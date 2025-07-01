@@ -1,0 +1,11 @@
+# 除外ファイル
+output/
+config/
+*.log
+*.py
+*.spec
+*.md.bak
+__pycache__/
+.DS_Store
+Thumbs.db
+*.exe
