@@ -21,9 +21,9 @@
 
 ## ダウンロード・実行方法
 
-1. **必ずこのGitHubリポジトリの[Releases](https://github.com/MNagasako/misc-rde-tool-public/releases)ページから最新版の `rde_webview_login.exe` をダウンロードしてください。**
+1. **必ずこのGitHubリポジトリの[Releases](https://github.com/MNagasako/misc-rde-tool-public/releases)ページから最新版の `release_files/arim_rde_tool.exe` をダウンロードしてください。**
 2. 必要に応じて `config/` などの設定ファイルを同じディレクトリに配置
-3. `rde_webview_login.exe` をダブルクリックで実行
+3. `arim_rde_tool.exe` をダブルクリックで実行
 4. `output/` フォルダは自動生成されます
 
 ---
