@@ -1,7 +1,7 @@
 # ARIM事業 RDE→ARIMデータカタログ作成支援ツール（バイナリ配布用）
 
 ---
-**バージョン: v1.7.1（2025-07-08）**
+**バージョン: v1.7.2（2025-07-08）**
 ---
 
 このリポジトリは、RDEからデータカタログを抽出するための「データカタログ作成支援ツール」バイナリ配布専用です。
@@ -21,7 +21,7 @@
 
 ## ダウンロード・実行方法
 
-1. **必ずこのGitHubリポジトリの[Releases](https://github.com/MNagasako/misc-rde-tool-public/releases/tag/v1.7.1)ページから最新版の `release_files/arim_rde_tool.exe` をダウンロードしてください。**
+1. **必ずこのGitHubリポジトリの[Releases](https://github.com/MNagasako/misc-rde-tool-public/releases/tag/v1.7.2)ページから最新版の `release_files/arim_rde_tool.exe` をダウンロードしてください。**
 2. 必要に応じて `config/` などの設定ファイルを同じディレクトリに配置
 3. `arim_rde_tool.exe` をダブルクリックで実行
 4. `output/` フォルダは自動生成されます
@@ -45,14 +45,14 @@
 
 ---
 
-## バージョン 1.7.1
+## バージョン 1.7.2
 
-- dist.zip を含むリリースを作成しました。
-- PyInstaller バイナリ化対応。
-- login.txt のパス処理を修正し、バイナリ実行とスクリプト実行の両方に対応。
-- コードの安定性向上とエラー修正。
+- sanitize_path_name関数をユーティリティモジュールに移動。
+- 循環インポート問題を修正。
+- データセットフォルダ名のサニタイズ処理を統一。
+- ドキュメント更新。
 
-リリースページ: [Release v1.7.1](https://github.com/MNagasako/misc-rde-tool-public/releases/tag/v1.7.1)
+リリースページ: [Release v1.7.2](https://github.com/MNagasako/misc-rde-tool-public/releases/tag/v1.7.2)
 
 ## ライセンス・問い合わせ
 - ライセンス: 未定
