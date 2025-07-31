@@ -26,6 +26,14 @@
 
 ---
 
+###　0.ダウンロード
+https://github.com/MNagasako/misc-rde-tool-public/releases
+
+### 初回実行時に警告が出ます。
+--- アンチウィルスソフト等が動作を妨げる場合があります。必要な場合は例外していしてください。
+<img width="532" height="498" alt="2025-07-31_18h22_53" src="https://github.com/user-attachments/assets/5117baeb-973c-4a7d-aed6-8f2d58400f26" /><img width="532" height="498" alt="2025-07-31_18h23_02" src="https://github.com/user-attachments/assets/56e2ecce-466c-420e-ba84-95fc0eceacb5" />
+
+
 ### 1. ログイン
 <img width="1062" height="698" alt="2025-07-31_10h49_43" src="https://github.com/user-attachments/assets/c9e7f1c9-cb3f-4f39-9572-693378c33d40" />
 RDEアカウントでログインしてください。自動ログインしたい場合は、`input/login.txt` ファイルの先頭に以下の内容を保存してください（DICEアカウントのみ対応）。
