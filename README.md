@@ -1,16 +1,3 @@
-<img width="1062" height="698" alt="2025-07-31_10h49_43" src="https://github.com/user-attachments/assets/c9e7f1c9-cb3f-4f39-9572-693378c33d40" />
-<img width="1062" height="772" alt="2025-07-31_10h55_14" src="https://github.com/user-attachments/assets/a51db1a7-1fce-469b-a912-7d213186b8c8" />
-<img width="1062" height="528" alt="2025-07-31_11h54_40" src="https://github.com/user-attachments/assets/cb5fd9dc-d093-47a5-9bd0-df88b75d0764" />
-
-<img width="1062" height="680" alt="2025-07-31_10h50_41" src="https://github.com/user-attachments/assets/8a9eb378-896f-4546-8aff-82c4c6aa8a45" />
-<img width="1062" height="586" alt="2025-07-31_10h50_46" src="https://github.com/user-attachments/assets/95e8a940-37c6-4f28-b202-84076ed8a382" />
-<img width="1062" height="528" alt="2025-07-31_10h51_01" src="https://github.com/user-attachments/assets/22f8d8f1-9f92-40e0-bab6-10e6cf0588cf" />
-<img width="1062" height="791" alt="2025-07-31_10h54_30" src="https://github.com/user-attachments/assets/afc6fdc7-2342-4f31-a212-892261afd023" />
-
-
-
-
-
 # DICE/RDE システム利用支援ツール
 
 ---
@@ -38,6 +25,7 @@
 ## 使用方法
 
 ### 1. ログイン
+<img width="1062" height="698" alt="2025-07-31_10h49_43" src="https://github.com/user-attachments/assets/c9e7f1c9-cb3f-4f39-9572-693378c33d40" />
 RDEアカウントでログインしてください。
 自動ログインしたい場合は、`input/login.txt` ファイルの先頭に以下の内容を保存してください（DICEアカウントのみ対応）。
 ```txt
@@ -49,6 +37,7 @@ dice
 ---
 
 ### 2. データ取得（旧方式）
+<img width="1062" height="772" alt="2025-07-31_10h55_14" src="https://github.com/user-attachments/assets/a51db1a7-1fce-469b-a912-7d213186b8c8" />
 ARIM課題番号を入力し「実行」ボタンをクリックすると、該当課題のデータセットJSONや画像ファイルを取得できます。
 ※ JSONファイルは匿名化版が生成されます。
 ※ WEBVIEW経由のためダウンロードに時間がかかります。
@@ -61,9 +50,11 @@ JPMX12xxTUzzzz
 ---
 
 ### 3. 基本情報取得
+<img width="1062" height="586" alt="2025-07-31_10h50_46" src="https://github.com/user-attachments/assets/95e8a940-37c6-4f28-b202-84076ed8a382" />
 基本情報」メニューで「基本情報取得（ALL または 検索）」と「invoice_schema取得」を実行してください（初回は時間がかかります）。
 
 #### データ取得2(新方式)
+<img width="1062" height="528" alt="2025-07-31_11h54_40" src="https://github.com/user-attachments/assets/cb5fd9dc-d093-47a5-9bd0-df88b75d0764" />
 2. 基本情報取得後、ドロップダウンリストにアクセス可能な課題（データセット）が表示されます。
 3. 「選択データセットのファイルリスト取得」ボタンで、該当データセットの書誌情報JSONと全画像ファイル（構造化済み）を取得できます。
 4. 書誌情報は匿名化版が生成されます。
@@ -71,6 +62,7 @@ JPMX12xxTUzzzz
 ---
 
 #### サブグループ作成
+<img width="1062" height="680" alt="2025-07-31_10h50_41" src="https://github.com/user-attachments/assets/8a9eb378-896f-4546-8aff-82c4c6aa8a45" />
 - グループメンバー選択欄で管理者（オーナー）・代理管理者（ASSISTANT）を選択
 - グループ名・説明・課題番号（課題番号:課題名, ...）を入力
 - 「サブグループ作成」ボタンで作成
@@ -87,6 +79,7 @@ wwwwwwwwww@tohoku.ac.jp,1,1,1;
 ```
 
 #### データセット開設
+<img width="1062" height="528" alt="2025-07-31_10h51_01" src="https://github.com/user-attachments/assets/22f8d8f1-9f92-40e0-bab6-10e6cf0588cf" />
 - サブグループを選択（補完検索可）
 - データセット名・エンバーゴ終了日・テンプレート名を入力
 - 広域シェア・匿名化の有無を選択
@@ -94,6 +87,7 @@ wwwwwwwwww@tohoku.ac.jp,1,1,1;
 - 作成後は「基本情報」メニューで共通情報を再取得
 
 #### データ登録
+<img width="1062" height="791" alt="2025-07-31_10h54_30" src="https://github.com/user-attachments/assets/afc6fdc7-2342-4f31-a212-892261afd023" />
 - データセットを選択（補完検索可）
 - データ名・説明・実験ID・参考URL・タグ・試料情報・固有情報を入力
 - データファイル（必須）・添付ファイル（任意）を選択
