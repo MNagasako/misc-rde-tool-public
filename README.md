@@ -56,7 +56,11 @@ JPMX12xxTUzzzz
 
 ### 3. 基本情報取得
 <img width="1062" height="586" alt="2025-07-31_10h50_46" src="https://github.com/user-attachments/assets/95e8a940-37c6-4f28-b202-84076ed8a382" />
-「基本情報」メニューで「基本情報取得（ALL または 検索）」と「invoice_schema取得」を実行してください（初回は時間がかかります）。
+「基本情報」メニューで「基本情報取得（ALL または 検索）」と「invoice_schema取得」を実行してください
+**（初回は時間がかかります）。
+**ホントにかかります。特にALLは。二回目以降は不足分だけ取得します。コーヒーでも飲んでお待ちください。
+** 進んでいるかどうか不安な時は'output/rde/data/datasets'　と　'output/rde/data/dataEntry' の中身を確認しましょう。ゆっくり増えていればOK
+
 
 #### データ取得2（新方式）
 <img width="1062" height="528" alt="2025-07-31_11h54_40" src="https://github.com/user-attachments/assets/cb5fd9dc-d093-47a5-9bd0-df88b75d0764" />
