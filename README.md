@@ -22,16 +22,24 @@
 
 ---
 
-## 使用方法
+
+## ダウンロード
+
+最新版バイナリは以下より取得してください。  
+https://github.com/MNagasako/misc-rde-tool-public/releases
 
 ---
 
-###　0.ダウンロード
-https://github.com/MNagasako/misc-rde-tool-public/releases
 
-### 初回実行時に警告が出ます。
---- アンチウィルスソフト等が動作を妨げる場合があります。必要な場合は例外していしてください。
-<img width="532" height="498" alt="2025-07-31_18h22_53" src="https://github.com/user-attachments/assets/5117baeb-973c-4a7d-aed6-8f2d58400f26" /><img width="532" height="498" alt="2025-07-31_18h23_02" src="https://github.com/user-attachments/assets/56e2ecce-466c-420e-ba84-95fc0eceacb5" />
+## 使用方法
+
+### 1. 初回起動時の警告について
+
+Windowsのセキュリティ警告やアンチウイルスによりブロックされる場合があります。  
+必要に応じて例外設定してください。
+
+<img width="532" height="498" alt="2025-07-31_18h22_53" src="https://github.com/user-attachments/assets/5117baeb-973c-4a7d-aed6-8f2d58400f26" />
+<img width="532" height="498" alt="2025-07-31_18h23_02" src="https://github.com/user-attachments/assets/56e2ecce-466c-420e-ba84-95fc0eceacb5" />
 
 
 ### 1. ログイン
