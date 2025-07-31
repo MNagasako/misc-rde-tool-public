@@ -79,4 +79,7 @@
 - ライセンス: 未定
 - 制作: 東北大金研 長迫
 
----
+
+
+## 関連ツール
+- https://github.com/MNagasako/BJB-PathFlattener
