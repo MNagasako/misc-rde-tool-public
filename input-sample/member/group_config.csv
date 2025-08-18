@@ -1,0 +1,4 @@
+group_name,description,subjects,funds
+サブグループA,テスト用グループA,物理,科研費A
+サブグループB,テスト用グループB,化学,科研費B,科研費C
+サブグループC,テスト用グループC,生物,科研費D
