@@ -1,0 +1,5 @@
+# mailaddress , role(1=OWNER,2=ASSISTANT),canCreateDatasets (1=True) , canEditMembers(1=True),;
+user_1@mailserver,2,1,1;
+user_2@mailserver,2,1,1;
+user_3@mailserver,2,1,1;
+user_4@mailserver,1,1,1;
