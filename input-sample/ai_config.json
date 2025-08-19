@@ -27,16 +27,25 @@
       "default_model": "gemini-2.0-flash"
     },
     "local_llm": {
-      "enabled": false,
-      "base_url": "http://localhost:11434/v1",
+      "enabled": true,
+      "base_url": "http://localhost:11434/api/generate",
       "models": [
-        "llama3.2:3b",
-        "llama3.2:1b",
-        "codellama:7b",
-        "mistral:7b"
+        "gemma3:1b",
+        "gemma3:4b",
+        "gemma3:12b",
+        "gemma3:27b",
+        "llama3.1:8b",
+        "deepseek-r1:7b",
+        "deepseek-r1:8b",
+        "deepseek-r1:14b",
+        "deepseek-coder-v2:16b",
+        "qwen2.5:7b-instruct",
+        "qwen2.5:14b-instruct",
+        "qwen2.5-coder:7b-instruct",
+        "gpt-oss:20b"
       ],
-      "default_model": "llama3.2:3b",
-      "note": "Ollama等のローカルLLMサーバーが必要です"
+      "default_model": "gemma3:12b", 
+      "note": "Ollama等のローカルLLMサーバーが必要です。軽量版: gemma3:1b, 高性能版: gemma3:27b, コーディング: deepseek-coder-v2:16b, 推論: deepseek-r1シリーズ"
     }
   },
   "default_provider": "gemini",
