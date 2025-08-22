@@ -11,6 +11,17 @@
 
 ---
 
+## ツール概要
+本ツールは、**文部科学省マテリアル先端リサーチインフラ（ARIM）事業**（[公式サイト](https://nanonet.go.jp/)）におけるデータ構造化システム **RDE（Research Data Express）**（[RDEサイト](https://rde.nims.go.jp/)）の操作を支援するために開発された、GUIベースの補助ツールです。
+
+RDE上でのデータセット管理、書誌情報取得、ファイル一括取得、サブグループ管理、AI活用機能などを提供し、研究データの整理と共有を効率化します。
+
+> **利用にはDICEアカウントが必要です**。アカウント権限の範囲内で可能な操作をサポートします。
+
+本ツールは主に**実施機関の支援担当者**向けのテスト利用を想定しています。個人開発によるもののため、自由にご利用いただけますが**無保証**です。
+
+---
+
 ## 実行方法
 
 0. アプリを起動すると、`input/` および `output/` フォルダが自動生成されます。
@@ -61,8 +72,8 @@
 ---
 
 ## ダウンロード
-最新版バイナリは以下より取得できます：
-https://github.com/MNagasako/misc-rde-tool-public/releases
+最新版バイナリは以下より取得できます：  
+[https://github.com/MNagasako/misc-rde-tool-public/releases](https://github.com/MNagasako/misc-rde-tool-public/releases)
 
 ---
 
@@ -119,20 +130,36 @@ dice
 
 ---
 
-### 6. データセット開設
-<img width="1062" height="528" alt="2025-07-31_10h51_01" src="https://github.com/user-attachments/assets/22f8d8f1-9f92-40e0-bab6-10e6cf0588cf" />
+### 6. データセット開設・修正
 
-- サブグループと課題番号を選択
-- データセット名やテンプレートを指定
-- 作成後は基本情報を更新
+<img width="1062" height="528" alt="2025-07-31_10h51_01" src="https://github.com/user-attachments/assets/22f8d8f1-9f92-40e0-bab6-10e6cf0588cf" />
+<img width="1062" height="710" alt="2025-08-22_14h15_23" src="https://github.com/user-attachments/assets/349caf93-a1d5-4c84-9a85-ee3c1e955f27" />
+
+- サブグループドロップダウンリスト（グループと表記されます）で研究グループを選択（補完検索可）
+<img width="1061" height="429" alt="2025-08-22_14h15_47" src="https://github.com/user-attachments/assets/ff307ad2-eafa-4d78-a4f1-bd11ad7b2c8d" />
+- 課題番号を選択（サブグループ上で登録されている必要があります）
+<img width="1062" height="710" alt="2025-08-22_14h16_07" src="https://github.com/user-attachments/assets/1b88aaa8-678b-4616-8238-d52e9e085d8d" />
+- データセット名を入力
+<img width="1062" height="710" alt="2025-08-22_14h16_13" src="https://github.com/user-attachments/assets/7946c18d-1266-436c-9095-b3703a3de8c3" />
+- テンプレートをドロップダウンリストから選択（補完検索可）
+-- RDEサイト上では、　機関・装置・データセット種別　等で絞り込む必要がありますが、アプリでは直接指定可能です。
+- 広域シェア及び匿名化オプションの選択
+- データセット開設実行をクリック
+
 
 ---
 
 ### 7. データ登録
-<img width="1062" height="791" alt="2025-07-31_10h54_30" src="https://github.com/user-attachments/assets/afc6fdc7-2342-4f31-a212-892261afd023" />
+<img width="1062" height="532" alt="2025-08-22_14h26_17" src="https://github.com/user-attachments/assets/9904b0d9-436e-4801-bf78-a0c2c42dbf15" />
 
-- データセットを選択し、必要情報を入力
-- データファイルを添付して「データ登録」ボタンで実行
+- ドロップダウンリストでデータセットを選択（補完検索可）
+- 必要情報（データ名・データ説明等）を入力
+- データファイル。添付ファイルを選択
+- 試料情報を入力もしくは既存試料情報から選択
+- 固有情報（データセットテンプレートごとに異なります）を入力
+- データ登録ボタンをクリック
+
+- データファイルがアップロードされ、構造化処理が始まります。
 
 ---
 
@@ -140,19 +167,35 @@ dice
 - **リクエスト解析**：REST APIデバッグ用
 - **設定タブ**：未実装
 
+### 9. AIテスト
+
+<img width="1062" height="832" alt="2025-08-22_14h31_56" src="https://github.com/user-attachments/assets/c5dae4c6-b4cb-4341-93bd-45f0381d57bd" />
+- 事前にAI関連ファイルを準備しておく
+-- input/ai_config.json,input/ai{dir}  
+- AIプロバイダ・LLMモデルを選択
+- 課題番号を選択
+- 実験データを選択
+- ARIM拡張情報（利用報告書）　の使用有無を選択
+- AI分析方法を選択
+- AI分析実行　をクリック
+<img width="1062" height="832" alt="2025-08-22_14h33_31" src="https://github.com/user-attachments/assets/1f58b255-b30d-4623-8f75-d7503e391e32" />
+実行結果（例）
 ---
 
 ## 注意事項・免責
 - このリポジトリはバイナリ配布専用
 - 本ツールは**個人開発のため無保証**
 - 再配布・転載は禁止
-- ARIMデータ提供システムへの登録機能はありません
 
-リリースページ：https://github.com/MNagasako/misc-rde-tool-public/releases
+
+リリースページ：  
+[https://github.com/MNagasako/misc-rde-tool-public/releases](https://github.com/MNagasako/misc-rde-tool-public/releases)
+
+---
 
 ## ライセンス・問い合わせ
 - ライセンス: 未定
 - 制作: 東北大金研 長迫
 
 ## 関連ツール
-- https://github.com/MNagasako/BJB-PathFlattener
+- [https://github.com/MNagasako/BJB-PathFlattener](https://github.com/MNagasako/BJB-PathFlattener)
