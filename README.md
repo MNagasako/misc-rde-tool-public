@@ -129,8 +129,8 @@ JPMX12xxTUzzzz
 ---
 
 ### 3. 基本情報取得
+<img width="1062" height="925" alt="2025-08-22_13h50_22" src="https://github.com/user-attachments/assets/bb481a4b-3585-409e-bad3-1941694ee20d" />
 
-<img width="1062" height="586" alt="2025-07-31_10h50_46" src="https://github.com/user-attachments/assets/95e8a940-37c6-4f28-b202-84076ed8a382" />
 
 「**基本情報**」メニューから **「基本情報取得（ALL または 検索）」** および **「invoice_schema取得」** を実行します。
 
