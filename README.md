@@ -70,9 +70,50 @@ AI機能を利用するには、以下の設定が必要です：
 `input/ai_config.json`
 ```json
 {
-  "provider": "openai",
-  "api_key": "YOUR_API_KEY",
-  "model": "gpt-4o-mini"
+  "ai_providers": {
+    "openai": {
+      "enabled": true,
+      "api_key": "API_KEY_FOR_OPENAI",
+      "base_url": "https://api.openai.com/v1",
+      "models": [
+        "gpt-5","gpt-5-mini","gpt-5-nano",
+        "gpt-4.1","gpt-4.1-mini","gpt-4.1-nano","o4-mini-deep-research",
+        "gpt-4o",
+        "gpt-4o-mini", 
+        "gpt-4-turbo",
+        "gpt-3.5-turbo"
+      ],
+      "default_model": "gpt-4o-mini"
+    },
+    "gemini": {
+      "enabled": true,
+      "api_key": "API_KEY_FOR_GEMINI",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta",
+      "models": [
+        "gemini-2.0-flash",
+        "gemini-1.5-pro",
+        "gemini-1.5-flash",
+        "gemini-1.0-pro"
+      ],
+      "default_model": "gemini-2.0-flash"
+    },
+    "local_llm": {
+      "enabled": true,
+      "base_url": "http://localhost:11434/api/generate",
+      "models": [
+        "gemma3:1b",
+        "gemma3:4b",
+        "gemma3:12b",
+        "gpt-oss:20b"
+      ],
+      "default_model": "gemma3:12b", 
+      "note": "Ollama等のローカルLLMサーバーが必要です。"
+    }
+  },
+  "default_provider": "gemini",
+  "timeout": 30,
+  "max_tokens": 1000,
+  "temperature": 0.7
 }
 ```
 - **provider**：`openai` / `gemini` / `local`
