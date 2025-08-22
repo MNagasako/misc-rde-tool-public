@@ -2,7 +2,7 @@
 
 ---
 
-**バージョン: v1.13.1（2025-08-22）**
+**バージョン: [v1.13.1](https://github.com/MNagasako/misc-rde-tool-public/releases/tag/v1.13.1)（2025-08-22）**
 
 ---
 
