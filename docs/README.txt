@@ -19,35 +19,24 @@
 │   ├── README.txt
 │   ├── login.txt.sample
 │   ├── list.txt.sample
-├── input/
-│   ├── login.txt
-│   ├── list.txt
-├── output/
+
 │   └── ...
 ```
 
 ## 実行方法
 1. 必要に応じて `input/` フォルダを作成し、以下のファイルを配置してください。
    - `login.txt`: 自動ログイン用の情報を記載
-   - `list.txt`: 一括取得用のリストを記載
-2. `arim_rde_tool.exe` をダブルクリックして実行します。
 3. 出力は `output/` フォルダに保存されます。
 
 ## 出力例
-```
 output/
 ├── datasets/
-│   ├── JPMXP12xxTUzzzz/　　　（課題番号）
 │   │   ├── .datatree.json　　（不使用）
 │   │   ├── データセット/   (データセット名)
-│   │   │   ├── aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.json  (書誌情報　JSON　通常版)
 │   │   │   ├── filelist.json (不使用)
 │   │   │   ├── 差分_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.txt　 (不使用)
 │   │   │   ├── サブデータセット/　（サブデータセット名）
 │   │   │   │   ├── 01234567-1234-5678-9999-000000000000.json 　 (不使用)
-│   │   │   │   ├── file01.png
-│   │   │   │   ├── ...
-│   │   │   │   ├── filexx.png
 │   │   ├── 非開示_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee.json　 (書誌情報　JSON　非開示)
 │   ├── JPMXP12xxTUyyyy/
 ├── log/ （デバッグ用）（不使用）
