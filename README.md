@@ -62,12 +62,21 @@ RDE上でのデータセット管理、書誌情報取得、ファイル一括�
 - OpenAI / Gemini / ローカルLLM対応
 - 実験概要自動要約
 - マテリアルインデックス（MI）自動推定
+- データ品質評価、実験手法分析など複数のAI活用機能を提供
+
 
 ### 必要な準備
 AI機能を利用するには、以下の設定が必要です：
 
-#### **必須ファイル**
-`input/ai_config.json`
+
+# AI設定ファイルについて
+
+AI機能を利用するための設定は、`input/ai_config.json` に記載します。今回提供いただいたファイルの内容を基に、README内に追記しました。
+
+---
+
+## `ai_config.json` 概要
+
 ```json
 {
   "ai_providers": {
@@ -76,12 +85,9 @@ AI機能を利用するには、以下の設定が必要です：
       "api_key": "API_KEY_FOR_OPENAI",
       "base_url": "https://api.openai.com/v1",
       "models": [
-        "gpt-5","gpt-5-mini","gpt-5-nano",
-        "gpt-4.1","gpt-4.1-mini","gpt-4.1-nano","o4-mini-deep-research",
-        "gpt-4o",
-        "gpt-4o-mini", 
-        "gpt-4-turbo",
-        "gpt-3.5-turbo"
+        "gpt-5", "gpt-5-mini", "gpt-5-nano",
+        "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "o4-mini-deep-research",
+        "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"
       ],
       "default_model": "gpt-4o-mini"
     },
@@ -101,13 +107,16 @@ AI機能を利用するには、以下の設定が必要です：
       "enabled": true,
       "base_url": "http://localhost:11434/api/generate",
       "models": [
-        "gemma3:1b",
-        "gemma3:4b",
-        "gemma3:12b",
+        "gemma3:1b", "gemma3:4b", "gemma3:12b", "gemma3:27b",
+        "llama3.1:8b",
+        "deepseek-r1:7b", "deepseek-r1:8b", "deepseek-r1:14b",
+        "deepseek-coder-v2:16b",
+        "qwen2.5:7b-instruct", "qwen2.5:14b-instruct",
+        "qwen2.5-coder:7b-instruct",
         "gpt-oss:20b"
       ],
-      "default_model": "gemma3:12b", 
-      "note": "Ollama等のローカルLLMサーバーが必要です。"
+      "default_model": "gemma3:12b",
+      "note": "Ollama等のローカルLLMサーバーが必要です。軽量版: gemma3:1b, 高性能版: gemma3:27b, コーディング: deepseek-coder-v2:16b, 推論: deepseek-r1シリーズ"
     }
   },
   "default_provider": "gemini",
@@ -116,16 +125,34 @@ AI機能を利用するには、以下の設定が必要です：
   "temperature": 0.7
 }
 ```
-- **provider**：`openai` / `gemini` / `local`
-- **api_key**：APIキー（必要な場合）
-- **model**：使用するモデル名
+
+### ポイント
+- OpenAI / Gemini / ローカルLLMの3系統に対応
+- 各プロバイダで利用可能なモデルを事前定義済み
+- `default_provider` は `gemini` に設定されています
+- `local_llm` 利用時は **Ollamaなどのローカルサーバー**が必要です
+
+> **注意**: APIキーは必ず各自取得し、`ai_config.json` に記載してください。
+
+
+
+
 
 #### **追加設定（既存データ解析用）**
-以下を `input/ai/` 配下に配置：
-- `prompts/` : AI解析用プロンプト
-- `arim_exp.xlsx`
-- `MI.json`
-- `arim/converted.xlsx`
+以下を `input/ai/` 配下に配置してください：
+- `prompts/` : AI解析用プロンプト群
+- `quality_assessment.txt` → データ品質評価
+- `dataset_explanation.txt` → データセット概要生成
+- `experiment_method.txt` → 実験手法分析 
+- `material_index.txt` → マテリアルインデックス推定
+
+
+> **メモ**: `prompts` 内の各ファイルはユーザーが自由に書き換えてカスタマイズ可能です。
+
+
+- `arim_exp.xlsx` : 実験情報定義ファイル
+- `MI.json` : マテリアルインデックス定義
+- `arim/converted.xlsx` : RDE用変換済みデータファイル
 
 ---
 
