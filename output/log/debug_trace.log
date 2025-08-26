@@ -1,0 +1,26 @@
+2025-08-19 18:06:35.526233	Browser.__init__	{"auto_close": false, "test_mode": false}
+2025-08-19 18:06:35.544491	AppInitializer.initialize_all	{}
+2025-08-19 18:06:35.544952	AppInitializer.initialize_managers	{}
+2025-08-19 18:06:35.546473	BatchProcessor.__init__	{"browser_instance": "<__main__.Browser object at 0x000002323187F800>"}
+2025-08-19 18:06:35.546873	AppInitializer.setup_batch_signals	{}
+2025-08-19 18:06:35.547222	AppInitializer.initialize_arim_anonymizer	{}
+2025-08-19 18:06:35.548139	Browser.set_webview_message	{"msg": "[匿名化機能初期化完了!!!"}
+2025-08-19 18:06:35.548921	AppInitializer.setup_login_info	{}
+2025-08-19 18:06:36.203243	Browser.on_url_changed	{"url": "PyQt5.QtCore.QUrl('https://rde.nims.go.jp/')"}
+2025-08-19 18:06:36.203852	Browser.log_webview_html	{"url": "PyQt5.QtCore.QUrl('https://rde.nims.go.jp/')"}
+2025-08-19 18:06:36.306829	Browser.update_autologin_msg	{"msg": "ブラウザ初期化完了"}
+2025-08-19 18:06:36.445484	Browser.update_autologin_msg	{"msg": "DICEログインボタンを待機中..."}
+2025-08-19 18:06:36.446547	Browser.start_blinking_msg	{}
+2025-08-19 18:06:36.825151	Browser.on_load_finished	{"ok": true}
+2025-08-19 18:06:36.825820	Browser.log_webview_html	{"url": "PyQt5.QtCore.QUrl('https://rde.nims.go.jp/')"}
+2025-08-19 18:06:36.947979	Browser.update_autologin_msg	{"msg": "DICEログインボタンを待機中..."}
+2025-08-19 18:06:36.948416	Browser.start_blinking_msg	{}
+2025-08-19 18:06:37.449219	Browser.update_autologin_msg	{"msg": "DICEログインボタンを待機中..."}
+2025-08-19 18:06:37.449789	Browser.start_blinking_msg	{}
+2025-08-19 18:06:37.464558	Browser.on_url_changed	{"url": "PyQt5.QtCore.QUrl('https://dicelogin.b2clogin.com/dicelogin.onmicrosoft.com/b2c_1a_dpf_sign...
+2025-08-19 18:06:37.465091	Browser.log_webview_html	{"url": "PyQt5.QtCore.QUrl('https://dicelogin.b2clogin.com/dicelogin.onmicrosoft.com/b2c_1a_dpf_sign...
+2025-08-19 18:06:37.521793	Browser.on_load_finished	{"ok": true}
+2025-08-19 18:06:37.522919	Browser.log_webview_html	{"url": "PyQt5.QtCore.QUrl('https://dicelogin.b2clogin.com/dicelogin.onmicrosoft.com/b2c_1a_dpf_sign...
+2025-08-19 18:06:37.951522	Browser.update_autologin_msg	{"msg": "DICEログインボタンが有効です（自動クリック）"}
+2025-08-19 18:06:37.951968	Browser.stop_blinking_msg	{}
+2025-08-19 18:06:39.653422	Browser.closeEvent	{"event": "<PyQt5.QtGui.QCloseEvent object at 0x0000023232D350A0>"}
