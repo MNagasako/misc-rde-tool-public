@@ -1,8 +1,21 @@
 # バイナリ配布専用リポジトリ用 .gitignore
-*
-!.gitignore
-!README.md
-!input-sample/
-!input-sample/**
-!docs/
-!docs/**
+
+
+# Python
+__pycache__/
+.venv/
+*.py[cod]
+*.pyo
+*.pyd
+*.pkl
+*.pickle
+*.env
+.env*
+
+# バイナリファイル（100MB超はGitHubにpush不可）
+arim_rde_tool.exe
+zip
+exe
+dist/
+build/
+input/
