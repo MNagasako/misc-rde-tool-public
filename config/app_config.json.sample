@@ -1,0 +1,39 @@
+{
+  "app": {
+    "default_grant_number": "JPMXP1222TU0195",
+    "auto_login_enabled": false,
+    "auto_close_enabled": false,
+    "test_mode": false
+  },
+  "ui": {
+    "window_title_suffix": "",
+    "webview_width": 1024,
+    "webview_height": 768,
+    "menu_width": 300,
+    "image_load_wait_time": 5000
+  },
+  "network": {
+    "request_timeout": 30,
+    "max_retries": 3,
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+  },
+  "logging": {
+    "level": "INFO",
+    "file_enabled": true,
+    "console_enabled": true,
+    "max_file_size_mb": 10,
+    "backup_count": 5
+  },
+  "image": {
+    "max_concurrent_downloads": 5,
+    "thumbnail_size": [150, 150],
+    "supported_formats": ["jpg", "jpeg", "png", "gif", "bmp"],
+    "quality": 95
+  },
+  "data": {
+    "batch_size": 100,
+    "max_dataset_size_gb": 10,
+    "compression_enabled": true,
+    "backup_enabled": true
+  }
+}

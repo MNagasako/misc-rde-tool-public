@@ -1,0 +1,139 @@
+network:
+  mode: SYSTEM
+  proxies:
+    http: http://127.0.0.1:8888
+    https: http://127.0.0.1:8888
+    no_proxy: localhost,127.0.0.1,.local
+  pac_url: ''
+  cert:
+    use_os_store: true
+    verify: false
+    ca_bundle: ''
+    ssl_context_options:
+      check_hostname: true
+      allow_legacy_unsafe_renegotiation: false
+      trust_proxy_certs: false
+    proxy_ssl_handling:
+      strategy: disable_verify
+      fallback_to_no_verify: true
+      log_ssl_errors: true
+    enterprise_ca:
+      enable_truststore: true
+      custom_ca_bundle: ''
+      auto_detect_corporate_ca: true
+      corporate_ca_sources:
+      - truststore
+      - system_ca
+      - certifi
+      - custom_file
+  pac:
+    auto_detect: true
+    url: ''
+    timeout: 10
+    fallback_to_system: true
+  timeouts:
+    connect: 10
+    read: 30
+  retries:
+    total: 3
+    backoff_factor: 0.5
+    status_forcelist:
+    - 429
+    - 500
+    - 502
+    - 503
+    - 504
+webview:
+  auto_proxy_from_network: true
+  additional_args: []
+ui:
+  show_startup_proxy_notification: false
+configurations:
+  direct:
+    mode: DIRECT
+  direct_no_ssl_verify:
+    mode: DIRECT
+    cert:
+      verify: false
+      use_os_store: false
+  system_proxy:
+    mode: SYSTEM
+    cert:
+      use_os_store: true
+      verify: false
+      proxy_ssl_handling:
+        strategy: disable_verify
+        fallback_to_no_verify: true
+        log_ssl_errors: false
+  system_proxy_ssl_enabled:
+    mode: SYSTEM
+    cert:
+      use_os_store: true
+      verify: true
+      proxy_ssl_handling:
+        strategy: use_proxy_ca
+        fallback_to_no_verify: true
+        log_ssl_errors: true
+  system_proxy_no_ssl_verify:
+    mode: SYSTEM
+    cert:
+      verify: false
+      use_os_store: false
+      proxy_ssl_handling:
+        strategy: disable_verify
+        fallback_to_no_verify: false
+        log_ssl_errors: false
+  enterprise_proxy_with_ca:
+    mode: SYSTEM
+    cert:
+      verify: true
+      use_os_store: true
+      enterprise_ca:
+        enable_truststore: true
+        auto_detect_corporate_ca: true
+        corporate_ca_sources:
+        - system_ca
+        - truststore
+      proxy_ssl_handling:
+        strategy: use_proxy_ca
+        fallback_to_no_verify: true
+        log_ssl_errors: true
+  pac_auto_config:
+    mode: PAC
+    pac:
+      auto_detect: true
+      fallback_to_system: true
+    cert:
+      verify: true
+      use_os_store: true
+      enterprise_ca:
+        enable_truststore: true
+        auto_detect_corporate_ca: true
+        corporate_ca_sources:
+        - system_ca
+        - truststore
+  auto_detected_test:
+    mode: HTTP
+    http_proxy: http://127.0.0.1:8888
+    https_proxy: http://127.0.0.1:8888
+  auto_detected:
+    mode: HTTP
+    http_proxy: http://127.0.0.1:8888
+    https_proxy: http://127.0.0.1:8888
+  auto_detected_no_ssl_verify:
+    mode: HTTP
+    http_proxy: http://127.0.0.1:8888
+    https_proxy: http://127.0.0.1:8888
+    cert:
+      verify: false
+      use_os_store: false
+  system_auto:
+    mode: HTTP
+    http_proxy: http://127.0.0.1:8888
+    https_proxy: http://127.0.0.1:8888
+mode: DIRECT
+http_proxy: http://127.0.0.1:8888
+https_proxy: http://127.0.0.1:8888
+cert:
+  verify: true
+  use_os_store: true

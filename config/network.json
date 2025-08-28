@@ -1,0 +1,29 @@
+{
+  "network": {
+    "mode": "DIRECT",
+    "proxies": {
+      "http": "",
+      "https": "",
+      "no_proxy": ""
+    },
+    "pac_url": "",
+    "cert": {
+      "use_os_store": true,
+      "verify": true,
+      "ca_bundle": ""
+    },
+    "timeouts": {
+      "connect": 10,
+      "read": 30
+    },
+    "retries": {
+      "total": 3,
+      "backoff_factor": 0.5,
+      "status_forcelist": [429, 500, 502, 503, 504]
+    }
+  },
+  "webview": {
+    "auto_proxy_from_network": true,
+    "additional_args": []
+  }
+}
