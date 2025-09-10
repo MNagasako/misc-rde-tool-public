@@ -103,6 +103,7 @@ input_/**
 output/*.tmp
 output/*.bak
 output/*.log
+output/log/*
 legacy_cli/8ac947c.js
 
 # src/配下に移動した, inputディレクトリの除外
