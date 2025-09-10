@@ -3,14 +3,10 @@
 ## 概要
 ARIM RDE Toolのログイン機能は、PyQt5のWebEngineViewを使用してRDEシステムへの自動ログインを実現しています。セキュアなCookie管理とBearer Token認証により、ユーザーのセッション状態を適切に維持します。
 
-## 実装ファイル
-- **メインファイル**: `src/arim_rde_tool.py` (Browserクラス)
-- **ログイン管理**: `src/classes/login_manager.py`
 - **UI制御**: `src/classes/ui_controller.py`
 - **設定ファイル**: `src/config/site_rde.py`
 
 ## 主要機能
-
 ### 1. 自動ログイン機能
 - **実装場所**: `LoginManager.auto_login()`
 - **機能**: 保存されたログイン情報を使用してRDEシステムに自動ログイン
