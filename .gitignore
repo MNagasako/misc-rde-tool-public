@@ -1,3 +1,6 @@
+# outputの個別除外
+output/.private/
+output/datasets/
 # バイナリ配布専用リポジトリ用 .gitignore
 
 
