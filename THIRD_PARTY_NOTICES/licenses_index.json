@@ -1,0 +1,343 @@
+[
+  {
+    "name": "PyQt5",
+    "version": "5.15.11",
+    "copied": []
+  },
+  {
+    "name": "PyQt5-Qt5",
+    "version": "5.15.2",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "PyQt5_sip",
+    "version": "12.17.0",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "PyQtWebEngine",
+    "version": "5.15.7",
+    "copied": []
+  },
+  {
+    "name": "PyQtWebEngine-Qt5",
+    "version": "5.15.2",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "WMI",
+    "version": "1.5.1",
+    "copied": []
+  },
+  {
+    "name": "altgraph",
+    "version": "0.17.4",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "beautifulsoup4",
+    "version": "4.13.4",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "browser-cookie3",
+    "version": "0.20.1",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "certifi",
+    "version": "2025.7.14",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "charset-normalizer",
+    "version": "3.4.2",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "et_xmlfile",
+    "version": "2.0.0",
+    "copied": [
+      "LICENCE.rst"
+    ]
+  },
+  {
+    "name": "idna",
+    "version": "3.10",
+    "copied": [
+      "LICENSE.md"
+    ]
+  },
+  {
+    "name": "jaraco.classes",
+    "version": "3.4.0",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "jaraco.context",
+    "version": "6.0.1",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "jaraco.functools",
+    "version": "4.3.0",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "keyring",
+    "version": "25.6.0",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "lz4",
+    "version": "4.4.4",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "more-itertools",
+    "version": "10.8.0",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "numpy",
+    "version": "2.3.2",
+    "copied": [
+      "LICENSE.txt",
+      "LICENSE.txt",
+      "LICENSE",
+      "LICENSE.md"
+    ]
+  },
+  {
+    "name": "openpyxl",
+    "version": "3.1.5",
+    "copied": [
+      "LICENCE.rst"
+    ]
+  },
+  {
+    "name": "packaging",
+    "version": "25.0",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "pandas",
+    "version": "2.3.1",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "pefile",
+    "version": "2023.2.7",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "pillow",
+    "version": "11.3.0",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "pip",
+    "version": "25.2",
+    "copied": [
+      "LICENSE.txt",
+      "LICENSE.txt",
+      "LICENSE",
+      "LICENSE.txt",
+      "LICENSE.txt",
+      "LICENSE",
+      "LICENSE.md",
+      "COPYING",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE-HEADER",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE.txt"
+    ]
+  },
+  {
+    "name": "psutil",
+    "version": "7.0.0",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "pycryptodomex",
+    "version": "3.23.0",
+    "copied": [
+      "LICENSE.rst"
+    ]
+  },
+  {
+    "name": "pyinstaller",
+    "version": "6.15.0",
+    "copied": [
+      "COPYING.txt"
+    ]
+  },
+  {
+    "name": "pyinstaller-hooks-contrib",
+    "version": "2025.8",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "python-dateutil",
+    "version": "2.9.0.post0",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "python-dotenv",
+    "version": "1.1.1",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "pytz",
+    "version": "2025.2",
+    "copied": [
+      "LICENSE.txt"
+    ]
+  },
+  {
+    "name": "pywin32",
+    "version": "311",
+    "copied": [
+      "license.txt",
+      "license.txt",
+      "license.txt",
+      "License.txt"
+    ]
+  },
+  {
+    "name": "pywin32-ctypes",
+    "version": "0.2.3",
+    "copied": [
+      "LICENSE.txt"
+    ]
+  },
+  {
+    "name": "requests",
+    "version": "2.32.4",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "setuptools",
+    "version": "80.9.0",
+    "copied": [
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE",
+      "LICENSE.txt",
+      "LICENSE",
+      "LICENSE",
+      "NOTICE",
+      "NOTICE"
+    ]
+  },
+  {
+    "name": "shadowcopy",
+    "version": "0.0.4",
+    "copied": [
+      "LICENSE.md"
+    ]
+  },
+  {
+    "name": "six",
+    "version": "1.17.0",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "soupsieve",
+    "version": "2.7",
+    "copied": [
+      "LICENSE.md"
+    ]
+  },
+  {
+    "name": "typing_extensions",
+    "version": "4.15.0",
+    "copied": [
+      "LICENSE"
+    ]
+  },
+  {
+    "name": "tzdata",
+    "version": "2025.2",
+    "copied": [
+      "LICENSE",
+      "LICENSE_APACHE"
+    ]
+  },
+  {
+    "name": "urllib3",
+    "version": "2.5.0",
+    "copied": [
+      "LICENSE.txt"
+    ]
+  }
+]

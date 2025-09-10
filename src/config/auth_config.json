@@ -1,0 +1,12 @@
+{
+    "gui_password": "$admin",
+    "max_attempts": 3,
+    "password_description": "RDE Dataset Creation GUI access password",
+    "last_updated": "2025-07-13",
+    "notes": [
+        "This file contains authentication settings for the RDE Dataset Creation GUI",
+        "Change 'gui_password' to set a custom password",
+        "Change 'max_attempts' to modify the number of allowed login attempts",
+        "Keep this file secure and do not share it"
+    ]
+}

@@ -1,0 +1,23 @@
+# CP1: STATIC モード（存在証明用 - 到達不能プロキシ）
+network:
+  mode: STATIC
+  proxies:
+    http: "http://127.0.0.1:8888"    # 存在しないプロキシ
+    https: "http://127.0.0.1:8888"   # 存在しないプロキシ
+    no_proxy: "localhost,127.0.0.1"
+  pac_url: ""
+  cert:
+    use_os_store: true
+    verify: true
+    ca_bundle: ""
+  timeouts:
+    connect: 5     # 短いタイムアウトで高速失敗
+    read: 10
+  retries:
+    total: 1       # リトライ回数を減らして高速化
+    backoff_factor: 0.1
+    status_forcelist: [429, 500, 502, 503, 504]
+
+webview:
+  auto_proxy_from_network: true
+  additional_args: []

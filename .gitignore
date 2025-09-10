@@ -12,10 +12,155 @@ __pycache__/
 *.env
 .env*
 
-# バイナリファイル（100MB超はGitHubにpush不可）
+
+
+
+# バイナリ・大容量ファイル（100MB超はGitHubにpush不可）
+dist/*.zip
+dist/*.exe
+*.zip
+*.exe
+*.7z
+*.tar
+*.gz
+*.bz2
+*.xz
+*.msi
+*.dmg
+*.pkg
+*.iso
+*.img
+*.bin
+*.raw
+*.cab
+*.wim
+*.vhd
+*.vhdx
+*.ova
+*.ovf
+*.qcow2
+*.vmdk
+*.rar
+*.tar.gz
+*.tar.bz2
+*.tar.xz
 arim_rde_tool.exe
-zip
-exe
 dist/
 build/
-input/
+
+
+# Python
+__pycache__/
+.venv/
+*.py[cod]
+*.pyo
+*.pyd
+*.pkl
+*.pickle
+*.env
+.env*
+
+# VSCode
+.vscode/
+.github/
+.git/
+# OS
+.DS_Store
+Thumbs.db
+
+# Cookie/認証情報
+cookies*.txt
+cookies*.pkl
+input/login.txt
+!input/login.txt.sample
+input_/login.txt
+!input_/login.txt.sample
+
+# Jupyter
+.ipynb_checkpoints/
+
+# その他
+*.log
+*.bak
+*.swp
+
+app_config.json
+login.txt
+
+# バイナリファイル（100MB超はGitHubにpush不可）
+arim_rde_tool.exe
+dist/
+build/
+
+rde_env/*
+!rde_env/.gitkeep
+output/**
+!output/.gitkeep
+input/**
+!input/.gitkeep
+input_/**
+!input_/.gitkeep
+output/*.tmp
+output/*.bak
+output/*.log
+legacy_cli/8ac947c.js
+
+# src/配下に移動した, inputディレクトリの除外
+src/output/**
+
+# tools/配下のoutputディレクトリの除外
+src/tools/output/**
+
+src/input/
+src/input/login.txt
+!src/input/login.txt.sample
+src/input_/
+src/input_/login.txt
+!src/input_/login.txt.sample
+# PyInstaller
+dist/
+build/
+*.spec
+login.txt
+
+bearer_token.txt
+
+# 隠しフォルダ
+.pytest_cache/cleanup/
+
+# テストファイル・デバッグファイル除外
+test_*.py
+debug_*.py
+demo_*.py
+temp_*.py
+*_test.py
+*_debug.py
+*_temp.py
+
+# ルートディレクトリの一時ファイル
+/test_*.py
+/debug_*.py
+/demo_*.py
+/temp_*.py
+
+# tools配下のテストファイル
+tools/test_*.py
+tools/*_test.py
+
+cleanup/**
+!cleanup/.gitkeep
+
+test_logs/**
+!test_logs/.gitkeep
+
+test_logs_full/**
+!test_logs_full/.gitkeep
+
+tests/**
+!tests/.gitkeep
+
+ref/**
+!ref/.gitkeep
+
+sandbox/**
+!sandbox/.gitkeep

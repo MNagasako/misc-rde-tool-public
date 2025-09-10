@@ -1,3 +1,7 @@
+arim_rde_tool v1.17.0
+2025-09-10
+
+
 arim_rde_tool v1.16.0
 2025-09-01
 - 【動的ユーザー管理機能実装】rde-member.txtを読み取り専用化、動的追加ユーザーはoutput/temp/dynamic_users.jsonに保存

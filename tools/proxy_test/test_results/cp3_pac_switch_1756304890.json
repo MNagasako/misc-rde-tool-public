@@ -1,0 +1,80 @@
+{
+  "checkpoint_id": "cp3_pac_switch",
+  "name": "CP3: PAC（PROXY/DIRECT切替）",
+  "timestamp": "2025-08-27T23:28:05.023655",
+  "success": true,
+  "execution_time": 5.166111469268799,
+  "details": {
+    "mode": "PAC",
+    "proxy_server_running": true,
+    "pac_server_running": true,
+    "proxy_url": "http://127.0.0.1:8888",
+    "pac_url": "http://127.0.0.1:8080/proxy.pac",
+    "integration_test": {
+      "total_tests": 3,
+      "successful_tests": 1,
+      "results": [
+        {
+          "url": "https://httpbin.org/ip",
+          "status": "error",
+          "error": "maximum recursion depth exceeded"
+        },
+        {
+          "url": "http://127.0.0.1:8080/proxy.pac",
+          "status": "success",
+          "status_code": 200,
+          "response_size": 827
+        },
+        {
+          "url": "https://www.google.com",
+          "status": "error",
+          "error": "maximum recursion depth exceeded"
+        }
+      ]
+    },
+    "dynamic_switch_test": {
+      "status": "error",
+      "error": "maximum recursion depth exceeded"
+    }
+  },
+  "error_message": "",
+  "config_used": {
+    "network": {
+      "mode": "DIRECT",
+      "proxies": {
+        "http": "",
+        "https": "",
+        "no_proxy": "localhost,127.0.0.1"
+      },
+      "pac_url": "http://127.0.0.1:8080/wpad_switch.dat",
+      "cert": {
+        "use_os_store": true,
+        "verify": true,
+        "ca_bundle": ""
+      },
+      "timeouts": {
+        "connect": 10,
+        "read": 30
+      },
+      "retries": {
+        "total": 3,
+        "backoff_factor": 0.5,
+        "status_forcelist": [
+          429,
+          500,
+          502,
+          503,
+          504
+        ]
+      },
+      "pac": {
+        "url": "http://127.0.0.1:8080/proxy.pac"
+      }
+    },
+    "webview": {
+      "auto_proxy_from_network": true,
+      "additional_args": []
+    }
+  },
+  "suggestions": []
+}

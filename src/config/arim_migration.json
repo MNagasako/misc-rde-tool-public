@@ -1,0 +1,13 @@
+{
+  "anonymization_rules": [
+    {
+      "field": "user_id",
+      "method": "hash"
+    },
+    {
+      "field": "email",
+      "method": "mask",
+      "mask_char": "*"
+    }
+  ]
+}

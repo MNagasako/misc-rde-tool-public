@@ -1,0 +1,61 @@
+{
+  "checkpoint_id": "cp2_pac_direct",
+  "name": "CP2: PAC（常時DIRECT）",
+  "timestamp": "2025-08-27T23:23:27.518031",
+  "success": true,
+  "execution_time": 3.988173484802246,
+  "details": {
+    "mode": "PAC",
+    "pac_server_running": true,
+    "pac_url": "http://127.0.0.1:8080/proxy.pac",
+    "pac_fetch": {
+      "status": "success",
+      "content_length": 709,
+      "contains_function": true
+    },
+    "pac_http_test": {
+      "status": "error",
+      "error": "maximum recursion depth exceeded"
+    }
+  },
+  "error_message": "",
+  "config_used": {
+    "network": {
+      "mode": "PAC",
+      "proxies": {
+        "http": "",
+        "https": "",
+        "no_proxy": "localhost,127.0.0.1"
+      },
+      "pac_url": "http://127.0.0.1:8080/wpad_direct.dat",
+      "cert": {
+        "use_os_store": true,
+        "verify": true,
+        "ca_bundle": ""
+      },
+      "timeouts": {
+        "connect": 10,
+        "read": 30
+      },
+      "retries": {
+        "total": 3,
+        "backoff_factor": 0.5,
+        "status_forcelist": [
+          429,
+          500,
+          502,
+          503,
+          504
+        ]
+      },
+      "pac": {
+        "url": "http://127.0.0.1:8080/proxy.pac"
+      }
+    },
+    "webview": {
+      "auto_proxy_from_network": true,
+      "additional_args": []
+    }
+  },
+  "suggestions": []
+}
