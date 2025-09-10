@@ -24,3 +24,59 @@
 2025-08-19 18:06:37.951522	Browser.update_autologin_msg	{"msg": "DICEログインボタンが有効です（自動クリック）"}
 2025-08-19 18:06:37.951968	Browser.stop_blinking_msg	{}
 2025-08-19 18:06:39.653422	Browser.closeEvent	{"event": "<PyQt5.QtGui.QCloseEvent object at 0x0000023232D350A0>"}
+2025-09-10 22:39:13.987199	Browser.__init__	{"auto_close": false, "test_mode": false}
+2025-09-10 22:39:14.078871	AppInitializer.initialize_all	{}
+2025-09-10 22:39:14.080040	AppInitializer.initialize_managers	{}
+2025-09-10 22:39:14.089792	BatchProcessor.__init__	{"browser_instance": "<__main__.Browser object at 0x0000016B9117D250>"}
+2025-09-10 22:39:14.108146	AppInitializer.initialize_proxy_settings	{}
+2025-09-10 22:39:14.111465	Browser.set_webview_message	{"msg": "[プロキシ設定] ダイレクト接続を使用"}
+2025-09-10 22:39:14.146194	AppInitializer.setup_batch_signals	{}
+2025-09-10 22:39:14.148357	AppInitializer.initialize_arim_anonymizer	{}
+2025-09-10 22:39:14.151385	AppInitializer.setup_login_info	{}
+2025-09-10 22:39:15.560740	BrowserController.setup_webview	{"webview": "<PyQt5.QtWebEngineWidgets.QWebEngineView object at 0x0000016B9117D1C0>"}
+2025-09-10 22:39:18.007989	BrowserController.on_url_changed	{"url": "PyQt5.QtCore.QUrl('https://rde.nims.go.jp/')"}
+2025-09-10 22:39:18.009467	Browser.log_webview_html	{"url": "PyQt5.QtCore.QUrl('https://rde.nims.go.jp/')"}
+2025-09-10 22:39:18.873613	Browser.update_autologin_msg	{"msg": "ブラウザ初期化完了"}
+2025-09-10 22:39:19.619016	Browser.update_autologin_msg	{"msg": "DICEログインボタンを待機中..."}
+2025-09-10 22:39:19.620836	Browser.start_blinking_msg	{}
+2025-09-10 22:39:20.127696	Browser.update_autologin_msg	{"msg": "DICEログインボタンを待機中..."}
+2025-09-10 22:39:20.129466	Browser.start_blinking_msg	{}
+2025-09-10 22:39:20.647875	Browser.update_autologin_msg	{"msg": "DICEログインボタンを待機中..."}
+2025-09-10 22:39:20.650191	Browser.start_blinking_msg	{}
+2025-09-10 22:39:22.200139	Browser.update_autologin_msg	{"msg": "DICEログインボタンを待機中..."}
+2025-09-10 22:39:22.201833	Browser.start_blinking_msg	{}
+2025-09-10 22:39:22.372430	BrowserController.on_load_finished	{"ok": true}
+2025-09-10 22:39:22.374077	Browser.log_webview_html	{"url": "PyQt5.QtCore.QUrl('https://rde.nims.go.jp/')"}
+2025-09-10 22:39:22.375296	BrowserController._adjust_zoom	{}
+2025-09-10 22:39:22.377356	BrowserController._check_login_completion	{}
+2025-09-10 22:39:22.378440	BrowserController.is_rde_logged_in_url	{"url": "https://rde.nims.go.jp/"}
+2025-09-10 22:39:28.467472	Browser.update_autologin_msg	{"msg": "DICEログインボタンを待機中..."}
+2025-09-10 22:39:28.468297	Browser.start_blinking_msg	{}
+2025-09-10 22:39:29.003762	Browser.update_autologin_msg	{"msg": "DICEログインボタンを待機中..."}
+2025-09-10 22:39:29.004839	Browser.start_blinking_msg	{}
+2025-09-10 22:39:29.252202	BrowserController.on_url_changed	{"url": "PyQt5.QtCore.QUrl('https://dicelogin.b2clogin.com/dicelogin.onmicrosoft.com/b2c_1a_dpf_sign...
+2025-09-10 22:39:29.252943	Browser.log_webview_html	{"url": "PyQt5.QtCore.QUrl('https://dicelogin.b2clogin.com/dicelogin.onmicrosoft.com/b2c_1a_dpf_sign...
+2025-09-10 22:39:29.514799	Browser.update_autologin_msg	{"msg": "DICEログインボタンを待機中..."}
+2025-09-10 22:39:29.516171	Browser.start_blinking_msg	{}
+2025-09-10 22:39:29.684611	BrowserController.on_load_finished	{"ok": true}
+2025-09-10 22:39:29.686112	Browser.log_webview_html	{"url": "PyQt5.QtCore.QUrl('https://dicelogin.b2clogin.com/dicelogin.onmicrosoft.com/b2c_1a_dpf_sign...
+2025-09-10 22:39:29.687182	BrowserController._adjust_zoom	{}
+2025-09-10 22:39:29.689145	BrowserController._check_login_completion	{}
+2025-09-10 22:39:29.690261	BrowserController.is_rde_logged_in_url	{"url": "https://dicelogin.b2clogin.com/dicelogin.onmicrosoft.com/b2c_1a_dpf_signin/oauth2/v2.0/auth...
+2025-09-10 22:39:30.044917	Browser.update_autologin_msg	{"msg": "DICEログインボタンが有効です（自動クリック）"}
+2025-09-10 22:39:30.046022	Browser.stop_blinking_msg	{}
+2025-09-10 22:39:35.441584	BrowserController.on_url_changed	{"url": "PyQt5.QtCore.QUrl('https://rde.nims.go.jp/')"}
+2025-09-10 22:39:35.442315	Browser.log_webview_html	{"url": "PyQt5.QtCore.QUrl('https://rde.nims.go.jp/')"}
+2025-09-10 22:39:36.505797	BrowserController.on_load_finished	{"ok": true}
+2025-09-10 22:39:36.506711	Browser.log_webview_html	{"url": "PyQt5.QtCore.QUrl('https://rde.nims.go.jp/')"}
+2025-09-10 22:39:36.507684	BrowserController._adjust_zoom	{}
+2025-09-10 22:39:36.509034	BrowserController._check_login_completion	{}
+2025-09-10 22:39:36.509575	BrowserController.is_rde_logged_in_url	{"url": "https://rde.nims.go.jp/"}
+2025-09-10 22:39:36.897844	BrowserController.on_url_changed	{"url": "PyQt5.QtCore.QUrl('https://dicelogin.b2clogin.com/dicelogin.onmicrosoft.com/b2c_1a_dpf_sign...
+2025-09-10 22:39:36.898820	Browser.log_webview_html	{"url": "PyQt5.QtCore.QUrl('https://dicelogin.b2clogin.com/dicelogin.onmicrosoft.com/b2c_1a_dpf_sign...
+2025-09-10 22:39:36.983818	BrowserController.on_load_finished	{"ok": true}
+2025-09-10 22:39:36.985159	Browser.log_webview_html	{"url": "PyQt5.QtCore.QUrl('https://dicelogin.b2clogin.com/dicelogin.onmicrosoft.com/b2c_1a_dpf_sign...
+2025-09-10 22:39:37.006422	BrowserController._adjust_zoom	{}
+2025-09-10 22:39:37.009726	BrowserController._check_login_completion	{}
+2025-09-10 22:39:37.012324	BrowserController.is_rde_logged_in_url	{"url": "https://dicelogin.b2clogin.com/dicelogin.onmicrosoft.com/b2c_1a_dpf_signin/oauth2/v2.0/auth...
+2025-09-10 22:39:55.906879	Browser.closeEvent	{"event": "<PyQt5.QtGui.QCloseEvent object at 0x0000016B9E9EFC80>"}
