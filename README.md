@@ -4,8 +4,6 @@
 
 **2025-09-10 最新アップデート**: 動的ユーザー管理機能拡張・API補完強化・認証ストア統合・データセットフィルタ強化
 
-このリポジトリは、ARIM事業 RDE→ARIMデータポータル移行ツールのバイナリ配布専用リポジトリです。
-
 
 ## ✨ 最新機能（v1.17.0+）
 
@@ -267,20 +265,19 @@ AI機能を利用するための設定は、`input/ai_config.json` に記載し�
 
 
 ## 注意事項・免責
-- このリポジトリはバイナリ配布専用
 - 本ツールは**個人開発のため無保証**
-- 再配布・転載は禁止
 
 リリースページ：  
 [https://github.com/MNagasako/misc-rde-tool-public/releases](https://github.com/MNagasako/misc-rde-tool-public/releases)
 
 ---
+## License
+
+本プロジェクトのソースコードは **GNU General Public License v3.0**（**GPL-3.0**）の下で提供します。
+- 本プロジェクトは **PyQt5 を GPLv3 条件で利用**しており、**Riverbank の商用ライセンスは使用していません**。
 
 
 
-## ライセンス・問い合わせ
-- ライセンス: 未定
-- 制作: 東北大金研 長迫
 
 ## 関連ツール
 - [https://github.com/MNagasako/BJB-PathFlattener](https://github.com/MNagasako/BJB-PathFlattener)
