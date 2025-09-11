@@ -59,24 +59,43 @@ class SettingsTabWidget(QWidget):
         
         # アプリケーション設定タブ
         self.setup_application_tab()
-        
+            
         # 自動ログインタブ
         self.setup_autologin_tab()
-        
+
+        # インポートタブ（ダミー）
+        self.setup_import_tab_dummy()
+            
         # ボタンエリア
         button_layout = QHBoxLayout()
-        
+            
         self.apply_button = QPushButton("適用")
         self.apply_button.clicked.connect(self.apply_settings)
-        
+            
         self.reload_button = QPushButton("再読み込み")
         self.reload_button.clicked.connect(self.reload_settings)
-        
+            
         button_layout.addStretch()
         button_layout.addWidget(self.apply_button)
         button_layout.addWidget(self.reload_button)
         
-        #layout.addLayout(button_layout)
+    #layout.addLayout(button_layout)
+    def setup_import_tab_dummy(self):
+        """インポートタブ（ダミー表示）"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        title_label = QLabel("インポート（ダミー表示）")
+        title_font = QFont()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
+        info_label = QLabel("このタブは今後インポート機能を実装予定です。\n（現状はダミー表示です）")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+        layout.addStretch()
+        self.tab_widget.addTab(widget, "インポート")
         
     def get_optimal_layout_columns(self):
         """画面サイズに基づいて最適な段組数を決定"""

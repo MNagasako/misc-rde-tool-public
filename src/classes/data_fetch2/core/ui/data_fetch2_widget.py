@@ -49,16 +49,16 @@ def safe_show_message_widget(parent, title, message, message_type="warning"):
         logger.error(f"メッセージボックス表示エラー: {e}")
         logger.error(f"[{message_type.upper()}] {title}: {message}")
 
-def create_data_fetch2_widget(parent=None):
+def create_data_fetch2_widget(parent=None, bearer_token=None):
     # 非同期化を解除（QThread, Workerクラス削除）
     """
     データ取得2用ウィジェット（dataset.json参照・検索付きドロップダウン）
     """
-    widget = parent if parent is not None else QWidget()
-    layout = QVBoxLayout()
+    widget = QWidget(parent)
+    layout = QVBoxLayout(widget)
     label = QLabel("データ取得2機能")
     label.setStyleSheet("font-size: 16px; font-weight: bold; color: #1976d2; padding: 10px;")
-    #layout.addWidget(label)
+    layout.addWidget(label)
 
 
     # dataset.jsonのパス
@@ -98,6 +98,9 @@ def create_data_fetch2_widget(parent=None):
 
 
     def find_bearer_token_recursive(obj):
+        # bearer_tokenが直接渡されていればそれを優先
+        if bearer_token:
+            return bearer_token
         # objがNoneなら終了
         if obj is None:
             return None
@@ -232,5 +235,4 @@ def create_data_fetch2_widget(parent=None):
 
     fetch_files_btn.clicked.connect(on_fetch_files)
 
-    widget.setLayout(layout)
     return widget

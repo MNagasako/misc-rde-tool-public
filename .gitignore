@@ -168,3 +168,5 @@ ref/**
 
 sandbox/**
 !sandbox/.gitkeep
+# temp_folder_manager.pyは除外しない
+!src/classes/data_entry/core/temp_folder_manager.py

@@ -52,7 +52,7 @@
 > ※本章の内容が最新です。以降のマニュアル的記載には一部古い内容が含まれる場合がございます。
 
 
-# ARIM RDE Tool v1.17.0
+# ARIM RDE Tool v1.17.1
 
 
 GPL3ライセンスで公開
@@ -164,9 +164,26 @@ dice
 ---
 
 
----
 
-## 重要ファイル
+
+## バイナリ化方法（開発用リポジトリでの手順）
+
+1. **仮想環境の有効化と依存モジュールのインストール**
+  ```powershell
+  # PowerShell例
+  cd C:\vscode\rde
+  .\.venv\Scripts\Activate.ps1
+  pip install -r requirements.txt
+  ```
+
+2. **PyInstallerによるバイナリ化**
+  ```powershell
+  pyinstaller --exclude-module pytest --noconsole --onefile --icon "src/image/icon/icon1.ico" --add-data "src/image;image" --add-data "config;config" --add-data "src/js_templates;js_templates" src/arim_rde_tool.py
+  ```
+
+- バイナリ（`dist/arim_rde_tool.exe`）が生成されます。
+
+---
 
 ### 配布関連
 - `dist/arim_rde_tool.exe` — メイン実行ファイル

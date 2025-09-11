@@ -120,10 +120,10 @@ class DataRegisterTabWidget(QWidget):
             # 通常登録タブ：標準的なサイズに設定（初回呼び出し時と同じ幅・95%高さ）
             if screen:
                 screen_size = screen.size()
-                # 標準的な幅（データセット選択時に適切な幅）と95%高さを設定
+                # 標準的な幅（データセット選択時に適切な幅）と90%高さを設定
                 standard_width = 1200  # 通常登録タブの標準幅
-                target_height = int(screen_size.height() * 0.95)
-                
+                target_height = int(screen_size.height() * 0.90)
+
                 print(f"[DEBUG] スクリーンサイズ: {screen_size.width()}x{screen_size.height()}")
                 print(f"[DEBUG] 通常登録ターゲットサイズ: {standard_width}x{target_height} (幅=標準, 高さ=95%)")
                 
@@ -166,12 +166,12 @@ class DataRegisterTabWidget(QWidget):
                 top_level.setMinimumWidth(200)
             if hasattr(top_level, 'setMaximumWidth'):
                 top_level.setMaximumWidth(16777215)
-                
-            # 一括登録タブ：画面サイズの95%にリサイズ
+
+            # 一括登録タブ：画面サイズの90%にリサイズ
             if screen:
                 screen_size = screen.size()
-                target_width = int(screen_size.width() * 0.95)
-                target_height = int(screen_size.height() * 0.95)
+                target_width = int(screen_size.width() * 0.90)
+                target_height = int(screen_size.height() * 0.90)
                 
                 print(f"[DEBUG] スクリーンサイズ: {screen_size.width()}x{screen_size.height()}")
                 print(f"[DEBUG] ターゲットサイズ(95%): {target_width}x{target_height}")
