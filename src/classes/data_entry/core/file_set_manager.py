@@ -6,6 +6,8 @@
 
 import os
 import json
+import uuid
+import datetime
 from typing import List, Dict, Optional, Union, Tuple
 from dataclasses import dataclass, field
 from enum import Enum
@@ -24,6 +26,12 @@ class FileType(Enum):
     DIRECTORY = "directory"
 
 
+class FileItemType(Enum):
+    """ファイルアイテムの種別（データファイル/添付ファイル）"""
+    DATA = "data"            # データファイル
+    ATTACHMENT = "attachment" # 添付ファイル
+
+
 @dataclass
 class FileItem:
     """ファイル・ディレクトリの情報を表現するクラス"""
@@ -35,6 +43,8 @@ class FileItem:
     size: int = 0                      # ファイルサイズ（bytes）
     child_count: int = 0               # 配下ファイル数（ディレクトリの場合）
     is_excluded: bool = False          # 除外フラグ
+    item_type: FileItemType = FileItemType.DATA  # ファイル種別（データファイル/添付ファイル）
+    is_zip: bool = False               # ZIP化指定フラグ（ディレクトリの場合）
     
     def __post_init__(self):
         """初期化後の処理"""
@@ -61,10 +71,16 @@ class FileItem:
 class FileSet:
     """一括登録の単位となるファイルセット"""
     id: int                            # ファイルセットID
-    name: str                          # ファイルセット名
-    base_directory: str                # ベースディレクトリ
+    uuid: str = field(default_factory=lambda: str(uuid.uuid4()))  # ファイルセット固有UUID
+    name: str = ""                     # ファイルセット名
+    base_directory: str = ""           # ベースディレクトリ
+    created_at: str = field(default_factory=lambda: datetime.datetime.now().isoformat())  # 作成日時
     items: List[FileItem] = field(default_factory=list)  # 含まれるファイル・ディレクトリ
     organize_method: PathOrganizeMethod = PathOrganizeMethod.FLATTEN  # パス整理方法
+    
+    # 一時フォルダ管理情報
+    temp_folder_path: Optional[str] = None        # 固定一時フォルダパス
+    mapping_file_path: Optional[str] = None       # 固定マッピングファイルパス
     
     # データエントリー情報
     dataset_id: Optional[str] = None                    # データセットID
@@ -106,6 +122,14 @@ class FileSet:
             if item.file_type == FileType.FILE:
                 file_count += 1
         return file_count
+    
+    def get_directory_count(self) -> int:
+        """ファイルセット内のディレクトリ数を取得"""
+        directory_count = 0
+        for item in self.get_valid_items():
+            if item.file_type == FileType.DIRECTORY:
+                directory_count += 1
+        return directory_count
 
 
 class FileSetManager:
@@ -116,6 +140,96 @@ class FileSetManager:
         self.file_sets: List[FileSet] = []
         self.file_tree: List[FileItem] = []
         self._next_id = 1
+        
+        # メタデータファイルの管理
+        self.metadata_dir = self._get_metadata_directory()
+        self._ensure_metadata_directory()
+    
+    def _get_metadata_directory(self) -> str:
+        """メタデータディレクトリのパスを取得"""
+        from config.common import get_output_directory
+        return os.path.join(get_output_directory(), "filesets_metadata")
+    
+    def _ensure_metadata_directory(self):
+        """メタデータディレクトリが存在することを確認（なければ作成）"""
+        if not os.path.exists(self.metadata_dir):
+            os.makedirs(self.metadata_dir, exist_ok=True)
+            print(f"[INFO] ファイルセットメタデータディレクトリを作成: {self.metadata_dir}")
+    
+    def save_fileset_metadata(self, file_set: FileSet):
+        """ファイルセットのメタデータをJSONファイルに保存"""
+        try:
+            metadata = {
+                'id': file_set.id,
+                'uuid': file_set.uuid,
+                'name': file_set.name,
+                'created_at': file_set.created_at,
+                'base_directory': file_set.base_directory,
+                'organize_method': file_set.organize_method.value,
+                'temp_folder_path': file_set.temp_folder_path,
+                'mapping_file_path': file_set.mapping_file_path,
+                'dataset_id': file_set.dataset_id,
+                'data_name': file_set.data_name,
+                'sample_mode': file_set.sample_mode,
+                'sample_id': file_set.sample_id,
+                'sample_name': file_set.sample_name,
+                'file_count': file_set.get_file_count(),
+                'total_size': file_set.get_total_size(),
+                'items_count': len(file_set.items)
+            }
+            
+            # UUIDベースのファイル名でメタデータを保存
+            metadata_file = os.path.join(self.metadata_dir, f"{file_set.uuid}.json")
+            with open(metadata_file, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, ensure_ascii=False, indent=2)
+            
+            print(f"[INFO] ファイルセットメタデータを保存: {metadata_file}")
+            
+        except Exception as e:
+            print(f"[ERROR] メタデータ保存エラー: {e}")
+    
+    def load_fileset_metadata(self, fileset_uuid: str) -> Optional[Dict]:
+        """UUIDからファイルセットのメタデータを読み込み"""
+        try:
+            metadata_file = os.path.join(self.metadata_dir, f"{fileset_uuid}.json")
+            if os.path.exists(metadata_file):
+                with open(metadata_file, 'r', encoding='utf-8') as f:
+                    metadata = json.load(f)
+                return metadata
+            return None
+        except Exception as e:
+            print(f"[ERROR] メタデータ読み込みエラー: {e}")
+            return None
+    
+    def cleanup_fileset_metadata(self, fileset_uuid: str):
+        """ファイルセットのメタデータファイルを削除"""
+        try:
+            metadata_file = os.path.join(self.metadata_dir, f"{fileset_uuid}.json")
+            if os.path.exists(metadata_file):
+                os.remove(metadata_file)
+                print(f"[INFO] ファイルセットメタデータを削除: {metadata_file}")
+        except Exception as e:
+            print(f"[ERROR] メタデータ削除エラー: {e}")
+    
+    def get_all_fileset_metadata(self) -> List[Dict]:
+        """全ファイルセットのメタデータ一覧を取得"""
+        metadata_list = []
+        try:
+            if os.path.exists(self.metadata_dir):
+                for filename in os.listdir(self.metadata_dir):
+                    if filename.endswith('.json'):
+                        uuid_str = filename[:-5]  # .json拡張子を除去
+                        metadata = self.load_fileset_metadata(uuid_str)
+                        if metadata:
+                            metadata_list.append(metadata)
+            
+            # 作成日時でソート
+            metadata_list.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+            
+        except Exception as e:
+            print(f"[ERROR] 全メタデータ取得エラー: {e}")
+        
+        return metadata_list
     
     def build_file_tree(self) -> List[FileItem]:
         """ベースディレクトリからファイルツリーを構築"""
@@ -173,6 +287,9 @@ class FileSetManager:
         self.file_sets.append(file_set)
         self._next_id += 1
         
+        # メタデータを保存
+        self.save_fileset_metadata(file_set)
+        
         return self.file_sets
     
     def auto_assign_filesets_by_top_level_dirs(self) -> List[FileSet]:
@@ -224,6 +341,9 @@ class FileSetManager:
                 )
                 self.file_sets.append(file_set)
                 self._next_id += 1
+                
+                # メタデータを保存
+                self.save_fileset_metadata(file_set)
         
         # ルートファイルがある場合は別ファイルセットに（未割り当てのみ）
         unassigned_root_files = [f for f in root_files if f.relative_path not in assigned_items]
@@ -237,6 +357,10 @@ class FileSetManager:
             )
             self.file_sets.append(file_set)
             self._next_id += 1
+            
+            # メタデータを保存
+            self.save_fileset_metadata(file_set)
+            
             # ルートファイルも割り当て済みに追加
             for item in unassigned_root_files:
                 assigned_items.add(item.relative_path)
@@ -334,6 +458,9 @@ class FileSetManager:
         self.file_sets.append(file_set)
         self._next_id += 1
         
+        # メタデータを保存
+        self.save_fileset_metadata(file_set)
+        
         return file_set
     
     def _normalize_manual_selection(self, selected_items: List[FileItem]) -> List[FileItem]:
@@ -376,12 +503,47 @@ class FileSetManager:
         return normalized
     
     def remove_fileset(self, fileset_id: int) -> bool:
-        """ファイルセットを削除"""
+        """ファイルセットを削除（関連データも削除）"""
         for i, file_set in enumerate(self.file_sets):
             if file_set.id == fileset_id:
+                # メタデータを削除
+                self.cleanup_fileset_metadata(file_set.uuid)
+                
+                # 一時フォルダも削除
+                if file_set.temp_folder_path and os.path.exists(file_set.temp_folder_path):
+                    try:
+                        import shutil
+                        shutil.rmtree(file_set.temp_folder_path)
+                        print(f"[INFO] ファイルセット削除時に一時フォルダを削除: {file_set.temp_folder_path}")
+                    except Exception as e:
+                        print(f"[WARNING] 一時フォルダ削除失敗: {e}")
+                
+                # ファイルセットを削除
                 del self.file_sets[i]
                 return True
         return False
+    
+    def clear_all_filesets(self):
+        """全ファイルセットを削除（関連データも削除）"""
+        print(f"[DEBUG] clear_all_filesets: {len(self.file_sets)}個のファイルセットを削除")
+        
+        # 全ファイルセットを削除（逆順で安全に削除）
+        for file_set in reversed(self.file_sets[:]):
+            # メタデータを削除
+            self.cleanup_fileset_metadata(file_set.uuid)
+            
+            # 一時フォルダも削除
+            if hasattr(file_set, 'temp_folder_path') and file_set.temp_folder_path and os.path.exists(file_set.temp_folder_path):
+                try:
+                    import shutil
+                    shutil.rmtree(file_set.temp_folder_path)
+                    print(f"[INFO] 全削除時に一時フォルダを削除: {file_set.temp_folder_path}")
+                except Exception as e:
+                    print(f"[WARNING] 一時フォルダ削除失敗: {e}")
+        
+        # リストをクリア
+        self.file_sets.clear()
+        print(f"[DEBUG] clear_all_filesets: 削除完了")
     
     def get_fileset_by_id(self, fileset_id: int) -> Optional[FileSet]:
         """IDでファイルセットを取得"""

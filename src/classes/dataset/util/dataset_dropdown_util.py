@@ -183,6 +183,34 @@ def get_unique_dataset_types(dataset_json_path):
         return []
 
 def create_dataset_dropdown_all(dataset_json_path, parent=None, global_share_filter="both", user_membership_filter="both", dataset_type_filter="all", grant_number_filter=""):
+    # データセットタイプフィルタ
+    type_combo = QComboBox(parent)
+    type_combo.setMinimumWidth(120)
+    type_combo.addItem("全て", "all")
+    for dtype, label in get_dataset_type_display_map().items():
+        type_combo.addItem(label, dtype)
+    type_layout = QHBoxLayout()
+    type_layout.addWidget(QLabel("タイプ:"))
+    type_layout.addWidget(type_combo)
+    type_widget = QWidget(parent)
+    type_widget.setLayout(type_layout)
+
+    # 課題番号フィルタ
+    grant_line_edit = QLineEdit(parent)
+    grant_line_edit.setPlaceholderText("課題番号で絞り込み")
+    grant_layout = QHBoxLayout()
+    grant_layout.addWidget(QLabel("課題番号:"))
+    grant_layout.addWidget(grant_line_edit)
+    grant_widget = QWidget(parent)
+    grant_widget.setLayout(grant_layout)
+
+    # メンバーシップウィジェット
+    membership_layout = QHBoxLayout()
+    membership_layout.addWidget(membership_radio_both)
+    membership_layout.addWidget(membership_radio_member)
+    membership_layout.addWidget(membership_radio_non_member)
+    membership_widget = QWidget(parent)
+    membership_widget.setLayout(membership_layout)
     """
     dataset.jsonの全データセットをユーザーフィルタなしでQComboBox（検索付き）で表示
     広域シェア設定、ユーザーメンバーシップ、データセットタイプ、課題番号による複合フィルタリング機能を追加
@@ -200,138 +228,39 @@ def create_dataset_dropdown_all(dataset_json_path, parent=None, global_share_fil
     from PyQt5.QtWidgets import QVBoxLayout, QWidget, QLabel, QComboBox, QSizePolicy, QCompleter, QHBoxLayout, QRadioButton, QButtonGroup, QLineEdit, QGroupBox
     from PyQt5.QtCore import Qt
 
+    # --- UI部品定義 ---
     combo = QComboBox(parent)
     combo.setMinimumWidth(320)
-    combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     combo.setEditable(True)
-    combo.setInsertPolicy(QComboBox.NoInsert)
-    combo.setMaxVisibleItems(12)
-    combo.view().setMinimumHeight(240)
-    
-    # 広域シェアフィルタUI作成
-    filter_widget = QWidget(parent)
-    filter_layout = QHBoxLayout(filter_widget)
-    filter_layout.setContentsMargins(0, 0, 0, 0)
-    filter_layout.setSpacing(10)
-    
-    filter_label = QLabel("広域シェア設定:")
-    filter_layout.addWidget(filter_label)
-    
-    # ラジオボタングループ
-    button_group = QButtonGroup(filter_widget)
-    
+    combo.lineEdit().setPlaceholderText("リストから選択、またはキーワードで検索して選択してください")
+
+    # 広域シェアフィルタ
+    radio_enabled = QRadioButton("広域シェアあり")
+    radio_disabled = QRadioButton("広域シェアなし")
     radio_both = QRadioButton("両方")
-    radio_enabled = QRadioButton("有効のみ")
-    radio_disabled = QRadioButton("無効のみ")
-    
+    button_group = QButtonGroup(parent)
     button_group.addButton(radio_both, 0)
     button_group.addButton(radio_enabled, 1)
     button_group.addButton(radio_disabled, 2)
-    
+    filter_layout = QHBoxLayout()
     filter_layout.addWidget(radio_both)
     filter_layout.addWidget(radio_enabled)
     filter_layout.addWidget(radio_disabled)
-    filter_layout.addStretch()
-    
-    # ユーザーメンバーシップフィルタUI作成
-    membership_widget = QWidget(parent)
-    membership_layout = QHBoxLayout(membership_widget)
-    membership_layout.setContentsMargins(0, 0, 0, 0)
-    membership_layout.setSpacing(10)
-    
-    membership_label = QLabel("関係メンバー:")
-    membership_layout.addWidget(membership_label)
-    
-    # ユーザーメンバーシップ用ラジオボタングループ
-    membership_button_group = QButtonGroup(membership_widget)
-    
+    filter_widget = QWidget(parent)
+    filter_widget.setLayout(filter_layout)
+
+    # ユーザーメンバーシップフィルタ
+    membership_radio_member = QRadioButton("メンバー")
+    membership_radio_non_member = QRadioButton("非メンバー")
     membership_radio_both = QRadioButton("両方")
-    membership_radio_member = QRadioButton("メンバーのみ")
-    membership_radio_non_member = QRadioButton("非メンバーのみ")
-    
+    membership_button_group = QButtonGroup(parent)
     membership_button_group.addButton(membership_radio_both, 0)
     membership_button_group.addButton(membership_radio_member, 1)
     membership_button_group.addButton(membership_radio_non_member, 2)
-    
-    membership_layout.addWidget(membership_radio_both)
-    membership_layout.addWidget(membership_radio_member)
-    membership_layout.addWidget(membership_radio_non_member)
-    membership_layout.addStretch()
-    
-    # データセットタイプフィルタUI作成
-    type_widget = QWidget(parent)
-    type_layout = QHBoxLayout(type_widget)
-    type_layout.setContentsMargins(0, 0, 0, 0)
-    type_layout.setSpacing(10)
-    
-    type_label = QLabel("データセットタイプ:")
-    type_layout.addWidget(type_label)
-    
-    # データセットタイプ選択用コンボボックス
-    type_combo = QComboBox(type_widget)
-    type_combo.addItem("全て", "all")
-    
-    # 利用可能なデータセットタイプを動的に取得して日本語表示名を付ける
-    available_types = get_unique_dataset_types(dataset_json_path)
-    
-    # データセットタイプの日本語表示名マッピングを取得
-    type_display_map = get_dataset_type_display_map()
-    
-    for dtype in available_types:
-        display_name = type_display_map.get(dtype, dtype)  # マッピングにない場合は元の名前を使用
-        type_combo.addItem(display_name, dtype)
-    
-    type_layout.addWidget(type_combo)
-    type_layout.addStretch()
-    
-    # 課題番号フィルタUI作成
-    grant_widget = QWidget(parent)
-    grant_layout = QHBoxLayout(grant_widget)
-    grant_layout.setContentsMargins(0, 0, 0, 0)
-    grant_layout.setSpacing(10)
-    
-    grant_label = QLabel("課題番号:")
-    grant_layout.addWidget(grant_label)
-    
-    grant_line_edit = QLineEdit(grant_widget)
-    grant_line_edit.setPlaceholderText("部分一致で検索（例：JPMXP1222）")
-    grant_line_edit.setMinimumWidth(200)
-    grant_layout.addWidget(grant_line_edit)
-    grant_layout.addStretch()
-    
-    # デフォルト選択
-    if global_share_filter == "enabled":
-        radio_enabled.setChecked(True)
-    elif global_share_filter == "disabled":
-        radio_disabled.setChecked(True)
-    else:
-        radio_both.setChecked(True)
-    
-    if user_membership_filter == "member":
-        membership_radio_member.setChecked(True)
-    elif user_membership_filter == "non_member":
-        membership_radio_non_member.setChecked(True)
-    else:
-        membership_radio_both.setChecked(True)
-    
-    # データセットタイプのデフォルト設定
-    type_index = type_combo.findData(dataset_type_filter)
-    if type_index >= 0:
-        type_combo.setCurrentIndex(type_index)
-    
-    # 課題番号のデフォルト設定
-    if grant_number_filter:
-        grant_line_edit.setText(grant_number_filter)
 
+    # --- フィルタ適用・ドロップダウン更新関数 ---
     def load_and_filter_datasets(global_filter_type="both", membership_filter_type="both", dtype_filter="all", grant_filter=""):
-        """データセットを読み込み、複合フィルタを適用してドロップダウンを更新"""
-        combo.clear()
-        combo.lineEdit().setPlaceholderText("データセット名・課題番号・タイトルで検索")
-        
-        # 現在ログイン中のユーザーIDを取得
-        current_user_id = get_current_user_id()
-        
-        # dataset.jsonの読み込み
+        # dataset_itemsの取得
         if not os.path.exists(dataset_json_path):
             dataset_items = []
         else:
@@ -350,6 +279,90 @@ def create_dataset_dropdown_all(dataset_json_path, parent=None, global_share_fil
 
         # 先頭に空欄を追加
         combo.addItem("", None)
+        display_list = [""]
+        filtered_count = 0
+        total_count = len(dataset_items)
+
+        for idx, item in enumerate(dataset_items):
+            if not isinstance(item, dict):
+                continue
+
+            # 広域シェアフィルタの適用
+            is_global_share_enabled = check_global_sharing_enabled(item)
+
+            if global_filter_type == "enabled" and not is_global_share_enabled:
+                continue
+            elif global_filter_type == "disabled" and is_global_share_enabled:
+                continue
+
+            # ユーザーメンバーシップフィルタの適用
+            current_user_id = get_current_user_id()
+            is_user_member = check_user_is_member(item, current_user_id) if current_user_id else False
+
+            if membership_filter_type == "member" and not is_user_member:
+                continue
+            elif membership_filter_type == "non_member" and is_user_member:
+                continue
+
+            # データセットタイプフィルタの適用
+            if not check_dataset_type_match(item, dtype_filter):
+                continue
+
+            # 課題番号フィルタの適用
+            if not check_grant_number_match(item, grant_filter):
+                continue
+
+            # 全フィルタ条件をクリアしたデータセットのみ表示対象
+            filtered_count += 1
+
+            attr = item.get('attributes', {})
+            dataset_id = item.get('id')
+            name = attr.get('name', dataset_id)
+            subject_title = attr.get('subjectTitle', '')
+            grant_number = attr.get('grantNumber', '')
+            dataset_type = attr.get('datasetType', '')
+
+            def truncate(text, maxlen=30):
+                return (text[:maxlen] + '…') if text and len(text) > maxlen else text
+
+            name_disp = truncate(name, 60)
+            subject_disp = truncate(subject_title, 20)
+            grant_disp = grant_number if grant_number else "<課題番号未設定>"
+
+            # データセットタイプの日本語表示名を取得
+            type_display_map = get_dataset_type_display_map()
+            type_display = type_display_map.get(dataset_type, dataset_type) if dataset_type else "タイプ未設定"
+            type_disp = f"[{type_display}]"
+
+            # 広域シェア状態を表示に含める
+            share_status = "🌐" if is_global_share_enabled else "🔒"
+            user_status = "👤" if is_user_member else "👥"
+            display = f"{share_status}{user_status} {type_disp} {grant_disp} {subject_disp} {name_disp}".strip()
+
+            combo.addItem(display, dataset_id)
+            # datasetのdictをUserRoleで保持
+            try:
+                combo.setItemData(combo.count()-1, item, Qt.UserRole)
+            except Exception as e:
+                print(f"[ERROR] combo.setItemData失敗: idx={combo.count()-1}, error={e}")
+            display_list.append(display)
+
+        combo.setCurrentIndex(0)
+
+        # QCompleterで補完・絞り込み
+        completer = QCompleter(display_list, combo)
+        completer.setCaseSensitivity(False)
+        completer.setFilterMode(Qt.MatchContains)
+        popup_view = completer.popup()
+        popup_view.setMinimumHeight(240)
+        popup_view.setMaximumHeight(240)
+        combo.setCompleter(completer)
+
+        # フィルタ結果を表示
+        print(f"[INFO] フィルタ適用 - 広域シェア: {global_filter_type}, メンバーシップ: {membership_filter_type}, データタイプ: {dtype_filter}, 課題番号: '{grant_filter}', 表示数: {filtered_count}/{total_count}")
+        return filtered_count, total_count
+
+                                # --- フィルタ適用・ドロップダウン更新関数 ---
         display_list = [""]
         filtered_count = 0
         total_count = len(dataset_items)

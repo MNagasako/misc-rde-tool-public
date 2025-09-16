@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-ARIM RDE Tool v1.17.0 - PyQt5によるRDE→ARIMデータポータル移行ツール
+ARIM RDE Tool v1.17.2 - PyQt5によるRDE→ARIMデータポータル移行ツール
 
 主要機能:
 - RDEシステムへの自動ログイン・データセット一括取得・画像保存
@@ -554,14 +554,14 @@ def main():
                             break
             except Exception:
                 print('README.md: 取得失敗')
-            # docs/ARCHITECTURE_FEATURE_MAP_v1.17.0.md
+            # docs/ARCHITECTURE_FEATURE_MAP_v1.17.2.md
             try:
-                arch_path = os.path.join(os.path.dirname(__file__), '../docs/ARCHITECTURE_FEATURE_MAP_v1.17.0.md')
+                arch_path = os.path.join(os.path.dirname(__file__), '../docs/ARCHITECTURE_FEATURE_MAP_v1.17.2.md')
                 with open(arch_path, encoding='utf-8') as f:
                     line = f.readline()
-                    print(f"ARCHITECTURE_FEATURE_MAP_v1.17.0.md: {line.strip()}")
+                    print(f"ARCHITECTURE_FEATURE_MAP_v1.17.2.md: {line.strip()}")
             except Exception:
-                print('ARCHITECTURE_FEATURE_MAP_v1.17.0.md: 取得失敗')
+                print('ARCHITECTURE_FEATURE_MAP_v1.17.2.md: 取得失敗')
 
             # src配下の__version__定義
             import re

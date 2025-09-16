@@ -30,7 +30,7 @@ from datetime import datetime, timedelta, timezone
 from dateutil.parser import parse as parse_datetime  # ISO8601対応のため
 from ..util.xlsx_exporter import apply_basic_info_to_Xlsx_logic, summary_basic_info_to_Xlsx_logic
 from classes.utils.api_request_helper import api_request  # refactored to use api_request_helper
-from config.common import SUBGROUP_JSON_PATH
+from config.common import SUBGROUP_JSON_PATH, get_dynamic_file_path
 
 # ロガー設定（標準出力にも出す）
 logging.basicConfig(
@@ -2036,9 +2036,9 @@ def write_summary_sheet(wb, parent):
 
     # 各種JSONロード
     sub_group_json = load_json(SUBGROUP_JSON_PATH)
-    dataset_json = load_json(os.path.join("output", "rde", "data", "dataset.json"))
-    instruments_json = load_json(os.path.join("output", "rde", "data", "instruments.json"))
-    templates_json = load_json(os.path.join("output", "rde", "data", "template.json"))
+    dataset_json = load_json(get_dynamic_file_path("output/rde/data/dataset.json"))
+    instruments_json = load_json(get_dynamic_file_path("output/rde/data/instruments.json"))
+    templates_json = load_json(get_dynamic_file_path("output/rde/data/template.json"))
     if not all([sub_group_json, dataset_json, instruments_json, templates_json]):
         return
 

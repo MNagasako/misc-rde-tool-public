@@ -1,5 +1,5 @@
 """
-スキーマフォーム生成ユーティリティ - ARIM RDE Tool v1.17.0
+スキーマフォーム生成ユーティリティ - ARIM RDE Tool v1.17.2
 invoiceSchemaからUIフォームを動的生成する機能
 
 主要機能:
@@ -11,6 +11,7 @@ invoiceSchemaからUIフォームを動的生成する機能
 
 import json
 from PyQt5.QtWidgets import QGroupBox, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit
+from PyQt5.QtCore import Qt
 
 
 def create_schema_form(schema_path, parent=None):
@@ -38,6 +39,12 @@ def create_schema_form(schema_path, parent=None):
 
     # フォームグループ作成
     group = QGroupBox(custom.get("label", {}).get("ja", "固有情報"), parent)
+    
+    # 独立ダイアログとして表示されることを防ぐ
+    from PyQt5.QtCore import Qt
+    group.setWindowFlags(Qt.Widget)  # 明示的にウィジェットフラグを設定
+    group.setVisible(False)  # 初期状態では非表示に設定
+    
     layout = QVBoxLayout(group)
 
     # プロパティ解析・フォーム要素生成
@@ -74,6 +81,70 @@ def create_schema_form(schema_path, parent=None):
     group.setLayout(layout)
     # 英語key→widgetマッピングを保存
     group._schema_key_to_widget = key_to_widget
+    
+    # フォーム操作メソッドを追加
+    def get_form_data():
+        """フォームから値を取得"""
+        return get_schema_form_values(group)
+    
+    def set_form_data(data):
+        """フォームに値を設定"""
+        if not data or not hasattr(group, '_schema_key_to_widget'):
+            return
+        
+        key_to_widget = getattr(group, '_schema_key_to_widget', {})
+        print(f"[DEBUG] set_form_data呼び出し: data={data}, available_keys={list(key_to_widget.keys())}")
+        
+        for key, value in data.items():
+            if key in key_to_widget:
+                widget = key_to_widget[key]
+                try:
+                    if hasattr(widget, 'setCurrentText'):
+                        # コンボボックスの場合
+                        widget.setCurrentText(str(value))
+                        print(f"[DEBUG] コンボボックス設定: {key}={value}")
+                    elif hasattr(widget, 'setText'):
+                        # テキストフィールドの場合
+                        widget.setText(str(value))
+                        print(f"[DEBUG] テキストフィールド設定: {key}={value}")
+                except Exception as e:
+                    print(f"[WARNING] フィールド設定エラー ({key}={value}): {e}")
+            else:
+                print(f"[WARNING] 未知のフィールドキー: {key}")
+    
+    def clear_form():
+        """フォームをクリア"""
+        if not hasattr(group, '_schema_key_to_widget'):
+            return
+            
+        key_to_widget = getattr(group, '_schema_key_to_widget', {})
+        for key, widget in key_to_widget.items():
+            try:
+                if hasattr(widget, 'setCurrentIndex'):
+                    widget.setCurrentIndex(0)  # コンボボックスは先頭（空欄）に
+                elif hasattr(widget, 'setText'):
+                    widget.setText('')  # テキストフィールドは空文字
+            except Exception as e:
+                print(f"[WARNING] フィールドクリアエラー ({key}): {e}")
+    
+    # メソッドをフォームに動的に追加
+    group.get_form_data = get_form_data
+    group.set_form_data = set_form_data
+    group.clear_form = clear_form
+    
+    # 独立ダイアログ表示を防ぐ追加設定
+    group.setWindowModality(Qt.NonModal)  # モーダルダイアログにしない
+    group.setAttribute(Qt.WA_DeleteOnClose, False)  # 閉じてもオブジェクトを削除しない
+    if parent is not None:
+        group.setParent(parent)  # 親ウィジェットを明示的に再設定
+    
+    # デバッグ情報
+    print(f"[DEBUG] スキーマフォーム作成完了: parent={type(parent) if parent else None}, flags={group.windowFlags()}")
+    print(f"[DEBUG] parent object id: {id(parent) if parent else None}")
+    print(f"[DEBUG] group object id: {id(group)}")
+    print(f"[DEBUG] ウィンドウフラグ詳細: {int(group.windowFlags())}")
+    print(f"[DEBUG] 可視性: visible={group.isVisible()}, window={group.isWindow()}")
+    
     return group
 
 

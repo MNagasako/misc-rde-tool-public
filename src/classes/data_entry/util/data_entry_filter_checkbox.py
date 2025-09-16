@@ -69,18 +69,20 @@ def get_colored_dataset_display_name(dataset):
     }.get(dataset_type, '📄')
     
     # 表示用フォーマット（詳細情報付き）
-    display_parts = [f"{role_icon} {user_role}"]
+    display_parts = [f"{role_icon}"] # {user_role}
     
-    # データセット名
-    if name and name != 'Unnamed Dataset':
-        display_parts.append(f"{type_icon} {name}")
+
     
     # 課題番号/subjectTitle
     if grant_number:
-        display_parts.append(f"({grant_number})")
+        display_parts.append(f"<{grant_number}>")
     elif subject_title:
-        display_parts.append(f"({subject_title})")
-    
+        display_parts.append(f"<{subject_title}>")
+
+     # データセット名
+    if name and name != 'Unnamed Dataset':
+        display_parts.append(f"【{type_icon}{name}】") 
+
     # テンプレートID（短縮版）
     if template_id:
         # テンプレートIDを短縮して表示
@@ -95,13 +97,13 @@ def get_colored_dataset_display_name(dataset):
             'subGroup': 'subGrp',
             'データ所有者': 'DataOwner'
         }.get(role_source, role_source)
-        display_parts.append(f"via {source_short}")
+        display_parts.append(f"[{source_short}]")
     
     # ID情報（最後に短縮版）
     if dataset_id:
-        display_parts.append(f"ID:{dataset_id[:8]}...")
-    
-    return " | ".join(display_parts)
+        display_parts.append(f"(ID:{dataset_id[:16]}...)")
+    delimiter = "" #" | "
+    return delimiter.join(display_parts)
 
 
 # グローバルキャッシュ
@@ -503,7 +505,7 @@ def create_checkbox_filter_dropdown(parent=None):
     filter_layout = QHBoxLayout(filter_widget)
     filter_layout.setContentsMargins(0, 0, 0, 0)
     
-    filter_label = QLabel("権限フィルタ:")
+    filter_label = QLabel("権限:")
     filter_label.setFont(QFont("", 9))
     filter_layout.addWidget(filter_label)
     
@@ -550,7 +552,10 @@ def create_checkbox_filter_dropdown(parent=None):
     combo.setInsertPolicy(QComboBox.NoInsert)
     combo.setMaxVisibleItems(12)
     combo.view().setMinimumHeight(240)
-    combo.lineEdit().setPlaceholderText("データセット名・課題番号で検索")
+    # 先頭に空欄＋プレースホルダー
+    combo.addItem("")
+    combo.setCurrentIndex(0)
+    combo.lineEdit().setPlaceholderText("リストから選択、またはキーワードで検索して選択してください")
     
     # 状況表示ラベル
     status_label = QLabel("読み込み中...")
@@ -599,14 +604,18 @@ def create_checkbox_filter_dropdown(parent=None):
             filtered_datasets = filter_datasets_by_checkbox_selection_optimized(current_user_id, selected_roles)
             
             # ドロップダウンの更新
+            # 先頭に空欄を維持
+            combo.clear()
+            combo.addItem("")
             for dataset in filtered_datasets:
                 display_name = get_colored_dataset_display_name(dataset)
                 combo.addItem(display_name, dataset)  # データセット全体を格納
+            combo.setCurrentIndex(0)
             
             # 完了状況を表示（関連データセット総数は表示しない）
             selected_roles_str = "+".join(selected_roles)
-            status_label.setText(f"✅ {selected_roles_str}: {len(filtered_datasets)}件")
-            
+            #status_label.setText(f"✅ {selected_roles_str}: {len(filtered_datasets)}件")
+            status_label.setText(f"✅ {len(filtered_datasets)}件")
             # オートコンプリート機能を設定
             completion_items = [get_colored_dataset_display_name(ds) for ds in filtered_datasets]
             completer = QCompleter(completion_items, combo)

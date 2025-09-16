@@ -478,7 +478,7 @@ def create_individual_execution_widget(parent=None):
             control_layout = QHBoxLayout()
             
             # ラベル
-            label = QLabel("実行段階:")
+            label = QLabel("個別取得:")
             label.setMinimumWidth(70)
             control_layout.addWidget(label)
             

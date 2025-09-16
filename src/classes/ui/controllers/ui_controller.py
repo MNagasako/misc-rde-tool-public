@@ -108,9 +108,9 @@ class UIController(UIControllerCore):
             return
             
         screen_geometry = screen.geometry()
-        max_screen_height = int(screen_geometry.height() * 0.95)  # 95%制限
-        max_screen_width = int(screen_geometry.width() * 0.95)
-        
+        max_screen_height = int(screen_geometry.height() * 0.90)  # 90%制限
+        max_screen_width = int(screen_geometry.width() * 0.90)
+
         # コンテンツに必要なサイズを計算
         hint = parent.sizeHint()
         
@@ -727,7 +727,7 @@ class UIController(UIControllerCore):
             # WebView本体を非表示
             if hasattr(self.parent, 'webview'):
                 self.parent.webview.setVisible(False)
-                
+            
             # WebViewを含むWidgetも非表示・高さ0
             webview_widget = self.parent.findChild(QWidget, 'webview_widget')
             if webview_widget:
@@ -735,11 +735,23 @@ class UIController(UIControllerCore):
                 webview_widget.setFixedHeight(0)
             if hasattr(self.parent, 'overlay_manager'):
                 self.parent.overlay_manager.hide_overlay()
-            
+
+            # サブグループ・データセット・基本情報・設定モードは初期高さをディスプレイの90%に設定（後から変更可）
+            if mode in ["subgroup_create", "dataset_open", "basic_info", "settings"]:
+                try:
+                    from PyQt5.QtWidgets import QApplication
+                    screen = QApplication.primaryScreen()
+                    if screen:
+                        screen_geometry = screen.geometry()
+                        max_height = int(screen_geometry.height() * 0.90)
+                        if top_level and hasattr(top_level, 'resize'):
+                            top_level.resize(top_level.width(), max_height)
+                except Exception as e:
+                    print(f"[DEBUG] 初期高さ90%リサイズ失敗: {e}")
 
         elif mode == "data_fetch":
             # データ取得モード：WebViewを表示してオーバーレイも表示
-            # ウィンドウサイズを確実に標準サイズに復元
+            # ウィンドウサイズを確実に標準サイズに復元し、初期高さ800pxに設定（後から変更可）
             if top_level:
                 webview_width = getattr(top_level, '_webview_fixed_width', 900)
                 menu_width = 120
@@ -751,6 +763,9 @@ class UIController(UIControllerCore):
                     top_level.setMinimumSize(fixed_width, 200)
                 if hasattr(top_level, 'setMaximumSize'):
                     top_level.setMaximumSize(fixed_width, 16777215)
+                # 初期高さ800pxでリサイズ（最大・最小制約はかけない）
+                if hasattr(top_level, 'resize'):
+                    top_level.resize(fixed_width, 800)
             
             if hasattr(self.parent, 'webview'):
                 self.parent.webview.setVisible(True)
@@ -770,7 +785,7 @@ class UIController(UIControllerCore):
             # WebView本体を非表示
             if hasattr(self.parent, 'webview'):
                 self.parent.webview.setVisible(False)
-                
+            
             # WebViewを含むWidgetも非表示・高さ0
             webview_widget = self.parent.findChild(QWidget, 'webview_widget')
             if webview_widget:
@@ -780,8 +795,8 @@ class UIController(UIControllerCore):
             # オーバーレイも非表示
             if hasattr(self.parent, 'overlay_manager'):
                 self.parent.overlay_manager.hide_overlay()
-                
-            # ウィンドウサイズは制限しない（データ取得2は独自レイアウト）
+            
+            # データ取得2専用の初期高さ600pxでリサイズ（最大・最小制約はかけない）
             if top_level:
                 if hasattr(top_level, 'setFixedWidth'):
                     # 幅の固定を解除
@@ -791,6 +806,9 @@ class UIController(UIControllerCore):
                     top_level.setMinimumSize(200, 200)
                 if hasattr(top_level, 'setMaximumSize'):
                     top_level.setMaximumSize(16777215, 16777215)
+                if hasattr(top_level, 'resize'):
+                    # 初期高さ600px
+                    top_level.resize(top_level.width(), 600)
             
         elif mode == "request_analyzer":
             if hasattr(self.parent, 'webview'):
@@ -894,8 +912,8 @@ class UIController(UIControllerCore):
         from PyQt5.QtWidgets import QLabel, QHBoxLayout, QVBoxLayout, QLineEdit, QMessageBox
         
         try:
-            # データ取得機能セクション
-            data_fetch_label = QLabel("🔄 データ取得機能:")
+            # RDE基本情報取得機能セクション
+            data_fetch_label = QLabel("🔄 RDE基本情報取得機能:")
             data_fetch_label.setStyleSheet("font-weight: bold; color: #2196F3; margin-bottom: 8px; font-size: 12pt;")
             layout.addWidget(data_fetch_label)
             
@@ -1110,32 +1128,42 @@ class UIController(UIControllerCore):
         Step 2.5.2.5b: データ取得2 UI構築層の分離
         データ取得2機能の高度なUI構築とキャッシュ管理
         """
-        from PyQt5.QtWidgets import QLabel
-        # 既存のfetch2_widgetがあれば再利用、なければ生成（削除済みも考慮/sip未使用）
-        need_create = (
-            not hasattr(self, '_fetch2_widget') or
-            self._fetch2_widget is None or
-            (hasattr(self._fetch2_widget, 'isVisible') and not self._fetch2_widget.isVisible())
-        )
-        if need_create:
-            try:
-                try:
-                    from classes.data_fetch2.core.ui.data_fetch2_widget import create_data_fetch2_widget  # 新構造に修正
-                except ImportError:
-                    from classes.data_fetch2.core.ui.data_fetch2_widget import create_data_fetch2_widget  # 新構造に修正
-                # bearer_tokenを明示的にwidgetへ渡す
-                if hasattr(self.parent, 'bearer_token'):
-                    widget.bearer_token = getattr(self.parent, 'bearer_token')
-                self._fetch2_widget = create_data_fetch2_widget(widget)
-                layout.addWidget(self._fetch2_widget)
-            except ImportError as e:
-                self.show_error(f"データ取得2モジュールのインポートに失敗しました: {e}")
-                layout.addWidget(QLabel("データ取得2機能が利用できません"))
-            except Exception as e:
-                self.show_error(f"データ取得2画面の作成でエラーが発生しました: {e}")
-                layout.addWidget(QLabel("データ取得2機能にエラーが発生しました"))
-        else:
-            layout.addWidget(self._fetch2_widget)
+        # DataFetch2TabWidgetを使ってタブUI化
+        try:
+            from classes.data_fetch2.core.ui.data_fetch2_tab_widget import create_data_fetch2_tab_widget
+            # bearer_tokenを明示的に渡す
+            bearer_token = getattr(self.parent, 'bearer_token', None)
+            self._fetch2_tab_widget = create_data_fetch2_tab_widget(widget, bearer_token=bearer_token)
+            layout.addWidget(self._fetch2_tab_widget)
+        except ImportError as e:
+            from PyQt5.QtWidgets import QLabel
+            self.show_error(f"データ取得2タブウィジェットのインポートに失敗しました: {e}")
+            layout.addWidget(QLabel("データ取得2タブUIが利用できません"))
+        except Exception as e:
+            from PyQt5.QtWidgets import QLabel
+            self.show_error(f"データ取得2タブ画面の作成でエラーが発生しました: {e}")
+            layout.addWidget(QLabel("データ取得2タブUIにエラーが発生しました"))
+
+    def _create_dataset_ui(self, layout, widget):
+        """
+        Step 2.5.2.3: データセットUI構築層の分離  
+        データセット開設・修正・データエントリー機能のタブ統合UI構築
+        """
+        # DatasetTabWidgetを使ってタブUI化
+        try:
+            from classes.dataset.ui.dataset_tab_widget import create_dataset_tab_widget
+            # bearer_tokenを明示的に渡す
+            bearer_token = getattr(self.parent, 'bearer_token', None)
+            self._dataset_tab_widget = create_dataset_tab_widget(widget, bearer_token=bearer_token, ui_controller=self)
+            layout.addWidget(self._dataset_tab_widget)
+        except ImportError as e:
+            from PyQt5.QtWidgets import QLabel
+            self.show_error(f"データセットタブウィジェットのインポートに失敗しました: {e}")
+            layout.addWidget(QLabel("データセットタブUIが利用できません"))
+        except Exception as e:
+            from PyQt5.QtWidgets import QLabel
+            self.show_error(f"データセットタブ画面の作成でエラーが発生しました: {e}")
+            layout.addWidget(QLabel("データセットタブUIにエラーが発生しました"))
 
     def _create_dummy_ui(self, layout, title, button_style):
         """
@@ -3744,11 +3772,11 @@ class UIController(UIControllerCore):
             from PyQt5.QtWidgets import QApplication
             from PyQt5.QtCore import QTimer
             
-            # 通常登録タブの初期サイズ (95%高さ、標準幅1200px)
+            # 通常登録タブの初期サイズ (90%高さ、標準幅1200px)
             def apply_sizing():
                 if hasattr(self, 'parent') and self.parent:
                     screen = QApplication.primaryScreen().geometry()
-                    target_height = int(screen.height() * 0.95)
+                    target_height = int(screen.height() * 0.90)
                     target_width = 1200  # 通常登録タブの標準幅
                     
                     print(f"[DEBUG] 初回データ登録ウィジェット作成: 画面サイズ適用 {target_width}x{target_height}")

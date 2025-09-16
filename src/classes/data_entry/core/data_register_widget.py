@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont
+from config.common import get_dynamic_file_path
 
 
 class DataRegisterWidget(QWidget):
@@ -204,7 +205,7 @@ class DataRegisterWidget(QWidget):
     def load_datasets(self):
         """データセット一覧を読み込み"""
         try:
-            dataset_json_path = os.path.join("output", "rde", "data", "dataset.json")
+            dataset_json_path = get_dynamic_file_path("output/rde/data/dataset.json")
             if not os.path.exists(dataset_json_path):
                 self.dataset_dropdown.addItem("データセット情報がありません")
                 return

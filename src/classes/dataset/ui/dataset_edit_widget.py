@@ -5,6 +5,8 @@ import os
 import json
 import datetime
 import webbrowser
+import shutil
+import codecs
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGridLayout, 
     QPushButton, QMessageBox, QScrollArea, QCheckBox, QRadioButton, 
@@ -15,6 +17,142 @@ from PyQt5.QtCore import Qt, QDate, QTimer
 from config.common import get_dynamic_file_path
 from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
 from classes.dataset.ui.taxonomy_builder_dialog import TaxonomyBuilderDialog
+
+
+def repair_json_file(file_path):
+    """破損したJSONファイルの修復を試行"""
+    try:
+        import codecs
+        import re
+        
+        print("[INFO] JSONファイル修復を開始")
+        print(f"[DEBUG] 対象ファイル: {file_path}")
+        
+        # 複数のエンコーディングでの読み込みを試行
+        encodings = ['utf-8', 'utf-8-sig', 'cp1252', 'latin1', 'shift_jis']
+        
+        for encoding in encodings:
+            try:
+                print(f"[DEBUG] エンコーディング '{encoding}' で読み込み試行")
+                with codecs.open(file_path, 'r', encoding=encoding, errors='replace') as f:
+                    content = f.read()
+                
+                print(f"[DEBUG] 読み込み完了。文字数: {len(content)}")
+                
+                # より包括的なクリーンアップ
+                # 1. すべての制御文字を除去（\t, \n, \r, スペースは保持）
+                print("[DEBUG] 制御文字クリーンアップを実行")
+                original_len = len(content)
+                # \x00-\x1F の制御文字のうち、\t(\x09), \n(\x0A), \r(\x0D), space(\x20)以外を除去
+                content = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', content)
+                
+                # 2. Unicode置換文字(\uFFFD)を除去
+                content = content.replace('\uFFFD', '')
+                
+                # 3. その他の問題のある文字を除去
+                # NULL文字やその他の問題を引き起こす可能性のある文字
+                content = content.replace('\x00', '')
+                
+                print(f"[DEBUG] クリーンアップ後の文字数: {len(content)} (削減: {original_len - len(content)}文字)")
+                
+                # JSONとしてパース可能かテスト
+                try:
+                    data = json.loads(content)
+                    print(f"[INFO] エンコーディング '{encoding}' で読み込み成功")
+                    
+                    # 修復したファイルをUTF-8で保存
+                    backup_path = file_path + '.corrupted_backup'
+                    shutil.copy2(file_path, backup_path)
+                    print(f"[INFO] 破損ファイルをバックアップ: {backup_path}")
+                    
+                    with open(file_path, 'w', encoding='utf-8') as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                    print(f"[INFO] ファイルをUTF-8で再保存しました")
+                    
+                    return data
+                    
+                except json.JSONDecodeError as json_err:
+                    # JSONパースエラーの詳細を表示
+                    print(f"[DEBUG] JSONパースエラー詳細: {json_err}")
+                    print(f"[DEBUG] エラー位置: 行{getattr(json_err, 'lineno', '不明')} 列{getattr(json_err, 'colno', '不明')}")
+                    
+                    # エラー位置周辺のテキストを表示
+                    if hasattr(json_err, 'pos') and json_err.pos:
+                        start_pos = max(0, json_err.pos - 50)
+                        end_pos = min(len(content), json_err.pos + 50)
+                        context = content[start_pos:end_pos]
+                        print(f"[DEBUG] エラー位置周辺のテキスト: {context!r}")
+                    
+                    continue
+                
+            except (UnicodeError, Exception) as e:
+                print(f"[DEBUG] エンコーディング '{encoding}' 失敗: {e}")
+                continue
+        
+        print("[ERROR] すべてのエンコーディング試行が失敗しました")
+        
+        # 最後の手段として、ファイルの修復を試みる
+        print("[INFO] 最後の手段として、部分的な修復を試行")
+        try:
+            return attempt_partial_recovery(file_path)
+        except Exception as recovery_err:
+            print(f"[ERROR] 部分回復も失敗: {recovery_err}")
+        
+        return None
+        
+    except Exception as e:
+        print(f"[ERROR] ファイル修復中の予期しないエラー: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+
+def attempt_partial_recovery(file_path):
+    """部分的な修復を試行"""
+    import re
+    
+    print("[DEBUG] 部分的修復を開始")
+    
+    # バイナリモードで読み込み、有効なJSON部分を抽出を試みる
+    with open(file_path, 'rb') as f:
+        raw_data = f.read()
+    
+    # UTF-8で読み込み、エラー文字を置換
+    content = raw_data.decode('utf-8', errors='replace')
+    
+    # JSON構造の開始と終了を見つける
+    json_start = content.find('{"data"')
+    if json_start == -1:
+        json_start = content.find('{"')
+    
+    if json_start == -1:
+        print("[ERROR] JSON構造の開始が見つかりません")
+        return None
+    
+    print(f"[DEBUG] JSON開始位置: {json_start}")
+    
+    # 後方から有効な終了位置を見つける
+    json_end = content.rfind('}')
+    if json_end == -1:
+        print("[ERROR] JSON構造の終了が見つかりません")
+        return None
+    
+    print(f"[DEBUG] JSON終了位置: {json_end}")
+    
+    # 部分的なJSONを抽出
+    partial_json = content[json_start:json_end + 1]
+    
+    # 基本的なクリーンアップ
+    partial_json = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', partial_json)
+    partial_json = partial_json.replace('\uFFFD', '')
+    
+    try:
+        data = json.loads(partial_json)
+        print("[INFO] 部分的修復に成功")
+        return data
+    except json.JSONDecodeError as e:
+        print(f"[ERROR] 部分的修復も失敗: {e}")
+        return None
 
 
 def get_user_grant_numbers():
@@ -193,7 +331,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
     
     def is_cache_valid():
         """キャッシュが有効かどうかを判定"""
-        dataset_path = os.path.abspath(os.path.join("output", "rde", "data", "dataset.json"))
+        dataset_path = get_dynamic_file_path("output/rde/data/dataset.json")
         if not os.path.exists(dataset_path):
             return False
         
@@ -444,7 +582,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             grant_number_filter: 課題番号の部分一致検索文字列
             force_reload: キャッシュを無視して強制再読み込み
         """
-        dataset_path = os.path.abspath(os.path.join("output", "rde", "data", "dataset.json"))
+        dataset_path = get_dynamic_file_path("output/rde/data/dataset.json")
         print(f"[DEBUG] データセットファイルパス: {dataset_path}")
         print(f"[DEBUG] ファイル存在確認: {os.path.exists(dataset_path)}")
         print(f"[DEBUG] フィルタタイプ: {filter_type}, 課題番号フィルタ: '{grant_number_filter}'")
@@ -485,41 +623,77 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                 QApplication.processEvents()
                 
                 try:
-                    with open(dataset_path, encoding="utf-8") as f:
+                    with open(dataset_path, encoding="utf-8", errors='replace') as f:
                         data = json.load(f)
                         
                     file_progress.setLabelText("JSONデータを解析中...")
                     QApplication.processEvents()
                     
-                except json.JSONDecodeError as json_error:
+                except (json.JSONDecodeError, UnicodeDecodeError) as json_error:
                     file_progress.close()
-                    print(f"[ERROR] データセット一覧JSONパースエラー: {json_error}")
+                    print(f"[ERROR] データセット読み込みエラー: {json_error}")
                     print(f"[ERROR] ファイルパス: {dataset_path}")
                     
-                    # ファイルサイズ確認
-                    file_size = os.path.getsize(dataset_path)
-                    print(f"[ERROR] ファイルサイズ: {file_size} bytes")
+                    # UTF-8デコードエラーの場合は修復を試行
+                    if isinstance(json_error, UnicodeDecodeError):
+                        print("[INFO] UTF-8デコードエラーを検出、ファイル修復を試行します")
+                        try:
+                            repaired_data = repair_json_file(dataset_path)
+                            if repaired_data:
+                                data = repaired_data
+                                print("[INFO] ファイル修復に成功しました")
+                            else:
+                                print("[ERROR] ファイル修復に失敗しました")
+                                return
+                        except Exception as repair_error:
+                            print(f"[ERROR] ファイル修復中にエラー: {repair_error}")
+                            return
+                    else:
+                        # ファイルサイズ確認
+                        file_size = os.path.getsize(dataset_path)
+                        print(f"[ERROR] ファイルサイズ: {file_size} bytes")
                     
                     # バックアップファイルの確認と復旧試行
                     backup_file = dataset_path + ".backup"
                     if os.path.exists(backup_file):
                         print(f"[INFO] バックアップファイルから復旧を試行: {backup_file}")
                         try:
-                            with open(backup_file, 'r', encoding='utf-8') as f:
-                                data = json.load(f)
-                            print(f"[INFO] バックアップファイルから正常に読み込みました")
-                            
-                            # 破損したファイルを置き換え
-                            import shutil
-                            shutil.copy2(backup_file, dataset_path)
-                            print(f"[INFO] バックアップファイルで破損ファイルを置き換えました")
+                            # バックアップファイルも修復機能を使用
+                            backup_data = repair_json_file(backup_file)
+                            if backup_data:
+                                data = backup_data
+                                print(f"[INFO] バックアップファイルから正常に読み込み、元ファイルを置き換えました")
+                                # 修復したバックアップで元ファイルを置き換え
+                                shutil.copy2(backup_file, dataset_path)
+                            else:
+                                print(f"[ERROR] バックアップファイルも破損しています")
+                                return
                             
                         except Exception as backup_error:
                             print(f"[ERROR] バックアップファイルからの復旧も失敗: {backup_error}")
                             return
                     else:
                         print(f"[ERROR] バックアップファイルが見つかりません: {backup_file}")
-                        return
+                        print("[INFO] 最初から読み込みなおしを試行します...")
+                        
+                        # 最後の手段として、元ファイルを修復機能で直接修復
+                        try:
+                            repaired_original = repair_json_file(dataset_path)
+                            if repaired_original:
+                                data = repaired_original
+                                print("[INFO] 元ファイルの直接修復が成功しました")
+                            else:
+                                print("[ERROR] 元ファイルの修復も失敗しました")
+                                QMessageBox.critical(widget, "エラー", 
+                                                   "データセットファイルが破損しており、修復できませんでした。\n"
+                                                   "新しいファイルが作成されます。")
+                                data = {"data": [], "links": {}, "meta": {}}
+                        except Exception as final_error:
+                            print(f"[ERROR] 最終修復試行も失敗: {final_error}")
+                            QMessageBox.critical(widget, "エラー", 
+                                               "データセットファイルの読み込みに完全に失敗しました。\n"
+                                               "空のデータセットリストから開始します。")
+                            data = {"data": [], "links": {}, "meta": {}}
                 finally:
                     file_progress.close()
                 

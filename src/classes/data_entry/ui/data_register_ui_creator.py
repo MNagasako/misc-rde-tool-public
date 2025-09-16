@@ -122,7 +122,10 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
         if combo is None:
             # フォールバック: 基本的なドロップダウンを作成
             combo = QComboBox()
-            combo.addItem("📊 データセット選択を準備中...")
+            combo.setEditable(True)
+            combo.addItem("")
+            combo.setCurrentIndex(0)
+            combo.lineEdit().setPlaceholderText("リストから選択、またはキーワードで検索して選択してください")
             layout.addWidget(QLabel("📊 データセット選択"))
             layout.addWidget(combo)
     except Exception as combo_error:

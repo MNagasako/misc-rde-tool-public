@@ -28,8 +28,8 @@ import os
 # 1. ドキュメント: VERSION.txt, README.md, docs/refactor_progress.md
 # 2. 各クラスファイル: ヘッダーコメント内のバージョン番号
 # 3. このREVISION変数（マスター管理）
-REVISION = "1.17.0"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
-# 2025-09-10: v1.17.0 - センシティブデータ保護強化・コードクリーンアップ・ライセンス管理強化
+REVISION = "1.17.2"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+# 2025-09-10: v1.17.2 - センシティブデータ保護強化・コードクリーンアップ・ライセンス管理強化
 # 2025-08-31: v1.15.0 - ワークスペース大規模整理完了・コードベース品質向上・開発環境安定化
 # 2025-08-28: v1.14.1 - 企業CA証明書機能有効化・SSL証明書管理完全対応・PyInstaller配布対応
 # 2025-08-28: v1.14.0 - プロキシ対応機能完全実装・エラーメッセージUI改善・ワークスペース整理
@@ -144,6 +144,15 @@ for dir_path in [INPUT_DIR, OUTPUT_DIR, OUTPUT_LOG_DIR, HIDDEN_DIR, CONFIG_DIR]:
     if not os.path.exists(dir_path):
         os.makedirs(dir_path, exist_ok=True)
 
+# 便利関数: output ディレクトリパスを取得
+def get_output_directory():
+    """outputディレクトリの絶対パスを返す"""
+    return OUTPUT_DIR
+
+def get_input_directory():
+    """inputディレクトリの絶対パスを返す"""
+    return INPUT_DIR
+
 # ファイルパス定義（動的ファイル）
 
 # セキュリティ関連ファイル
@@ -227,6 +236,10 @@ def get_cookie_file_path():
 def get_samples_dir_path():
     """samplesディレクトリのパスを取得"""
     return SAMPLES_DIR
+
+def get_user_config_dir():
+    """ユーザー設定ディレクトリのパスを取得"""
+    return get_dynamic_file_path("config")
 
 DEBUG_LOG_ENABLED = True  # 全体設定で有効/無効切替
 # DEBUG設定

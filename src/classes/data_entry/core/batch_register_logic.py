@@ -123,43 +123,46 @@ class BatchRegisterWorker(QThread):
     
     def _register_fileset(self, file_set: FileSet):
         """個別ファイルセットの登録処理"""
-        # 一時ディレクトリ作成
-        temp_dir = os.path.join(self.temp_base_dir, f"fileset_{file_set.id}")
-        os.makedirs(temp_dir, exist_ok=True)
+        # ベアラートークンを取得（グローバルから）
+        from ..ui.batch_preview_dialog import FileSetPreviewWidget
+        from core.bearer_token_helper import get_current_bearer_token
+        # Bearerトークンを共通ヘルパーで取得（通常登録タブ方式に統一）
+        bearer_token = get_current_bearer_token()
+        if not bearer_token:
+            raise Exception("認証トークンが設定されていません。ログインを確認してください。")
+        # データセット情報の確認
+        if not file_set.dataset_id:
+            raise Exception("データセットIDが設定されていません。")
+        # ファイルセット情報をdataset_infoの形式に変換
+        dataset_info = {
+            'id': file_set.dataset_id,
+            'relationships': {},
+            'attributes': {}
+        }
+        # プレビューウィジェット作成（一時的）
+        preview_widget = FileSetPreviewWidget(file_set, bearer_token=bearer_token)
         
         try:
-            # ファイル整理
-            organized_files = self._organize_files(file_set, temp_dir)
+            # フォーム値構築
+            form_values = preview_widget._build_form_values_from_fileset()
             
-            # データエントリー作成
-            data_register_logic = DataRegisterLogic()
+            # アップロード処理実行
+            upload_success = preview_widget._execute_batch_upload()
+            if not upload_success:
+                raise Exception("ファイルアップロードに失敗しました。")
             
-            # ファイルセット情報をデータエントリー用に変換（dataset_idは別で渡すため除外）
-            register_data = {
-                "data_name": file_set.data_name or file_set.name,
-                "description": file_set.description,
-                "experiment_id": file_set.experiment_id,
-                "reference_url": file_set.reference_url,
-                "tags": file_set.tags,
-                "sample_mode": file_set.sample_mode,
-                "sample_id": file_set.sample_id,
-                "sample_name": file_set.sample_name,
-                "sample_description": file_set.sample_description,
-                "sample_composition": file_set.sample_composition,
-                "custom_values": file_set.custom_values
-            }
-            
-            # データエントリー登録実行
-            data_register_logic.run_data_register_logic(
-                dataset_id=file_set.dataset_id,
-                upload_files=organized_files,
-                **register_data
-            )
-            
+            # データ登録処理実行
+            registration_success = preview_widget._execute_data_registration()
+            if not registration_success:
+                raise Exception("データ登録に失敗しました。")
+                
+        except Exception as e:
+            raise Exception(f"ファイルセット '{file_set.name}' の登録処理でエラーが発生: {str(e)}")
+        
         finally:
-            # 一時ディレクトリ削除
-            if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir, ignore_errors=True)
+            # プレビューウィジェットをクリーンアップ
+            if preview_widget:
+                preview_widget.deleteLater()
     
     def _organize_files(self, file_set: FileSet, temp_dir: str) -> List[str]:
         """ファイル整理処理"""

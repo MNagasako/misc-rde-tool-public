@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-データ取得2ウィジェット v1.17.0
+データ取得2ウィジェット v1.17.2
 データセット選択・ファイル一括取得機能
 
 主要機能:
@@ -11,6 +11,7 @@
 - 企業プロキシ・SSL証明書対応
 
 変更履歴:
+- v1.17.2: フィルタリングロジック完全修正・ドロップダウンUI改善
 - v1.15.1: プロキシ設定UI改善、PAC・企業CA設定の横並び表示対応
 - v1.15.0: ワークスペース整理完了・コードベース品質向上
 """
@@ -18,9 +19,10 @@
 import os
 import logging
 import threading
-from PyQt5.QtWidgets import QVBoxLayout, QLabel, QWidget, QMessageBox, QProgressDialog
-from PyQt5.QtCore import QTimer, Qt, QMetaObject, Q_ARG
-from classes.dataset.util.dataset_dropdown_util import create_dataset_dropdown_all
+import json
+from PyQt5.QtWidgets import QVBoxLayout, QLabel, QWidget, QMessageBox, QProgressDialog, QComboBox, QPushButton
+from PyQt5.QtCore import QTimer, Qt, QMetaObject, Q_ARG, QUrl
+from PyQt5.QtGui import QDesktopServices
 from config.common import OUTPUT_DIR, DATAFILES_DIR
 
 # ロガー設定
@@ -49,16 +51,465 @@ def safe_show_message_widget(parent, title, message, message_type="warning"):
         logger.error(f"メッセージボックス表示エラー: {e}")
         logger.error(f"[{message_type.upper()}] {title}: {message}")
 
-def create_data_fetch2_widget(parent=None):
+def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="both"):
+    """
+    データセットドロップダウンを作成（データ取得2専用版・フィルタリング対応）
+    dataset_dropdown_util.py の実装を参考に完全なフィルタリング機能を提供
+    """
+    import json
+    import os
+    from PyQt5.QtWidgets import QWidget, QVBoxLayout, QComboBox, QLabel, QHBoxLayout, QRadioButton, QLineEdit, QPushButton, QButtonGroup, QCompleter
+    from PyQt5.QtCore import Qt
+    
+    def check_global_sharing_enabled(dataset_item):
+        """広域シェアが有効かどうかをチェック"""
+        global_share = dataset_item.get("attributes", {}).get("globalShareDataset")
+        # データ構造確認結果：globalShareDatasetは通常Noneまたは未定義
+        # 実際のシェア状況は別の属性で判定する必要がある可能性
+        # ひとまず isOpen を使用（公開されているかどうか）
+        is_open = dataset_item.get("attributes", {}).get("isOpen", False)
+        return is_open  # isOpenをglobalShareの代替として使用
+    
+    def get_current_user_id():
+        """現在のユーザーIDを取得"""
+        from config.common import get_dynamic_file_path
+        try:
+            self_path = get_dynamic_file_path("output/rde/data/self.json")
+            if os.path.exists(self_path):
+                with open(self_path, 'r', encoding='utf-8') as f:
+                    self_data = json.load(f)
+                return self_data.get("data", {}).get("id", "")
+        except Exception:
+            return ""
+        return ""
+    
+    def check_user_is_member(dataset_item, user_id):
+        """ユーザーがデータセットのメンバーかどうかをチェック"""
+        if not user_id:
+            return False
+        
+        # relationshipsからメンバー情報を確認
+        # データ構造確認結果：membersキーは存在しない
+        # 代替として manager, dataOwners, applicant を確認
+        relationships = dataset_item.get("relationships", {})
+        
+        # managerId確認
+        manager = relationships.get("manager", {}).get("data", {})
+        if isinstance(manager, dict) and manager.get("id") == user_id:
+            return True
+        
+        # dataOwners確認
+        data_owners = relationships.get("dataOwners", {}).get("data", [])
+        if isinstance(data_owners, list):
+            for owner in data_owners:
+                if isinstance(owner, dict) and owner.get("id") == user_id:
+                    return True
+        
+        # applicant確認
+        applicant = relationships.get("applicant", {}).get("data", {})
+        if isinstance(applicant, dict) and applicant.get("id") == user_id:
+            return True
+        
+        return False
+    
+    def check_dataset_type_match(dataset_item, dataset_type_filter):
+        """データセットタイプがフィルタにマッチするかチェック"""
+        if dataset_type_filter == "all":
+            return True
+        
+        dataset_type = dataset_item.get("attributes", {}).get("datasetType", "")
+        return dataset_type == dataset_type_filter
+    
+    def check_grant_number_match(dataset_item, grant_number_filter):
+        """課題番号がフィルタにマッチするかチェック"""
+        if not grant_number_filter:
+            return True
+        
+        grant_number = dataset_item.get("attributes", {}).get("grantNumber", "")
+        return grant_number_filter.lower() in grant_number.lower()
+    
+    def get_dataset_type_display_map():
+        """データセットタイプの表示マップを取得"""
+        return {
+            "ANALYSIS": "解析",
+            "RECIPE": "レシピ",
+            "MEASUREMENT": "測定",
+            "SIMULATION": "シミュレーション",
+            "OTHERS": "その他"
+        }
+    
+    # メインコンテナ
+    container = QWidget(parent)
+    layout = QVBoxLayout(container)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(10)
+    
+    # データセット選択ラベル
+    dataset_label = QLabel("データセット選択:")
+    dataset_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: #2196F3; margin-bottom: 5px;")
+    layout.addWidget(dataset_label)
+    
+    # 広域シェア設定フィルタ
+    share_widget = QWidget()
+    share_layout = QHBoxLayout()
+    share_layout.setContentsMargins(0, 0, 0, 0)
+    
+    share_label = QLabel("広域シェア設定:")
+    share_label.setMinimumWidth(120)
+    share_label.setStyleSheet("font-weight: bold;")
+    
+    share_both_radio = QRadioButton("両方")
+    share_enabled_radio = QRadioButton("有効のみ")
+    share_disabled_radio = QRadioButton("無効のみ")
+    share_both_radio.setChecked(True)  # デフォルト
+    
+    share_button_group = QButtonGroup()
+    share_button_group.addButton(share_both_radio, 0)
+    share_button_group.addButton(share_enabled_radio, 1)
+    share_button_group.addButton(share_disabled_radio, 2)
+    
+    share_layout.addWidget(share_label)
+    share_layout.addWidget(share_both_radio)
+    share_layout.addWidget(share_enabled_radio)
+    share_layout.addWidget(share_disabled_radio)
+    share_layout.addStretch()
+    
+    share_widget.setLayout(share_layout)
+    layout.addWidget(share_widget)
+    
+    # 関係メンバーフィルタ
+    member_widget = QWidget()
+    member_layout = QHBoxLayout()
+    member_layout.setContentsMargins(0, 0, 0, 0)
+    
+    member_label = QLabel("関係メンバー:")
+    member_label.setMinimumWidth(120)
+    member_label.setStyleSheet("font-weight: bold;")
+    
+    member_both_radio = QRadioButton("両方")
+    member_only_radio = QRadioButton("メンバーのみ")
+    member_non_radio = QRadioButton("非メンバーのみ")
+    member_both_radio.setChecked(True)  # デフォルト
+    
+    member_button_group = QButtonGroup()
+    member_button_group.addButton(member_both_radio, 0)
+    member_button_group.addButton(member_only_radio, 1)
+    member_button_group.addButton(member_non_radio, 2)
+    
+    member_layout.addWidget(member_label)
+    member_layout.addWidget(member_both_radio)
+    member_layout.addWidget(member_only_radio)
+    member_layout.addWidget(member_non_radio)
+    member_layout.addStretch()
+    
+    member_widget.setLayout(member_layout)
+    layout.addWidget(member_widget)
+    
+    # データセットタイプフィルタ
+    type_widget = QWidget()
+    type_layout = QHBoxLayout()
+    type_layout.setContentsMargins(0, 0, 0, 0)
+    
+    type_label = QLabel("データセットタイプ:")
+    type_label.setMinimumWidth(120)
+    type_label.setStyleSheet("font-weight: bold;")
+    
+    type_combo = QComboBox()
+    type_combo.addItem("全て", "all")
+    type_display_map = get_dataset_type_display_map()
+    for dtype, label in type_display_map.items():
+        type_combo.addItem(label, dtype)
+    type_combo.setMinimumWidth(150)
+    
+    type_layout.addWidget(type_label)
+    type_layout.addWidget(type_combo)
+    type_layout.addStretch()
+    
+    type_widget.setLayout(type_layout)
+    layout.addWidget(type_widget)
+    
+    # 課題番号フィルタ
+    grant_widget = QWidget()
+    grant_layout = QHBoxLayout()
+    grant_layout.setContentsMargins(0, 0, 0, 0)
+    
+    grant_label = QLabel("課題番号:")
+    grant_label.setMinimumWidth(120)
+    grant_label.setStyleSheet("font-weight: bold;")
+    
+    grant_edit = QLineEdit()
+    grant_edit.setPlaceholderText("部分一致で検索（例: JPMXP1234）")
+    grant_edit.setMinimumWidth(300)
+    
+    grant_layout.addWidget(grant_label)
+    grant_layout.addWidget(grant_edit)
+    grant_layout.addStretch()
+    
+    grant_widget.setLayout(grant_layout)
+    layout.addWidget(grant_widget)
+    
+    # 表示件数ラベル
+    count_label = QLabel("表示中: 0/0 件")
+    count_label.setStyleSheet("color: #666; font-size: 10pt; font-weight: bold;")
+    layout.addWidget(count_label)
+    
+    # データセット検索フィールド
+    search_widget = QWidget()
+    search_layout = QHBoxLayout()
+    search_layout.setContentsMargins(0, 0, 0, 0)
+    
+    search_label = QLabel("データセット名・課題番号・タイトルで検索:")
+    search_label.setStyleSheet("font-weight: bold;")
+    search_edit = QLineEdit()
+    search_edit.setPlaceholderText("リストから選択、またはキーワードで検索して選択してください")
+    search_edit.setMinimumWidth(400)
+    
+    search_layout.addWidget(search_label)
+    #search_layout.addWidget(search_edit)
+    
+    search_widget.setLayout(search_layout)
+    layout.addWidget(search_widget)
+    
+    # コンボボックス作成
+    combo = QComboBox()
+    combo.setMinimumWidth(650)
+    combo.setEditable(True)
+    combo.setInsertPolicy(QComboBox.NoInsert)
+    combo.setMaxVisibleItems(15)
+    combo.lineEdit().setPlaceholderText("データセットを選択してください")
+    
+    combo.setStyleSheet("""
+        QComboBox {
+            border: 2px solid #2196F3;
+            border-radius: 6px;
+            padding: 8px;
+            font-size: 11pt;
+            min-height: 25px;
+            padding-right: 35px;
+        }
+        QComboBox:focus {
+            border-color: #1976D2;
+            background-color: #E3F2FD;
+        }
+        QComboBox:hover {
+            border-color: #1565C0;
+            background-color: #F5F5F5;
+        }
+        QComboBox::drop-down {
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 30px;
+            border-left: 1px solid #2196F3;
+            border-top-right-radius: 4px;
+            border-bottom-right-radius: 4px;
+            background-color: #2196F3;
+        }
+        QComboBox::drop-down:hover {
+            background-color: #1976D2;
+        }
+        QComboBox::down-arrow {
+            width: 0;
+            height: 0;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-top: 8px solid white;
+            margin: 0px;
+        }
+        QComboBox::down-arrow:on {
+            border-top: 8px solid #E3F2FD;
+        }
+    """)
+    
+    # 全件表示ボタン（コンボボックスの隣に配置）
+    combo_container = QWidget()
+    combo_layout = QHBoxLayout()
+    combo_layout.setContentsMargins(0, 0, 0, 0)
+    
+    show_all_btn = QPushButton("全件表示")
+    show_all_btn.setMaximumWidth(80)
+    show_all_btn.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold; border-radius: 4px; padding: 5px;")
+    
+    combo_layout.addWidget(combo)
+    combo_layout.addWidget(show_all_btn)
+    combo_container.setLayout(combo_layout)
+    
+    layout.addWidget(combo_container)
+    
+    def load_and_filter_datasets():
+        """フィルタリング設定を適用してコンボボックスを更新"""
+        try:
+            # フィルタ設定を取得
+            share_filter_types = {0: "both", 1: "enabled", 2: "disabled"}
+            member_filter_types = {0: "both", 1: "member", 2: "non_member"}
+            
+            share_filter_type = share_filter_types.get(share_button_group.checkedId(), "both")
+            member_filter_type = member_filter_types.get(member_button_group.checkedId(), "both")
+            dtype_filter = type_combo.currentData() or "all"
+            grant_filter = grant_edit.text().strip()
+            
+            # dataset.jsonからデータを読み込み
+            if not os.path.exists(dataset_json_path):
+                print(f"[WARNING] dataset.json が見つかりません: {dataset_json_path}")
+                combo.clear()
+                combo.addItem("-- データセット情報がありません --", None)
+                count_label.setText("表示中: 0/0 件")
+                return
+            
+            with open(dataset_json_path, 'r', encoding='utf-8') as f:
+                dataset_data = json.load(f)
+            
+            # データセットリストを取得（data配下かルート配下かを判定）
+            if isinstance(dataset_data, dict) and 'data' in dataset_data:
+                dataset_items = dataset_data['data']
+            elif isinstance(dataset_data, list):
+                dataset_items = dataset_data
+            else:
+                dataset_items = []
+            
+            # 現在のユーザーIDを取得
+            current_user_id = get_current_user_id()
+            
+            # フィルタリング処理
+            filtered_datasets = []
+            total_count = len(dataset_items)
+            
+            for dataset in dataset_items:
+                if not isinstance(dataset, dict):
+                    continue
+                
+                # 広域シェアフィルタの適用
+                is_global_share_enabled = check_global_sharing_enabled(dataset)
+                if share_filter_type == "enabled" and not is_global_share_enabled:
+                    continue
+                elif share_filter_type == "disabled" and is_global_share_enabled:
+                    continue
+                
+                # メンバーシップフィルタの適用
+                is_user_member = check_user_is_member(dataset, current_user_id) if current_user_id else False
+                if member_filter_type == "member" and not is_user_member:
+                    continue
+                elif member_filter_type == "non_member" and is_user_member:
+                    continue
+                
+                # データセットタイプフィルタの適用
+                if not check_dataset_type_match(dataset, dtype_filter):
+                    continue
+                
+                # 課題番号フィルタの適用
+                if not check_grant_number_match(dataset, grant_filter):
+                    continue
+                
+                filtered_datasets.append(dataset)
+            
+            # コンボボックスを更新
+            combo.clear()
+            combo.addItem("-- データセットを選択してください --", None)
+            
+            display_list = ["-- データセットを選択してください --"]
+            
+            for dataset in filtered_datasets:
+                attrs = dataset.get("attributes", {})
+                dataset_id = dataset.get("id", "")
+                name = attrs.get("name", "名前なし")
+                grant_number = attrs.get("grantNumber", "")
+                dataset_type = attrs.get("datasetType", "")
+                subject_title = attrs.get("subjectTitle", "")
+                
+                # データセットタイプの日本語表示
+                type_display = type_display_map.get(dataset_type, dataset_type) if dataset_type else ""
+                
+                # 広域シェア状態とメンバーシップ状態の表示
+                share_status = "🌐" if is_global_share_enabled else "🔒"
+                member_status = "👤" if is_user_member else "👥"
+                
+                # 表示文字列を構築
+                display_parts = []
+                if grant_number:
+                    display_parts.append(grant_number)
+                if subject_title:
+                    display_parts.append(f"{subject_title[:30]}...")
+                display_parts.append(name[:40] + ("..." if len(name) > 40 else ""))
+                
+                if type_display:
+                    display_parts.append(f"[{type_display}]")
+                
+                display_text = f"{share_status}{member_status} {' '.join(display_parts)}"
+                
+                combo.addItem(display_text, dataset_id)
+                display_list.append(display_text)
+            
+            # QCompleter設定
+            completer = QCompleter(display_list, combo)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchContains)
+            combo.setCompleter(completer)
+            
+            # 件数表示を更新
+            filtered_count = len(filtered_datasets)
+            count_label.setText(f"表示中: {filtered_count}/{total_count} 件")
+            
+            print(f"[INFO] データセットフィルタリング完了: 広域シェア={share_filter_type}, メンバー={member_filter_type}, タイプ={dtype_filter}, 課題番号='{grant_filter}', 結果={filtered_count}/{total_count}件")
+            
+        except Exception as e:
+            print(f"[ERROR] データセット読み込みエラー: {e}")
+            combo.clear()
+            combo.addItem("-- データセット読み込みエラー --", None)
+            count_label.setText("表示中: 0/0 件")
+            import traceback
+            traceback.print_exc()
+    
+    def show_all_datasets():
+        """全件表示ボタンが押された時の処理"""
+        # すべてのフィルタを「両方」「全て」に設定
+        share_button_group.button(0).setChecked(True)  # 両方
+        member_button_group.button(0).setChecked(True)  # 両方
+        type_combo.setCurrentIndex(0)  # 全て
+        grant_edit.clear()  # 課題番号フィルタをクリア
+        search_edit.clear()  # 検索フィールドもクリア
+        
+        # フィルタ適用
+        load_and_filter_datasets()
+        
+        # コンボボックスを展開して全件表示
+        combo.showPopup()
+    
+    # フィルタ変更時のイベント接続
+    share_button_group.buttonClicked[int].connect(lambda: load_and_filter_datasets())
+    member_button_group.buttonClicked[int].connect(lambda: load_and_filter_datasets())
+    type_combo.currentTextChanged.connect(lambda: load_and_filter_datasets())
+    grant_edit.textChanged.connect(lambda: load_and_filter_datasets())
+    
+    # 全件表示ボタンのイベント接続
+    show_all_btn.clicked.connect(show_all_datasets)
+    
+    # 検索フィールドとコンボボックスの連携
+    search_edit.textChanged.connect(lambda text: combo.lineEdit().setText(text))
+    combo.lineEdit().textChanged.connect(lambda text: search_edit.setText(text))
+    
+    # 初回読み込み
+    load_and_filter_datasets()
+    
+    # コンテナの属性設定
+    container.dataset_dropdown = combo
+    container.share_button_group = share_button_group
+    container.member_button_group = member_button_group
+    container.type_combo = type_combo
+    container.grant_edit = grant_edit
+    container.search_edit = search_edit
+    container.count_label = count_label
+    
+    return container
+
+def create_data_fetch2_widget(parent=None, bearer_token=None):
     # 非同期化を解除（QThread, Workerクラス削除）
     """
     データ取得2用ウィジェット（dataset.json参照・検索付きドロップダウン）
     """
-    widget = parent if parent is not None else QWidget()
-    layout = QVBoxLayout()
+    widget = QWidget(parent)
+    layout = QVBoxLayout(widget)
     label = QLabel("データ取得2機能")
     label.setStyleSheet("font-size: 16px; font-weight: bold; color: #1976d2; padding: 10px;")
-    #layout.addWidget(label)
+    layout.addWidget(label)
 
 
     # dataset.jsonのパス
@@ -77,7 +528,6 @@ def create_data_fetch2_widget(parent=None):
     layout.addWidget(fetch2_dropdown_widget)
 
     # 選択中データセットのファイルリストを取得するボタン
-    from PyQt5.QtWidgets import QPushButton
     fetch_files_btn = QPushButton("選択したデータセットのファイルを一括取得")
     fetch_files_btn.setStyleSheet(
         "background-color: #1976d2; color: white; font-weight: bold; font-size: 13px; padding: 8px 16px; border-radius: 6px;"
@@ -85,9 +535,6 @@ def create_data_fetch2_widget(parent=None):
     layout.addWidget(fetch_files_btn)
 
     # エクスプローラーでdataFilesフォルダを開くボタン
-    from PyQt5.QtWidgets import QPushButton
-    from PyQt5.QtCore import QUrl
-    from PyQt5.QtGui import QDesktopServices
     open_folder_btn = QPushButton("出力フォルダ(dataFiles)をエクスプローラーで開く")
     layout.addWidget(open_folder_btn)
 
@@ -98,6 +545,9 @@ def create_data_fetch2_widget(parent=None):
 
 
     def find_bearer_token_recursive(obj):
+        # bearer_tokenが直接渡されていればそれを優先
+        if bearer_token:
+            return bearer_token
         # objがNoneなら終了
         if obj is None:
             return None
@@ -120,13 +570,43 @@ def create_data_fetch2_widget(parent=None):
                 return
 
             idx = combo.currentIndex()
-            dataset_obj = combo.itemData(idx)
-            logger.info(f"選択されたデータセット: index={idx}, dataset_id={dataset_obj}")
+            dataset_id = combo.itemData(idx)
+            logger.info(f"選択されたデータセット: index={idx}, dataset_id={dataset_id}")
 
             # データセットが選択されているかチェック
-            if dataset_obj is None or not dataset_obj:
+            if dataset_id is None or not dataset_id:
                 logger.warning("データセットが選択されていません")
                 safe_show_message_widget(widget, "選択エラー", "データセットを選択してください。", "warning")
+                return
+            
+            # dataset.jsonからデータセット情報を取得
+            try:
+                with open(dataset_json_path, 'r', encoding='utf-8') as f:
+                    dataset_data = json.load(f)
+                
+                # データセットリストを取得
+                if isinstance(dataset_data, dict) and 'data' in dataset_data:
+                    dataset_items = dataset_data['data']
+                elif isinstance(dataset_data, list):
+                    dataset_items = dataset_data
+                else:
+                    dataset_items = []
+                
+                # 選択されたデータセットIDに対応するオブジェクトを検索
+                dataset_obj = None
+                for dataset in dataset_items:
+                    if dataset.get('id') == dataset_id:
+                        dataset_obj = dataset
+                        break
+                
+                if dataset_obj is None:
+                    logger.error(f"データセットオブジェクトが見つかりません: {dataset_id}")
+                    safe_show_message_widget(widget, "データセットエラー", f"データセットオブジェクトが見つかりません: {dataset_id}", "warning")
+                    return
+                    
+            except Exception as e:
+                logger.error(f"データセット情報取得エラー: {e}")
+                safe_show_message_widget(widget, "データセット情報エラー", f"データセット情報の取得に失敗しました: {e}", "warning")
                 return
 
             # トークン取得（親→親→...でbearer_token探索）
@@ -232,5 +712,4 @@ def create_data_fetch2_widget(parent=None):
 
     fetch_files_btn.clicked.connect(on_fetch_files)
 
-    widget.setLayout(layout)
     return widget
