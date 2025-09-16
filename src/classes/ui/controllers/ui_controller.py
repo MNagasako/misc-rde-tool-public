@@ -1143,6 +1143,7 @@ class UIController(UIControllerCore):
             from PyQt5.QtWidgets import QLabel
             self.show_error(f"データ取得2タブ画面の作成でエラーが発生しました: {e}")
             layout.addWidget(QLabel("データ取得2タブUIにエラーが発生しました"))
+<<<<<<< HEAD
 
     def _create_dataset_ui(self, layout, widget):
         """
@@ -1164,6 +1165,8 @@ class UIController(UIControllerCore):
             from PyQt5.QtWidgets import QLabel
             self.show_error(f"データセットタブ画面の作成でエラーが発生しました: {e}")
             layout.addWidget(QLabel("データセットタブUIにエラーが発生しました"))
+=======
+>>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
 
     def _create_dummy_ui(self, layout, title, button_style):
         """

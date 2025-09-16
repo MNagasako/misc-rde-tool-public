@@ -16,7 +16,11 @@
 
 """
 
+<<<<<<< HEAD
 __version__ = "1.17.2"
+=======
+__version__ = "1.17.1"
+>>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
 __author__ = "ARIM RDE Tool Team"
 
 # パッケージ内の主要クラス・関数のエクスポート

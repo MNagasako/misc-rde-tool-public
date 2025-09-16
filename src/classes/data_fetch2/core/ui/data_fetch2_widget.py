@@ -51,6 +51,7 @@ def safe_show_message_widget(parent, title, message, message_type="warning"):
         logger.error(f"メッセージボックス表示エラー: {e}")
         logger.error(f"[{message_type.upper()}] {title}: {message}")
 
+<<<<<<< HEAD
 def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="both"):
     """
     データセットドロップダウンを作成（データ取得2専用版・フィルタリング対応）
@@ -500,6 +501,8 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     
     return container
 
+=======
+>>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
 def create_data_fetch2_widget(parent=None, bearer_token=None):
     # 非同期化を解除（QThread, Workerクラス削除）
     """
