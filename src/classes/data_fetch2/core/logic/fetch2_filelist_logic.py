@@ -174,7 +174,7 @@ def download_file_for_data_id(data_id, bearer_token, save_dir_base, file_name, g
             logf.write(f"[ERROR] makedirs failed for data_id={data_id}, grantNumber={grantNumber}, dataset_name={dataset_name}, tile_name={tile_name}, tile_number={tile_number}\nException: {e}\n")
         print(f"[ERROR] makedirs failed: {e}")
         return False
-    url = f"https://rde-api.nims.go.jp/files/{data_id}"
+    url = f"https://rde-api.nims.go.jp/files/{data_id}?isDownload=true"
     headers = {
         "Authorization": f"Bearer {bearer_token}",
         "Accept": "*/*",
@@ -185,6 +185,7 @@ def download_file_for_data_id(data_id, bearer_token, save_dir_base, file_name, g
     print(f"[INFO] Downloading file for data_id: {data_id} from {url}")
     try:
         resp = download_request(url, bearer_token=None, timeout=30, headers=headers, stream=True)  # download_request returns Response object
+        print(f"{url} -> HTTP {resp.status_code if resp else 'No Response'} ")
         if resp is None:
             print(f"[ERROR] Request failed for data_id: {data_id}")
             if parent:
@@ -286,12 +287,21 @@ def anonymize_json(data, grant_number):
             return [anonymize_json(v, grant_number) for v in data]
         return data
 
-def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token, save_dir=None, progress_callback=None):
+def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token, save_dir=None, progress_callback=None, file_filter_config=None):
     
     tile_name = "tile_name"  # デフォルト値
     tile_number = "tile_number"  # デフォルト値
     """
     指定データセットIDのfiles_{id}.jsonをAPI経由で取得し保存する
+    ファイルフィルタ機能付き
+    
+    Args:
+        parent: 親ウィジェット
+        dataset_obj: データセットオブジェクト
+        bearer_token: 認証トークン
+        save_dir: 保存先ディレクトリ
+        progress_callback: プログレス通知コールバック
+        file_filter_config: ファイルフィルタ設定辞書
     """
     if not dataset_obj:
         error_msg = "データセットIDが選択されていません。"
@@ -305,6 +315,19 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token, save_dir=Non
         if parent:
             safe_show_message(parent, "認証エラー", error_msg, "warning")
         return None
+
+    # フィルタ設定の初期化
+    if file_filter_config is None:
+        # デフォルトフィルタ（従来通りMAIN_IMAGEのみ）
+        file_filter_config = {
+            "file_types": ["MAIN_IMAGE"],
+            "media_types": [],
+            "extensions": [],
+            "size_min": 0,
+            "size_max": 0,
+            "filename_pattern": "",
+            "max_download_count": 0
+        }
 
     try:
         # プログレスコールバック初期化
@@ -579,7 +602,26 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token, save_dir=Non
                 # files_dataはdict型のはずなのでdataキーを直接参照
                 data_entries_files = files_data.get("data", [])
                 
-                for dataentry in data_entries_files:
+                # フィルタ処理を適用
+                try:
+                    from classes.data_fetch2.util.file_filter_util import filter_file_list
+                    filtered_files = filter_file_list(data_entries_files, file_filter_config)
+                    logger.info(f"フィルタ適用: {len(data_entries_files)}件 → {len(filtered_files)}件")
+                except ImportError:
+                    # フォールバック: 従来のMAIN_IMAGEフィルタのみ
+                    logger.warning("フィルタユーティリティがインポートできません。従来フィルタを使用します。")
+                    filtered_files = [entry for entry in data_entries_files 
+                                    if entry.get("attributes", {}).get("fileType") == "MAIN_IMAGE"]
+                
+                download_count = 0
+                max_download = file_filter_config.get("max_download_count", 0)
+                
+                for dataentry in filtered_files:
+                    # ダウンロード数上限チェック
+                    if max_download > 0 and download_count >= max_download:
+                        logger.info(f"ダウンロード数上限に達しました: {max_download}件")
+                        break
+                        
                     logger.debug(f"データエントリ処理中: {dataentry}")
                     
                     if not isinstance(dataentry, dict):
@@ -594,11 +636,6 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token, save_dir=Non
                     fileType = attributes_file.get("fileType", "")
                     logger.debug(f"fileType: {fileType} for data_id: {data_id}")
                     
-                    # fileTypeがMAIN_IMAGEでない場合はスキップ
-                    if fileType != "MAIN_IMAGE":
-                        logger.info(f"MAIN_IMAGE以外のファイルをスキップ: data_id={data_id}, fileType={fileType}")
-                        continue
-                        
                     # idを取得
                     entry_data_id = dataentry.get("id")
                     if not entry_data_id:
@@ -612,7 +649,9 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token, save_dir=Non
                         continue
                         
                     # ファイル本体をダウンロード
-                    download_file_for_data_id(entry_data_id, bearer_token, save_dir_base, file_name, grantNumber, dataset_name, tile_name, tile_number, parent)
+                    download_success = download_file_for_data_id(entry_data_id, bearer_token, save_dir_base, file_name, grantNumber, dataset_name, tile_name, tile_number, parent)
+                    if download_success:
+                        download_count += 1
                     
                 logger.info(f"データエントリ処理完了: data_id={data_id}")
                 processed_entries += 1

@@ -1130,10 +1130,13 @@ class UIController(UIControllerCore):
         """
         # DataFetch2TabWidgetを使ってタブUI化
         try:
-            from classes.data_fetch2.core.ui.data_fetch2_tab_widget import create_data_fetch2_tab_widget
+            from classes.data_fetch2.ui.data_fetch2_tab_widget import create_data_fetch2_tab_widget
             # bearer_tokenを明示的に渡す
             bearer_token = getattr(self.parent, 'bearer_token', None)
-            self._fetch2_tab_widget = create_data_fetch2_tab_widget(widget, bearer_token=bearer_token)
+            self._fetch2_tab_widget = create_data_fetch2_tab_widget(widget)
+            # bearer_tokenを個別に設定
+            if hasattr(self._fetch2_tab_widget, 'set_bearer_token') and bearer_token:
+                self._fetch2_tab_widget.set_bearer_token(bearer_token)
             layout.addWidget(self._fetch2_tab_widget)
         except ImportError as e:
             from PyQt5.QtWidgets import QLabel
@@ -1143,7 +1146,6 @@ class UIController(UIControllerCore):
             from PyQt5.QtWidgets import QLabel
             self.show_error(f"データ取得2タブ画面の作成でエラーが発生しました: {e}")
             layout.addWidget(QLabel("データ取得2タブUIにエラーが発生しました"))
-<<<<<<< HEAD
 
     def _create_dataset_ui(self, layout, widget):
         """
@@ -1165,8 +1167,6 @@ class UIController(UIControllerCore):
             from PyQt5.QtWidgets import QLabel
             self.show_error(f"データセットタブ画面の作成でエラーが発生しました: {e}")
             layout.addWidget(QLabel("データセットタブUIにエラーが発生しました"))
-=======
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
 
     def _create_dummy_ui(self, layout, title, button_style):
         """

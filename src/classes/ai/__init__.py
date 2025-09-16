@@ -10,10 +10,6 @@ AI機能パッケージ - ARIM RDE Tool v1.17.2 (REFACTOR_PLAN_01準拠)
 
 # 最小限の公開API - 段階的実装
 __all__ = []
-<<<<<<< HEAD
-__version__ = "1.17.2"
-=======
-__version__ = "1.17.1"
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
+__version__ = "1.17.3"
 
 # 必要に応じて遅延インポートで実装

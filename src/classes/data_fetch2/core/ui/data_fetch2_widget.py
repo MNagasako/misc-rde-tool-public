@@ -51,7 +51,6 @@ def safe_show_message_widget(parent, title, message, message_type="warning"):
         logger.error(f"メッセージボックス表示エラー: {e}")
         logger.error(f"[{message_type.upper()}] {title}: {message}")
 
-<<<<<<< HEAD
 def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="both"):
     """
     データセットドロップダウンを作成（データ取得2専用版・フィルタリング対応）
@@ -501,8 +500,6 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     
     return container
 
-=======
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
 def create_data_fetch2_widget(parent=None, bearer_token=None):
     # 非同期化を解除（QThread, Workerクラス削除）
     """
@@ -640,9 +637,34 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
                     progress_dialog.show()
                     
                     # ワーカー作成（ProgressWorkerを使用）
+                    # フィルタ設定を取得（親タブウィジェットから）
+                    file_filter_config = None
+                    try:
+                        # 親オブジェクトがDataFetch2TabWidgetの場合、フィルタ設定を取得
+                        parent_obj = widget.parent()
+                        while parent_obj:
+                            if hasattr(parent_obj, 'current_filter_config'):
+                                file_filter_config = parent_obj.current_filter_config
+                                logger.info(f"フィルタ設定を取得: {file_filter_config}")
+                                break
+                            parent_obj = parent_obj.parent()
+                    except Exception as e:
+                        logger.warning(f"フィルタ設定取得エラー（デフォルトフィルタを使用）: {e}")
+                    
+                    # デフォルトフィルタにフォールバック
+                    if not file_filter_config:
+                        try:
+                            from classes.data_fetch2.conf.file_filter_config import get_default_filter
+                            file_filter_config = get_default_filter()
+                            logger.info(f"デフォルトフィルタを使用: {file_filter_config}")
+                        except ImportError:
+                            file_filter_config = {"file_types": ["MAIN_IMAGE"]}
+                            logger.info("基本フィルタを使用: MAIN_IMAGE のみ")
+                    
                     worker = ProgressWorker(
                         fetch_files_json_for_dataset,
                         task_args=[widget, dataset_obj, bearer_token],
+                        task_kwargs={"save_dir": None, "file_filter_config": file_filter_config},
                         task_name="ファイルリスト取得"
                     )
                     

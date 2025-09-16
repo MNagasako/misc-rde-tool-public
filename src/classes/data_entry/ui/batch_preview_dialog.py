@@ -5,39 +5,25 @@
 """
 
 import os
-<<<<<<< HEAD
 import json
 import urllib.parse
 from typing import List, Dict, Optional, Set, Tuple
 from pathlib import Path
 import logging
 from datetime import datetime
-=======
-import urllib.parse
-from typing import List, Dict, Optional, Set
-from pathlib import Path
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
 
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QTableWidget, 
     QTableWidgetItem, QLabel, QPushButton, QTextEdit, QGroupBox,
     QHeaderView, QScrollArea, QWidget, QSplitter, QMessageBox,
-<<<<<<< HEAD
     QDialogButtonBox, QComboBox, QProgressDialog, QApplication
-=======
-    QDialogButtonBox, QComboBox, QProgressDialog
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
 from PyQt5.QtGui import QFont, QColor
 
-<<<<<<< HEAD
 from classes.data_entry.core.file_set_manager import FileSet, FileItem, FileType, PathOrganizeMethod, FileItemType
 
 logger = logging.getLogger(__name__)
-=======
-from classes.data_entry.core.file_set_manager import FileSet, FileItem, FileType, PathOrganizeMethod
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
 
 
 class FileSetPreviewWidget(QWidget):
@@ -114,13 +100,10 @@ class FileSetPreviewWidget(QWidget):
         header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # 状態
         
         self.files_table.setAlternatingRowColors(True)
-<<<<<<< HEAD
         
         # ファイルテーブルの最低高さを設定（複数行が見えるように）
         self.files_table.setMinimumHeight(300)  # 約10-12行表示
         
-=======
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
         files_layout.addWidget(self.files_table)
         
         files_group.setLayout(files_layout)
@@ -141,7 +124,6 @@ class FileSetPreviewWidget(QWidget):
         self.open_temp_folder_button.clicked.connect(self._open_temp_folder)
         self.open_mapping_file_button = QPushButton("マッピングファイルを開く")
         self.open_mapping_file_button.clicked.connect(self._open_mapping_file)
-<<<<<<< HEAD
         self.update_mapping_button = QPushButton("マッピング更新")
         self.update_mapping_button.clicked.connect(self._update_mapping_file)
         self.export_folder_button = QPushButton("フォルダ書き出し")
@@ -151,16 +133,10 @@ class FileSetPreviewWidget(QWidget):
         temp_folder_layout.addWidget(self.open_mapping_file_button)
         temp_folder_layout.addWidget(self.update_mapping_button)
         temp_folder_layout.addWidget(self.export_folder_button)
-=======
-        
-        temp_folder_layout.addWidget(self.open_temp_folder_button)
-        temp_folder_layout.addWidget(self.open_mapping_file_button)
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
         temp_folder_layout.addStretch()
         
         settings_layout.addLayout(temp_folder_layout)
         
-<<<<<<< HEAD
         # 一括処理ボタン
         batch_buttons_layout = QHBoxLayout()
         self.batch_upload_button = QPushButton("ファイル一括アップロード")
@@ -207,8 +183,6 @@ class FileSetPreviewWidget(QWidget):
         
         settings_layout.addLayout(batch_buttons_layout)
         
-=======
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
         settings_group.setLayout(settings_layout)
         layout.addWidget(settings_group)
         
@@ -255,27 +229,17 @@ class FileSetPreviewWidget(QWidget):
             self.info_label.setText(f"情報読み込みエラー: {str(e)}")
     
     def _load_files_table(self):
-<<<<<<< HEAD
         """ファイル一覧テーブルを読み込み（ZIP化対応）"""
-=======
-        """ファイル一覧テーブルを読み込み"""
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
         try:
             valid_items = self.file_set.get_valid_items()
             file_items = [item for item in valid_items if item.file_type == FileType.FILE]
             
-<<<<<<< HEAD
             # ZIP化されたファイルを処理：ZIPファイルのみ表示、ZIP内ファイルは除外
             display_items = self._get_display_file_items(file_items)
             
             self.files_table.setRowCount(len(display_items))
             
             for row, file_item in enumerate(display_items):
-=======
-            self.files_table.setRowCount(len(file_items))
-            
-            for row, file_item in enumerate(file_items):
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
                 # 相対パス
                 self.files_table.setItem(row, 0, QTableWidgetItem(file_item.relative_path or ""))
                 
@@ -304,7 +268,6 @@ class FileSetPreviewWidget(QWidget):
                 
                 # 種別（データファイル/添付ファイル）をコンボボックスで表示
                 file_type_combo = QComboBox()
-<<<<<<< HEAD
                 
                 # ZIP化されたファイルかどうかで選択肢を制限
                 is_zipped = self._is_file_zipped(file_item)
@@ -325,21 +288,6 @@ class FileSetPreviewWidget(QWidget):
                         file_type_combo.setCurrentIndex(1)  # 添付ファイル
                     else:
                         file_type_combo.setCurrentIndex(0)  # データファイル
-=======
-                file_type_combo.addItems(["データファイル", "添付ファイル"])
-                
-                # 現在の設定を反映（フラット化の場合は初期値をデータファイルに）
-                current_type = self._get_file_type_category(file_item)
-                if current_type == "データファイル":
-                    file_type_combo.setCurrentIndex(0)
-                else:
-                    file_type_combo.setCurrentIndex(1)
-                
-                # フラット化の場合は初期値をデータファイルに設定
-                if (self.file_set.organize_method == PathOrganizeMethod.FLATTEN and 
-                    not hasattr(file_item, '_file_category')):
-                    file_type_combo.setCurrentIndex(0)
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
                 
                 # コンボボックスの変更時にファイルアイテムに記録
                 file_type_combo.currentTextChanged.connect(
@@ -412,19 +360,13 @@ class FileSetPreviewWidget(QWidget):
             
             # 試料情報の詳細取得
             sample_info = []
-<<<<<<< HEAD
             sample_mode = getattr(self.file_set, 'sample_mode', None)
             
             print(f"[DEBUG] _load_settings_info - 試料モード取得: sample_mode={sample_mode}")
-=======
-            sample_mode = getattr(self.file_set, 'sample_mode', 'new')
-            sample_info.append(f"  モード: {self._get_sample_mode_display()}")
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
             
             # 拡張設定から試料情報を補完
             extended_config = getattr(self.file_set, 'extended_config', {})
             
-<<<<<<< HEAD
             # 表示モードを取得
             display_mode = self._get_sample_mode_display()
             sample_info.append(f"  モード: {display_mode}")
@@ -450,25 +392,12 @@ class FileSetPreviewWidget(QWidget):
                 
                 print(f"[DEBUG] _load_settings_info - 新規作成モード: sample_name={sample_name}, sample_composition={sample_composition}")
                 
-=======
-            if sample_mode == 'existing' or extended_config.get('sample_mode') == '既存試料使用':
-                sample_id = getattr(self.file_set, 'sample_id', None) or extended_config.get('sample_id', None)
-                sample_info.append(f"  既存試料ID: {sample_id or '未設定'}")
-            else:
-                sample_name = getattr(self.file_set, 'sample_name', None) or extended_config.get('sample_name', None)
-                sample_description = getattr(self.file_set, 'sample_description', None) or extended_config.get('sample_description', None)
-                sample_composition = getattr(self.file_set, 'sample_composition', None) or extended_config.get('sample_composition', None)
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
                 sample_info.append(f"  試料名: {sample_name or '未設定'}")
                 sample_info.append(f"  試料説明: {sample_description or '未設定'}")
                 sample_info.append(f"  組成: {sample_composition or '未設定'}")
             
             # 固有情報の詳細取得
-<<<<<<< HEAD
             custom_values = getattr(self.file_set, 'custom_values', {}) or {}
-=======
-            custom_values = getattr(self.file_set, 'custom_values', {})
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
             
             # デバッグ情報を出力
             print(f"[DEBUG] プレビュー - ファイルセット属性custom_values: {custom_values}")
@@ -480,7 +409,6 @@ class FileSetPreviewWidget(QWidget):
                 
                 # 拡張設定内のカスタム値やインボイススキーマ関連の値を抽出
                 custom_candidates = {}
-<<<<<<< HEAD
                 
                 # まず、明示的にcustom_valuesキーをチェック
                 if 'custom_values' in extended_config and extended_config['custom_values']:
@@ -519,23 +447,11 @@ class FileSetPreviewWidget(QWidget):
                 if custom_values:
                     self.file_set.custom_values = custom_values
                     print(f"[DEBUG] プレビュー - custom_valuesをファイルセット属性に反映: {len(custom_values)}個")
-=======
-                for key, value in extended_config.items():
-                    # 基本フィールド以外をカスタム値として扱う
-                    basic_fields = {'description', 'experiment_id', 'reference_url', 'tags', 
-                                  'sample_mode', 'sample_id', 'sample_name', 'sample_description', 
-                                  'sample_composition', 'temp_folder', 'mapping_file', 'temp_created'}
-                    if key not in basic_fields and value:
-                        custom_candidates[key] = value
-                        print(f"[DEBUG] プレビュー - カスタム値候補: {key} = {value}")
-                custom_values = custom_candidates
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
             
             custom_info = []
             if custom_values:
                 custom_info.append(f"  カスタム値: {len(custom_values)}個設定済み")
                 for key, value in custom_values.items():
-<<<<<<< HEAD
                     # 値を適切に表示形式に変換
                     if isinstance(value, dict):
                         value_str = f"{{{len(value)} items}}"
@@ -558,15 +474,6 @@ class FileSetPreviewWidget(QWidget):
                 temp_folder = getattr(self.file_set, 'temp_folder', None)
             if not mapping_file:
                 mapping_file = getattr(self.file_set, 'mapping_file', None)
-=======
-                    custom_info.append(f"    {key}: {value}")
-            else:
-                custom_info.append("  設定項目なし")
-            
-            # 一時フォルダ情報を取得
-            temp_folder = getattr(self.file_set, 'temp_folder', None)
-            mapping_file = getattr(self.file_set, 'mapping_file', None)
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
             
             # 拡張設定からも一時フォルダ情報を確認
             extended_config = getattr(self.file_set, 'extended_config', {})
@@ -578,10 +485,7 @@ class FileSetPreviewWidget(QWidget):
             temp_info = []
             if temp_folder and os.path.exists(temp_folder):
                 temp_info.append(f"  一時フォルダ: {temp_folder}")
-<<<<<<< HEAD
                 temp_info.append(f"  UUID: {getattr(self.file_set, 'uuid', '未設定')}")
-=======
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
                 if mapping_file and os.path.exists(mapping_file):
                     temp_info.append(f"  マッピングファイル: {mapping_file}")
                 else:
@@ -589,10 +493,7 @@ class FileSetPreviewWidget(QWidget):
                 temp_info.append(f"  整理方法: {self._get_organize_method_display()}")
             else:
                 temp_info.append("  一時フォルダ未作成")
-<<<<<<< HEAD
                 temp_info.append(f"  UUID: {getattr(self.file_set, 'uuid', '未設定')}")
-=======
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
                 temp_info.append(f"  整理方法: {self._get_organize_method_display()}")
             
             # 拡張設定の詳細取得
@@ -640,7 +541,6 @@ class FileSetPreviewWidget(QWidget):
         except:
             return "未設定"
     
-<<<<<<< HEAD
     def _get_display_file_items(self, file_items):
         """表示用ファイル項目の取得（ZIP対応）
         
@@ -976,30 +876,6 @@ class FileSetPreviewWidget(QWidget):
             print(f"[ERROR] ファイルZIP化判定エラー: {e}")
             return False
     
-=======
-    def _get_register_filename(self, file_item: FileItem) -> str:
-        """登録時のファイル名を取得（フラット化対応）"""
-        try:
-            if self.file_set.organize_method == PathOrganizeMethod.FLATTEN:
-                # フラット化の場合は、相対パスをダブルアンダースコアで置き換え
-                relative_path = file_item.relative_path.replace('/', '__').replace('\\', '__')
-                return relative_path
-            elif self.file_set.organize_method == PathOrganizeMethod.ZIP:
-                # ZIP化の場合は、最上位レベルのファイルは直接、それ以外はZIP内パス
-                relative_path = Path(file_item.relative_path)
-                if len(relative_path.parts) == 1:
-                    # 直接ファイル
-                    return file_item.name
-                else:
-                    # ZIP内ファイル
-                    zip_name = f"{relative_path.parts[0]}.zip"
-                    return f"{zip_name} (ZIP内: {'/'.join(relative_path.parts[1:])})"
-            else:
-                return file_item.relative_path
-        except:
-            return file_item.name or "不明なファイル"
-    
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
     def _get_file_type_category(self, file_item: FileItem) -> str:
         """ファイルの種別（データファイル/添付ファイル）を取得"""
         # 拡張子ベースでの簡易判定
@@ -1016,7 +892,6 @@ class FileSetPreviewWidget(QWidget):
     def _on_file_type_changed(self, text: str, file_item: FileItem):
         """ファイル種別変更時の処理"""
         try:
-<<<<<<< HEAD
             # ファイルアイテムのitem_typeを設定
             if text == "添付ファイル":
                 file_item.item_type = FileItemType.ATTACHMENT
@@ -1027,14 +902,6 @@ class FileSetPreviewWidget(QWidget):
             
             # マッピングファイルを再作成（必要に応じて）
             # self._recreate_mapping_file()
-=======
-            # ファイルアイテムに種別を設定
-            setattr(file_item, '_file_category', text)
-            print(f"[DEBUG] ファイル種別変更: {file_item.name} → {text}")
-            
-            # マッピングファイルを再作成
-            self._recreate_mapping_file()
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
             
         except Exception as e:
             print(f"[ERROR] ファイル種別変更処理エラー: {e}")
@@ -1127,7 +994,6 @@ class FileSetPreviewWidget(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "エラー", f"マッピングファイルを開く際にエラーが発生しました:\n{str(e)}")
     
-<<<<<<< HEAD
     def _update_mapping_file(self):
         """マッピングファイルを更新"""
         try:
@@ -1258,8 +1124,6 @@ class FileSetPreviewWidget(QWidget):
             print(f"[ERROR] フォルダ書き出しエラー: {e}")
             QMessageBox.warning(self, "エラー", f"フォルダ書き出しに失敗しました: {str(e)}")
     
-=======
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
     def _update_temp_folder_buttons(self):
         """一時フォルダボタンの表示状態を更新"""
         try:
@@ -1281,11 +1145,7 @@ class FileSetPreviewWidget(QWidget):
                 self.open_temp_folder_button.setEnabled(False)
                 self.open_temp_folder_button.setText("一時フォルダなし")
             
-<<<<<<< HEAD
             # マッピングファイルボタンの有効/無効（修正版）
-=======
-            # マッピングファイルボタンの有効/無効
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
             if mapping_file and os.path.exists(mapping_file):
                 self.open_mapping_file_button.setEnabled(True)
                 self.open_mapping_file_button.setText("マッピングファイルを開く")
@@ -1296,13 +1156,9 @@ class FileSetPreviewWidget(QWidget):
         except Exception as e:
             print(f"[WARNING] ボタン状態更新エラー: {e}")
             self.open_temp_folder_button.setEnabled(False)
-<<<<<<< HEAD
             self.open_temp_folder_button.setText("一時フォルダなし")
             self.open_mapping_file_button.setEnabled(False)
             self.open_mapping_file_button.setText("マッピングファイルなし")
-=======
-            self.open_mapping_file_button.setEnabled(False)
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
     
     def _get_sample_mode_display(self) -> str:
         """試料モードの表示名を取得"""
@@ -1310,7 +1166,6 @@ class FileSetPreviewWidget(QWidget):
             # 直接の属性から取得を試行
             sample_mode = getattr(self.file_set, 'sample_mode', None)
             
-<<<<<<< HEAD
             print(f"[DEBUG] _get_sample_mode_display - 直接属性: sample_mode={sample_mode}")
             
             # 属性ベースの変換を優先
@@ -1340,29 +1195,6 @@ class FileSetPreviewWidget(QWidget):
                 
         except Exception as e:
             print(f"[ERROR] _get_sample_mode_display エラー: {e}")
-=======
-            # 属性にない場合は拡張設定から取得
-            if not sample_mode:
-                extended_config = getattr(self.file_set, 'extended_config', {})
-                sample_mode_text = extended_config.get('sample_mode', '新規作成')
-                
-                # テキストベースで判定
-                if sample_mode_text == "既存試料使用":
-                    return "既存試料使用"
-                elif sample_mode_text == "前回と同じ":
-                    return "前回と同じ"
-                else:
-                    return "新規作成"
-            
-            # 属性ベースの変換
-            mode_map = {
-                "new": "新規作成",
-                "existing": "既存試料使用",
-                "same_as_previous": "前回と同じ"
-            }
-            return mode_map.get(sample_mode, sample_mode)
-        except:
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
             return "未設定"
     
     def _format_size(self, size_bytes: int) -> str:
@@ -1378,7 +1210,6 @@ class FileSetPreviewWidget(QWidget):
             i += 1
         
         return f"{size:.1f} {size_names[i]}"
-<<<<<<< HEAD
     
     def _get_mapping_file_path(self) -> Optional[str]:
         """マッピングファイルのパスを取得"""
@@ -1415,8 +1246,6 @@ class FileSetPreviewWidget(QWidget):
         except Exception as e:
             print(f"[WARNING] マッピングファイルパス取得エラー: {e}")
             return None
-=======
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
 
     def _upload_file(self, file_item: FileItem):
         """ファイルアップロード処理（改良版：デバッグ情報表示・確認ダイアログ付き）"""
@@ -1437,58 +1266,9 @@ class FileSetPreviewWidget(QWidget):
                 QMessageBox.warning(self, "エラー", "データセットが選択されていません")
                 return
                 
-<<<<<<< HEAD
             # Bearerトークンを共通ヘルパーで取得（通常登録タブ方式に統一）
             from core.bearer_token_helper import get_current_bearer_token
             bearer_token = get_current_bearer_token(self)
-=======
-            # Bearerトークンを取得（親から継承またはファイルから読み取り）
-            bearer_token = self.bearer_token
-            if not bearer_token:
-                print("[DEBUG] Bearer トークンが親から取得できない - 他の方法を試行")
-                
-                # 親ウィジェットから取得を試行（複数階層遡及）
-                current_widget = self
-                while current_widget and not bearer_token:
-                    current_widget = current_widget.parent()
-                    if current_widget and hasattr(current_widget, 'bearer_token'):
-                        bearer_token = current_widget.bearer_token
-                        print(f"[DEBUG] 親ウィジェット({type(current_widget).__name__})からBearerトークンを取得")
-                        break
-                
-                # まだない場合は、メインコントローラから取得を試行
-                if not bearer_token:
-                    try:
-                        from PyQt5.QtWidgets import QApplication
-                        app = QApplication.instance()
-                        if app:
-                            main_window = None
-                            for widget in app.topLevelWidgets():
-                                if hasattr(widget, 'controller') and hasattr(widget.controller, 'bearer_token'):
-                                    bearer_token = widget.controller.bearer_token
-                                    print("[DEBUG] メインコントローラからBearerトークンを取得")
-                                    break
-                    except Exception as e:
-                        print(f"[WARNING] メインコントローラからのトークン取得エラー: {e}")
-                
-                # それでもない場合はファイルから読み取り
-                if not bearer_token:
-                    print("[DEBUG] ファイルからBearerトークンを読み取り試行")
-                    from config.common import BEARER_TOKEN_FILE
-                    try:
-                        if os.path.exists(BEARER_TOKEN_FILE):
-                            with open(BEARER_TOKEN_FILE, 'r', encoding='utf-8') as f:
-                                file_token = f.read().strip()
-                            # ファイルから読み取ったトークンの形式をチェック
-                            if file_token and file_token.startswith('Bearer '):
-                                bearer_token = file_token[7:]  # 'Bearer 'プレフィックスを除去
-                            elif file_token:
-                                bearer_token = file_token
-                            print(f"[DEBUG] ファイルからBearerトークンを取得: 長さ={len(bearer_token) if bearer_token else 0}")
-                    except Exception as e:
-                        print(f"[WARNING] Bearerトークンファイル読み取りエラー: {e}")
-                
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
             if not bearer_token:
                 print("[ERROR] Bearerトークンが取得できません")
                 QMessageBox.warning(self, "エラー", "認証トークンが取得できません。ログインしてください。")
@@ -1655,17 +1435,10 @@ API情報:
             print(f"[DEBUG] バイナリデータサイズ: {len(binary_data)} bytes")
             print(f"[DEBUG] Authorization: Bearer {bearer_token[:10]}...{bearer_token[-10:]}")
             # print(f"[DEBUG] Accept: {actual_headers}")
-<<<<<<< HEAD
             # プロキシ対応HTTPヘルパーを使用
             from net.http_helpers import proxy_post
             
             resp = proxy_post(url, data=binary_data, headers=actual_headers)
-=======
-            # HTTP通信ヘルパーを使用
-            from classes.utils.api_request_helper import post_binary
-            
-            resp = post_binary(url, binary_data, headers=actual_headers, bearer_token=bearer_token)
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
             
             if resp is None:
                 print(f"[ERROR] API呼び出し失敗: レスポンスがNone")
@@ -1736,7 +1509,6 @@ API情報:
             print(f"[ERROR] スタックトレース:\n{traceback.format_exc()}")
             return {"error": str(e)}
             print(f"[ERROR] ファイルアップロードエラー: {e}")
-<<<<<<< HEAD
     
     def _batch_upload_files(self):
         """ファイル一括アップロード処理"""
@@ -2998,8 +2770,6 @@ API情報:
         except Exception as e:
             print(f"[ERROR] 単一ファイルセットZIP化判定エラー: {e}")
             return False
-=======
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
 
 
 class BatchRegisterPreviewDialog(QDialog):
@@ -3012,7 +2782,6 @@ class BatchRegisterPreviewDialog(QDialog):
         self.bearer_token = bearer_token
         self.setWindowTitle("一括登録プレビュー")
         self.setModal(True)
-<<<<<<< HEAD
         
         # ダイアログサイズをディスプレイの90%に設定
         self.setup_dialog_size()
@@ -3050,9 +2819,6 @@ class BatchRegisterPreviewDialog(QDialog):
         except Exception as e:
             print(f"[WARNING] ダイアログサイズ設定エラー: {e}")
             self.resize(1000, 700)  # フォールバック
-=======
-        self.resize(1000, 700)
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
         
         self.setup_ui()
         self.check_duplicates()
@@ -3173,7 +2939,6 @@ class BatchRegisterPreviewDialog(QDialog):
             print(f"プレビューデータ読み込み中にエラー: {e}")
             self.summary_label.setText(f"エラー: {str(e)}")
     
-<<<<<<< HEAD
     def _batch_upload_files(self):
         """ファイル一括アップロード処理"""
         try:
@@ -3887,8 +3652,6 @@ class BatchRegisterPreviewDialog(QDialog):
             print(f"[WARNING] 試料情報抽出エラー: {e}")
             return None
     
-=======
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
     def _format_size(self, size_bytes: int) -> str:
         """ファイルサイズを人間が読みやすい形式に変換"""
         if size_bytes == 0:
@@ -3906,7 +3669,6 @@ class BatchRegisterPreviewDialog(QDialog):
     def get_validated_file_sets(self) -> List[FileSet]:
         """検証済みファイルセットを取得（重複ファイル除外後）"""
         return self.file_sets
-<<<<<<< HEAD
 
 
 class BatchRegisterPreviewDialog(QDialog):
@@ -5077,5 +4839,3 @@ class BatchRegisterPreviewDialog(QDialog):
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "エラー", f"全ファイルセット一括データ登録処理でエラーが発生しました:\n{str(e)}")
-=======
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce

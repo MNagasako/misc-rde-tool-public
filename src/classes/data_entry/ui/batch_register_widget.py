@@ -1758,28 +1758,6 @@ class DataTreeDialog(QDialog):
             self.file_tree.load_file_tree(self.file_items)
         else:
             print("[WARNING] DataTreeDialog: ファイルアイテムが空です")
-<<<<<<< HEAD
-=======
-        
-        # ファイルセット更新ボタン
-        update_fileset_btn = QPushButton("選択ファイルセットを更新")
-        update_fileset_btn.setToolTip("ファイルツリーの選択状態を選択されたファイルセットに反映します")
-        update_fileset_btn.clicked.connect(self.update_selected_fileset_from_tree)
-        update_fileset_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745;
-                color: white;
-                padding: 8px 16px;
-                border-radius: 4px;
-                font-weight: bold;
-                margin: 5px;
-            }
-            QPushButton:hover {
-                background-color: #218838;
-            }
-        """)
-        layout.addWidget(update_fileset_btn)
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
         
         # 選択情報
         self.selection_info = QLabel("選択されたアイテム: 0個")
@@ -1842,7 +1820,6 @@ class BatchRegisterWidget(QWidget):
         self.temp_folder_manager = TempFolderManager()  # 一時フォルダ管理
         self.datasets = []  # データセット一覧
         
-<<<<<<< HEAD
         # ファイルセット復元処理中フラグ（自動設定適用を防ぐため）
         self._restoring_fileset = False
         
@@ -1852,8 +1829,6 @@ class BatchRegisterWidget(QWidget):
             self.bearer_token = parent_controller.bearer_token
             print(f"[DEBUG] BatchRegisterWidget: parent_controllerからトークンを設定")
         
-=======
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
         # 既存の一時フォルダをクリーンアップ
         self.cleanup_temp_folders_on_init()
         
@@ -2889,7 +2864,6 @@ class BatchRegisterWidget(QWidget):
                     if isinstance(current_data, dict) and 'id' in current_data:
                         settings['dataset_id'] = current_data['id']
                         settings['dataset_name'] = current_data.get('name', '')
-<<<<<<< HEAD
                         settings['selected_dataset'] = current_data  # 完全なデータセット情報を保存
                         print(f"[DEBUG] get_current_settings - データセット情報: {current_data}")
                     else:
@@ -2967,39 +2941,6 @@ class BatchRegisterWidget(QWidget):
             
             print(f"[DEBUG] get_current_settings - 固有情報取得完了: {len(custom_values)}個の項目")
             
-=======
-                    else:
-                        settings['dataset_id'] = str(current_data)
-                        settings['dataset_name'] = self.dataset_combo.currentText()
-                else:
-                    settings['dataset_id'] = None
-                    settings['dataset_name'] = self.dataset_combo.currentText()
-            
-            # 試料設定
-            if hasattr(self, 'sample_mode_combo'):
-                settings['sample_mode'] = self.sample_mode_combo.currentText()
-            if hasattr(self, 'sample_id_combo'):
-                settings['sample_id'] = self.sample_id_combo.currentText()
-            if hasattr(self, 'sample_name_edit'):
-                settings['sample_name'] = self.sample_name_edit.text()
-            if hasattr(self, 'sample_description_edit'):
-                settings['sample_description'] = self.sample_description_edit.toPlainText()
-            if hasattr(self, 'sample_composition_edit'):
-                settings['sample_composition'] = self.sample_composition_edit.text()
-            
-            # 固有情報（カスタムフィールド）
-            custom_values = {}
-            if hasattr(self, 'custom_field_widgets'):
-                for field_name, widget in self.custom_field_widgets.items():
-                    if hasattr(widget, 'text'):
-                        custom_values[field_name] = widget.text()
-                    elif hasattr(widget, 'toPlainText'):
-                        custom_values[field_name] = widget.toPlainText()
-                    elif hasattr(widget, 'currentText'):
-                        custom_values[field_name] = widget.currentText()
-            settings['custom_values'] = custom_values
-            
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
             print(f"[DEBUG] get_current_settings: {settings}")
             
         except Exception as e:
@@ -3028,7 +2969,6 @@ class BatchRegisterWidget(QWidget):
             # データセット設定の適用
             if 'dataset_id' in settings:
                 fileset.dataset_id = settings['dataset_id']
-<<<<<<< HEAD
                 print(f"[DEBUG] データセットIDを fileset.dataset_id に設定: {settings['dataset_id']}")
                 
                 # dataset_infoも同時に設定
@@ -3049,12 +2989,6 @@ class BatchRegisterWidget(QWidget):
                     fileset.extended_config = {}
                 fileset.extended_config['selected_dataset'] = settings['selected_dataset']
                 print(f"[DEBUG] データセット情報を extended_config に保存: {settings['selected_dataset']}")
-=======
-            if 'dataset_name' in settings and hasattr(fileset, 'dataset_info'):
-                if not fileset.dataset_info:
-                    fileset.dataset_info = {}
-                fileset.dataset_info['name'] = settings['dataset_name']
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
             
             # 試料設定の適用
             if 'sample_mode' in settings:
@@ -3075,7 +3009,6 @@ class BatchRegisterWidget(QWidget):
                 fileset.sample_composition = settings['sample_composition']
             
             # 固有情報（カスタム値）の適用
-<<<<<<< HEAD
             if 'custom_values' in settings and settings['custom_values']:
                 if not hasattr(fileset, 'custom_values'):
                     fileset.custom_values = {}
@@ -3100,20 +3033,6 @@ class BatchRegisterWidget(QWidget):
             print(f"[INFO] ファイルセット '{fileset.name}' に設定を適用しました")
             print(f"[DEBUG] 適用後のfileset.data_name: {getattr(fileset, 'data_name', None)}")
             print(f"[DEBUG] 適用後のfileset.dataset_id: {getattr(fileset, 'dataset_id', None)}")
-=======
-            if 'custom_values' in settings:
-                if not hasattr(fileset, 'custom_values'):
-                    fileset.custom_values = {}
-                fileset.custom_values.update(settings['custom_values'])
-            
-            # 拡張設定に保存（バックアップとして）
-            if not hasattr(fileset, 'extended_config'):
-                fileset.extended_config = {}
-            fileset.extended_config.update(settings)
-            
-            print(f"[INFO] ファイルセット '{fileset.name}' に設定を適用しました")
-            print(f"[DEBUG] 適用後のfileset.data_name: {getattr(fileset, 'data_name', None)}")
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
             print(f"[DEBUG] 適用後のfileset.sample_mode: {getattr(fileset, 'sample_mode', None)}")
             
         except Exception as e:
@@ -3757,7 +3676,6 @@ class BatchRegisterWidget(QWidget):
                 if self.sample_mode_combo.itemText(i) == sample_mode:
                     self.sample_mode_combo.setCurrentIndex(i)
                     break
-<<<<<<< HEAD
             
             self.sample_id_combo.setCurrentText(extended_config.get('sample_id', ''))
             self.sample_name_edit.setText(extended_config.get('sample_name', ''))
@@ -3833,62 +3751,6 @@ class BatchRegisterWidget(QWidget):
             # ファイルセット復元処理完了フラグをリセット
             self._restoring_fileset = False
             print("[DEBUG] ファイルセット復元処理完了 - 自動設定適用を再有効化")
-=======
-            if not found:
-                print(f"[WARNING] データセットID {file_set.dataset_id} がコンボボックスに見つかりません")
-                # データセット未選択状態にする（有効な最初のアイテムを選択）
-                self.dataset_combo.setCurrentIndex(-1)
-        else:
-            print("[DEBUG] ファイルセット選択: データセット未設定")
-            # 未設定の場合は最初のアイテム（選択なし）を選択
-            self.dataset_combo.setCurrentIndex(0)
-        
-        # 拡張設定フィールドを表示
-        extended_config = getattr(file_set, 'extended_config', {})
-        
-        # データ情報
-        self.description_edit.setPlainText(extended_config.get('description', ''))
-        self.experiment_id_edit.setText(extended_config.get('experiment_id', ''))
-        self.reference_url_edit.setText(extended_config.get('reference_url', ''))
-        self.tags_edit.setText(extended_config.get('tags', ''))
-        
-        # 試料情報
-        # 「前回と同じ」オプションの有効性をチェックして制御
-        self.update_same_as_previous_option()
-        
-        sample_mode = extended_config.get('sample_mode', '新規作成')
-        for i in range(self.sample_mode_combo.count()):
-            if self.sample_mode_combo.itemText(i) == sample_mode:
-                self.sample_mode_combo.setCurrentIndex(i)
-                break
-        
-        self.sample_id_combo.setCurrentText(extended_config.get('sample_id', ''))
-        self.sample_name_edit.setText(extended_config.get('sample_name', ''))
-        self.sample_description_edit.setPlainText(extended_config.get('sample_description', ''))
-        self.sample_composition_edit.setText(extended_config.get('sample_composition', ''))
-        
-        # カスタム値（インボイススキーマフォーム）の復元
-        if hasattr(self, 'invoice_schema_form') and self.invoice_schema_form:
-            try:
-                custom_values = getattr(file_set, 'custom_values', {})
-                print(f"[DEBUG] ファイルセット選択時のカスタム値復元: {len(custom_values)}個の項目")
-                for key, value in custom_values.items():
-                    print(f"[DEBUG]   復元: {key} = {value}")
-                
-                if custom_values:
-                    self.invoice_schema_form.set_form_data(custom_values)
-                    print(f"[DEBUG] インボイススキーマフォームにカスタム値を設定完了")
-                else:
-                    print(f"[DEBUG] カスタム値が空のため、フォームをクリア")
-                    self.invoice_schema_form.clear_form()
-            except Exception as e:
-                print(f"[WARNING] カスタム値復元エラー: {e}")
-        else:
-            print("[DEBUG] インボイススキーマフォームが存在しないため、カスタム値復元をスキップ")
-        
-        # 現在のファイルセットを記録
-        self.current_fileset = file_set
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
     
     def update_same_as_previous_option(self):
         """「前回と同じ」オプションの有効性をチェックして制御"""
@@ -3995,7 +3857,6 @@ class BatchRegisterWidget(QWidget):
         
         # 試料情報を直接属性として保存
         sample_mode_text = self.sample_mode_combo.currentText()
-<<<<<<< HEAD
         sample_mode_index = self.sample_mode_combo.currentIndex()
         print(f"[DEBUG] 試料モード状態確認:")
         print(f"[DEBUG] - currentText(): '{sample_mode_text}'")
@@ -4007,19 +3868,10 @@ class BatchRegisterWidget(QWidget):
         # 試料モード判定：index=0は新規作成、それ以外は既存試料選択
         if sample_mode_index == 0 or sample_mode_text == "新規作成":
             # 新規作成モード
-=======
-        if sample_mode_text == "既存試料使用":
-            selected_fileset.sample_mode = "existing"
-            selected_fileset.sample_id = self.sample_id_combo.currentText()
-        elif sample_mode_text == "前回と同じ":
-            selected_fileset.sample_mode = "same_as_previous"
-        else:
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
             selected_fileset.sample_mode = "new"
             selected_fileset.sample_name = self.sample_name_edit.text()
             selected_fileset.sample_description = self.sample_description_edit.toPlainText()
             selected_fileset.sample_composition = self.sample_composition_edit.text()
-<<<<<<< HEAD
             print(f"[DEBUG] 試料モード設定: new")
             print(f"[DEBUG] - sample_name: {selected_fileset.sample_name}")
             print(f"[DEBUG] - sample_description: {selected_fileset.sample_description}")
@@ -4079,20 +3931,12 @@ class BatchRegisterWidget(QWidget):
                 # QGroupBoxの場合はget_schema_form_values関数を使用
                 from classes.utils.schema_form_util import get_schema_form_values
                 custom_values = get_schema_form_values(self.invoice_schema_form)
-=======
-        
-        # カスタム値を取得（インボイススキーマフォーム）
-        if hasattr(self, 'invoice_schema_form') and self.invoice_schema_form:
-            try:
-                custom_values = self.invoice_schema_form.get_form_data()
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
                 selected_fileset.custom_values = custom_values
                 print(f"[DEBUG] カスタム値を保存: {len(custom_values)}個の項目")
                 for key, value in custom_values.items():
                     print(f"[DEBUG]   {key}: {value}")
             except Exception as e:
                 print(f"[WARNING] カスタム値取得エラー: {e}")
-<<<<<<< HEAD
                 import traceback
                 traceback.print_exc()
                 selected_fileset.custom_values = {}
@@ -4104,12 +3948,6 @@ class BatchRegisterWidget(QWidget):
             else:
                 selected_fileset.custom_values = {}
                 print("[DEBUG] 空のcustom_valuesを設定")
-=======
-                selected_fileset.custom_values = {}
-        else:
-            print("[DEBUG] インボイススキーマフォームが存在しません")
-            selected_fileset.custom_values = {}
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
         
         # 拡張フィールドを辞書に保存（下位互換性のため）
         selected_fileset.extended_config = {
@@ -4120,17 +3958,8 @@ class BatchRegisterWidget(QWidget):
             'reference_url': self.reference_url_edit.text(),
             'tags': self.tags_edit.text(),
             
-<<<<<<< HEAD
             # 試料情報 - 内部値を保存
             'sample_mode': selected_fileset.sample_mode,  # 内部値（new/existing/same_as_previous）を使用
-=======
-            # 試料情報
-            'sample_mode': sample_mode_text,
-            'sample_id': self.sample_id_combo.currentText(),
-            'sample_name': self.sample_name_edit.text(),
-            'sample_description': self.sample_description_edit.toPlainText(),
-            'sample_composition': self.sample_composition_edit.text(),
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
         }
         
         # 試料情報の詳細を条件付きで保存
@@ -4232,7 +4061,6 @@ class BatchRegisterWidget(QWidget):
             return
         
         try:
-<<<<<<< HEAD
             # 全ファイルセットに対して一時フォルダとマッピングファイルを確実に作成
             for file_set in self.file_set_manager.file_sets:
                 self._ensure_temp_folder_and_mapping(file_set)
@@ -4242,18 +4070,6 @@ class BatchRegisterWidget(QWidget):
             
             # Bearerトークンを取得（統一メソッドを使用）
             bearer_token = self._get_bearer_token()
-=======
-            # 一時フォルダ作成（フラット化・ZIP化対応）
-            self._prepare_temp_folders()
-            
-            # Bearerトークンを取得
-            bearer_token = getattr(self, 'bearer_token', None)
-            if not bearer_token:
-                # 親ウィジェットから取得を試行
-                parent_widget = self.parent()
-                if parent_widget and hasattr(parent_widget, 'bearer_token'):
-                    bearer_token = parent_widget.bearer_token
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
             
             # 新しい詳細プレビューダイアログを表示
             from classes.data_entry.ui.batch_preview_dialog import BatchRegisterPreviewDialog
@@ -5393,24 +5209,6 @@ class BatchRegisterWidget(QWidget):
             
         except Exception as e:
             print(f"[WARNING] スキーマフォームクリアエラー: {e}")
-<<<<<<< HEAD
-=======
-
-    def save_current_fileset_settings(self):
-        """現在の設定を選択されたファイルセットに適用"""
-        if not hasattr(self, 'current_fileset') or not self.current_fileset:
-            QMessageBox.information(self, "情報", "ファイルセットが選択されていません。")
-            return
-        
-        try:
-            # 現在の設定を取得
-            settings = self._collect_fileset_settings()
-            self._apply_settings_to_fileset(self.current_fileset, settings)
-            QMessageBox.information(self, "完了", f"ファイルセット '{self.current_fileset.name}' に設定を適用しました。")
-            self.refresh_fileset_display()
-        except Exception as e:
-            QMessageBox.warning(self, "エラー", f"設定の適用に失敗しました: {e}")
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
     
     def _create_empty_schema_form(self):
         """空のインボイススキーマフォームを作成（参照確保用）"""
@@ -5477,11 +5275,7 @@ class BatchRegisterWidget(QWidget):
         if reply == QMessageBox.Yes:
             try:
                 # 現在の設定を取得
-<<<<<<< HEAD
                 settings = self.get_current_settings()
-=======
-                settings = self._collect_fileset_settings()
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
                 applied_count = 0
                 for fileset in self.file_set_manager.file_sets:
                     self._apply_settings_to_fileset(fileset, settings)
@@ -6248,7 +6042,6 @@ def _prepare_temp_folders(self):
         raise
 
 def cleanup_temp_folders_on_init(self):
-<<<<<<< HEAD
     """初期化時に既存の一時フォルダをクリーンアップ（UUID対応版）"""
     try:
         print("[INFO] 既存一時フォルダのクリーンアップを開始")
@@ -6260,27 +6053,17 @@ def cleanup_temp_folders_on_init(self):
         orphaned_count = self.temp_folder_manager.cleanup_orphaned_temp_folders([])
         
         print(f"[INFO] 既存一時フォルダのクリーンアップ完了（孤立フォルダ {orphaned_count} 個削除）")
-=======
-    """初期化時に既存の一時フォルダをクリーンアップ"""
-    try:
-        print("[INFO] 既存一時フォルダのクリーンアップを開始")
-        self.temp_folder_manager.cleanup_all_temp_folders()
-        print("[INFO] 既存一時フォルダのクリーンアップ完了")
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
     except Exception as e:
         print(f"[WARNING] 一時フォルダクリーンアップエラー: {e}")
 
 def auto_apply_settings_to_selected(self):
     """選択されたファイルセットに現在の設定を自動適用"""
     try:
-<<<<<<< HEAD
         # ファイルセット復元処理中の場合は自動適用をスキップ
         if getattr(self, '_restoring_fileset', False):
             print("[DEBUG] ファイルセット復元中のため自動設定適用をスキップ")
             return
             
-=======
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
         # ターゲットファイルセットコンボボックスが存在し、選択されている場合のみ
         if hasattr(self, 'target_fileset_combo') and self.target_fileset_combo.currentText():
             target_name = self.target_fileset_combo.currentText()
@@ -6305,7 +6088,6 @@ def auto_apply_settings_to_selected(self):
     except Exception as e:
         print(f"[WARNING] 設定自動適用エラー: {e}")
 
-<<<<<<< HEAD
     def show_data_tree_dialog(self, fileset: FileSet):
         """データツリー選択ダイアログを表示"""
         try:
@@ -6384,8 +6166,6 @@ def auto_apply_settings_to_selected(self):
         import datetime
         return datetime.datetime.now().isoformat()
 
-=======
->>>>>>> f76e2187b15a1f404bbf2305e61fdf202d0d68ce
 # BatchRegisterWidgetクラスにメソッドを動的に追加
 BatchRegisterWidget._prepare_temp_folders = _prepare_temp_folders
 BatchRegisterWidget.cleanup_temp_folders_on_init = cleanup_temp_folders_on_init
