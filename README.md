@@ -1,5 +1,4 @@
-
-<img width="403" height="401" alt="2025-08-22_12h57_27" src="https://github.com/user-attachments/assets/c0db1885-48db-4b95-906a-115ade26d152" />
+<img width="400" height="400" alt="2025-09-17_12h59_55" src="https://github.com/user-attachments/assets/d63f3c1a-1efb-4bf7-9ed7-8608a8a73c0b" />
 
 # ARIM RDE Tool v1.17.5
 
