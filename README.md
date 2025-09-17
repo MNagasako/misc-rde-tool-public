@@ -177,9 +177,9 @@ Windows のセキュリティ警告やアンチウイルスによりブロック
    * **関連試料抽出**：所属試料一覧を表示し、クリックでサンプルページを開きます。
 
 ### 8. データセット開設・修正
-
-<img width="1062" height="528" alt="2025-07-31_10h51_01" src="https://github.com/user-attachments/assets/22f8d8f1-9f92-40e0-bab6-10e6cf0588cf" />
-<img width="1062" height="710" alt="2025-08-22_14h15_23" src="https://github.com/user-attachments/assets/349caf93-a1d5-4c84-9a85-ee3c1e955f27" />
+<img width="1062" height="1004" alt="2025-09-17_13h01_58" src="https://github.com/user-attachments/assets/f460aa2c-fdea-4d1c-98d0-8cb4be80b324" />
+<img width="1062" height="1004" alt="2025-09-17_13h02_48" src="https://github.com/user-attachments/assets/2efcddbf-8d8d-442f-ab9e-221fa1325702" />
+<img width="1062" height="1004" alt="2025-09-17_13h03_26" src="https://github.com/user-attachments/assets/e18f6e21-f6ea-4712-925b-e25afd0d57f5" />
 
 * サブグループを選択（補完検索対応）
 * 課題番号を選択（登録済みである必要あり）
@@ -188,8 +188,9 @@ Windows のセキュリティ警告やアンチウイルスによりブロック
 * **データセット開設実行** をクリック
 
 ### 9. データ登録
+<img width="1062" height="1004" alt="2025-09-17_13h04_57" src="https://github.com/user-attachments/assets/721c7456-86a3-48e8-b72b-98cae744b800" />
+<img width="1730" height="1004" alt="2025-09-17_13h06_45" src="https://github.com/user-attachments/assets/f6402182-f7b1-4303-943d-e80cd768683c" />
 
-<img width="1062" height="532" alt="2025-08-22_14h26_17" src="https://github.com/user-attachments/assets/9904b0d9-436e-4801-bf78-a0c2c42dbf15" />
 
 * データセットを選択
 * データ名・説明・試料情報を入力
