@@ -164,31 +164,40 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
     info_layout.addWidget(basic_info_widget)
     
     # データエントリー一覧テーブル
+    # --- fileTypeごとのカラム拡張 ---
+    from classes.data_fetch2.conf.file_filter_config import FILE_TYPES
+    # ファイルタイプごとの短い日本語ラベル
+    FILE_TYPE_LABELS = {
+        "MAIN_IMAGE": "MAIN",
+        "STRUCTURED": "STRCT",
+        "NONSHARED_RAW": "NOSHARE",
+        "RAW": "RAW",
+        "META": "META",
+        "ATTACHEMENT": "ATTACH",
+        "THUMBNAIL": "THUMB",
+        "OTHER": "OTHER"
+    }
+    base_headers = ["No", "名前", "説明", "ファイル", "画像", "作成日"]
+    filetype_headers = [f"{FILE_TYPE_LABELS.get(ft, ft)}" for ft in FILE_TYPES]
+    all_headers = base_headers + filetype_headers + ["ブラウザ"]
     entry_table = QTableWidget()
-    entry_table.setColumnCount(7)  # ブラウザリンク列を追加
-    entry_table.setHorizontalHeaderLabels([
-        "データ番号", "名前", "説明", "ファイル数", "画像ファイル数", "作成日", "ブラウザで開く"
-    ])
-    
+    entry_table.setColumnCount(len(all_headers))
+    entry_table.setHorizontalHeaderLabels(all_headers)
     # テーブルの設定
     header = entry_table.horizontalHeader()
-    header.setStretchLastSection(True)
-    header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # データ番号
-    header.setSectionResizeMode(1, QHeaderView.Stretch)  # 名前
-    header.setSectionResizeMode(2, QHeaderView.Stretch)  # 説明
-    header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # ファイル数
-    header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # 画像ファイル数
-    header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # 作成日
-    header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # ブラウザリンク
-    header.setSectionResizeMode(2, QHeaderView.Stretch)  # 説明
-    header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # ファイル数
-    header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # 画像ファイル数
-    header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # 作成日
-    
+    # 各列の幅を内容に応じて自動調整（可変）
+    for col in range(len(all_headers)):
+        header.setSectionResizeMode(col, QHeaderView.ResizeToContents)
+    header.setStretchLastSection(False)
     entry_table.setAlternatingRowColors(True)
     entry_table.setSelectionBehavior(QTableWidget.SelectRows)
     entry_table.setSortingEnabled(True)
     entry_table.setMinimumHeight(300)
+    # 列ヘッダの折り返し表示（word-wrap）
+    entry_table.horizontalHeader().setDefaultAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+    entry_table.setWordWrap(True)
+    # ヘッダのスタイルで折り返しを強制
+    entry_table.setStyleSheet("QHeaderView::section { padding: 4px; white-space: normal; }")
     
     info_layout.addWidget(entry_table)
     info_group.setLayout(info_layout)
@@ -547,17 +556,67 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
             
             # テーブルにデータを設定
             entry_table.setRowCount(entry_count)
-            
+            from classes.data_fetch2.conf.file_filter_config import FILE_TYPES
+            base_col_count = 6  # データ番号, 名前, 説明, ファイル数, 画像ファイル数, 作成日
             for row, entry in enumerate(data.get('data', [])):
                 attributes = entry.get('attributes', {})
-                
-                # データ番号
                 data_number = str(attributes.get('dataNumber', ''))
                 entry_table.setItem(row, 0, QTableWidgetItem(data_number))
-                
-                # 名前
                 name = attributes.get('name', '')
                 entry_table.setItem(row, 1, QTableWidgetItem(name))
+                description = attributes.get('description', '')
+                entry_table.setItem(row, 2, QTableWidgetItem(description))
+                num_files = str(attributes.get('numberOfFiles', 0))
+                entry_table.setItem(row, 3, QTableWidgetItem(num_files))
+                num_image_files = str(attributes.get('numberOfImageFiles', 0))
+                entry_table.setItem(row, 4, QTableWidgetItem(num_image_files))
+                # 作成日: 'createdAt' または 'created' を参照
+                created_at = attributes.get('createdAt') or attributes.get('created') or ''
+                if created_at:
+                    try:
+                        dt = datetime.datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        formatted_date = dt.strftime('%Y-%m-%d')
+                    except Exception:
+                        formatted_date = created_at
+                else:
+                    formatted_date = '--'
+                entry_table.setItem(row, 5, QTableWidgetItem(formatted_date))
+                # --- fileTypeごとのファイル数集計 ---
+                included = data.get('included', [])
+                entry_id = entry.get('id', '')
+                # entryのrelationships.files.dataからファイルIDリストを取得
+                file_ids = set()
+                rel_files = entry.get('relationships', {}).get('files', {}).get('data', [])
+                for fobj in rel_files:
+                    if isinstance(fobj, dict) and fobj.get('type') == 'file' and fobj.get('id'):
+                        file_ids.add(fobj['id'])
+                # included配列からidがfile_idsに含まれるfile要素を抽出
+                files_for_entry = [f for f in included if f.get('type') == 'file' and f.get('id') in file_ids]
+                # デバッグ出力
+                print(f"[DEBUG] entry_id={entry_id} name={name} data_number={data_number} file_ids={list(file_ids)}")
+                print(f"  [DEBUG] files_for_entry count={len(files_for_entry)} ids={[f.get('id') for f in files_for_entry]}")
+                filetype_counts = {ft: 0 for ft in FILE_TYPES}
+                for f in files_for_entry:
+                    ft = f.get('attributes', {}).get('fileType')
+                    print(f"    [DEBUG] file id={f.get('id')} fileType={ft}")
+                    if ft in filetype_counts:
+                        filetype_counts[ft] += 1
+                print(f"  [DEBUG] filetype_counts={filetype_counts}")
+                # fileTypeカウント列はすべてsetItemで数値のみ（ボタン禁止）
+                for i, ft in enumerate(FILE_TYPES):
+                    item = QTableWidgetItem(str(filetype_counts[ft]))
+                    entry_table.setItem(row, base_col_count + i, item)
+                # 「ブラウザ」列のみsetCellWidgetでボタン
+                browser_col = base_col_count + len(FILE_TYPES)
+                link_button = QPushButton("開く")
+                link_button.setStyleSheet("background-color: #4CAF50; color: white; font-size: 10px; padding: 2px 6px; border-radius: 3px;")
+                def create_link_handler(entry_id):
+                    def on_link_click():
+                        url = f"https://rde.nims.go.jp/rde/datasets/data/{entry_id}"
+                        QDesktopServices.openUrl(QUrl(url))
+                    return on_link_click
+                link_button.clicked.connect(create_link_handler(entry_id))
+                entry_table.setCellWidget(row, browser_col, link_button)
                 
                 # 説明
                 description = attributes.get('description', '')
@@ -571,74 +630,7 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
                 num_image_files = str(attributes.get('numberOfImageFiles', 0))
                 entry_table.setItem(row, 4, QTableWidgetItem(num_image_files))
                 
-                # 作成日
-                created_at = attributes.get('createdAt', '')
-                if created_at:
-                    try:
-                        # ISO形式の日時を読みやすい形式に変換
-                        dt = datetime.datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                        formatted_date = dt.strftime('%Y-%m-%d %H:%M')
-                    except:
-                        formatted_date = created_at
-                else:
-                    formatted_date = ''
-                entry_table.setItem(row, 5, QTableWidgetItem(formatted_date))
-                
-                # ブラウザリンクボタン
-                link_button = QPushButton("開く")
-                link_button.setStyleSheet("background-color: #4CAF50; color: white; font-size: 10px; padding: 2px 6px; border-radius: 3px;")
-                entry_id = entry.get('id', '')
-                
-                # ボタンクリック時のイベントハンドラ
-                def create_link_handler(entry_id):
-                    def on_link_click():
-                        url = f"https://rde.nims.go.jp/rde/datasets/data/{entry_id}"
-                        QDesktopServices.openUrl(QUrl(url))
-                    return on_link_click
-                
-                link_button.clicked.connect(create_link_handler(entry_id))
-                entry_table.setCellWidget(row, 6, link_button)
-                
-                # 説明
-                description = attributes.get('description', '')
-                entry_table.setItem(row, 2, QTableWidgetItem(description))
-                
-                # ファイル数
-                num_files = str(attributes.get('numberOfFiles', 0))
-                entry_table.setItem(row, 3, QTableWidgetItem(num_files))
-                
-                # 画像ファイル数
-                num_image_files = str(attributes.get('numberOfImageFiles', 0))
-                entry_table.setItem(row, 4, QTableWidgetItem(num_image_files))
-                
-                # 作成日
-                created_at = attributes.get('createdAt', '')
-                if created_at:
-                    try:
-                        # ISO形式の日時を読みやすい形式に変換
-                        dt = datetime.datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                        formatted_date = dt.strftime('%Y-%m-%d %H:%M')
-                    except:
-                        formatted_date = created_at
-                else:
-                    formatted_date = ''
-                entry_table.setItem(row, 5, QTableWidgetItem(formatted_date))
-                
-                # ブラウザリンクボタン
-                link_button = QPushButton("開く")
-                link_button.setStyleSheet("background-color: #4CAF50; color: white; font-size: 10px; padding: 2px 6px; border-radius: 3px;")
-                entry_id = entry.get('id', '')
-                
-                # ボタンクリック時のイベントハンドラ
-                def create_link_handler(entry_id):
-                    def on_link_click():
-                        url = f"https://rde.nims.go.jp/rde/datasets/data/{entry_id}"
-                        QDesktopServices.openUrl(QUrl(url))
-                    return on_link_click
-                
-                link_button.clicked.connect(create_link_handler(entry_id))
-                entry_table.setCellWidget(row, 6, link_button)
-            
+           
         except Exception as e:
             print(f"[ERROR] データエントリー情報表示エラー: {e}")
             dataset_info_label.setText(f"データセット: {dataset_id} (表示エラー)")
@@ -703,54 +695,72 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
             
             entry_table.setRowCount(len(all_entries))
             
+            from classes.data_fetch2.conf.file_filter_config import FILE_TYPES
+            FILE_TYPE_LABELS = {
+                "MAIN_IMAGE": "MAIN",
+                "STRUCTURED": "STRCT",
+                "NONSHARED_RAW": "NOSHARE",
+                "RAW": "RAW",
+                "META": "META",
+                "ATTACHEMENT": "ATTACH",
+                "THUMBNAIL": "THUMB",
+                "OTHER": "OTHER"
+            }
+            base_col_count = 6
             for row, entry in enumerate(all_entries):
                 attributes = entry.get('attributes', {})
-                
-                # データ番号（データセットID付き）
                 data_number = f"{entry.get('dataset_id', '')}-{attributes.get('dataNumber', '')}"
                 entry_table.setItem(row, 0, QTableWidgetItem(data_number))
-                
-                # 名前
                 name = attributes.get('name', '')
                 entry_table.setItem(row, 1, QTableWidgetItem(name))
-                
-                # 説明
                 description = attributes.get('description', '')
                 entry_table.setItem(row, 2, QTableWidgetItem(description))
-                
-                # ファイル数
                 num_files = str(attributes.get('numberOfFiles', 0))
                 entry_table.setItem(row, 3, QTableWidgetItem(num_files))
-                
-                # 画像ファイル数
                 num_image_files = str(attributes.get('numberOfImageFiles', 0))
                 entry_table.setItem(row, 4, QTableWidgetItem(num_image_files))
-                
-                # 作成日
-                created_at = attributes.get('createdAt', '')
+                # 作成日: 'createdAt' または 'created' を参照
+                created_at = attributes.get('createdAt') or attributes.get('created') or ''
                 if created_at:
                     try:
                         dt = datetime.datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                        formatted_date = dt.strftime('%Y-%m-%d %H:%M')
-                    except:
+                        formatted_date = dt.strftime('%Y-%m-%d')
+                    except Exception:
                         formatted_date = created_at
                 else:
-                    formatted_date = ''
+                    formatted_date = '----'
                 entry_table.setItem(row, 5, QTableWidgetItem(formatted_date))
-                
-                # ブラウザリンクボタン
+
+                # --- fileTypeごとのファイル数集計 ---
+                included = entry.get('included', []) if 'included' in entry else []
+                entry_id = entry.get('id', '')
+                file_ids = set()
+                rel_files = entry.get('relationships', {}).get('files', {}).get('data', [])
+                for fobj in rel_files:
+                    if isinstance(fobj, dict) and fobj.get('type') == 'file' and fobj.get('id'):
+                        file_ids.add(fobj['id'])
+                files_for_entry = [f for f in included if f.get('type') == 'file' and f.get('id') in file_ids]
+                filetype_counts = {ft: 0 for ft in FILE_TYPES}
+                for f in files_for_entry:
+                    ft = f.get('attributes', {}).get('fileType')
+                    if ft in filetype_counts:
+                        filetype_counts[ft] += 1
+                # fileTypeカウント列はすべてsetItemで数値のみ（ボタン禁止）
+                for i, ft in enumerate(FILE_TYPES):
+                    item = QTableWidgetItem(str(filetype_counts[ft]))
+                    entry_table.setItem(row, base_col_count + i, item)
+                # 「ブラウザ」列のみsetCellWidgetでボタン
+                browser_col = base_col_count + len(FILE_TYPES)
                 link_button = QPushButton("開く")
                 link_button.setStyleSheet("background-color: #4CAF50; color: white; font-size: 10px; padding: 2px 6px; border-radius: 3px;")
                 entry_id = entry.get('id', '')
-                
                 def create_link_handler(entry_id):
                     def on_link_click():
                         url = f"https://rde.nims.go.jp/rde/datasets/data/{entry_id}"
                         QDesktopServices.openUrl(QUrl(url))
                     return on_link_click
-                
                 link_button.clicked.connect(create_link_handler(entry_id))
-                entry_table.setCellWidget(row, 6, link_button)
+                entry_table.setCellWidget(row, browser_col, link_button)
             
         except Exception as e:
             QMessageBox.critical(widget, "エラー", f"全エントリー表示中にエラーが発生しました:\n{e}")

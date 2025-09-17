@@ -11,8 +11,12 @@ FILE_TYPES = [
     "STRUCTURED", 
     "NONSHARED_RAW",
     "RAW",
-    "META"
+    "META",
+    "ATTACHEMENT",
+    "THUMBNAIL"
 ]
+
+
 
 # メディアタイプ選択肢（実データから）
 MEDIA_TYPES = [

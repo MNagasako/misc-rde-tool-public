@@ -59,7 +59,7 @@ def create_dataset_open_widget(parent, title, color, create_auto_resize_button):
     try:
         from classes.dataset.ui.dataset_dataentry_widget_minimal import create_dataset_dataentry_widget
         dataentry_tab = create_dataset_dataentry_widget(parent, "データエントリー", color, create_auto_resize_button)
-        tab_widget.addTab(dataentry_tab, "データエントリー")
+        tab_widget.addTab(dataentry_tab, "タイル（データエントリー）")
         
     except Exception as e:
         print(f"[WARNING] データエントリータブの作成に失敗: {e}")
