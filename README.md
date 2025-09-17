@@ -74,6 +74,7 @@
 
 ---
 
+> 以降の手順・画面例は一部古い内容が含まれる場合があります。最新の機能・仕様は上記各章を参照してください。
 ## インストール
 
 1. [Releases](https://github.com/MNagasako/misc-rde-tool-public/releases) から最新版 ZIP をダウンロード
@@ -83,14 +84,28 @@
 
 > 詳細は `input-sample/` および `docs/` を参照してください。
 
----
 
-## 設定
+### バージョンアップ時の注意
 
+* `INPUT`・`OUTPUT` はそのまま、EXE のみ差し替えで可。
+* 保存形式が変わる場合があるため、更新後はあらためて「データ取得の事前準備」を実行してください。
+
+###  初回起動時の警告
+
+Windows のセキュリティ警告やアンチウイルスによりブロックされる場合は、必要に応じて例外設定を行ってください。
+
+<img width="532" height="498" alt="2025-07-31_18h22_53" src="https://github.com/user-attachments/assets/5117baeb-973c-4a7d-aed6-8f2d58400f26" />
+<img width="532" height="498" alt="2025-07-31_18h23_02" src="https://github.com/user-attachments/assets/56e2ecce-466c-420e-ba84-95fc0eceacb5" />
+
+
+##  使い方
+### 0. 設定
 <img width="1062" height="1004" alt="2025-09-17_11h16_05" src="https://github.com/user-attachments/assets/0991e17a-62aa-461d-bc64-8983c694b384" />
 <img width="1062" height="1004" alt="2025-09-17_11h17_17" src="https://github.com/user-attachments/assets/65baed9c-e52e-4cb6-9999-5ac6ad100267" />
 
 * 必要に応じてプロキシ設定を行ってください。通常のブラウザでインターネットアクセスできていれば本ツールも使用可能です（認証付きプロキシは未対応）。
+
+
 
 > **自動ログイン設定について**
 >
@@ -108,39 +123,21 @@
 
 ---
 
-## クイックスタート / 使い方
 
-> 本章以降の手順・画面例は一部古い内容が含まれる場合があります。最新の機能・仕様は上記各章を参照してください。
-
-### 1. データ取得の事前準備（必須）
-
-* **基本情報取得（ALL または 検索）**
-* **サンプル情報強制取得**
-* **invoice\_schema 取得**
-
-初回は 20–30 分かかる場合があります。短縮したい場合は「基本情報取得（検索）」で課題番号プリフィックス等により絞り込みを推奨。既存データはスキップされます。
-
-### 2. バージョンアップ時の注意
-
-* `INPUT`・`OUTPUT` はそのまま、EXE のみ差し替えで可。
-* 保存形式が変わる場合があるため、更新後はあらためて「データ取得の事前準備」を実行してください。
-
-### 3. 初回起動時の警告
-
-Windows のセキュリティ警告やアンチウイルスによりブロックされる場合は、必要に応じて例外設定を行ってください。
-
-<img width="532" height="498" alt="2025-07-31_18h22_53" src="https://github.com/user-attachments/assets/5117baeb-973c-4a7d-aed6-8f2d58400f26" />
-<img width="532" height="498" alt="2025-07-31_18h23_02" src="https://github.com/user-attachments/assets/56e2ecce-466c-420e-ba84-95fc0eceacb5" />
-
-### 4. 基本情報取得
-
+### 1. 基本情報
+**データ取得の事前準備（必須）**
 <img width="1062" height="925" alt="2025-08-22_13h50_22" src="https://github.com/user-attachments/assets/bb481a4b-3585-409e-bad3-1941694ee20d" />
 
 * RDE サーバー上のデータをローカルに一括取得し、検索機能を有効化します。
 * 初回は時間を要しますが、既存ファイルはスキップされます。
 * 強制再取得が必要な場合は対象ファイルを削除して再実行してください。
+* 初回は 20–30 分かかる場合があります。短縮したい場合は「基本情報取得（検索）」で課題番号プリフィックス等により絞り込みを推奨。既存データはスキップされます。
 
-### 5. データ取得（旧方式）
+1. **基本情報取得（ALL または 検索）** を実行
+2. **サンプル情報強制取得**　を実行
+3. **invoice_schema 取得**　を実行
+
+### 2. データ取得（旧方式）
 
 * 内蔵 **WebView** を用いて RDE の画面にアクセスし、**BLOB 画像を保存**する実装です。**パフォーマンス上の制約**があり、環境によっては取得に時間がかかります。
 * 後述の **新方式（API 直接ダウンロード）** の利用を推奨します。
@@ -148,7 +145,7 @@ Windows のセキュリティ警告やアンチウイルスによりブロック
 2. **実行ボタン**をクリックすると、関連するデータセットと、それに紐付いた **データエントリー（タイル）** の情報を取得します。
 3. **保存先フォルダを開く**ボタンで、保存フォルダを開けます。
 
-### 6. データ取得 2（新方式）
+### 3. データ取得 2（新方式）
 
 <img width="1062" height="632" alt="2025-09-17_11h08_48" src="https://github.com/user-attachments/assets/4d1ff881-9c61-4673-acd3-a22f1ca4b1b3" />
 <img width="1062" height="632" alt="2025-09-17_11h08_58" src="https://github.com/user-attachments/assets/6865cdfe-dd10-400e-8c0d-30597bb85712" />
@@ -164,7 +161,7 @@ Windows のセキュリティ警告やアンチウイルスによりブロック
 * ファイルタイプ・メディアタイプ・拡張子・サイズ・名称・上限数でダウンロードするファイルを指定できます。
 * フィルタを指定してからデータ取得タブで一括取得を実行してください。
 
-### 7. サブグループ（研究グループ）
+### 4. サブグループ（研究グループ）
 
 <img width="1062" height="1004" alt="2025-09-17_11h26_44" src="https://github.com/user-attachments/assets/1c1a5902-7bae-43ab-8c75-36ad7a6d8c6c" />
 <img width="1062" height="1004" alt="2025-09-17_11h26_54" src="https://github.com/user-attachments/assets/9ddfe44b-0726-439a-9f3a-7b13d5783dc4" />
@@ -183,7 +180,7 @@ Windows のセキュリティ警告やアンチウイルスによりブロック
    * **RDE サブグループページを開く**：RDE 上の同ページを開きます（事前ログイン要）。
    * **関連試料抽出**：所属試料一覧を表示し、クリックでサンプルページを開きます。
 
-### 8. データセット
+### 5. データセット
 <img width="1062" height="1004" alt="2025-09-17_13h01_58" src="https://github.com/user-attachments/assets/f460aa2c-fdea-4d1c-98d0-8cb4be80b324" />
 <img width="1062" height="1004" alt="2025-09-17_13h02_48" src="https://github.com/user-attachments/assets/2efcddbf-8d8d-442f-ab9e-221fa1325702" />
 <img width="1062" height="1004" alt="2025-09-17_13h03_26" src="https://github.com/user-attachments/assets/e18f6e21-f6ea-4712-925b-e25afd0d57f5" />
@@ -234,7 +231,7 @@ Windows のセキュリティ警告やアンチウイルスによりブロック
 
 
 
-### 9. データ登録
+### 6. データ登録
 <img width="1062" height="1004" alt="2025-09-17_13h04_57" src="https://github.com/user-attachments/assets/721c7456-86a3-48e8-b72b-98cae744b800" />
 <img width="1730" height="1004" alt="2025-09-17_13h06_45" src="https://github.com/user-attachments/assets/f6402182-f7b1-4303-943d-e80cd768683c" />
 
@@ -264,7 +261,7 @@ Windows のセキュリティ警告やアンチウイルスによりブロック
 
 
 
-### 10. AI テスト
+### 7. AI テスト
 
 <img width="1062" height="832" alt="2025-08-22_14h31_56" src="https://github.com/user-attachments/assets/c5dae4c6-b4cb-4341-93bd-45f0381d57bd" />
 <img width="1062" height="832" alt="2025-08-22_14h33_31" src="https://github.com/user-attachments/assets/1f58b255-b30d-4623-8f75-d7503e391e32" />
