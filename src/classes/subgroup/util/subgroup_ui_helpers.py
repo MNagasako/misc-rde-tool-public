@@ -141,7 +141,7 @@ class SubgroupFormBuilder:
                 "一括作成", 200, 40, self.button_style
             )
             button_bulk.clicked.connect(handlers['bulk'])
-            button_row.addWidget(button_bulk)
+            #button_row.addWidget(button_bulk)
         
         # 手動作成/更新ボタン
         if 'manual' in handlers:

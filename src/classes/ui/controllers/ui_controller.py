@@ -997,7 +997,7 @@ class UIController(UIControllerCore):
             # XLSX反映ボタン
             apply_basic_info_btn = self.create_auto_resize_button("📄 XLSX反映", 180, 40, xlsx_button_style)
             apply_basic_info_btn.clicked.connect(self.apply_basic_info_to_Xlsx)
-            btn_layout2.addWidget(apply_basic_info_btn)
+            # btn_layout2.addWidget(apply_basic_info_btn)
             
             # まとめXLSXボタン
             summary_basic_info_btn = self.create_auto_resize_button("📋 まとめXLSX", 180, 40, xlsx_button_style)
