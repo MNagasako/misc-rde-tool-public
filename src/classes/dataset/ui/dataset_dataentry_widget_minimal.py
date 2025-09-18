@@ -58,12 +58,12 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
     grant_filter_layout = QHBoxLayout()
     grant_filter_layout.setContentsMargins(0, 0, 0, 0)
     
-    grant_filter_label = QLabel("グラント番号:")
+    grant_filter_label = QLabel("課題番号:")
     grant_filter_label.setMinimumWidth(120)
     grant_filter_label.setStyleSheet("font-weight: bold;")
     
     grant_filter_input = QLineEdit()
-    grant_filter_input.setPlaceholderText("グラント番号で絞り込み（部分一致）")
+    grant_filter_input.setPlaceholderText("課題番号で絞り込み（部分一致）")
     grant_filter_input.setMinimumWidth(200)
     
     grant_filter_layout.addWidget(grant_filter_label)

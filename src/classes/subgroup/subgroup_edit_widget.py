@@ -13,12 +13,12 @@ from PyQt5.QtWidgets import (
 from config.common import SUBGROUP_JSON_PATH
 from PyQt5.QtCore import Qt
 from classes.dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
-from .subgroup_ui_helpers import (
+from .util.subgroup_ui_helpers import (
     SubjectInputValidator, SubgroupFormBuilder, 
     SubgroupCreateHandler, MemberDataProcessor,
     show_selected_user_ids, load_user_entries
 )
-from .subgroup_member_selector_common import create_common_subgroup_member_selector
+from .util.subgroup_member_selector_common import create_common_subgroup_member_selector
 from . import subgroup_api_helper
 
 

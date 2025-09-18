@@ -193,8 +193,9 @@ def get_user_grant_numbers():
                 user_in_group = False
                 for r in roles:
                     if r.get("userId") == user_id:
-                        user_in_group = True
-                        break
+                        if r.get("role") in ["OWNER", "ASSISTANT"]:
+                            user_in_group = True
+                            break
                 
                 if user_in_group:
                     # このグループのgrantNumbersを取得

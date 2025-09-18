@@ -434,7 +434,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
         if progress:
             progress.setLabelText("エントリー登録バリデーション中...")
             QCoreApplication.processEvents()
-        resp_validation = api_request("POST", url_validation, bearer_token=bearer_token, headers=headers, json_data=payload)  # refactored to use api_request_helper
+        resp_validation = api_request("POST", url_validation, bearer_token=bearer_token, headers=headers, json_data=payload, timeout=60)  # refactored to use api_request_helper
         if resp_validation is None:
             if progress:
                 progress.setLabelText("バリデーションエラー: リクエスト失敗")
@@ -454,7 +454,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
             msg_box.setIcon(QMessageBox.Critical)
             msg_box.setWindowTitle("バリデーション通信エラー")
             msg_box.setText("バリデーション処理でサーバーとの通信に失敗しました。")
-            msg_box.setInformativeText("ネットワーク接続とトークンの有効性を確認してください。")
+            msg_box.setInformativeText("ネットワーク接続とトークンの有効性を確認してください。\nRDEサーバーと構造化サーバー間でタイムアウトが発生している場合は登録は完了している可能性があります。\nRDEサイトを確認してください。")
             msg_box.setStandardButtons(QMessageBox.Ok)
             msg_box.exec_()
             
@@ -491,7 +491,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
         if progress:
             progress.setLabelText("エントリー本体POST中...")
             QCoreApplication.processEvents()
-        resp = api_request("POST", url, bearer_token=bearer_token, headers=headers, json_data=payload)  # refactored to use api_request_helper
+        resp = api_request("POST", url, bearer_token=bearer_token, headers=headers, json_data=payload, timeout=60)  # refactored to use api_request_helper
         if resp is None:
             if progress:
                 progress.setLabelText("POSTエラー: リクエスト失敗")
@@ -511,7 +511,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
             msg_box.setIcon(QMessageBox.Critical)
             msg_box.setWindowTitle("通信エラー")
             msg_box.setText("サーバーとの通信に失敗しました。")
-            msg_box.setInformativeText("ネットワーク接続とトークンの有効性を確認してください。")
+            msg_box.setInformativeText("ネットワーク接続とトークンの有効性を確認してください。\nRDEサーバーと構造化サーバー間でタイムアウトが発生している場合は登録は完了している可能性があります。\nRDEサイトを確認してください。")
             msg_box.setStandardButtons(QMessageBox.Ok)
             msg_box.exec_()
             
