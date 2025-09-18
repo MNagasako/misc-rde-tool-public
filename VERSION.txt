@@ -14,10 +14,13 @@ arim_rde_tool v1.17.2
 arim_rde_tool v1.17.1
 2025-09-10
 
-arim_rde_tool v1.16.0
-2025-09-01
-- 【動的ユーザー管理機能実装】rde-member.txtを読み取り専用化、動的追加ユーザーはoutput/temp/dynamic_users.jsonに保存
 - 【API補完機能統合】subGroup.json内の不完全ユーザーデータ（IDのみ）をNIMS User APIで詳細データ自動補完
+arim_rde_tool v1.17.6
+2025-09-18
+
+arim_rde_tool v1.17.5
+2025-09-17
+- 安定性向上・細かなバグ修正・ドキュメント整理
 - 【認証情報ストア統合】Bearer token連携・WebView認証後のAPI呼び出し・安全な認証情報管理
 - 【透過的統合】既存の作成/編集タブで自動的にAPI補完が動作・ユーザー体験向上
 - 【フォールバック機能】API呼び出し失敗時は既存データを保持・エラー耐性を確保
