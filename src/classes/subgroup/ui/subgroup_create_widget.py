@@ -321,7 +321,7 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     
     # ボタン作成
     button_bulk, button_manual = form_builder.build_button_row({
-        'bulk': on_create_subgroup_bulk,
+        # 'bulk': on_create_subgroup_bulk,
         'manual': on_create_subgroup_manual
     })
 

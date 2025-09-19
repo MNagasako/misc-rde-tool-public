@@ -326,11 +326,11 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     combo_layout.setContentsMargins(0, 0, 0, 0)
     
     show_all_btn = QPushButton("全件表示")
-    show_all_btn.setMaximumWidth(80)
-    show_all_btn.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold; border-radius: 4px; padding: 5px;")
+    #show_all_btn.setMaximumWidth(80)
+    #show_all_btn.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold; border-radius: 4px; padding: 5px;")
     
     combo_layout.addWidget(combo)
-    combo_layout.addWidget(show_all_btn)
+    #combo_layout.addWidget(show_all_btn)
     combo_container.setLayout(combo_layout)
     
     layout.addWidget(combo_container)
@@ -507,14 +507,9 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
     """
     widget = QWidget(parent)
     layout = QVBoxLayout(widget)
-    label = QLabel("データ取得2機能")
-    label.setStyleSheet("font-size: 16px; font-weight: bold; color: #1976d2; padding: 10px;")
-    layout.addWidget(label)
-
 
     # dataset.jsonのパス
     dataset_json_path = os.path.normpath(os.path.join(OUTPUT_DIR, 'rde/data/dataset.json'))
-    # info.jsonは不要
 
     # dataset.jsonの絶対パスを表示
     dataset_json_abspath = os.path.abspath(dataset_json_path)

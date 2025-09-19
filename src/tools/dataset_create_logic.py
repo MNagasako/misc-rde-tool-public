@@ -1,11 +1,11 @@
-# データセット開設実行ボタンのロジック（ポップアップ表示のみ）
+# データセット開設ボタンのロジック（ポップアップ表示のみ）
 # ファイル名: dataset_create_logic.py
 
 from PyQt5.QtWidgets import QMessageBox
 
 def show_dataset_create_popup(parent=None):
     """
-    データセット開設実行ボタン押下時にポップアップを表示するロジック
+    データセット開設ボタン押下時にポップアップを表示するロジック
     """
     QMessageBox.information(
         parent,

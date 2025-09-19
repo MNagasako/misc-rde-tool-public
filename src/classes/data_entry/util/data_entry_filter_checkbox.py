@@ -510,10 +510,10 @@ def create_checkbox_filter_dropdown(parent=None):
     filter_layout.addWidget(filter_label)
     
     # 権限フィルタのチェックボックス
-    checkbox_owner = QCheckBox("👑 OWNER")
-    checkbox_assistant = QCheckBox("💁 ASSISTANT") 
-    checkbox_member = QCheckBox("👥 MEMBER")
-    checkbox_agent = QCheckBox("🤖 AGENT")
+    checkbox_owner = QCheckBox("👑 管理者")
+    checkbox_assistant = QCheckBox("💁 管理者代理") 
+    checkbox_member = QCheckBox("👥 チームメンバ")
+    checkbox_agent = QCheckBox("🤖 登録代行者")
     
     # 初期状態では全てチェック
     checkbox_owner.setChecked(True)
@@ -567,7 +567,7 @@ def create_checkbox_filter_dropdown(parent=None):
     
     # データ読み込みと初期表示
     def update_filtered_datasets():
-        """チェックボックスフィルタを適用してデータセット一覧を更新"""
+        """フィルタを適用してデータセット一覧を更新"""
         combo.clear()
         
         # 現在のユーザーIDを取得
@@ -600,7 +600,7 @@ def create_checkbox_filter_dropdown(parent=None):
             # 最適化版フィルタリング実行（事前抽出されたデータセットのみ対象）
             status_label.setText(f"🔍 高速フィルタリング中...")
             
-            # 最適化されたチェックボックスフィルタリング実行
+            # 最適化されたフィルタリング実行
             filtered_datasets = filter_datasets_by_checkbox_selection_optimized(current_user_id, selected_roles)
             
             # ドロップダウンの更新

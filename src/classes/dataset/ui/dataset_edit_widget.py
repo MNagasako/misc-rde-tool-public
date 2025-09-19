@@ -298,7 +298,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
     dataset_selection_layout = QHBoxLayout()
     dataset_selection_layout.setContentsMargins(0, 0, 0, 0)
     
-    existing_dataset_label = QLabel("修正するデータセットを選択:")
+    existing_dataset_label = QLabel("表示するデータセット:")
     existing_dataset_label.setMinimumWidth(150)
     existing_dataset_combo = QComboBox()
     existing_dataset_combo.setMinimumWidth(650)  # 幅を広げてID表示対応
@@ -1271,7 +1271,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         checkbox_layout.addWidget(edit_anonymize_checkbox, 0, 0)
         
         edit_data_entry_prohibited_checkbox = QCheckBox("データ登録を禁止する")
-        checkbox_layout.addWidget(edit_data_entry_prohibited_checkbox, 0, 1)
+        # checkbox_layout.addWidget(edit_data_entry_prohibited_checkbox, 0, 1)
         
         # データ登録及び削除を禁止するチェックボックスを追加
         edit_data_entry_delete_prohibited_checkbox = QCheckBox("データの登録及び削除を禁止する")
@@ -1282,6 +1282,8 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         checkbox_layout.addWidget(edit_share_core_scope_checkbox, 1, 1)
         
         checkbox_widget.setLayout(checkbox_layout)
+        
+        form_layout.addWidget(QLabel("共有範囲/利用制限:"), 14, 0)
         form_layout.addWidget(checkbox_widget, 14, 1)
         
         form_widget.setLayout(form_layout)

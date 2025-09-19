@@ -723,7 +723,7 @@ class UIController(UIControllerCore):
                 self.parent.autologin_msg_label.setVisible(True)
             if hasattr(self.parent, 'webview_msg_label'):
                 self.parent.webview_msg_label.setVisible(True)
-        elif mode in ["subgroup_create", "basic_info", "dataset_open", "data_register", "settings", "ai_test"]:
+        elif mode in ["subgroup_create", "basic_info", "dataset_open", "data_register", "settings", "ai_test", "data_fetch2"]:
             # WebView本体を非表示
             if hasattr(self.parent, 'webview'):
                 self.parent.webview.setVisible(False)
@@ -737,7 +737,7 @@ class UIController(UIControllerCore):
                 self.parent.overlay_manager.hide_overlay()
 
             # サブグループ・データセット・基本情報・設定モードは初期高さをディスプレイの90%に設定（後から変更可）
-            if mode in ["subgroup_create", "dataset_open", "basic_info", "settings"]:
+            if mode in ["subgroup_create", "basic_info", "dataset_open", "data_register", "settings", "ai_test", "data_fetch2"]:
                 try:
                     from PyQt5.QtWidgets import QApplication
                     screen = QApplication.primaryScreen()
@@ -748,6 +748,19 @@ class UIController(UIControllerCore):
                             top_level.resize(top_level.width(), max_height)
                 except Exception as e:
                     print(f"[DEBUG] 初期高さ90%リサイズ失敗: {e}")
+
+            # データセットは初期幅をディスプレイの75%に設定（後から変更可）
+            if mode in [ "dataset_open" ]:
+                try:
+                    from PyQt5.QtWidgets import QApplication
+                    screen = QApplication.primaryScreen()
+                    if screen:
+                        screen_geometry = screen.geometry()
+                        max_width = int(screen_geometry.width() * 0.75)
+                        if top_level and hasattr(top_level, 'resize'):
+                            top_level.resize(max_width, top_level.height())
+                except Exception as e:
+                    print(f"[DEBUG] 初期幅75%リサイズ失敗: {e}")
 
         elif mode == "data_fetch":
             # データ取得モード：WebViewを表示してオーバーレイも表示

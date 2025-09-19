@@ -143,12 +143,30 @@ class SubgroupFormBuilder:
             button_bulk.clicked.connect(handlers['bulk'])
             #button_row.addWidget(button_bulk)
         
-        # 手動作成/更新ボタン
+        # サブグループ作成ボタン
         if 'manual' in handlers:
-            manual_text = handlers.get('manual_text', '作成')
+            manual_text = handlers.get('manual_text', 'サブグループ作成')
             button_manual = self.create_auto_resize_button(
                 manual_text, 200, 40, self.button_style
             )
+            from PyQt5.QtWidgets import QSizePolicy
+            button_manual.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            button_manual.setStyleSheet("""
+                QPushButton {
+                    background-color: #1976d2;
+                    color: white;
+                    font-weight: bold;
+                    font-size: 13px;
+                    border-radius: 6px;
+                    padding: 8px 20px;
+                }
+                QPushButton:hover {
+                    background-color: #1565c0;
+                }
+                QPushButton:pressed {
+                    background-color: #0d47a1;
+                }
+            """)
             button_manual.clicked.connect(handlers['manual'])
             button_row.addWidget(button_manual)
         

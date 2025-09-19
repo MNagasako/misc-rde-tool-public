@@ -2170,8 +2170,8 @@ class BatchRegisterWidget(QWidget):
         self.scroll_widget = QWidget()  # クラス属性として保存
         scroll_layout = QVBoxLayout()
         
-        # データエントリー基本情報
-        data_group = QGroupBox("データエントリー基本情報")
+        # 基本情報
+        data_group = QGroupBox("基本情報")
         data_layout = QGridLayout()
         
         data_layout.addWidget(QLabel("データ名:"), 0, 0)

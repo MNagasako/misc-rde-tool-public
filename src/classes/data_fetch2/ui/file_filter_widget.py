@@ -54,7 +54,7 @@ class FileFilterWidget(QWidget):
         # スクロールエリア
         scroll_area = QScrollArea(self)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setMinimumHeight(400)
+        scroll_area.setMinimumHeight(600)
         
         # メインコンテンツ
         content_widget = QWidget()

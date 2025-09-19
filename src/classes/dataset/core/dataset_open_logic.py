@@ -234,12 +234,13 @@ def create_group_select_widget(parent=None):
     
     # フィルタ選択UI
     filter_combo = QComboBox(parent)
-    filter_combo.addItem("メンバー（何らかの役割を持つ）", "member")
-    filter_combo.addItem("フィルタなし（全てのグループ）", "none")
-    filter_combo.addItem("OWNER のみ", "owner")
-    filter_combo.addItem("ASSISTANT のみ", "assistant")
-    filter_combo.addItem("OWNER または ASSISTANT", "owner_assistant")
-    filter_combo.addItem("OWNER、ASSISTANT、MEMBER、AGENT、VIEWER", "all_roles")
+    #filter_combo.addItem("メンバー（何らかの役割を持つ）", "member")
+    #filter_combo.addItem("フィルタなし（全てのグループ）", "none")
+    filter_combo.addItem("管理者 または 管理者代理", "owner_assistant")
+    filter_combo.addItem("管理者 のみ", "owner")
+    filter_combo.addItem("管理者代理 のみ", "assistant")
+
+    #filter_combo.addItem("管理者、管理者代理、メンバー、登録代行者、閲覧者", "all_roles")
     filter_combo.setCurrentIndex(0)  # デフォルト：メンバー
     
     # 初期グループリスト設定
@@ -571,7 +572,23 @@ def create_group_select_widget(parent=None):
     name_edit.setStyleSheet("color: #228B22;")
     embargo_edit.setStyleSheet("color: #228B22;")
     template_combo.lineEdit().setStyleSheet("color: #228B22;")
-    open_btn = QPushButton("データセット開設実行", parent)
+    open_btn = QPushButton("データセット開設", parent)
+    open_btn.setStyleSheet("""
+        QPushButton {
+            background-color: #1976d2;
+            color: white;
+            font-weight: bold;
+            font-size: 13px;
+            border-radius: 6px;
+            padding: 8px 20px;
+        }
+        QPushButton:hover {
+            background-color: #1565c0;
+        }
+        QPushButton:pressed {
+            background-color: #0d47a1;
+        }
+    """)
     form_layout.addRow(open_btn)
     container = QWidget(parent)
     container.setLayout(form_layout)
