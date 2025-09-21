@@ -402,18 +402,19 @@ class FileSetPreviewWidget(QWidget):
             # デバッグ情報を出力
             print(f"[DEBUG] プレビュー - ファイルセット属性custom_values: {custom_values}")
             
-            # カスタム値が空の場合、拡張設定から取得を試行
-            if not custom_values:
-                extended_config = getattr(self.file_set, 'extended_config', {})
-                print(f"[DEBUG] プレビュー - extended_config全体: {extended_config}")
-                
-                # 拡張設定内のカスタム値やインボイススキーマ関連の値を抽出
-                custom_candidates = {}
-                
-                # まず、明示的にcustom_valuesキーをチェック
-                if 'custom_values' in extended_config and extended_config['custom_values']:
-                    custom_candidates.update(extended_config['custom_values'])
-                    print(f"[DEBUG] プレビュー - extended_config.custom_values: {extended_config['custom_values']}")
+            # カスタム値が空の場合でも、拡張設定から取得を試行
+            extended_config = getattr(self.file_set, 'extended_config', {})
+            print(f"[DEBUG] プレビュー - extended_config全体: {extended_config}")
+            
+            # 拡張設定内のカスタム値やインボイススキーマ関連の値を抽出
+            custom_candidates = {}
+            
+            # まず、明示的にcustom_valuesキーをチェック（null値も含む）
+            if 'custom_values' in extended_config:
+                extended_custom = extended_config['custom_values']
+                if extended_custom:
+                    custom_candidates.update(extended_custom)
+                    print(f"[DEBUG] プレビュー - extended_config.custom_values: {extended_custom}")
                 
                 # その他のカスタムフィールドを探す（基本フィールドと内部データ以外）
                 basic_fields = {
@@ -444,14 +445,17 @@ class FileSetPreviewWidget(QWidget):
                 custom_values = custom_candidates
                 
                 # ファイルセット属性に反映（次回以降の取得を効率化）
-                if custom_values:
-                    self.file_set.custom_values = custom_values
-                    print(f"[DEBUG] プレビュー - custom_valuesをファイルセット属性に反映: {len(custom_values)}個")
+                self.file_set.custom_values = custom_values
+                print(f"[DEBUG] プレビュー - custom_valuesをファイルセット属性に反映: {len([v for v in custom_values.values() if v and v.strip()])}個の非空値")
             
             custom_info = []
-            if custom_values:
-                custom_info.append(f"  カスタム値: {len(custom_values)}個設定済み")
-                for key, value in custom_values.items():
+            # 空文字列を含む場合もカスタム情報として表示
+            non_empty_values = {k: v for k, v in custom_values.items() if v and v.strip()} if custom_values else {}
+            empty_values = {k: v for k, v in custom_values.items() if not v or not v.strip()} if custom_values else {}
+            
+            if non_empty_values:
+                custom_info.append(f"  カスタム値: {len(non_empty_values)}個設定済み")
+                for key, value in non_empty_values.items():
                     # 値を適切に表示形式に変換
                     if isinstance(value, dict):
                         value_str = f"{{{len(value)} items}}"
@@ -462,7 +466,13 @@ class FileSetPreviewWidget(QWidget):
                         if len(value_str) > 50:  # 長い値は省略
                             value_str = value_str[:47] + "..."
                     custom_info.append(f"    {key}: {value_str}")
-            else:
+                    
+            if empty_values:
+                custom_info.append(f"  空値: {len(empty_values)}個")
+                for key in empty_values.keys():
+                    custom_info.append(f"    {key}: (空文字列)")
+                    
+            if not non_empty_values and not empty_values:
                 custom_info.append("  設定項目なし")
             
             # 一時フォルダ情報を取得（UUID固定版を優先）

@@ -12,7 +12,7 @@ ARIMデータポータルへのデータ登録、ファイルアップロード�
 - データ登録UI提供
 """
 
-__version__ = "1.17.7"
+__version__ = "1.17.8"
 __all__ = [
     # Core data registration logic
     "run_data_register_logic",

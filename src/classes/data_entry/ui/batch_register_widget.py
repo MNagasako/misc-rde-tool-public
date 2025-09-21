@@ -2053,9 +2053,9 @@ class BatchRegisterWidget(QWidget):
         """)
         save_btn.setToolTip("現在の設定を選択されたファイルセットに適用します")
         save_btn.clicked.connect(self.save_fileset_config)
-        button_layout.addWidget(save_btn)
+        # button_layout.addWidget(save_btn)
         
-        apply_all_btn = QPushButton("全適用")
+        apply_all_btn = QPushButton("全ファイルセットに適用")
         apply_all_btn.setStyleSheet("""
             QPushButton {
                 background-color: #28a745;
@@ -2909,20 +2909,23 @@ class BatchRegisterWidget(QWidget):
             # 固有情報（カスタムフィールド）
             custom_values = {}
             
-            # インボイススキーマフォームから取得を試行
+            # インボイススキーマフォームから取得を試行（空値も含む）
             if hasattr(self, 'invoice_schema_form') and self.invoice_schema_form:
                 try:
-                    schema_custom_values = self.invoice_schema_form.get_form_data()
-                    if schema_custom_values:
+                    # 新しい関数で空値もnullとして取得
+                    from classes.utils.schema_form_util import get_schema_form_all_fields
+                    schema_custom_values = get_schema_form_all_fields(self.invoice_schema_form)
+                    if schema_custom_values is not None:  # Noneでない場合はマージ
                         custom_values.update(schema_custom_values)
-                        print(f"[DEBUG] get_current_settings - インボイススキーマから取得: {schema_custom_values}")
+                        print(f"[DEBUG] get_current_settings - インボイススキーマから取得(空値含む): {schema_custom_values}")
                 except Exception as e:
                     print(f"[WARNING] インボイススキーマフォームからの取得エラー: {e}")
             
-            # 従来のカスタムフィールドウィジェットからも取得
+            # 従来のカスタムフィールドウィジェットからも取得（空値も含む）
             if hasattr(self, 'custom_field_widgets'):
                 for field_name, widget in self.custom_field_widgets.items():
                     try:
+                        value = None
                         if hasattr(widget, 'text'):
                             value = widget.text()
                         elif hasattr(widget, 'toPlainText'):
@@ -2932,14 +2935,18 @@ class BatchRegisterWidget(QWidget):
                         else:
                             continue
                         
-                        if value:  # 空でない値のみ保存
-                            custom_values[field_name] = value
+                        # 空値も空文字列として保存（既存値を上書きしない）
+                        if field_name not in custom_values:
+                            custom_values[field_name] = value if value else ""
+                        
                     except Exception as e:
                         print(f"[WARNING] カスタムフィールド '{field_name}' の取得エラー: {e}")
                         
             settings['custom_values'] = custom_values
             
             print(f"[DEBUG] get_current_settings - 固有情報取得完了: {len(custom_values)}個の項目")
+            for key, value in custom_values.items():
+                print(f"[DEBUG]   - {key}: {value}")
             
             print(f"[DEBUG] get_current_settings: {settings}")
             
@@ -3009,17 +3016,22 @@ class BatchRegisterWidget(QWidget):
                 fileset.sample_composition = settings['sample_composition']
             
             # 固有情報（カスタム値）の適用
-            if 'custom_values' in settings and settings['custom_values']:
+            if 'custom_values' in settings:
+                # custom_values属性を必ず初期化
                 if not hasattr(fileset, 'custom_values'):
                     fileset.custom_values = {}
                 
-                # カスタム値を更新（既存値を上書き）
+                # 既存のカスタム値をクリア（空値にした項目を確実にリセット）
                 fileset.custom_values.clear()
-                fileset.custom_values.update(settings['custom_values'])
                 
-                print(f"[DEBUG] カスタム値をファイルセットに適用: {len(settings['custom_values'])}個")
-                for key, value in settings['custom_values'].items():
-                    print(f"[DEBUG]   - {key}: {value}")
+                # 新しいカスタム値を設定（null値も含む）
+                if settings['custom_values']:
+                    fileset.custom_values.update(settings['custom_values'])
+                    print(f"[DEBUG] カスタム値をファイルセットに適用: {len(settings['custom_values'])}個")
+                    for key, value in settings['custom_values'].items():
+                        print(f"[DEBUG]   - {key}: {value}")
+                else:
+                    print(f"[DEBUG] カスタム値は空ですが、フィールドをクリアしました")
             
             # 拡張設定に保存（バックアップとして、ただし内部データは除外）
             if not hasattr(fileset, 'extended_config'):
@@ -3746,6 +3758,13 @@ class BatchRegisterWidget(QWidget):
             
             # 現在のファイルセットを記録
             self.current_fileset = file_set
+
+            # ★ここでtarget_fileset_comboも同期する
+            if hasattr(self, 'target_fileset_combo'):
+                index = self.target_fileset_combo.findText(file_set.name)
+                if index >= 0:
+                    self.target_fileset_combo.setCurrentIndex(index)
+            
             
         finally:
             # ファイルセット復元処理完了フラグをリセット
@@ -3835,6 +3854,15 @@ class BatchRegisterWidget(QWidget):
         selected_fileset = self.fileset_table.get_selected_fileset()
         if not selected_fileset:
             QMessageBox.information(self, "情報", "設定を保存するファイルセットを選択してください")
+            return
+
+        reply = QMessageBox.question(
+            self,
+            "確認",
+            f"ファイルセット「{selected_fileset.name}」を更新します。よろしいですか？",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
             return
         
         # 基本情報を更新

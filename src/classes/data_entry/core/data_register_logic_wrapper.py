@@ -98,9 +98,11 @@ class DataRegisterLogic:
                 "sample_composition": sample_composition
             }
             
-            # カスタム値をマージ
-            if custom_values:
-                form_values.update(custom_values)
+            # カスタム値の設定（nullを含む可能性があるため適切に処理）
+            if custom_values is not None:
+                # custom_valuesを"custom"キーで設定し、direct mergeも行う
+                form_values["custom"] = custom_values
+                form_values["custom_values"] = custom_values  # フォールバック用
             
             # Bearerトークン取得（指定されていない場合）
             if not bearer_token:

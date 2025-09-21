@@ -148,12 +148,13 @@ def create_schema_form(schema_path, parent=None):
     return group
 
 
-def get_schema_form_values(schema_form_widget):
+def get_schema_form_values(schema_form_widget, include_empty=False):
     """
     スキーマフォームからキー・値のペアを取得
     
     Args:
         schema_form_widget (QGroupBox): create_schema_form で生成されたフォーム
+        include_empty (bool): 空値も空文字列として含めるかどうか
         
     Returns:
         dict: {key: value} の辞書
@@ -171,7 +172,24 @@ def get_schema_form_values(schema_form_widget):
         elif hasattr(widget, 'text'):
             value = widget.text()
         
-        if value and value.strip():  # 空値は除外
+        if value and value.strip():
+            # 非空値はそのまま保存
             values[key] = value
+        elif include_empty:
+            # 空値を空文字列として保存（include_emptyがTrueの場合のみ）
+            values[key] = ""
     
     return values
+
+
+def get_schema_form_all_fields(schema_form_widget):
+    """
+    スキーマフォームの全フィールドを取得（空値は空文字列）
+    
+    Args:
+        schema_form_widget (QGroupBox): create_schema_form で生成されたフォーム
+        
+    Returns:
+        dict: 全フィールドの {key: value} の辞書（空値は空文字列）
+    """
+    return get_schema_form_values(schema_form_widget, include_empty=True)

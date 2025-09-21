@@ -106,6 +106,12 @@ def _continue_data_register_process(parent, bearer_token, dataset_info, form_val
         names_list = [n.strip() for n in sampleNames.split(',')] if sampleNames else ["試料名(ローカルID)"]
         # カスタム欄（スキーマフォーム）の値をpayloadに反映
         custom_values = form_values.get('custom') if form_values and 'custom' in form_values else {}
+        
+        # custom_valuesが空の辞書の場合、null値を含むフィールドがあるか確認
+        if not custom_values:
+            # form_valuesからcustom_valuesキーを直接取得してみる
+            custom_values = form_values.get('custom_values', {}) if form_values else {}
+            print(f"[DEBUG] プレビュー - customが空のためcustom_valuesを取得: {custom_values}")
         preview_payload = {
             "data": {
                 "type": "entry",
@@ -119,7 +125,7 @@ def _continue_data_register_process(parent, bearer_token, dataset_info, form_val
                             "description": basicDescription or "説明",
                             "experimentId": experimentId or "basic/experimentId"
                         },
-                        "custom": custom_values if custom_values else {},
+                        "custom": custom_values,
                         "sample": {
                             "description": sampleDescription or "試料の説明",
                             "composition": sampleComposition or "化学式・組成式・分子式",
@@ -366,6 +372,12 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
 
     # カスタム欄（スキーマフォーム）の値をpayloadに反映
     custom_values = form_values.get('custom') if form_values and 'custom' in form_values else {}
+    
+    # custom_valuesが空の辞書の場合、null値を含むフィールドがあるか確認
+    if not custom_values:
+        # form_valuesからcustom_valuesキーを直接取得してみる
+        custom_values = form_values.get('custom_values', {}) if form_values else {}
+        print(f"[DEBUG] 正式登録 - customが空のためcustom_valuesを取得: {custom_values}")
 
     if not sample_id:
         payload_detail_sample = {
@@ -396,7 +408,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
                         "description": basicDescription or "説明",
                         "experimentId": experimentId or "basic/experimentId"
                     },
-                    "custom": custom_values if custom_values else {},
+                    "custom": custom_values,
                     "sample": payload_detail_sample
                 }
             },
