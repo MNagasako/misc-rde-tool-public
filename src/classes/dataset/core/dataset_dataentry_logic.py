@@ -4,10 +4,9 @@
 """
 import os
 import json
-import requests
 import logging
 from config.common import OUTPUT_DIR
-from net.http_helpers import create_request_session
+from classes.utils.api_request_helper import api_request
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -24,6 +23,7 @@ def fetch_dataset_dataentry(dataset_id, bearer_token, force_refresh=False):
     Returns:
         bool: 取得成功の場合True
     """
+    print(f"[DEBUG] fetch_dataset_dataentry called with dataset_id={dataset_id}, force_refresh={force_refresh}")
     try:
         # 出力ディレクトリの作成
         output_dir = os.path.join(OUTPUT_DIR, "rde", "data", "dataEntry")
@@ -42,59 +42,56 @@ def fetch_dataset_dataentry(dataset_id, bearer_token, force_refresh=False):
                 logger.info(f"データエントリーキャッシュを使用: {dataset_id}")
                 return True
         
-        # APIエンドポイントURL
-        api_url = f"https://rde.nims.go.jp/rde-api/api/v1/datasets/{dataset_id}/data"
+        # APIエンドポイントURL（既存実装と同じ形式）
+        api_url = f"https://rde-api.nims.go.jp/data?filter%5Bdataset.id%5D={dataset_id}&sort=-created&page%5Boffset%5D=0&page%5Blimit%5D=24&include=owner%2Csample%2CthumbnailFile%2Cfiles"
         
-        # HTTPセッションを作成
-        session = create_request_session()
-        
-        # ヘッダー設定
+        # ヘッダー設定（既存実装と同じ形式）
         headers = {
+            "Accept": "application/vnd.api+json",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
             "Authorization": f"Bearer {bearer_token}",
-            "Content-Type": "application/json",
-            "Accept": "application/json"
+            "Connection": "keep-alive",
+            "Host": "rde-api.nims.go.jp",
+            "Origin": "https://rde.nims.go.jp",
+            "Referer": "https://rde.nims.go.jp/",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+            "sec-ch-ua": '"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"'
         }
         
         logger.info(f"データエントリー情報を取得開始: {dataset_id}")
+        print(f"[DEBUG] API URL: {api_url}")
         
-        # API呼び出し
-        response = session.get(api_url, headers=headers, timeout=60)
+        # 既存実装と同じapi_requestを使用
+        response = api_request("GET", api_url, bearer_token=bearer_token, headers=headers, timeout=60)
         
-        if response.status_code == 200:
-            # 成功：JSONデータを保存
-            data = response.json()
-            
-            with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            
-            entry_count = len(data.get('data', []))
-            logger.info(f"データエントリー情報取得完了: {dataset_id} ({entry_count}件)")
-            
-            return True
-            
-        elif response.status_code == 404:
-            # データセットにデータエントリーが存在しない
-            logger.warning(f"データセットにデータエントリーが存在しません: {dataset_id}")
-            
-            # 空のデータ構造を保存
-            empty_data = {"data": [], "meta": {"total": 0}}
-            with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump(empty_data, f, ensure_ascii=False, indent=2)
-            
-            return True
-            
-        else:
-            # その他のエラー
-            logger.error(f"データエントリー取得エラー: {dataset_id}, ステータス: {response.status_code}")
-            logger.error(f"レスポンス: {response.text[:500]}")
+        if response is None:
+            logger.error(f"データエントリー取得失敗: {dataset_id}")
             return False
-    
-    except requests.RequestException as e:
-        logger.error(f"データエントリー取得リクエストエラー: {dataset_id}, エラー: {e}")
-        return False
         
+        # レスポンス確認
+        response.raise_for_status()
+        
+        # 成功：JSONデータを保存
+        data = response.json()
+        
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        entry_count = len(data.get('data', []))
+        logger.info(f"データエントリー情報取得完了: {dataset_id} ({entry_count}件)")
+        print(f"[DEBUG] データエントリー取得成功: {entry_count}件")
+        
+        return True
+    
     except Exception as e:
         logger.error(f"データエントリー取得処理エラー: {dataset_id}, エラー: {e}")
+        print(f"[ERROR] fetch_dataset_dataentry failed: {e}")
         return False
 
 def get_dataentry_info_from_cache(dataset_id):

@@ -421,16 +421,18 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
             # ファイルの更新時刻をチェック（5分以内なら取得スキップ）
             file_mtime = os.path.getmtime(dataentry_file)
             current_time = time.time()
+            
             if current_time - file_mtime < 300:  # 5分 = 300秒
                 needs_fetch = False
-        
+            print(f"[DEBUG][データエントリーキャッシュ] needs_fetch={needs_fetch} now={current_time} file={dataentry_file} 最終更新: {datetime.datetime.fromtimestamp(file_mtime)}")
         if needs_fetch:
             # データエントリー情報を取得する必要がある
             dataset_info_label.setText(f"データセット: {dataset_id} (取得中...)")
             entry_count_label.setText("データエントリー件数: 取得中...")
             last_updated_label.setText("最終取得: 取得中...")
             entry_table.setRowCount(0)
-            
+            print(f"[DEBUG][データエントリー取得] fetch_dataentry_info({dataset_id}, {force_refresh})")
+                # 少し遅延させてから取得処理を実行
             QTimer.singleShot(100, lambda: fetch_dataentry_info(dataset_id, force_refresh))
         else:
             # 既存のJSONファイルを読み込んで表示
@@ -438,6 +440,7 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
     
     def fetch_dataentry_info(dataset_id, force_refresh=False):
         """データエントリー情報をAPIから取得"""
+        
         try:
             # プログレスダイアログを表示
             progress = QProgressDialog("データエントリー情報を取得中...", "キャンセル", 0, 100, widget)
@@ -466,16 +469,18 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
             QApplication.processEvents()
             
             # データエントリー取得API呼び出し（実際のAPI呼び出しコードに置き換える）
+            # ここから先を修正。basic モジュールとかのデータエントリー取得機能を使うといいと思う。
+            
             from classes.dataset.core.dataset_dataentry_logic import fetch_dataset_dataentry
             
             progress.setValue(50)
             QApplication.processEvents()
             
             success = fetch_dataset_dataentry(dataset_id, bearer_token, force_refresh)
-            
+            #return #debug 一時的
             progress.setValue(90)
             QApplication.processEvents()
-            
+            print(f"[DEBUG] fetch_dataset_dataentry result: {success}")
             if success:
                 # 取得成功、表示を更新
                 load_and_display_dataentry_info(dataset_id)
@@ -486,12 +491,14 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
                 QMessageBox.warning(widget, "取得エラー", "データエントリー情報の取得に失敗しました。")
             
         except ImportError:
+            print("[WARNING] データエントリーロジックモジュールが見つかりません。ダミーデータで対応します。")
             # データエントリーロジックモジュールが見つからない場合、ダミーデータで対応
             progress.close()
             # QMessageBox.information(widget, "開発中", "データエントリー取得機能は開発中です。\n既存のJSONファイルがあれば表示されます。")
             load_and_display_dataentry_info(dataset_id)
             
         except Exception as e:
+            print(f"[ERROR] データエントリー取得エラー: {e}")
             if progress:
                 progress.close()
             print(f"[ERROR] データエントリー取得エラー: {e}")
@@ -552,7 +559,7 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
             
             dataset_info_label.setText(f"データセット: {dataset_id}")
             entry_count_label.setText(f"データエントリー件数: {entry_count}件")
-            last_updated_label.setText(f"最終取得: {last_updated}")
+            last_updated_label.setText(f"最終取得: {last_updated} path: {dataentry_file}")
             
             # テーブルにデータを設定
             entry_table.setRowCount(entry_count)
@@ -593,15 +600,15 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
                 # included配列からidがfile_idsに含まれるfile要素を抽出
                 files_for_entry = [f for f in included if f.get('type') == 'file' and f.get('id') in file_ids]
                 # デバッグ出力
-                print(f"[DEBUG] entry_id={entry_id} name={name} data_number={data_number} file_ids={list(file_ids)}")
-                print(f"  [DEBUG] files_for_entry count={len(files_for_entry)} ids={[f.get('id') for f in files_for_entry]}")
+                #print(f"[DEBUG] entry_id={entry_id} name={name} data_number={data_number} file_ids={list(file_ids)}")
+                #print(f"  [DEBUG] files_for_entry count={len(files_for_entry)} ids={[f.get('id') for f in files_for_entry]}")
                 filetype_counts = {ft: 0 for ft in FILE_TYPES}
                 for f in files_for_entry:
                     ft = f.get('attributes', {}).get('fileType')
-                    print(f"    [DEBUG] file id={f.get('id')} fileType={ft}")
+                    # print(f"    [DEBUG] file id={f.get('id')} fileType={ft}")
                     if ft in filetype_counts:
                         filetype_counts[ft] += 1
-                print(f"  [DEBUG] filetype_counts={filetype_counts}")
+                #print(f"  [DEBUG] filetype_counts={filetype_counts}")
                 # fileTypeカウント列はすべてsetItemで数値のみ（ボタン禁止）
                 for i, ft in enumerate(FILE_TYPES):
                     item = QTableWidgetItem(str(filetype_counts[ft]))
