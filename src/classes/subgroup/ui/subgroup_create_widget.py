@@ -282,39 +282,12 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
             "sec-ch-ua-platform": '"Windows"',
         }
         
-        try:
-            from net.http_helpers import proxy_post
-            resp = proxy_post(api_url, headers=headers_dict, json=payload, timeout=15)
-            if resp.status_code in (200, 201):
-                QMessageBox.information(widget, "作成成功", f"サブグループ[{group_name}]の作成に成功しました。")
-                
-                # 成功時にsubGroup.jsonを自動再取得
-                try:
-                    from PyQt5.QtCore import QTimer
-                    def auto_refresh():
-                        try:
-                            from classes.basic.core.basic_info_logic import auto_refresh_subgroup_json
-                            from classes.utils.progress_worker import SimpleProgressWorker
-                            from classes.basic.ui.ui_basic_info import show_progress_dialog
-                            
-                            bearer_token = subgroup_api_helper.find_bearer_token(widget)
-                            if bearer_token:
-                                worker = SimpleProgressWorker(
-                                    task_func=auto_refresh_subgroup_json,
-                                    task_kwargs={'bearer_token': bearer_token},
-                                    task_name="サブグループ情報自動更新"
-                                )
-                                progress_dialog = show_progress_dialog(widget, "サブグループ情報自動更新", worker)
-                        except Exception as e:
-                            print(f"[ERROR] サブグループ情報自動更新でエラー: {e}")
-                    
-                    QTimer.singleShot(1000, auto_refresh)
-                except Exception as e:
-                    print(f"[WARNING] サブグループ情報自動更新の設定に失敗: {e}")
-            else:
-                QMessageBox.warning(widget, "作成失敗", f"サブグループ[{group_name}]の作成に失敗しました。\n\nStatus: {resp.status_code}\n{resp.text}")
-        except Exception as e:
-            QMessageBox.warning(widget, "APIエラー", f"API送信中にエラーが発生しました: {e}")
+        # subgroup_api_helper の統一送信関数を使用（通知機能付き）
+        success = subgroup_api_helper.send_subgroup_request(widget, api_url, headers_dict, payload, group_name, auto_refresh=True)
+        
+        if not success:
+            print(f"[ERROR] サブグループ作成に失敗: {group_name}")
+            return
     
     def on_create_subgroup_bulk():
         prepare_subgroup_create_request(widget, parent, member_selector.user_rows)

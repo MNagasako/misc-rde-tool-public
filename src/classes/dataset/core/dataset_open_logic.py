@@ -219,7 +219,7 @@ def create_group_select_widget(parent=None):
                 all_team_groups.append(item)
         
         # デフォルトフィルタを適用
-        team_groups_raw = filter_groups_by_role(all_team_groups, "member", user_id)
+        team_groups_raw = filter_groups_by_role(all_team_groups, "owner_assistant", user_id)
     except Exception as e:
         print(f"[ERROR] subGroup.json/self.jsonの読み込み・フィルタに失敗: {e}")
         # ファイルが見つからない場合の詳細情報
@@ -288,6 +288,8 @@ def create_group_select_widget(parent=None):
     # グループ選択コンボボックス
     def update_group_list(filter_type="member"):
         """フィルタタイプに応じてグループリストを更新"""
+        nonlocal team_groups, group_names, group_completer  # group_completer も追加
+        
         filtered_groups = filter_groups_by_role(all_team_groups, filter_type, user_id)
         
         # グループ名リスト作成
@@ -310,9 +312,15 @@ def create_group_select_widget(parent=None):
             combo.lineEdit().setPlaceholderText("該当するグループがありません")
         
         # グループデータも更新
-        nonlocal team_groups, group_names
         team_groups = filtered_groups
         group_names = group_names_new
+        
+        # Completer も更新（重要！）
+        try:
+            group_completer.setModel(group_completer.model().__class__(group_names_new, group_completer))
+            print(f"[DEBUG] Completer更新完了: {len(group_names_new)}件")
+        except Exception as e:
+            print(f"[WARNING] Completer更新に失敗: {e}")
         
         # 課題番号コンボボックスをクリア
         grant_combo.clear()
@@ -324,10 +332,8 @@ def create_group_select_widget(parent=None):
     # グループ選択コンボボックスの設定
     combo.lineEdit().setPlaceholderText("グループ名で検索")
     
-    # 初期グループリスト設定
-    update_group_list("member")  # デフォルトフィルタで初期化
-    
-    group_completer = QCompleter(group_names, combo)
+    # Completer の初期化（先に行う）
+    group_completer = QCompleter([], combo)  # 空リストで初期化
     group_completer.setCaseSensitivity(False)
     group_completer.setFilterMode(Qt.MatchContains)
     # 検索時の補完リスト（popup）の高さを12行分に制限
@@ -336,15 +342,14 @@ def create_group_select_widget(parent=None):
     popup_view.setMaximumHeight(240)
     combo.setCompleter(group_completer)
     
+    # 初期グループリスト設定
+    update_group_list("owner_assistant")  # デフォルトフィルタで初期化（フィルタコンボの初期値に合わせる）
+    
     # フィルタ変更時のイベントハンドラ
     def on_filter_changed():
         filter_type = filter_combo.currentData()
         print(f"[DEBUG] Filter changed to: {filter_type}")
-        group_names_new = update_group_list(filter_type)
-        
-        # グループコンプリーターを更新
-        group_completer.setModel(group_completer.model().__class__(group_names_new, group_completer))
-        
+        update_group_list(filter_type)  # update_group_list内でCompleterも更新される
         print(f"[DEBUG] Groups after filter: {len(team_groups)} groups")
         
     filter_combo.currentTextChanged.connect(on_filter_changed)
@@ -668,6 +673,80 @@ def create_group_select_widget(parent=None):
         print(f"[DEBUG] on_open: group={group_info.get('attributes', {}).get('name')}, grant_number={selected_grant_number}, dataset_name={dataset_name}, embargo_str={embargo_str}, template_id={template_id}, dataset_type={dataset_type}, bearer_token={bearer_token}, share_core_scope={share_core_scope}, anonymize={anonymize}")
         run_dataset_open_logic(parent, bearer_token, group_info, dataset_name, embargo_str, template_id, dataset_type, share_core_scope, anonymize)
     open_btn.clicked.connect(on_open)
+
+    # サブグループ情報の更新機能を追加
+    def refresh_subgroup_data():
+        """サブグループ情報を再読み込みしてコンボボックスを更新"""
+        try:
+            # ウィジェットが破棄されていないかチェック
+            if not combo or combo.parent() is None:
+                print("[DEBUG] コンボボックスが破棄されているため更新をスキップ")
+                return
+                
+            # subGroup.jsonから最新データを読み込み
+            with open(SUBGROUP_JSON_PATH, encoding="utf-8") as f:
+                sub_group_data = json.load(f)
+            
+            # 全てのTEAMグループを再取得
+            new_all_team_groups = []
+            for item in sub_group_data.get("included", []):
+                if item.get("type") == "group" and item.get("attributes", {}).get("groupType") == "TEAM":
+                    new_all_team_groups.append(item)
+            
+            # グローバル変数を更新
+            nonlocal all_team_groups, team_groups, group_names
+            all_team_groups = new_all_team_groups
+            
+            # 現在のフィルタを適用して更新
+            current_filter = filter_combo.currentData()
+            update_group_list(current_filter or "owner_assistant")
+            
+            # Completer の更新 - これが重要！
+            if group_completer and hasattr(group_completer, 'setModel'):
+                group_completer.setModel(group_completer.model().__class__(group_names, group_completer))
+            
+            # コンボボックスの再構築（確実な更新のため）
+            if combo and hasattr(combo, 'blockSignals'):
+                combo.blockSignals(True)
+                combo.clear()
+                if group_names:
+                    combo.addItems(group_names)
+                    combo.setCurrentIndex(-1)  # 選択なし状態
+                    combo.lineEdit().setPlaceholderText("グループを選択してください")
+                    combo.setEnabled(True)
+                else:
+                    combo.setEnabled(False)
+                    combo.lineEdit().setPlaceholderText("該当するグループがありません")
+                combo.blockSignals(False)
+                
+                # UIの強制更新
+                combo.update()
+                combo.repaint()
+            
+            print(f"[INFO] サブグループ情報更新完了: {len(new_all_team_groups)}件のグループ, 表示: {len(group_names)}件")
+            
+        except Exception as e:
+            print(f"[ERROR] サブグループ情報更新に失敗: {e}")
+    
+    # サブグループ更新通知システムに登録
+    try:
+        from classes.dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
+        subgroup_notifier = get_subgroup_refresh_notifier()
+        subgroup_notifier.register_callback(refresh_subgroup_data)
+        print("[INFO] データセット開設タブ: サブグループ更新通知に登録完了")
+        
+        # ウィジェット破棄時の通知解除用
+        def cleanup_callback():
+            subgroup_notifier.unregister_callback(refresh_subgroup_data)
+            print("[INFO] データセット開設タブ: サブグループ更新通知を解除")
+        
+        container._cleanup_subgroup_callback = cleanup_callback
+        
+    except Exception as e:
+        print(f"[WARNING] サブグループ更新通知への登録に失敗: {e}")
+
+    # 外部から呼び出し可能にする
+    container._refresh_subgroup_data = refresh_subgroup_data
 
     return container, team_groups, combo, grant_combo, open_btn, name_edit, embargo_edit, template_combo, template_list, filter_combo
 

@@ -171,7 +171,8 @@ def check_subgroup_files():
         if not os.path.exists(p):
             missing.append(label)
     if not config_file_used:
-        missing.append("group_config.xlsx or group_config.csv or group_config.json")
+        pass
+        #missing.append("group_config.xlsx or group_config.csv or group_config.json")
     return {
         "info_path": info_path,
         "config_json_path": config_json_path,
@@ -920,6 +921,22 @@ def send_subgroup_request(widget, api_url, headers, payload, group_name, auto_re
                                 
                                 # プログレス表示
                                 progress_dialog = show_progress_dialog(widget, "サブグループ情報自動更新", worker)
+                                
+                                # サブグループ更新通知を送信
+                                try:
+                                    from classes.dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
+                                    subgroup_notifier = get_subgroup_refresh_notifier()
+                                    # 更新完了後に少し遅延して通知（ファイル更新完了を待つため）
+                                    from PyQt5.QtCore import QTimer
+                                    def send_notification():
+                                        try:
+                                            subgroup_notifier.notify_refresh()
+                                            print("[INFO] サブグループ更新通知を送信しました")
+                                        except Exception as e:
+                                            print(f"[WARNING] サブグループ更新通知送信に失敗: {e}")
+                                    QTimer.singleShot(2000, send_notification)  # 2秒後に通知
+                                except Exception as e:
+                                    print(f"[WARNING] サブグループ更新通知の設定に失敗: {e}")
                                 
                         except Exception as e:
                             print(f"[ERROR] サブグループ情報自動更新でエラー: {e}")

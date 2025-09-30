@@ -545,7 +545,7 @@ def prepare_subgroup_create_request(widget, parent, user_rows=None):
     
     paths = subgroup_api_helper.check_subgroup_files()
     if paths["missing"]:
-        msg = f"必要なファイルが見つかりません: {', '.join(paths['missing'])}\n\n{paths['output_dir']} または {paths['input_dir']} に配置してください。"
+        msg = f"必要なファイルが見つかりません！: {', '.join(paths['missing'])}\n\n{paths['output_dir']} または {paths['input_dir']} に配置してください。"
         QMessageBox.warning(widget, "ファイル不足", msg)
         print(msg)
         return
@@ -599,6 +599,6 @@ def prepare_subgroup_create_request(widget, parent, user_rows=None):
         reply = msg_box.exec_()
         if msg_box.clickedButton() == yes_btn:
             send_subgroup_request = subgroup_api_helper.send_subgroup_request
-            send_subgroup_request(widget, parent, api_url, headers, payload, group.get('group_name',''))
+            send_subgroup_request(widget, api_url, headers, payload, group.get('group_name',''))
         else:
             print("[INFO] サブグループ作成処理はユーザーによりキャンセルされました。")
