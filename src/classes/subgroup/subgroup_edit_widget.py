@@ -72,8 +72,9 @@ class SubgroupEditHandler(SubgroupCreateHandler):
         """
         PATCHリクエストの送信
         """
-        # BearerToken取得
-        bearer_token = subgroup_api_helper.find_bearer_token(self.widget)
+        # BearerToken統一管理システムで取得
+        from core.bearer_token_manager import BearerTokenManager
+        bearer_token = BearerTokenManager.get_token_with_relogin_prompt(self.widget)
         if not bearer_token:
             QMessageBox.warning(self.widget, "認証エラー", "Bearerトークンが取得できません。ログイン状態を確認してください。")
             return False

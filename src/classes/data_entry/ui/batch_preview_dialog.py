@@ -1276,9 +1276,9 @@ class FileSetPreviewWidget(QWidget):
                 QMessageBox.warning(self, "エラー", "データセットが選択されていません")
                 return
                 
-            # Bearerトークンを共通ヘルパーで取得（通常登録タブ方式に統一）
-            from core.bearer_token_helper import get_current_bearer_token
-            bearer_token = get_current_bearer_token(self)
+            # Bearerトークンを統一管理システムで取得
+            from core.bearer_token_manager import BearerTokenManager
+            bearer_token = BearerTokenManager.get_token_with_relogin_prompt(self)
             if not bearer_token:
                 print("[ERROR] Bearerトークンが取得できません")
                 QMessageBox.warning(self, "エラー", "認証トークンが取得できません。ログインしてください。")

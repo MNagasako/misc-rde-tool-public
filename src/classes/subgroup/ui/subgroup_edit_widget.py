@@ -75,8 +75,9 @@ class SubgroupEditHandler(SubgroupCreateHandler):
         """
         PATCHリクエストの送信
         """
-        # BearerToken取得
-        bearer_token = subgroup_api_helper.find_bearer_token(self.widget)
+        # BearerToken統一管理システムで取得
+        from core.bearer_token_manager import BearerTokenManager
+        bearer_token = BearerTokenManager.get_token_with_relogin_prompt(self.widget)
         if not bearer_token:
             QMessageBox.warning(self.widget, "認証エラー", "Bearerトークンが取得できません。ログイン状態を確認してください。")
             return False
@@ -219,11 +220,11 @@ class EditMemberManager:
         for member in group_data.get('members', []):
             current_roles[member['id']] = member['role']
         
-        # Bearer tokenを取得
+        # Bearer token統一管理システムで取得
         bearer_token = None
         if self.parent_widget:
-            from ..core import subgroup_api_helper
-            bearer_token = subgroup_api_helper.find_bearer_token(self.parent_widget)
+            from core.bearer_token_manager import BearerTokenManager
+            bearer_token = BearerTokenManager.get_valid_token()
         
         print(f"[DEBUG] update_member_selection: Bearer token={'あり' if bearer_token else 'なし'}")
         
@@ -270,8 +271,8 @@ class EditMemberManager:
             print("[DEBUG] 親ウィジェットが無効のため再実行をスキップ")
             return
         
-        from ..core import subgroup_api_helper
-        bearer_token = subgroup_api_helper.find_bearer_token(target_parent)
+        from core.bearer_token_manager import BearerTokenManager
+        bearer_token = BearerTokenManager.get_valid_token()
         
         if bearer_token:
             print("[DEBUG] Bearer token取得完了 - メンバーセレクターを再作成")

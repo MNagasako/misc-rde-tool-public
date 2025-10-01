@@ -1,6 +1,7 @@
 """
 データセット データエントリー専用ウィジェット（最小版）
 ※修正タブの構造を参考にした安全な実装
+Bearer Token統一管理システム対応
 """
 import os
 import json
@@ -16,6 +17,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, QTimer, QUrl
 from PyQt5.QtGui import QDesktopServices
 from config.common import get_dynamic_file_path
+from core.bearer_token_manager import BearerTokenManager
 
 
 def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_button):
@@ -449,20 +451,10 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
             progress.setValue(10)
             QApplication.processEvents()
             
-            # bearer_tokenを取得（親から）
-            bearer_token = None
-            current_parent = parent
-            while current_parent and not bearer_token:
-                if hasattr(current_parent, 'bearer_token'):
-                    bearer_token = current_parent.bearer_token
-                    break
-                if hasattr(current_parent, 'parent'):
-                    current_parent = current_parent.parent
-                else:
-                    break
-            
+            # Bearer Token統一管理システムで取得
+            bearer_token = BearerTokenManager.get_token_with_relogin_prompt(parent)
             if not bearer_token:
-                QMessageBox.warning(widget, "認証エラー", "認証トークンが見つかりません。ログインしてください。")
+                QMessageBox.warning(widget, "認証エラー", "Bearer Tokenが取得できません。ログインを確認してください。")
                 return
             
             progress.setValue(30)
@@ -506,9 +498,9 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
             entry_count_label.setText("データエントリー件数: エラー")
             last_updated_label.setText("最終取得: エラー")
             # 基本情報取得機能を使用してデータエントリー情報を取得
-            bearer_token = getattr(parent, 'bearer_token', None)
+            bearer_token = BearerTokenManager.get_token_with_relogin_prompt(parent)
             if not bearer_token:
-                QMessageBox.warning(widget, "エラー", "認証トークンが見つかりません。ログインしてください。")
+                QMessageBox.warning(widget, "エラー", "Bearer Tokenが取得できません。ログインを確認してください。")
                 return
             
             # 既存の fetch_data_entry_info_from_api を使用

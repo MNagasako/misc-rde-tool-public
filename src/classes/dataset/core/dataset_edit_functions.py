@@ -5,8 +5,8 @@ import json
 import os
 from PyQt5.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QTextEdit, QPushButton, QLabel
 from PyQt5.QtCore import QDate, QTimer, Qt
-# from classes.data.logic.bearer_token_util import load_bearer_token_from_file  # TODO: 新構造で再実装
 from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
+from core.bearer_token_manager import BearerTokenManager
 
 
 def create_dataset_update_payload(selected_dataset, edit_dataset_name_edit, edit_grant_number_combo, 
@@ -254,13 +254,10 @@ def send_dataset_update_request(widget, parent, selected_dataset,
                                edit_data_entry_delete_prohibited_checkbox, edit_share_core_scope_checkbox, ui_refresh_callback=None):
     """データセット更新リクエストを送信"""
     
-    # Bearerトークンを取得
-    bearer_token = None
-    if parent and hasattr(parent, 'bearer_token'):
-        bearer_token = parent.bearer_token
-    
+    # Bearer Token統一管理システムで取得
+    bearer_token = BearerTokenManager.get_token_with_relogin_prompt(parent)
     if not bearer_token:
-        QMessageBox.warning(widget, "認証エラー", "Bearerトークンが取得できません。ログイン状態を確認してください。")
+        QMessageBox.warning(widget, "認証エラー", "Bearer Tokenが取得できません。ログインを確認してください。")
         return
     
     # ペイロード作成

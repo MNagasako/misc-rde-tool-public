@@ -1836,6 +1836,10 @@ class BatchRegisterWidget(QWidget):
         self.connect_signals()
         self.load_initial_data()
         self.adjust_window_size()
+        
+        # データセット更新通知システムに登録
+        self.setup_dataset_refresh_notification()
+        
         print("[DEBUG] BatchRegisterWidget初期化完了")
         
     def setup_ui(self):
@@ -5385,77 +5389,6 @@ class BatchRegisterWidget(QWidget):
             index = self.target_fileset_combo.findText(current_text)
             if index >= 0:
                 self.target_fileset_combo.setCurrentIndex(index)
-    
-    def setup_dataset_refresh_notification(self):
-        """データセット更新通知システムに登録"""
-        try:
-            from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
-            dataset_notifier = get_dataset_refresh_notifier()
-            dataset_notifier.register_callback(self.refresh_dataset_list)
-            print("[INFO] 一括登録ウィジェット: データセット更新通知に登録完了")
-            
-            # ウィジェット破棄時の通知解除用
-            def cleanup_callback():
-                dataset_notifier.unregister_callback(self.refresh_dataset_list)
-                print("[INFO] 一括登録ウィジェット: データセット更新通知を解除")
-            
-            self._cleanup_dataset_callback = cleanup_callback
-            
-        except Exception as e:
-            print(f"[WARNING] データセット更新通知への登録に失敗: {e}")
-    
-    def refresh_dataset_list(self):
-        """データセットリストを更新"""
-        try:
-            # dataset_dropdown_widgetがある場合は、それを使用して更新
-            if hasattr(self, 'dataset_dropdown_widget') and self.dataset_dropdown_widget:
-                print("[INFO] 一括登録: dataset_dropdown_widget経由でデータセットリスト更新開始")
-                # dataset_dropdown_widgetのrefresh機能を呼び出し
-                if hasattr(self.dataset_dropdown_widget, 'refresh_datasets'):
-                    self.dataset_dropdown_widget.refresh_datasets()
-                    print("[INFO] 一括登録: dataset_dropdown_widget更新完了")
-                return
-            
-            # 代替手段：dataset_comboが存在する場合の処理
-            if not hasattr(self, 'dataset_combo') or not self.dataset_combo or self.dataset_combo.parent() is None:
-                print("[DEBUG] データセットコンボボックスが破棄されているため更新をスキップ")
-                return
-            
-            print("[INFO] 一括登録: dataset_combo経由でデータセットリスト更新開始")
-            
-            # 現在選択されているアイテムのIDを保存
-            current_dataset_id = None
-            current_index = self.dataset_combo.currentIndex()
-            if current_index > 0:  # 0番目は通常「選択してください」
-                current_data = self.dataset_combo.itemData(current_index)
-                if current_data:
-                    current_dataset_id = current_data.get("id")
-            
-            # データセットリストを再読み込み
-            self.refresh_datasets()
-            
-            # 以前の選択を復元
-            if current_dataset_id:
-                for i in range(self.dataset_combo.count()):
-                    item_data = self.dataset_combo.itemData(i)
-                    if item_data and item_data.get("id") == current_dataset_id:
-                        self.dataset_combo.setCurrentIndex(i)
-                        print(f"[INFO] 一括登録: データセット選択を復元: {current_dataset_id}")
-                        break
-            
-            print("[INFO] 一括登録: データセットリスト更新完了")
-            
-        except Exception as e:
-            print(f"[ERROR] 一括登録: データセットリスト更新に失敗: {e}")
-    
-    def closeEvent(self, event):
-        """ウィジェット終了時の処理"""
-        try:
-            if hasattr(self, '_cleanup_dataset_callback'):
-                self._cleanup_dataset_callback()
-        except Exception as e:
-            print(f"[WARNING] データセット更新通知の解除に失敗: {e}")
-        super().closeEvent(event)
 
 
 # QInputDialogのインポートを追加
@@ -6264,6 +6197,140 @@ def auto_apply_settings_to_selected(self):
         """現在のタイムスタンプを取得"""
         import datetime
         return datetime.datetime.now().isoformat()
+
+
+# BatchRegisterWidget に一時フォルダ管理メソッドを追加
+def _prepare_temp_folders(self):
+        try:
+            from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
+            dataset_notifier = get_dataset_refresh_notifier()
+            dataset_notifier.register_callback(self.refresh_dataset_list)
+            print("[INFO] 一括登録ウィジェット: データセット更新通知に登録完了")
+            
+            # ウィジェット破棄時の通知解除用
+            def cleanup_callback():
+                dataset_notifier.unregister_callback(self.refresh_dataset_list)
+                print("[INFO] 一括登録ウィジェット: データセット更新通知を解除")
+            
+            self._cleanup_dataset_callback = cleanup_callback
+            
+        except Exception as e:
+            print(f"[WARNING] データセット更新通知への登録に失敗: {e}")
+    
+    def refresh_dataset_list(self):
+        """データセットリストを更新"""
+        try:
+            # dataset_dropdown_widgetがある場合は、それを使用して更新
+            if hasattr(self, 'dataset_dropdown_widget') and self.dataset_dropdown_widget:
+                print("[INFO] 一括登録: dataset_dropdown_widget経由でデータセットリスト更新開始")
+                # dataset_dropdown_widgetのrefresh機能を呼び出し
+                if hasattr(self.dataset_dropdown_widget, 'refresh_datasets'):
+                    self.dataset_dropdown_widget.refresh_datasets()
+                    print("[INFO] 一括登録: dataset_dropdown_widget更新完了")
+                return
+            
+            # 代替手段：dataset_comboが存在する場合の処理
+            if not hasattr(self, 'dataset_combo') or not self.dataset_combo or self.dataset_combo.parent() is None:
+                print("[DEBUG] データセットコンボボックスが破棄されているため更新をスキップ")
+                return
+            
+            print("[INFO] 一括登録: dataset_combo経由でデータセットリスト更新開始")
+            
+            # 現在選択されているアイテムのIDを保存
+            current_dataset_id = None
+            current_index = self.dataset_combo.currentIndex()
+            if current_index > 0:  # 0番目は通常「選択してください」
+                current_data = self.dataset_combo.itemData(current_index)
+                if current_data:
+                    current_dataset_id = current_data.get("id")
+            
+            # データセットリストを再読み込み
+            self.refresh_datasets()
+            
+            # 以前の選択を復元
+            if current_dataset_id:
+                for i in range(self.dataset_combo.count()):
+                    item_data = self.dataset_combo.itemData(i)
+                    if item_data and item_data.get("id") == current_dataset_id:
+                        self.dataset_combo.setCurrentIndex(i)
+                        print(f"[INFO] 一括登録: データセット選択を復元: {current_dataset_id}")
+                        break
+            
+            print("[INFO] 一括登録: データセットリスト更新完了")
+            
+        except Exception as e:
+            print(f"[ERROR] 一括登録: データセットリスト更新に失敗: {e}")
+    
+    def setup_dataset_refresh_notification(self):
+        """データセット更新通知システムに登録"""
+        try:
+            from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
+            dataset_notifier = get_dataset_refresh_notifier()
+            dataset_notifier.register_callback(self.refresh_dataset_list)
+            print("[INFO] 一括登録ウィジェット: データセット更新通知に登録完了")
+            
+            # ウィジェット破棄時の通知解除用
+            def cleanup_callback():
+                dataset_notifier.unregister_callback(self.refresh_dataset_list)
+                print("[INFO] 一括登録ウィジェット: データセット更新通知を解除")
+            
+            self._cleanup_dataset_callback = cleanup_callback
+            
+        except Exception as e:
+            print(f"[WARNING] データセット更新通知への登録に失敗: {e}")
+    
+    def refresh_dataset_list(self):
+        """データセットリストを更新"""
+        try:
+            # dataset_dropdown_widgetがある場合は、それを使用して更新
+            if hasattr(self, 'dataset_dropdown_widget') and self.dataset_dropdown_widget:
+                print("[INFO] 一括登録: dataset_dropdown_widget経由でデータセットリスト更新開始")
+                # dataset_dropdown_widgetのrefresh機能を呼び出し
+                if hasattr(self.dataset_dropdown_widget, 'refresh_datasets'):
+                    self.dataset_dropdown_widget.refresh_datasets()
+                    print("[INFO] 一括登録: dataset_dropdown_widget更新完了")
+                return
+            
+            # 代替手段：dataset_comboが存在する場合の処理
+            if not hasattr(self, 'dataset_combo') or not self.dataset_combo or self.dataset_combo.parent() is None:
+                print("[DEBUG] データセットコンボボックスが破棄されているため更新をスキップ")
+                return
+            
+            print("[INFO] 一括登録: dataset_combo経由でデータセットリスト更新開始")
+            
+            # 現在選択されているアイテムのIDを保存
+            current_dataset_id = None
+            current_index = self.dataset_combo.currentIndex()
+            if current_index > 0:  # 0番目は通常「選択してください」
+                current_data = self.dataset_combo.itemData(current_index)
+                if current_data:
+                    current_dataset_id = current_data.get("id")
+            
+            # データセットリストを再読み込み
+            self.refresh_datasets()
+            
+            # 以前の選択を復元
+            if current_dataset_id:
+                for i in range(self.dataset_combo.count()):
+                    item_data = self.dataset_combo.itemData(i)
+                    if item_data and item_data.get("id") == current_dataset_id:
+                        self.dataset_combo.setCurrentIndex(i)
+                        print(f"[INFO] 一括登録: データセット選択を復元: {current_dataset_id}")
+                        break
+            
+            print("[INFO] 一括登録: データセットリスト更新完了")
+            
+        except Exception as e:
+            print(f"[ERROR] 一括登録: データセットリスト更新に失敗: {e}")
+    
+    def closeEvent(self, event):
+        """ウィジェット終了時の処理"""
+        try:
+            if hasattr(self, '_cleanup_dataset_callback'):
+                self._cleanup_dataset_callback()
+        except Exception as e:
+            print(f"[WARNING] データセット更新通知の解除に失敗: {e}")
+        super().closeEvent(event)
 
 # BatchRegisterWidgetクラスにメソッドを動的に追加
 BatchRegisterWidget._prepare_temp_folders = _prepare_temp_folders

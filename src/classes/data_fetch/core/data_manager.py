@@ -17,6 +17,7 @@ from .storage.image_saver import ImageSaver
 from classes.utils.anonymizer import Anonymizer
 from functions.utils import sanitize_path_name
 from classes.utils.api_request_helper import api_request, fetch_binary  # 共通化済み
+from core.bearer_token_manager import BearerTokenManager
 
 class DataManager(QObject):
     """
@@ -59,7 +60,7 @@ class DataManager(QObject):
         try:
             # urlがフルパスの場合はそのまま、そうでなければAPIクライアント経由
             if url.startswith("http"):
-                resp = api_request("GET", url, bearer_token=bearer_token, headers=headers)  # refactored to use api_request_helper
+                resp = api_request("GET", url, headers=headers)  # Bearer Token統一管理システム対応
                 if resp is None:
                     self.logger.warning(f"APIリクエスト失敗: {url}")
                     return
@@ -376,12 +377,27 @@ class DataManager(QObject):
                 set_webview_message(error_msg)
 
     @debug_log
-    def search_and_save_result(self, grant_number, bearer_token, set_webview_message):
+    def search_and_save_result(self, grant_number, bearer_token=None, set_webview_message=None):
         """
         grant_numberでAPI検索し、結果を保存。UI通知も行う。
+        
+        Args:
+            grant_number: グラント番号
+            bearer_token: 認証トークン（省略時はBearerTokenManagerから取得）
+            set_webview_message: WebViewメッセージ設定関数
         """
         import os
         from config.site_rde import URLS
+        
+        # Bearer Token統一管理システムで取得
+        if not bearer_token:
+            bearer_token = BearerTokenManager.get_current_token()
+            if not bearer_token:
+                error_msg = "Bearer Tokenが取得できません。ログインを確認してください。"
+                self.logger.error(error_msg)
+                if set_webview_message:
+                    set_webview_message(error_msg)
+                return
         # クッキー取得
         cookie_path = get_cookie_file_path()
         try:

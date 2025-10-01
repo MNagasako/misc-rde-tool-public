@@ -25,6 +25,9 @@ class DataRegisterWidget(QWidget):
         self.init_ui()
         self.setup_filtered_dataset_dropdown()
         
+        # データセット更新通知システムに登録
+        self.setup_dataset_refresh_notification()
+        
     def init_ui(self):
         """UIを初期化"""
         layout = QVBoxLayout()
@@ -446,3 +449,65 @@ class DataRegisterWidget(QWidget):
             print(f"[ERROR] 試料フォームデータ取得エラー: {e}")
             QMessageBox.critical(self, "フォームエラー", f"試料フォームのデータを取得できませんでした:\n{e}")
             return None
+    
+    def setup_dataset_refresh_notification(self):
+        """データセット更新通知システムに登録"""
+        try:
+            from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
+            dataset_notifier = get_dataset_refresh_notifier()
+            dataset_notifier.register_callback(self.refresh_dataset_list)
+            print("[INFO] データ登録ウィジェット: データセット更新通知に登録完了")
+            
+            # ウィジェット破棄時の通知解除用
+            def cleanup_callback():
+                dataset_notifier.unregister_callback(self.refresh_dataset_list)
+                print("[INFO] データ登録ウィジェット: データセット更新通知を解除")
+            
+            self._cleanup_dataset_callback = cleanup_callback
+            
+        except Exception as e:
+            print(f"[WARNING] データセット更新通知への登録に失敗: {e}")
+    
+    def refresh_dataset_list(self):
+        """データセットリストを更新"""
+        try:
+            # ウィジェットが破棄されていないかチェック
+            if not self.dataset_dropdown or self.dataset_dropdown.parent() is None:
+                print("[DEBUG] データセットコンボボックスが破棄されているため更新をスキップ")
+                return
+            
+            print("[INFO] データセットリスト更新開始")
+            
+            # 現在選択されているアイテムのIDを保存
+            current_dataset_id = None
+            current_index = self.dataset_dropdown.currentIndex()
+            if current_index > 0:  # 0番目は通常「選択してください」
+                current_data = self.dataset_dropdown.itemData(current_index)
+                if current_data:
+                    current_dataset_id = current_data.get("id")
+            
+            # データセットリストを再読み込み
+            self.load_datasets()
+            
+            # 以前の選択を復元
+            if current_dataset_id:
+                for i in range(self.dataset_dropdown.count()):
+                    item_data = self.dataset_dropdown.itemData(i)
+                    if item_data and item_data.get("id") == current_dataset_id:
+                        self.dataset_dropdown.setCurrentIndex(i)
+                        print(f"[INFO] データセット選択を復元: {current_dataset_id}")
+                        break
+            
+            print("[INFO] データセットリスト更新完了")
+            
+        except Exception as e:
+            print(f"[ERROR] データセットリスト更新に失敗: {e}")
+    
+    def closeEvent(self, event):
+        """ウィジェット終了時の処理"""
+        try:
+            if hasattr(self, '_cleanup_dataset_callback'):
+                self._cleanup_dataset_callback()
+        except Exception as e:
+            print(f"[WARNING] データセット更新通知の解除に失敗: {e}")
+        super().closeEvent(event)

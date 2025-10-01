@@ -258,7 +258,8 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
             
         # API送信処理
         api_url = "https://rde-api.nims.go.jp/groups"
-        bearer_token = subgroup_api_helper.find_bearer_token(widget)
+        from core.bearer_token_manager import BearerTokenManager
+        bearer_token = BearerTokenManager.get_token_with_relogin_prompt(widget)
         if not bearer_token:
             QMessageBox.warning(widget, "認証エラー", "Bearerトークンが取得できません。ログイン状態を確認してください。")
             return

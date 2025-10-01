@@ -1,29 +1,39 @@
 """
 データセット データエントリー取得ロジック
 データエントリー情報をAPIから取得してJSONファイルに保存する機能
+Bearer Token統一管理システム対応
 """
 import os
 import json
 import logging
 from config.common import OUTPUT_DIR
 from classes.utils.api_request_helper import api_request
+from core.bearer_token_manager import BearerTokenManager
 
 # ロガー設定
 logger = logging.getLogger(__name__)
 
-def fetch_dataset_dataentry(dataset_id, bearer_token, force_refresh=False):
+def fetch_dataset_dataentry(dataset_id, bearer_token=None, force_refresh=False):
     """
     指定されたデータセットのデータエントリー情報を取得
     
     Args:
         dataset_id (str): データセットID
-        bearer_token (str): 認証トークン
+        bearer_token (str): 認証トークン（Noneの場合は統一管理システムから自動取得）
         force_refresh (bool): 強制更新フラグ
     
     Returns:
         bool: 取得成功の場合True
     """
     print(f"[DEBUG] fetch_dataset_dataentry called with dataset_id={dataset_id}, force_refresh={force_refresh}")
+    
+    # Bearer Token統一管理システムで取得
+    if not bearer_token:
+        bearer_token = BearerTokenManager.get_current_token()
+        if not bearer_token:
+            logger.error("Bearer Tokenが取得できません")
+            return False
+    
     try:
         # 出力ディレクトリの作成
         output_dir = os.path.join(OUTPUT_DIR, "rde", "data", "dataEntry")

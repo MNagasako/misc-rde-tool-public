@@ -3,8 +3,8 @@ from PyQt5.QtWidgets import QMessageBox
 import os
 import json
 from PyQt5.QtWidgets import QComboBox, QLabel, QVBoxLayout, QHBoxLayout, QWidget
-# from classes.data.logic.bearer_token_util import load_bearer_token_from_file  # TODO: 新構造で再実装
 from classes.utils.api_request_helper import api_request  # refactored to use api_request_helper
+from core.bearer_token_manager import BearerTokenManager
 
 
 def filter_groups_by_role(groups, filter_type="member", user_id=None):
@@ -45,12 +45,16 @@ def filter_groups_by_role(groups, filter_type="member", user_id=None):
 
 # 事前に選択されたグループ情報を引数で受け取る形に変更
 def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, dataset_name=None, embargo_date_str=None, template_id=None, dataset_type=None, share_core_scope=False, anonymize=False):
-    print(f"[DEBUG] run_dataset_open_logic: dataset_name={dataset_name}, embargo_date_str={embargo_date_str}, template_id={template_id}, dataset_type={dataset_type}, bearer_token={bearer_token}, group_info={group_info}")
+    print(f"[DEBUG] run_dataset_open_logic: dataset_name={dataset_name}, embargo_date_str={embargo_date_str}, template_id={template_id}, dataset_type={dataset_type}, bearer_token={'[PRESENT]' if bearer_token else '[NONE]'}, group_info={group_info}")
     print(f"[DEBUG] share_core_scope={share_core_scope}, anonymize={anonymize}")
-    # bearer_tokenが未指定なら親からの取得を試行
-    if not bearer_token and parent and hasattr(parent, 'bearer_token'):
-        bearer_token = parent.bearer_token
-        print(f"[DEBUG] bearer_token loaded from parent: {bearer_token}")
+    
+    # Bearer Token統一管理システムで取得
+    if not bearer_token:
+        bearer_token = BearerTokenManager.get_token_with_relogin_prompt(parent)
+        if not bearer_token:
+            QMessageBox.warning(parent, "認証エラー", "Bearer Tokenが取得できません。ログインを確認してください。")
+            return
+        print(f"[DEBUG] Bearer Token obtained from BearerTokenManager")
     if group_info is None:
         QMessageBox.warning(parent, "グループ情報エラー", "グループが選択されていません。")
         return
@@ -150,6 +154,15 @@ def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, data
         if success:
             QMessageBox.information(parent, "データセット開設", "データセットの開設に成功しました。\nID: {}".format(result.get('data', {}).get('id', '不明') if isinstance(result, dict) else '不明'))
             
+            # データセット更新通知を発火
+            try:
+                from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
+                dataset_notifier = get_dataset_refresh_notifier()
+                dataset_notifier.notify_refresh()
+                print("[INFO] データセット開設成功: 更新通知を発火")
+            except Exception as e:
+                print(f"[WARNING] データセット更新通知の発火に失敗: {e}")
+            
             # 成功時にdataset.jsonを自動再取得
             try:
                 from PyQt5.QtCore import QTimer
@@ -169,6 +182,18 @@ def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, data
                             
                             # プログレス表示
                             progress_dialog = show_progress_dialog(parent, "データセット一覧自動更新", worker)
+                            
+                            # dataset.json更新完了後に再度通知を発火
+                            def notify_after_json_update():
+                                try:
+                                    from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
+                                    dataset_notifier = get_dataset_refresh_notifier()
+                                    dataset_notifier.notify_refresh()
+                                    print("[INFO] dataset.json更新完了: 再通知を発火")
+                                except Exception as e:
+                                    print(f"[WARNING] dataset.json更新後の通知発火に失敗: {e}")
+                            
+                            QTimer.singleShot(3000, notify_after_json_update)  # 3秒後に再通知
                             
                     except Exception as e:
                         print(f"[ERROR] データセット一覧自動更新でエラー: {e}")
@@ -661,16 +686,13 @@ def create_group_select_widget(parent=None):
         share_core_scope = share_core_scope_checkbox.isChecked()
         anonymize = anonymize_checkbox.isChecked()
         
-        # bearer_tokenを親ウィジェットから取得
-        bearer_token = None
-        p = parent
-        while p is not None:
-            if hasattr(p, 'bearer_token'):
-                bearer_token = getattr(p, 'bearer_token')
-                break
-            p = getattr(p, 'parent', None)
+        # Bearer Token統一管理システムで取得
+        bearer_token = BearerTokenManager.get_token_with_relogin_prompt(parent)
+        if not bearer_token:
+            QMessageBox.warning(parent, "認証エラー", "Bearer Tokenが取得できません。ログインを確認してください。")
+            return
         
-        print(f"[DEBUG] on_open: group={group_info.get('attributes', {}).get('name')}, grant_number={selected_grant_number}, dataset_name={dataset_name}, embargo_str={embargo_str}, template_id={template_id}, dataset_type={dataset_type}, bearer_token={bearer_token}, share_core_scope={share_core_scope}, anonymize={anonymize}")
+        print(f"[DEBUG] on_open: group={group_info.get('attributes', {}).get('name')}, grant_number={selected_grant_number}, dataset_name={dataset_name}, embargo_str={embargo_str}, template_id={template_id}, dataset_type={dataset_type}, bearer_token={'[PRESENT]' if bearer_token else '[NONE]'}, share_core_scope={share_core_scope}, anonymize={anonymize}")
         run_dataset_open_logic(parent, bearer_token, group_info, dataset_name, embargo_str, template_id, dataset_type, share_core_scope, anonymize)
     open_btn.clicked.connect(on_open)
 
@@ -752,13 +774,12 @@ def create_group_select_widget(parent=None):
 
 def create_dataset(bearer_token, payload, output_dir="output/rde/data"):
     """
-    設備情報取得（ダミー）: 基本情報取得と同じAPI・保存処理
-    payload引数で受け取った内容をそのまま送信
+    データセット開設API実行
+    Bearer Token統一管理システム対応済み
     """
     if not bearer_token:
-        # TODO: 新構造ではbearer_tokenは呼び出し元から渡される想定
-        print("[ERROR] Bearerトークンが指定されていません。")
-        return
+        print("[ERROR] Bearer Tokenが指定されていません。")
+        return False, "Bearer Token required"
     url = "https://rde-api.nims.go.jp/datasets"
 
     if 'payload' in locals():
@@ -820,10 +841,10 @@ def create_dataset(bearer_token, payload, output_dir="output/rde/data"):
 
 def update_dataset(bearer_token, output_dir="output/rde/data"):
     """
-    設備情報取得（ダミー）: 基本情報取得と同じAPI・保存処理
+    データセット更新処理（Bearer Token統一管理システム対応済み）
     """
     if not bearer_token:
-        print("[ERROR] Bearerトークンが取得できません。ログイン状態を確認してください。")
+        print("[ERROR] Bearer Tokenが取得できません。ログイン状態を確認してください。")
         return
     #url = "https://rde-api.nims.go.jp/datasetTemplates?programId=4bbf62be-f270-4a46-9682-38cd064607ba&teamId=22398c55-8620-430e-afa5-2405c57dd03c&sort=id&page[limit]=10000&page[offset]=0&include=instruments&fields[instrument]=nameJa%2CnameEn"
     url = "https://rde-api.nims.go.jp/datasets/5bfd6602-41c2-423a-8652-e9cbab71a172"

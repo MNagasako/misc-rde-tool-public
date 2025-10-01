@@ -24,6 +24,7 @@ from PyQt5.QtGui import QFont, QTextCursor
 
 from tools.rde_request_analyzer import RDERequestAnalyzer
 from config.common import OUTPUT_LOG_DIR
+from core.bearer_token_manager import BearerTokenManager
 
 
 try:
@@ -726,7 +727,7 @@ class RDEDatasetCreationGUI(QMainWindow):
     def check_initial_auth_status(self):
         """初期認証ステータスチェック"""
         try:
-            bearer_token = self.load_bearer_token_from_file()
+            bearer_token = self.get_bearer_token()
             if bearer_token:
                 # トークンの有効期限をチェック（JWTの場合）
                 try:
@@ -770,10 +771,6 @@ class RDEDatasetCreationGUI(QMainWindow):
         except Exception as e:
             self.log_message(f"初期認証ステータスチェックエラー: {e}")
             return False
-    
-    def load_bearer_token_from_file(self):
-        return self.get_bearer_token()
- 
     
     def sync_webview_cookies(self):
         """WebViewのCookieをHTTPクライアントに同期"""
@@ -846,7 +843,7 @@ class RDEDatasetCreationGUI(QMainWindow):
         try:
             # Bearerトークンがまだ設定されていない場合、ファイルから読み込み
             if 'Authorization' not in auth_headers:
-                bearer_token = self.load_bearer_token_from_file()
+                bearer_token = self.get_bearer_token()
                 if bearer_token:
                     auth_headers['Authorization'] = f"Bearer {bearer_token}"
                     self.log_message(f"フォールバック処理でBearerトークン設定: {bearer_token[:30]}...")
@@ -965,7 +962,7 @@ class RDEDatasetCreationGUI(QMainWindow):
                 
             else:
                 # Bearerトークンファイルの確認
-                bearer_token = self.load_bearer_token_from_file()
+                bearer_token = self.get_bearer_token()
                 if bearer_token:
                     self.update_auth_status("Bearerトークンファイル検出")
                 else:
@@ -1780,25 +1777,12 @@ class RDEDatasetCreationGUI(QMainWindow):
     
     def get_bearer_token(self):
         """
-        bearer_token.txt からトークンを取得（シンプル版: BEARER_TOKEN_FILEのみ参照）
+        Bearer Token統一管理システムから取得
         """
         try:
-            from config.common import BEARER_TOKEN_FILE
-            import os
-            if not os.path.exists(BEARER_TOKEN_FILE):
-                return None
-            with open(BEARER_TOKEN_FILE, 'r', encoding='utf-8') as f:
-                token = f.read().strip()
-                # "BearerToken=" プレフィックスを除去
-                if token.startswith('BearerToken='):
-                    token = token[len('BearerToken='):]
-                    self.log_message(f"Bearerトークンファイル読み込み成功: {BEARER_TOKEN_FILE}")
-                    return token
-                if token:
-                    return token
-                else:
-                    return None
-        except Exception:
+            return BearerTokenManager.get_token_with_relogin_prompt(self)
+        except Exception as e:
+            self.log_message(f"Bearer Token取得エラー: {e}")
             return None
     
     def merge_bearer_token_to_headers(self):

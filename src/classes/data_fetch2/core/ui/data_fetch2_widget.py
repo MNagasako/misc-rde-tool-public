@@ -539,20 +539,7 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
     open_folder_btn.clicked.connect(on_open_folder)
 
 
-    def find_bearer_token_recursive(obj):
-        # bearer_tokenが直接渡されていればそれを優先
-        if bearer_token:
-            return bearer_token
-        # objがNoneなら終了
-        if obj is None:
-            return None
-        # bearer_token属性があれば返す
-        if hasattr(obj, 'bearer_token') and getattr(obj, 'bearer_token'):
-            return getattr(obj, 'bearer_token')
-        # parent属性があれば再帰
-        if hasattr(obj, 'parent'):
-            return find_bearer_token_recursive(getattr(obj, 'parent'))
-        return None
+
 
     def on_fetch_files():
         """ファイル取得ボタンのクリックハンドラ"""
@@ -604,11 +591,12 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
                 safe_show_message_widget(widget, "データセット情報エラー", f"データセット情報の取得に失敗しました: {e}", "warning")
                 return
 
-            # トークン取得（親→親→...でbearer_token探索）
-            bearer_token = find_bearer_token_recursive(parent)
+            # Bearer Token統一管理システムで取得
+            from core.bearer_token_manager import BearerTokenManager
+            bearer_token = BearerTokenManager.get_token_with_relogin_prompt(parent)
             if not bearer_token:
                 logger.error("認証トークンが取得できません")
-                safe_show_message_widget(widget, "認証エラー", "認証トークンが取得できません。bearer_token属性がどの親にもありません。", "warning")
+                safe_show_message_widget(widget, "認証エラー", "認証トークンが取得できません。ログインを確認してください。", "warning")
                 return
 
             # プログレス表示付きでファイル取得処理を実行

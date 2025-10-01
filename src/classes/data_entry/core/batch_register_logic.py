@@ -123,13 +123,12 @@ class BatchRegisterWorker(QThread):
     
     def _register_fileset(self, file_set: FileSet):
         """個別ファイルセットの登録処理"""
-        # ベアラートークンを取得（グローバルから）
+        # ベアラートークンを統一管理システムで取得
         from ..ui.batch_preview_dialog import FileSetPreviewWidget
-        from core.bearer_token_helper import get_current_bearer_token
-        # Bearerトークンを共通ヘルパーで取得（通常登録タブ方式に統一）
-        bearer_token = get_current_bearer_token()
+        from core.bearer_token_manager import BearerTokenManager
+        bearer_token = BearerTokenManager.get_valid_token()
         if not bearer_token:
-            raise Exception("認証トークンが設定されていません。ログインを確認してください。")
+            raise Exception("認証トークンが取得できません。ログインを確認してください。")
         # データセット情報の確認
         if not file_set.dataset_id:
             raise Exception("データセットIDが設定されていません。")

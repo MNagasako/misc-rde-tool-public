@@ -5,6 +5,7 @@ HTTP通信、認証、ペイロード構築を統一管理
 import json
 from PyQt5.QtWidgets import QMessageBox
 from PyQt5.QtCore import QTimer
+from core.bearer_token_manager import BearerTokenManager
 
 
 class SubgroupApiClient:
@@ -21,12 +22,12 @@ class SubgroupApiClient:
     
     def authenticate(self):
         """
-        Bearer トークンの取得・設定
+        Bearer トークンの取得・設定（統一管理システム使用）
         
         Returns:
             bool: 認証成功かどうか
         """
-        self.bearer_token = self._find_bearer_token()
+        self.bearer_token = BearerTokenManager.get_token_with_relogin_prompt(self.widget)
         if not self.bearer_token:
             QMessageBox.warning(
                 self.widget, 
@@ -35,25 +36,6 @@ class SubgroupApiClient:
             )
             return False
         return True
-    
-    def _find_bearer_token(self):
-        """widgetまたは親階層からbearer_tokenを探す"""
-        current = self.widget
-        # QWidgetのparent()はQObjectを返すので、bearer_token属性をたどる
-        while current is not None:
-            token = getattr(current, 'bearer_token', None)
-            if token:
-                return token
-            # PyQt: parent()はQObject、Noneまたはcallable
-            if hasattr(current, 'parent'):
-                p = current.parent()
-                if p is not None and p != current:
-                    current = p
-                else:
-                    break
-            else:
-                break
-        return None
     
     def create_subgroup(self, payload, group_name, auto_refresh=True):
         """
@@ -355,14 +337,6 @@ class SubgroupPayloadBuilder:
 
 
 # 後方互換性のための関数群（既存コードとの互換性維持）
-
-def find_bearer_token(widget):
-    """
-    後方互換性のためのbearer_token取得関数
-    """
-    client = SubgroupApiClient(widget)
-    return client._find_bearer_token()
-
 
 def send_subgroup_request(widget, api_url, headers, payload, group_name, auto_refresh=True):
     """

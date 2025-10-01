@@ -723,12 +723,12 @@ class CommonSubgroupMemberSelector(QWidget):
                     return
         
         try:
-            # 既存のAPIヘルパーを使用してBearer token取得
-            from ..core import subgroup_api_helper
-            bearer_token = subgroup_api_helper.find_bearer_token(self)
+            # Bearer Token統一管理システムで取得
+            from core.bearer_token_manager import BearerTokenManager
+            bearer_token = BearerTokenManager.get_token_with_relogin_prompt(self)
             
             if not bearer_token:
-                QMessageBox.warning(self, "認証エラー", "Bearer tokenが見つかりません。ログインを確認してください。")
+                QMessageBox.warning(self, "認証エラー", "Bearer tokenが取得できません。ログインを確認してください。")
                 return
             
             # APIでユーザー検索（既存のHTTPヘルパーを使用）

@@ -9,6 +9,7 @@ from PyQt5.QtWidgets import QMessageBox, QFileDialog
 from PyQt5.QtCore import QCoreApplication
 from config.common import OUTPUT_RDE_DIR, INPUT_DIR
 from classes.utils.api_request_helper import api_request, post_form, post_binary  # refactored to use api_request_helper
+from core.bearer_token_manager import BearerTokenManager
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -16,6 +17,14 @@ logger = logging.getLogger(__name__)
 def run_data_register_logic(parent=None, bearer_token=None, dataset_info=None, form_values=None, file_paths=None, attachment_paths=None):
     """データ登録ボタン押下時のロジック（ファイル選択・一時保存付き）"""
     try:
+        # Bearer Token統一管理システムで取得
+        if not bearer_token:
+            bearer_token = BearerTokenManager.get_token_with_relogin_prompt(parent)
+            if not bearer_token:
+                logger.error("Bearer Tokenが取得できません。ログインを確認してください")
+                QMessageBox.warning(parent, "認証エラー", "Bearer Tokenが取得できません。ログインを確認してください。")
+                return
+        
         # file_pathsが指定されていればそれを使う。なければ従来通りファイル選択ダイアログを出す
         if file_paths is not None:
             temp_file_paths = file_paths
@@ -28,11 +37,6 @@ def run_data_register_logic(parent=None, bearer_token=None, dataset_info=None, f
 
         # 添付ファイルパス
         temp_attachment_paths = attachment_paths if attachment_paths else []
-        
-        # Bearerトークンチェック
-        if not bearer_token:
-            logger.error("Bearerトークンが取得できません。ログイン状態を確認してください")
-            return
 
         # dataset_infoの検証
         logger.debug(f"dataset_info検証: type={type(dataset_info)}, value={dataset_info}")
@@ -446,7 +450,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
         if progress:
             progress.setLabelText("エントリー登録バリデーション中...")
             QCoreApplication.processEvents()
-        resp_validation = api_request("POST", url_validation, bearer_token=bearer_token, headers=headers, json_data=payload, timeout=60)  # refactored to use api_request_helper
+        resp_validation = api_request("POST", url_validation, headers=headers, json_data=payload, timeout=60)  # Bearer Token統一管理システム対応
         if resp_validation is None:
             if progress:
                 progress.setLabelText("バリデーションエラー: リクエスト失敗")
@@ -503,7 +507,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
         if progress:
             progress.setLabelText("エントリー本体POST中...")
             QCoreApplication.processEvents()
-        resp = api_request("POST", url, bearer_token=bearer_token, headers=headers, json_data=payload, timeout=60)  # refactored to use api_request_helper
+        resp = api_request("POST", url, headers=headers, json_data=payload, timeout=60)  # Bearer Token統一管理システム対応
         if resp is None:
             if progress:
                 progress.setLabelText("POSTエラー: リクエスト失敗")
@@ -672,7 +676,7 @@ def upload_file(bearer_token,datasetId= "a74b58c0-9907-40e7-a261-a75519730d82",f
         with open(file_path, 'rb') as f:
             binary_data = f.read()
 
-        resp = post_binary(url, binary_data, headers=headers, bearer_token=bearer_token)  # refactored to use api_request_helper
+        resp = post_binary(url, binary_data, headers=headers)  # Bearer Token統一管理システム対応
         if resp is None:
             raise Exception("Binary upload failed: Request error")
         resp.raise_for_status()  # エラーなら例外

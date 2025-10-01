@@ -33,17 +33,16 @@ def fetch_user_details_by_id(user_id, bearer_token=None):
         return None
     
     try:
-        from net.http_helpers import proxy_get
+        from classes.utils.api_request_helper import api_request
         
         # API URL構築
         api_url = f"https://rde-user-api.nims.go.jp/users/{user_id}"
         
-        # ヘッダー準備
+        # ヘッダー準備（AuthorizationはBearerTokenManagerで自動設定されるため除外）
         headers = {
             'Accept': 'application/vnd.api+json',
             'Accept-Encoding': 'gzip, deflate, br, zstd',
             'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
-            'Authorization': f'Bearer {bearer_token}',
             'Connection': 'keep-alive',
             'Host': 'rde-user-api.nims.go.jp',
             'Origin': 'https://rde-user.nims.go.jp',
@@ -59,8 +58,8 @@ def fetch_user_details_by_id(user_id, bearer_token=None):
         
         print(f"[DEBUG] ユーザー詳細取得API呼び出し: {api_url}")
         
-        # API呼び出し
-        response = proxy_get(api_url, headers=headers, timeout=10)
+        # API呼び出し（統一管理システム使用）
+        response = api_request("GET", api_url, bearer_token=bearer_token, headers=headers, timeout=10)
         response.raise_for_status()
         
         # レスポンス解析
@@ -90,52 +89,6 @@ def fetch_user_details_by_id(user_id, bearer_token=None):
     except Exception as e:
         print(f"[ERROR] ユーザー詳細取得エラー (ID: {user_id}): {e}")
         return None
-
-
-def find_bearer_token(widget):
-    """widgetまたは親階層からbearer_tokenを探す（安全版）"""
-    print(f"[DEBUG] Bearer token検索開始: widget={type(widget).__name__}")
-    current = widget
-    level = 0
-    
-    # QWidgetのparent()はQObjectを返すので、bearer_token属性をたどる
-    while current is not None and level < 10:  # 無限ループを防ぐため制限
-        try:
-            # オブジェクトが削除されていないかチェック
-            if hasattr(current, '__class__'):
-                # 削除チェック: 削除されたオブジェクトにアクセスするとRuntimeError
-                _ = type(current).__name__
-                
-                token = getattr(current, 'bearer_token', None)
-                print(f"[DEBUG] レベル{level}: {type(current).__name__}, token={'あり' if token else 'なし'}")
-                
-                if token:
-                    print(f"[DEBUG] Bearer token発見: レベル{level}で発見")
-                    return token
-                    
-                # PyQt: parent()はQObject、Noneまたはcallable
-                if hasattr(current, 'parent'):
-                    p = current.parent()
-                    if p is not None and p != current:
-                        current = p
-                        level += 1
-                    else:
-                        break
-                else:
-                    break
-            else:
-                print(f"[WARNING] レベル{level}: オブジェクトが無効です")
-                break
-                
-        except RuntimeError as e:
-            print(f"[WARNING] レベル{level}: QWidgetが削除済み - {e}")
-            break
-        except Exception as e:
-            print(f"[WARNING] レベル{level}: 予期しないエラー - {e}")
-            break
-    
-    print(f"[WARNING] Bearer token見つからず: {level}レベル検索完了")
-    return None
 
 
 def check_subgroup_files():
@@ -887,7 +840,8 @@ def send_subgroup_request(widget, api_url, headers, payload, group_name, auto_re
         group_name: グループ名（メッセージ用）
         auto_refresh: 成功時の自動リフレッシュ有効/無効
     """
-    bearer_token = find_bearer_token(widget)
+    from core.bearer_token_manager import BearerTokenManager
+    bearer_token = BearerTokenManager.get_token_with_relogin_prompt(widget)
     if not bearer_token:
         QMessageBox.warning(widget, "認証エラー", "Bearerトークンが取得できません。ログイン状態を確認してください。")
         return False
@@ -910,7 +864,8 @@ def send_subgroup_request(widget, api_url, headers, payload, group_name, auto_re
                             from classes.utils.progress_worker import SimpleProgressWorker
                             from classes.basic.ui.ui_basic_info import show_progress_dialog
                             
-                            bearer_token = find_bearer_token(widget)
+                            from core.bearer_token_manager import BearerTokenManager
+                            bearer_token = BearerTokenManager.get_valid_token()
                             if bearer_token:
                                 # プログレス表示付きで自動更新
                                 worker = SimpleProgressWorker(

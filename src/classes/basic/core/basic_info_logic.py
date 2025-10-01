@@ -227,8 +227,24 @@ def get_self_username_from_json(json_path="output/rde/data/self.json"):
         logger.error(f"self.jsonのuserName取得失敗: {e}")
         return ""
 # --- ユーザー自身情報取得 ---
-def fetch_self_info_from_api(bearer_token, output_dir="output/rde/data"):
-    """https://rde-user-api.nims.go.jp/users/self からユーザー情報を取得し、self.jsonとして保存"""
+def fetch_self_info_from_api(bearer_token=None, output_dir="output/rde/data", parent_widget=None):
+    """
+    https://rde-user-api.nims.go.jp/users/self からユーザー情報を取得し、self.jsonとして保存
+    
+    Args:
+        bearer_token: Bearer Token（Noneの場合は統一管理システムから自動取得）
+        output_dir: 出力ディレクトリ
+        parent_widget: 再ログインダイアログの親ウィジェット
+    """
+    from core.bearer_token_manager import BearerTokenManager
+    
+    # Bearer Token統一管理システムを使用
+    if bearer_token is None:
+        bearer_token = BearerTokenManager.get_token_with_relogin_prompt(parent_widget)
+        if bearer_token is None:
+            logger.error("ユーザー情報取得失敗: 有効なBearer Tokenが取得できません")
+            return False
+    
     url = "https://rde-user-api.nims.go.jp/users/self"
     headers = _make_headers(
         bearer_token,
@@ -241,7 +257,7 @@ def fetch_self_info_from_api(bearer_token, output_dir="output/rde/data"):
         resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=10)  # refactored to use api_request_helper
         if resp is None:
             logger.error("ユーザー情報取得失敗: リクエストエラー")
-            return
+            return False
         resp.raise_for_status()
         data = resp.json()
         
@@ -250,8 +266,14 @@ def fetch_self_info_from_api(bearer_token, output_dir="output/rde/data"):
         with open(save_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         logger.info(f"self.json取得・保存完了: {save_path}")
+        return True
     except Exception as e:
         logger.error(f"self.json取得・保存失敗: {e}")
+        # トークンが無効の可能性をチェック
+        if hasattr(e, 'response') and e.response.status_code == 401:
+            logger.warning("認証エラー（401）が発生しました。Bearer Tokenが無効の可能性があります。")
+            if BearerTokenManager.request_relogin_if_invalid(parent_widget):
+                logger.info("再ログインが促進されました")
         raise
 
 
@@ -801,13 +823,14 @@ def show_fetch_confirmation_dialog(parent, onlySelf, searchWords):
 # === 段階別実行関数 ===
 
 @stage_error_handler("ユーザー情報取得")
-def fetch_user_info_stage(bearer_token, progress_callback=None):
+def fetch_user_info_stage(bearer_token=None, progress_callback=None, parent_widget=None):
     """段階1: ユーザー情報取得"""
     if progress_callback:
         if not progress_callback(10, 100, "ユーザー情報取得中..."):
             return "キャンセルされました"
     
-    fetch_self_info_from_api(bearer_token)
+    if not fetch_self_info_from_api(bearer_token, parent_widget=parent_widget):
+        return "ユーザー情報取得に失敗しました"
     
     if progress_callback:
         if not progress_callback(100, 100, "ユーザー情報取得完了"):
@@ -1257,7 +1280,8 @@ def fetch_basic_info_logic(bearer_token, parent=None, webview=None, onlySelf=Fal
             return "キャンセルされました"
         
         logger.debug("fetch_self_info_from_api")
-        fetch_self_info_from_api(bearer_token)
+        if not fetch_self_info_from_api(bearer_token, parent_widget=parent):
+            return "ユーザー情報取得に失敗しました"
         
         if not update_stage_progress(0, 100, "完了"):
             return "キャンセルされました"
@@ -1791,7 +1815,8 @@ def fetch_common_info_only_logic(bearer_token, parent=None, webview=None, progre
             return "キャンセルされました"
             
         logger.debug("fetch_self_info_from_api")
-        fetch_self_info_from_api(bearer_token)
+        if not fetch_self_info_from_api(bearer_token, parent_widget=parent):
+            return "ユーザー情報取得に失敗しました"
         
         if not update_stage_progress(0, 100, "完了"):
             return "キャンセルされました"

@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import QMessageBox
 from PyQt5.QtCore import QMetaObject, Qt, Q_ARG
 from config.common import OUTPUT_DIR
 from classes.utils.api_request_helper import api_request, fetch_binary, download_request  # refactored to use api_request_helper
+from core.bearer_token_manager import BearerTokenManager
 
 # ログ設定
 logger = logging.getLogger(__name__)
@@ -66,12 +67,25 @@ def replace_invalid_path_chars(s):
     })
     return s.translate(table)
 
-def download_all_files_from_files_json(data_id, bearer_token, parent=None):
+def download_all_files_from_files_json(data_id, bearer_token=None, parent=None):
     """
     dataFiles/{data_id}.json の data 配列内の各ファイルID・fileNameで全ファイルをダウンロードし保存
     保存先: output/rde/data/dataFiles/{data_id}/{fileName}
+    
+    Args:
+        data_id: データID
+        bearer_token: 認証トークン（省略時はBearerTokenManagerから取得）
+        parent: 親ウィジェット
     """
     from urllib.parse import unquote
+    
+    # Bearer Token統一管理システムで取得
+    if not bearer_token:
+        bearer_token = BearerTokenManager.get_token_with_relogin_prompt(parent)
+        if not bearer_token:
+            logger.error("Bearer Tokenが取得できません。ログインを確認してください")
+            safe_show_message(parent, "認証エラー", "Bearer Tokenが取得できません。ログインを確認してください。", "critical")
+            return False
     
     files_json_path = os.path.normpath(os.path.join(OUTPUT_DIR, f'rde/data/dataFiles/{data_id}.json'))
     save_dir = os.path.normpath(os.path.join(OUTPUT_DIR, f'rde/data/dataFiles/{data_id}'))
@@ -149,11 +163,31 @@ def download_all_files_from_files_json(data_id, bearer_token, parent=None):
     logger.info(f"ファイルダウンロード完了: data_id={data_id}, 成功={downloaded_count}/{len(file_entries)}")
     if parent:
         safe_show_message(parent, "完了", f"{data_id} の全ファイルを保存しました。（{downloaded_count}/{len(file_entries)}件成功）", "information")
-def download_file_for_data_id(data_id, bearer_token, save_dir_base, file_name, grantNumber, dataset_name, tile_name, tile_number, parent=None):
+
+def download_file_for_data_id(data_id, bearer_token=None, save_dir_base=None, file_name=None, grantNumber=None, dataset_name=None, tile_name=None, tile_number=None, parent=None):
     """
     指定data_idのファイル本体をAPIから取得し、output/rde/data/dataFiles/{data_id}/ に保存
+    
+    Args:
+        data_id: データID
+        bearer_token: 認証トークン（省略時はBearerTokenManagerから取得）
+        save_dir_base: 保存ディレクトリベース
+        file_name: ファイル名
+        grantNumber: グラント番号
+        dataset_name: データセット名
+        tile_name: タイル名
+        tile_number: タイル番号
+        parent: 親ウィジェット
     """
     import os
+    
+    # Bearer Token統一管理システムで取得
+    if not bearer_token:
+        bearer_token = BearerTokenManager.get_token_with_relogin_prompt(parent)
+        if not bearer_token:
+            logger.error("Bearer Tokenが取得できません。ログインを確認してください")
+            safe_show_message(parent, "認証エラー", "Bearer Tokenが取得できません。ログインを確認してください。", "critical")
+            return False
     from urllib.parse import unquote, urlparse
     #base_dir = os.path.abspath(os.path.dirname(__file__))
 
@@ -287,7 +321,7 @@ def anonymize_json(data, grant_number):
             return [anonymize_json(v, grant_number) for v in data]
         return data
 
-def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token, save_dir=None, progress_callback=None, file_filter_config=None):
+def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_dir=None, progress_callback=None, file_filter_config=None):
     
     tile_name = "tile_name"  # デフォルト値
     tile_number = "tile_number"  # デフォルト値
@@ -298,7 +332,7 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token, save_dir=Non
     Args:
         parent: 親ウィジェット
         dataset_obj: データセットオブジェクト
-        bearer_token: 認証トークン
+        bearer_token: 認証トークン（省略時はBearerTokenManagerから取得）
         save_dir: 保存先ディレクトリ
         progress_callback: プログレス通知コールバック
         file_filter_config: ファイルフィルタ設定辞書
@@ -309,12 +343,16 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token, save_dir=Non
         if parent:
             safe_show_message(parent, "データセット未選択", error_msg, "warning")
         return None
+    
+    # Bearer Token統一管理システムで取得
     if not bearer_token:
-        error_msg = "認証トークンが取得できません。ログイン状態を確認してください。"
-        logger.error(error_msg)
-        if parent:
-            safe_show_message(parent, "認証エラー", error_msg, "warning")
-        return None
+        bearer_token = BearerTokenManager.get_token_with_relogin_prompt(parent)
+        if not bearer_token:
+            error_msg = "Bearer Tokenが取得できません。ログインを確認してください。"
+            logger.error(error_msg)
+            if parent:
+                safe_show_message(parent, "認証エラー", error_msg, "warning")
+            return None
 
     # フィルタ設定の初期化
     if file_filter_config is None:
@@ -424,7 +462,7 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token, save_dir=Non
                 
                 logger.info(f"APIリクエスト送信: {entry_url}")
                 
-                resp = api_request("GET", entry_url, bearer_token=bearer_token, headers=headers, params=params)
+                resp = api_request("GET", entry_url, headers=headers, params=params)  # Bearer Token統一管理システム対応
                 
                 if resp is None:
                     error_msg = f"APIからのデータエントリ取得に失敗しました: {dataset_id}"
@@ -570,7 +608,7 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token, save_dir=Non
                     "sec-ch-ua-platform": '"Windows"',
                 }
                 
-                resp = api_request("GET", files_url, bearer_token=bearer_token, headers=headers)
+                resp = api_request("GET", files_url, headers=headers)  # Bearer Token統一管理システム対応
                 
                 if resp is None:
                     logger.error(f"リクエスト失敗 (data_id: {data_id}): {files_url}")

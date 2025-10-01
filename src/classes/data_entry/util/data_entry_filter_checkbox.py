@@ -640,6 +640,39 @@ def create_checkbox_filter_dropdown(parent=None):
     # 初回読み込み
     update_filtered_datasets()
     
+    # データセット更新通知システムに登録
+    def setup_dataset_refresh_notification():
+        """データセット更新通知システムに登録"""
+        try:
+            from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
+            dataset_notifier = get_dataset_refresh_notifier()
+            
+            def refresh_callback():
+                """データセットリスト更新コールバック"""
+                try:
+                    print("[INFO] フィルタ付きドロップダウン: データセットリスト更新開始")
+                    clear_user_cache()  # キャッシュクリア
+                    update_filtered_datasets()  # データセット再読み込み
+                    print("[INFO] フィルタ付きドロップダウン: データセットリスト更新完了")
+                except Exception as e:
+                    print(f"[ERROR] フィルタ付きドロップダウン: データセットリスト更新に失敗: {e}")
+            
+            dataset_notifier.register_callback(refresh_callback)
+            print("[INFO] フィルタ付きドロップダウン: データセット更新通知に登録完了")
+            
+            # ウィジェット破棄時の通知解除用
+            def cleanup_callback():
+                dataset_notifier.unregister_callback(refresh_callback)
+                print("[INFO] フィルタ付きドロップダウン: データセット更新通知を解除")
+            
+            container._cleanup_dataset_callback = cleanup_callback
+            
+        except Exception as e:
+            print(f"[WARNING] フィルタ付きドロップダウン: データセット更新通知への登録に失敗: {e}")
+    
+    # 通知システム初期化
+    setup_dataset_refresh_notification()
+    
     # ウィジェットにアクセス用属性を設定
     container.dataset_dropdown = combo
     container.filter_widget = filter_widget
