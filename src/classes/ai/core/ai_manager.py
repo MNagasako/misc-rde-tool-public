@@ -192,8 +192,10 @@ class AIManager:
                 
                 return {
                     "success": True, 
-                    "response": content, 
+                    "response": content,
+                    "content": content,  # 互換性のため追加
                     "usage": result.get("usage", {}),
+                    "tokens_used": result.get("usage", {}).get("total_tokens", 0),  # 互換性のため追加
                     "model": model,
                     "response_time": response_time
                 }
@@ -247,10 +249,14 @@ class AIManager:
             result = response.json()
             if "candidates" in result and len(result["candidates"]) > 0:
                 content = result["candidates"][0]["content"]["parts"][0]["text"]
+                usage_metadata = result.get("usageMetadata", {})
+                
                 return {
                     "success": True, 
-                    "response": content, 
-                    "usage": result.get("usageMetadata", {}),
+                    "response": content,
+                    "content": content,  # 互換性のため追加
+                    "usage": usage_metadata,
+                    "tokens_used": usage_metadata.get("totalTokenCount", 0),  # 互換性のため追加
                     "model": model,
                     "response_time": response_time
                 }
@@ -326,15 +332,19 @@ class AIManager:
                         "eval_count": result.get("eval_count", 0),
                         "total_duration": result.get("total_duration", 0)
                     }
+                    tokens_used = usage_info.get("prompt_eval_count", 0) + usage_info.get("eval_count", 0)
                 else:
                     # OpenAI互換API形式のレスポンス処理
                     content = result["choices"][0]["message"]["content"]
                     usage_info = result.get("usage", {})
+                    tokens_used = usage_info.get("total_tokens", 0)
                 
                 return {
                     "success": True, 
-                    "response": content, 
+                    "response": content,
+                    "content": content,  # 互換性のため追加
                     "usage": usage_info,
+                    "tokens_used": tokens_used,  # 互換性のため追加
                     "model": model,
                     "response_time": response_time
                 }

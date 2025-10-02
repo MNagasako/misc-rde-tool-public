@@ -59,6 +59,9 @@ class SettingsTabWidget(QWidget):
         
         # アプリケーション設定タブ
         self.setup_application_tab()
+        
+        # AI設定タブ
+        self.setup_ai_tab()
             
         # 自動ログインタブ
         self.setup_autologin_tab()
@@ -428,6 +431,73 @@ class SettingsTabWidget(QWidget):
         
         layout.addStretch()
         self.tab_widget.addTab(widget, "アプリケーション")
+    
+    def setup_ai_tab(self):
+        """AI設定タブ"""
+        try:
+            from classes.config.ui.ai_settings_widget import create_ai_settings_widget
+            
+            # AI設定ウィジェットを作成
+            ai_widget = create_ai_settings_widget(self)
+            
+            if ai_widget:
+                # スクロールエリアでラップ
+                ai_scroll = QScrollArea()
+                ai_scroll.setWidgetResizable(True)
+                ai_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+                ai_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+                ai_scroll.setMinimumHeight(600)
+                ai_scroll.setWidget(ai_widget)
+                
+                # AI設定ウィジェットへの参照を保存
+                self.ai_widget = ai_widget
+                
+                # タブに追加
+                self.tab_widget.addTab(ai_scroll, "AI設定")
+            else:
+                # フォールバック：簡略版を作成
+                self.setup_ai_tab_fallback()
+                
+        except ImportError as e:
+            logger.warning(f"AI設定ウィジェットのインポートに失敗: {e}")
+            # フォールバック：簡略版を作成
+            self.setup_ai_tab_fallback()
+        except Exception as e:
+            logger.error(f"AI設定タブ作成エラー: {e}")
+            self.setup_ai_tab_fallback()
+    
+    def setup_ai_tab_fallback(self):
+        """AI設定タブ - フォールバック版"""
+        print("[settings_tab_widget] フォールバックAI設定タブを作成")
+        
+        fallback_widget = QWidget()
+        layout = QVBoxLayout(fallback_widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # タイトル
+        title_label = QLabel("AI設定")
+        title_font = QFont()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
+        
+        # 説明
+        info_label = QLabel(
+            "AI設定機能は現在利用できません。\n"
+            "手動でinput/ai_config.jsonを編集してください。\n"
+            "詳細は管理者にお問い合わせください。"
+        )
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+        
+        # 設定ファイルパス表示
+        path_label = QLabel("設定ファイル: input/ai_config.json")
+        path_label.setStyleSheet("color: #666; font-style: italic;")
+        layout.addWidget(path_label)
+        
+        layout.addStretch()
+        self.tab_widget.addTab(fallback_widget, "AI設定")
         
     def test_enterprise_ca(self):
         """組織内CA確認テスト"""
@@ -464,12 +534,24 @@ class SettingsTabWidget(QWidget):
     def apply_settings(self):
         """設定を適用"""
         try:
+            applied_settings = []
+            
             # プロキシ設定の適用
             if hasattr(self, 'proxy_widget') and hasattr(self.proxy_widget, 'apply_settings'):
                 self.proxy_widget.apply_settings()
-                QMessageBox.information(self, "設定適用", "プロキシ設定が適用されました。")
+                applied_settings.append("プロキシ設定")
+            
+            # AI設定の適用
+            if hasattr(self, 'ai_widget') and hasattr(self.ai_widget, 'save_settings'):
+                self.ai_widget.save_settings()
+                applied_settings.append("AI設定")
+            
+            if applied_settings:
+                message = f"以下の設定が適用されました:\n• " + "\n• ".join(applied_settings)
             else:
-                QMessageBox.information(self, "設定適用", "設定が適用されました。（プロキシ設定は簡易モード）")
+                message = "設定が適用されました。（簡易モード）"
+                
+            QMessageBox.information(self, "設定適用", message)
             
         except Exception as e:
             logger.error(f"設定適用エラー: {e}")
@@ -478,17 +560,31 @@ class SettingsTabWidget(QWidget):
     def reload_settings(self):
         """設定を再読み込み"""
         try:
+            reloaded_settings = []
+            
             # プロキシ設定の再読み込み
             if hasattr(self, 'proxy_widget') and hasattr(self.proxy_widget, 'load_current_settings'):
                 self.proxy_widget.load_current_settings()
-                QMessageBox.information(self, "設定再読み込み", "プロキシ設定が再読み込みされました。")
-            else:
+                reloaded_settings.append("プロキシ設定")
+            elif hasattr(self, 'proxy_widget'):
                 # フォールバック処理
                 if hasattr(self, 'current_mode_label'):
                     self.current_mode_label.setText("SYSTEM")
                 if hasattr(self, 'current_http_proxy_label'):
                     self.current_http_proxy_label.setText("自動検出")
-                QMessageBox.information(self, "設定再読み込み", "設定が再読み込みされました。（簡易モード）")
+                reloaded_settings.append("プロキシ設定（簡易）")
+            
+            # AI設定の再読み込み
+            if hasattr(self, 'ai_widget') and hasattr(self.ai_widget, 'load_current_settings'):
+                self.ai_widget.load_current_settings()
+                reloaded_settings.append("AI設定")
+                
+            if reloaded_settings:
+                message = f"以下の設定が再読み込みされました:\n• " + "\n• ".join(reloaded_settings)
+            else:
+                message = "設定が再読み込みされました。（簡易モード）"
+                
+            QMessageBox.information(self, "設定再読み込み", message)
             
         except Exception as e:
             logger.error(f"設定再読み込みエラー: {e}")
