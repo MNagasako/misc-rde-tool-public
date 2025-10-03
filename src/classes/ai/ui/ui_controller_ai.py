@@ -246,24 +246,31 @@ class UIControllerAI:
                 response_display.append("[DEBUG] 実験データコンボボックス: 未初期化")
             
             # ARIM拡張情報の状態
-            if hasattr(self.parent, 'arim_extension_checkbox') and self.parent.arim_extension_checkbox:
-                arim_checked = self.parent.arim_extension_checkbox.isChecked()
-                response_display.append(f"[DEBUG] ARIM拡張情報チェックボックス: {arim_checked}")
-                if arim_checked:
-                    # ARIM拡張データの確認
-                    try:
-                        arim_data = self._load_arim_extension_data()
-                        if arim_data:
-                            response_display.append(f"[DEBUG] ARIM拡張データ件数: {len(arim_data)}")
-                            if len(arim_data) > 0:
-                                sample_keys = list(arim_data[0].keys())[:10]
-                                response_display.append(f"[DEBUG] ARIM拡張データキー例: {sample_keys}")
-                        else:
-                            response_display.append("[DEBUG] ARIM拡張データ: 読み込み失敗")
-                    except Exception as e:
-                        response_display.append(f"[DEBUG] ARIM拡張データ確認エラー: {e}")
-            else:
-                response_display.append("[DEBUG] ARIM拡張情報チェックボックス: 未初期化")
+            try:
+                if (hasattr(self.parent, 'arim_extension_checkbox') and 
+                    self.parent.arim_extension_checkbox and
+                    hasattr(self.parent.arim_extension_checkbox, 'isChecked')):
+                    
+                    arim_checked = self.parent.arim_extension_checkbox.isChecked()
+                    response_display.append(f"[DEBUG] ARIM拡張情報チェックボックス: {arim_checked}")
+                    if arim_checked:
+                        # ARIM拡張データの確認
+                        try:
+                            arim_data = self._load_arim_extension_data()
+                            if arim_data:
+                                response_display.append(f"[DEBUG] ARIM拡張データ件数: {len(arim_data)}")
+                                if len(arim_data) > 0:
+                                    sample_keys = list(arim_data[0].keys())[:10]
+                                    response_display.append(f"[DEBUG] ARIM拡張データキー例: {sample_keys}")
+                            else:
+                                response_display.append("[DEBUG] ARIM拡張データ: 読み込み失敗")
+                        except Exception as e:
+                            response_display.append(f"[DEBUG] ARIM拡張データ確認エラー: {e}")
+                else:
+                    response_display.append("[DEBUG] ARIM拡張情報チェックボックス: 未初期化")
+            except Exception as e:
+                response_display.append(f"❌ エラーが発生しました: {e}")
+                response_display.append("[DEBUG] ARIM拡張情報チェックボックス: アクセスエラー")
             
             # データソースの状態
             if hasattr(self.parent, 'arim_exp_radio') and self.parent.arim_exp_radio:
@@ -1719,8 +1726,16 @@ class UIControllerAI:
         プロンプト用のprepared_dataも含めて返すように変更
         """
         # ARIM拡張情報のチェックボックス状態を確認
-        use_arim_extension = (hasattr(self.parent, 'arim_extension_checkbox') and 
-                            self.parent.arim_extension_checkbox.isChecked())
+        use_arim_extension = False
+        try:
+            if (hasattr(self.parent, 'arim_extension_checkbox') and 
+                self.parent.arim_extension_checkbox and
+                hasattr(self.parent.arim_extension_checkbox, 'isChecked')):
+                use_arim_extension = self.parent.arim_extension_checkbox.isChecked()
+        except Exception as e:
+            self._force_log(f"ARIM拡張情報チェックボックスアクセスエラー: {e}", "error")
+            use_arim_extension = False
+            
         try:
             if hasattr(self, 'ai_response_display') and self.ai_response_display:
                 self.ai_response_display.append(f"[DEBUG] ARIM拡張情報使用: {use_arim_extension}")
@@ -2414,30 +2429,9 @@ ARIMNO: {experiment_data.get('ARIMNO', 'N/A')}
                             self.parent.ai_response_display.append(f"[DEBUG] 課題番号完全一致: {record_task}")
                         break
             
-            # 3. 末尾4桁一致検索（ポップアップと同じロジック）
-            if not matching_records and task_id and len(task_id) >= 4:
-                task_suffix = task_id[-4:]  # 末尾4桁を取得
-                if hasattr(self.parent, 'ai_response_display'):
-                    self.parent.ai_response_display.append(f"[DEBUG] 末尾4桁検索開始: {task_suffix}")
-                
-                for record in arim_data:
-                    # 課題番号列での末尾一致チェック
-                    record_task = record.get('課題番号', '')
-                    if record_task and str(record_task).endswith(task_suffix):
-                        matching_records.append(record)
-                        if hasattr(self.parent, 'ai_response_display'):
-                            self.parent.ai_response_display.append(f"[DEBUG] 課題番号末尾一致: {record_task} (suffix: {task_suffix})")
-                        break
-                    
-                    # ARIMNO列での末尾一致チェック
-                    record_arimno = record.get('ARIMNO', '')
-                    if record_arimno and str(record_arimno).endswith(task_suffix):
-                        # 重複チェック
-                        if record not in matching_records:
-                            matching_records.append(record)
-                            if hasattr(self.parent, 'ai_response_display'):
-                                self.parent.ai_response_display.append(f"[DEBUG] ARIMNO末尾一致: {record_arimno} (suffix: {task_suffix})")
-                        break
+            # 完全一致検索のみ - 末尾4桁検索は無効化
+            if not matching_records and hasattr(self.parent, 'ai_response_display'):
+                self.parent.ai_response_display.append(f"[DEBUG] 完全一致検索結果なし: {task_id}")
             
             # 結合処理
             if matching_records:

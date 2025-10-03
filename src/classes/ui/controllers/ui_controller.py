@@ -3266,21 +3266,12 @@ class UIController(UIControllerCore):
                     if arimno and str(arimno) == str(selected_task_id):
                         matching_records.append(record)
                 
-                # 2. ARIMNO列での完全一致が見つからない場合、課題番号での末尾4桁一致検索
-                if not matching_records and len(selected_task_id) >= 4:
-                    task_suffix = selected_task_id[-4:]  # 末尾4桁を取得
+                # 2. 課題番号列での完全一致検索
+                if not matching_records:
                     for record in arim_data:
-                        # 課題番号列をチェック
                         kadai_no = record.get('課題番号', '')
-                        if kadai_no and str(kadai_no).endswith(task_suffix):
+                        if kadai_no and str(kadai_no) == str(selected_task_id):
                             matching_records.append(record)
-                        
-                        # ARIMNO列も末尾一致でチェック
-                        arimno = record.get('ARIMNO', '')
-                        if arimno and str(arimno).endswith(task_suffix):
-                            # 重複チェック
-                            if record not in matching_records:
-                                matching_records.append(record)
                 
                 content_lines.extend([
                     f"選択された課題番号: {selected_task_id}",
@@ -3290,7 +3281,7 @@ class UIController(UIControllerCore):
                     "",
                     "=== 検索方式 ===",
                     "1. ARIMNO列での完全一致検索（優先）",
-                    "2. 課題番号での末尾4桁一致検索（フォールバック）",
+                    "2. 課題番号列での完全一致検索",
                     "",
                 ])
                 
@@ -3307,8 +3298,9 @@ class UIController(UIControllerCore):
                         "",
                         "以下の検索を実行しました:",
                         f"• ARIMNO列での完全一致: {selected_task_id}",
-                        f"• 課題番号列での末尾4桁一致: {selected_task_id[-4:] if len(selected_task_id) >= 4 else '(4桁未満のため検索なし)'}",
-                        f"• ARIMNO列での末尾4桁一致: {selected_task_id[-4:] if len(selected_task_id) >= 4 else '(4桁未満のため検索なし)'}",
+                        f"• 課題番号列での完全一致: {selected_task_id}",
+                        "",
+                        "注意: 完全一致検索のみ実行（末尾4桁検索は無効化済み）"
                     ])
             
             content = "\n".join(content_lines)

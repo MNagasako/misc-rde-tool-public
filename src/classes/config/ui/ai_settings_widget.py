@@ -935,3 +935,39 @@ def create_ai_settings_widget(parent=None):
     except Exception as e:
         logger.error(f"AI設定ウィジェット作成エラー: {e}")
         return None
+
+
+def get_ai_config():
+    """AI設定を取得"""
+    try:
+        config_path = get_dynamic_file_path("input/ai_config.json")
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                # 設定ファイルの構造に合わせて正規化
+                if 'ai_providers' in config:
+                    # 新しい構造: ai_providers -> providers
+                    normalized_config = {
+                        'default_provider': config.get('default_provider', 'gemini'),
+                        'providers': config.get('ai_providers', {}),
+                        'timeout': config.get('timeout', 30),
+                        'max_tokens': config.get('max_tokens', 1001),
+                        'temperature': config.get('temperature', 0.8)
+                    }
+                    return normalized_config
+                else:
+                    # 旧い構造はそのまま返す
+                    return config
+        else:
+            # デフォルト設定を返す
+            return {
+                'default_provider': 'gemini',
+                'providers': {
+                    'gemini': {
+                        'default_model': 'gemini-2.0-flash'
+                    }
+                }
+            }
+    except Exception as e:
+        logger.error(f"AI設定取得エラー: {e}")
+        return None

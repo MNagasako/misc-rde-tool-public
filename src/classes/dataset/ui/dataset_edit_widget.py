@@ -17,6 +17,7 @@ from PyQt5.QtCore import Qt, QDate, QTimer
 from config.common import get_dynamic_file_path
 from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
 from classes.dataset.ui.taxonomy_builder_dialog import TaxonomyBuilderDialog
+from classes.dataset.ui.ai_suggestion_dialog import AISuggestionDialog
 
 
 def repair_json_file(file_path):
@@ -1016,10 +1017,72 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         
         # 説明
         form_layout.addWidget(QLabel("説明:"), 2, 0)
+        
+        # 説明フィールド用の水平レイアウト
+        description_layout = QHBoxLayout()
         edit_description_edit = QTextEdit()
         edit_description_edit.setPlaceholderText("データセットの説明を入力")
         edit_description_edit.setMaximumHeight(80)  # 4行程度
-        form_layout.addWidget(edit_description_edit, 2, 1)
+        description_layout.addWidget(edit_description_edit)
+        
+        # AIサジェストボタン
+        ai_suggest_button = QPushButton("AI\nTEST")
+        ai_suggest_button.setMaximumWidth(50)
+        ai_suggest_button.setMaximumHeight(80)
+        ai_suggest_button.setToolTip("AIによる説明文の提案")
+        
+        # AI提案ダイアログ表示のコールバック関数
+        def show_ai_suggestion():
+            try:
+                # 現在のフォームデータを収集してコンテキストとして使用
+                context_data = {}
+                
+                # データセット名
+                if hasattr(edit_dataset_name_edit, 'text'):
+                    context_data['name'] = edit_dataset_name_edit.text().strip()
+                
+                # データセットタイプ（デフォルトまたは推定）
+                context_data['type'] = 'mixed'  # デフォルト
+                
+                # 課題番号
+                if hasattr(edit_grant_number_combo, 'currentText'):
+                    grant_text = edit_grant_number_combo.currentText().strip()
+                    if grant_text and grant_text != "課題番号を選択してください":
+                        context_data['grant_number'] = grant_text
+                    else:
+                        context_data['grant_number'] = ''
+                
+                # 既存の説明文
+                if hasattr(edit_description_edit, 'toPlainText'):
+                    existing_desc = edit_description_edit.toPlainText().strip()
+                    context_data['description'] = existing_desc if existing_desc else ''
+                
+                # アクセスポリシー（必要に応じて）
+                context_data['access_policy'] = 'restricted'  # デフォルト
+                
+                # その他のフォーム情報
+                if hasattr(edit_contact_edit, 'text'):
+                    context_data['contact'] = edit_contact_edit.text().strip()
+                
+                print(f"[DEBUG] AI提案に渡すコンテキストデータ: {context_data}")
+                
+                # AI提案ダイアログを表示（自動生成有効）
+                dialog = AISuggestionDialog(parent=widget, context_data=context_data, auto_generate=True)
+                if dialog.exec_() == QDialog.Accepted:
+                    suggestion = dialog.get_selected_suggestion()
+                    if suggestion:
+                        edit_description_edit.setText(suggestion)
+                        
+            except Exception as e:
+                QMessageBox.critical(widget, "エラー", f"AI提案機能でエラーが発生しました: {str(e)}")
+        
+        ai_suggest_button.clicked.connect(show_ai_suggestion)
+        description_layout.addWidget(ai_suggest_button)
+        
+        # 水平レイアウトを含むウィジェットを作成
+        description_widget = QWidget()
+        description_widget.setLayout(description_layout)
+        form_layout.addWidget(description_widget, 2, 1)
         
         # エンバーゴ期間終了日
         form_layout.addWidget(QLabel("エンバーゴ期間終了日:"), 3, 0)
