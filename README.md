@@ -178,9 +178,8 @@ Windows のセキュリティ警告やアンチウイルスによりブロック
 * フィルタを指定してからデータ取得タブで一括取得を実行してください。
 
 ### 4. サブグループ（研究グループ）
-
-<img width="1062" height="1004" alt="2025-09-17_11h26_44" src="https://github.com/user-attachments/assets/1c1a5902-7bae-43ab-8c75-36ad7a6d8c6c" />
-<img width="1062" height="1004" alt="2025-09-17_11h26_54" src="https://github.com/user-attachments/assets/9ddfe44b-0726-439a-9f3a-7b13d5783dc4" />
+<img width="1062" height="1004" alt="2025-09-17_11h26_44" src="https://github.com/user-attachments/assets/9708f82e-d2a5-4284-9745-06f5029be0f6" />
+<img width="1062" height="1004" alt="2025-09-17_11h26_54" src="https://github.com/user-attachments/assets/7d8fb89a-059e-40dc-b572-e2f778b583e8" />
 
 #### 新規作成
 
