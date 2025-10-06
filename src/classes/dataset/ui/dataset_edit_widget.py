@@ -1094,13 +1094,53 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         edit_description_edit.setMaximumHeight(80)  # 4行程度
         description_layout.addWidget(edit_description_edit)
         
-        # AIサジェストボタン
-        ai_suggest_button = QPushButton("AI\nTEST")
-        ai_suggest_button.setMaximumWidth(50)
-        ai_suggest_button.setMaximumHeight(80)
-        ai_suggest_button.setToolTip("AIによる説明文の提案")
+        # AIサジェストボタン用の縦並びレイアウト
+        ai_buttons_layout = QVBoxLayout()
+        ai_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        ai_buttons_layout.setSpacing(2)  # ボタン間の間隔を小さく
         
-        # AI提案ダイアログ表示のコールバック関数
+        # AIボタン（通常版・ダイアログ表示）
+        ai_suggest_button = QPushButton("🤖 AI")
+        ai_suggest_button.setMaximumWidth(50)
+        ai_suggest_button.setMaximumHeight(38)  # 高さを半分に調整
+        ai_suggest_button.setToolTip("AIによる説明文の提案（ダイアログ表示）")
+        ai_suggest_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-size: 10px;
+                font-weight: bold;
+                border: none;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        
+        # クイックAIボタン（即座反映版）
+        quick_ai_button = QPushButton("⚡ Quick")
+        quick_ai_button.setMaximumWidth(50)
+        quick_ai_button.setMaximumHeight(38)  # 高さを半分に調整
+        quick_ai_button.setToolTip("AIによる説明文の即座生成（直接反映）")
+        quick_ai_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                font-size: 10px;
+                font-weight: bold;
+                border: none;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
+        
+        ai_buttons_layout.addWidget(ai_suggest_button)
+        ai_buttons_layout.addWidget(quick_ai_button)
+        
+        # AI提案ダイアログ表示のコールバック関数（既存）
         def show_ai_suggestion():
             try:
                 # 現在のフォームデータを収集してコンテキストとして使用
@@ -1145,8 +1185,71 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             except Exception as e:
                 QMessageBox.critical(widget, "エラー", f"AI提案機能でエラーが発生しました: {str(e)}")
         
+        # クイックAI生成のコールバック関数（新規）
+        def show_quick_ai_suggestion():
+            try:
+                # 現在のフォームデータを収集してコンテキストとして使用
+                context_data = {}
+                
+                # データセット名
+                if hasattr(edit_dataset_name_edit, 'text'):
+                    context_data['name'] = edit_dataset_name_edit.text().strip()
+                
+                # データセットタイプ（デフォルトまたは推定）
+                context_data['type'] = 'mixed'  # デフォルト
+                
+                # 課題番号
+                if hasattr(edit_grant_number_combo, 'currentText'):
+                    grant_text = edit_grant_number_combo.currentText().strip()
+                    if grant_text and grant_text != "課題番号を選択してください":
+                        context_data['grant_number'] = grant_text
+                    else:
+                        context_data['grant_number'] = ''
+                
+                # 既存の説明文
+                if hasattr(edit_description_edit, 'toPlainText'):
+                    existing_desc = edit_description_edit.toPlainText().strip()
+                    context_data['description'] = existing_desc if existing_desc else ''
+                
+                # アクセスポリシー（必要に応じて）
+                context_data['access_policy'] = 'restricted'  # デフォルト
+                
+                # その他のフォーム情報
+                if hasattr(edit_contact_edit, 'text'):
+                    context_data['contact'] = edit_contact_edit.text().strip()
+                
+                print(f"[DEBUG] クイックAI提案に渡すコンテキストデータ: {context_data}")
+                
+                # ボタンを無効化してプログレス表示
+                quick_ai_button.setEnabled(False)
+                quick_ai_button.setText("⏳ 生成中")
+                QApplication.processEvents()
+                
+                # クイック版AI機能を実行（ダイアログなし）
+                from classes.dataset.core.quick_ai_suggestion import generate_quick_suggestion
+                suggestion = generate_quick_suggestion(context_data)
+                
+                if suggestion:
+                    # 既存の説明文を置き換え
+                    edit_description_edit.setText(suggestion)
+                    print(f"[INFO] クイックAI提案を適用: {len(suggestion)}文字")
+                else:
+                    QMessageBox.warning(widget, "警告", "クイックAI提案の生成に失敗しました")
+                    
+            except Exception as e:
+                QMessageBox.critical(widget, "エラー", f"クイックAI提案機能でエラーが発生しました: {str(e)}")
+            finally:
+                # ボタンを元の状態に戻す
+                quick_ai_button.setEnabled(True)
+                quick_ai_button.setText("⚡ Quick")
+        
         ai_suggest_button.clicked.connect(show_ai_suggestion)
-        description_layout.addWidget(ai_suggest_button)
+        quick_ai_button.clicked.connect(show_quick_ai_suggestion)
+        
+        # ボタンレイアウトをウィジェット化
+        ai_buttons_widget = QWidget()
+        ai_buttons_widget.setLayout(ai_buttons_layout)
+        description_layout.addWidget(ai_buttons_widget)
         
         # 水平レイアウトを含むウィジェットを作成
         description_widget = QWidget()

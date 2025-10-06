@@ -37,37 +37,16 @@ class MaterialIndexLoader:
     
     @classmethod
     def format_for_prompt(cls) -> str:
-        """プロンプト用にMI情報をフォーマット"""
+        """プロンプト用にMI情報をフォーマット（JSON形式・改行なし）"""
         mi_data = cls.load_material_index()
         if not mi_data:
             return "[MI情報未取得]"
             
         try:
-            formatted_lines = ["=== マテリアルインデックス（材料分類ツリー）==="]
-            
-            def format_category(name: str, items: Any, indent: int = 0) -> List[str]:
-                lines = []
-                prefix = "  " * indent
-                
-                if isinstance(items, dict):
-                    lines.append(f"{prefix}📁 {name}")
-                    for sub_name, sub_items in items.items():
-                        lines.extend(format_category(sub_name, sub_items, indent + 1))
-                elif isinstance(items, list):
-                    lines.append(f"{prefix}📁 {name}")
-                    for item in items:
-                        lines.append(f"{prefix}  • {item}")
-                else:
-                    lines.append(f"{prefix}• {items}")
-                    
-                return lines
-            
-            for category_name, category_data in mi_data.items():
-                formatted_lines.extend(format_category(category_name, category_data))
-                formatted_lines.append("")  # 空行を追加
-                
-            formatted_lines.append("=== マテリアルインデックス終了 ===")
-            return "\n".join(formatted_lines)
+            # プロンプトを長くしないためにJSONのまま改行なしで出力
+            import json
+            json_str = json.dumps(mi_data, ensure_ascii=False, separators=(',', ':'))
+            return json_str
             
         except Exception as e:
             print(f"[ERROR] MI情報フォーマットエラー: {e}")

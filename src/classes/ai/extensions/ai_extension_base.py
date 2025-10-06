@@ -248,7 +248,7 @@ ARIM課題関連情報:
 
 実験データサマリー: {experiment_summary}
 
-{material_index_data}
+マテリアルインデックス(JSON): {material_index_data}
 
 {equipment_data}
 
@@ -288,7 +288,7 @@ ARIM課題データ:
 
 {arim_detailed_experiment}
 
-{material_index_data}
+マテリアルインデックス(JSON): {material_index_data}
 
 {equipment_data}
 
@@ -306,7 +306,43 @@ ARIM課題データ:
         )
         
         self.register_template(detailed_template)
-        print("[INFO] フォールバックテンプレート登録完了: basic, detailed")
+        
+        # クイック版テンプレート（フォールバック用）
+        quick_template = AIPromptTemplate(
+            "quick",
+            """
+データセットの簡潔な説明文を1つ生成してください。
+
+基本情報:
+- データセット名: {name}
+- データセットタイプ: {type}
+- 研究課題番号: {grant_number}
+- 既存の説明: {existing_description}
+
+ARIM課題データ:
+- 課題データ: {dataset_existing_info}
+- 拡張情報: {arim_extension_data}
+- 実験データ: {arim_experiment_data}
+
+{experiment_summary}
+
+マテリアルインデックス(JSON): {material_index_data}
+
+{equipment_data}
+
+要求:
+- 学術的且つ技術的で簡潔な説明文を作成してください
+- 150-250文字程度
+- 箇条書きを避け、一続きの自然な文章とする
+- 冗長な表現・重複は避ける
+
+出力: 簡潔な説明文のみ（見出しや形式マーカーなし）
+""",
+            ["name", "type", "grant_number", "existing_description", "dataset_existing_info", "arim_extension_data", "arim_experiment_data", "experiment_summary", "material_index_data", "equipment_data"]
+        )
+        
+        self.register_template(quick_template)
+        print("[INFO] フォールバックテンプレート登録完了: basic, detailed, quick")
         
     def collect_context_data(self, **kwargs) -> Dict[str, Any]:
         """データセット関連のコンテキストデータを収集"""
