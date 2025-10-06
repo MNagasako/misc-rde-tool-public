@@ -156,6 +156,61 @@ def attempt_partial_recovery(file_path):
         return None
 
 
+def get_grant_numbers_from_dataset(dataset_data):
+    """
+    データセットから対応するサブグループの課題番号リストを取得
+    
+    Args:
+        dataset_data (dict): データセット情報
+        
+    Returns:
+        set: 課題番号のセット
+    """
+    if not dataset_data:
+        return set()
+    
+    grant_numbers = set()
+    try:
+        # データセットのgrantNumberを取得
+        dataset_grant_number = dataset_data.get("attributes", {}).get("grantNumber", "")
+        if dataset_grant_number:
+            grant_numbers.add(dataset_grant_number)
+            print(f"[DEBUG] データセットの課題番号: {dataset_grant_number}")
+            
+            # このgrantNumberを持つサブグループを探し、そのサブグループの全課題番号を取得
+            sub_group_path = get_dynamic_file_path('output/rde/data/subGroup.json')
+            if os.path.exists(sub_group_path):
+                with open(sub_group_path, encoding="utf-8") as f:
+                    sub_group_data = json.load(f)
+                
+                # このgrantNumberを含むサブグループを検索
+                for item in sub_group_data.get("included", []):
+                    if item.get("type") == "group" and item.get("attributes", {}).get("groupType") == "TEAM":
+                        subjects = item.get("attributes", {}).get("subjects", [])
+                        # このグループにデータセットのgrantNumberが含まれているかチェック
+                        group_grant_numbers = set()
+                        dataset_grant_found = False
+                        
+                        for subject in subjects:
+                            subject_grant_number = subject.get("grantNumber", "")
+                            if subject_grant_number:
+                                group_grant_numbers.add(subject_grant_number)
+                                if subject_grant_number == dataset_grant_number:
+                                    dataset_grant_found = True
+                        
+                        # このサブグループがデータセットの課題番号を含む場合、このグループの全課題番号を返す
+                        if dataset_grant_found:
+                            grant_numbers = group_grant_numbers
+                            group_name = item.get("attributes", {}).get("name", "不明")
+                            print(f"[DEBUG] データセットのサブグループ '{group_name}' の全課題番号: {sorted(grant_numbers)}")
+                            break
+    
+    except Exception as e:
+        print(f"[ERROR] データセットから課題番号取得に失敗: {e}")
+    
+    return grant_numbers
+
+
 def get_user_grant_numbers():
     """
     ログインユーザーが属するサブグループのgrantNumberリストを取得
@@ -269,12 +324,8 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
     grant_number_filter_label.setStyleSheet("font-weight: bold;")
     
     grant_number_filter_edit = QLineEdit()
-    grant_number_filter_edit.setPlaceholderText("課題番号の一部を入力（部分一致検索）")
-    grant_number_filter_edit.setMinimumWidth(300)
-    
-    filter_apply_button = QPushButton("フィルタ適用")
-    filter_apply_button.setMaximumWidth(100)
-    filter_apply_button.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; border-radius: 4px; padding: 5px;")
+    grant_number_filter_edit.setPlaceholderText("課題番号の一部を入力（部分一致検索・リアルタイム絞り込み）")
+    grant_number_filter_edit.setMinimumWidth(400)
     
     # キャッシュ更新ボタンを追加
     cache_refresh_button = QPushButton("キャッシュ更新")
@@ -284,7 +335,6 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
     
     grant_number_filter_layout.addWidget(grant_number_filter_label)
     grant_number_filter_layout.addWidget(grant_number_filter_edit)
-    grant_number_filter_layout.addWidget(filter_apply_button)
     grant_number_filter_layout.addWidget(cache_refresh_button)
     grant_number_filter_layout.addStretch()
     
@@ -997,21 +1047,40 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         edit_grant_number_combo.setInsertPolicy(QComboBox.NoInsert)
         edit_grant_number_combo.lineEdit().setPlaceholderText("課題番号を選択または入力")
         
-        # ユーザーが属する課題番号を取得してコンボボックスに設定
-        try:
-            user_grant_numbers = get_user_grant_numbers()
-            if user_grant_numbers:
-                for grant_number in sorted(user_grant_numbers):
+        # 初期状態でユーザーの課題番号を設定
+        def update_grant_number_combo_local(grant_numbers):
+            """課題番号コンボボックスを更新する"""
+            # 既存のアイテムをクリア
+            edit_grant_number_combo.clear()
+            
+            # 既存のCompleterがあればクリア
+            if edit_grant_number_combo.completer():
+                edit_grant_number_combo.completer().deleteLater()
+            
+            if grant_numbers:
+                sorted_grant_numbers = sorted(grant_numbers)
+                for grant_number in sorted_grant_numbers:
                     edit_grant_number_combo.addItem(grant_number, grant_number)
                 edit_grant_number_combo.setCurrentIndex(-1)  # 初期選択なし
-            
-            # 自動補完機能を追加
-            grant_completer = QCompleter(sorted(user_grant_numbers), edit_grant_number_combo)
-            grant_completer.setCaseSensitivity(Qt.CaseInsensitive)
-            grant_completer.setFilterMode(Qt.MatchContains)
-            edit_grant_number_combo.setCompleter(grant_completer)
+                
+                # 自動補完機能を追加
+                grant_completer = QCompleter(sorted_grant_numbers, edit_grant_number_combo)
+                grant_completer.setCaseSensitivity(Qt.CaseInsensitive)
+                grant_completer.setFilterMode(Qt.MatchContains)
+                edit_grant_number_combo.setCompleter(grant_completer)
+                
+                print(f"[DEBUG] 課題番号コンボボックスを更新: {sorted_grant_numbers}")
+            else:
+                print("[DEBUG] 課題番号が空のため、コンボボックスは空のまま")
+        
+        # この関数をedit_grant_number_comboのプロパティとして保存
+        edit_grant_number_combo.update_grant_numbers = update_grant_number_combo_local
+        
+        try:
+            user_grant_numbers = get_user_grant_numbers()
+            update_grant_number_combo_local(user_grant_numbers)
         except Exception as e:
-            print(f"[DEBUG] 課題番号リスト取得エラー: {e}")
+            print(f"[DEBUG] 初期課題番号リスト取得エラー: {e}")
         
         form_layout.addWidget(edit_grant_number_combo, 1, 1)
         
@@ -1535,21 +1604,31 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         
         # 基本情報
         edit_dataset_name_edit.setText(attrs.get("name", ""))
-        # 課題番号の設定
-        grant_number = attrs.get("grantNumber", "")
-        if grant_number:
+        
+        # 課題番号の設定 - 選択されたデータセットに対応するサブグループの課題番号を取得
+        dataset_grant_numbers = get_grant_numbers_from_dataset(selected_dataset)
+        if hasattr(edit_grant_number_combo, 'update_grant_numbers'):
+            edit_grant_number_combo.update_grant_numbers(dataset_grant_numbers)
+        
+        # 現在のデータセットの課題番号を選択状態にする
+        current_grant_number = attrs.get("grantNumber", "")
+        if current_grant_number and dataset_grant_numbers:
             # コンボボックスに該当アイテムがあるかチェック
             found_index = -1
             for i in range(edit_grant_number_combo.count()):
-                if edit_grant_number_combo.itemData(i) == grant_number:
+                if edit_grant_number_combo.itemData(i) == current_grant_number:
                     found_index = i
                     break
             
             if found_index >= 0:
                 edit_grant_number_combo.setCurrentIndex(found_index)
+                print(f"[DEBUG] 課題番号 '{current_grant_number}' を選択状態に設定")
             else:
                 # 見つからない場合はテキストとして設定
-                edit_grant_number_combo.lineEdit().setText(grant_number)
+                edit_grant_number_combo.lineEdit().setText(current_grant_number)
+                print(f"[DEBUG] 課題番号 '{current_grant_number}' をテキストとして設定")
+        else:
+            print(f"[DEBUG] 課題番号設定スキップ: current='{current_grant_number}', available={len(dataset_grant_numbers) if dataset_grant_numbers else 0}")
         edit_description_edit.setText(attrs.get("description", ""))
         edit_contact_edit.setText(attrs.get("contact", ""))
         
@@ -1763,13 +1842,22 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         clear_cache()
         apply_filter(force_reload=True)
     
+    # 動的フィルタリング用のタイマー
+    filter_timer = QTimer()
+    filter_timer.setSingleShot(True)
+    filter_timer.timeout.connect(apply_filter)
+    
+    def on_filter_text_changed():
+        """フィルタテキスト変更時の処理（遅延実行）"""
+        filter_timer.stop()  # 既存のタイマーを停止
+        filter_timer.start(500)  # 500ms後にフィルタを実行
+    
     # フィルタイベントを接続
-    filter_apply_button.clicked.connect(apply_filter)
     cache_refresh_button.clicked.connect(refresh_cache)
     filter_user_only_radio.toggled.connect(lambda: apply_filter() if filter_user_only_radio.isChecked() else None)
     filter_others_only_radio.toggled.connect(lambda: apply_filter() if filter_others_only_radio.isChecked() else None)
     filter_all_radio.toggled.connect(lambda: apply_filter() if filter_all_radio.isChecked() else None)
-    grant_number_filter_edit.returnPressed.connect(apply_filter)
+    grant_number_filter_edit.textChanged.connect(on_filter_text_changed)  # リアルタイム絞り込み
     
     # ボタンエリア
     button_layout = QHBoxLayout()
