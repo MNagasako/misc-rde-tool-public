@@ -666,6 +666,12 @@ class UIController(UIControllerCore):
         self.menu_buttons['ai_test'].clicked.connect(
             lambda: self.switch_mode("ai_test")
         )
+        self.menu_buttons['ai_test2'] = self.create_auto_resize_button(
+            '🤖 AIテスト2', button_width, button_height, base_inactive_style
+        )
+        self.menu_buttons['ai_test2'].clicked.connect(
+            lambda: self.open_ai_extension_dialog_from_menu()
+        )
         return list(self.menu_buttons.values())
     
     def switch_mode(self, mode):
@@ -765,7 +771,12 @@ class UIController(UIControllerCore):
                 webview_widget.setVisible(True)
                 webview_widget.setMinimumHeight(1)
                 webview_widget.setMaximumHeight(16777215)
-                webview_widget.setFixedHeight(webview_widget.sizeHint().height())
+                # sizeHintが負の値を返す場合は適切なデフォルト値を使用
+                hint_height = webview_widget.sizeHint().height()
+                if hint_height > 0:
+                    webview_widget.setFixedHeight(hint_height)
+                else:
+                    webview_widget.setFixedHeight(200)  # デフォルト高さ
             if hasattr(self.parent, 'overlay_manager'):
                 self.parent.overlay_manager.hide_overlay()
             
@@ -839,7 +850,12 @@ class UIController(UIControllerCore):
                 webview_widget.setVisible(True)
                 webview_widget.setMinimumHeight(1)
                 webview_widget.setMaximumHeight(16777215)
-                webview_widget.setFixedHeight(webview_widget.sizeHint().height())
+                # sizeHintが負の値を返す場合は適切なデフォルト値を使用
+                hint_height = webview_widget.sizeHint().height()
+                if hint_height > 0:
+                    webview_widget.setFixedHeight(hint_height)
+                else:
+                    webview_widget.setFixedHeight(200)  # デフォルト高さ
             if hasattr(self.parent, 'overlay_manager'):
                 self.parent.overlay_manager.resize_overlay()
                 self.parent.overlay_manager.show_overlay()
@@ -3850,6 +3866,76 @@ class UIController(UIControllerCore):
             # UIが完全に作成された後にサイズを適用
             QTimer.singleShot(50, apply_sizing)
             
+        except Exception as e:
+            print(f"[ERROR] 初回データ登録サイズ適用エラー: {e}")
+    
+    def open_ai_extension_dialog_from_menu(self):
+        """メニューからAI拡張ダイアログを直接開く（簡素化版）"""
+        try:
+            print("[DEBUG] メニューからAI拡張ダイアログを開く")
+            
+            # AI拡張ダイアログを直接起動
+            self._launch_ai_extension_dialog_direct()
+            
+        except Exception as e:
+            print(f"[ERROR] メニューからのAI拡張ダイアログ起動エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(None, "エラー", f"AI拡張機能の起動に失敗しました: {str(e)}")
+    
+    def _launch_ai_extension_dialog_direct(self):
+        """AI拡張ダイアログを直接起動（簡素化版）"""
+        try:
+            from classes.dataset.ui.ai_suggestion_dialog import AISuggestionDialog
+            
+            print("[DEBUG] AI拡張ダイアログを直接起動")
+            
+            # 基本的なコンテキストデータを作成
+            context_data = {
+                'name': '',
+                'type': 'mixed', 
+                'grant_number': '',
+                'description': '',
+                'access_policy': 'restricted',
+                'contact': '',
+                'dataset_id': ''
+            }
+            
+            # ダイアログを作成
+            dialog = AISuggestionDialog(
+                parent=None,  # 親を指定しない
+                context_data=context_data,
+                extension_name="dataset_description",
+                auto_generate=False
+            )
+            
+            # AI拡張タブを選択
+            if hasattr(dialog, 'tab_widget'):
+                from PyQt5.QtCore import QTimer
+                def select_extension_tab():
+                    try:
+                        for i in range(dialog.tab_widget.count()):
+                            tab_text = dialog.tab_widget.tabText(i)
+                            if "AI拡張" in tab_text:
+                                dialog.tab_widget.setCurrentIndex(i)
+                                print(f"[DEBUG] AI拡張タブを選択: インデックス {i}")
+                                break
+                    except Exception as e:
+                        print(f"[ERROR] AI拡張タブ選択エラー: {e}")
+                
+                QTimer.singleShot(100, select_extension_tab)
+            
+            # ダイアログを表示
+            dialog.show()
+            print("[DEBUG] AI拡張ダイアログ表示完了")
+            
+        except Exception as e:
+            print(f"[ERROR] AI拡張ダイアログ直接起動エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            from PyQt5.QtWidgets import QMessageBox
+            QMessageBox.critical(None, "エラー", f"AI拡張ダイアログの起動に失敗しました: {str(e)}")
         except Exception as e:
             print(f"[ERROR] 初回データ登録ウィジェットサイズ適用エラー: {e}")
             import traceback

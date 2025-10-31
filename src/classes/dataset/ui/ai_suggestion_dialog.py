@@ -8,7 +8,8 @@ import json
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QListWidget, QListWidgetItem, QTextEdit, QProgressBar,
-    QMessageBox, QSplitter, QWidget, QTabWidget, QGroupBox
+    QMessageBox, QSplitter, QWidget, QTabWidget, QGroupBox,
+    QComboBox
 )
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from classes.ai.core.ai_manager import AIManager
@@ -196,6 +197,9 @@ class AISuggestionDialog(QDialog):
         button_layout.addWidget(self.cancel_button)
         
         layout.addLayout(button_layout)
+        
+        # データセット選択ドロップダウンを初期化
+        QTimer.singleShot(100, self.initialize_dataset_dropdown)
         
     def setup_main_tab(self, tab_widget):
         """メインタブのセットアップ"""
@@ -669,7 +673,40 @@ class AISuggestionDialog(QDialog):
         
         layout.addLayout(header_layout)
         
-        # データセット情報エリア
+        # データセット選択エリア
+        dataset_select_widget = QWidget()
+        dataset_select_layout = QVBoxLayout(dataset_select_widget)
+        dataset_select_layout.setContentsMargins(10, 5, 10, 5)
+        
+        # データセット選択ラベル
+        dataset_select_label = QLabel("分析対象データセットを選択:")
+        dataset_select_label.setStyleSheet("font-weight: bold; margin: 5px;")
+        dataset_select_layout.addWidget(dataset_select_label)
+        
+        # データセット選択コンボボックス
+        dataset_combo_container = QWidget()
+        dataset_combo_layout = QHBoxLayout(dataset_combo_container)
+        dataset_combo_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.extension_dataset_combo = QComboBox()
+        self.extension_dataset_combo.setMinimumWidth(500)
+        self.extension_dataset_combo.setEditable(True)
+        self.extension_dataset_combo.setInsertPolicy(QComboBox.NoInsert)
+        self.extension_dataset_combo.setMaxVisibleItems(12)
+        self.extension_dataset_combo.lineEdit().setPlaceholderText("データセットを検索・選択してください")
+        dataset_combo_layout.addWidget(self.extension_dataset_combo)
+        
+        # ▼ボタン追加
+        show_all_btn = QPushButton("▼")
+        show_all_btn.setToolTip("全件リスト表示")
+        show_all_btn.setFixedWidth(28)
+        show_all_btn.clicked.connect(self.show_all_datasets)
+        dataset_combo_layout.addWidget(show_all_btn)
+        
+        dataset_select_layout.addWidget(dataset_combo_container)
+        layout.addWidget(dataset_select_widget)
+        
+        # データセット情報エリア（既存）
         dataset_info_widget = QWidget()
         dataset_info_layout = QVBoxLayout(dataset_info_widget)
         dataset_info_layout.setContentsMargins(10, 5, 10, 5)
@@ -706,9 +743,9 @@ class AISuggestionDialog(QDialog):
         </div>
         """
         
-        dataset_info_label = QLabel(dataset_info_html)
-        dataset_info_label.setWordWrap(True)
-        dataset_info_layout.addWidget(dataset_info_label)
+        self.dataset_info_label = QLabel(dataset_info_html)
+        self.dataset_info_label.setWordWrap(True)
+        dataset_info_layout.addWidget(self.dataset_info_label)
         
         layout.addWidget(dataset_info_widget)
         
@@ -923,6 +960,13 @@ class AISuggestionDialog(QDialog):
             error_label.setWordWrap(True)
             error_label.setAlignment(Qt.AlignCenter)
             self.buttons_layout.addWidget(error_label)
+        
+        # データセット選択の初期化
+        self.initialize_dataset_dropdown()
+        
+        # データセット選択のシグナル接続
+        if hasattr(self, 'extension_dataset_combo'):
+            self.extension_dataset_combo.currentTextChanged.connect(self.on_dataset_selection_changed)
         
     def load_extension_buttons(self):
         """AI拡張設定からボタンを読み込んで表示"""
@@ -1165,6 +1209,20 @@ class AISuggestionDialog(QDialog):
                     'description': getattr(self, 'description_input', None).toPlainText() if hasattr(self, 'description_input') and self.description_input else "未設定"
                 }
                 print("[WARNING] context_dataが初期化されていません。フォールバックデータを使用します。")
+            
+            # データセット選択による更新があった場合は最新情報を使用
+            if hasattr(self, 'extension_dataset_combo') and self.extension_dataset_combo.currentIndex() > 0:
+                selected_dataset = self.extension_dataset_combo.itemData(self.extension_dataset_combo.currentIndex())
+                if selected_dataset:
+                    attrs = selected_dataset.get('attributes', {})
+                    context_data.update({
+                        'name': attrs.get('name', context_data.get('name', '')),
+                        'grant_number': attrs.get('grantNumber', context_data.get('grant_number', '')),
+                        'dataset_type': attrs.get('datasetType', context_data.get('dataset_type', 'mixed')),
+                        'description': attrs.get('description', context_data.get('description', '')),
+                        'dataset_id': selected_dataset.get('id', '')
+                    })
+                    print(f"[DEBUG] データセット選択による情報更新: {context_data['name']}")
             
             # 追加のコンテキストデータを収集（可能な場合）
             try:
@@ -1696,3 +1754,209 @@ class AISuggestionDialog(QDialog):
         except Exception as e:
             print(f"[ERROR] ダイアログ完了エラー: {e}")
             super().accept()
+    
+    def initialize_dataset_dropdown(self):
+        """データセット選択ドロップダウンを初期化"""
+        if not hasattr(self, 'extension_dataset_combo'):
+            print("[DEBUG] extension_dataset_combo が存在しません")
+            return
+            
+        try:
+            from config.common import get_dynamic_file_path
+            from classes.dataset.util.dataset_dropdown_util import load_dataset_list
+            import os
+            
+            print("[DEBUG] データセット選択初期化を開始")
+            
+            # dataset.jsonのパス
+            dataset_json_path = get_dynamic_file_path('output/rde/data/dataset.json')
+            info_json_path = get_dynamic_file_path('output/rde/data/info.json')
+            
+            print(f"[DEBUG] dataset.jsonパス: {dataset_json_path}")
+            print(f"[DEBUG] ファイル存在確認: {os.path.exists(dataset_json_path)}")
+            
+            # データセット一覧を読み込み
+            self.load_datasets_to_combo(dataset_json_path, info_json_path)
+            
+            # 現在のコンテキストに基づいて選択
+            self.select_current_dataset()
+            
+            print("[DEBUG] データセット選択初期化完了")
+            
+        except Exception as e:
+            print(f"[ERROR] データセット選択初期化エラー: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def load_datasets_to_combo(self, dataset_json_path, info_json_path):
+        """データセット一覧をコンボボックスに読み込み"""
+        try:
+            from classes.dataset.util.dataset_dropdown_util import load_dataset_list
+            
+            # データセット一覧を取得
+            datasets = load_dataset_list(dataset_json_path)
+            
+            # コンボボックスをクリア
+            self.extension_dataset_combo.clear()
+            self.extension_dataset_combo.addItem("-- データセットを選択してください --", None)
+            
+            # データセット一覧を追加
+            for dataset_info in datasets:
+                dataset_id = dataset_info.get('id', '')
+                display_name = dataset_info.get('display', '名前なし')
+                
+                # アイテムを追加
+                self.extension_dataset_combo.addItem(display_name, dataset_info)
+            
+            print(f"[DEBUG] データセット {len(datasets)}件を読み込みました")
+            
+            # データセット選択変更のイベントハンドラを接続
+            self.extension_dataset_combo.currentIndexChanged.connect(self.on_dataset_selection_changed)
+            
+        except Exception as e:
+            print(f"[ERROR] データセット読み込みエラー: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def select_current_dataset(self):
+        """現在のコンテキストに基づいてデータセットを選択"""
+        if not hasattr(self, 'extension_dataset_combo'):
+            return
+            
+        try:
+            # コンテキストからデータセット名または課題番号を取得
+            current_name = self.context_data.get('name', '').strip()
+            current_grant_number = self.context_data.get('grant_number', '').strip()
+            
+            if current_name or current_grant_number:
+                # コンボボックスから一致するアイテムを検索
+                for i in range(self.extension_dataset_combo.count()):
+                    text = self.extension_dataset_combo.itemText(i)
+                    dataset = self.extension_dataset_combo.itemData(i)
+                    
+                    if dataset:
+                        attrs = dataset.get('attributes', {})
+                        name = attrs.get('name', '')
+                        grant_number = attrs.get('grantNumber', '')
+                        
+                        # 名前または課題番号で一致判定
+                        if (current_name and current_name == name) or \
+                           (current_grant_number and current_grant_number == grant_number):
+                            self.extension_dataset_combo.setCurrentIndex(i)
+                            print(f"[DEBUG] データセット自動選択: {text}")
+                            return
+            
+        except Exception as e:
+            print(f"[ERROR] データセット自動選択エラー: {e}")
+    
+    def on_dataset_selection_changed(self, text):
+        """データセット選択変更時の処理"""
+        try:
+            if not hasattr(self, 'extension_dataset_combo'):
+                return
+                
+            current_index = self.extension_dataset_combo.currentIndex()
+            if current_index <= 0:  # "選択してください"が選択された場合
+                return
+            
+            # 選択されたデータセットを取得
+            dataset_info = self.extension_dataset_combo.itemData(current_index)
+            if not dataset_info:
+                return
+            
+            # コンテキストデータを更新
+            self.update_context_from_dataset(dataset_info)
+            
+            # データセット情報表示を更新
+            self.update_dataset_info_display()
+            
+            print(f"[DEBUG] データセット選択変更: {text}")
+            
+        except Exception as e:
+            print(f"[ERROR] データセット選択変更エラー: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def update_context_from_dataset(self, dataset_info):
+        """選択されたデータセット情報からコンテキストデータを更新"""
+        try:
+            # dataset_infoの形式を確認
+            if 'attributes' in dataset_info:
+                # dataset.json形式の場合
+                attrs = dataset_info.get('attributes', {})
+                self.context_data['dataset_id'] = dataset_info.get('id', '')
+                self.context_data['name'] = attrs.get('name', '')
+                self.context_data['grant_number'] = attrs.get('grantNumber', '')
+                self.context_data['type'] = attrs.get('datasetType', 'mixed')
+                self.context_data['description'] = attrs.get('description', '')
+            else:
+                # load_dataset_list形式の場合
+                self.context_data['dataset_id'] = dataset_info.get('id', '')
+                self.context_data['name'] = dataset_info.get('name', '')
+                self.context_data['grant_number'] = dataset_info.get('grantNumber', '')
+                self.context_data['type'] = dataset_info.get('datasetType', 'mixed')
+                self.context_data['description'] = dataset_info.get('description', '')
+            
+            # アクセスポリシーとコンタクト情報をデフォルト値で設定
+            if 'access_policy' not in self.context_data:
+                self.context_data['access_policy'] = 'restricted'
+            if 'contact' not in self.context_data:
+                self.context_data['contact'] = ''
+            
+            print(f"[DEBUG] コンテキストデータ更新: dataset_id={self.context_data.get('dataset_id', '')}, name={self.context_data.get('name', '')}")
+            
+        except Exception as e:
+            print(f"[ERROR] コンテキストデータ更新エラー: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def update_dataset_info_display(self):
+        """データセット情報表示を更新"""
+        try:
+            # データセット情報を取得
+            dataset_name = self.context_data.get('name', '').strip()
+            grant_number = self.context_data.get('grant_number', '').strip()
+            dataset_type = self.context_data.get('type', '').strip()
+            
+            if not dataset_name:
+                dataset_name = "データセット名未設定"
+            if not grant_number:
+                grant_number = "課題番号未設定"
+            if not dataset_type:
+                dataset_type = "タイプ未設定"
+            
+            # HTMLを更新
+            dataset_info_html = f"""
+        <div style="background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 5px; padding: 10px; margin: 5px 0;">
+            <h4 style="margin: 0 0 8px 0; color: #495057;">📊 対象データセット情報</h4>
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                    <td style="font-weight: bold; color: #6c757d; padding: 2px 10px 2px 0; width: 100px;">データセット名:</td>
+                    <td style="color: #212529; padding: 2px 0;">{dataset_name}</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: bold; color: #6c757d; padding: 2px 10px 2px 0;">課題番号:</td>
+                    <td style="color: #212529; padding: 2px 0;">{grant_number}</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: bold; color: #6c757d; padding: 2px 10px 2px 0;">タイプ:</td>
+                    <td style="color: #212529; padding: 2px 0;">{dataset_type}</td>
+                </tr>
+            </table>
+        </div>
+        """
+            
+            # dataset_info_labelがある場合のみ更新
+            if hasattr(self, 'dataset_info_label') and self.dataset_info_label:
+                self.dataset_info_label.setText(dataset_info_html)
+            
+        except Exception as e:
+            print(f"[ERROR] データセット情報表示更新エラー: {e}")
+    
+    def show_all_datasets(self):
+        """全データセット表示（▼ボタン用）"""
+        try:
+            if hasattr(self, 'extension_dataset_combo'):
+                self.extension_dataset_combo.showPopup()
+        except Exception as e:
+            print(f"[ERROR] 全データセット表示エラー: {e}")

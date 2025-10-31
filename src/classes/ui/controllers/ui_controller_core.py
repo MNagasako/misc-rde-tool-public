@@ -351,6 +351,8 @@ class UIControllerCore:
             # 上部：WebView
             webview_widget = QWidget()
             webview_widget.setObjectName('webview_widget')
+            # 初期サイズを設定してネガティブサイズエラーを防止
+            webview_widget.setMinimumSize(100, 50)
             webview_layout = QHBoxLayout()
             webview_layout.addWidget(self.parent.webview)
             webview_layout.addSpacing(20)

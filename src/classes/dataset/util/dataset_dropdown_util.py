@@ -802,55 +802,51 @@ def load_dataset_list(json_path):
     """
     if not os.path.exists(json_path):
         return []
-    with open(json_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    # 例: [{"id": ..., "attributes": {"name": ...}}, ...]
-    if isinstance(data, dict) and 'data' in data:
-        items = data['data']
-    elif isinstance(data, list):
-        items = data
-    else:
-        items = []
-    result = []
-    for item in items:
-        if isinstance(item, dict):
-            dataset_id = item.get('id')
-            attr = item.get('attributes', {})
-            name = attr.get('name', dataset_id)
-            grant_number = attr.get('grantNumber', '')
-            display = f"{grant_number} {name}".strip() if grant_number else name
-    # --- バイナリ実行時のパス解決 ---
-    def resolve_data_path(rel_path):
-        # バイナリ: 実行ファイルのディレクトリ基準
-        # シェル: このpyファイルの位置基準
-        # パス管理システムを使用（CWD非依存）
-        from config.common import get_base_dir
-        return os.path.join(get_base_dir(), rel_path)
-
-    # dataset.json
-    if dataset_json_path:
-        # dataset_json_pathが絶対パスでなければ、パス管理システムで解決
-        if not os.path.isabs(dataset_json_path):
-            dataset_json_path = resolve_data_path(dataset_json_path)
-        if os.path.exists(dataset_json_path):
-            try:
-                with open(dataset_json_path, 'r', encoding='utf-8') as f:
-                    dataset_data = json.load(f)
-                if isinstance(dataset_data, dict) and 'data' in dataset_data:
-                    dataset_count = len(dataset_data['data'])
-                elif isinstance(dataset_data, list):
-                    dataset_count = len(dataset_data)
-            except Exception:
-                pass
-    # self.json
-    self_json_path = os.path.join(os.path.dirname(dataset_json_path), 'self.json')
-    if not os.path.isabs(self_json_path):
-        self_json_path = resolve_data_path(self_json_path)
-    if os.path.exists(self_json_path):
-        try:
-            with open(self_json_path, 'r', encoding='utf-8') as f:
-                self_data = json.load(f)
-            if isinstance(self_data, dict):
-                self_id = self_data.get('data', {}).get('id')
-        except Exception:
-            pass
+    
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        
+        # データ構造を確認
+        if isinstance(data, dict) and 'data' in data:
+            items = data['data']
+        elif isinstance(data, list):
+            items = data
+        else:
+            items = []
+        
+        result = []
+        for item in items:
+            if isinstance(item, dict):
+                dataset_id = item.get('id')
+                attr = item.get('attributes', {})
+                name = attr.get('name', dataset_id or '名前なし')
+                grant_number = attr.get('grantNumber', '')
+                dataset_type = attr.get('datasetType', '')
+                
+                # 表示用テキスト作成
+                display_parts = []
+                if name:
+                    display_parts.append(name)
+                if grant_number:
+                    display_parts.append(f"[{grant_number}]")
+                if dataset_type:
+                    display_parts.append(f"({dataset_type})")
+                
+                display = ' '.join(display_parts) if display_parts else f"ID: {dataset_id}"
+                
+                # 結果に追加
+                result.append({
+                    'id': dataset_id,
+                    'name': name,
+                    'grantNumber': grant_number,
+                    'datasetType': dataset_type,
+                    'display': display,
+                    'attributes': attr  # 元の属性も保持
+                })
+        
+        return result
+        
+    except Exception as e:
+        print(f"[ERROR] load_dataset_list エラー: {e}")
+        return []
