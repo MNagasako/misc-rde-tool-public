@@ -1,0 +1,80 @@
+{
+  "version": "1.0.0",
+  "description": "AI拡張機能の設定ファイル - データセット関連のAIサジェスト機能のボタン・プロンプトマッピング",
+  "buttons": [
+    {
+      "id": "suggest_important_tech_area",
+      "label": "重要技術領域",
+      "description": "データセットの重要技術領域を提案",
+      "prompt_file": "input/ai/prompts/ext/suggest_importantTechArea.txt",
+      "icon": "🔬",
+      "category": "技術分析"
+    },
+    {
+      "id": "suggest_keywords",
+      "label": "キーワード提案",
+      "description": "データセットに適したキーワードを提案",
+      "prompt_file": "input/ai/prompts/ext/suggest_keywords.txt",
+      "icon": "🏷️",
+      "category": "メタデータ"
+    },
+    {
+      "id": "suggest_applications",
+      "label": "応用分野",
+      "description": "データセットの応用可能分野を提案",
+      "prompt_file": "input/ai/prompts/ext/suggest_applications.txt",
+      "icon": "🎯",
+      "category": "活用分析"
+    },
+    {
+      "id": "suggest_limitations",
+      "label": "制限事項",
+      "description": "データセットの制限事項や注意点を分析",
+      "prompt_file": "input/ai/prompts/ext/suggest_limitations.txt",
+      "icon": "⚠️",
+      "category": "品質評価"
+    },
+    {
+      "id": "suggest_related_datasets",
+      "label": "関連データセット",
+      "description": "関連するデータセットや研究領域を提案",
+      "prompt_file": "input/ai/prompts/ext/suggest_related_datasets.txt",
+      "icon": "🔗",
+      "category": "関連性分析"
+    },
+    {
+      "id": "suggest_improvement",
+      "label": "改善提案",
+      "description": "データセットの品質改善案を提案",
+      "prompt_file": "input/ai/prompts/ext/suggest_improvement.txt",
+      "icon": "💡",
+      "category": "品質改善"
+    },
+    {
+      "id": "test_table_format",
+      "label": "テーブル表示テスト",
+      "description": "マークダウンテーブル表示機能をテスト",
+      "prompt_file": "input/ai/prompts/ext/test_table.txt",
+      "icon": "📋",
+      "category": "テスト"
+    }
+  ],
+  "default_buttons": [
+    {
+      "id": "default_analysis",
+      "label": "総合分析",
+      "description": "データセットの総合的な分析を実行",
+      "prompt_template": "以下のデータセットについて総合的な分析を行ってください。\n\nデータセット名: {name}\nタイプ: {type}\n課題番号: {grant_number}\n既存説明: {description}\n\n分析項目:\n1. 技術的特徴\n2. 学術的価値\n3. 応用可能性\n4. データ品質\n5. 改善提案\n\n各項目について詳しく分析し、200文字程度で要約してください。",
+      "icon": "📊",
+      "category": "総合"
+    }
+  ],
+  "ui_settings": {
+    "buttons_per_row": 3,
+    "button_height": 60,
+    "button_width": 140,
+    "response_area_height": 400,
+    "enable_categories": true,
+    "show_icons": true
+  }
+}

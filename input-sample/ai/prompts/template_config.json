@@ -1,0 +1,24 @@
+{
+  "dataset_explanation": {
+    "basic": {
+      "file": "input/ai/prompts/dataset/dataset_explanation_basic.txt",
+      "context_keys": [
+        "name", "type", "grant_number", "existing_description",
+        "dataset_existing_info", "arim_extension_data", "arim_experiment_data",
+        "arim_detailed_experiment", "experiment_summary",
+        "material_index_data", "equipment_data", "file_tree",
+        "llm_provider", "llm_model", "llm_model_name"
+      ]
+    },
+    "detailed": {
+      "file": "input/ai/prompts/dataset/dataset_explanation_detailed.txt", 
+      "context_keys": [
+        "name", "type", "grant_number", "existing_description",
+        "dataset_existing_info", "arim_extension_data", "arim_experiment_data",
+        "arim_detailed_experiment", "material_index_data", "equipment_data",
+        "file_tree", "metadata", "related_datasets",
+        "llm_provider", "llm_model", "llm_model_name"
+      ]
+    }
+  }
+}
