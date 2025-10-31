@@ -230,31 +230,27 @@ def get_self_username_from_json(json_path="output/rde/data/self.json"):
 def fetch_self_info_from_api(bearer_token=None, output_dir="output/rde/data", parent_widget=None):
     """
     https://rde-user-api.nims.go.jp/users/self からユーザー情報を取得し、self.jsonとして保存
+    v1.18.4: Bearer Token自動選択対応
     
     Args:
-        bearer_token: Bearer Token（Noneの場合は統一管理システムから自動取得）
+        bearer_token: Bearer Token（非推奨、互換性のため残存。Noneの場合は自動選択）
         output_dir: 出力ディレクトリ
-        parent_widget: 再ログインダイアログの親ウィジェット
+        parent_widget: 親ウィジェット（未使用、互換性のため残存）
     """
-    from core.bearer_token_manager import BearerTokenManager
-    
-    # Bearer Token統一管理システムを使用
-    if bearer_token is None:
-        bearer_token = BearerTokenManager.get_token_with_relogin_prompt(parent_widget)
-        if bearer_token is None:
-            logger.error("ユーザー情報取得失敗: 有効なBearer Tokenが取得できません")
-            return False
+    # v1.18.4: bearer_token引数は互換性のために残しているが、
+    # api_request_helperが自動選択するため、明示的に渡さない
     
     url = "https://rde-user-api.nims.go.jp/users/self"
-    headers = _make_headers(
-        bearer_token,
-        host="rde-user-api.nims.go.jp",
-        origin="https://rde.nims.go.jp",
-        referer="https://rde.nims.go.jp/"
-    )
+    headers = {
+        "Accept": "application/vnd.api+json",
+        "Host": "rde-user-api.nims.go.jp",
+        "Origin": "https://rde.nims.go.jp",
+        "Referer": "https://rde.nims.go.jp/"
+    }
     try:
         logger.info("ユーザー情報取得開始")
-        resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=10)  # refactored to use api_request_helper
+        # v1.18.4: bearer_token=Noneで自動選択させる
+        resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
         if resp is None:
             logger.error("ユーザー情報取得失敗: リクエストエラー")
             return False
@@ -269,11 +265,9 @@ def fetch_self_info_from_api(bearer_token=None, output_dir="output/rde/data", pa
         return True
     except Exception as e:
         logger.error(f"self.json取得・保存失敗: {e}")
-        # トークンが無効の可能性をチェック
+        # v1.18.4: 401エラーはapi_request_helperで自動選択されたトークンの問題
         if hasattr(e, 'response') and e.response.status_code == 401:
-            logger.warning("認証エラー（401）が発生しました。Bearer Tokenが無効の可能性があります。")
-            if BearerTokenManager.request_relogin_if_invalid(parent_widget):
-                logger.info("再ログインが促進されました")
+            logger.warning("認証エラー（401）が発生しました。ログインしてBearer Tokenを更新してください。")
         raise
 
 
@@ -313,7 +307,10 @@ def fetch_all_data_entrys_info(bearer_token, output_dir="output/rde/data"):
 
 
 def fetch_data_entry_info_from_api(bearer_token, dataset_id, output_dir="output/rde/data/dataEntry"):
-    """指定データセットIDのデータエントリ情報をAPIから取得し、dataEntry.jsonとして保存"""
+    """
+    指定データセットIDのデータエントリ情報をAPIから取得し、dataEntry.jsonとして保存
+    v1.18.4: Bearer Token自動選択対応
+    """
     url = f"https://rde-api.nims.go.jp/data?filter%5Bdataset.id%5D={dataset_id}&sort=-created&page%5Boffset%5D=0&page%5Blimit%5D=24&include=owner%2Csample%2CthumbnailFile%2Cfiles"
     save_path = os.path.join(output_dir, f"{dataset_id}.json")
     
@@ -321,11 +318,17 @@ def fetch_data_entry_info_from_api(bearer_token, dataset_id, output_dir="output/
         logger.info(f"データエントリファイル既存のためスキップ: {dataset_id}.json")
         return
         
-    headers = _make_headers(bearer_token, host="rde-api.nims.go.jp", origin="https://rde.nims.go.jp", referer="https://rde.nims.go.jp/")
+    headers = {
+        "Accept": "application/vnd.api+json",
+        "Host": "rde-api.nims.go.jp",
+        "Origin": "https://rde.nims.go.jp",
+        "Referer": "https://rde.nims.go.jp/"
+    }
     
     try:
         logger.debug(f"データエントリ取得開始: dataset_id={dataset_id}")
-        resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=10)  # refactored to use api_request_helper
+        # v1.18.4: bearer_token=Noneで自動選択させる
+        resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
         if resp is None:
             logger.error(f"データエントリ取得失敗: dataset_id={dataset_id}")
             return
@@ -513,11 +516,20 @@ def fetch_all_dataset_info(bearer_token, output_dir="output/rde/data",onlySelf=F
 
 
 def fetch_instrument_type_info_from_api(bearer_token, save_path):
-    """装置タイプ情報をAPIから取得し、instrumentType.jsonとして保存"""
+    """
+    装置タイプ情報をAPIから取得し、instrumentType.jsonとして保存
+    v1.18.4: Bearer Token自動選択対応
+    """
     url = "https://rde-instrument-api.nims.go.jp/typeTerms?programId=4bbf62be-f270-4a46-9682-38cd064607ba"
-    headers = _make_headers(bearer_token, host="rde-instrument-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
+    headers = {
+        "Accept": "application/vnd.api+json",
+        "Host": "rde-instrument-api.nims.go.jp",
+        "Origin": "https://rde-entry-arim.nims.go.jp",
+        "Referer": "https://rde-entry-arim.nims.go.jp/"
+    }
     try:
-        resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=10)  # refactored to use api_request_helper
+        # v1.18.4: bearer_token=Noneで自動選択させる
+        resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
         if resp is None:
             print("[ERROR] 装置タイプ情報の取得に失敗しました: リクエストエラー")
             return
@@ -529,11 +541,20 @@ def fetch_instrument_type_info_from_api(bearer_token, save_path):
         print(f"[ERROR] 装置タイプ情報の取得・保存に失敗しました: {e}")
 
 def fetch_organization_info_from_api(bearer_token, save_path):
-    """組織情報をAPIから取得し、organization.jsonとして保存"""
+    """
+    組織情報をAPIから取得し、organization.jsonとして保存
+    v1.18.4: Bearer Token自動選択対応
+    """
     url = "https://rde-instrument-api.nims.go.jp/organizations"
-    headers = _make_headers(bearer_token, host="rde-instrument-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
+    headers = {
+        "Accept": "application/vnd.api+json",
+        "Host": "rde-instrument-api.nims.go.jp",
+        "Origin": "https://rde-entry-arim.nims.go.jp",
+        "Referer": "https://rde-entry-arim.nims.go.jp/"
+    }
     try:
-        resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=10)  # refactored to use api_request_helper
+        # v1.18.4: bearer_token=Noneで自動選択させる
+        resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
         if resp is None:
             print("[ERROR] 組織情報の取得に失敗しました: リクエストエラー")
             return
@@ -546,14 +567,20 @@ def fetch_organization_info_from_api(bearer_token, save_path):
 
 
 def fetch_template_info_from_api(bearer_token, output_dir="output/rde/data"):
-    """テンプレート情報をAPIから取得し、template.jsonとして保存"""
-    if not bearer_token:
-        print("[ERROR] Bearerトークンが取得できません。ログイン状態を確認してください。")
-        return
+    """
+    テンプレート情報をAPIから取得し、template.jsonとして保存
+    v1.18.4: Bearer Token自動選択対応
+    """
     url = "https://rde-api.nims.go.jp/datasetTemplates?programId=4bbf62be-f270-4a46-9682-38cd064607ba&teamId=22398c55-8620-430e-afa5-2405c57dd03c&sort=id&page[limit]=10000&page[offset]=0&include=instruments&fields[instrument]=nameJa%2CnameEn"
-    headers = _make_headers(bearer_token, host="rde-api.nims.go.jp", origin="https://rde.nims.go.jp", referer="https://rde.nims.go.jp/")
+    headers = {
+        "Accept": "application/vnd.api+json",
+        "Host": "rde-api.nims.go.jp",
+        "Origin": "https://rde.nims.go.jp",
+        "Referer": "https://rde.nims.go.jp/"
+    }
     try:
-        resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=30)  # datasetTemplates は重い処理のためタイムアウト延長
+        # v1.18.4: bearer_token=Noneで自動選択させる
+        resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=30)  # datasetTemplates は重い処理のためタイムアウト延長
         if resp is None:
             print("[ERROR] テンプレート情報の取得に失敗しました: リクエストエラー")
             return
@@ -567,14 +594,20 @@ def fetch_template_info_from_api(bearer_token, output_dir="output/rde/data"):
         print(f"[ERROR] テンプレートの取得・保存に失敗しました: {e}")
 
 def fetch_instruments_info_from_api(bearer_token, output_dir="output/rde/data"):
-    """設備リスト情報をAPIから取得し、instruments.jsonとして保存"""
-    if not bearer_token:
-        print("[ERROR] Bearerトークンが取得できません。ログイン状態を確認してください。")
-        return
+    """
+    設備リスト情報をAPIから取得し、instruments.jsonとして保存
+    v1.18.4: Bearer Token自動選択対応
+    """
     url = "https://rde-instrument-api.nims.go.jp/instruments?programId=4bbf62be-f270-4a46-9682-38cd064607ba&page%5Blimit%5D=10000&sort=id&page%5Boffset%5D=0"
-    headers = _make_headers(bearer_token, host="rde-instrument-api.nims.go.jp", origin="https://rde.nims.go.jp", referer="https://rde.nims.go.jp/")
+    headers = {
+        "Accept": "application/vnd.api+json",
+        "Host": "rde-instrument-api.nims.go.jp",
+        "Origin": "https://rde.nims.go.jp",
+        "Referer": "https://rde.nims.go.jp/"
+    }
     try:
-        resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=10)  # refactored to use api_request_helper
+        # v1.18.4: bearer_token=Noneで自動選択させる
+        resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
         if resp is None:
             print("[ERROR] 装置情報の取得に失敗しました: リクエストエラー")
             return
@@ -588,14 +621,20 @@ def fetch_instruments_info_from_api(bearer_token, output_dir="output/rde/data"):
         print(f"[ERROR] 設備情報の取得・保存に失敗しました: {e}")
 
 def fetch_licenses_info_from_api(bearer_token, output_dir="output/rde/data"):
-    """利用ライセンスマスタ情報をAPIから取得し、licenses.jsonとして保存"""
-    if not bearer_token:
-        print("[ERROR] Bearerトークンが取得できません。ログイン状態を確認してください。")
-        return
+    """
+    利用ライセンスマスタ情報をAPIから取得し、licenses.jsonとして保存
+    v1.18.4: Bearer Token自動選択対応
+    """
     url = "https://rde-api.nims.go.jp/licenses"
-    headers = _make_headers(bearer_token, host="rde-api.nims.go.jp", origin="https://rde.nims.go.jp", referer="https://rde.nims.go.jp/")
+    headers = {
+        "Accept": "application/vnd.api+json",
+        "Host": "rde-api.nims.go.jp",
+        "Origin": "https://rde.nims.go.jp",
+        "Referer": "https://rde.nims.go.jp/"
+    }
     try:
-        resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=10)
+        # v1.18.4: bearer_token=Noneで自動選択させる
+        resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
         if resp is None:
             print("[ERROR] 利用ライセンス情報の取得に失敗しました: リクエストエラー")
             return
@@ -951,8 +990,11 @@ def fetch_sample_info_stage(bearer_token, progress_callback=None):
             
             url = f"https://rde-material-api.nims.go.jp/samples?groupId={group_id_sample}&page%5Blimit%5D=1000&page%5Boffset%5D=0&fields%5Bsample%5D=names%2Cdescription%2Ccomposition"
             try:
-                headers_sample = _make_headers(bearer_token, host="rde-material-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
-                resp = api_request("GET", url, bearer_token=bearer_token, headers=headers_sample, timeout=10)
+                # Material API用のトークンを明示的に取得
+                from config.common import load_bearer_token
+                material_token = load_bearer_token('rde-material.nims.go.jp')
+                headers_sample = _make_headers(material_token, host="rde-material-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
+                resp = api_request("GET", url, bearer_token=material_token, headers=headers_sample, timeout=10)
                 if resp is None:
                     continue
                 resp.raise_for_status()
@@ -1380,8 +1422,11 @@ def fetch_basic_info_logic(bearer_token, parent=None, webview=None, onlySelf=Fal
                 
             url = f"https://rde-material-api.nims.go.jp/samples?groupId={group_id_sample}&page%5Blimit%5D=1000&page%5Boffset%5D=0&fields%5Bsample%5D=names%2Cdescription%2Ccomposition"
             try:
-                headers_sample = _make_headers(bearer_token, host="rde-material-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
-                resp = api_request("GET", url, bearer_token=bearer_token, headers=headers_sample, timeout=10)
+                # Material API用のトークンを明示的に取得
+                from config.common import load_bearer_token
+                material_token = load_bearer_token('rde-material.nims.go.jp')
+                headers_sample = _make_headers(material_token, host="rde-material-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
+                resp = api_request("GET", url, bearer_token=material_token, headers=headers_sample, timeout=10)
                 if resp is None:
                     logger.error(f"サンプル情報({group_id_sample})の取得に失敗しました: リクエストエラー")
                     continue
@@ -1583,8 +1628,11 @@ def fetch_sample_info_only(bearer_token, output_dir="output/rde/data", progress_
             sample_json_path = os.path.join(sample_dir, f"{group_id_sample}.json")
             
             try:
-                headers_sample = _make_headers(bearer_token, host="rde-material-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
-                resp = api_request("GET", url, bearer_token=bearer_token, headers=headers_sample, timeout=10)
+                # Material API用のトークンを明示的に取得
+                from config.common import load_bearer_token
+                material_token = load_bearer_token('rde-material.nims.go.jp')
+                headers_sample = _make_headers(material_token, host="rde-material-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
+                resp = api_request("GET", url, bearer_token=material_token, headers=headers_sample, timeout=10)
                 if resp is None:
                     failed_samples += 1
                     logger.error(f"サンプル情報({group_id_sample})の取得に失敗しました: リクエストエラー")
@@ -1670,8 +1718,11 @@ def fetch_sample_info_from_subgroup_ids_only(bearer_token, output_dir="output/rd
             sample_json_path = os.path.join(sample_dir, f"{group_id_sample}.json")
             
             try:
-                headers_sample = _make_headers(bearer_token, host="rde-material-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
-                resp = api_request("GET", url, bearer_token=bearer_token, headers=headers_sample, timeout=10)
+                # Material API用のトークンを明示的に取得
+                from config.common import load_bearer_token
+                material_token = load_bearer_token('rde-material.nims.go.jp')
+                headers_sample = _make_headers(material_token, host="rde-material-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
+                resp = api_request("GET", url, bearer_token=material_token, headers=headers_sample, timeout=10)
                 if resp is None:
                     failed_samples += 1
                     logger.error(f"サンプル情報({group_id_sample})の取得に失敗: リクエストエラー")
@@ -1704,11 +1755,10 @@ def fetch_sample_info_for_dataset_only(bearer_token, dataset_id, output_dir="out
     """
     指定されたデータセットIDの個別データセットJSONからグループIDを取得し、
     そのグループのサンプル情報のみを取得する（データ登録後の自動取得用）
+    
+    注意: bearer_tokenはOptional（None可）。API呼び出し時に自動選択される。
     """
-    if not bearer_token:
-        error_msg = "Bearerトークンが取得できません"
-        logger.error(error_msg)
-        return error_msg
+    # 注意: Bearer Tokenチェックを削除（API呼び出し時に自動選択される）
         
     if not dataset_id:
         error_msg = "データセットIDが指定されていません"
@@ -1744,8 +1794,26 @@ def fetch_sample_info_for_dataset_only(bearer_token, dataset_id, output_dir="out
         url = f"https://rde-material-api.nims.go.jp/samples?groupId={group_id}&page%5Blimit%5D=1000&page%5Boffset%5D=0&fields%5Bsample%5D=names%2Cdescription%2Ccomposition"
         sample_json_path = os.path.join(sample_dir, f"{group_id}.json")
         
-        headers_sample = _make_headers(bearer_token, host="rde-material-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
-        resp = api_request("GET", url, bearer_token=bearer_token, headers=headers_sample, timeout=10)
+        # ヘッダー設定（Authorizationは削除、api_request内で自動選択）
+        headers_sample = {
+            "Accept": "application/vnd.api+json",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+            "Connection": "keep-alive",
+            "Host": "rde-material-api.nims.go.jp",
+            "Origin": "https://rde-entry-arim.nims.go.jp",
+            "Referer": "https://rde-entry-arim.nims.go.jp/",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+            "sec-ch-ua": '"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+        }
+        
+        # bearer_token=Noneで自動選択（Material API用トークンが自動的に選ばれる）
+        resp = api_request("GET", url, bearer_token=None, headers=headers_sample, timeout=10)
         if resp is None:
             error_msg = f"サンプル情報({group_id})の取得に失敗: リクエストエラー"
             logger.error(error_msg)

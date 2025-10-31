@@ -1097,43 +1097,60 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         # AIサジェストボタン用の縦並びレイアウト
         ai_buttons_layout = QVBoxLayout()
         ai_buttons_layout.setContentsMargins(0, 0, 0, 0)
-        ai_buttons_layout.setSpacing(2)  # ボタン間の間隔を小さく
+        ai_buttons_layout.setSpacing(4)  # ボタン間の間隔
+        
+        # SpinnerButtonをインポート
+        from classes.dataset.ui.spinner_button import SpinnerButton
         
         # AIボタン（通常版・ダイアログ表示）
-        ai_suggest_button = QPushButton("🤖 AI")
-        ai_suggest_button.setMaximumWidth(50)
-        ai_suggest_button.setMaximumHeight(38)  # 高さを半分に調整
-        ai_suggest_button.setToolTip("AIによる説明文の提案（ダイアログ表示）")
+        ai_suggest_button = SpinnerButton("🤖 AI提案")
+        ai_suggest_button.setMinimumWidth(80)  # サイズを拡大
+        ai_suggest_button.setMaximumWidth(100)
+        ai_suggest_button.setMinimumHeight(45)  # 高さを拡大
+        ai_suggest_button.setMaximumHeight(50)
+        ai_suggest_button.setToolTip("AIによる説明文の提案（ダイアログ表示）\n複数の候補から選択できます")
         ai_suggest_button.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
                 color: white;
-                font-size: 10px;
+                font-size: 11px;
                 font-weight: bold;
                 border: none;
-                border-radius: 4px;
+                border-radius: 6px;
+                padding: 8px;
             }
             QPushButton:hover {
                 background-color: #45a049;
             }
+            QPushButton:disabled {
+                background-color: #81C784;
+                color: #E8F5E9;
+            }
         """)
         
         # クイックAIボタン（即座反映版）
-        quick_ai_button = QPushButton("⚡ Quick")
-        quick_ai_button.setMaximumWidth(50)
-        quick_ai_button.setMaximumHeight(38)  # 高さを半分に調整
-        quick_ai_button.setToolTip("AIによる説明文の即座生成（直接反映）")
+        quick_ai_button = SpinnerButton("⚡ Quick AI")
+        quick_ai_button.setMinimumWidth(80)  # サイズを拡大
+        quick_ai_button.setMaximumWidth(100)
+        quick_ai_button.setMinimumHeight(45)  # 高さを拡大
+        quick_ai_button.setMaximumHeight(50)
+        quick_ai_button.setToolTip("AIによる説明文の即座生成（直接反映）\nワンクリックで自動入力されます")
         quick_ai_button.setStyleSheet("""
             QPushButton {
                 background-color: #2196F3;
                 color: white;
-                font-size: 10px;
+                font-size: 11px;
                 font-weight: bold;
                 border: none;
-                border-radius: 4px;
+                border-radius: 6px;
+                padding: 8px;
             }
             QPushButton:hover {
                 background-color: #1976D2;
+            }
+            QPushButton:disabled {
+                background-color: #64B5F6;
+                color: #E3F2FD;
             }
         """)
         
@@ -1143,8 +1160,22 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         # AI提案ダイアログ表示のコールバック関数（既存）
         def show_ai_suggestion():
             try:
+                # スピナー開始
+                ai_suggest_button.start_loading("AI生成中")
+                QApplication.processEvents()  # UI更新
+                
                 # 現在のフォームデータを収集してコンテキストとして使用
                 context_data = {}
+                
+                # 【重要】現在選択されているデータセットIDを取得
+                current_index = existing_dataset_combo.currentIndex()
+                if current_index > 0:  # 0は"選択してください"項目
+                    selected_dataset = existing_dataset_combo.itemData(current_index)
+                    if selected_dataset:
+                        dataset_id = selected_dataset.get("id")
+                        if dataset_id:
+                            context_data['dataset_id'] = dataset_id
+                            print(f"[DEBUG] データセットID設定: {dataset_id}")
                 
                 # データセット名
                 if hasattr(edit_dataset_name_edit, 'text'):
@@ -1177,19 +1208,43 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                 
                 # AI提案ダイアログを表示（自動生成有効）
                 dialog = AISuggestionDialog(parent=widget, context_data=context_data, auto_generate=True)
+                
+                # スピナー停止
+                ai_suggest_button.stop_loading()
+                
                 if dialog.exec_() == QDialog.Accepted:
                     suggestion = dialog.get_selected_suggestion()
                     if suggestion:
-                        edit_description_edit.setText(suggestion)
+                        # QTextEditの場合はsetPlainTextを使用して改行を保持
+                        if hasattr(edit_description_edit, 'setPlainText'):
+                            edit_description_edit.setPlainText(suggestion)
+                        else:
+                            edit_description_edit.setText(suggestion)
                         
             except Exception as e:
+                # エラー時もスピナーを停止
+                ai_suggest_button.stop_loading()
                 QMessageBox.critical(widget, "エラー", f"AI提案機能でエラーが発生しました: {str(e)}")
         
         # クイックAI生成のコールバック関数（新規）
         def show_quick_ai_suggestion():
             try:
+                # スピナー開始
+                quick_ai_button.start_loading("生成中")
+                QApplication.processEvents()  # UI更新
+                
                 # 現在のフォームデータを収集してコンテキストとして使用
                 context_data = {}
+                
+                # 【重要】現在選択されているデータセットIDを取得
+                current_index = existing_dataset_combo.currentIndex()
+                if current_index > 0:  # 0は"選択してください"項目
+                    selected_dataset = existing_dataset_combo.itemData(current_index)
+                    if selected_dataset:
+                        dataset_id = selected_dataset.get("id")
+                        if dataset_id:
+                            context_data['dataset_id'] = dataset_id
+                            print(f"[DEBUG] データセットID設定（クイック版）: {dataset_id}")
                 
                 # データセット名
                 if hasattr(edit_dataset_name_edit, 'text'):
@@ -1220,18 +1275,16 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                 
                 print(f"[DEBUG] クイックAI提案に渡すコンテキストデータ: {context_data}")
                 
-                # ボタンを無効化してプログレス表示
-                quick_ai_button.setEnabled(False)
-                quick_ai_button.setText("⏳ 生成中")
-                QApplication.processEvents()
-                
                 # クイック版AI機能を実行（ダイアログなし）
                 from classes.dataset.core.quick_ai_suggestion import generate_quick_suggestion
                 suggestion = generate_quick_suggestion(context_data)
                 
                 if suggestion:
-                    # 既存の説明文を置き換え
-                    edit_description_edit.setText(suggestion)
+                    # 既存の説明文を置き換え（QTextEditの場合はsetPlainTextを使用して改行を保持）
+                    if hasattr(edit_description_edit, 'setPlainText'):
+                        edit_description_edit.setPlainText(suggestion)
+                    else:
+                        edit_description_edit.setText(suggestion)
                     print(f"[INFO] クイックAI提案を適用: {len(suggestion)}文字")
                 else:
                     QMessageBox.warning(widget, "警告", "クイックAI提案の生成に失敗しました")
@@ -1239,9 +1292,8 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             except Exception as e:
                 QMessageBox.critical(widget, "エラー", f"クイックAI提案機能でエラーが発生しました: {str(e)}")
             finally:
-                # ボタンを元の状態に戻す
-                quick_ai_button.setEnabled(True)
-                quick_ai_button.setText("⚡ Quick")
+                # 必ずスピナーを停止
+                quick_ai_button.stop_loading()
         
         ai_suggest_button.clicked.connect(show_ai_suggestion)
         quick_ai_button.clicked.connect(show_quick_ai_suggestion)

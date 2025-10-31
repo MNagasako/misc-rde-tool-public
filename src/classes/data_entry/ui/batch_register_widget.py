@@ -1137,18 +1137,12 @@ class FileSetTableWidget(QTableWidget):
                 QMessageBox.warning(self, "エラー", "対象のファイルセットが見つかりません")
                 return
             
-            # Bearerトークンを統一管理システムで取得
-            from core.bearer_token_manager import BearerTokenManager
-            bearer_token = BearerTokenManager.get_token_with_relogin_prompt(self)
-            if not bearer_token:
-                QMessageBox.warning(self, "エラー", "認証トークンが取得できません。ログインを確認してください。")
-                return
-            print(f"[DEBUG] register_single_fileset: トークン取得成功 (長さ: {len(bearer_token)})")
+            # v1.18.4: Bearer Tokenはapi_request_helperが自動選択するため、取得不要
             from .batch_preview_dialog import BatchRegisterPreviewDialog
             dialog = BatchRegisterPreviewDialog(
                 file_sets=[target_fileset],
                 parent=self,
-                bearer_token=bearer_token
+                bearer_token=None  # v1.18.4: 自動選択に変更
             )
             dialog.exec_()
             
@@ -4096,13 +4090,12 @@ class BatchRegisterWidget(QWidget):
             # 一時フォルダ作成（フラット化・ZIP化対応） - 既存処理
             self._prepare_temp_folders()
             
-            # Bearerトークンを取得（統一メソッドを使用）
-            bearer_token = self._get_bearer_token()
+            # v1.18.4: Bearer Tokenはapi_request_helperが自動選択するため、取得不要
             
             # 新しい詳細プレビューダイアログを表示
             from classes.data_entry.ui.batch_preview_dialog import BatchRegisterPreviewDialog
             
-            dialog = BatchRegisterPreviewDialog(self.file_set_manager.file_sets, self, bearer_token)
+            dialog = BatchRegisterPreviewDialog(self.file_set_manager.file_sets, self, bearer_token=None)
             result = dialog.exec_()
             
             if result == QDialog.Accepted:
@@ -4126,12 +4119,7 @@ class BatchRegisterWidget(QWidget):
             QMessageBox.warning(self, "エラー", "実行するファイルセットがありません")
             return
         
-        # ベアラートークンの確認（統一メソッドを使用）
-        bearer_token = self._get_bearer_token()
-        
-        if not bearer_token:
-            QMessageBox.warning(self, "エラー", "認証トークンが設定されていません。ログインを確認してください。")
-            return
+        # v1.18.4: Bearer Tokenはapi_request_helperが自動選択するため、取得不要
         
         # 妥当性検証
         is_valid, errors = self.batch_logic.validate_filesets(self.file_set_manager.file_sets)
@@ -4154,10 +4142,13 @@ class BatchRegisterWidget(QWidget):
         
         if reply == QMessageBox.Yes:
             # 一括登録実行（複数ファイルセット一括処理）
-            self._execute_multi_fileset_batch_register(bearer_token)
+            self._execute_multi_fileset_batch_register()
     
-    def _execute_multi_fileset_batch_register(self, bearer_token: str):
-        """複数ファイルセット一括登録処理"""
+    def _execute_multi_fileset_batch_register(self):
+        """
+        複数ファイルセット一括登録処理
+        v1.18.4: Bearer Token自動選択対応、bearer_tokenパラメータ削除
+        """
         try:
             from .batch_preview_dialog import BatchRegisterPreviewDialog
             
@@ -4165,7 +4156,7 @@ class BatchRegisterWidget(QWidget):
             batch_dialog = BatchRegisterPreviewDialog(
                 file_sets=self.file_set_manager.file_sets,
                 parent=self,
-                bearer_token=bearer_token
+                bearer_token=None  # v1.18.4: 自動選択に変更
             )
             
             # プログレスダイアログの表示設定

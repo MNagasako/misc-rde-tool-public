@@ -27,15 +27,26 @@ class AIRequestThread(QThread):
         super().__init__()
         self.prompt = prompt
         self.context_data = context_data or {}
+        self._stop_requested = False
+        
+    def stop(self):
+        """スレッドの停止をリクエスト"""
+        self._stop_requested = True
         
     def run(self):
         """AIリクエストを実行"""
         try:
+            if self._stop_requested:
+                return
+                
             ai_manager = AIManager()
             
             # AI設定を取得
             from classes.config.ui.ai_settings_widget import get_ai_config
             ai_config = get_ai_config()
+            
+            if self._stop_requested:
+                return
             
             if not ai_config:
                 self.error_occurred.emit("AI設定が見つかりません")
@@ -48,6 +59,9 @@ class AIRequestThread(QThread):
             # デバッグ用ログ出力
             print(f"[DEBUG] AI設定取得: provider={provider}, model={model}")
             print(f"[DEBUG] AI設定内容: {ai_config}")
+            
+            if self._stop_requested:
+                return
             
             # AIリクエスト実行
             result = ai_manager.send_prompt(self.prompt, provider, model)
@@ -72,6 +86,7 @@ class AISuggestionDialog(QDialog):
         self.suggestions = []
         self.selected_suggestion = None
         self.ai_thread = None
+        self.extension_ai_threads = []  # AI拡張用のスレッドリスト
         self.auto_generate = auto_generate  # 自動生成フラグ
         
         # AI拡張機能を取得
@@ -129,6 +144,15 @@ class AISuggestionDialog(QDialog):
         self.tab_widget.addTab(detail_tab, "詳細情報")
         self.setup_detail_tab(detail_tab)
         
+        # AI拡張タブ
+        try:
+            extension_tab = QWidget()
+            self.tab_widget.addTab(extension_tab, "AI拡張")
+            self.setup_extension_tab(extension_tab)
+        except Exception as e:
+            print(f"[WARNING] AI拡張タブの初期化に失敗しました: {e}")
+            # AI拡張タブが失敗しても他の機能は使用可能
+        
         # プログレスバー
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
@@ -137,7 +161,30 @@ class AISuggestionDialog(QDialog):
         # ボタンエリア
         button_layout = QHBoxLayout()
         
-        self.generate_button = QPushButton("AI提案生成")
+        # SpinnerButtonをインポートして使用
+        from classes.dataset.ui.spinner_button import SpinnerButton
+        
+        self.generate_button = SpinnerButton("🚀 AI提案生成")
+        self.generate_button.setMinimumHeight(35)
+        self.generate_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-size: 12px;
+                font-weight: bold;
+                border: none;
+                border-radius: 5px;
+                padding: 8px 16px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:disabled {
+                background-color: #81C784;
+                color: #E8F5E9;
+            }
+        """)
+        
         self.apply_button = QPushButton("適用")
         self.cancel_button = QPushButton("キャンセル")
         
@@ -260,26 +307,49 @@ class AISuggestionDialog(QDialog):
     def generate_suggestions(self):
         """AI提案を生成"""
         if self.ai_thread and self.ai_thread.isRunning():
+            print("[DEBUG] 既にAIスレッドが実行中です")
             return
+        
+        try:
+            # スピナー開始
+            self.generate_button.start_loading("生成中")
             
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # 不定プログレス
-        self.generate_button.setEnabled(False)
-        
-        # プロンプトを構築
-        prompt = self.build_prompt()
-        
-        # 詳細情報タブに表示
-        self.update_detail_display(prompt)
-        
-        # AIリクエストスレッドを開始
-        self.ai_thread = AIRequestThread(prompt, self.context_data)
-        self.ai_thread.result_ready.connect(self.on_ai_result)
-        self.ai_thread.error_occurred.connect(self.on_ai_error)
-        self.ai_thread.start()
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, 0)  # 不定プログレス
+            
+            # プロンプトを構築
+            prompt = self.build_prompt()
+            
+            # 詳細情報タブに表示
+            self.update_detail_display(prompt)
+            
+            # 既存のスレッドがあれば停止
+            if self.ai_thread:
+                if self.ai_thread.isRunning():
+                    self.ai_thread.stop()
+                    self.ai_thread.wait(1000)
+            
+            # AIリクエストスレッドを開始
+            self.ai_thread = AIRequestThread(prompt, self.context_data)
+            self.ai_thread.result_ready.connect(self.on_ai_result)
+            self.ai_thread.error_occurred.connect(self.on_ai_error)
+            self.ai_thread.start()
+            
+        except Exception as e:
+            print(f"[ERROR] AI提案生成エラー: {e}")
+            self.generate_button.stop_loading()
+            self.progress_bar.setVisible(False)
         
     def update_detail_display(self, prompt):
         """詳細情報タブの表示を更新"""
+        print(f"[DEBUG] プロンプト表示更新: 全{len(prompt)}文字")
+        
+        # プロンプト内にファイル情報が含まれているか確認
+        if 'ファイル構成' in prompt or 'ファイル統計' in prompt or 'タイル#' in prompt:
+            print("[DEBUG] ✅ プロンプトにファイル情報が含まれています")
+        else:
+            print("[WARNING] ⚠️ プロンプトにファイル情報が見つかりません")
+        
         # プロンプト表示（詳細情報タブ）
         self.prompt_display.setText(prompt)
         
@@ -339,11 +409,17 @@ class AISuggestionDialog(QDialog):
             # データセットコンテキストコレクターを使用して完全なコンテキストを収集
             context_collector = get_dataset_context_collector()
             
-            # データセットIDがある場合は詳細情報を取得
+            # データセットIDを取得（context_dataから）
             dataset_id = self.context_data.get('dataset_id')
+            print(f"[DEBUG] データセットID: {dataset_id}")
+            
+            # context_dataからdataset_idを一時的に除外してから渡す
+            context_data_without_id = {k: v for k, v in self.context_data.items() if k != 'dataset_id'}
+            
+            # collect_full_contextにdataset_idを明示的に渡す
             full_context = context_collector.collect_full_context(
                 dataset_id=dataset_id,
-                **self.context_data
+                **context_data_without_id
             )
             
             print(f"[DEBUG] コンテキストコレクター処理後: {list(full_context.keys())}")
@@ -382,29 +458,57 @@ class AISuggestionDialog(QDialog):
             return prompt
             
         except Exception as e:
-            print(f"[WARNING] プロンプト構築エラー: {e}")
+            print(f"[ERROR] プロンプト構築エラー: {e}")
             import traceback
             traceback.print_exc()
-            # エラー時のフォールバック
-            return f"""
+            
+            # エラー時のフォールバック（より詳細な情報を含める）
+            name = self.context_data.get('name', '未設定')
+            grant_number = self.context_data.get('grant_number', '未設定')
+            description = self.context_data.get('description', '')
+            dataset_type = self.context_data.get('type', 'mixed')
+            
+            fallback_prompt = f"""
 データセットの説明文を3つの異なるスタイルで提案してください。
 
-データセット情報:
-名前: {self.context_data.get('name', '未設定')}
-課題番号: {self.context_data.get('grant_number', '未設定')}
-
-出力形式:
-[簡潔版] ここに簡潔な説明
-[学術版] ここに学術的な説明  
-[一般版] ここに一般向けの説明
+【データセット基本情報】
+- データセット名: {name}
+- 課題番号: {grant_number}
+- データセットタイプ: {dataset_type}
 """
+            
+            if description:
+                fallback_prompt += f"- 既存の説明: {description}\n"
+            
+            fallback_prompt += """
+【要求事項】
+1. 学術的で専門的な内容を含めること
+2. データの特徴や価値を明確にすること
+3. 利用者にとって有用な情報を提供すること
+
+【出力形式】
+以下の3つのスタイルで説明文を提案してください:
+
+[簡潔版] ここに簡潔な説明（200文字程度）
+
+[学術版] ここに学術的な説明（500文字程度）
+
+[一般版] ここに一般向けの説明（300文字程度）
+
+注意: 各説明文は改行なしで1行で出力してください。
+"""
+            
+            print(f"[WARNING] フォールバックプロンプトを使用: {len(fallback_prompt)}文字")
+            return fallback_prompt
         
     def on_ai_result(self, result):
         """AIリクエスト結果を処理"""
-        self.progress_bar.setVisible(False)
-        self.generate_button.setEnabled(True)
-        
         try:
+            self.progress_bar.setVisible(False)
+            
+            # スピナー停止
+            self.generate_button.stop_loading()
+            
             # レスポンステキストを取得
             response_text = result.get('response') or result.get('content', '')
             
@@ -422,13 +526,22 @@ class AISuggestionDialog(QDialog):
                 QMessageBox.warning(self, "警告", "AIからの応答が空です")
                 
         except Exception as e:
+            print(f"[ERROR] AI結果処理エラー: {e}")
             QMessageBox.critical(self, "エラー", f"AI結果処理エラー: {str(e)}")
             
     def on_ai_error(self, error_message):
         """AIリクエストエラーを処理"""
-        self.progress_bar.setVisible(False)
-        self.generate_button.setEnabled(True)
-        QMessageBox.critical(self, "AIエラー", error_message)
+        try:
+            self.progress_bar.setVisible(False)
+            
+            # スピナー停止
+            self.generate_button.stop_loading()
+            
+            print(f"[ERROR] AIエラー: {error_message}")
+            QMessageBox.critical(self, "AIエラー", error_message)
+            
+        except Exception as e:
+            print(f"[ERROR] AIエラー処理エラー: {e}")
         
     def parse_suggestions(self, response_text):
         """AI応答から提案候補を抽出"""
@@ -521,8 +634,10 @@ class AISuggestionDialog(QDialog):
                 preview_html += f'<div style="border: 1px solid #ccc; padding: 10px; margin: 5px 0; border-radius: 5px;">'
                 preview_html += f'<h3 style="color: #333; margin: 0 0 10px 0;">{suggestion["title"]}</h3>'
             
-            # 改行を<br>に変換してHTML表示
-            text_with_breaks = suggestion['text'].replace('\n', '<br>')
+            # HTMLエスケープして改行を<br>に変換（XSS対策）
+            import html
+            escaped_text = html.escape(suggestion['text'])
+            text_with_breaks = escaped_text.replace('\n', '<br>')
             preview_html += f'<div style="white-space: pre-wrap; line-height: 1.4;">{text_with_breaks}</div>'
             preview_html += '</div><br>'
         
@@ -531,3 +646,1053 @@ class AISuggestionDialog(QDialog):
     def get_selected_suggestion(self):
         """選択された提案を取得"""
         return self.selected_suggestion
+    
+    def setup_extension_tab(self, tab_widget):
+        """AI拡張タブのセットアップ"""
+        layout = QVBoxLayout(tab_widget)
+        
+        # ヘッダー
+        header_layout = QHBoxLayout()
+        
+        title_label = QLabel("AI拡張サジェスト機能")
+        title_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 5px;")
+        header_layout.addWidget(title_label)
+        
+        header_layout.addStretch()
+        
+        # 設定ボタン
+        config_button = QPushButton("設定編集")
+        config_button.setToolTip("AI拡張設定ファイルを編集")
+        config_button.clicked.connect(self.edit_extension_config)
+        config_button.setMaximumWidth(80)
+        header_layout.addWidget(config_button)
+        
+        layout.addLayout(header_layout)
+        
+        # データセット情報エリア
+        dataset_info_widget = QWidget()
+        dataset_info_layout = QVBoxLayout(dataset_info_widget)
+        dataset_info_layout.setContentsMargins(10, 5, 10, 5)
+        
+        # データセット情報を取得・表示
+        dataset_name = self.context_data.get('name', '').strip()
+        grant_number = self.context_data.get('grant_number', '').strip()
+        dataset_type = self.context_data.get('type', '').strip()
+        
+        if not dataset_name:
+            dataset_name = "データセット名未設定"
+        if not grant_number:
+            grant_number = "課題番号未設定"
+        if not dataset_type:
+            dataset_type = "タイプ未設定"
+        
+        dataset_info_html = f"""
+        <div style="background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 5px; padding: 10px; margin: 5px 0;">
+            <h4 style="margin: 0 0 8px 0; color: #495057;">📊 対象データセット情報</h4>
+            <table style="width: 100%; border-collapse: collapse;">
+                <tr>
+                    <td style="font-weight: bold; color: #6c757d; padding: 2px 10px 2px 0; width: 100px;">データセット名:</td>
+                    <td style="color: #212529; padding: 2px 0;">{dataset_name}</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: bold; color: #6c757d; padding: 2px 10px 2px 0;">課題番号:</td>
+                    <td style="color: #212529; padding: 2px 0;">{grant_number}</td>
+                </tr>
+                <tr>
+                    <td style="font-weight: bold; color: #6c757d; padding: 2px 10px 2px 0;">タイプ:</td>
+                    <td style="color: #212529; padding: 2px 0;">{dataset_type}</td>
+                </tr>
+            </table>
+        </div>
+        """
+        
+        dataset_info_label = QLabel(dataset_info_html)
+        dataset_info_label.setWordWrap(True)
+        dataset_info_layout.addWidget(dataset_info_label)
+        
+        layout.addWidget(dataset_info_widget)
+        
+        # メインコンテンツエリア（左右分割）
+        from PyQt5.QtWidgets import QSplitter
+        content_splitter = QSplitter(Qt.Horizontal)
+        layout.addWidget(content_splitter)
+        
+        # 左側: ボタンエリア
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(5, 5, 5, 5)
+        
+        buttons_label = QLabel("🤖 AIサジェスト機能")
+        buttons_label.setStyleSheet("font-weight: bold; margin: 5px 0; font-size: 13px; color: #495057;")
+        left_layout.addWidget(buttons_label)
+        
+        # ボタンエリア（スクロールなしで直接配置）
+        self.buttons_widget = QWidget()
+        self.buttons_layout = QVBoxLayout(self.buttons_widget)
+        self.buttons_layout.setContentsMargins(5, 5, 5, 5)
+        self.buttons_layout.setSpacing(6)  # ボタン間の間隔を狭く
+        
+        left_layout.addWidget(self.buttons_widget)
+        left_layout.addStretch()  # 下部にストレッチを追加
+        
+        left_widget.setMaximumWidth(280)  # 幅を調整
+        left_widget.setMinimumWidth(250)
+        content_splitter.addWidget(left_widget)
+        
+        # 右側: 応答表示エリア
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(5, 5, 5, 5)
+        
+        response_label = QLabel("📝 AI応答結果")
+        response_label.setStyleSheet("font-weight: bold; margin: 5px 0; font-size: 13px; color: #495057;")
+        right_layout.addWidget(response_label)
+        
+        from PyQt5.QtWidgets import QTextBrowser
+        
+        self.extension_response_display = QTextBrowser()
+        self.extension_response_display.setReadOnly(True)
+        self.extension_response_display.setOpenExternalLinks(False)  # セキュリティのため外部リンクは無効
+        self.extension_response_display.setPlaceholderText(
+            "🤖 AI拡張サジェスト機能へようこそ！\n\n"
+            "左側のボタンをクリックすると、選択した機能に応じたAI分析結果がここに表示されます。\n\n"
+            "利用可能な機能:\n"
+            "• 重要技術領域の分析\n"
+            "• キーワード提案\n"
+            "• 応用分野の提案\n"
+            "• 制限事項の分析\n"
+            "• 関連データセットの提案\n"
+            "• 改善提案\n\n"
+            "各ボタンを右クリックするとプロンプトの編集・プレビューが可能です。"
+        )
+        self.extension_response_display.setStyleSheet("""
+            QTextBrowser {
+                border: 1px solid #dee2e6;
+                border-radius: 5px;
+                background-color: #ffffff;
+                font-family: 'Yu Gothic', 'Meiryo', sans-serif;
+                font-size: 12px;
+                line-height: 1.3;
+                padding: 6px;
+            }
+            QTextBrowser h1 {
+                color: #2c3e50;
+                font-size: 16px;
+                font-weight: bold;
+                margin: 8px 0 4px 0;
+                border-bottom: 2px solid #3498db;
+                padding-bottom: 2px;
+            }
+            QTextBrowser h2 {
+                color: #34495e;
+                font-size: 15px;
+                font-weight: bold;
+                margin: 6px 0 3px 0;
+                border-bottom: 1px solid #bdc3c7;
+                padding-bottom: 1px;
+            }
+            QTextBrowser h3 {
+                color: #34495e;
+                font-size: 14px;
+                font-weight: bold;
+                margin: 5px 0 2px 0;
+            }
+            QTextBrowser p {
+                margin: 3px 0;
+                line-height: 1.3;
+            }
+            QTextBrowser ul {
+                margin: 3px 0 3px 12px;
+            }
+            QTextBrowser li {
+                margin: 1px 0;
+                line-height: 1.3;
+            }
+            QTextBrowser code {
+                background-color: #f8f9fa;
+                color: #e83e8c;
+                padding: 1px 3px;
+                border-radius: 2px;
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: 11px;
+            }
+            QTextBrowser pre {
+                background-color: #f8f9fa;
+                border: 1px solid #e9ecef;
+                border-radius: 3px;
+                padding: 6px;
+                margin: 4px 0;
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: 11px;
+                overflow-x: auto;
+            }
+            QTextBrowser blockquote {
+                border-left: 3px solid #3498db;
+                margin: 4px 0;
+                padding: 4px 8px;
+                background-color: #f8f9fa;
+                font-style: italic;
+            }
+            QTextBrowser strong {
+                font-weight: bold;
+                color: #2c3e50;
+            }
+            QTextBrowser em {
+                font-style: italic;
+                color: #7f8c8d;
+            }
+            QTextBrowser table {
+                border-collapse: collapse;
+                width: 100%;
+                margin: 6px 0;
+                font-size: 11px;
+                border: 1px solid #dee2e6;
+                background-color: #ffffff;
+            }
+            QTextBrowser th {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                padding: 6px 8px;
+                text-align: left;
+                font-weight: bold;
+                color: #495057;
+            }
+            QTextBrowser td {
+                border: 1px solid #dee2e6;
+                padding: 6px 8px;
+                text-align: left;
+                vertical-align: top;
+                line-height: 1.3;
+            }
+        """)
+        right_layout.addWidget(self.extension_response_display)
+        
+        # 応答制御ボタン
+        response_button_layout = QHBoxLayout()
+        
+        self.clear_response_button = QPushButton("🗑️ クリア")
+        self.clear_response_button.clicked.connect(self.clear_extension_response)
+        self.clear_response_button.setStyleSheet("""
+            QPushButton {
+                background-color: #dc3545;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #c82333;
+            }
+        """)
+        
+        self.copy_response_button = QPushButton("📋 コピー")
+        self.copy_response_button.clicked.connect(self.copy_extension_response)
+        self.copy_response_button.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #218838;
+            }
+        """)
+        
+        response_button_layout.addWidget(self.clear_response_button)
+        response_button_layout.addWidget(self.copy_response_button)
+        response_button_layout.addStretch()
+        
+        right_layout.addLayout(response_button_layout)
+        
+        content_splitter.addWidget(right_widget)
+        
+        # 初期状態でボタンを読み込み
+        try:
+            self.load_extension_buttons()
+        except Exception as e:
+            print(f"[WARNING] AI拡張ボタンの読み込みに失敗しました: {e}")
+            # エラーメッセージを表示
+            error_label = QLabel(f"AI拡張機能の初期化に失敗しました。\n\n設定ファイルを確認してください:\ninput/ai/ai_ext_conf.json\n\nエラー: {str(e)}")
+            error_label.setStyleSheet("color: red; padding: 20px; background-color: #fff8f8; border: 1px solid #ffcdd2; border-radius: 5px;")
+            error_label.setWordWrap(True)
+            error_label.setAlignment(Qt.AlignCenter)
+            self.buttons_layout.addWidget(error_label)
+        
+    def load_extension_buttons(self):
+        """AI拡張設定からボタンを読み込んで表示"""
+        try:
+            from classes.dataset.util.ai_extension_helper import load_ai_extension_config
+            config = load_ai_extension_config()
+            
+            # 既存のボタンをクリア
+            for i in reversed(range(self.buttons_layout.count())):
+                self.buttons_layout.itemAt(i).widget().setParent(None)
+            
+            ui_settings = config.get('ui_settings', {})
+            buttons_per_row = ui_settings.get('buttons_per_row', 3)
+            button_height = ui_settings.get('button_height', 60)
+            button_width = ui_settings.get('button_width', 140)
+            show_icons = ui_settings.get('show_icons', True)
+            enable_categories = ui_settings.get('enable_categories', True)
+            
+            # ボタン設定を取得
+            buttons_config = config.get('buttons', [])
+            default_buttons = config.get('default_buttons', [])
+            
+            # 全ボタンをまとめる
+            all_buttons = buttons_config + default_buttons
+            
+            if not all_buttons:
+                no_buttons_label = QLabel("AI拡張ボタンが設定されていません。\n設定編集ボタンから設定ファイルを確認してください。")
+                no_buttons_label.setStyleSheet("color: #666; text-align: center; padding: 20px;")
+                no_buttons_label.setAlignment(Qt.AlignCenter)
+                self.buttons_layout.addWidget(no_buttons_label)
+                return
+            
+            # カテゴリ別にボタンを整理
+            if enable_categories:
+                categories = {}
+                for button_config in all_buttons:
+                    category = button_config.get('category', 'その他')
+                    if category not in categories:
+                        categories[category] = []
+                    categories[category].append(button_config)
+                
+                # カテゴリごとにボタンを作成
+                for category_name, category_buttons in categories.items():
+                    self.create_category_section(category_name, category_buttons, buttons_per_row, button_height, button_width, show_icons)
+            else:
+                # カテゴリなしでボタンを作成
+                self.create_buttons_grid(all_buttons, buttons_per_row, button_height, button_width, show_icons)
+            
+            # 最後にストレッチを追加
+            self.buttons_layout.addStretch()
+            
+        except Exception as e:
+            error_label = QLabel(f"AI拡張設定の読み込みエラー: {str(e)}")
+            error_label.setStyleSheet("color: red; padding: 10px;")
+            self.buttons_layout.addWidget(error_label)
+    
+    def create_category_section(self, category_name, buttons, buttons_per_row, button_height, button_width, show_icons):
+        """カテゴリセクションを作成（シンプル版）"""
+        # ボタンを1列に配置（カテゴリヘッダーは不要）
+        for button_config in buttons:
+            button = self.create_extension_button(button_config, button_height, button_width, show_icons)
+            self.buttons_layout.addWidget(button)
+    
+    def create_buttons_grid(self, buttons, buttons_per_row, button_height, button_width, show_icons):
+        """ボタングリッドを作成（カテゴリなし・シンプル版）"""
+        # ボタンを1列に配置
+        for button_config in buttons:
+            button = self.create_extension_button(button_config, button_height, button_width, show_icons)
+            self.buttons_layout.addWidget(button)
+    
+    def create_extension_button(self, button_config, button_height, button_width, show_icons):
+        """AI拡張ボタンを作成（改良版）"""
+        from classes.dataset.ui.spinner_button import SpinnerButton
+        
+        button_id = button_config.get('id', 'unknown')
+        label = button_config.get('label', 'Unknown')
+        description = button_config.get('description', '')
+        icon = button_config.get('icon', '🤖') if show_icons else ''
+        
+        # ボタンテキスト（アイコン＋タイトル＋説明を統合）
+        button_text = f"{icon} {label}"
+        if description:
+            # 説明が長い場合は短縮
+            short_desc = description[:40] + "..." if len(description) > 40 else description
+            button_text += f"\n{short_desc}"
+        
+        button = SpinnerButton(button_text)
+        
+        # ボタンサイズを調整（複数行テキスト対応）
+        button.setMinimumHeight(max(50, button_height - 15))  # 説明文のため高さを確保
+        button.setMaximumHeight(max(60, button_height - 5))
+        button.setMinimumWidth(max(200, button_width - 40))
+        button.setMaximumWidth(max(240, button_width - 20))
+        
+        # ツールチップ（詳細情報）
+        tooltip_text = f"🔹 {label}"
+        if description:
+            tooltip_text += f"\n💡 {description}"
+        tooltip_text += "\n\n右クリック: プロンプト編集"
+        button.setToolTip(tooltip_text)
+        
+        # 改良されたボタンスタイル（複数行対応）
+        button.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 #4CAF50, stop: 1 #45a049);
+                color: white;
+                font-size: 11px;
+                font-weight: bold;
+                border: none;
+                border-radius: 6px;
+                padding: 8px 12px;
+                text-align: left;
+                margin: 2px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 #66BB6A, stop: 1 #4CAF50);
+                transform: scale(1.02);
+            }
+            QPushButton:pressed {
+                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                    stop: 0 #388E3C, stop: 1 #2E7D32);
+            }
+            QPushButton:disabled {
+                background-color: #E0E0E0;
+                color: #9E9E9E;
+            }
+        """)
+        
+        # ボタンにconfigを保存
+        button.button_config = button_config
+        
+        # ボタンクリック時の処理
+        button.clicked.connect(lambda checked, config=button_config: self.on_extension_button_clicked(config))
+        
+        # 右クリックメニューでプロンプト編集を追加
+        button.setContextMenuPolicy(Qt.CustomContextMenu)
+        button.customContextMenuRequested.connect(lambda pos, config=button_config, btn=button: self.show_button_context_menu(pos, config, btn))
+        
+        return button
+    
+    def on_extension_button_clicked(self, button_config):
+        """AI拡張ボタンクリック時の処理"""
+        try:
+            button_id = button_config.get('id', 'unknown')
+            label = button_config.get('label', 'Unknown')
+            
+            print(f"[DEBUG] AI拡張ボタンクリック: {button_id} ({label})")
+            
+            # senderからクリックされたボタンを取得
+            clicked_button = self.sender()
+            
+            if clicked_button and hasattr(clicked_button, 'start_loading'):
+                clicked_button.start_loading("AI処理中")
+            
+            # プロンプトを構築
+            prompt = self.build_extension_prompt(button_config)
+            
+            if not prompt:
+                if clicked_button:
+                    clicked_button.stop_loading()
+                QMessageBox.warning(self, "警告", "プロンプトの構築に失敗しました。")
+                return
+            
+            # AI問い合わせを実行
+            self.execute_extension_ai_request(prompt, button_config, clicked_button)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "エラー", f"AI拡張ボタン処理エラー: {str(e)}")
+    
+    def build_extension_prompt(self, button_config):
+        """AI拡張プロンプトを構築"""
+        try:
+            prompt_file = button_config.get('prompt_file')
+            prompt_template = button_config.get('prompt_template')
+            
+            print(f"[DEBUG] プロンプト構築開始 - prompt_file: {prompt_file}, prompt_template: {bool(prompt_template)}")
+            
+            if prompt_file:
+                # ファイルからプロンプトを読み込み
+                from classes.dataset.util.ai_extension_helper import load_prompt_file
+                template_content = load_prompt_file(prompt_file)
+                if not template_content:
+                    print(f"[WARNING] プロンプトファイルが読み込めません: {prompt_file}")
+                    # フォールバック用のシンプルプロンプト
+                    template_content = f"""データセットについて分析してください。
+
+データセット名: {{name}}
+課題番号: {{grant_number}}
+タイプ: {{dataset_type}}
+既存説明: {{description}}
+
+上記の情報を基に、「{button_config.get('label', 'AI分析')}」の観点から詳細な分析を行ってください。"""
+            elif prompt_template:
+                # 直接指定されたテンプレートを使用
+                template_content = prompt_template
+                print("[DEBUG] 直接指定されたテンプレートを使用")
+            else:
+                print("[WARNING] プロンプトファイルもテンプレートも指定されていません")
+                # デフォルトプロンプト
+                template_content = f"""データセットについて分析してください。
+
+データセット名: {{name}}
+課題番号: {{grant_number}}
+タイプ: {{dataset_type}}
+既存説明: {{description}}
+
+上記の情報を基に、「{button_config.get('label', 'AI分析')}」の観点から詳細な分析を行ってください。"""
+            
+            # コンテキストデータを準備
+            context_data = self.prepare_extension_context()
+            print(f"[DEBUG] コンテキストデータ準備完了: {list(context_data.keys())}")
+            
+            # プロンプトを置換
+            from classes.dataset.util.ai_extension_helper import format_prompt_with_context
+            formatted_prompt = format_prompt_with_context(template_content, context_data)
+            
+            print(f"[DEBUG] プロンプト構築完了 - 長さ: {len(formatted_prompt)}文字")
+            return formatted_prompt
+            
+        except Exception as e:
+            print(f"[ERROR] AI拡張プロンプト構築エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def prepare_extension_context(self):
+        """AI拡張用のコンテキストデータを準備"""
+        try:
+            # 基本コンテキストデータを確保
+            if hasattr(self, 'context_data') and self.context_data:
+                context_data = self.context_data.copy()
+            else:
+                # フォールバック用の基本データ
+                context_data = {
+                    'name': getattr(self, 'name_input', None).text() if hasattr(self, 'name_input') and self.name_input else "未設定",
+                    'grant_number': getattr(self, 'grant_number_input', None).text() if hasattr(self, 'grant_number_input') and self.grant_number_input else "未設定",
+                    'dataset_type': getattr(self, 'type_combo', None).currentText() if hasattr(self, 'type_combo') and self.type_combo else "未設定",
+                    'description': getattr(self, 'description_input', None).toPlainText() if hasattr(self, 'description_input') and self.description_input else "未設定"
+                }
+                print("[WARNING] context_dataが初期化されていません。フォールバックデータを使用します。")
+            
+            # 追加のコンテキストデータを収集（可能な場合）
+            try:
+                from classes.dataset.util.dataset_context_collector import get_dataset_context_collector
+                context_collector = get_dataset_context_collector()
+                
+                dataset_id = context_data.get('dataset_id')
+                if dataset_id:
+                    # データセットIDを一時的に除外
+                    context_data_without_id = {k: v for k, v in context_data.items() if k != 'dataset_id'}
+                    
+                    # 完全なコンテキストを収集
+                    full_context = context_collector.collect_full_context(
+                        dataset_id=dataset_id,
+                        **context_data_without_id
+                    )
+                    
+                    context_data.update(full_context)
+            except Exception as context_error:
+                print(f"[WARNING] 拡張コンテキスト収集でエラー: {context_error}")
+                # エラーが発生してもbase contextで続行
+            
+            return context_data
+            
+        except Exception as e:
+            print(f"[ERROR] AI拡張コンテキスト準備エラー: {e}")
+            # 最小限のフォールバックデータ
+            return {
+                'name': "データセット名未設定",
+                'grant_number': "課題番号未設定", 
+                'dataset_type': "タイプ未設定",
+                'description': "説明未設定"
+            }
+    
+    def execute_extension_ai_request(self, prompt, button_config, button_widget):
+        """AI拡張リクエストを実行"""
+        try:
+            # AIリクエストスレッドを作成・実行
+            ai_thread = AIRequestThread(prompt, self.context_data)
+            
+            # スレッドリストに追加（管理用）
+            self.extension_ai_threads.append(ai_thread)
+            
+            # スレッド完了時のコールバック
+            def on_success(result):
+                try:
+                    response_text = result.get('response') or result.get('content', '')
+                    if response_text:
+                        # 応答をフォーマットして表示
+                        formatted_response = self.format_extension_response(response_text, button_config)
+                        self.extension_response_display.setHtml(formatted_response)
+                    else:
+                        self.extension_response_display.setText("AI応答が空でした。")
+                finally:
+                    if button_widget:
+                        button_widget.stop_loading()
+                    # 完了したスレッドをリストから削除
+                    if ai_thread in self.extension_ai_threads:
+                        self.extension_ai_threads.remove(ai_thread)
+            
+            def on_error(error_message):
+                try:
+                    self.extension_response_display.setText(f"エラー: {error_message}")
+                finally:
+                    if button_widget:
+                        button_widget.stop_loading()
+                    # エラー時もスレッドをリストから削除
+                    if ai_thread in self.extension_ai_threads:
+                        self.extension_ai_threads.remove(ai_thread)
+            
+            ai_thread.result_ready.connect(on_success)
+            ai_thread.error_occurred.connect(on_error)
+            ai_thread.start()
+            
+        except Exception as e:
+            if button_widget:
+                button_widget.stop_loading()
+            QMessageBox.critical(self, "エラー", f"AI拡張リクエスト実行エラー: {str(e)}")
+    
+    def format_extension_response(self, response_text, button_config):
+        """AI拡張応答をフォーマット（マークダウン対応）"""
+        try:
+            label = button_config.get('label', 'AI拡張')
+            icon = button_config.get('icon', '🤖')
+            timestamp = __import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            
+            # マークダウンをHTMLに変換
+            html_content = self.convert_markdown_to_html(response_text)
+            
+            # HTMLフォーマット（コンパクトヘッダー付き）
+            formatted_html = f"""
+            <div style="border: 1px solid #e1e5e9; border-radius: 6px; padding: 0; margin: 3px 0; background-color: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 8px 12px; border-radius: 6px 6px 0 0; margin-bottom: 0;">
+                    <h3 style="margin: 0; font-size: 14px; font-weight: bold;">{icon} {label}</h3>
+                    <small style="opacity: 0.9; font-size: 10px;">実行時刻: {timestamp}</small>
+                </div>
+                <div style="padding: 10px; line-height: 1.3; font-family: 'Yu Gothic', 'Meiryo', sans-serif;">
+                    {html_content}
+                </div>
+            </div>
+            """
+            
+            return formatted_html
+            
+        except Exception as e:
+            print(f"[ERROR] AI拡張応答フォーマットエラー: {e}")
+            # フォールバック
+            import html
+            escaped_text = html.escape(response_text)
+            return f"<div style='padding: 10px; border: 1px solid #ccc;'><pre>{escaped_text}</pre></div>"
+    
+    def convert_markdown_to_html(self, markdown_text):
+        """シンプルなマークダウン→HTML変換"""
+        try:
+            import re
+            html_text = markdown_text
+            
+            # HTMLエスケープ
+            import html
+            html_text = html.escape(html_text)
+            
+            # マークダウン要素をHTMLに変換
+            
+            # ヘッダー（### → h3, ## → h2, # → h1）
+            html_text = re.sub(r'^### (.*?)$', r'<h3>\1</h3>', html_text, flags=re.MULTILINE)
+            html_text = re.sub(r'^## (.*?)$', r'<h2>\1</h2>', html_text, flags=re.MULTILINE)
+            html_text = re.sub(r'^# (.*?)$', r'<h1>\1</h1>', html_text, flags=re.MULTILINE)
+            
+            # 太字（**text** → <strong>text</strong>）
+            html_text = re.sub(r'\*\*(.*?)\*\*', r'<strong>\1</strong>', html_text)
+            
+            # 斜体（*text* → <em>text</em>）
+            html_text = re.sub(r'\*(.*?)\*', r'<em>\1</em>', html_text)
+            
+            # インラインコード（`code` → <code>code</code>）
+            html_text = re.sub(r'`([^`]+)`', r'<code>\1</code>', html_text)
+            
+            # マークダウンテーブル変換を先に処理
+            html_text = self.convert_markdown_tables(html_text)
+            
+            # リスト項目（- item → <li>item</li>）
+            lines = html_text.split('\n')
+            in_list = False
+            in_table = False
+            result_lines = []
+            
+            for line in lines:
+                stripped = line.strip()
+                
+                # テーブル行の判定（既に変換済みのHTMLテーブルはスキップ）
+                if '<table' in line or '</table>' in line or '<tr>' in line or '</tr>' in line:
+                    in_table = True
+                    result_lines.append(line)
+                    if '</table>' in line:
+                        in_table = False
+                    continue
+                
+                if in_table:
+                    result_lines.append(line)
+                    continue
+                
+                if re.match(r'^[-*+]\s+', stripped):
+                    if not in_list:
+                        result_lines.append('<ul>')
+                        in_list = True
+                    item_text = re.sub(r'^[-*+]\s+', '', stripped)
+                    result_lines.append(f'<li>{item_text}</li>')
+                else:
+                    if in_list:
+                        result_lines.append('</ul>')
+                        in_list = False
+                    if stripped:  # 空行でない場合
+                        result_lines.append(f'<p>{line}</p>')
+                    else:
+                        # 空行は少ない間隔にする
+                        result_lines.append('<div style="margin: 2px 0;"></div>')
+            
+            if in_list:
+                result_lines.append('</ul>')
+            
+            html_text = '\n'.join(result_lines)
+            
+            # コードブロック（```code``` → <pre><code>code</code></pre>）- コンパクトスタイル
+            html_text = re.sub(
+                r'```([^`]*?)```', 
+                r'<pre style="background-color: #f8f9fa; padding: 6px; border-radius: 3px; border: 1px solid #e9ecef; overflow-x: auto; margin: 4px 0;"><code>\1</code></pre>', 
+                html_text, 
+                flags=re.DOTALL
+            )
+            
+            # 引用（> text → <blockquote>text</blockquote>）
+            html_text = re.sub(r'^> (.*?)$', r'<blockquote>\1</blockquote>', html_text, flags=re.MULTILINE)
+            
+            return html_text
+            
+        except Exception as e:
+            print(f"[WARNING] マークダウン変換エラー: {e}")
+            # エラー時はプレーンテキストをHTMLエスケープして返す
+            import html
+            return f"<pre>{html.escape(markdown_text)}</pre>"
+    
+    def convert_markdown_tables(self, text):
+        """マークダウンテーブルをHTMLテーブルに変換"""
+        try:
+            import re
+            lines = text.split('\n')
+            result_lines = []
+            in_table = False
+            table_lines = []
+            
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                
+                # テーブル行の判定（|で始まって|で終わる、または|を含む）
+                if '|' in stripped and len(stripped.split('|')) >= 3:
+                    # セパレータ行の判定（|:---|---|:---|のような行）
+                    is_separator = re.match(r'^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$', stripped)
+                    
+                    if not in_table:
+                        in_table = True
+                        table_lines = []
+                    
+                    if is_separator:
+                        # セパレータ行は無視してテーブルヘッダーを確定
+                        continue
+                    else:
+                        table_lines.append(stripped)
+                else:
+                    # テーブル以外の行
+                    if in_table:
+                        # テーブル終了 - HTMLテーブルを生成
+                        html_table = self.build_html_table(table_lines)
+                        result_lines.append(html_table)
+                        in_table = False
+                        table_lines = []
+                    
+                    result_lines.append(line)
+            
+            # 最後にテーブルがある場合
+            if in_table and table_lines:
+                html_table = self.build_html_table(table_lines)
+                result_lines.append(html_table)
+            
+            return '\n'.join(result_lines)
+            
+        except Exception as e:
+            print(f"[WARNING] テーブル変換エラー: {e}")
+            return text
+    
+    def build_html_table(self, table_lines):
+        """テーブル行のリストからHTMLテーブルを構築"""
+        try:
+            if not table_lines:
+                return ""
+            
+            html_parts = ['<table>']
+            
+            for i, line in enumerate(table_lines):
+                # 行をセルに分割
+                cells = [cell.strip() for cell in line.split('|')]
+                # 最初と最後の空セルを除去
+                if cells and not cells[0]:
+                    cells = cells[1:]
+                if cells and not cells[-1]:
+                    cells = cells[:-1]
+                
+                if not cells:
+                    continue
+                
+                html_parts.append('<tr>')
+                
+                # 最初の行はヘッダーとして扱う
+                if i == 0:
+                    for cell in cells:
+                        html_parts.append(f'<th>{cell}</th>')
+                else:
+                    for cell in cells:
+                        html_parts.append(f'<td>{cell}</td>')
+                
+                html_parts.append('</tr>')
+            
+            html_parts.append('</table>')
+            
+            return '\n'.join(html_parts)
+            
+        except Exception as e:
+            print(f"[WARNING] HTMLテーブル構築エラー: {e}")
+            return '\n'.join(table_lines)
+    
+    def edit_extension_config(self):
+        """AI拡張設定ファイルを編集"""
+        try:
+            from classes.dataset.ui.ai_extension_prompt_edit_dialog import AIExtensionPromptEditDialog
+            
+            # 設定ファイルのパスを取得
+            config_path = "input/ai/ai_ext_conf.json"
+            
+            # プロンプト編集ダイアログを表示（設定ファイル編集モード）
+            dialog = AIExtensionPromptEditDialog(
+                parent=self,
+                prompt_file_path=config_path,
+                button_config={
+                    'label': 'AI拡張設定',
+                    'description': 'AI拡張機能の設定ファイル'
+                }
+            )
+            
+            # 更新時にボタンを再読み込み
+            dialog.prompt_updated.connect(lambda: self.load_extension_buttons())
+            
+            dialog.exec_()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "エラー", f"設定編集エラー: {str(e)}")
+    
+    def clear_extension_response(self):
+        """AI拡張応答をクリア"""
+        self.extension_response_display.clear()
+    
+    def copy_extension_response(self):
+        """AI拡張応答をクリップボードにコピー"""
+        try:
+            from PyQt5.QtWidgets import QApplication
+            # QTextBrowserからプレーンテキストを取得
+            text = self.extension_response_display.toPlainText()
+            if text:
+                clipboard = QApplication.clipboard()
+                clipboard.setText(text)
+                QMessageBox.information(self, "コピー完了", "応答内容をクリップボードにコピーしました。")
+            else:
+                QMessageBox.warning(self, "警告", "コピーする内容がありません。")
+        except Exception as e:
+            QMessageBox.critical(self, "エラー", f"コピーエラー: {str(e)}")
+        except Exception as e:
+            QMessageBox.critical(self, "エラー", f"コピーエラー: {str(e)}")
+    
+    def show_button_context_menu(self, position, button_config, button_widget):
+        """ボタンの右クリックメニューを表示"""
+        try:
+            from PyQt5.QtWidgets import QMenu, QAction
+            
+            menu = QMenu(button_widget)
+            
+            # プロンプト編集アクション
+            edit_action = QAction("📝 プロンプト編集", menu)
+            edit_action.triggered.connect(lambda: self.edit_button_prompt(button_config))
+            menu.addAction(edit_action)
+            
+            # プロンプトプレビューアクション
+            preview_action = QAction("👁️ プロンプトプレビュー", menu)
+            preview_action.triggered.connect(lambda: self.preview_button_prompt(button_config))
+            menu.addAction(preview_action)
+            
+            # メニューを表示
+            global_pos = button_widget.mapToGlobal(position)
+            menu.exec_(global_pos)
+            
+        except Exception as e:
+            QMessageBox.critical(self, "エラー", f"コンテキストメニューエラー: {str(e)}")
+    
+    def edit_button_prompt(self, button_config):
+        """ボタンのプロンプトを編集"""
+        try:
+            prompt_file = button_config.get('prompt_file')
+            
+            if prompt_file:
+                # ファイルベースのプロンプトを編集
+                from classes.dataset.ui.ai_extension_prompt_edit_dialog import AIExtensionPromptEditDialog
+                
+                dialog = AIExtensionPromptEditDialog(
+                    parent=self,
+                    prompt_file_path=prompt_file,
+                    button_config=button_config
+                )
+                
+                dialog.exec_()
+            else:
+                # デフォルトテンプレートの場合は新しいファイルを作成するか尋ねる
+                reply = QMessageBox.question(
+                    self,
+                    "プロンプトファイル作成",
+                    f"ボタン '{button_config.get('label', 'Unknown')}' はデフォルトテンプレートを使用しています。\n"
+                    "プロンプトファイルを作成して編集しますか？",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                
+                if reply == QMessageBox.Yes:
+                    # 新しいプロンプトファイルパスを生成
+                    button_id = button_config.get('id', 'unknown')
+                    new_prompt_file = f"input/ai/prompts/ext/{button_id}.txt"
+                    
+                    # デフォルトテンプレートを初期内容として使用
+                    initial_content = button_config.get('prompt_template', self.get_default_template_for_button(button_config))
+                    
+                    # ファイルを作成
+                    from classes.dataset.util.ai_extension_helper import save_prompt_file
+                    if save_prompt_file(new_prompt_file, initial_content):
+                        # 設定ファイルを更新（今後の拡張で実装）
+                        QMessageBox.information(
+                            self,
+                            "ファイル作成完了",
+                            f"プロンプトファイルを作成しました:\n{new_prompt_file}\n\n"
+                            "設定ファイルの更新は手動で行ってください。"
+                        )
+                        
+                        # 編集ダイアログを開く
+                        dialog = AIExtensionPromptEditDialog(
+                            parent=self,
+                            prompt_file_path=new_prompt_file,
+                            button_config=button_config
+                        )
+                        dialog.exec_()
+                    else:
+                        QMessageBox.critical(self, "エラー", "プロンプトファイルの作成に失敗しました。")
+                        
+        except Exception as e:
+            QMessageBox.critical(self, "エラー", f"プロンプト編集エラー: {str(e)}")
+    
+    def preview_button_prompt(self, button_config):
+        """ボタンのプロンプトをプレビュー"""
+        try:
+            prompt = self.build_extension_prompt(button_config)
+            
+            if prompt:
+                # プレビューダイアログを表示
+                from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
+                
+                preview_dialog = QDialog(self)
+                preview_dialog.setWindowTitle(f"プロンプトプレビュー: {button_config.get('label', 'Unknown')}")
+                preview_dialog.resize(700, 500)
+                
+                layout = QVBoxLayout(preview_dialog)
+                
+                preview_text = QTextEdit()
+                preview_text.setReadOnly(True)
+                preview_text.setText(prompt)
+                layout.addWidget(preview_text)
+                
+                close_button = QPushButton("閉じる")
+                close_button.clicked.connect(preview_dialog.close)
+                layout.addWidget(close_button)
+                
+                preview_dialog.exec_()
+            else:
+                QMessageBox.warning(self, "警告", "プロンプトの構築に失敗しました。")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "エラー", f"プロンプトプレビューエラー: {str(e)}")
+    
+    def get_default_template_for_button(self, button_config):
+        """ボタン用のデフォルトテンプレートを取得"""
+        button_id = button_config.get('id', 'unknown')
+        label = button_config.get('label', 'Unknown')
+        
+        return f"""データセットについて{label}を分析してください。
+
+【データセット情報】
+- 名前: {{name}}
+- タイプ: {{type}}
+- 課題番号: {{grant_number}}
+- 説明: {{description}}
+
+【実験データ】
+{{experiment_data}}
+
+【分析指示】
+上記データセット情報を基に、{label}の観点から分析してください。
+
+【出力形式】
+分析結果を詳しく説明し、200文字程度で要約してください。
+
+日本語で詳細に分析してください。"""
+    
+    def cleanup_threads(self):
+        """すべてのスレッドをクリーンアップ"""
+        try:
+            # メインAIスレッドの停止
+            if self.ai_thread and self.ai_thread.isRunning():
+                print("[DEBUG] メインAIスレッドを停止中...")
+                self.ai_thread.stop()
+                self.ai_thread.wait(3000)  # 3秒まで待機
+                if self.ai_thread.isRunning():
+                    print("[WARNING] メインAIスレッドの強制終了")
+                    self.ai_thread.terminate()
+            
+            # AI拡張スレッドの停止
+            for thread in self.extension_ai_threads:
+                if thread and thread.isRunning():
+                    print("[DEBUG] AI拡張スレッドを停止中...")
+                    thread.stop()
+                    thread.wait(3000)  # 3秒まで待機
+                    if thread.isRunning():
+                        print("[WARNING] AI拡張スレッドの強制終了")
+                        thread.terminate()
+            
+            # スレッドリストをクリア
+            self.extension_ai_threads.clear()
+            print("[DEBUG] すべてのスレッドのクリーンアップ完了")
+            
+        except Exception as e:
+            print(f"[ERROR] スレッドクリーンアップエラー: {e}")
+    
+    def closeEvent(self, event):
+        """ダイアログクローズ時の処理"""
+        try:
+            print("[DEBUG] AISuggestionDialog終了処理開始")
+            self.cleanup_threads()
+            event.accept()
+        except Exception as e:
+            print(f"[ERROR] ダイアログクローズエラー: {e}")
+            event.accept()
+    
+    def reject(self):
+        """キャンセル時の処理"""
+        try:
+            print("[DEBUG] AISuggestionDialogキャンセル処理開始")
+            self.cleanup_threads()
+            super().reject()
+        except Exception as e:
+            print(f"[ERROR] ダイアログキャンセルエラー: {e}")
+            super().reject()
+    
+    def accept(self):
+        """OK時の処理"""
+        try:
+            print("[DEBUG] AISuggestionDialog完了処理開始")
+            self.cleanup_threads()
+            super().accept()
+        except Exception as e:
+            print(f"[ERROR] ダイアログ完了エラー: {e}")
+            super().accept()

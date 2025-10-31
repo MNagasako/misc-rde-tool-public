@@ -23,7 +23,7 @@ import logging
 import json
 from config.common import LOGIN_FILE
 from functions.common_funcs import load_js_template
-from PyQt5.QtCore import QTimer
+from PyQt5.QtCore import QTimer, QUrl
 from PyQt5.QtWidgets import QApplication, QMessageBox
 from config.common import get_cookie_file_path, BEARER_TOKEN_FILE
 
@@ -58,10 +58,13 @@ class LoginManager:
         self.credential_source = None
         self.credential_store = None
         
-        # 既存の認証情報（後方互換）
+        # 既存の認証情報(後方互換)
         self.login_username = browser.login_username
         self.login_password = browser.login_password
         self.login_mode = browser.login_mode
+        
+        # v1.18.3: マルチホストトークン取得フラグ
+        self._material_token_fetched = False
         
         # v1.16: 起動時に認証情報を決定
         self._initialize_credential_source()
@@ -180,6 +183,10 @@ class LoginManager:
         # test_modeでは処理をスキップ
         if hasattr(self.browser, 'test_mode') and self.browser.test_mode:
             return
+        
+        # v1.18.3: 自動ログイン開始時にマテリアルトークンフラグをリセット
+        logger.info("[LOGIN] 自動ログイン開始 - マテリアルトークンフラグをリセット")
+        self.reset_material_token_flag()
             
         from PyQt5.QtCore import QTimer
         js_code = load_js_template('poll_dice_btn_status.js')
@@ -310,26 +317,40 @@ class LoginManager:
                 logger.info('Cookieが取得できませんでした。')
         QTimer.singleShot(1000, save_cookies)
 
-    def save_bearer_token_to_file(self, token):
-        try:
-            with open(BEARER_TOKEN_FILE, 'w', encoding='utf-8') as f:
-                f.write(f"BearerToken={token}\n")
-            logger.info("BearerTokenを専用ファイルに保存しました。")
-        except Exception as e:
-            logger.error(f"BearerTokenの保存に失敗しました: {e}")
-
-    def try_get_bearer_token(self, retries=3):
+    def save_bearer_token_to_file(self, token, host='rde.nims.go.jp'):
         """
-        WebViewからBearerトークンを取得する
+        Bearer Tokenをファイルに保存（複数ホスト対応）
+        
+        Args:
+            token: 保存するBearerトークン
+            host: ホスト名（デフォルト: 'rde.nims.go.jp'）
+        """
+        try:
+            from config.common import save_bearer_token
+            logger.info(f"[TOKEN] Bearerトークンをファイルに保存開始 ({host}): {token[:20]}...")
+            if save_bearer_token(token, host):
+                logger.info(f"[TOKEN] BearerToken保存成功 ({host})")
+            else:
+                logger.error(f"[TOKEN] BearerToken保存失敗 ({host})")
+        except Exception as e:
+            logger.error(f"[TOKEN] BearerToken保存エラー ({host}): {e}")
+
+    def try_get_bearer_token(self, retries=3, host='rde.nims.go.jp'):
+        """
+        WebViewからBearerトークンを取得する（複数ホスト対応）
+        
         Args:
             retries: リトライ回数
+            host: 対象ホスト名（デフォルト: 'rde.nims.go.jp'）
         """
+        logger.info(f"[TOKEN] Bearerトークン取得開始: host={host}, retries={retries}")
         js_code = load_js_template('extract_bearer_token.js')
         
         def handle_token_list(token_list):
+            logger.debug(f"[TOKEN] sessionStorage取得結果: {len(token_list) if token_list else 0}件")
             if not token_list and retries > 0:
-                logger.warning("トークン取得失敗。リトライします...")
-                self.try_get_bearer_token(retries=retries - 1)
+                logger.warning(f"[TOKEN] トークン取得失敗 ({host})。リトライします... (残り{retries-1}回)")
+                self.try_get_bearer_token(retries=retries - 1, host=host)
                 return
             
             for item in token_list:
@@ -341,18 +362,58 @@ class LoginManager:
                     try:
                         data = json.loads(item['value'])
                         if data.get('credentialType') == 'AccessToken' and 'secret' in data:
-                            self.browser.bearer_token = data['secret']
-                            logger.info("Bearerトークン自動取得: " + data['secret'][:40] + "... (省略)")
-                            # ファイルにも保存
-                            self.save_bearer_token_to_file(data['secret'])
+                            token = data['secret']
+                            
+                            # トークンの内容をデコードして検証（デバッグ用）
+                            print(f"[TOKEN-DEBUG] 取得したトークン: {token[:50]}...")
+                            try:
+                                import base64
+                                # JWT形式: header.payload.signature
+                                parts = token.split('.')
+                                if len(parts) == 3:
+                                    # ペイロード部分をデコード（Base64URL → 通常のBase64）
+                                    payload_b64 = parts[1]
+                                    # パディング調整
+                                    payload_b64 += '=' * (4 - len(payload_b64) % 4)
+                                    payload_json = base64.b64decode(payload_b64).decode('utf-8')
+                                    payload_data = json.loads(payload_json)
+                                    print(f"[TOKEN-DEBUG] トークンペイロード: aud={payload_data.get('aud')}, scp={payload_data.get('scp')}")
+                                    
+                                    # スコープを確認してトークンの種類を判定
+                                    scopes = payload_data.get('scp', '')
+                                    if 'materials' in scopes:
+                                        print(f"[TOKEN-DEBUG] ✓ Material API用トークンを検出")
+                                    else:
+                                        print(f"[TOKEN-DEBUG] ✓ RDE API用トークンを検出")
+                            except Exception as decode_err:
+                                print(f"[TOKEN-DEBUG] トークンデコードエラー: {decode_err}")
+                            
+                            self.browser.bearer_token = token
+                            logger.info(f"[TOKEN] Bearerトークン自動取得成功 ({host}): {token[:40]}... (省略)")
+                            print(f"[TOKEN-DEBUG] トークンを {host} として保存")
+                            
+                            # ファイルにも保存（ホスト別）
+                            self.save_bearer_token_to_file(token, host)
+                            
+                            # v1.18.3: UIコンポーネントにトークン更新を通知
+                            self._notify_token_updated(token, host)
                             
                             # v1.16: 認証完了後のクリーンアップ
                             self._secure_cleanup_credentials()
+                            
+                            # rde.nims.go.jpの場合は、続けてrde-material.nims.go.jpのトークンも取得
+                            # v1.18.3: 無限ループ防止 - まだ取得していない場合のみ実行
+                            if host == 'rde.nims.go.jp' and not self._material_token_fetched:
+                                logger.info("[TOKEN] rde-material.nims.go.jpのトークン取得を開始します")
+                                print(f"[TOKEN-DEBUG] Material トークン取得プロセスを2秒後に開始")
+                                QTimer.singleShot(2000, lambda: self.fetch_material_token())
+                            
                             return
                     except Exception as e:
-                        logger.warning(f"JSONパース失敗: {e}")
+                        logger.warning(f"[TOKEN] JSONパース失敗: {e}")
+                        print(f"[TOKEN-DEBUG] JSONパースエラー: {e}")
             
-            logger.warning("BearerトークンがsessionStorageから取得できませんでした")
+            logger.warning(f"[TOKEN] BearerトークンがsessionStorageから取得できませんでした ({host})")
         
         self.webview.page().runJavaScript(js_code, handle_token_list)
     
@@ -389,6 +450,127 @@ class LoginManager:
         """
         # ページロード完了後の処理をここに実装
         logger.debug("ページロード完了 - ログイン状態チェック")
+    
+    def fetch_material_token(self):
+        """
+        rde-material.nims.go.jpからBearerトークンを取得
+        認証情報は共通のため、既にログイン済みの状態でアクセスして
+        Cookieからトークンを抽出する
+        
+        トークン取得後、rde.nims.go.jp/rde/datasetsに戻る(データ取得機能用)
+        """
+        # v1.18.3: 二重実行防止 - 既に取得プロセス実行中の場合はスキップ
+        if self._material_token_fetched:
+            logger.info("[TOKEN] rde-material.nims.go.jpトークン取得は既に実行済みです（スキップ）")
+            return
+        
+        # フラグを先に設定して二重実行を防止
+        logger.info("[TOKEN] rde-material.nims.go.jpトークン取得フラグを設定")
+        self._material_token_fetched = True
+            
+        try:
+            # 重要: rde-material.nims.go.jpのログインページに遷移してトークンを取得
+            # ルートパスではなく、/rde/samplesなど実際のアプリケーションパスに遷移
+            material_url = "https://rde-material.nims.go.jp/rde/samples"
+            logger.info(f"[TOKEN] rde-material.nims.go.jpへ遷移開始: {material_url}")
+            print(f"[TOKEN-DEBUG] Material URL遷移: {material_url}")
+            
+            # ページロード完了を待ってトークン取得
+            def on_load_finished(ok):
+                # シグナルを即座に切断（無限ループ防止）
+                try:
+                    self.webview.loadFinished.disconnect(on_load_finished)
+                    logger.debug("[TOKEN] loadFinishedシグナルを切断")
+                except:
+                    pass  # 既に切断されている場合は無視
+                
+                if ok:
+                    logger.info("[TOKEN] rde-material.nims.go.jp ページロード完了")
+                    print(f"[TOKEN-DEBUG] Material ページロード完了、待機中...")
+                    # トークン取得を試行（十分な待機時間を確保）
+                    def after_token_fetch():
+                        logger.info("[TOKEN] rde-material.nims.go.jpのトークン取得を試行")
+                        print(f"[TOKEN-DEBUG] Material トークン取得開始")
+                        self.try_get_bearer_token(retries=3, host='rde-material.nims.go.jp')
+                        # トークン取得後、元のrde.nims.go.jp/rde/datasetsに戻る
+                        QTimer.singleShot(1000, self.return_to_rde_datasets)
+                    
+                    # 待機時間を5秒に延長（認証処理とsessionStorage更新を待つ）
+                    QTimer.singleShot(5000, after_token_fetch)
+                else:
+                    logger.warning("[TOKEN] rde-material.nims.go.jp ページロード失敗")
+                    print(f"[TOKEN-DEBUG] Material ページロード失敗")
+            
+            # 一時的にloadFinishedシグナルに接続
+            self.webview.loadFinished.connect(on_load_finished)
+            logger.debug("[TOKEN] loadFinishedシグナルを接続")
+            
+            # WebViewでrde-material.nims.go.jpに遷移
+            logger.info(f"[TOKEN] WebViewでURL遷移実行: {material_url}")
+            self.webview.setUrl(QUrl(material_url))
+            
+        except Exception as e:
+            logger.error(f"[TOKEN] rde-material.nims.go.jpトークン取得エラー: {e}")
+            print(f"[TOKEN-DEBUG] Material トークン取得エラー: {e}")
+            # エラー時はフラグをリセット
+            self._material_token_fetched = False
+    
+    def return_to_rde_datasets(self):
+        """
+        rde.nims.go.jp/rde/datasetsに戻る（データ取得機能用）
+        """
+        try:
+            rde_datasets_url = "https://rde.nims.go.jp/rde/datasets"
+            logger.info(f"rde.nims.go.jp/rde/datasetsに戻ります: {rde_datasets_url}")
+            self.webview.setUrl(QUrl(rde_datasets_url))
+        except Exception as e:
+            logger.error(f"rde.nims.go.jp/rde/datasets遷移エラー: {e}")
+    
+    def reset_material_token_flag(self):
+        """
+        マテリアルトークン取得フラグをリセット
+        再ログイン時に呼び出すことで、再度トークン取得を可能にする
+        """
+        logger.info("[TOKEN] マテリアルトークン取得フラグをリセット")
+        self._material_token_fetched = False
+    
+    def _notify_token_updated(self, token: str, host: str):
+        """
+        トークン更新をUIコンポーネントに通知
+        
+        Args:
+            token: 更新されたトークン
+            host: ホスト名
+        """
+        try:
+            logger.info(f"[TOKEN] トークン更新をUIコンポーネントに通知: host={host}")
+            
+            # デバッグ情報
+            logger.debug(f"[TOKEN] browser属性チェック: hasattr(ui_controller)={hasattr(self.browser, 'ui_controller')}")
+            if hasattr(self.browser, 'ui_controller'):
+                logger.debug(f"[TOKEN] ui_controller存在チェック: {self.browser.ui_controller is not None}")
+            
+            # UI controllerが存在する場合、タブwidgetを更新
+            if hasattr(self.browser, 'ui_controller') and self.browser.ui_controller:
+                logger.info("[TOKEN] UIコントローラー経由でタブwidgetを更新開始")
+                self.browser.ui_controller._update_tabs_bearer_token(token)
+                logger.info("[TOKEN] UIコントローラー経由でタブwidgetを更新完了")
+            else:
+                logger.warning("[TOKEN] UIコントローラーが存在しないため、タブwidget更新をスキップ")
+            
+            # 直接タブwidgetが存在する場合も更新
+            if hasattr(self.browser, 'tabs') and self.browser.tabs:
+                logger.debug(f"[TOKEN] tabs属性が存在: count={self.browser.tabs.count()}")
+                for i in range(self.browser.tabs.count()):
+                    widget = self.browser.tabs.widget(i)
+                    if hasattr(widget, 'bearer_token'):
+                        widget.bearer_token = token
+                        logger.debug(f"[TOKEN] タブ{i}のbearer_tokenを更新")
+            else:
+                logger.debug("[TOKEN] tabs属性が存在しないか、Noneです")
+                        
+        except Exception as e:
+            logger.error(f"[TOKEN] トークン更新通知エラー: {e}", exc_info=True)
     
     def test_credentials(self, credentials: 'CredentialInfo') -> bool:
         """

@@ -117,12 +117,12 @@ def api_request(method: str, url: str, bearer_token: Optional[str] = None,
                params: Optional[Dict[str, str]] = None,
                timeout: int = 30) -> Optional[_requests_types.Response]:
     """
-    JSON API リクエスト用共通関数（セッション管理ベース）
+    JSON API リクエスト用共通関数（セッション管理ベース・複数ホスト対応 v1.18.3+）
     
     Args:
         method: HTTPメソッド
         url: リクエストURL
-        bearer_token: Bearerトークン
+        bearer_token: Bearerトークン（未指定時はURLから自動選択）
         headers: 追加ヘッダー
         json_data: JSONデータ
         params: URLパラメータ
@@ -136,6 +136,22 @@ def api_request(method: str, url: str, bearer_token: Optional[str] = None,
         'Content-Type': 'application/json',
         'Accept': 'application/json'
     }
+    
+    # bearer_tokenが指定されていない場合、URLから自動選択
+    if not bearer_token:
+        try:
+            from config.common import get_bearer_token_for_url
+            bearer_token = get_bearer_token_for_url(url)
+            if bearer_token:
+                if hasattr(logger, 'log') and logger.__class__.__name__ == 'DebugLog':
+                    logger.log(logging.DEBUG, f"Bearer Token自動選択: {url[:50]}...")
+                else:
+                    logger.debug(f"Bearer Token自動選択: {url[:50]}...")
+        except Exception as e:
+            if hasattr(logger, 'log') and logger.__class__.__name__ == 'DebugLog':
+                logger.log(logging.WARNING, f"Bearer Token自動選択失敗: {e}")
+            else:
+                logger.warning(f"Bearer Token自動選択失敗: {e}")
     
     if bearer_token:
         request_headers['Authorization'] = f'Bearer {bearer_token}'
@@ -157,12 +173,12 @@ def stream_request(method: str, url: str, bearer_token: Optional[str] = None,
                 timeout: int = 30, headers: Optional[Dict[str, str]] = None, 
                 stream: bool = True) -> Optional[_requests_types.Response]:
     """
-    ストリーミングリクエスト用関数（セッション管理ベース）
+    ストリーミングリクエスト用関数（セッション管理ベース・複数ホスト対応 v1.18.3+）
     
     Args:
         method: HTTPメソッド
         url: リクエストURL
-        bearer_token: Bearerトークン
+        bearer_token: Bearerトークン（未指定時はURLから自動選択）
         timeout: タイムアウト秒数
         headers: カスタムヘッダー
         stream: ストリーミングモード
@@ -171,6 +187,15 @@ def stream_request(method: str, url: str, bearer_token: Optional[str] = None,
         _requests_types.Response または None
     """
     request_headers = {}
+    
+    # bearer_tokenが指定されていない場合、URLから自動選択
+    if not bearer_token:
+        try:
+            from config.common import get_bearer_token_for_url
+            bearer_token = get_bearer_token_for_url(url)
+        except Exception:
+            pass
+    
     if bearer_token:
         request_headers['Authorization'] = f'Bearer {bearer_token}'
     
@@ -190,11 +215,11 @@ def download_request(url: str, bearer_token: Optional[str] = None,
               timeout: int = 30, headers: Optional[Dict[str, str]] = None,
               stream: bool = True) -> Optional[_requests_types.Response]:
     """
-    ダウンロード用リクエスト関数（セッション管理ベース）
+    ダウンロード用リクエスト関数（セッション管理ベース・複数ホスト対応 v1.18.3+）
     
     Args:
         url: ダウンロードURL
-        bearer_token: Bearerトークン
+        bearer_token: Bearerトークン（未指定時はURLから自動選択）
         timeout: タイムアウト秒数
         headers: カスタムヘッダー
         stream: ストリーミングモード
@@ -274,12 +299,12 @@ def post_form(url: str, data: Dict[str, Any], bearer_token: Optional[str] = None
              headers: Optional[Dict[str, str]] = None,
              timeout: int = 30) -> Optional[_requests_types.Response]:
     """
-    フォームデータ POST リクエスト用関数（セッション管理ベース）
+    フォームデータ POST リクエスト用関数（セッション管理ベース・複数ホスト対応 v1.18.4+）
     
     Args:
         url: リクエストURL
         data: フォームデータ
-        bearer_token: Bearerトークン
+        bearer_token: Bearerトークン（未指定時はURLから自動選択）
         headers: カスタムヘッダー
         timeout: タイムアウト秒数
         
@@ -287,6 +312,25 @@ def post_form(url: str, data: Dict[str, Any], bearer_token: Optional[str] = None
         _requests_types.Response または None
     """
     request_headers = {}
+    
+    # bearer_tokenが指定されていない場合、URLから自動選択
+    if not bearer_token:
+        try:
+            from config.common import get_bearer_token_for_url
+            bearer_token = get_bearer_token_for_url(url)
+            if bearer_token:
+                if hasattr(logger, 'log') and logger.__class__.__name__ == 'DebugLog':
+                    logger.log(logging.DEBUG, f"Bearer Token自動選択 (POST Form): {url[:50]}...")
+                else:
+                    logger.debug(f"Bearer Token自動選択 (POST Form): {url[:50]}...")
+        except Exception as e:
+            if hasattr(logger, 'log') and logger.__class__.__name__ == 'DebugLog':
+                logger.log(f"[WARNING] Bearer Token自動選択エラー: {e}", "WARNING")
+            elif hasattr(logger, 'log'):
+                logger.log(logging.WARNING, f"[WARNING] Bearer Token自動選択エラー: {e}")
+            else:
+                logger.warning(f"[WARNING] Bearer Token自動選択エラー: {e}")
+    
     if bearer_token:
         request_headers['Authorization'] = f'Bearer {bearer_token}'
     
@@ -307,12 +351,12 @@ def post_binary(url: str, data: bytes, bearer_token: Optional[str] = None,
                headers: Optional[Dict[str, str]] = None,
                timeout: int = 30) -> Optional[_requests_types.Response]:
     """
-    バイナリデータ POST リクエスト用関数（セッション管理ベース）
+    バイナリデータ POST リクエスト用関数（セッション管理ベース・複数ホスト対応 v1.18.4+）
     
     Args:
         url: リクエストURL
         data: バイナリデータ
-        bearer_token: Bearerトークン
+        bearer_token: Bearerトークン（未指定時はURLから自動選択）
         content_type: Content-Type ヘッダー
         headers: カスタムヘッダー
         timeout: タイムアウト秒数
@@ -323,6 +367,24 @@ def post_binary(url: str, data: bytes, bearer_token: Optional[str] = None,
     request_headers = {
         'Content-Type': content_type
     }
+    
+    # bearer_tokenが指定されていない場合、URLから自動選択
+    if not bearer_token:
+        try:
+            from config.common import get_bearer_token_for_url
+            bearer_token = get_bearer_token_for_url(url)
+            if bearer_token:
+                if hasattr(logger, 'log') and logger.__class__.__name__ == 'DebugLog':
+                    logger.log(logging.DEBUG, f"Bearer Token自動選択 (POST Binary): {url[:50]}...")
+                else:
+                    logger.debug(f"Bearer Token自動選択 (POST Binary): {url[:50]}...")
+        except Exception as e:
+            if hasattr(logger, 'log') and logger.__class__.__name__ == 'DebugLog':
+                logger.log(f"[WARNING] Bearer Token自動選択エラー: {e}", "WARNING")
+            elif hasattr(logger, 'log'):
+                logger.log(logging.WARNING, f"[WARNING] Bearer Token自動選択エラー: {e}")
+            else:
+                logger.warning(f"[WARNING] Bearer Token自動選択エラー: {e}")
     
     if bearer_token:
         request_headers['Authorization'] = f'Bearer {bearer_token}'

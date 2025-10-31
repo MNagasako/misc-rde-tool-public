@@ -34,6 +34,18 @@ class AIPromptTemplate:
             レンダリングされたプロンプト文字列
         """
         try:
+            # デバッグ: file_tree の内容を確認
+            if 'file_tree' in context_data:
+                file_tree_value = context_data['file_tree']
+                print(f"[DEBUG] テンプレートrender: file_tree キー存在")
+                print(f"[DEBUG] file_tree の型: {type(file_tree_value)}")
+                print(f"[DEBUG] file_tree の長さ: {len(file_tree_value) if file_tree_value else 0} 文字")
+                print(f"[DEBUG] file_tree が空: {not file_tree_value}")
+                if file_tree_value:
+                    print(f"[DEBUG] file_tree の先頭100文字: {file_tree_value[:100]}")
+            else:
+                print(f"[DEBUG] ⚠️  context_data に file_tree キーが存在しません")
+            
             # 空値の場合のフォールバック処理
             safe_context = {}
             for key in self.context_keys:
@@ -44,6 +56,10 @@ class AIPromptTemplate:
             for key, value in context_data.items():
                 if key not in safe_context:
                     safe_context[key] = value if value else f"[{key}未設定]"
+            
+            # デバッグ: safe_context の file_tree を確認
+            if 'file_tree' in safe_context:
+                print(f"[DEBUG] safe_context['file_tree']: {safe_context['file_tree'][:100] if len(safe_context['file_tree']) > 100 else safe_context['file_tree']}")
             
             return self.base_prompt.format(**safe_context)
             
@@ -384,8 +400,17 @@ ARIM課題データ:
         
         # 将来の拡張用フィールド
         context['file_info'] = kwargs.get('file_info', '')
+        context['file_tree'] = kwargs.get('file_tree', '')  # テンプレートで使用されるキー
         context['metadata'] = kwargs.get('metadata', '')
         context['related_datasets'] = kwargs.get('related_datasets', '')
+        
+        # デバッグ: file_tree の内容を確認
+        print(f"[DEBUG] collect_context_data: file_tree キー追加")
+        if context['file_tree']:
+            print(f"[DEBUG] file_tree の長さ: {len(context['file_tree'])} 文字")
+            print(f"[DEBUG] file_tree の先頭100文字: {context['file_tree'][:100]}")
+        else:
+            print(f"[DEBUG] ⚠️  file_tree が空です")
         
         return context
         

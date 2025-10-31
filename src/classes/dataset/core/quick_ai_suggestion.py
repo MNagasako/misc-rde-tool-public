@@ -34,11 +34,17 @@ def generate_quick_suggestion(context_data: Dict[str, Any]) -> Optional[str]:
         # データセットコンテキストコレクターを使用して完全なコンテキストを収集
         context_collector = get_dataset_context_collector()
         
-        # データセットIDがある場合は詳細情報を取得
+        # データセットIDを取得（context_dataから）
         dataset_id = context_data.get('dataset_id')
+        print(f"[DEBUG] データセットID: {dataset_id}")
+        
+        # context_dataからdataset_idを一時的に除外してから渡す
+        context_data_without_id = {k: v for k, v in context_data.items() if k != 'dataset_id'}
+        
+        # collect_full_contextにdataset_idを明示的に渡す
         full_context = context_collector.collect_full_context(
             dataset_id=dataset_id,
-            **context_data
+            **context_data_without_id
         )
         
         print(f"[DEBUG] コンテキストコレクター処理後: {list(full_context.keys())}")

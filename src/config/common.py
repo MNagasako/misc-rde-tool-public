@@ -28,7 +28,9 @@ import os
 # 1. ドキュメント: VERSION.txt, README.md, docs/refactor_progress.md
 # 2. 各クラスファイル: ヘッダーコメント内のバージョン番号
 # 3. このREVISION変数（マスター管理）
-REVISION = "1.18.3"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+# 2025-10-22: v1.18.5 - 安定性向上・軽微な修正・バージョン統一
+REVISION = "1.19.0"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+# 2025-10-21: v1.18.4 - 軽微なバグ修正・安定性向上・バージョン統一
 # 2025-09-10: v1.17.2 - センシティブデータ保護強化・コードクリーンアップ・ライセンス管理強化
 # 2025-08-31: v1.15.0 - ワークスペース大規模整理完了・コードベース品質向上・開発環境安定化
 # 2025-08-28: v1.14.1 - 企業CA証明書機能有効化・SSL証明書管理完全対応・PyInstaller配布対応
@@ -158,7 +160,8 @@ def get_input_directory():
 # セキュリティ関連ファイル
 COOKIE_FILE_RDE = os.path.join(HIDDEN_DIR, '.cookies_rde.txt')
 DEBUG_INFO_FILE = os.path.join(HIDDEN_DIR, 'info.txt')
-BEARER_TOKEN_FILE = os.path.join(HIDDEN_DIR, 'bearer_token.txt')
+BEARER_TOKEN_FILE = os.path.join(HIDDEN_DIR, 'bearer_token.txt')  # レガシー互換用（rde.nims.go.jp）
+BEARER_TOKENS_FILE = os.path.join(HIDDEN_DIR, 'bearer_tokens.json')  # 複数ホスト対応（v1.18.3+）
 
 # 入力ファイル
 ARIM_BATCH_LIST_FILE = get_dynamic_file_path('input/list.txt')
@@ -240,6 +243,203 @@ def get_samples_dir_path():
 def get_user_config_dir():
     """ユーザー設定ディレクトリのパスを取得"""
     return get_dynamic_file_path("config")
+
+# =============================================================================
+# 複数ホスト対応 Bearer Token 管理機能（v1.18.3+）
+# =============================================================================
+
+import json as _json
+from typing import Optional, Dict
+
+# RDEホスト定義
+RDE_HOSTS = {
+    'rde': 'rde.nims.go.jp',
+    'rde-material': 'rde-material.nims.go.jp'
+}
+
+def save_bearer_token(token: str, host: str = 'rde.nims.go.jp') -> bool:
+    """
+    Bearer Tokenを保存（複数ホスト対応）
+    
+    Args:
+        token: 保存するBearerトークン
+        host: ホスト名（例: 'rde.nims.go.jp', 'rde-material.nims.go.jp'）
+    
+    Returns:
+        bool: 保存成功時True
+    """
+    try:
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # 既存のトークンを読み込み
+        logger.debug(f"[TOKEN-SAVE] 既存トークンを読み込み: {BEARER_TOKENS_FILE}")
+        print(f"[TOKEN-SAVE] 保存開始 - host={host}, token={token[:20]}...")
+        tokens = load_all_bearer_tokens()
+        print(f"[TOKEN-SAVE] 既存トークン数: {len(tokens)}, ホスト: {list(tokens.keys())}")
+        
+        # 新しいトークンを追加
+        tokens[host] = token
+        logger.info(f"[TOKEN-SAVE] トークンを追加: host={host}, token={token[:20]}...")
+        print(f"[TOKEN-SAVE] 追加後トークン数: {len(tokens)}, ホスト: {list(tokens.keys())}")
+        
+        # JSON形式で保存
+        logger.debug(f"[TOKEN-SAVE] JSON形式で保存: {BEARER_TOKENS_FILE}")
+        with open(BEARER_TOKENS_FILE, 'w', encoding='utf-8') as f:
+            _json.dump(tokens, f, indent=2, ensure_ascii=False)
+        logger.info(f"[TOKEN-SAVE] JSON保存完了: {len(tokens)}個のトークン")
+        print(f"[TOKEN-SAVE] JSON保存完了: {BEARER_TOKENS_FILE}")
+        
+        # 保存後の確認
+        saved_tokens = load_all_bearer_tokens()
+        print(f"[TOKEN-SAVE] 保存確認 - ホスト数: {len(saved_tokens)}, ホスト: {list(saved_tokens.keys())}")
+        for saved_host, saved_token in saved_tokens.items():
+            print(f"[TOKEN-SAVE]   {saved_host}: {saved_token[:20]}...")
+        
+        # レガシー互換：rde.nims.go.jpの場合は従来のファイルにも保存
+        if host == 'rde.nims.go.jp':
+            logger.debug(f"[TOKEN-SAVE] レガシーファイルにも保存: {BEARER_TOKEN_FILE}")
+            with open(BEARER_TOKEN_FILE, 'w', encoding='utf-8') as f:
+                f.write(f"BearerToken={token}\n")
+            logger.info("[TOKEN-SAVE] レガシーファイル保存完了")
+        
+        return True
+    except Exception as e:
+        print(f"[TOKEN-SAVE] Bearer Token保存エラー ({host}): {e}")
+        logger.error(f"Bearer Token保存エラー ({host}): {e}")
+        return False
+
+def load_bearer_token(host: str = 'rde.nims.go.jp') -> Optional[str]:
+    """
+    指定ホストのBearer Tokenを取得
+    
+    Args:
+        host: ホスト名（例: 'rde.nims.go.jp', 'rde-material.nims.go.jp'）
+    
+    Returns:
+        str: トークン文字列、存在しない場合None
+    """
+    try:
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        print(f"[TOKEN-LOAD] トークン読み込み開始 - host={host}")
+        logger.debug(f"[TOKEN-LOAD] トークン読み込み開始: host={host}")
+        
+        # 新形式のJSONファイルから読み込み
+        if os.path.exists(BEARER_TOKENS_FILE):
+            logger.debug(f"[TOKEN-LOAD] JSON形式トークンファイル読み込み: {BEARER_TOKENS_FILE}")
+            print(f"[TOKEN-LOAD] JSONファイルから読み込み中...")
+            with open(BEARER_TOKENS_FILE, 'r', encoding='utf-8') as f:
+                tokens = _json.load(f)
+                print(f"[TOKEN-LOAD] ファイル内のホスト数: {len(tokens)}, ホスト: {list(tokens.keys())}")
+                if host in tokens:
+                    token = tokens[host]
+                    logger.info(f"[TOKEN-LOAD] トークン読み込み成功 ({host}): {token[:20]}...")
+                    print(f"[TOKEN-LOAD] トークン取得成功 - host={host}, token={token[:20]}...")
+                    return token
+                else:
+                    logger.warning(f"[TOKEN-LOAD] ホスト {host} のトークンが見つかりません")
+                    print(f"[TOKEN-LOAD] 指定ホストのトークンなし - host={host}")
+        else:
+            logger.debug(f"[TOKEN-LOAD] JSON形式トークンファイルが存在しません: {BEARER_TOKENS_FILE}")
+            print(f"[TOKEN-LOAD] JSONファイルが存在しません")
+        
+        # レガシー互換：rde.nims.go.jpの場合は従来のファイルからも読み込み
+        if host == 'rde.nims.go.jp' and os.path.exists(BEARER_TOKEN_FILE):
+            logger.debug(f"[TOKEN-LOAD] レガシートークンファイル読み込み: {BEARER_TOKEN_FILE}")
+            print(f"[TOKEN-LOAD] レガシーファイルから読み込み試行")
+            with open(BEARER_TOKEN_FILE, 'r', encoding='utf-8') as f:
+                content = f.read().strip()
+                # "BearerToken=" プレフィックスを除去
+                if content.startswith('BearerToken='):
+                    content = content[len('BearerToken='):]
+                if content:
+                    logger.info(f"[TOKEN-LOAD] レガシーファイルからトークン読み込み成功: {content[:20]}...")
+                    print(f"[TOKEN-LOAD] レガシーファイルから取得成功 - token={content[:20]}...")
+                    return content
+        
+        logger.warning(f"[TOKEN-LOAD] トークンが見つかりません ({host})")
+        print(f"[TOKEN-LOAD] トークンが見つかりませんでした - host={host}")
+        return None
+    except Exception as e:
+        print(f"[TOKEN-LOAD] Bearer Token読み込みエラー ({host}): {e}")
+        logger.error(f"Bearer Token読み込みエラー ({host}): {e}")
+        return None
+
+def load_all_bearer_tokens() -> Dict[str, str]:
+    """
+    全ホストのBearer Tokenを取得
+    
+    Returns:
+        dict: {host: token} の辞書
+    """
+    try:
+        if os.path.exists(BEARER_TOKENS_FILE):
+            with open(BEARER_TOKENS_FILE, 'r', encoding='utf-8') as f:
+                return _json.load(f)
+        return {}
+    except Exception as e:
+        print(f"Bearer Token一括読み込みエラー: {e}")
+        return {}
+
+def get_bearer_token_for_url(url: str) -> Optional[str]:
+    """
+    URL文字列から適切なBearer Tokenを自動選択
+    v1.18.4: rde-instrument-api, rde-entry-api-arim対応強化
+    
+    Args:
+        url: APIエンドポイントのURL
+    
+    Returns:
+        str: 適切なトークン、見つからない場合None
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # 優先順位: より具体的なホスト名を優先してマッチング
+    
+    # 1. rde-material.nims.go.jp関連の派生ホスト（Material専用トークン）
+    material_hosts = [
+        'rde-material-api.nims.go.jp',
+        'rde-material.nims.go.jp'
+    ]
+    
+    for host in material_hosts:
+        if host in url:
+            token = load_bearer_token('rde-material.nims.go.jp')
+            if token:
+                logger.debug(f"[TOKEN-SELECT] Material token selected for: {url[:50]}...")
+                print(f"[TOKEN-SELECT] Material token for {host}")
+                return token
+            else:
+                logger.warning(f"[TOKEN-SELECT] Material token not found, falling back to RDE token")
+                print(f"[TOKEN-SELECT] Material token not found, using RDE token")
+    
+    # 2. rde.nims.go.jp関連の派生ホスト（RDEメイントークン）
+    # 注意: rde-entry-api-arim, rde-instrument-apiもRDEメイントークンを使用
+    rde_hosts = [
+        'rde-entry-api-arim.nims.go.jp',  # ARIM登録API
+        'rde-instrument-api.nims.go.jp',  # 装置情報API
+        'rde-api.nims.go.jp',             # メインAPI
+        'rde-user-api.nims.go.jp',        # ユーザーAPI
+        'rde.nims.go.jp'                  # ベースURL
+    ]
+    
+    for host in rde_hosts:
+        if host in url:
+            token = load_bearer_token('rde.nims.go.jp')
+            if token:
+                logger.debug(f"[TOKEN-SELECT] RDE token selected for: {url[:50]}...")
+                print(f"[TOKEN-SELECT] RDE token for {host}")
+                return token
+    
+    # 3. デフォルトはrde.nims.go.jpのトークン
+    logger.warning(f"[TOKEN-SELECT] No specific host matched, using default RDE token for: {url[:50]}...")
+    print(f"[TOKEN-SELECT] Default RDE token for: {url[:50]}...")
+    return load_bearer_token('rde.nims.go.jp')
+
+# =============================================================================
 
 DEBUG_LOG_ENABLED = True  # 全体設定で有効/無効切替
 # DEBUG設定

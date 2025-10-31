@@ -1276,45 +1276,16 @@ class FileSetPreviewWidget(QWidget):
                 QMessageBox.warning(self, "エラー", "データセットが選択されていません")
                 return
                 
-            # Bearerトークンを統一管理システムで取得
-            from core.bearer_token_manager import BearerTokenManager
-            bearer_token = BearerTokenManager.get_token_with_relogin_prompt(self)
-            if not bearer_token:
-                print("[ERROR] Bearerトークンが取得できません")
-                QMessageBox.warning(self, "エラー", "認証トークンが取得できません。ログインしてください。")
-                return
-            
-            # トークンの形式をチェック・清浄化
-            bearer_token = bearer_token.strip()
-            
-            # デバッグ：トークンの内容確認
-            print(f"[DEBUG] トークン処理前: 長さ={len(bearer_token)}, 先頭20文字={repr(bearer_token[:20])}")
-            
-            # 様々なプレフィックスを除去
-            if bearer_token.startswith('BearerToken='):
-                bearer_token = bearer_token[12:]  # 'BearerToken='プレフィックスを除去
-                print(f"[DEBUG] BearerToken=プレフィックス除去後: 長さ={len(bearer_token)}")
-            elif bearer_token.startswith('Bearer '):
-                bearer_token = bearer_token[7:]  # 'Bearer 'プレフィックスを除去
-                print(f"[DEBUG] Bearer プレフィックス除去後: 長さ={len(bearer_token)}")
-            
-            # トークンがJWT形式かどうか確認（eyJ で始まる）
-            if not bearer_token.startswith('eyJ'):
-                print(f"[WARNING] トークンがJWT形式ではないようです: {bearer_token[:20]}...")
-            
-            print(f"[DEBUG] 最終トークン: 長さ={len(bearer_token)}, 先頭10文字={bearer_token[:10]}, 末尾10文字={bearer_token[-10:]}")
-            
             # ファイル情報を取得
             filename = os.path.basename(file_item.path)
             encoded_filename = urllib.parse.quote(filename)
             file_size = os.path.getsize(file_item.path)
             
-            # APIエンドポイントとヘッダー情報を準備（既存実装と完全一致）
+            # APIエンドポイントとヘッダー情報を準備
+            # v1.18.4: Bearer Tokenはapi_request_helperが自動選択するため、Authorizationヘッダーは不要
             url = f"https://rde-entry-api-arim.nims.go.jp/uploads?datasetId={dataset_id}"
             headers = {
-                "Authorization": f"Bearer {bearer_token}",
                 "Accept": "application/json",
-                "Content-Type": "application/octet-stream",
                 "X-File-Name": encoded_filename,
                 "User-Agent": "PythonUploader/1.0",
             }
@@ -1332,14 +1303,11 @@ API情報:
   データセットID: {dataset_id}
   
 認証情報:
-  トークン長: {len(bearer_token)} 文字
-  トークン先頭: {bearer_token[:15]}...
-  トークン末尾: ...{bearer_token[-15:]}
+  自動選択されます（URLから適切なトークンを選択）
   
 リクエストヘッダー:
-  Authorization: Bearer {bearer_token[:10]}...{bearer_token[-10:]}
   Accept: {headers["Accept"]}
-  Content-Type: {headers["Content-Type"]}
+  Content-Type: application/octet-stream (自動設定)
   X-File-Name: {headers["X-File-Name"]}
   User-Agent: {headers["User-Agent"]}
 
@@ -1366,9 +1334,9 @@ API情報:
             progress.show()
             
             try:
-                # 改良されたアップロード処理を実行
+                # 改良されたアップロード処理を実行（v1.18.4: bearer_token削除）
                 upload_result = self._execute_upload_with_debug(
-                    bearer_token, dataset_id, file_item.path, headers, url
+                    dataset_id, file_item.path, headers, url
                 )
                 
                 if upload_result and upload_result.get('upload_id'):
@@ -1411,8 +1379,11 @@ API情報:
             print(f"[ERROR] スタックトレース:\n{traceback.format_exc()}")
             QMessageBox.critical(self, "エラー", f"アップロード処理中にエラーが発生しました: {e}")
     
-    def _execute_upload_with_debug(self, bearer_token, dataset_id, file_path, headers, url):
-        """デバッグ機能付きアップロード実行（既存実装準拠）"""
+    def _execute_upload_with_debug(self, dataset_id, file_path, headers, url):
+        """
+        デバッグ機能付きアップロード実行
+        v1.18.4: Bearer Token自動選択対応、api_request_helper使用に変更
+        """
         try:
             print(f"[DEBUG] _execute_upload_with_debug 開始")
             print(f"[DEBUG] ファイルパス: {file_path}")
@@ -1429,26 +1400,30 @@ API情報:
             print(f"[DEBUG] オリジナルファイル名: {filename}")
             print(f"[DEBUG] エンコード済みファイル名: {encoded_filename}")
             
-            # 既存実装と完全に一致するヘッダーを使用（5つのみ）
+            # ヘッダー準備（v1.18.4: Authorizationヘッダーは自動設定されるため除外）
             actual_headers = {
-                "Authorization": f"Bearer {bearer_token}",
                 "Accept": "application/json",
-                "Content-Type": "application/octet-stream",
                 "X-File-Name": encoded_filename,
                 "User-Agent": "PythonUploader/1.0",
             }
             
             print(f"[DEBUG] API呼び出し開始: POST {url}")
             print(f"[DEBUG] リクエストヘッダー数: {len(actual_headers)}")
-            print(f"[DEBUG] Content-Type: {actual_headers['Content-Type']}")
             print(f"[DEBUG] X-File-Name: {actual_headers['X-File-Name']}")
             print(f"[DEBUG] バイナリデータサイズ: {len(binary_data)} bytes")
-            print(f"[DEBUG] Authorization: Bearer {bearer_token[:10]}...{bearer_token[-10:]}")
-            # print(f"[DEBUG] Accept: {actual_headers}")
-            # プロキシ対応HTTPヘルパーを使用
-            from net.http_helpers import proxy_post
+            print(f"[DEBUG] Bearer Token: URLから自動選択されます")
             
-            resp = proxy_post(url, data=binary_data, headers=actual_headers)
+            # v1.18.4: api_request_helper.post_binaryを使用（Bearer Token自動選択）
+            from classes.utils.api_request_helper import post_binary
+            
+            resp = post_binary(
+                url=url,
+                data=binary_data,
+                bearer_token=None,  # 自動選択させる
+                content_type='application/octet-stream',
+                headers=actual_headers,
+                timeout=60  # アップロードは時間がかかる可能性があるため60秒に設定
+            )
             
             if resp is None:
                 print(f"[ERROR] API呼び出し失敗: レスポンスがNone")
@@ -1557,72 +1532,10 @@ API情報:
             QMessageBox.critical(self, "エラー", f"ファイル一括アップロード処理でエラーが発生しました:\n{str(e)}")
 
     def _validate_upload_prerequisites(self) -> bool:
-        """ファイルアップロードの前提条件をチェック"""
+        """ファイルアップロードの前提条件をチェック（Bearer Token自動選択対応）"""
         try:
-            # ベアラートークン確認（個別アップロードと同じロジック）
-            bearer_token = getattr(self, 'bearer_token', None)
-            if not bearer_token:
-                print("[DEBUG] Bearer トークンが親から取得できない - 他の方法を試行")
-                
-                # 親ウィジェットから取得を試行（複数階層遡及）
-                current_widget = self
-                while current_widget and not bearer_token:
-                    current_widget = current_widget.parent()
-                    if current_widget and hasattr(current_widget, 'bearer_token'):
-                        bearer_token = current_widget.bearer_token
-                        print(f"[DEBUG] 親ウィジェット({type(current_widget).__name__})からBearerトークンを取得")
-                        break
-                
-                # まだない場合は、メインコントローラから取得を試行
-                if not bearer_token:
-                    try:
-                        from PyQt5.QtWidgets import QApplication
-                        app = QApplication.instance()
-                        if app:
-                            main_window = None
-                            for widget in app.topLevelWidgets():
-                                if hasattr(widget, 'controller') and hasattr(widget.controller, 'bearer_token'):
-                                    bearer_token = widget.controller.bearer_token
-                                    print("[DEBUG] メインコントローラからBearerトークンを取得")
-                                    break
-                    except Exception as e:
-                        print(f"[WARNING] メインコントローラからのトークン取得エラー: {e}")
-                
-                # それでもない場合はファイルから読み取り
-                if not bearer_token:
-                    print("[DEBUG] ファイルからBearerトークンを読み取り試行")
-                    from config.common import BEARER_TOKEN_FILE
-                    try:
-                        if os.path.exists(BEARER_TOKEN_FILE):
-                            with open(BEARER_TOKEN_FILE, 'r', encoding='utf-8') as f:
-                                file_token = f.read().strip()
-                            # ファイルから読み取ったトークンの形式をチェック
-                            if file_token and file_token.startswith('Bearer '):
-                                bearer_token = file_token[7:]  # 'Bearer 'プレフィックスを除去
-                            elif file_token:
-                                bearer_token = file_token
-                            print(f"[DEBUG] ファイルからBearerトークンを取得: 長さ={len(bearer_token) if bearer_token else 0}")
-                    except Exception as e:
-                        print(f"[WARNING] Bearerトークンファイル読み取りエラー: {e}")
-            
-            if not bearer_token:
-                print("[ERROR] Bearerトークンが取得できません")
-                QMessageBox.warning(self, "エラー", "認証トークンが設定されていません。ログインを確認してください。")
-                return False
-            
-            # トークンの形式をチェック・清浄化
-            bearer_token = bearer_token.strip()
-            
-            # 様々なプレフィックスを除去
-            if bearer_token.startswith('BearerToken='):
-                bearer_token = bearer_token[12:]  # 'BearerToken='プレフィックスを除去
-            elif bearer_token.startswith('Bearer '):
-                bearer_token = bearer_token[7:]  # 'Bearer 'プレフィックスを除去
-            
-            print(f"[DEBUG] 前提条件チェック - 取得したトークン: 長さ={len(bearer_token)}, 先頭10文字={bearer_token[:10]}")
-            
-            # 取得したトークンをインスタンス変数に保存（後続処理で使用）
-            self.bearer_token = bearer_token
+            # 注意: Bearer Tokenは不要（API呼び出し時に自動選択される）
+            # このチェックではファイルセットとデータセットIDのみ確認
             
             # ファイルセット確認
             if not hasattr(self, 'file_set') or not self.file_set:
@@ -2101,7 +2014,7 @@ API情報:
             return {"data": []}, []
     
     def _execute_single_upload(self, bearer_token: str, dataset_id: str, file_item: FileItem) -> dict:
-        """単一ファイルのアップロード処理（一括用）- 個別アップロード処理と同じ方法"""
+        """単一ファイルのアップロード処理（一括用）- Bearer Token自動選択対応"""
         try:
             if not os.path.exists(file_item.path):
                 return {"error": f"ファイルが存在しません: {file_item.path}"}
@@ -2113,14 +2026,12 @@ API情報:
             
             print(f"[INFO] アップロード実行: {register_filename} (元ファイル: {os.path.basename(file_item.path)})")
             
-            # APIエンドポイント（個別アップロード処理と同じ）
+            # APIエンドポイント
             url = f"https://rde-entry-api-arim.nims.go.jp/uploads?datasetId={dataset_id}"
             
-            # リクエストヘッダー（個別アップロード処理と同じ）
+            # リクエストヘッダー（Authorizationは削除、post_binary内で自動選択）
             headers = {
-                "Authorization": f"Bearer {bearer_token}",
                 "Accept": "application/json",
-                "Content-Type": "application/octet-stream",
                 "X-File-Name": encoded_filename,
                 "User-Agent": "PythonUploader/1.0"
             }
@@ -2132,14 +2043,13 @@ API情報:
             with open(file_item.path, 'rb') as f:
                 binary_data = f.read()
             
-            # プロキシ対応HTTPヘルパーを使用（個別アップロード処理と統一）
-            from net.http_helpers import proxy_post
+            # Bearer Token自動選択対応のpost_binaryを使用
+            from classes.utils.api_request_helper import post_binary
             
             print(f"[DEBUG] API呼び出し開始: POST {url}")
             print(f"[DEBUG] バイナリデータサイズ: {len(binary_data)} bytes")
-            print(f"[DEBUG] Authorization: Bearer {bearer_token[:10]}...{bearer_token[-10:]}")
             
-            resp = proxy_post(url, data=binary_data, headers=headers)
+            resp = post_binary(url, data=binary_data, bearer_token=None, headers=headers)
             if resp is None:
                 print(f"[ERROR] API呼び出し失敗: レスポンスがNone")
                 return {"error": "API呼び出し失敗: レスポンスがありません"}
@@ -2196,16 +2106,11 @@ API情報:
             return {"error": str(e)}
 
     def _execute_batch_upload(self) -> bool:
-        """ファイル一括アップロードを実行（FileSetPreviewWidget用）"""
+        """ファイル一括アップロードを実行（Bearer Token自動選択対応）"""
         try:
             print("[INFO] ファイル一括アップロード開始")
             
-            # ベアラートークンを取得
-            bearer_token = getattr(self, 'bearer_token', None)
-            if not bearer_token:
-                print("[ERROR] ベアラートークンが取得できません")
-                QMessageBox.warning(self, "エラー", "認証トークンが設定されていません。")
-                return False
+            # 注意: Bearer Tokenは不要（API呼び出し時に自動選択される）
             
             # データセットIDを取得
             dataset_id = getattr(self.file_set, 'dataset_id', None)
@@ -2254,8 +2159,8 @@ API情報:
                 QApplication.processEvents()
                 
                 try:
-                    # 単一ファイルアップロード実行（修正されたメソッドを使用）
-                    upload_result = self._execute_single_upload(bearer_token, dataset_id, file_item)
+                    # 単一ファイルアップロード実行（bearer_tokenは不要、自動選択される）
+                    upload_result = self._execute_single_upload(None, dataset_id, file_item)
                     
                     if upload_result and upload_result.get('upload_id'):
                         upload_id = upload_result['upload_id']
@@ -2307,7 +2212,7 @@ API情報:
             return False
     
     def _execute_single_upload_internal(self, bearer_token: str, dataset_id: str, file_item: FileItem) -> dict:
-        """単一ファイルのアップロード実行"""
+        """単一ファイルのアップロード実行 - Bearer Token自動選択対応"""
         try:
             # ファイルパスの決定（複数の属性をチェック）
             file_path = getattr(file_item, 'absolute_path', None)
@@ -2319,27 +2224,25 @@ API情報:
             if not os.path.exists(file_path):
                 return {'success': False, 'error': f'ファイルが存在しません: {file_path}'}
             
-            # アップロードAPI呼び出し（個別アップロード処理と統一）
+            # アップロードAPI呼び出し
             url = f"https://rde-entry-api-arim.nims.go.jp/uploads?datasetId={dataset_id}"
             
             # ファイル読み込み
             with open(file_path, 'rb') as f:
                 file_data = f.read()
             
-            # ヘッダー設定（個別アップロード処理と統一）
+            # ヘッダー設定（Authorizationは削除、post_binary内で自動選択）
             filename = os.path.basename(file_path)
             encoded_filename = urllib.parse.quote(filename)
             headers = {
-                "Authorization": f"Bearer {bearer_token}",
                 "Accept": "application/json",
-                "Content-Type": "application/octet-stream",
                 "X-File-Name": encoded_filename,
                 "User-Agent": "PythonUploader/1.0"
             }
             
-            # HTTP POST実行
-            from net.http_helpers import proxy_post
-            resp = proxy_post(url, data=file_data, headers=headers)
+            # Bearer Token自動選択対応のpost_binaryを使用
+            from classes.utils.api_request_helper import post_binary
+            resp = post_binary(url, data=file_data, bearer_token=None, headers=headers)
             
             if resp is None:
                 return {'success': False, 'error': 'API呼び出し失敗: レスポンスがありません'}
@@ -2367,16 +2270,11 @@ API情報:
             return {'success': False, 'error': str(e)}
     
     def _execute_data_registration(self) -> bool:
-        """データ登録を実行（FileSetPreviewWidget用）"""
+        """データ登録を実行（Bearer Token自動選択対応）"""
         try:
             print("[INFO] データ登録実行開始")
             
-            # ベアラートークン取得
-            bearer_token = getattr(self, 'bearer_token', None)
-            if not bearer_token:
-                print("[ERROR] ベアラートークンが取得できません")
-                QMessageBox.warning(self, "エラー", "認証トークンが設定されていません。")
-                return False
+            # 注意: Bearer Tokenは不要（entry_data関数内で自動選択される）
             
             # データセット情報取得
             dataset_info = getattr(self.file_set, 'dataset_info', None)
@@ -2443,11 +2341,11 @@ API情報:
             progress.show()
             
             try:
-                # 通常登録タブと同じentry_data関数を使用
+                # 通常登録タブと同じentry_data関数を使用（bearer_token=Noneで自動選択）
                 from ..core.data_register_logic import entry_data
                 
                 result = entry_data(
-                    bearer_token=bearer_token,
+                    bearer_token=None,
                     dataFiles=dataFiles,
                     attachements=attachments,
                     dataset_info=dataset_info,
@@ -2950,15 +2848,11 @@ class BatchRegisterPreviewDialog(QDialog):
             self.summary_label.setText(f"エラー: {str(e)}")
     
     def _batch_upload_files(self):
-        """ファイル一括アップロード処理"""
+        """ファイル一括アップロード処理（Bearer Token自動選択対応）"""
         try:
             print("[INFO] ファイル一括アップロード開始")
             
-            # ベアラートークン確認
-            bearer_token = getattr(self, 'bearer_token', None)
-            if not bearer_token:
-                QMessageBox.warning(self, "エラー", "認証トークンが設定されていません。ログインを確認してください。")
-                return
+            # 注意: Bearer Tokenは不要（API呼び出し時に自動選択される）
             
             # 現在表示中のファイルセットを取得
             if not hasattr(self, 'file_set') or not self.file_set:
@@ -3021,8 +2915,8 @@ class BatchRegisterPreviewDialog(QDialog):
                 QApplication.processEvents()
                 
                 try:
-                    # 個別アップロード処理を呼び出し
-                    upload_result = self._execute_single_upload(bearer_token, dataset_id, file_item)
+                    # 個別アップロード処理を呼び出し（bearer_tokenは不要、自動選択される）
+                    upload_result = self._execute_single_upload(None, dataset_id, file_item)
                     
                     if upload_result and upload_result.get('upload_id'):
                         upload_id = upload_result['upload_id']
@@ -3086,14 +2980,12 @@ class BatchRegisterPreviewDialog(QDialog):
             
             print(f"[INFO] アップロード実行: {register_filename} (元ファイル: {os.path.basename(file_item.path)})")
             
-            # APIエンドポイント（個別アップロード処理と同じ）
+            # APIエンドポイント
             url = f"https://rde-entry-api-arim.nims.go.jp/uploads?datasetId={dataset_id}"
             
-            # リクエストヘッダー（個別アップロード処理と同じ）
+            # リクエストヘッダー（Authorizationは削除、post_binary内で自動選択）
             headers = {
-                "Authorization": f"Bearer {bearer_token}",
                 "Accept": "application/json",
-                "Content-Type": "application/octet-stream",
                 "X-File-Name": encoded_filename,
                 "User-Agent": "PythonUploader/1.0"
             }
@@ -3105,14 +2997,13 @@ class BatchRegisterPreviewDialog(QDialog):
             with open(file_item.path, 'rb') as f:
                 binary_data = f.read()
             
-            # プロキシ対応HTTPヘルパーを使用（個別アップロード処理と統一）
-            from net.http_helpers import proxy_post
+            # Bearer Token自動選択対応のpost_binaryを使用
+            from classes.utils.api_request_helper import post_binary
             
             print(f"[DEBUG] API呼び出し開始: POST {url}")
             print(f"[DEBUG] バイナリデータサイズ: {len(binary_data)} bytes")
-            print(f"[DEBUG] Authorization: Bearer {bearer_token[:10]}...{bearer_token[-10:]}")
             
-            resp = proxy_post(url, data=binary_data, headers=headers)
+            resp = post_binary(url, data=binary_data, bearer_token=None, headers=headers)
             if resp is None:
                 print(f"[ERROR] API呼び出し失敗: レスポンスがNone")
                 return {"error": "API呼び出し失敗: レスポンスがありません"}
@@ -3936,15 +3827,11 @@ class BatchRegisterPreviewDialog(QDialog):
             self.summary_label.setText(f"エラー: {str(e)}")
     
     def _batch_upload_all(self):
-        """全ファイルセット一括アップロード処理"""
+        """全ファイルセット一括アップロード処理（Bearer Token自動選択対応）"""
         try:
             print("[INFO] 全ファイルセット一括アップロード開始")
             
-            # ベアラートークン確認
-            bearer_token = getattr(self, 'bearer_token', None)
-            if not bearer_token:
-                QMessageBox.warning(self, "エラー", "認証トークンが設定されていません。ログインを確認してください。")
-                return
+            # 注意: Bearer Tokenは不要（API呼び出し時に自動選択される）
             
             # アップロード対象ファイルセット確認
             valid_file_sets = [fs for fs in self.file_sets if fs and hasattr(fs, 'dataset_info') and fs.dataset_info]
@@ -3994,7 +3881,7 @@ class BatchRegisterPreviewDialog(QDialog):
                 QApplication.processEvents()
                 
                 try:
-                    upload_result = self._upload_single_fileset(bearer_token, file_set)
+                    upload_result = self._upload_single_fileset(None, file_set)
                     success_count = upload_result.get('success_count', 0)
                     failed_count = upload_result.get('failed_count', 0)
                     
@@ -4054,15 +3941,11 @@ class BatchRegisterPreviewDialog(QDialog):
             QMessageBox.critical(self, "エラー", f"全ファイルセット一括アップロード処理でエラーが発生しました:\n{str(e)}")
     
     def _batch_register_all(self):
-        """全ファイルセット一括データ登録処理（アップロード + データ登録）"""
+        """全ファイルセット一括データ登録処理（Bearer Token自動選択対応）"""
         try:
             print("[INFO] 全ファイルセット一括データ登録開始")
             
-            # ベアラートークン確認
-            bearer_token = getattr(self, 'bearer_token', None)
-            if not bearer_token:
-                QMessageBox.warning(self, "エラー", "認証トークンが設定されていません。ログインを確認してください。")
-                return
+            # 注意: Bearer Tokenは不要（API呼び出し時に自動選択される）
             
             # データ登録対象ファイルセット確認（デバッグログ付き）
             print(f"[DEBUG] 全体のファイルセット数: {len(self.file_sets)}")
@@ -4166,7 +4049,7 @@ class BatchRegisterPreviewDialog(QDialog):
                         file_set.extended_config['sample_id'] = previous_sample_id
                         print(f"[INFO] 前回サンプルID継承: {file_set.name} -> {previous_sample_id}")
                     
-                    register_result = self._register_single_fileset(bearer_token, file_set)
+                    register_result = self._register_single_fileset(None, file_set)
                     
                     if register_result.get('success'):
                         fileset_results.append({
@@ -4309,7 +4192,8 @@ class BatchRegisterPreviewDialog(QDialog):
             
             for file_item in display_items:
                 try:
-                    upload_result = self._execute_single_upload_for_fileset(bearer_token, dataset_id, file_item)
+                    # bearer_tokenは不要（自動選択される）
+                    upload_result = self._execute_single_upload_for_fileset(None, dataset_id, file_item)
                     if upload_result and upload_result.get('upload_id'):
                         upload_id = upload_result['upload_id']
                         setattr(file_item, 'upload_id', upload_id)
@@ -4409,11 +4293,11 @@ class BatchRegisterPreviewDialog(QDialog):
             if not dataFiles.get('data') and not attachments:
                 return {'success': False, 'error': 'データファイルまたは添付ファイルが必要です'}
             
-            # entry_dataを呼び出し
+            # entry_dataを呼び出し（bearer_token=Noneで自動選択）
             from ..core.data_register_logic import entry_data
             
             result = entry_data(
-                bearer_token=bearer_token,
+                bearer_token=None,
                 dataFiles=dataFiles,
                 attachements=attachments,
                 dataset_info=dataset_info,
@@ -4569,16 +4453,13 @@ class BatchRegisterPreviewDialog(QDialog):
             
             print(f"[DEBUG] アップロード実行: {register_filename} (元ファイル: {os.path.basename(file_item.path)})")
             print(f"[DEBUG] データセットID: {dataset_id}")
-            print(f"[DEBUG] ベアラートークン長: {len(bearer_token) if bearer_token else 0}")
             
             # APIエンドポイント
             url = f"https://rde-entry-api-arim.nims.go.jp/uploads?datasetId={dataset_id}"
             
-            # リクエストヘッダー
+            # リクエストヘッダー（Authorizationは削除、post_binary内で自動選択）
             headers = {
-                "Authorization": f"Bearer {bearer_token}",
                 "Accept": "application/json",
-                "Content-Type": "application/octet-stream",
                 "X-File-Name": encoded_filename,
                 "User-Agent": "PythonUploader/1.0",
             }
@@ -4594,10 +4475,10 @@ class BatchRegisterPreviewDialog(QDialog):
             print(f"[DEBUG] リクエスト送信 - URL: {url}")
             print(f"[DEBUG] リクエスト送信 - ヘッダー: {headers}")
             
-            # HTTP通信ヘルパーを使用
+            # Bearer Token自動選択対応のpost_binaryを使用
             from classes.utils.api_request_helper import post_binary
             
-            resp = post_binary(url, binary_data, headers=headers, bearer_token=bearer_token)
+            resp = post_binary(url, binary_data, bearer_token=None, headers=headers)
             
             print(f"[DEBUG] レスポンス受信 - ステータス: {resp.status_code if resp else 'None'}")
             if resp:

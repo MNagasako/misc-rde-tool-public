@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-ARIM RDE Tool v1.18.3 - PyQt5によるRDE→ARIMデータポータル移行ツール
+ARIM RDE Tool v1.19.0 - PyQt5によるRDE→ARIMデータポータル移行ツール
 
 主要機能:
 - RDEシステムへの自動ログイン・データセット一括取得・画像保存

@@ -516,6 +516,57 @@ class UIController(UIControllerCore):
     def bearer_token(self, value):
         """Bearer token を設定"""
         self._bearer_token = value
+        # トークン更新時に、すでに初期化済みのタブwidgetも更新
+        self._update_tabs_bearer_token(value)
+    
+    def _update_tabs_bearer_token(self, token):
+        """
+        全タブwidgetのbearer_tokenを更新
+        
+        Args:
+            token: 新しいトークン
+        """
+        try:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"[TOKEN] 全タブwidgetのbearer_token更新開始: token={token[:20] if token else 'None'}...")
+            
+            updated_count = 0
+            
+            # 各タブwidgetの属性をチェックして更新
+            if hasattr(self, '_dataset_tab_widget'):
+                logger.debug(f"[TOKEN] _dataset_tab_widget存在: {self._dataset_tab_widget is not None}")
+                if self._dataset_tab_widget and hasattr(self._dataset_tab_widget, 'bearer_token'):
+                    self._dataset_tab_widget.bearer_token = token
+                    logger.info("[TOKEN] dataset_tab_widgetを更新")
+                    updated_count += 1
+            else:
+                logger.debug("[TOKEN] _dataset_tab_widget属性が存在しません")
+            
+            # data_fetch2関連
+            if hasattr(self.parent, 'data_fetch2_widget'):
+                logger.debug(f"[TOKEN] data_fetch2_widget存在: {self.parent.data_fetch2_widget is not None}")
+                if self.parent.data_fetch2_widget and hasattr(self.parent.data_fetch2_widget, 'bearer_token'):
+                    self.parent.data_fetch2_widget.bearer_token = token
+                    logger.info("[TOKEN] data_fetch2_widgetを更新")
+                    updated_count += 1
+            else:
+                logger.debug("[TOKEN] data_fetch2_widget属性が存在しません")
+            
+            # 設定widget
+            if hasattr(self, '_settings_widget'):
+                logger.debug(f"[TOKEN] _settings_widget存在: {self._settings_widget is not None}")
+                if self._settings_widget and hasattr(self._settings_widget, 'bearer_token'):
+                    self._settings_widget.bearer_token = token
+                    logger.info("[TOKEN] settings_widgetを更新")
+                    updated_count += 1
+            else:
+                logger.debug("[TOKEN] _settings_widget属性が存在しません")
+                    
+            logger.info(f"[TOKEN] 全タブwidgetのbearer_token更新完了: {updated_count}個のwidgetを更新")
+            
+        except Exception as e:
+            logger.error(f"[TOKEN] タブwidget更新エラー: {e}", exc_info=True)
     
     @property 
     def webview(self):

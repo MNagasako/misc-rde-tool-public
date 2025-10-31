@@ -281,10 +281,22 @@ class EventHandler:
         # 手動クローズモード（デフォルト）では自動的にフォーム表示
         if not self.auto_close and not self.closed:
             if '/rde/datasets' in url.toString():
-                self.parent.show_overlay() 
-                logger.info('RDEデータセットページに到達したため、自動でクッキー保存します。')
-                self.parent.login_manager.try_get_bearer_token()  # 追加: トークン自動取得
-                QTimer.singleShot(1000, self.parent.save_cookies_and_show_grant_form)
+                # v1.18.4: 初回到達時のみ処理実行（Material URL遷移後の戻り時に再実行を防ぐ）
+                if not hasattr(self.parent.login_manager, '_initial_datasets_reached'):
+                    logger.info('[LOGIN] RDEデータセットページに到達 - Cookieとトークンを保存します')
+                    self.parent.show_overlay()
+                    
+                    # 初回到達フラグを設定
+                    self.parent.login_manager._initial_datasets_reached = True
+                    
+                    # v1.18.3: トークン取得を確実に実行
+                    logger.info('[TOKEN] Bearerトークン自動取得を開始')
+                    self.parent.login_manager.try_get_bearer_token()  # rde.nims.go.jpのトークン取得
+                    
+                    # Cookie保存とフォーム表示
+                    QTimer.singleShot(1000, self.parent.save_cookies_and_show_grant_form)
+                else:
+                    logger.info('[LOGIN] RDEデータセットページに戻りましたが、トークン取得は既に実行済み（スキップ）')
     
     def handle_close_event(self, event):
         """

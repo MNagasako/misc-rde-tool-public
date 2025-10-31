@@ -309,11 +309,9 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
     エントリー作成
     """
     output_dir=os.path.join(OUTPUT_RDE_DIR, "data")
-    if not bearer_token:
-        print("[ERROR] Bearerトークンが取得できません。ログイン状態を確認してください。")
-        if progress:
-            progress.close()
-        return
+    # 注意: Bearer Tokenは不要（API呼び出し時に自動選択される）
+    # 古いチェックを削除: if not bearer_token: return
+    
     url = "https://rde-entry-api-arim.nims.go.jp/entries"
     url_validation="https://rde-entry-api-arim.nims.go.jp/entries?validationOnly=true"
     # attachementsはrun_data_register_logicから渡されたアップロード結果のみを使う
@@ -424,11 +422,11 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
             "attachments": attachements
         }
     }
+    # Authorizationヘッダーは削除（api_request内で自動選択）
     headers = {
         "Accept": "application/vnd.api+json",
         "Accept-Encoding": "gzip, deflate, br, zstd",
         "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-        "Authorization": f"Bearer {bearer_token}",
         "Connection": "keep-alive",
         "Content-Type": "application/vnd.api+json",
         "Host": "rde-entry-api-arim.nims.go.jp",
@@ -450,7 +448,8 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
         if progress:
             progress.setLabelText("エントリー登録バリデーション中...")
             QCoreApplication.processEvents()
-        resp_validation = api_request("POST", url_validation, headers=headers, json_data=payload, timeout=60)  # Bearer Token統一管理システム対応
+        # bearer_token=Noneで自動選択を有効化
+        resp_validation = api_request("POST", url_validation, bearer_token=None, headers=headers, json_data=payload, timeout=60)
         if resp_validation is None:
             if progress:
                 progress.setLabelText("バリデーションエラー: リクエスト失敗")
@@ -507,7 +506,8 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
         if progress:
             progress.setLabelText("エントリー本体POST中...")
             QCoreApplication.processEvents()
-        resp = api_request("POST", url, headers=headers, json_data=payload, timeout=60)  # Bearer Token統一管理システム対応
+        # bearer_token=Noneで自動選択を有効化
+        resp = api_request("POST", url, bearer_token=None, headers=headers, json_data=payload, timeout=60)
         if resp is None:
             if progress:
                 progress.setLabelText("POSTエラー: リクエスト失敗")
@@ -547,7 +547,8 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
         try:
             print("[INFO] データ登録成功。サンプル情報を自動取得中...")
             from classes.basic.core.basic_info_logic import fetch_sample_info_for_dataset_only
-            sample_result = fetch_sample_info_for_dataset_only(bearer_token, datasetId)
+            # bearer_token=Noneで自動選択（Material API用トークンが自動的に選ばれる）
+            sample_result = fetch_sample_info_for_dataset_only(None, datasetId)
             if isinstance(sample_result, str) and "エラー" not in sample_result and "失敗" not in sample_result:
                 print(f"[INFO] サンプル情報の自動取得完了: {sample_result}")
             else:
@@ -662,10 +663,9 @@ def upload_file(bearer_token,datasetId= "a74b58c0-9907-40e7-a261-a75519730d82",f
         filename = os.path.basename(file_path)
         encoded_filename = urllib.parse.quote(filename)
 
+        # Authorizationヘッダーは削除（post_binary内で自動選択される）
         headers = {
-            "Authorization": f"Bearer {bearer_token}",
             "Accept": "application/json",
-            "Content-Type": "application/octet-stream",
             "X-File-Name": encoded_filename,
             "User-Agent": "PythonUploader/1.0",
         }
@@ -676,7 +676,8 @@ def upload_file(bearer_token,datasetId= "a74b58c0-9907-40e7-a261-a75519730d82",f
         with open(file_path, 'rb') as f:
             binary_data = f.read()
 
-        resp = post_binary(url, binary_data, headers=headers)  # Bearer Token統一管理システム対応
+        # bearer_token=Noneで自動選択を有効化
+        resp = post_binary(url, binary_data, bearer_token=None, headers=headers)
         if resp is None:
             raise Exception("Binary upload failed: Request error")
         resp.raise_for_status()  # エラーなら例外

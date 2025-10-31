@@ -23,18 +23,48 @@ class SubgroupApiClient:
     def authenticate(self):
         """
         Bearer トークンの取得・設定（統一管理システム使用）
+        常に最新のトークンをファイルから読み込む
         
         Returns:
             bool: 認証成功かどうか
         """
+        print("[TOKEN-DEBUG] SubgroupApiClient.authenticate() 開始")
+        print("[TOKEN-DEBUG] RDE API用トークン取得中...")
+        
+        # v1.18.3: キャッシュせず、毎回最新のトークンを取得
+        print("[TOKEN-DEBUG] BearerTokenManager.get_token_with_relogin_prompt() 呼び出し前")
         self.bearer_token = BearerTokenManager.get_token_with_relogin_prompt(self.widget)
+        print(f"[TOKEN-DEBUG] get_token_with_relogin_prompt() 結果: {self.bearer_token[:20] if self.bearer_token else 'None'}...")
+        
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[TOKEN] サブグループAPI認証: token={'取得成功' if self.bearer_token else '取得失敗'}")
+        
         if not self.bearer_token:
+            print("[TOKEN-DEBUG] トークンが取得できませんでした")
             QMessageBox.warning(
                 self.widget, 
                 "認証エラー", 
                 "Bearerトークンが取得できません。ログイン状態を確認してください。"
             )
             return False
+        
+        print(f"[TOKEN-DEBUG] 認証成功: {self.bearer_token[:20]}...")
+        
+        # トークン検証
+        print("[TOKEN-DEBUG] トークン検証を実行...")
+        is_valid = BearerTokenManager.validate_token(self.bearer_token)
+        print(f"[TOKEN-DEBUG] トークン検証結果: {'有効' if is_valid else '無効'}")
+        
+        if not is_valid:
+            print("[TOKEN-DEBUG] トークンが無効です")
+            QMessageBox.warning(
+                self.widget,
+                "認証エラー",
+                "Bearerトークンが無効です。再ログインしてください。"
+            )
+            return False
+        
         return True
     
     def create_subgroup(self, payload, group_name, auto_refresh=True):
@@ -76,17 +106,26 @@ class SubgroupApiClient:
         Returns:
             bool: 更新成功かどうか
         """
+        print(f"[TOKEN-DEBUG] update_subgroup() 開始 - group_id={group_id}")
         if not self.authenticate():
+            print("[TOKEN-DEBUG] 認証失敗")
             return False
         
+        print(f"[TOKEN-DEBUG] 認証成功、RDEトークン使用: {self.bearer_token[:20]}...")
         api_url = f"{self.api_base_url}/groups/{group_id}"
+        print(f"[TOKEN-DEBUG] API呼び出し: {api_url}")
         headers = self._build_headers()
         
         try:
             from net.http_helpers import proxy_patch
+            print("[TOKEN-DEBUG] proxy_patch() 呼び出し中...")
             resp = proxy_patch(api_url, headers=headers, json=payload, timeout=15)
+            print(f"[TOKEN-DEBUG] API レスポンス: status_code={resp.status_code}")
             return self._handle_response(resp, group_name, "更新", auto_refresh)
         except Exception as e:
+            print(f"[ERROR] API送信エラー: {e}")
+            import traceback
+            traceback.print_exc()
             QMessageBox.warning(self.widget, "APIエラー", f"API送信中にエラーが発生しました: {e}")
             return False
     
@@ -171,6 +210,242 @@ class SubgroupApiClient:
             QTimer.singleShot(1000, auto_refresh)
         except Exception as e:
             print(f"[WARNING] サブグループ情報自動更新の設定に失敗: {e}")
+    
+    def get_sample_detail(self, sample_id):
+        """
+        試料詳細情報を取得（共有グループ情報を含む）
+        
+        Args:
+            sample_id (str): 試料ID
+            
+        Returns:
+            dict: 試料詳細情報、エラー時はNone
+        """
+        # Material API用のトークンを取得
+        print(f"[TOKEN-DEBUG] get_sample_detail() 開始 - sample_id={sample_id}")
+        print("[TOKEN-DEBUG] Material API用トークン取得中...")
+        from config.common import load_bearer_token
+        material_token = load_bearer_token('rde-material.nims.go.jp')
+        
+        if not material_token:
+            print("[ERROR] Material APIトークンが取得できません")
+            return None
+        
+        print(f"[TOKEN-DEBUG] Material トークン取得成功: {material_token[:20]}...")
+        
+        # トークン検証
+        print("[TOKEN-DEBUG] Material トークン検証中...")
+        is_valid = BearerTokenManager.validate_token(material_token)
+        print(f"[TOKEN-DEBUG] Material トークン検証結果: {'有効' if is_valid else '無効'}")
+        
+        if not is_valid:
+            print("[ERROR] Material APIトークンが無効です")
+            return None
+        
+        api_url = f"https://rde-material-api.nims.go.jp/samples/{sample_id}?include=sharingGroups"
+        print(f"[TOKEN-DEBUG] API呼び出し: {api_url}")
+        
+        headers = {
+            "Accept": "application/vnd.api+json",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+            "Authorization": f"Bearer {material_token}",
+            "Connection": "keep-alive",
+            "Host": "rde-material-api.nims.go.jp",
+            "Origin": "https://rde-entry-arim.nims.go.jp",
+            "Referer": "https://rde-entry-arim.nims.go.jp/",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+            "sec-ch-ua": '"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"'
+        }
+        
+        try:
+            from net.http_helpers import proxy_get
+            print("[TOKEN-DEBUG] proxy_get() 呼び出し中...")
+            response = proxy_get(api_url, headers=headers)
+            print(f"[TOKEN-DEBUG] API レスポンス: status_code={response.status_code}")
+            
+            if response.status_code == 200:
+                print("[TOKEN-DEBUG] 試料詳細取得成功")
+                return response.json()
+            else:
+                print(f"[ERROR] 試料詳細取得エラー (Status: {response.status_code})")
+                print(f"[TOKEN-DEBUG] レスポンス内容: {response.text[:200]}")
+                return None
+                
+        except Exception as e:
+            print(f"[ERROR] API呼び出しエラー: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def set_sample_sharing_group(self, sample_id, sharing_group_id, sharing_group_name):
+        """
+        試料に共有グループを設定
+        
+        Args:
+            sample_id (str): 試料ID
+            sharing_group_id (str): 共有グループID
+            sharing_group_name (str): 共有グループ名
+            
+        Returns:
+            tuple: (success: bool, message: str)
+        """
+        # Material API用のトークンを取得
+        print(f"[TOKEN-DEBUG] set_sample_sharing_group() 開始 - sample_id={sample_id}")
+        print("[TOKEN-DEBUG] Material API用トークン取得中...")
+        from config.common import load_bearer_token
+        material_token = load_bearer_token('rde-material.nims.go.jp')
+        
+        if not material_token:
+            print("[ERROR] Material APIトークンが取得できません")
+            return False, "Material APIトークンが取得できません"
+        
+        print(f"[TOKEN-DEBUG] Material トークン取得成功: {material_token[:20]}...")
+        
+        # トークン検証
+        print("[TOKEN-DEBUG] Material トークン検証中...")
+        is_valid = BearerTokenManager.validate_token(material_token)
+        print(f"[TOKEN-DEBUG] Material トークン検証結果: {'有効' if is_valid else '無効'}")
+        
+        if not is_valid:
+            print("[ERROR] Material APIトークンが無効です")
+            return False, "Material APIトークンが無効です"
+        
+        api_url = f"https://rde-material-api.nims.go.jp/samples/{sample_id}/relationships/sharingGroups"
+        print(f"[TOKEN-DEBUG] API呼び出し: {api_url}")
+        
+        payload = {
+            "data": [{
+                "type": "sharingGroup",
+                "id": sharing_group_id,
+                "meta": {
+                    "name": sharing_group_name
+                }
+            }]
+        }
+        
+        headers = {
+            "Accept": "application/vnd.api+json",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+            "Authorization": f"Bearer {material_token}",
+            "Connection": "keep-alive",
+            "Content-Type": "application/vnd.api+json",
+            "Host": "rde-material-api.nims.go.jp",
+            "Origin": "https://rde-entry-arim.nims.go.jp",
+            "Referer": "https://rde-entry-arim.nims.go.jp/",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+            "sec-ch-ua": '"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"'
+        }
+        
+        print(f"[DEBUG] POST Sample Sharing Group API URL: {api_url}")
+        print(f"[DEBUG] ペイロード: {json.dumps(payload, ensure_ascii=False, indent=2)}")
+        
+        try:
+            from net.http_helpers import proxy_post
+            print("[TOKEN-DEBUG] proxy_post() 呼び出し中...")
+            response = proxy_post(api_url, headers=headers, json=payload)
+            print(f"[TOKEN-DEBUG] API レスポンス: status_code={response.status_code}")
+            
+            if response.status_code == 204:
+                print(f"[INFO] 試料共有グループ設定成功: sample_id={sample_id}, group={sharing_group_name}")
+                return True, f"試料に共有グループ「{sharing_group_name}」を設定しました"
+            else:
+                error_msg = f"API エラー (Status: {response.status_code})"
+                try:
+                    error_detail = response.json()
+                    error_msg += f"\n詳細: {json.dumps(error_detail, ensure_ascii=False, indent=2)}"
+                except:
+                    error_msg += f"\n応答: {response.text}"
+                print(f"[ERROR] {error_msg}")
+                print(f"[TOKEN-DEBUG] レスポンス内容: {response.text[:200]}")
+                return False, error_msg
+                
+        except Exception as e:
+            error_msg = f"API呼び出しエラー: {str(e)}"
+            print(f"[ERROR] {error_msg}")
+            return False, error_msg
+    
+    def delete_sample_sharing_group(self, sample_id, sharing_group_id):
+        """
+        試料から共有グループを削除
+        
+        Args:
+            sample_id (str): 試料ID
+            sharing_group_id (str): 共有グループID
+            
+        Returns:
+            tuple: (success: bool, message: str)
+        """
+        # Material API用のトークンを取得
+        from config.common import load_bearer_token
+        material_token = load_bearer_token('rde-material.nims.go.jp')
+        
+        if not material_token:
+            return False, "Material APIトークンが取得できません"
+        
+        api_url = f"https://rde-material-api.nims.go.jp/samples/{sample_id}/relationships/sharingGroups"
+        
+        payload = {
+            "data": [{
+                "type": "sharingGroup",
+                "id": sharing_group_id
+            }]
+        }
+        
+        headers = {
+            "Accept": "application/vnd.api+json",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+            "Authorization": f"Bearer {material_token}",
+            "Connection": "keep-alive",
+            "Content-Type": "application/vnd.api+json",
+            "Host": "rde-material-api.nims.go.jp",
+            "Origin": "https://rde-entry-arim.nims.go.jp",
+            "Referer": "https://rde-entry-arim.nims.go.jp/",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-site",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+            "sec-ch-ua": '"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"'
+        }
+        
+        print(f"[DEBUG] DELETE Sample Sharing Group API URL: {api_url}")
+        print(f"[DEBUG] ペイロード: {json.dumps(payload, ensure_ascii=False, indent=2)}")
+        
+        try:
+            from net.http_helpers import proxy_delete
+            response = proxy_delete(api_url, headers=headers, json=payload)
+            
+            if response.status_code == 204:
+                print(f"[INFO] 試料共有グループ削除成功: sample_id={sample_id}")
+                return True, "試料から共有グループを削除しました"
+            else:
+                error_msg = f"API エラー (Status: {response.status_code})"
+                try:
+                    error_detail = response.json()
+                    error_msg += f"\n詳細: {json.dumps(error_detail, ensure_ascii=False, indent=2)}"
+                except:
+                    error_msg += f"\n応答: {response.text}"
+                print(f"[ERROR] {error_msg}")
+                return False, error_msg
+                
+        except Exception as e:
+            error_msg = f"API呼び出しエラー: {str(e)}"
+            print(f"[ERROR] {error_msg}")
+            return False, error_msg
 
 
 class SubgroupPayloadBuilder:

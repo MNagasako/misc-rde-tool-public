@@ -75,19 +75,22 @@ def proxy_patch(url: str, data: Optional[Union[Dict, str, bytes]] = None,
     session = get_proxy_session()
     return session.patch(url, data=data, json=json, **kwargs)
 
-def proxy_delete(url: str, **kwargs) -> requests.Response:
+def proxy_delete(url: str, data: Optional[Union[Dict, str, bytes]] = None,
+                 json: Optional[Dict] = None, **kwargs) -> requests.Response:
     """
     プロキシ対応 DELETE リクエスト
     
     Args:
         url: リクエストURL
+        data: フォームデータまたはバイナリデータ
+        json: JSONデータ
         **kwargs: requests.delete() と同じパラメータ
         
     Returns:
         requests.Response: レスポンスオブジェクト
     """
     session = get_proxy_session()
-    return session.delete(url, **kwargs)
+    return session.delete(url, data=data, json=json, **kwargs)
 
 def proxy_head(url: str, **kwargs) -> requests.Response:
     """
@@ -124,14 +127,16 @@ def proxy_request(method: str, url: str, **kwargs) -> requests.Response:
 
 def add_auth_header(headers: Optional[Dict[str, str]] = None, 
                    bearer_token: Optional[str] = None,
-                   api_key: Optional[str] = None) -> Dict[str, str]:
+                   api_key: Optional[str] = None,
+                   url: Optional[str] = None) -> Dict[str, str]:
     """
-    認証ヘッダーを追加
+    認証ヘッダーを追加（複数ホスト対応 v1.18.3+）
     
     Args:
         headers: 既存のヘッダー辞書
-        bearer_token: Bearerトークン
+        bearer_token: Bearerトークン（指定しない場合はURLから自動選択）
         api_key: APIキー
+        url: リクエスト先URL（トークン自動選択時に使用）
         
     Returns:
         Dict[str, str]: 認証ヘッダー付きの辞書
@@ -140,6 +145,14 @@ def add_auth_header(headers: Optional[Dict[str, str]] = None,
         headers = {}
     
     headers = headers.copy()
+    
+    # bearer_tokenが指定されていない場合、URLから自動選択
+    if not bearer_token and url:
+        try:
+            from config.common import get_bearer_token_for_url
+            bearer_token = get_bearer_token_for_url(url)
+        except Exception:
+            pass  # 自動選択失敗時は何もしない
     
     if bearer_token:
         headers['Authorization'] = f'Bearer {bearer_token}'

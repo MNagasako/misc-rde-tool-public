@@ -47,51 +47,64 @@ class BearerTokenManager:
         Returns:
             str: 有効なBearer Token、無効または存在しない場合はNone
         """
+        print("[TOKEN-DEBUG] get_valid_token() 開始")
         try:
+            print("[TOKEN-DEBUG] logger.info呼び出し前")
+            logger.info("[TOKEN] 有効なBearerトークン取得を開始")
+            print("[TOKEN-DEBUG] logger.info呼び出し後")
+            
             # 1. ファイルからトークンを読み込み
+            print("[TOKEN-DEBUG] _load_token_from_file()呼び出し前")
             token = BearerTokenManager._load_token_from_file()
+            print(f"[TOKEN-DEBUG] _load_token_from_file()結果: {token[:20] if token else 'None'}...")
             if not token:
-                logger.warning("Bearer Tokenファイルが存在しないか空です")
+                logger.warning("[TOKEN] Bearerトークンファイルが存在しないか空です")
+                print("[TOKEN-DEBUG] トークンファイルが存在しないか空、Noneを返却")
                 return None
             
+            logger.info(f"[TOKEN] ファイルから読み込んだトークン: {token[:20]}...")
+            
             # 2. トークンの有効性を検証
-            if BearerTokenManager.validate_token(token):
-                logger.debug("Bearer Token検証成功")
+            logger.debug("[TOKEN] トークンの有効性を検証中...")
+            print("[TOKEN-DEBUG] validate_token()呼び出し前")
+            is_valid = BearerTokenManager.validate_token(token)
+            print(f"[TOKEN-DEBUG] validate_token()結果: {is_valid}")
+            if is_valid:
+                logger.info("[TOKEN] Bearerトークン検証成功")
+                print(f"[TOKEN-DEBUG] 検証成功、トークン返却: {token[:20]}...")
                 return token
             else:
-                logger.warning("Bearer Tokenが無効です")
+                logger.warning("[TOKEN] Bearerトークンが無効です")
+                print("[TOKEN-DEBUG] 検証失敗、Noneを返却")
                 return None
                 
         except Exception as e:
-            logger.error(f"Bearer Token取得エラー: {e}")
+            logger.error(f"[TOKEN] Bearerトークン取得エラー: {e}", exc_info=True)
+            print(f"[TOKEN-DEBUG] 例外発生: {e}")
             return None
     
     @staticmethod
     def _load_token_from_file() -> Optional[str]:
         """
         ファイルからBearer Tokenを読み込み（内部用）
+        複数ホスト対応のJSONファイルを優先し、レガシーファイルをフォールバックとする
         
         Returns:
             str: ファイルから読み込んだトークン、失敗時はNone
         """
         try:
-            if not os.path.exists(BEARER_TOKEN_FILE):
-                return None
+            # v1.18.3: load_bearer_token関数を使用（複数ホスト対応）
+            from config.common import load_bearer_token
+            token = load_bearer_token('rde.nims.go.jp')
+            if token:
+                logger.debug("[TOKEN] 複数ホスト対応ファイルからトークン読み込み成功")
+                return token
             
-            with open(BEARER_TOKEN_FILE, 'r', encoding='utf-8') as f:
-                content = f.read().strip()
-            
-            if not content:
-                return None
-            
-            # "BearerToken=" プレフィックスがある場合は除去
-            if content.startswith('BearerToken='):
-                content = content[len('BearerToken='):]
-            
-            return content if content else None
+            logger.warning("[TOKEN] Bearerトークンファイルが見つからないか空です")
+            return None
             
         except Exception as e:
-            logger.error(f"Bearer Tokenファイル読み込みエラー: {e}")
+            logger.error(f"[TOKEN] Bearerトークンファイル読み込みエラー: {e}")
             return None
     
     @staticmethod
@@ -200,14 +213,21 @@ class BearerTokenManager:
         Returns:
             str: 有効なBearer Token、取得失敗時はNone
         """
+        print("[TOKEN-DEBUG] get_token_with_relogin_prompt() 開始")
+        print("[TOKEN-DEBUG] get_valid_token()呼び出し前")
         token = BearerTokenManager.get_valid_token()
+        print(f"[TOKEN-DEBUG] get_valid_token()結果: {token[:20] if token else 'None'}...")
         
         if token:
+            print(f"[TOKEN-DEBUG] トークン取得成功、返却: {token[:20]}...")
             return token
         
         # 無効時は再ログイン促進
+        print("[TOKEN-DEBUG] トークン取得失敗、再ログイン促進を実行")
         if BearerTokenManager.request_relogin_if_invalid(parent_widget):
             # 再ログイン後の再試行（実装は呼び出し元で行う）
             logger.info("再ログイン促進を実行しました")
+            print("[TOKEN-DEBUG] 再ログイン促進完了")
         
+        print("[TOKEN-DEBUG] None返却")
         return None
