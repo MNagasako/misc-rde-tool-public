@@ -1,4 +1,8 @@
 
+arim_rde_tool v1.19.2
+2025-10-31
+
+
 arim_rde_tool v1.19.1
 2025-10-31
 

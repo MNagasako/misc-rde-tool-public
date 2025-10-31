@@ -4,7 +4,7 @@ ARIM利用報告書サイトから課題番号に基づいて報告書データ�
 """
 
 import re
-import requests
+from net.http_helpers import proxy_get, proxy_post
 from bs4 import BeautifulSoup
 from config.common import get_base_dir
 
@@ -15,11 +15,10 @@ class ARIMReportFetcher:
     BASE_URL = "https://nanonet.go.jp/user_report.php"
     
     def __init__(self):
-        self.session = requests.Session()
-        # User-Agentを設定
-        self.session.headers.update({
+        # User-Agentヘッダーを定義（リクエストごとに使用）
+        self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        })
+        }
     
     def extract_project_number(self, grant_number):
         """課題番号から検索用の番号を抽出"""
@@ -46,7 +45,7 @@ class ARIMReportFetcher:
             
             print(f"[DEBUG] ARIM報告書検索: {project_number}")
             
-            response = self.session.post(self.BASE_URL, data=search_data)
+            response = proxy_post(self.BASE_URL, data=search_data, headers=self.headers)
             response.raise_for_status()
             
             # HTMLをパース
@@ -89,7 +88,7 @@ class ARIMReportFetcher:
         try:
             print(f"[DEBUG] 報告書詳細取得: {detail_url}")
             
-            response = self.session.get(detail_url, timeout=30)
+            response = proxy_get(detail_url, timeout=30, headers=self.headers)
             response.raise_for_status()
             
             # HTMLをパース
@@ -107,11 +106,12 @@ class ARIMReportFetcher:
             
             return report_data
             
-        except requests.RequestException as e:
-            print(f"[ERROR] HTTP通信エラー: {e}")
-            return {}
         except Exception as e:
-            print(f"[ERROR] 報告書詳細取得エラー: {e}")
+            # HTTP通信エラーも含めて一般的な例外処理で対応
+            if "ConnectionError" in str(type(e)) or "timeout" in str(e).lower() or "http" in str(e).lower():
+                print(f"[ERROR] HTTP通信エラー: {e}")
+            else:
+                print(f"[ERROR] 報告書詳細取得エラー: {e}")
             return {}
     
     def parse_report_content(self, soup):

@@ -1789,7 +1789,7 @@ class AISuggestionDialog(QDialog):
             traceback.print_exc()
     
     def load_datasets_to_combo(self, dataset_json_path, info_json_path):
-        """データセット一覧をコンボボックスに読み込み"""
+        """データセット一覧をコンボボックスに読み込み（検索補完機能付き）"""
         try:
             from classes.dataset.util.dataset_dropdown_util import load_dataset_list
             
@@ -1798,7 +1798,13 @@ class AISuggestionDialog(QDialog):
             
             # コンボボックスをクリア
             self.extension_dataset_combo.clear()
-            self.extension_dataset_combo.addItem("-- データセットを選択してください --", None)
+            
+            # 既存のCompleterがあればクリア
+            if self.extension_dataset_combo.completer():
+                self.extension_dataset_combo.completer().deleteLater()
+            
+            # 表示名のリストを作成（検索補完用）
+            display_names = []
             
             # データセット一覧を追加
             for dataset_info in datasets:
@@ -1807,6 +1813,33 @@ class AISuggestionDialog(QDialog):
                 
                 # アイテムを追加
                 self.extension_dataset_combo.addItem(display_name, dataset_info)
+                display_names.append(display_name)
+            
+            # QCompleterを設定（修正タブと同じ実装）
+            from PyQt5.QtWidgets import QCompleter
+            from PyQt5.QtCore import Qt
+            
+            completer = QCompleter(display_names, self.extension_dataset_combo)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchContains)
+            
+            # 検索時の補完リスト（popup）の高さを12行分に制限
+            popup_view = completer.popup()
+            popup_view.setMinimumHeight(240)
+            popup_view.setMaximumHeight(240)
+            
+            self.extension_dataset_combo.setCompleter(completer)
+            
+            # データセットキャッシュを保存（修正タブと同様）
+            self.extension_dataset_combo._datasets_cache = datasets
+            self.extension_dataset_combo._display_names_cache = display_names
+            
+            # プレースホルダーテキストを更新
+            if self.extension_dataset_combo.lineEdit():
+                self.extension_dataset_combo.lineEdit().setPlaceholderText(f"データセット ({len(datasets)}件) から検索・選択してください")
+            
+            # マウスクリック時の全件表示機能を追加（修正タブと同様）
+            self.setup_mouse_click_handler()
             
             print(f"[DEBUG] データセット {len(datasets)}件を読み込みました")
             
@@ -1960,3 +1993,38 @@ class AISuggestionDialog(QDialog):
                 self.extension_dataset_combo.showPopup()
         except Exception as e:
             print(f"[ERROR] 全データセット表示エラー: {e}")
+    
+    def setup_mouse_click_handler(self):
+        """マウスクリック時の全件表示機能を設定（修正タブと同様）"""
+        try:
+            if not hasattr(self.extension_dataset_combo, '_mouse_press_event_set'):
+                orig_mouse_press = self.extension_dataset_combo.mousePressEvent
+                
+                def combo_mouse_press_event(event):
+                    if not self.extension_dataset_combo.lineEdit().text():
+                        # コンボボックスをクリア
+                        self.extension_dataset_combo.clear()
+                        
+                        # キャッシュされたデータセット一覧と表示名を使用
+                        cached_datasets = getattr(self.extension_dataset_combo, '_datasets_cache', [])
+                        cached_display_names = getattr(self.extension_dataset_combo, '_display_names_cache', [])
+                        
+                        print(f"[DEBUG] AI拡張 - コンボボックス展開: {len(cached_datasets)}件のデータセット")
+                        
+                        # データセット一覧を再設定
+                        if cached_datasets and cached_display_names:
+                            for i, dataset_info in enumerate(cached_datasets):
+                                display_name = cached_display_names[i] if i < len(cached_display_names) else '名前なし'
+                                self.extension_dataset_combo.addItem(display_name, dataset_info)
+                        else:
+                            # フォールバック：キャッシュがない場合
+                            self.extension_dataset_combo.addItem("-- データセットを選択してください --", None)
+                    
+                    self.extension_dataset_combo.showPopup()
+                    orig_mouse_press(event)
+                
+                self.extension_dataset_combo.mousePressEvent = combo_mouse_press_event
+                self.extension_dataset_combo._mouse_press_event_set = True
+                
+        except Exception as e:
+            print(f"[ERROR] マウスクリックハンドラ設定エラー: {e}")
