@@ -672,6 +672,12 @@ class UIController(UIControllerCore):
         self.menu_buttons['ai_test2'].clicked.connect(
             lambda: self.open_ai_extension_dialog_from_menu()
         )
+        self.menu_buttons['data_portal'] = self.create_auto_resize_button(
+            '📤 データポータル', button_width, button_height, base_inactive_style
+        )
+        self.menu_buttons['data_portal'].clicked.connect(
+            lambda: self.switch_mode("data_portal")
+        )
         return list(self.menu_buttons.values())
     
     def switch_mode(self, mode):
@@ -785,7 +791,7 @@ class UIController(UIControllerCore):
                 self.parent.autologin_msg_label.setVisible(True)
             if hasattr(self.parent, 'webview_msg_label'):
                 self.parent.webview_msg_label.setVisible(True)
-        elif mode in ["subgroup_create", "basic_info", "dataset_open", "data_register", "settings", "ai_test", "data_fetch2"]:
+        elif mode in ["subgroup_create", "basic_info", "dataset_open", "data_register", "settings", "ai_test", "data_fetch2", "data_portal"]:
             # WebView本体を非表示
             if hasattr(self.parent, 'webview'):
                 self.parent.webview.setVisible(False)
@@ -799,7 +805,7 @@ class UIController(UIControllerCore):
                 self.parent.overlay_manager.hide_overlay()
 
             # サブグループ・データセット・基本情報・設定モードは初期高さをディスプレイの90%に設定（後から変更可）
-            if mode in ["subgroup_create", "basic_info", "dataset_open", "data_register", "settings", "ai_test", "data_fetch2"]:
+            if mode in ["subgroup_create", "basic_info", "dataset_open", "data_register", "settings", "ai_test", "data_fetch2", "data_portal"]:
                 try:
                     from PyQt5.QtWidgets import QApplication
                     screen = QApplication.primaryScreen()
@@ -928,6 +934,9 @@ class UIController(UIControllerCore):
             self.show_dummy_message("基本情報")
         elif mode == "ai_test":
             # AIテストは個別のウィジェットで処理するため、ダミーメッセージは表示しない
+            pass
+        elif mode == "data_portal":
+            # データポータルは個別のウィジェットで処理
             pass
     
     def update_menu_button_styles(self, active_mode):
@@ -1350,6 +1359,17 @@ class UIController(UIControllerCore):
             return self._create_widget("データ取得2", "#528086")
         elif mode == "ai_test":
             return self._create_ai_test_widget()
+        elif mode == "data_portal":
+            if self.data_portal_widget is None:
+                try:
+                    from classes.data_portal.ui.data_portal_widget import DataPortalWidget
+                    self.data_portal_widget = DataPortalWidget(self.parent)
+                except Exception as e:
+                    print(f"データポータルウィジェット作成エラー: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    self.data_portal_widget = self._create_widget("データポータル", "#ff9800")
+            return self.data_portal_widget
         else:
             return None
         return None
@@ -3939,5 +3959,6 @@ class UIController(UIControllerCore):
         except Exception as e:
             print(f"[ERROR] 初回データ登録ウィジェットサイズ適用エラー: {e}")
             import traceback
-            traceback.print_exc()
+    
+
 

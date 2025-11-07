@@ -14,6 +14,26 @@ class ARIMAnonymizer:
     def __init__(self, logger=None, set_webview_message=None):
         self.logger = logger
         self.set_webview_message = set_webview_message or (lambda msg: None)
+    
+    def _mask_grant_number(self, grant_number):
+        """
+        grantNumberをマスク処理
+        例: JPMXP1223TU0172 -> JPMXP12********
+        
+        Args:
+            grant_number: 課題番号文字列
+            
+        Returns:
+            str: マスクされた課題番号
+        """
+        if not grant_number or not isinstance(grant_number, str):
+            return "***"
+        
+        # JPMXP12 までを残して、それ以降を * でマスク
+        if len(grant_number) > 7 and grant_number.startswith("JPMXP"):
+            return grant_number[:7] + "*" * (len(grant_number) - 7)
+        
+        return "***"
 
     def anonymize_dataset_directory(self, dataset_path, grant_number, **kwargs):
         set_webview_message = kwargs.get('set_webview_message', self.set_webview_message)
@@ -133,16 +153,21 @@ class ARIMAnonymizer:
     def anonymize_attributes(self, obj, grant_number):
         """
         attributesブロック内の 'subjectTitle', 'name', 'grantNumber' を必ず匿名化値で上書き
+        grantNumberは下4桁を除いてマスク（例: JPMXP1223TU0172 -> JPMXP12********）
         """
         if not (isinstance(obj, dict) and "attributes" in obj):
             return False
         attrs = obj["attributes"]
         changed = False
+        
+        # grantNumberのマスク処理
+        masked_grant_number = self._mask_grant_number(grant_number)
+        
         # 匿名化対象フィールド
         anonymize_fields = {
             "subjectTitle": "*******非開示*******",
             "name": "*******非開示*******",
-            "grantNumber": grant_number
+            "grantNumber": masked_grant_number
         }
         for k, v in anonymize_fields.items():
             if attrs.get(k) != v:

@@ -18,7 +18,8 @@ def safe_show_message(parent, title, message, message_type="warning"):
         return
     
     try:
-        if hasattr(parent, 'thread') and parent.thread() != parent.currentThread():
+        from PyQt5.QtCore import QThread
+        if hasattr(parent, 'thread') and parent.thread() != QThread.currentThread():
             # 別スレッドからの呼び出しの場合はメタオブジェクトを使用
             if message_type == "warning":
                 QMetaObject.invokeMethod(parent, "show_warning_message", 
@@ -67,7 +68,7 @@ def replace_invalid_path_chars(s):
     })
     return s.translate(table)
 
-def download_all_files_from_files_json(data_id, bearer_token=None, parent=None):
+def download_all_files_from_files_json(data_id, bearer_token=None, parent=None, progress_callback=None):
     """
     dataFiles/{data_id}.json の data 配列内の各ファイルID・fileNameで全ファイルをダウンロードし保存
     保存先: output/rde/data/dataFiles/{data_id}/{fileName}
@@ -76,6 +77,7 @@ def download_all_files_from_files_json(data_id, bearer_token=None, parent=None):
         data_id: データID
         bearer_token: 認証トークン（省略時はBearerTokenManagerから取得）
         parent: 親ウィジェット
+        progress_callback: プログレスコールバック関数 (current, total, message) -> None
     """
     from urllib.parse import unquote
     
@@ -110,10 +112,35 @@ def download_all_files_from_files_json(data_id, bearer_token=None, parent=None):
     file_entries = obj.get("data", [])
     os.makedirs(save_dir, exist_ok=True)
     
-    logger.info(f"ファイルダウンロード開始: data_id={data_id}, 対象ファイル数={len(file_entries)}")
+    # 画像ファイル（JPG/PNG）のみを抽出し、ベース名で重複を排除
+    image_entries = []
+    seen_basenames = set()
+    skipped_count = 0
+    for entry in file_entries:
+        attrs = entry.get("attributes", {})
+        fname = attrs.get("fileName")
+        if fname:
+            fext = os.path.splitext(fname)[1].lower()
+            if fext in ['.jpg', '.jpeg', '.png']:
+                # ベース名（拡張子を除く）を取得
+                basename = os.path.splitext(fname)[0]
+                # 重複チェック: 同じベース名のファイルは1回だけダウンロード
+                if basename not in seen_basenames:
+                    seen_basenames.add(basename)
+                    image_entries.append(entry)
+                    logger.debug(f"画像ファイル登録: {fname} (basename: {basename})")
+                else:
+                    skipped_count += 1
+                    logger.debug(f"重複スキップ: {fname} (basename: {basename} は既に登録済み)")
+    
+    total_images = len(image_entries)
+    if skipped_count > 0:
+        logger.info(f"ファイルダウンロード開始: data_id={data_id}, 画像ファイル数={total_images}/{len(file_entries)} (重複{skipped_count}件除外)")
+    else:
+        logger.info(f"ファイルダウンロード開始: data_id={data_id}, 画像ファイル数={total_images}/{len(file_entries)}")
     downloaded_count = 0
     
-    for file_entry in file_entries:
+    for idx, file_entry in enumerate(image_entries):
         file_id = file_entry.get("id")
         attributes = file_entry.get("attributes", {})
         file_name = attributes.get("fileName")
@@ -121,6 +148,10 @@ def download_all_files_from_files_json(data_id, bearer_token=None, parent=None):
         if not file_id or not file_name:
             logger.warning(f"無効なファイル情報をスキップ: file_id={file_id}, file_name={file_name}")
             continue
+        
+        # プログレスコールバック更新
+        if progress_callback:
+            progress_callback(idx + 1, total_images, file_name)
             
         url = f"https://rde-api.nims.go.jp/files/{file_id}"
         headers = {
@@ -132,21 +163,42 @@ def download_all_files_from_files_json(data_id, bearer_token=None, parent=None):
         }
         
         try:
-            resp = fetch_binary(url, headers=headers, stream=True)  # refactored to use api_request_helper
+            resp = download_request(url, bearer_token=bearer_token, headers=headers, stream=True)  # use download_request for Response object
             if resp is None:
-                error_msg = f"リクエスト失敗: {url}"
-                logger.error(error_msg)
-                if parent:
-                    safe_show_message(parent, "リクエストエラー", error_msg, "critical")
+                logger.warning(f"リクエスト失敗: {url}")
+                continue
+            if resp.status_code == 422:
+                # 422エラー（利用不可能なファイル）は警告としてログのみ
+                logger.warning(f"ファイル利用不可: {file_name} (HTTP 422)")
                 continue
             if resp.status_code != 200:
-                error_msg = f"HTTP {resp.status_code}エラー: {url}\n{resp.text}"
-                logger.error(error_msg)
-                if parent:
-                    safe_show_message(parent, f"{resp.status_code}エラー", error_msg, "critical")
+                logger.warning(f"HTTP {resp.status_code}エラー: {file_name}")
                 continue
+            
+            # Content-Dispositionヘッダーから正しいファイル名を取得
+            from urllib.parse import unquote
+            import re
+            
+            final_file_name = file_name
+            cd = resp.headers.get('Content-Disposition')
+            if cd:
+                # filename*=UTF-8''... 形式を優先
+                match_star = re.search(r"filename\*=(?:UTF-8'')?([^;\r\n]+)", cd)
+                if match_star:
+                    final_file_name = unquote(match_star.group(1).strip('"'))
+                else:
+                    # filename="..." 形式
+                    match = re.search(r'filename="?([^";\r\n]+)"?', cd)
+                    if match:
+                        final_file_name = match.group(1)
+            
+            # 拡張子の正規化（.jpegを.jpgに統一）
+            name_without_ext, ext = os.path.splitext(final_file_name)
+            if ext.lower() == '.jpeg':
+                ext = '.jpg'
+            final_file_name = name_without_ext + ext
                 
-            save_path = os.path.join(save_dir, file_name)
+            save_path = os.path.join(save_dir, final_file_name)
             with open(save_path, 'wb') as outf:
                 for chunk in resp.iter_content(chunk_size=8192):
                     if chunk:
@@ -160,9 +212,10 @@ def download_all_files_from_files_json(data_id, bearer_token=None, parent=None):
             if parent:
                 safe_show_message(parent, "ファイルダウンロード失敗", error_msg, "critical")
     
-    logger.info(f"ファイルダウンロード完了: data_id={data_id}, 成功={downloaded_count}/{len(file_entries)}")
-    if parent:
-        safe_show_message(parent, "完了", f"{data_id} の全ファイルを保存しました。（{downloaded_count}/{len(file_entries)}件成功）", "information")
+    logger.info(f"ファイルダウンロード完了: data_id={data_id}, 成功={downloaded_count}/{total_images}")
+    # DatasetUploadTabからの呼び出しの場合はメッセージ表示をスキップ（独自の完了メッセージを表示するため）
+    if parent and parent.__class__.__name__ != 'DatasetUploadTab':
+        safe_show_message(parent, "完了", f"{data_id} の全ファイルを保存しました。（{downloaded_count}/{total_images}件成功）", "information")
 
 def download_file_for_data_id(data_id, bearer_token=None, save_dir_base=None, file_name=None, grantNumber=None, dataset_name=None, tile_name=None, tile_number=None, parent=None):
     """

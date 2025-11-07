@@ -144,18 +144,13 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     layout.setContentsMargins(0, 0, 0, 0)
     layout.setSpacing(10)
     
-    # データセット選択ラベル
-    dataset_label = QLabel("データセット選択:")
-    dataset_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: #2196F3; margin-bottom: 5px;")
-    layout.addWidget(dataset_label)
+    # フィルタ（1行にまとめる）
+    filter_widget = QWidget()
+    filter_layout = QHBoxLayout()
+    filter_layout.setContentsMargins(0, 0, 0, 0)
     
     # 広域シェア設定フィルタ
-    share_widget = QWidget()
-    share_layout = QHBoxLayout()
-    share_layout.setContentsMargins(0, 0, 0, 0)
-    
     share_label = QLabel("広域シェア設定:")
-    share_label.setMinimumWidth(120)
     share_label.setStyleSheet("font-weight: bold;")
     
     share_both_radio = QRadioButton("両方")
@@ -168,22 +163,16 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     share_button_group.addButton(share_enabled_radio, 1)
     share_button_group.addButton(share_disabled_radio, 2)
     
-    share_layout.addWidget(share_label)
-    share_layout.addWidget(share_both_radio)
-    share_layout.addWidget(share_enabled_radio)
-    share_layout.addWidget(share_disabled_radio)
-    share_layout.addStretch()
+    filter_layout.addWidget(share_label)
+    filter_layout.addWidget(share_both_radio)
+    filter_layout.addWidget(share_enabled_radio)
+    filter_layout.addWidget(share_disabled_radio)
     
-    share_widget.setLayout(share_layout)
-    layout.addWidget(share_widget)
+    # スペーサー
+    filter_layout.addSpacing(20)
     
     # 関係メンバーフィルタ
-    member_widget = QWidget()
-    member_layout = QHBoxLayout()
-    member_layout.setContentsMargins(0, 0, 0, 0)
-    
     member_label = QLabel("関係メンバー:")
-    member_label.setMinimumWidth(120)
     member_label.setStyleSheet("font-weight: bold;")
     
     member_both_radio = QRadioButton("両方")
@@ -196,14 +185,14 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     member_button_group.addButton(member_only_radio, 1)
     member_button_group.addButton(member_non_radio, 2)
     
-    member_layout.addWidget(member_label)
-    member_layout.addWidget(member_both_radio)
-    member_layout.addWidget(member_only_radio)
-    member_layout.addWidget(member_non_radio)
-    member_layout.addStretch()
+    filter_layout.addWidget(member_label)
+    filter_layout.addWidget(member_both_radio)
+    filter_layout.addWidget(member_only_radio)
+    filter_layout.addWidget(member_non_radio)
+    filter_layout.addStretch()
     
-    member_widget.setLayout(member_layout)
-    layout.addWidget(member_widget)
+    filter_widget.setLayout(filter_layout)
+    layout.addWidget(filter_widget)
     
     # データセットタイプフィルタ
     type_widget = QWidget()

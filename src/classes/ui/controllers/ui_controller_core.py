@@ -31,6 +31,7 @@ class UIControllerCore:
         self.dataset_open_widget = None
         self.data_register_widget = None
         self.settings_widget = None
+        self.data_portal_widget = None
         
         # 画像取得上限設定用
         self.image_limit_dropdown = None
