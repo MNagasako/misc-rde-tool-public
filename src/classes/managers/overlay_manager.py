@@ -1,6 +1,6 @@
-from PyQt5.QtWidgets import QWidget, QLabel
-from PyQt5.QtCore import Qt, QEvent
-from PyQt5.QtGui import QPixmap
+from qt_compat.widgets import QWidget, QLabel
+from qt_compat.core import Qt, QEvent
+from qt_compat.gui import QPixmap
 import os
 
 class OverlayManager:

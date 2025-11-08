@@ -5,13 +5,13 @@ AI提案ダイアログ
 
 import os
 import json
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QListWidget, QListWidgetItem, QTextEdit, QProgressBar,
     QMessageBox, QSplitter, QWidget, QTabWidget, QGroupBox,
     QComboBox
 )
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+from qt_compat.core import Qt, QThread, Signal, QTimer
 from classes.ai.core.ai_manager import AIManager
 from classes.ai.extensions import AIExtensionRegistry, DatasetDescriptionExtension
 from classes.dataset.util.dataset_context_collector import get_dataset_context_collector
@@ -21,8 +21,8 @@ from classes.dataset.util.dataset_context_collector import get_dataset_context_c
 
 class AIRequestThread(QThread):
     """AI リクエスト処理用スレッド"""
-    result_ready = pyqtSignal(dict)
-    error_occurred = pyqtSignal(str)
+    result_ready = Signal(object)  # PySide6: dict→object
+    error_occurred = Signal(str)
     
     def __init__(self, prompt, context_data=None):
         super().__init__()
@@ -350,9 +350,9 @@ class AISuggestionDialog(QDialog):
         
         # プロンプト内にファイル情報が含まれているか確認
         if 'ファイル構成' in prompt or 'ファイル統計' in prompt or 'タイル#' in prompt:
-            print("[DEBUG] ✅ プロンプトにファイル情報が含まれています")
+            print("[DEBUG] [OK] プロンプトにファイル情報が含まれています")
         else:
-            print("[WARNING] ⚠️ プロンプトにファイル情報が見つかりません")
+            print("[WARNING] [WARN] プロンプトにファイル情報が見つかりません")
         
         # プロンプト表示（詳細情報タブ）
         self.prompt_display.setText(prompt)
@@ -386,7 +386,7 @@ class AISuggestionDialog(QDialog):
                 template_name="basic"
             )
             
-            if dialog.exec_() == QDialog.Accepted:
+            if dialog.exec() == QDialog.Accepted:
                 # テンプレートが更新された場合、AI拡張機能を再読み込み
                 self.ai_extension = AIExtensionRegistry.get(self.extension_name)
                 if not self.ai_extension:
@@ -750,7 +750,7 @@ class AISuggestionDialog(QDialog):
         layout.addWidget(dataset_info_widget)
         
         # メインコンテンツエリア（左右分割）
-        from PyQt5.QtWidgets import QSplitter
+        from qt_compat.widgets import QSplitter
         content_splitter = QSplitter(Qt.Horizontal)
         layout.addWidget(content_splitter)
         
@@ -785,7 +785,7 @@ class AISuggestionDialog(QDialog):
         response_label.setStyleSheet("font-weight: bold; margin: 5px 0; font-size: 13px; color: #495057;")
         right_layout.addWidget(response_label)
         
-        from PyQt5.QtWidgets import QTextBrowser
+        from qt_compat.widgets import QTextBrowser
         
         self.extension_response_display = QTextBrowser()
         self.extension_response_display.setReadOnly(True)
@@ -1533,7 +1533,7 @@ class AISuggestionDialog(QDialog):
             # 更新時にボタンを再読み込み
             dialog.prompt_updated.connect(lambda: self.load_extension_buttons())
             
-            dialog.exec_()
+            dialog.exec()
             
         except Exception as e:
             QMessageBox.critical(self, "エラー", f"設定編集エラー: {str(e)}")
@@ -1545,7 +1545,7 @@ class AISuggestionDialog(QDialog):
     def copy_extension_response(self):
         """AI拡張応答をクリップボードにコピー"""
         try:
-            from PyQt5.QtWidgets import QApplication
+            from qt_compat.widgets import QApplication
             # QTextBrowserからプレーンテキストを取得
             text = self.extension_response_display.toPlainText()
             if text:
@@ -1562,7 +1562,7 @@ class AISuggestionDialog(QDialog):
     def show_button_context_menu(self, position, button_config, button_widget):
         """ボタンの右クリックメニューを表示"""
         try:
-            from PyQt5.QtWidgets import QMenu, QAction
+            from qt_compat.widgets import QMenu, QAction
             
             menu = QMenu(button_widget)
             
@@ -1598,7 +1598,7 @@ class AISuggestionDialog(QDialog):
                     button_config=button_config
                 )
                 
-                dialog.exec_()
+                dialog.exec()
             else:
                 # デフォルトテンプレートの場合は新しいファイルを作成するか尋ねる
                 reply = QMessageBox.question(
@@ -1634,7 +1634,7 @@ class AISuggestionDialog(QDialog):
                             prompt_file_path=new_prompt_file,
                             button_config=button_config
                         )
-                        dialog.exec_()
+                        dialog.exec()
                     else:
                         QMessageBox.critical(self, "エラー", "プロンプトファイルの作成に失敗しました。")
                         
@@ -1648,7 +1648,7 @@ class AISuggestionDialog(QDialog):
             
             if prompt:
                 # プレビューダイアログを表示
-                from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
+                from qt_compat.widgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
                 
                 preview_dialog = QDialog(self)
                 preview_dialog.setWindowTitle(f"プロンプトプレビュー: {button_config.get('label', 'Unknown')}")
@@ -1665,7 +1665,7 @@ class AISuggestionDialog(QDialog):
                 close_button.clicked.connect(preview_dialog.close)
                 layout.addWidget(close_button)
                 
-                preview_dialog.exec_()
+                preview_dialog.exec()
             else:
                 QMessageBox.warning(self, "警告", "プロンプトの構築に失敗しました。")
                 
@@ -1816,8 +1816,8 @@ class AISuggestionDialog(QDialog):
                 display_names.append(display_name)
             
             # QCompleterを設定（修正タブと同じ実装）
-            from PyQt5.QtWidgets import QCompleter
-            from PyQt5.QtCore import Qt
+            from qt_compat.widgets import QCompleter
+            from qt_compat.core import Qt
             
             completer = QCompleter(display_names, self.extension_dataset_combo)
             completer.setCaseSensitivity(Qt.CaseInsensitive)

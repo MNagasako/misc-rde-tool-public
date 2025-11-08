@@ -383,8 +383,8 @@ def apply_webview_proxy_settings(app_or_profile):
         app_or_profile: QWebEngineProfile または QApplication インスタンス
     """
     try:
-        from PyQt5.QtWebEngineWidgets import QWebEngineProfile
-        from PyQt5.QtCore import QCoreApplication
+        from qt_compat.webengine import QWebEngineProfile
+        from qt_compat.core import QCoreApplication
         
         proxy_args = get_webview_proxy_args()
         

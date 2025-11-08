@@ -6,11 +6,11 @@
 - 一括登録タブ: 将来の一括登録機能（現在はプレースホルダー）
 """
 
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QWidget, QVBoxLayout, QTabWidget, QLabel, QScrollArea, QSizePolicy, QApplication
 )
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+from qt_compat.core import Qt
+from qt_compat.gui import QFont
 
 from .data_register_ui_creator import create_data_register_widget
 from classes.data_entry.conf.ui_constants import (
@@ -72,7 +72,7 @@ class DataRegisterTabWidget(QWidget):
         """一括登録タブ選択時のみ警告を一度だけ表示"""
         if hasattr(self, '_batch_tab_index') and index == self._batch_tab_index and not self._batch_tab_alert_shown:
             # 開発完了のため、アラートをコメントアウト
-            # from PyQt5.QtWidgets import QMessageBox
+            # from qt_compat.widgets import QMessageBox
             # QMessageBox.warning(self, "ご注意", "この機能は開発中のため正しく動作しません。\n（テスト・検証目的以外での利用はお控えください）")
             self._batch_tab_alert_shown = True
 

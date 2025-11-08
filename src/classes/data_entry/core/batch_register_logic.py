@@ -13,8 +13,8 @@ from typing import List, Dict, Optional, Tuple, Callable
 from datetime import datetime
 from pathlib import Path
 
-from PyQt5.QtCore import QObject, pyqtSignal, QThread
-from PyQt5.QtWidgets import QApplication, QProgressDialog, QMessageBox
+from qt_compat.core import QObject, Signal, QThread
+from qt_compat.widgets import QApplication, QProgressDialog, QMessageBox
 
 from .file_set_manager import FileSet, FileSetManager, FileItem, FileType, PathOrganizeMethod
 from .data_register_logic_wrapper import DataRegisterLogic
@@ -65,11 +65,11 @@ class BatchRegisterWorker(QThread):
     """一括登録ワーカースレッド"""
     
     # シグナル定義
-    progress_updated = pyqtSignal(int, str)  # (進捗%, メッセージ)
-    fileset_started = pyqtSignal(str)        # ファイルセット開始
-    fileset_completed = pyqtSignal(str)      # ファイルセット完了
-    fileset_error = pyqtSignal(str, str)     # (ファイルセット名, エラーメッセージ)
-    finished = pyqtSignal(object)            # BatchRegisterResult
+    progress_updated = Signal(int, str)  # (進捗%, メッセージ)
+    fileset_started = Signal(str)        # ファイルセット開始
+    fileset_completed = Signal(str)      # ファイルセット完了
+    fileset_error = Signal(str, str)     # (ファイルセット名, エラーメッセージ)
+    finished = Signal(object)            # BatchRegisterResult
     
     def __init__(self, file_sets: List[FileSet], temp_base_dir: str):
         super().__init__()
@@ -249,8 +249,8 @@ class BatchRegisterLogic(QObject):
     """一括登録メインロジッククラス"""
     
     # シグナル定義
-    progress_updated = pyqtSignal(int, str)
-    finished = pyqtSignal(object)  # BatchRegisterResult
+    progress_updated = Signal(int, str)
+    finished = Signal(object)  # BatchRegisterResult
     
     def __init__(self, parent=None):
         super().__init__(parent)

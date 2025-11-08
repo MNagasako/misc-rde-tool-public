@@ -225,8 +225,8 @@ def create_dataset_dropdown_all(dataset_json_path, parent=None, global_share_fil
     """
     import os
     import json
-    from PyQt5.QtWidgets import QVBoxLayout, QWidget, QLabel, QComboBox, QSizePolicy, QCompleter, QHBoxLayout, QRadioButton, QButtonGroup, QLineEdit, QGroupBox
-    from PyQt5.QtCore import Qt
+    from qt_compat.widgets import QVBoxLayout, QWidget, QLabel, QComboBox, QSizePolicy, QCompleter, QHBoxLayout, QRadioButton, QButtonGroup, QLineEdit, QGroupBox
+    from qt_compat.core import Qt
 
     # --- UI部品定義 ---
     combo = QComboBox(parent)
@@ -351,7 +351,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent=None, global_share_fil
 
         # QCompleterで補完・絞り込み
         completer = QCompleter(display_list, combo)
-        completer.setCaseSensitivity(False)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)  # PySide6: 列挙型が必要
         completer.setFilterMode(Qt.MatchContains)
         popup_view = completer.popup()
         popup_view.setMinimumHeight(240)
@@ -434,7 +434,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent=None, global_share_fil
         
         # QCompleterで補完・絞り込み
         completer = QCompleter(display_list, combo)
-        completer.setCaseSensitivity(False)
+        completer.setCaseSensitivity(Qt.CaseInsensitive)  # PySide6: 列挙型が必要
         completer.setFilterMode(Qt.MatchContains)
         popup_view = completer.popup()
         popup_view.setMinimumHeight(240)
@@ -515,7 +515,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent=None, global_share_fil
 
     # 選択時に選択オブジェクトをポップアップ表示（動作確認用）
     def on_dataset_changed(idx):
-        from PyQt5.QtWidgets import QMessageBox
+        from qt_compat.widgets import QMessageBox
         item = combo.itemData(idx, Qt.UserRole)
         if item is not None:
             import json
@@ -668,14 +668,14 @@ def load_dataset_and_user_list(dataset_json_path, info_json_path):
             result.append((display, dataset_id, not bool(grant_number), item))
     return result
 
-from PyQt5.QtWidgets import QComboBox, QSizePolicy, QCompleter
-from PyQt5.QtCore import Qt
+from qt_compat.widgets import QComboBox, QSizePolicy, QCompleter
+from qt_compat.core import Qt
 
 def create_dataset_dropdown_with_user(dataset_json_path, info_json_path, parent=None):
     """
     dataset.jsonとinfo.jsonを結合し、QComboBox（補完検索付き）を生成
     """
-    from PyQt5.QtWidgets import QVBoxLayout, QWidget, QLabel
+    from qt_compat.widgets import QVBoxLayout, QWidget, QLabel
     combo = QComboBox(parent)
     combo.setMinimumWidth(320)
     combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -772,7 +772,7 @@ def create_dataset_dropdown_with_user(dataset_json_path, info_json_path, parent=
 
     # QCompleterで補完・絞り込み
     completer = QCompleter(display_list, combo)
-    completer.setCaseSensitivity(False)
+    completer.setCaseSensitivity(Qt.CaseInsensitive)  # PySide6: 列挙型が必要
     completer.setFilterMode(Qt.MatchContains)
     popup_view = completer.popup()
     popup_view.setMinimumHeight(240)
@@ -794,7 +794,7 @@ def create_dataset_dropdown_with_user(dataset_json_path, info_json_path, parent=
 import os
 import sys
 import json
-from PyQt5.QtWidgets import QComboBox
+from qt_compat.widgets import QComboBox
 
 def load_dataset_list(json_path):
     """
@@ -850,3 +850,4 @@ def load_dataset_list(json_path):
     except Exception as e:
         print(f"[ERROR] load_dataset_list エラー: {e}")
         return []
+

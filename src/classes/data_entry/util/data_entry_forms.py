@@ -4,10 +4,10 @@
 試料選択フォーム、試料入力フォーム、インボイススキーマフォームの作成を担当します。
 """
 
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
+from qt_compat.widgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
                              QComboBox, QTextEdit, QFrame, QPushButton, QMessageBox, QGroupBox, QSizePolicy)
-from PyQt5.QtGui import QFont
-from PyQt5.QtCore import QTimer
+from qt_compat.gui import QFont
+from qt_compat.core import QTimer
 import json
 import os
 from config.common import get_dynamic_file_path

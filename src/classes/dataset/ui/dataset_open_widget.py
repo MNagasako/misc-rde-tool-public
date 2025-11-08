@@ -2,7 +2,7 @@
 データセット開設・編集のタブ付きウィジェット
 """
 import os
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QTabWidget
+from qt_compat.widgets import QWidget, QVBoxLayout, QLabel, QTabWidget
 from classes.dataset.core.dataset_open_logic import create_group_select_widget
 
 
@@ -29,7 +29,7 @@ def create_dataset_open_widget(parent, title, color, create_auto_resize_button):
             # 新しい戻り値形式に対応: container, team_groups, combo, grant_combo, open_btn, name_edit, embargo_edit, template_combo, template_list
         else:
             # フォールバック：空のウィジェット
-            from PyQt5.QtWidgets import QLabel as FallbackLabel
+            from qt_compat.widgets import QLabel as FallbackLabel
             fallback_widget = QWidget()
             fallback_layout = QVBoxLayout()
             fallback_layout.addWidget(FallbackLabel("データセット開設機能を読み込み中..."))
@@ -38,7 +38,7 @@ def create_dataset_open_widget(parent, title, color, create_auto_resize_button):
     except Exception as e:
         print(f"[WARNING] データセット開設タブの作成に失敗: {e}")
         # エラー時は空のタブを作成
-        from PyQt5.QtWidgets import QLabel as ErrorLabel
+        from qt_compat.widgets import QLabel as ErrorLabel
         error_widget = QWidget()
         error_layout = QVBoxLayout()
         error_layout.addWidget(ErrorLabel(f"データセット開設機能の読み込みに失敗しました: {e}"))
@@ -64,7 +64,7 @@ def create_dataset_open_widget(parent, title, color, create_auto_resize_button):
     except Exception as e:
         print(f"[WARNING] データエントリータブの作成に失敗: {e}")
         # エラー時は空のタブを作成
-        from PyQt5.QtWidgets import QLabel as ErrorLabel
+        from qt_compat.widgets import QLabel as ErrorLabel
         error_widget = QWidget()
         error_layout = QVBoxLayout()
         error_layout.addWidget(ErrorLabel(f"データエントリー機能の読み込みに失敗しました: {e}"))

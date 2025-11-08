@@ -165,7 +165,7 @@ class BearerTokenManager:
             bool: ユーザーが再ログインを選択した場合True
         """
         try:
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             
             if parent_widget is None:
                 # フォールバック: コンソールメッセージのみ
@@ -188,7 +188,7 @@ class BearerTokenManager:
             relogin_button = msg_box.addButton("再ログイン", QMessageBox.AcceptRole)
             cancel_button = msg_box.addButton("キャンセル", QMessageBox.RejectRole)
             
-            msg_box.exec_()
+            msg_box.exec()
             
             if msg_box.clickedButton() == relogin_button:
                 logger.info("ユーザーが再ログインを選択しました")

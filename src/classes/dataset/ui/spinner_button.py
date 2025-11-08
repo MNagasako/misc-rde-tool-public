@@ -4,9 +4,9 @@ AIサジェストボタン用のスピナーアニメーション実装
 ローディング中を視覚的に示すスピナー付きボタン
 """
 
-from PyQt5.QtWidgets import QPushButton
-from PyQt5.QtCore import QTimer, Qt
-from PyQt5.QtGui import QFont
+from qt_compat.widgets import QPushButton
+from qt_compat.core import QTimer, Qt
+from qt_compat.gui import QFont
 
 
 class SpinnerButton(QPushButton):

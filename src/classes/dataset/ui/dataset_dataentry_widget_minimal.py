@@ -7,15 +7,15 @@ import os
 import json
 import datetime
 import time
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QMessageBox, QComboBox, 
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
     QCheckBox, QRadioButton, QProgressDialog, QApplication,
     QLineEdit, QButtonGroup
 )
-from PyQt5.QtCore import Qt, QTimer, QUrl
-from PyQt5.QtGui import QDesktopServices
+from qt_compat.core import Qt, QTimer, QUrl
+from qt_compat.gui import QDesktopServices
 from config.common import get_dynamic_file_path
 from core.bearer_token_manager import BearerTokenManager
 
@@ -808,7 +808,7 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
     widget.setLayout(layout)
     return widget
 
-from PyQt5.QtWidgets import QWidget, QHBoxLayout, QComboBox, QPushButton, QLabel
+from qt_compat.widgets import QWidget, QHBoxLayout, QComboBox, QPushButton, QLabel
 
 class DatasetDataEntryWidget(QWidget):
     def __init__(self, parent=None):

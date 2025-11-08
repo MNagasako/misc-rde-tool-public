@@ -2,8 +2,8 @@
 UI関連のユーティリティクラス - ARIM RDE Tool v1.13.1
 UIControllerから分離したユーティリティメソッド群
 """
-from PyQt5.QtWidgets import QPushButton
-from PyQt5.QtGui import QFontMetrics, QFont
+from qt_compat.widgets import QPushButton
+from qt_compat.gui import QFontMetrics, QFont
 from classes.utils.ui_dialogs import TextAreaExpandDialog
 
 

@@ -2,12 +2,12 @@
 UI関連のダイアログクラス - ARIM RDE Tool v1.13.1
 UIControllerから分離したダイアログクラス群
 """
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, 
     QLabel, QShortcut, QApplication
 )
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont, QKeySequence
+from qt_compat.core import Qt
+from qt_compat.gui import QFont, QKeySequence
 
 
 class TextAreaExpandDialog:
@@ -148,7 +148,7 @@ class TextAreaExpandDialog:
     
     def exec_(self):
         """ダイアログをモーダルで表示（PyQt5互換）"""
-        return self.dialog.exec_()
+        return self.dialog.exec()
     
     def exec(self):
         """ダイアログをモーダルで表示（PyQt6互換）"""
@@ -156,7 +156,7 @@ class TextAreaExpandDialog:
             return self.dialog.exec()
         except AttributeError:
             # PyQt5の場合は exec_() を使用
-            return self.dialog.exec_()
+            return self.dialog.exec()
 
 
 class PopupDialog:
@@ -297,4 +297,4 @@ class PopupDialog:
     
     def exec_(self):
         """ダイアログを表示"""
-        return self.dialog.exec_()
+        return self.dialog.exec()

@@ -5,7 +5,7 @@ https://code.visualstudio.com/docs/copilot/copilot-customization#_use-a-githubco
 -->
 
 
-# ARIM RDE Tool 公開配布リポジトリ (v1.20.0)
+# ARIM RDE Tool 公開配布リポジトリ (v2.0.0)
 
 このリポジトリは、**ARIM事業 RDE→ARIMデータポータル移行ツール**の「バイナリ配布専用リポジトリ」です。
 ソースコード編集は禁止、ドキュメント・設定ファイルのみ操作可能です。
@@ -14,7 +14,7 @@ https://code.visualstudio.com/docs/copilot/copilot-customization#_use-a-githubco
 
 ## バージョン管理・表記ルール
 
-現在のバージョン: **1.20.0** (2025-11-07)
+現在のバージョン: **2.0.0** (2025-11-07)
 
 本リポジトリのバージョン情報は開発リポジトリ（`C:/vscode/rde`）の `src/config/common.py` の `REVISION` に基づいて統一管理されています。
 配布用ドキュメント（README.md, VERSION.txt, CHANGELOG.md, RELEASE_NOTES等）も同じバージョン表記（例: 1.20.0/v1.20.0）に揃えています。
@@ -23,7 +23,7 @@ https://code.visualstudio.com/docs/copilot/copilot-customization#_use-a-githubco
 
 ## リポジトリ運用ルール（Copilot向け）
 
-- **配布専用**: ソースコード編集は禁止。ドキュメント・設定ファイルのみ操作。
+- **配布専用（※方針変更）**: 本公開リポジトリはバイナリ配布が主目的です。ライセンスの変更（LGPLv3）及び第三者配布の方針変更に伴い、今後はソースコードを公開しない方針に移行します。ドキュメント・設定ファイルの更新は許可されますが、ソースコード編集・追加は行わないでください。
 - **バイナリ管理**: 開発リポジトリ（`C:/vscode/rde`）でビルドしたバイナリを `dist/` にコピー。
 - **リリース管理**: GitHub Releasesでバイナリ配布・バージョン管理。
 - **仮想環境必須**: Python作業は必ず `.venv` を有効化。

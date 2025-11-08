@@ -5,8 +5,8 @@ import tempfile
 import urllib.parse
 import re
 from copy import deepcopy
-from PyQt5.QtWidgets import QMessageBox, QFileDialog
-from PyQt5.QtCore import QCoreApplication
+from qt_compat.widgets import QMessageBox, QFileDialog
+from qt_compat.core import QCoreApplication
 from config.common import OUTPUT_RDE_DIR, INPUT_DIR
 from classes.utils.api_request_helper import api_request, post_form, post_binary  # refactored to use api_request_helper
 from core.bearer_token_manager import BearerTokenManager
@@ -164,7 +164,7 @@ def _continue_data_register_process(parent, bearer_token, dataset_info, form_val
     attachment_total_size_mb = attachment_total_size / (1024*1024) if temp_attachment_paths else 0
 
     # 確認ウインドウ
-    from PyQt5.QtWidgets import QMessageBox, QPushButton, QDialog, QVBoxLayout, QTextEdit
+    from qt_compat.widgets import QMessageBox, QPushButton, QDialog, QVBoxLayout, QTextEdit
     msg_box = QMessageBox(parent)
     msg_box.setWindowTitle("データ登録内容の確認")
     msg_box.setIcon(QMessageBox.Question)
@@ -186,17 +186,17 @@ def _continue_data_register_process(parent, bearer_token, dataset_info, form_val
         text_edit.setMinimumSize(600, 400)
         layout.addWidget(text_edit)
         dlg.setLayout(layout)
-        dlg.exec_()
+        dlg.exec()
     detail_btn.clicked.connect(show_detail)
 
-    reply = msg_box.exec_()
+    reply = msg_box.exec()
     if msg_box.clickedButton() != yes_btn:
         print("[INFO] データ登録処理はユーザーによりキャンセルされました。")
         return
 
     # --- ここからアップロード処理（プログレスバー付き） ---
-    from PyQt5.QtWidgets import QProgressDialog
-    from PyQt5.QtCore import Qt, QCoreApplication
+    from qt_compat.widgets import QProgressDialog
+    from qt_compat.core import Qt, QCoreApplication
     import time
     total_files = len(temp_file_paths) + len(temp_attachment_paths)
     dataFiles = {"data": []}
@@ -443,7 +443,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
 
     print (f"headers: {headers}")
     print (f"payload: {payload}")
-    from PyQt5.QtCore import QCoreApplication
+    from qt_compat.core import QCoreApplication
     try:
         if progress:
             progress.setLabelText("エントリー登録バリデーション中...")
@@ -459,7 +459,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
                 progress.close()
             
             # バリデーション通信エラーダイアログを確実に表示
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             import time
             time.sleep(0.5)  # プログレスバー閉じた後、少し間を置く
             QCoreApplication.processEvents()  # UI更新を確実にする
@@ -471,7 +471,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
             msg_box.setText("バリデーション処理でサーバーとの通信に失敗しました。")
             msg_box.setInformativeText("ネットワーク接続とトークンの有効性を確認してください。\nRDEサーバーと構造化サーバー間でタイムアウトが発生している場合は登録は完了している可能性があります。\nRDEサイトを確認してください。")
             msg_box.setStandardButtons(QMessageBox.Ok)
-            msg_box.exec_()
+            msg_box.exec()
             
             return {"error": "validation", "detail": "Request failed"}
         if progress:
@@ -488,7 +488,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
                 progress.close()
             
             # バリデーションエラーダイアログを確実に表示
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             import time
             time.sleep(0.5)  # プログレスバー閉じた後、少し間を置く
             QCoreApplication.processEvents()  # UI更新を確実にする
@@ -500,7 +500,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
             msg_box.setText("データの検証に失敗しました。")
             msg_box.setInformativeText(f"エラー詳細: {resp_validation.text}")
             msg_box.setStandardButtons(QMessageBox.Ok)
-            msg_box.exec_()
+            msg_box.exec()
             
             return {"error": "validation", "detail": resp_validation.text}
         if progress:
@@ -517,7 +517,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
                 progress.close()
             
             # POSTエラーダイアログを確実に表示
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             import time
             time.sleep(0.5)  # プログレスバー閉じた後、少し間を置く
             QCoreApplication.processEvents()  # UI更新を確実にする
@@ -529,7 +529,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
             msg_box.setText("サーバーとの通信に失敗しました。")
             msg_box.setInformativeText("ネットワーク接続とトークンの有効性を確認してください。\nRDEサーバーと構造化サーバー間でタイムアウトが発生している場合は登録は完了している可能性があります。\nRDEサイトを確認してください。")
             msg_box.setStandardButtons(QMessageBox.Ok)
-            msg_box.exec_()
+            msg_box.exec()
             
             return {"error": "post", "detail": "Request failed"}
         if progress:
@@ -565,7 +565,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
             progress.close()
         
         # 成功ダイアログを確実に表示
-        from PyQt5.QtWidgets import QMessageBox
+        from qt_compat.widgets import QMessageBox
         import time
         time.sleep(0.5)  # プログレスバー閉じた後、少し間を置く
         QCoreApplication.processEvents()  # UI更新を確実にする
@@ -577,7 +577,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
         msg_box.setText("データの登録が正常に完了しました。")
         msg_box.setInformativeText("登録されたデータは出力フォルダに保存されています。")
         msg_box.setStandardButtons(QMessageBox.Ok)
-        msg_box.exec_()
+        msg_box.exec()
         
         return {"success": True, "response": data}
     except Exception as e:
@@ -591,7 +591,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
             progress.close()
         
         # エラーダイアログを確実に表示
-        from PyQt5.QtWidgets import QMessageBox
+        from qt_compat.widgets import QMessageBox
         import time
         time.sleep(0.5)  # プログレスバー閉じた後、少し間を置く
         QCoreApplication.processEvents()  # UI更新を確実にする
@@ -603,7 +603,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
         msg_box.setText("データの登録に失敗しました。")
         msg_box.setInformativeText(f"エラー詳細: {e}")
         msg_box.setStandardButtons(QMessageBox.Ok)
-        msg_box.exec_()
+        msg_box.exec()
         
         return {"error": "exception", "detail": str(e)}
 

@@ -2,8 +2,8 @@
 basic_info関連のUIロジック分離
 """
 import logging
-from PyQt5.QtCore import QTimer, Qt
-from PyQt5.QtWidgets import QProgressDialog, QMessageBox
+from qt_compat.core import QTimer, Qt
+from qt_compat.widgets import QProgressDialog, QMessageBox
 import threading
 from classes.utils.progress_worker import ProgressWorker, SimpleProgressWorker
 
@@ -84,11 +84,11 @@ def fetch_basic_info(controller):
         show_progress_dialog(controller.parent, "基本情報取得", worker)
     except ImportError as e:
         logger.error(f"基本情報取得モジュールのインポートエラー: {e}")
-        from PyQt5.QtWidgets import QMessageBox
+        from qt_compat.widgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"基本情報取得機能の初期化に失敗しました: {e}")
     except Exception as e:
         logger.error(f"基本情報取得処理でエラー: {e}")
-        from PyQt5.QtWidgets import QMessageBox
+        from qt_compat.widgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"基本情報取得処理中にエラーが発生しました: {e}")
 
 def fetch_basic_info_self(controller):
@@ -121,11 +121,11 @@ def fetch_basic_info_self(controller):
         show_progress_dialog(controller.parent, "自分の基本情報取得", worker)
     except ImportError as e:
         logger.error(f"基本情報取得モジュールのインポートエラー: {e}")
-        from PyQt5.QtWidgets import QMessageBox
+        from qt_compat.widgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"基本情報取得機能の初期化に失敗しました: {e}")
     except Exception as e:
         logger.error(f"基本情報取得処理でエラー: {e}")
-        from PyQt5.QtWidgets import QMessageBox
+        from qt_compat.widgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"基本情報取得処理中にエラーが発生しました: {e}")
 
 def summary_basic_info_to_Xlsx(controller):
@@ -149,11 +149,11 @@ def summary_basic_info_to_Xlsx(controller):
         show_progress_dialog(controller.parent, "まとめXLSX作成", worker)
     except ImportError as e:
         logger.error(f"XLSX出力モジュールのインポートエラー: {e}")
-        from PyQt5.QtWidgets import QMessageBox
+        from qt_compat.widgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"XLSX出力機能の初期化に失敗しました: {e}")
     except Exception as e:
         logger.error(f"XLSX出力処理でエラー: {e}")
-        from PyQt5.QtWidgets import QMessageBox
+        from qt_compat.widgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"XLSX出力処理中にエラーが発生しました: {e}")
 
 def apply_basic_info_to_Xlsx(controller):
@@ -177,11 +177,11 @@ def apply_basic_info_to_Xlsx(controller):
         show_progress_dialog(controller.parent, "XLSX反映", worker)
     except ImportError as e:
         logger.error(f"XLSX反映モジュールのインポートエラー: {e}")
-        from PyQt5.QtWidgets import QMessageBox
+        from qt_compat.widgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"XLSX反映機能の初期化に失敗しました: {e}")
     except Exception as e:
         logger.error(f"XLSX反映処理でエラー: {e}")
-        from PyQt5.QtWidgets import QMessageBox
+        from qt_compat.widgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"XLSX反映処理中にエラーが発生しました: {e}")
 
 def fetch_invoice_schema(controller):
@@ -210,7 +210,7 @@ def fetch_sample_info_only(controller):
     サンプル情報のみを強制取得する
     """
     from ..core.basic_info_logic import fetch_sample_info_only as fetch_sample_info_only_logic
-    from PyQt5.QtWidgets import QMessageBox
+    from qt_compat.widgets import QMessageBox
     bearer_token = getattr(controller.parent, 'bearer_token', None)
     
     # 確認ダイアログ
@@ -244,7 +244,7 @@ def fetch_common_info_only(controller):
     9種類の共通情報JSONのみを取得する
     """
     from ..core.basic_info_logic import fetch_common_info_only_logic
-    from PyQt5.QtWidgets import QMessageBox
+    from qt_compat.widgets import QMessageBox
     bearer_token = getattr(controller.parent, 'bearer_token', None)
     webview = getattr(controller.parent, 'webview', controller.parent)
     
@@ -301,8 +301,8 @@ def create_json_status_widget(parent=None):
     """
     JSON取得状況を表示するウィジェットを作成
     """
-    from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton
-    from PyQt5.QtCore import Qt
+    from qt_compat.widgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton
+    from qt_compat.core import Qt
     
     class JsonStatusWidget(QWidget):
         def __init__(self, parent=None):
@@ -380,7 +380,7 @@ def execute_individual_stage_ui(controller, stage_name):
     個別段階実行をUIから呼び出す
     """
     from ..core.basic_info_logic import execute_individual_stage, STAGE_FUNCTIONS
-    from PyQt5.QtWidgets import QMessageBox
+    from qt_compat.widgets import QMessageBox
     
     if stage_name not in STAGE_FUNCTIONS:
         QMessageBox.warning(controller.parent, "エラー", f"不正な段階名です: {stage_name}")
@@ -452,9 +452,9 @@ def create_individual_execution_widget(parent=None):
     """
     個別実行用のドロップダウンとボタンを作成
     """
-    from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+    from qt_compat.widgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                 QComboBox, QPushButton, QTextEdit)
-    from PyQt5.QtCore import QTimer
+    from qt_compat.core import QTimer
     from ..core.basic_info_logic import STAGE_FUNCTIONS
     
     class IndividualExecutionWidget(QWidget):
@@ -520,7 +520,7 @@ def create_individual_execution_widget(parent=None):
         def execute_stage(self):
             """選択された段階を実行"""
             if not self.controller:
-                from PyQt5.QtWidgets import QMessageBox
+                from qt_compat.widgets import QMessageBox
                 QMessageBox.warning(self, "エラー", "コントローラーが設定されていません")
                 return
                 

@@ -3,7 +3,7 @@ UIコントローラーフォーム機能クラス - ARIM RDE Tool v1.13.2
 UIControllerのフォーム生成・バリデーション・入力管理機能を担当
 """
 import logging
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QComboBox, QLineEdit, QTextEdit, QMessageBox, QWidget
 )
@@ -241,7 +241,7 @@ class UIControllerForms:
             combo_layout.addWidget(combo_label)
             
             # コンボボックス
-            from PyQt5.QtWidgets import QComboBox
+            from qt_compat.widgets import QComboBox
             self.ui_controller.sample_select_combo = QComboBox()
             self.ui_controller.sample_select_combo.setStyleSheet("""
                 QComboBox {
@@ -327,7 +327,7 @@ class UIControllerForms:
             is_textarea: テキストエリアかどうか
         """
         try:
-            from PyQt5.QtWidgets import QHBoxLayout, QWidget
+            from qt_compat.widgets import QHBoxLayout, QWidget
             
             # 横並び用のコンテナを作成
             row_widget = QWidget()
@@ -501,7 +501,7 @@ class UIControllerForms:
             QHBoxLayout: 画像制限選択用レイアウト
         """
         try:
-            from PyQt5.QtWidgets import QHBoxLayout, QLabel
+            from qt_compat.widgets import QHBoxLayout, QLabel
             
             limit_layout = QHBoxLayout()
             limit_label = QLabel("画像取得上限:")

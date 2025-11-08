@@ -8,7 +8,7 @@ import os
 import json
 import logging
 from typing import List, Dict, Optional, Any
-from PyQt5.QtWidgets import QMessageBox
+from qt_compat.widgets import QMessageBox
 
 from . import data_register_logic as legacy_logic
 

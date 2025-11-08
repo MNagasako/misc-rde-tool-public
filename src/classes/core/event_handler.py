@@ -5,8 +5,8 @@ Browserクラスから イベント処理ロジックを分離
 【注意】バージョン更新時はconfig/common.py のREVISIONも要確認
 """
 import logging
-from PyQt5.QtCore import QEvent, Qt, QTimer
-from PyQt5.QtWidgets import QWidget
+from qt_compat.core import QEvent, Qt, QTimer
+from qt_compat.widgets import QWidget
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ class EventHandler:
             
         # リサイズ後にメニューボタンのフォントサイズを再調整
         if hasattr(self.parent, 'ui_controller') and self.parent.ui_controller:
-            from PyQt5.QtCore import QTimer
+            from qt_compat.core import QTimer
             # 少し遅延させて確実にリサイズ後のサイズでフォント調整
             QTimer.singleShot(100, self._adjust_all_menu_fonts)
     
@@ -188,7 +188,7 @@ class EventHandler:
         """
         # WebViewイベント接続
         if hasattr(self.parent, 'webview'):
-            self.parent.webview.loadFinished.connect(self.on_load_finished)
+            self.parent.webview.page().loadFinished.connect(self.on_load_finished)
             self.parent.webview.urlChanged.connect(self.on_url_changed)
         
         # Cookieイベント接続
@@ -274,6 +274,31 @@ class EventHandler:
         Args:
             url: 新しいURL
         """
+        # v1.20.3: URL変更の詳細ログ
+        url_str = url.toString()
+        logger.info(f"[URL] ━━━ URL変更: {url_str}")
+        
+        # ホスト判定
+        if "rde-material.nims.go.jp" in url_str:
+            logger.info("[URL] 📍 rde-material.nims.go.jp に遷移")
+        elif "rde.nims.go.jp" in url_str:
+            logger.info("[URL] 📍 rde.nims.go.jp に遷移")
+        elif "diceidm.nims.go.jp" in url_str:
+            logger.info("[URL] 📍 diceidm.nims.go.jp (DICE認証)")
+        elif "dicelogin.b2clogin.com" in url_str:
+            logger.info("[URL] 📍 dicelogin.b2clogin.com (Azure AD B2C)")
+        
+        # エラーページ検出
+        if "401" in url_str or "error" in url_str.lower():
+            logger.warning(f"[URL] ⚠️ エラーページ検出: {url_str}")
+            # ホスト判定
+            if "rde-material.nims.go.jp" in url_str:
+                logger.error("[URL] ❌ rde-material.nims.go.jp で401エラー")
+            elif "rde.nims.go.jp" in url_str:
+                logger.error("[URL] ❌ rde.nims.go.jp で401エラー")
+            else:
+                logger.error(f"[URL] ❌ 不明なホストで401エラー: {url_str}")
+        
         # URL変更時にHTMLを保存＆URLリスト記録
         self.parent.log_webview_html(url)
         
@@ -283,15 +308,15 @@ class EventHandler:
             if '/rde/datasets' in url.toString():
                 # v1.18.4: 初回到達時のみ処理実行（Material URL遷移後の戻り時に再実行を防ぐ）
                 if not hasattr(self.parent.login_manager, '_initial_datasets_reached'):
-                    logger.info('[LOGIN] RDEデータセットページに到達 - Cookieとトークンを保存します')
+                    logger.info('[LOGIN] ✅ RDEデータセットページに到達 - Cookieとトークンを保存します')
                     self.parent.show_overlay()
                     
                     # 初回到達フラグを設定
                     self.parent.login_manager._initial_datasets_reached = True
                     
-                    # v1.18.3: トークン取得を確実に実行
-                    logger.info('[TOKEN] Bearerトークン自動取得を開始')
-                    self.parent.login_manager.try_get_bearer_token()  # rde.nims.go.jpのトークン取得
+                    # v1.20.3: PySide6対応 - sessionStorage設定待機のため3秒遅延
+                    logger.info('[TOKEN] Bearerトークン自動取得を開始（3秒後）')
+                    self.parent.login_manager.try_get_bearer_token(initial_delay=3000)  # rde.nims.go.jpのトークン取得
                     
                     # Cookie保存とフォーム表示
                     QTimer.singleShot(1000, self.parent.save_cookies_and_show_grant_form)

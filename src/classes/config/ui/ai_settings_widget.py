@@ -16,21 +16,21 @@ import logging
 from typing import Dict, Any, List, Optional
 
 try:
-    from PyQt5.QtWidgets import (
+    from qt_compat.widgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
         QLabel, QPushButton, QLineEdit, QComboBox, QCheckBox,
         QGroupBox, QGridLayout, QScrollArea, QTextEdit,
         QSpinBox, QDoubleSpinBox, QMessageBox, QFormLayout,
         QProgressBar, QSplitter
     )
-    from PyQt5.QtCore import Qt, pyqtSignal, QThread
-    from PyQt5.QtGui import QFont
+    from qt_compat.core import Qt, Signal, QThread
+    from qt_compat.gui import QFont
     PYQT5_AVAILABLE = True
 except ImportError:
     PYQT5_AVAILABLE = False
     # ダミークラス定義
     class QWidget: pass
-    class pyqtSignal: pass
+    class Signal: pass
 
 # ログ設定
 logger = logging.getLogger(__name__)
@@ -46,7 +46,7 @@ class AISettingsWidget(QWidget):
     """AI設定ウィジェット"""
     
     # シグナル定義
-    settings_changed = pyqtSignal()
+    settings_changed = Signal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -914,7 +914,7 @@ class AISettingsWidget(QWidget):
         if "✅" in title:
             # 成功の場合は応答部分まで自動スクロール
             cursor = self.test_result_area.textCursor()
-            cursor.movePosition(cursor.Start)
+            cursor.movePosition(cursor.MoveOperation.Start)  # PySide6: MoveOperation列挙型
             if "🤖 AI応答:" in content:
                 # AI応答部分を探してスクロール
                 ai_response_pos = content.find("🤖 AI応答:")
@@ -924,7 +924,7 @@ class AISettingsWidget(QWidget):
         else:
             # エラーの場合は先頭に戻る
             cursor = self.test_result_area.textCursor()
-            cursor.movePosition(cursor.Start)
+            cursor.movePosition(cursor.MoveOperation.Start)  # PySide6: MoveOperation列挙型
             self.test_result_area.setTextCursor(cursor)
 
 

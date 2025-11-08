@@ -2,11 +2,11 @@
 AI テスト機能のダイアログクラス - ARIM RDE Tool v1.17.2
 ui_ai_test.py から分離したダイアログ専用モジュール
 """
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit,
     QDialogButtonBox, QMessageBox
 )
-from PyQt5.QtCore import Qt
+from qt_compat.core import Qt
 import os
 
 

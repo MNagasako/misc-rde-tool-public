@@ -15,17 +15,19 @@ from typing import Dict, Any, Optional
 
 try:
     # WebEngine初期化問題の回避
-    from PyQt5.QtCore import QCoreApplication, Qt
-    if not QCoreApplication.testAttribute(Qt.AA_ShareOpenGLContexts):
-        QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+    from qt_compat import initialize_webengine
+    from qt_compat.core import Qt
+
+    # WebEngine初期化
+    initialize_webengine()
     
-    from PyQt5.QtWidgets import (
+    from qt_compat.widgets import (
         QDialog, QVBoxLayout, QHBoxLayout, QTabWidget,
         QLabel, QPushButton, QMessageBox, QWidget,
         QScrollArea, QGroupBox, QGridLayout, QApplication
     )
-    from PyQt5.QtCore import Qt, QTimer
-    from PyQt5.QtGui import QFont
+    from qt_compat.core import Qt, QTimer
+    from qt_compat.gui import QFont
     PYQT5_AVAILABLE = True
 except ImportError:
     PYQT5_AVAILABLE = False
@@ -53,8 +55,9 @@ class SettingsDialog(QDialog):
         
         # 画面サイズの90%に設定
         if PYQT5_AVAILABLE:
-            desktop = QApplication.desktop()
-            screen_rect = desktop.screenGeometry()
+            # PySide6対応
+            from qt_compat import get_screen_geometry
+            screen_rect = get_screen_geometry(self)
             width = int(screen_rect.width() * 0.9)
             height = int(screen_rect.height() * 0.9)
             self.resize(width, height)
@@ -452,13 +455,13 @@ def run_settings_logic(parent=None, bearer_token=None):
             return
             
         dialog = SettingsDialog(parent, bearer_token)
-        dialog.exec_()
+        dialog.exec()
         
     except Exception as e:
         logger.error(f"設定ダイアログエラー: {e}")
         if parent:
             try:
-                from PyQt5.QtWidgets import QMessageBox
+                from qt_compat.widgets import QMessageBox
                 QMessageBox.warning(parent, "エラー", f"設定ダイアログの起動に失敗しました: {e}")
             except:
                 print(f"設定ダイアログエラー: {e}")

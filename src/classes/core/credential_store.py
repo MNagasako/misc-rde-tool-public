@@ -342,7 +342,7 @@ class KeyringCredentialStore(BaseCredentialStore):
         
         # 方法3: 現在のアプリケーションフォームから取得
         try:
-            from PyQt5.QtWidgets import QApplication
+            from qt_compat.widgets import QApplication
             app = QApplication.instance()
             if app:
                 # アクティブウィンドウから自動ログインタブを検索

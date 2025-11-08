@@ -6,12 +6,12 @@
 
 import logging
 from typing import Dict, Any, Optional
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QComboBox, QTextEdit, QPushButton,
     QGroupBox, QMessageBox, QProgressDialog, QApplication, QScrollArea, QWidget, QCheckBox, QRadioButton, QButtonGroup
 )
-from PyQt5.QtCore import Qt
+from qt_compat.core import Qt
 
 from classes.managers.log_manager import get_logger
 

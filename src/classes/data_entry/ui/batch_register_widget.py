@@ -9,7 +9,7 @@ import json
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, 
     QLineEdit, QTextEdit, QComboBox, QCheckBox, QTreeWidget, QTreeWidgetItem,
     QGroupBox, QScrollArea, QSplitter, QTabWidget, QProgressBar, QTableWidget,
@@ -17,8 +17,8 @@ from PyQt5.QtWidgets import (
     QFileDialog, QMessageBox, QMenu, QAction, QApplication, QFrame, QSizePolicy,
     QInputDialog, QRadioButton, QButtonGroup
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QTimer, QThread
-from PyQt5.QtGui import QFont, QIcon, QPixmap, QPainter, QColor, QBrush
+from qt_compat.core import Qt, Signal, QTimer, QThread
+from qt_compat.gui import QFont, QIcon, QPixmap, QPainter, QColor, QBrush
 
 from ..core.file_set_manager import (
     FileSetManager, FileSet, FileItem, FileType, PathOrganizeMethod, FileItemType
@@ -36,8 +36,8 @@ from classes.data_entry.conf.ui_constants import (
 class FileTreeWidget(QTreeWidget):
     """ファイルツリー表示ウィジェット"""
     
-    # シグナル定義
-    items_selected = pyqtSignal(list)  # 選択されたアイテム
+    # シグナル定義（PySide6: list→objectに変更）
+    items_selected = Signal(object)  # 選択されたアイテム
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -190,7 +190,7 @@ class FileTreeWidget(QTreeWidget):
         # 展開
         self.expandAll()
     
-    def _create_item_type_widget(self, file_item: FileItem, tree_item: QTreeWidgetItem) -> QWidget:
+    def _create_item_type_widget(self, file_item: FileItem, tree_item: QTreeWidgetItem) -> "":
         """ファイル種類選択ウィジェットを作成"""
         widget = QWidget()
         widget.setMinimumWidth(120)  # 最小幅を設定
@@ -829,8 +829,8 @@ class FileSetTableWidget(QTableWidget):
     """ファイルセット一覧表示ウィジェット"""
     
     # シグナル定義
-    fileset_selected = pyqtSignal(object)  # FileSet
-    fileset_deleted = pyqtSignal(int)      # ファイルセットID
+    fileset_selected = Signal(object)  # FileSet
+    fileset_deleted = Signal(int)      # ファイルセットID
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -1144,7 +1144,7 @@ class FileSetTableWidget(QTableWidget):
                 parent=self,
                 bearer_token=None  # v1.18.4: 自動選択に変更
             )
-            dialog.exec_()
+            dialog.exec()
             
         except Exception as e:
             print(f"[ERROR] register_single_fileset エラー: {e}")
@@ -1357,7 +1357,7 @@ class FileSetTableWidget(QTableWidget):
             zip_btn = msgbox.addButton("ZIPファイルとして書き出し", QMessageBox.ActionRole)
             cancel_btn = msgbox.addButton("キャンセル", QMessageBox.RejectRole)
             
-            msgbox.exec_()
+            msgbox.exec()
             clicked_button = msgbox.clickedButton()
             
             if clicked_button == cancel_btn:
@@ -1468,7 +1468,7 @@ class FileSetTableWidget(QTableWidget):
         
         layout.addLayout(button_layout)
         dialog.setLayout(layout)
-        dialog.exec_()
+        dialog.exec()
     
     def _apply_fileset_changes(self, dialog, file_set, file_tree):
         """ファイルセットへの変更を適用（重複チェック付き・種類変更・ZIP設定対応）"""
@@ -1867,7 +1867,7 @@ class BatchRegisterWidget(QWidget):
         
         self.setLayout(main_layout)
     
-    def create_file_operations_area(self) -> QWidget:
+    def create_file_operations_area(self) -> "":
         """ファイル操作エリア作成"""
         widget = QWidget()
         layout = QVBoxLayout()
@@ -1995,7 +1995,7 @@ class BatchRegisterWidget(QWidget):
         widget.setLayout(layout)
         return widget
     
-    def create_fileset_management_area(self) -> QWidget:
+    def create_fileset_management_area(self) -> "":
         """ファイルセット管理エリア作成"""
         widget = QWidget()
         layout = QVBoxLayout()
@@ -2252,7 +2252,7 @@ class BatchRegisterWidget(QWidget):
         widget.setLayout(layout)
         return widget
     
-    def create_execution_area(self) -> QWidget:
+    def create_execution_area(self) -> "":
         """登録実行ペイン作成"""
         # グループボックスでレジェンドを追加
         widget = QGroupBox("登録実行")
@@ -3270,11 +3270,11 @@ class BatchRegisterWidget(QWidget):
                     # チェック済みの場合は追加
                     if is_checked:
                         checked_items.append(file_item)
-                        print(f"[DEBUG] {indent}✓ チェック済みアイテム追加: {file_item.name} ({file_item.file_type.name}) - Path: {file_item.relative_path}")
+                        print(f"[DEBUG] {indent}[OK] チェック済みアイテム追加: {file_item.name} ({file_item.file_type.name}) - Path: {file_item.relative_path}")
                     else:
-                        print(f"[DEBUG] {indent}✗ チェックなしアイテム除外: {file_item.name} ({file_item.file_type.name})")
+                        print(f"[DEBUG] {indent}[X] チェックなしアイテム除外: {file_item.name} ({file_item.file_type.name})")
                 else:
-                    print(f"[DEBUG] {indent}⚠ FileItemが見つからない: tree_item_id={id(child)}")
+                    print(f"[DEBUG] {indent}[WARN] FileItemが見つからない: tree_item_id={id(child)}")
                 
                 # 子アイテムも再帰的に処理
                 collect_checked_items(child, depth + 1)
@@ -3577,7 +3577,7 @@ class BatchRegisterWidget(QWidget):
             
             # データツリー選択ダイアログ
             dialog = DataTreeDialog(file_items, self)
-            if dialog.exec_() == QDialog.Accepted:
+            if dialog.exec() == QDialog.Accepted:
                 selected_items = dialog.get_selected_items()
                 if selected_items:
                     # ファイルセット名入力
@@ -4096,7 +4096,7 @@ class BatchRegisterWidget(QWidget):
             from classes.data_entry.ui.batch_preview_dialog import BatchRegisterPreviewDialog
             
             dialog = BatchRegisterPreviewDialog(self.file_set_manager.file_sets, self, bearer_token=None)
-            result = dialog.exec_()
+            result = dialog.exec()
             
             if result == QDialog.Accepted:
                 # プレビューで検証済みのファイルセットを取得
@@ -5232,7 +5232,7 @@ class BatchRegisterWidget(QWidget):
     def _create_empty_schema_form(self):
         """空のインボイススキーマフォームを作成（参照確保用）"""
         try:
-            from PyQt5.QtWidgets import QGroupBox, QVBoxLayout, QLabel
+            from qt_compat.widgets import QGroupBox, QVBoxLayout, QLabel
             
             # 空のグループボックスを作成（親ウィジェットをスクロール領域に設定）
             empty_form = QGroupBox("固有情報", self.scroll_widget)
@@ -5450,7 +5450,7 @@ class BatchRegisterWidget(QWidget):
 
 
 # QInputDialogのインポートを追加
-from PyQt5.QtWidgets import QInputDialog
+from qt_compat.widgets import QInputDialog
 
 
 class FilesetConfigDialog(QDialog):
@@ -6182,7 +6182,7 @@ def auto_apply_settings_to_selected(self):
         """データツリー選択ダイアログを表示"""
         try:
             dialog = DataTreeDialog(fileset.items, self)
-            if dialog.exec_() == QDialog.Accepted:
+            if dialog.exec() == QDialog.Accepted:
                 # 選択されたファイルでファイルセットを更新
                 selected_files = dialog.get_selected_files()
                 if selected_files:
@@ -6260,3 +6260,4 @@ def auto_apply_settings_to_selected(self):
 BatchRegisterWidget._prepare_temp_folders = _prepare_temp_folders
 BatchRegisterWidget.cleanup_temp_folders_on_init = cleanup_temp_folders_on_init
 BatchRegisterWidget.auto_apply_settings_to_selected = auto_apply_settings_to_selected
+

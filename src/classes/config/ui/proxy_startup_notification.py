@@ -12,9 +12,9 @@ import os
 
 # パス設定
 try:
-    from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox
-    from PyQt5.QtCore import Qt, QTimer
-    from PyQt5.QtGui import QIcon, QFont
+    from qt_compat.widgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox
+    from qt_compat.core import Qt, QTimer
+    from qt_compat.gui import QIcon, QFont
     PYQT5_AVAILABLE = True
 except ImportError:
     PYQT5_AVAILABLE = False
@@ -196,7 +196,7 @@ class ProxyStartupNotificationDialog(QDialog):
                 # 移行済みクラスを使用
                 from classes.config.ui.proxy_settings_widget import ProxySettingsWidget
                 proxy_widget = ProxySettingsWidget(self.parent())
-                proxy_widget.exec_()
+                proxy_widget.exec()
             else:
                 # スタンドアロンでproxy_config_tool.pyを実行
                 import subprocess
@@ -267,11 +267,11 @@ def show_proxy_startup_notification(proxy_config, parent=None):
         return
         
     dialog = ProxyStartupNotificationDialog(proxy_config, parent)
-    dialog.exec_()
+    dialog.exec()
 
 if __name__ == "__main__":
     if PYQT5_AVAILABLE:
-        from PyQt5.QtWidgets import QApplication
+        from qt_compat.widgets import QApplication
         
         app = QApplication(sys.argv)
         
@@ -289,6 +289,6 @@ if __name__ == "__main__":
         
         show_proxy_startup_notification(test_config)
         
-        sys.exit(app.exec_())
+        sys.exit(app.exec())
     else:
         print("PyQt5が利用できません")

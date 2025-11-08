@@ -7,20 +7,20 @@
 
 import json
 import os
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QLabel, 
     QListWidget, QListWidgetItem, QTextEdit, QGroupBox, QCheckBox,
     QMessageBox, QScrollArea, QWidget, QSplitter
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from qt_compat.core import Qt, Signal
+from qt_compat.gui import QFont
 
 
 class TaxonomyBuilderDialog(QDialog):
     """タクソノミーキー構築ダイアログ"""
     
     # タクソノミーキーが変更されたときのシグナル
-    taxonomy_changed = pyqtSignal(str)
+    taxonomy_changed = Signal(str)
     
     def __init__(self, parent=None, current_taxonomy="", dataset_template_id=""):
         super().__init__(parent)

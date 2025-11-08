@@ -3,8 +3,8 @@
 フォームバリデーション、ユーザーロールバリデーション、入力チェックを集約
 """
 import re
-from PyQt5.QtWidgets import QMessageBox
-from PyQt5.QtGui import QColor
+from qt_compat.widgets import QMessageBox
+from qt_compat.gui import QColor
 
 
 class SubjectInputValidator:

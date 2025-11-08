@@ -4,12 +4,12 @@
 データ登録機能のUI構築を担当します。
 """
 
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QWidget, QVBoxLayout, QLabel, QLineEdit, QHBoxLayout, QTextEdit, QGroupBox, QComboBox, QSizePolicy, QMessageBox
 )
 from classes.data_entry.conf.ui_constants import DATA_REGISTER_FORM_STYLE
-from PyQt5.QtGui import QFont
-from PyQt5.QtCore import QTimer, Qt
+from qt_compat.gui import QFont
+from qt_compat.core import QTimer, Qt
 import json
 import os
 from config.common import get_dynamic_file_path

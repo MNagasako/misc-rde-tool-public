@@ -10,8 +10,8 @@ invoiceSchemaからUIフォームを動的生成する機能
 """
 
 import json
-from PyQt5.QtWidgets import QGroupBox, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit
-from PyQt5.QtCore import Qt
+from qt_compat.widgets import QGroupBox, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit
+from qt_compat.core import Qt
 
 
 def create_schema_form(schema_path, parent=None):
@@ -41,7 +41,7 @@ def create_schema_form(schema_path, parent=None):
     group = QGroupBox(custom.get("label", {}).get("ja", "固有情報"), parent)
     
     # 独立ダイアログとして表示されることを防ぐ
-    from PyQt5.QtCore import Qt
+    from qt_compat.core import Qt
     group.setWindowFlags(Qt.Widget)  # 明示的にウィジェットフラグを設定
     group.setVisible(False)  # 初期状態では非表示に設定
     

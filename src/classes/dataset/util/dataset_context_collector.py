@@ -58,11 +58,11 @@ class DatasetContextCollector:
             # ファイルツリー情報を個別キーとしても設定（プロンプトテンプレート用）
             if 'file_info' in details and details['file_info']:
                 context['file_tree'] = details['file_info']
-                print(f"[DEBUG] ✅ file_tree をセット: {len(context['file_tree'])} 文字")
+                print(f"[DEBUG] [OK] file_tree をセット: {len(context['file_tree'])} 文字")
             else:
                 # file_infoが空の場合もメッセージを設定
                 context['file_tree'] = details.get('file_info', '（ファイルツリー情報の取得に失敗しました）')
-                print(f"[DEBUG] ⚠️  file_info が空またはFalsy - file_tree = '{context['file_tree'][:50]}...'")
+                print(f"[DEBUG] [WARN] file_info が空またはFalsy - file_tree = '{context['file_tree'][:50]}...'")
             
             print(f"[DEBUG] 最終的な context['file_tree'] の長さ: {len(context.get('file_tree', ''))} 文字")
         else:

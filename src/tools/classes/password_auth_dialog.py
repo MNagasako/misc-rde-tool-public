@@ -1,6 +1,6 @@
 
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QHBoxLayout, QLineEdit, QPushButton, QMessageBox
-from PyQt5.QtCore import Qt
+from qt_compat.widgets import QDialog, QVBoxLayout, QLabel, QHBoxLayout, QLineEdit, QPushButton, QMessageBox
+from qt_compat.core import Qt
 import os
 import json
 

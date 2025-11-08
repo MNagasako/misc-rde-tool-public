@@ -33,7 +33,7 @@ def run_settings_logic(parent=None, bearer_token=None):
         logger.error(f"設定UIのインポートに失敗: {e}")
         # フォールバック: エラーメッセージを表示
         try:
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             QMessageBox.warning(
                 parent, 
                 "設定エラー", 
@@ -46,7 +46,7 @@ def run_settings_logic(parent=None, bearer_token=None):
     except Exception as e:
         logger.error(f"設定ロジック実行エラー: {e}")
         try:
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             QMessageBox.critical(parent, "予期しないエラー", f"設定処理中にエラーが発生しました: {e}")
         except:
             print(f"[ERROR] 設定処理エラー: {e}")

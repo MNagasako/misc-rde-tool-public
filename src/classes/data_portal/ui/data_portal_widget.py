@@ -4,10 +4,10 @@
 ログイン設定タブとデータセットアップロードタブを統合したタブウィジェット
 """
 
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QWidget, QVBoxLayout, QTabWidget
 )
-from PyQt5.QtCore import pyqtSignal
+from qt_compat.core import Signal
 
 from classes.managers.log_manager import get_logger
 from .login_settings_tab import LoginSettingsTab
@@ -26,8 +26,8 @@ class DataPortalWidget(QWidget):
     """
     
     # シグナル定義
-    login_test_completed = pyqtSignal(bool, str)  # ログインテスト完了
-    upload_completed = pyqtSignal(bool, str)  # アップロード完了
+    login_test_completed = Signal(bool, str)  # ログインテスト完了
+    upload_completed = Signal(bool, str)  # アップロード完了
     
     def __init__(self, parent=None):
         """初期化"""

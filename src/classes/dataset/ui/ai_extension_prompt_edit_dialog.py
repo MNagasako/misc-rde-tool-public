@@ -4,19 +4,19 @@ AI拡張プロンプト編集ダイアログ
 """
 
 import os
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QTextEdit, QMessageBox, QTabWidget, QWidget, QGroupBox,
     QLineEdit, QFormLayout, QScrollArea, QListWidget, QListWidgetItem
 )
-from PyQt5.QtCore import Qt, pyqtSignal
+from qt_compat.core import Qt, Signal
 from classes.dataset.util.ai_extension_helper import load_prompt_file, save_prompt_file
 
 
 class AIExtensionPromptEditDialog(QDialog):
     """AI拡張プロンプト編集ダイアログ"""
     
-    prompt_updated = pyqtSignal(str)  # プロンプト更新シグナル
+    prompt_updated = Signal(str)  # プロンプト更新シグナル
     
     def __init__(self, parent=None, prompt_file_path="", button_config=None):
         super().__init__(parent)

@@ -2,7 +2,7 @@
 データセットタブウィジェット - QTabWidgetベース
 データセット開設、修正、データエントリー機能の統合UI
 """
-from PyQt5.QtWidgets import QWidget, QTabWidget, QVBoxLayout, QLabel
+from qt_compat.widgets import QWidget, QTabWidget, QVBoxLayout, QLabel
 from classes.dataset.ui.dataset_open_widget import create_dataset_open_widget
 from classes.dataset.ui.dataset_edit_widget import create_dataset_edit_widget
 from classes.dataset.ui.dataset_dataentry_widget_minimal import create_dataset_dataentry_widget

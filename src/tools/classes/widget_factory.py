@@ -1,5 +1,5 @@
-from PyQt5.QtWidgets import QLabel, QTextEdit, QPushButton, QHBoxLayout, QVBoxLayout
-from PyQt5.QtGui import QFont
+from qt_compat.widgets import QLabel, QTextEdit, QPushButton, QHBoxLayout, QVBoxLayout
+from qt_compat.gui import QFont
 
 def create_labeled_textedit(label_text, placeholder, max_height=100, font_size=None):
     label = QLabel(label_text)
@@ -35,7 +35,7 @@ def create_action_button(text, callback=None, color_style="default", font_size=N
 
 def create_labeled_lineedit(label_text, default_text="", font_size=None):
     label = QLabel(label_text)
-    from PyQt5.QtWidgets import QLineEdit
+    from qt_compat.widgets import QLineEdit
     lineedit = QLineEdit()
     lineedit.setText(default_text)
     if font_size:

@@ -7,14 +7,14 @@ import logging
 from typing import Optional
 
 try:
-    from PyQt5.QtWidgets import (
+    from qt_compat.widgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
         QLabel, QPushButton, QLineEdit, QApplication,
         QScrollArea, QGroupBox, QGridLayout, QComboBox,
         QTextEdit, QCheckBox
     )
-    from PyQt5.QtCore import Qt
-    from PyQt5.QtGui import QFont
+    from qt_compat.core import Qt
+    from qt_compat.gui import QFont
     PYQT5_AVAILABLE = True
 except ImportError:
     PYQT5_AVAILABLE = False
@@ -46,10 +46,9 @@ class AITabWidget(QTabWidget):
         
     def setup_responsive_layout(self):
         """レスポンシブレイアウト設定"""
-        # 画面サイズ取得
-        desktop = QApplication.desktop()
-        screen_rect = desktop.screenGeometry()
-        screen_width = screen_rect.width()
+        # 画面サイズ取得 - PySide6対応
+        from qt_compat import get_screen_size
+        screen_width, _ = get_screen_size(self)
         
         # レスポンシブ設定
         self.columns = self.get_optimal_layout_columns(screen_width)
@@ -57,8 +56,8 @@ class AITabWidget(QTabWidget):
     def get_optimal_layout_columns(self, width=None):
         """最適な段組数を取得"""
         if width is None:
-            desktop = QApplication.desktop()
-            width = desktop.screenGeometry().width()
+            from qt_compat import get_screen_size
+            width, _ = get_screen_size(self)
             
         if width < 1024:
             return 1  # 1段組（スクロール表示）

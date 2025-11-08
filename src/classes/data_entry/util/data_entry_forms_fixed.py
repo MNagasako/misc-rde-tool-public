@@ -5,11 +5,11 @@
 """
 
 try:
-    from PyQt5.QtWidgets import (
+    from qt_compat.widgets import (
         QFrame, QVBoxLayout, QHBoxLayout, QGroupBox, 
         QLabel, QLineEdit, QTextEdit, QComboBox, QPushButton
     )
-    from PyQt5.QtCore import Qt
+    from qt_compat.core import Qt
 except ImportError as e:
     print(f"[ERROR] PyQt5インポートエラー: {e}")
     # フォールバック用の空実装

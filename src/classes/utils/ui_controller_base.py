@@ -3,9 +3,9 @@
 機能別UIコントローラーを統合する基本クラス
 """
 
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
-from PyQt5.QtCore import QTimer, pyqtSignal, QObject
-from PyQt5.QtGui import QFont
+from qt_compat.widgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+from qt_compat.core import QTimer, Signal, QObject
+from qt_compat.gui import QFont
 import logging
 
 from classes.ui.dialogs.ui_dialogs import TextAreaExpandDialog, PopupDialog
@@ -15,8 +15,8 @@ class UIController(QObject):
     """統合UIコントローラー - 各機能UIの基本クラス"""
     
     # シグナル定義
-    webview_login_success = pyqtSignal()
-    dataset_selected = pyqtSignal(str)
+    webview_login_success = Signal()
+    dataset_selected = Signal(str)
     
     def __init__(self, main_window=None):
         super().__init__()
@@ -147,7 +147,7 @@ class UIController(QObject):
         """テキストエリア拡大表示"""
         try:
             dialog = TextAreaExpandDialog(title, content, self.main_window)
-            dialog.exec_()
+            dialog.exec()
         except Exception as e:
             self.logger.error(f"テキストエリア表示エラー: {e}")
             
@@ -171,7 +171,7 @@ class UIController(QObject):
             print(f"[DEBUG] 現在のウインドウサイズ: {window_size.width()}x{window_size.height()}")
             
             # スクリーンサイズとの比較
-            from PyQt5.QtWidgets import QApplication
+            from qt_compat.widgets import QApplication
             screen = QApplication.primaryScreen()
             if screen:
                 screen_size = screen.size()

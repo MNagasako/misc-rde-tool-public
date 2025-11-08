@@ -4,12 +4,12 @@
 長時間処理にプログレス表示を提供する共通クラス
 """
 import time
-from PyQt5.QtCore import QObject, pyqtSignal
+from qt_compat.core import QObject, Signal
 
 class ProgressWorker(QObject):
     """プログレス表示付きの処理を実行するワーカー"""
-    progress = pyqtSignal(int, str)  # (進捗率, メッセージ)
-    finished = pyqtSignal(bool, str)  # (成功/失敗, 結果メッセージ)
+    progress = Signal(int, str)  # (進捗率, メッセージ)
+    finished = Signal(bool, str)  # (成功/失敗, 結果メッセージ)
     
     def __init__(self, task_func, task_args=None, task_kwargs=None, task_name="処理"):
         super().__init__()
@@ -56,8 +56,8 @@ class ProgressWorker(QObject):
 
 class SimpleProgressWorker(QObject):
     """シンプルなプログレス表示ワーカー（プログレスコールバック不要な処理用）"""
-    progress = pyqtSignal(int, str)
-    finished = pyqtSignal(bool, str)
+    progress = Signal(int, str)
+    finished = Signal(bool, str)
     
     def __init__(self, task_func, task_args=None, task_kwargs=None, task_name="処理"):
         super().__init__()

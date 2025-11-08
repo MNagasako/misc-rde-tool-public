@@ -10,15 +10,15 @@ import os
 import json
 
 from datetime import datetime
-from typing import Dict, Any, Optional
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+from typing import Dict, Any, Optional, TYPE_CHECKING
+from qt_compat.widgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QLabel, QLineEdit, QPushButton, 
                              QTextEdit, QComboBox, QGroupBox, QTabWidget,
                              QTableWidget, QTableWidgetItem, QHeaderView,
                              QMessageBox, QFileDialog, QCheckBox, QSpinBox,
                              QDialog, QDialogButtonBox)
-from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QFont, QTextCursor
+from qt_compat.core import Qt, QTimer
+from qt_compat.gui import QFont, QTextCursor
 
 # パス設定（上記で一元化）
 
@@ -75,7 +75,7 @@ class RDEDatasetCreationGUI(QMainWindow):
     
     def setup_dynamic_sizing(self):
         """画面解像度に応じて動的にサイズとフォントを調整"""
-        from PyQt5.QtWidgets import QApplication
+        from qt_compat.widgets import QApplication
         
         # 画面サイズを取得
         screen = QApplication.primaryScreen()
@@ -164,9 +164,9 @@ class RDEDatasetCreationGUI(QMainWindow):
         self.statusBar().showMessage("Ready")
     
 
-    def create_request_tab(self) -> QWidget:
+    def create_request_tab(self) -> "QWidget":
         """リクエスト送信タブ作成（左右分割・独立スクロール対応）"""
-        from PyQt5.QtWidgets import QScrollArea, QSizePolicy, QGridLayout, QSplitter
+        from qt_compat.widgets import QScrollArea, QSizePolicy, QGridLayout, QSplitter
 
         # スプリッターで左右分割
         splitter = QSplitter()
@@ -230,13 +230,13 @@ class RDEDatasetCreationGUI(QMainWindow):
         left_layout.addLayout(url_row)
 
         # プリセットボタン群（種類ごとにグルーピング）
-        from PyQt5.QtWidgets import QGroupBox
+        from qt_compat.widgets import QGroupBox
         # ボタン共通サイズ・スタイル
         button_width = 130
         button_height = 32
         button_style = "padding:2px 8px; margin:2px; min-width:{}px; min-height:{}px; max-width:{}px; max-height:{}px;".format(button_width, button_height, button_width, button_height)
 
-        from PyQt5.QtWidgets import QGridLayout
+        from qt_compat.widgets import QGridLayout
 
         # ユーザー系
         user_group = QGroupBox("ユーザーAPI")
@@ -451,7 +451,7 @@ class RDEDatasetCreationGUI(QMainWindow):
             if hasattr(self, 'current_response_data'):
                 formatted_content = self.format_response_for_display(self.current_response_data)
                 
-                from PyQt5.QtWidgets import QApplication
+                from qt_compat.widgets import QApplication
                 clipboard = QApplication.clipboard()
                 clipboard.setText(formatted_content)
                 
@@ -528,7 +528,7 @@ class RDEDatasetCreationGUI(QMainWindow):
         return ResponseFormatter.format_response_for_display(result)
     
     
-    def create_dummy_tab(self) -> QWidget:
+    def create_dummy_tab(self) -> "QWidget":
         """ダミー操作選択タブ作成（widget_factory利用版）"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -603,7 +603,7 @@ class RDEDatasetCreationGUI(QMainWindow):
 
         return widget
     
-    def create_history_tab(self) -> QWidget:
+    def create_history_tab(self) -> "QWidget":
         """履歴・ログタブ作成"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -680,8 +680,8 @@ class RDEDatasetCreationGUI(QMainWindow):
     def load_cookies_from_webview(self):
         """親WebViewからCookie情報を取得してHTTPクライアントに設定"""
         try:
-            from PyQt5.QtWebEngineWidgets import QWebEngineProfile
-            from PyQt5.QtWebEngineCore import QWebEngineCookieStore
+            from qt_compat.webengine import QWebEngineProfile
+            from qt_compat.webengine import QWebEngineCookieStore
             from net import http as requests  # プロキシ対応HTTP wrapper
             
             # WebViewのProfileからCookieStoreを取得
@@ -1093,7 +1093,7 @@ class RDEDatasetCreationGUI(QMainWindow):
                 
                 if current_domain == target_domain:
                     # 同じドメインなら直接移動
-                    from PyQt5.QtCore import QUrl
+                    from qt_compat.core import QUrl
                     self.parent_webview.setUrl(QUrl(target_url))
                     self.log_message(f"WebView移動: {target_url}")
                 elif current_is_rde and target_is_rde:
@@ -1309,7 +1309,7 @@ class RDEDatasetCreationGUI(QMainWindow):
         
         # 最下部にスクロール
         cursor = self.log_display.textCursor()
-        cursor.movePosition(QTextCursor.End)
+        cursor.movePosition(cursor.MoveOperation.End)  # PySide6: MoveOperation列挙型
         self.log_display.setTextCursor(cursor)
     
     def clear_request_form(self):
@@ -1340,7 +1340,7 @@ class RDEDatasetCreationGUI(QMainWindow):
                 from classes.log_saver import LogSaver
             LogSaver.save_log(self, self.request_history, OUTPUT_LOG_DIR, self.log_message)
         except Exception as e:
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             QMessageBox.critical(self, "保存エラー", f"ログ保存エラー: {e}")
             self.log_message(f"ログ保存エラー: {e}")
     
@@ -1899,12 +1899,12 @@ def main():
     auth_dialog = PasswordAuthDialog()
     auth_dialog.load_password_config()  # 設定ファイルからパスワード読み込み
     
-    if auth_dialog.exec_() == QDialog.Accepted:
+    if auth_dialog.exec() == QDialog.Accepted:
         # 認証成功時のみメインウィンドウを表示
         window = RDEDatasetCreationGUI()
         window.show()
         
-        sys.exit(app.exec_())
+        sys.exit(app.exec())
     else:
         # 認証失敗またはキャンセル時は終了
         sys.exit(0)
@@ -1921,7 +1921,7 @@ def create_authenticated_gui(parent_webview=None, parent_controller=None):
     auth_dialog = PasswordAuthDialog()
     auth_dialog.load_password_config()
     
-    if auth_dialog.exec_() == QDialog.Accepted:
+    if auth_dialog.exec() == QDialog.Accepted:
         # 認証成功時のみメインウィンドウを作成・表示
         window = RDEDatasetCreationGUI(parent_webview, parent_controller)
         window.show()

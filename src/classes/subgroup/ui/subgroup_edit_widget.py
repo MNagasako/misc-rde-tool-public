@@ -5,13 +5,13 @@
 
 import os
 import json
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGridLayout, 
     QPushButton, QMessageBox, QScrollArea, QCheckBox, QRadioButton, 
     QButtonGroup, QDialog, QTextEdit, QComboBox, QCompleter
 )
 from config.common import SUBGROUP_JSON_PATH
-from PyQt5.QtCore import Qt
+from qt_compat.core import Qt
 from ...dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
 from ..util.subgroup_ui_helpers import (
     SubjectInputValidator, SubgroupFormBuilder, 
@@ -108,7 +108,7 @@ class SubgroupEditHandler(SubgroupCreateHandler):
                 
                 # 成功時にsubGroup.jsonを自動再取得
                 try:
-                    from PyQt5.QtCore import QTimer
+                    from qt_compat.core import QTimer
                     def auto_refresh():
                         try:
                             from classes.basic.core.basic_info_logic import auto_refresh_subgroup_json
@@ -130,7 +130,7 @@ class SubgroupEditHandler(SubgroupCreateHandler):
                                 from classes.dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
                                 subgroup_notifier = get_subgroup_refresh_notifier()
                                 # 更新完了後に少し遅延して通知
-                                from PyQt5.QtCore import QTimer
+                                from qt_compat.core import QTimer
                                 def send_notification():
                                     try:
                                         subgroup_notifier.notify_refresh()
@@ -243,7 +243,7 @@ class EditMemberManager:
         # Bearer tokenが取得できていない場合、後で再実行を試行
         if not bearer_token:
             print("[DEBUG] Bearer token未取得のため、後で再実行を予約")
-            from PyQt5.QtCore import QTimer
+            from qt_compat.core import QTimer
             import weakref
             
             # 弱参照で安全にオブジェクトを保持
@@ -654,7 +654,7 @@ def _create_member_section(layout):
     scroll.setMaximumWidth(800)  # 余分な余白を削除
     
     # 画面サイズを取得してスクロールエリアの高さを動的に設定
-    from PyQt5.QtWidgets import QApplication
+    from qt_compat.widgets import QApplication
     screen = QApplication.primaryScreen().geometry()
     max_scroll_height = int(screen.height() * 0.70)  # 画面の35%まで
     
@@ -879,7 +879,7 @@ def _execute_update(edit_handler, form_values, roles):
     # 確認ダイアログ
     payload_str = json.dumps(payload, ensure_ascii=False, indent=2)
     msg_box, yes_btn = edit_handler.create_update_confirmation_dialog(payload, payload_str)
-    reply = msg_box.exec_()
+    reply = msg_box.exec()
     
     if msg_box.clickedButton() != yes_btn:
         return

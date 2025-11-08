@@ -7,8 +7,8 @@ WebView管理・URL変更・ページナビゲーション・JavaScript実行機
 
 import os
 import logging
-from PyQt5.QtCore import QTimer, QUrl
-from PyQt5.QtWebEngineWidgets import QWebEngineView
+from qt_compat.core import QTimer, QUrl
+from qt_compat.webengine import QWebEngineView
 from config.common import get_dynamic_file_path
 from config.site_rde import URLS
 from functions.common_funcs import load_js_template
@@ -27,7 +27,7 @@ class BrowserController:
             parent_widget: 親ウィジェット（Browserクラスのインスタンス）
         """
         self.parent = parent_widget
-        self.logger = logging.getLogger("BrowserController")
+        self.logger = logging.getLogger("RDE_WebView")  # メインロガーに統一
         
         # ブラウザ関連の状態変数
         self._webview_fixed_width = 900
@@ -49,8 +49,8 @@ class BrowserController:
         # URL読み込み
         webview.load(QUrl(URLS["web"]["base"]))
         
-        # イベント接続
-        webview.loadFinished.connect(self.on_load_finished)
+        # PySide6対応: loadFinishedはpage()経由で接続
+        webview.page().loadFinished.connect(self.on_load_finished)
         webview.urlChanged.connect(self.on_url_changed)
         
         self.logger.info("WebView設定完了")
@@ -63,8 +63,14 @@ class BrowserController:
         Args:
             ok: ロード成功フラグ
         """
+        # v1.20.3: ページロード完了時のURL詳細ログ
+        current_url = self.parent.webview.url().toString()
+        
         if ok:
-            self.logger.info("ページのロードが完了しました。Cookieを取得します。")
+            self.logger.info(f"[LOAD] ✅ ページロード完了: {current_url}")
+            
+            # v1.20.3: エラーページ検出
+            self._check_error_page(current_url)
             
             # Cookie取得
             self.parent.webview.page().profile().cookieStore().loadAllCookies()
@@ -82,7 +88,34 @@ class BrowserController:
             if self.parent.auto_close:
                 QTimer.singleShot(1000, self.parent.close)
         else:
-            self.logger.warning("ページのロードに失敗しました。")
+            self.logger.warning(f"[LOAD] ❌ ページロード失敗: {current_url}")
+            # v1.20.3: ロード失敗でもリダイレクト処理を継続
+            # PySide6ではフォーム送信後のリダイレクトで一時的にロード失敗になる可能性がある
+            self.logger.info(f"[LOAD] リダイレクト処理中の可能性 - 継続監視")
+    
+    def _check_error_page(self, url):
+        """エラーページを検出"""
+        js_code = load_js_template('check_error_page.js')
+        
+        def handle_error_check(result):
+            if result and isinstance(result, dict):
+                if result.get('is401'):
+                    # ホスト判定
+                    if 'rde-material.nims.go.jp' in url:
+                        self.logger.error(f"[ERROR] ❌ rde-material.nims.go.jp で401エラー検出")
+                    elif 'rde.nims.go.jp' in url:
+                        self.logger.error(f"[ERROR] ❌ rde.nims.go.jp で401エラー検出")
+                    else:
+                        self.logger.error(f"[ERROR] ❌ 401エラー検出: {url}")
+                    
+                    self.logger.error(f"[ERROR] タイトル: {result.get('title', 'N/A')}")
+                    self.logger.error(f"[ERROR] 本文: {result.get('bodyPreview', 'N/A')}")
+                
+                elif result.get('isError'):
+                    self.logger.warning(f"[ERROR] ⚠️ エラーページ検出: {url}")
+                    self.logger.warning(f"[ERROR] タイトル: {result.get('title', 'N/A')}")
+        
+        self.parent.webview.page().runJavaScript(js_code, handle_error_check)
     
     @debug_log
     def on_url_changed(self, url):

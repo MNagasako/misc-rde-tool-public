@@ -12,12 +12,12 @@ import logging
 from typing import Optional
 
 try:
-    from PyQt5.QtWidgets import (
+    from qt_compat.widgets import (
         QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
         QLabel, QPushButton, QApplication
     )
-    from PyQt5.QtCore import Qt
-    from PyQt5.QtGui import QFont
+    from qt_compat.core import Qt
+    from qt_compat.gui import QFont
     PYQT5_AVAILABLE = True
 except ImportError:
     PYQT5_AVAILABLE = False
@@ -184,7 +184,7 @@ class MainWindowTabIntegrator:
         except Exception as e:
             logger.error(f"設定ダイアログ起動エラー: {e}")
             try:
-                from PyQt5.QtWidgets import QMessageBox
+                from qt_compat.widgets import QMessageBox
                 QMessageBox.warning(self.parent, "エラー", f"設定ダイアログの起動に失敗しました: {e}")
             except:
                 print(f"設定ダイアログエラー: {e}")
@@ -219,9 +219,9 @@ class MainWindowTabIntegrator:
             if self.parent:
                 width = self.parent.width()
             else:
-                desktop = QApplication.desktop()
-                screen_rect = desktop.screenGeometry()
-                width = screen_rect.width()
+                # PySide6対応
+                from qt_compat import get_screen_size
+                width, _ = get_screen_size()
             
             # 利用可能な幅からメニュー部分を除く
             available_width = width - 160  # メニュー幅 + マージン

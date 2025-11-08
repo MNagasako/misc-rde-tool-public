@@ -3,8 +3,8 @@
 HTTP通信、認証、ペイロード構築を統一管理
 """
 import json
-from PyQt5.QtWidgets import QMessageBox
-from PyQt5.QtCore import QTimer
+from qt_compat.widgets import QMessageBox
+from qt_compat.core import QTimer
 from core.bearer_token_manager import BearerTokenManager
 
 
@@ -193,7 +193,7 @@ class SubgroupApiClient:
                         from classes.dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
                         subgroup_notifier = get_subgroup_refresh_notifier()
                         # 更新完了後に少し遅延して通知
-                        from PyQt5.QtCore import QTimer
+                        from qt_compat.core import QTimer
                         def send_notification():
                             try:
                                 subgroup_notifier.notify_refresh()

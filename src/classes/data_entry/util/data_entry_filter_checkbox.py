@@ -9,12 +9,12 @@ import time
 import hashlib
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, 
     QCheckBox, QCompleter, QMessageBox
 )
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QFont
+from qt_compat.core import Qt
+from qt_compat.gui import QFont
 
 # 親ディレクトリのsrcをPythonパスに追加
 current_dir = Path(__file__).parent

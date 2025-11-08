@@ -1,7 +1,7 @@
 import os
 import json
 from datetime import datetime
-from PyQt5.QtWidgets import QFileDialog, QMessageBox
+from qt_compat.widgets import QFileDialog, QMessageBox
 
 class LogSaver:
     @staticmethod

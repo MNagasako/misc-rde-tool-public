@@ -9,21 +9,21 @@ TAGビルダーダイアログ
 
 import json
 import os
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QLabel, 
     QListWidget, QListWidgetItem, QTextEdit, QGroupBox, QCheckBox,
     QMessageBox, QScrollArea, QWidget, QSplitter, QLineEdit, QTreeWidget,
     QTreeWidgetItem, QTabWidget, QComboBox
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from qt_compat.core import Qt, Signal
+from qt_compat.gui import QFont
 
 
 class TagBuilderDialog(QDialog):
     """TAGビルダーダイアログ"""
     
     # TAGが変更されたときのシグナル
-    tags_changed = pyqtSignal(str)
+    tags_changed = Signal(str)
     
     def __init__(self, parent=None, current_tags=""):
         super().__init__(parent)
@@ -487,7 +487,7 @@ class TagBuilderDialog(QDialog):
 def test_tag_builder():
     """TAGビルダーのテスト用関数"""
     import sys
-    from PyQt5.QtWidgets import QApplication
+    from qt_compat.widgets import QApplication
     
     app = QApplication(sys.argv)
     
@@ -501,11 +501,11 @@ def test_tag_builder():
     
     dialog.tags_changed.connect(on_tags_changed)
     
-    if dialog.exec_() == QDialog.Accepted:
+    if dialog.exec() == QDialog.Accepted:
         result = dialog.get_tags_string()
         print(f"最終結果: {result}")
     
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

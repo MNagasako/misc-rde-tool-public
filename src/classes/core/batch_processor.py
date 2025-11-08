@@ -33,7 +33,7 @@ BatchProcessor: バッチ処理機能を管理するクラス - ARIM RDE Tool v1
 
 import os
 import logging
-from PyQt5.QtCore import QObject, pyqtSignal, QTimer, QDateTime
+from qt_compat.core import QObject, Signal, QTimer, QDateTime
 from config.common import INPUT_DIR
 from classes.utils.debug_log import debug_log
 
@@ -41,9 +41,9 @@ class BatchProcessor(QObject):
     """バッチ処理機能を管理するクラス"""
     
     # シグナル定義
-    batch_progress_updated = pyqtSignal(int, int)  # (current, total)
-    batch_completed = pyqtSignal(dict)  # results
-    batch_error = pyqtSignal(str)  # error_message
+    batch_progress_updated = Signal(int, int)  # (current, total)
+    batch_completed = Signal(object)  # results（PySide6: dict→object）
+    batch_error = Signal(str)  # error_message
     
     @debug_log
     def __init__(self, browser_instance):

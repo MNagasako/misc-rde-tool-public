@@ -4,12 +4,12 @@
 データポータルサイトへのログイン認証情報を管理するタブ
 """
 
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, 
     QLabel, QLineEdit, QPushButton, QComboBox,
     QFormLayout, QTextEdit, QMessageBox
 )
-from PyQt5.QtCore import Qt, pyqtSignal
+from qt_compat.core import Qt, Signal
 
 from classes.managers.log_manager import get_logger
 from ..core.auth_manager import get_auth_manager, PortalCredentials, AuthManager
@@ -31,8 +31,8 @@ class LoginSettingsTab(QWidget):
     """
     
     # シグナル定義
-    credentials_saved = pyqtSignal(str)  # 環境名
-    login_test_completed = pyqtSignal(bool, str)  # 成功フラグ, メッセージ
+    credentials_saved = Signal(str)  # 環境名
+    login_test_completed = Signal(bool, str)  # 成功フラグ, メッセージ
     
     def __init__(self, parent=None):
         """初期化"""

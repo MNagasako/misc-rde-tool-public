@@ -3,7 +3,7 @@ UIコントローラーデータ処理機能クラス - ARIM RDE Tool v1.13.1
 UIControllerのデータ処理UI機能・データ取得・データ登録・データセット管理を担当
 """
 import logging
-from PyQt5.QtWidgets import QMessageBox
+from qt_compat.widgets import QMessageBox
 
 class UIControllerData:
     """UIコントローラーのデータ処理機能専門クラス"""
@@ -96,7 +96,7 @@ class UIControllerData:
         ファイル選択ボタン押下時の処理。ファイルパスを保存し、登録実行ボタンの有効/無効を制御。
         """
         try:
-            from PyQt5.QtWidgets import QFileDialog
+            from qt_compat.widgets import QFileDialog
             
             # ファイル選択ダイアログを表示
             file_paths, _ = QFileDialog.getOpenFileNames(
@@ -125,7 +125,7 @@ class UIControllerData:
         添付ファイル選択ボタン押下時の処理。添付ファイルパスを保存し、登録実行ボタンの有効/無効を制御。
         """
         try:
-            from PyQt5.QtWidgets import QFileDialog
+            from qt_compat.widgets import QFileDialog
             
             # 添付ファイル選択ダイアログを表示
             file_paths, _ = QFileDialog.getOpenFileNames(
@@ -352,7 +352,7 @@ class UIControllerData:
     def open_file_selector(self):
         """ファイル選択ダイアログを開く"""
         try:
-            from PyQt5.QtWidgets import QFileDialog
+            from qt_compat.widgets import QFileDialog
             file_path, _ = QFileDialog.getOpenFileName(
                 None,
                 "ファイルを選択",
@@ -372,7 +372,7 @@ class UIControllerData:
         try:
             self.logger.info("データセット登録処理開始")
             # データセット登録の実装
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             QMessageBox.information(None, "データセット登録", "データセットの登録が完了しました")
         except Exception as e:
             self._handle_operation_error("データセット登録", e)
@@ -382,7 +382,7 @@ class UIControllerData:
         try:
             self.logger.info("データセットバリデーション開始")
             # バリデーション処理の実装
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             QMessageBox.information(None, "バリデーション", "データセットのバリデーションが完了しました")
         except Exception as e:
             self.logger.error(f"データセットバリデーションエラー: {e}")
@@ -393,7 +393,7 @@ class UIControllerData:
         try:
             self.logger.info(f"データセット情報表示: {dataset_id}")
             # データセット情報の表示処理を実装
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             QMessageBox.information(None, "データセット情報", f"データセットID: {dataset_id}")
         except Exception as e:
             self.logger.error(f"データセット情報表示エラー: {e}")

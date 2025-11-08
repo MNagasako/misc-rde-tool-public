@@ -12,14 +12,14 @@ from pathlib import Path
 import logging
 from datetime import datetime
 
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QTableWidget, 
     QTableWidgetItem, QLabel, QPushButton, QTextEdit, QGroupBox,
     QHeaderView, QScrollArea, QWidget, QSplitter, QMessageBox,
     QDialogButtonBox, QComboBox, QProgressDialog, QApplication
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QThread, pyqtSlot
-from PyQt5.QtGui import QFont, QColor
+from qt_compat.core import Qt, Signal, QThread, Slot
+from qt_compat.gui import QFont, QColor
 
 from classes.data_entry.core.file_set_manager import FileSet, FileItem, FileType, PathOrganizeMethod, FileItemType
 
@@ -41,7 +41,7 @@ class FileSetPreviewWidget(QWidget):
     def setup_dialog_size(self):
         """ダイアログサイズを設定（ディスプレイ高さの90%）"""
         try:
-            from PyQt5.QtWidgets import QDesktopWidget
+            from qt_compat.widgets import QDesktopWidget
             desktop = QDesktopWidget()
             screen_rect = desktop.screenGeometry()
             
@@ -1075,7 +1075,7 @@ class FileSetPreviewWidget(QWidget):
                 self.file_set.mapping_file = mapping_file
             
             # 保存先を選択
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             
             
             # カスタムボタンテキストを設定
@@ -1087,7 +1087,7 @@ class FileSetPreviewWidget(QWidget):
             zip_btn = msgbox.addButton("ZIPファイルとして", QMessageBox.ActionRole)
             cancel_btn = msgbox.addButton("キャンセル", QMessageBox.RejectRole)
             
-            msgbox.exec_()
+            msgbox.exec()
             clicked_button = msgbox.clickedButton()
             
             if clicked_button == cancel_btn:
@@ -1097,7 +1097,7 @@ class FileSetPreviewWidget(QWidget):
             
             # 保存先を選択
             if export_as_zip:
-                from PyQt5.QtWidgets import QFileDialog
+                from qt_compat.widgets import QFileDialog
                 file_path, _ = QFileDialog.getSaveFileName(
                     self, "ZIPファイル保存先", 
                     f"{self.file_set.name}.zip",
@@ -1114,7 +1114,7 @@ class FileSetPreviewWidget(QWidget):
                     f"ファイルセット '{self.file_set.name}' をZIPファイルとして保存しました。\n"
                     f"パス: {file_path}")
             else:
-                from PyQt5.QtWidgets import QFileDialog
+                from qt_compat.widgets import QFileDialog
                 folder_path = QFileDialog.getExistingDirectory(
                     self, "フォルダ保存先", ""
                 )
@@ -1635,7 +1635,7 @@ API情報:
                 # まだない場合は、メインコントローラから取得を試行
                 if not bearer_token:
                     try:
-                        from PyQt5.QtWidgets import QApplication
+                        from qt_compat.widgets import QApplication
                         app = QApplication.instance()
                         if app:
                             main_window = None
@@ -2535,9 +2535,9 @@ API情報:
         payload_preview = payload_json[:1000] + "..." if len(payload_json) > 1000 else payload_json
         
         # 確認ダイアログ作成
-        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QLabel
-        from PyQt5.QtCore import Qt
-        from PyQt5.QtGui import QFont
+        from qt_compat.widgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QTextEdit, QLabel
+        from qt_compat.core import Qt
+        from qt_compat.gui import QFont
         
         dialog = QDialog(self)
         dialog.setWindowTitle("データ登録ペイロード確認")
@@ -2580,7 +2580,7 @@ API情報:
         
         layout.addLayout(button_layout)
         
-        return dialog.exec_() == QDialog.Accepted
+        return dialog.exec() == QDialog.Accepted
     
     def _show_full_payload(self, payload_json):
         """ペイロード全文表示ダイアログ
@@ -2588,9 +2588,9 @@ API情報:
         Args:
             payload_json: 完全なJSONペイロード文字列
         """
-        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QPushButton, QTextEdit
-        from PyQt5.QtCore import Qt
-        from PyQt5.QtGui import QFont
+        from qt_compat.widgets import QDialog, QVBoxLayout, QPushButton, QTextEdit
+        from qt_compat.core import Qt
+        from qt_compat.gui import QFont
         
         dialog = QDialog(self)
         dialog.setWindowTitle("データ登録ペイロード（全文）")
@@ -2611,7 +2611,7 @@ API情報:
         close_btn.clicked.connect(dialog.accept)
         layout.addWidget(close_btn)
         
-        dialog.exec_()
+        dialog.exec()
     
     def _get_register_filename(self, file_item: FileItem) -> str:
         """FileSetPreviewWidget用：登録時のファイル名を取得（単一ファイルセット対応）"""
@@ -2701,7 +2701,7 @@ class BatchRegisterPreviewDialog(QDialog):
     def setup_dialog_size(self):
         """ダイアログサイズを設定（ディスプレイ高さの90%）"""
         try:
-            from PyQt5.QtWidgets import QDesktopWidget
+            from qt_compat.widgets import QDesktopWidget
             desktop = QDesktopWidget()
             screen_rect = desktop.screenGeometry()
             
@@ -3593,7 +3593,7 @@ class BatchRegisterPreviewDialog(QDialog):
     def setup_dialog_size(self):
         """ダイアログサイズを設定（ディスプレイ高さの90%）"""
         try:
-            from PyQt5.QtWidgets import QDesktopWidget
+            from qt_compat.widgets import QDesktopWidget
             desktop = QDesktopWidget()
             screen_rect = desktop.screenGeometry()
             

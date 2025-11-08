@@ -67,5 +67,5 @@ class HistoryLogger:
 
     @staticmethod
     def _make_item(text):
-        from PyQt5.QtWidgets import QTableWidgetItem
+        from qt_compat.widgets import QTableWidgetItem
         return QTableWidgetItem(text)

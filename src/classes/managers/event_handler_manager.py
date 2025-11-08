@@ -150,7 +150,7 @@ class EventHandlerManager:
                 self.show_grant_number_form()
             else:
                 logger.info('Cookieが取得できませんでした。')
-        from PyQt5.QtCore import QTimer
+        from qt_compat.core import QTimer
         QTimer.singleShot(1000, save_cookies)
 
     @debug_log

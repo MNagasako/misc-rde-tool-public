@@ -1,8 +1,8 @@
 import json
 import os
 import logging
-from PyQt5.QtWidgets import QMessageBox
-from PyQt5.QtCore import QMetaObject, Qt, Q_ARG
+from qt_compat.widgets import QMessageBox
+from qt_compat.core import QMetaObject, Qt, Q_ARG
 from config.common import OUTPUT_DIR
 from classes.utils.api_request_helper import api_request, fetch_binary, download_request  # refactored to use api_request_helper
 from core.bearer_token_manager import BearerTokenManager
@@ -18,7 +18,7 @@ def safe_show_message(parent, title, message, message_type="warning"):
         return
     
     try:
-        from PyQt5.QtCore import QThread
+        from qt_compat.core import QThread
         if hasattr(parent, 'thread') and parent.thread() != QThread.currentThread():
             # 別スレッドからの呼び出しの場合はメタオブジェクトを使用
             if message_type == "warning":
@@ -280,7 +280,7 @@ def download_file_for_data_id(data_id, bearer_token=None, save_dir_base=None, fi
             return False
         if resp.status_code != 200:
             if parent:
-                from PyQt5.QtWidgets import QMessageBox
+                from qt_compat.widgets import QMessageBox
                 print(f"[WARNING] data_id {data_id} has no fileName in attributes, skipping download.")
             else:
                 print(f"[ERROR] {resp.status_code}: {url}\n{resp.text}")

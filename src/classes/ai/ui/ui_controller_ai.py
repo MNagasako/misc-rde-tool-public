@@ -993,7 +993,7 @@ class UIControllerAI:
     def _show_fallback_dialog(self, title, content):
         """フォールバック用のダイアログ表示"""
         try:
-            from PyQt5.QtWidgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
+            from qt_compat.widgets import QDialog, QVBoxLayout, QTextEdit, QPushButton
             
             dialog = QDialog()
             dialog.setWindowTitle(title)
@@ -1012,7 +1012,7 @@ class UIControllerAI:
             layout.addWidget(close_btn)
             
             dialog.setLayout(layout)
-            dialog.exec_()
+            dialog.exec()
             
         except Exception as e:
             self.logger.error(f"フォールバックダイアログ表示エラー: {e}")
@@ -1065,7 +1065,7 @@ class UIControllerAI:
     def _create_ai_test_widget_fallback(self):
         """AIテストウィジェットのフォールバック実装"""
         try:
-            from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
+            from qt_compat.widgets import QWidget, QVBoxLayout, QLabel
             
             widget = QWidget()
             layout = QVBoxLayout()

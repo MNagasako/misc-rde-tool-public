@@ -20,9 +20,9 @@ import os
 import logging
 import threading
 import json
-from PyQt5.QtWidgets import QVBoxLayout, QLabel, QWidget, QMessageBox, QProgressDialog, QComboBox, QPushButton
-from PyQt5.QtCore import QTimer, Qt, QMetaObject, Q_ARG, QUrl
-from PyQt5.QtGui import QDesktopServices
+from qt_compat.widgets import QVBoxLayout, QLabel, QWidget, QMessageBox, QProgressDialog, QComboBox, QPushButton
+from qt_compat.core import QTimer, Qt, QMetaObject, Q_ARG, QUrl
+from qt_compat.gui import QDesktopServices
 from config.common import OUTPUT_DIR, DATAFILES_DIR
 
 # ロガー設定
@@ -58,8 +58,8 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     """
     import json
     import os
-    from PyQt5.QtWidgets import QWidget, QVBoxLayout, QComboBox, QLabel, QHBoxLayout, QRadioButton, QLineEdit, QPushButton, QButtonGroup, QCompleter
-    from PyQt5.QtCore import Qt
+    from qt_compat.widgets import QWidget, QVBoxLayout, QComboBox, QLabel, QHBoxLayout, QRadioButton, QLineEdit, QPushButton, QButtonGroup, QCompleter
+    from qt_compat.core import Qt
     
     def check_global_sharing_enabled(dataset_item):
         """広域シェアが有効かどうかをチェック"""
@@ -462,9 +462,9 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
         # コンボボックスを展開して全件表示
         combo.showPopup()
     
-    # フィルタ変更時のイベント接続
-    share_button_group.buttonClicked[int].connect(lambda: load_and_filter_datasets())
-    member_button_group.buttonClicked[int].connect(lambda: load_and_filter_datasets())
+    # フィルタ変更時のイベント接続（PySide6: [int]シグネチャ削除）
+    share_button_group.buttonClicked.connect(lambda: load_and_filter_datasets())
+    member_button_group.buttonClicked.connect(lambda: load_and_filter_datasets())
     type_combo.currentTextChanged.connect(lambda: load_and_filter_datasets())
     grant_edit.textChanged.connect(lambda: load_and_filter_datasets())
     
@@ -592,8 +592,8 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
             def show_fetch_progress():
                 """プログレス表示付きファイル取得"""
                 try:
-                    from PyQt5.QtWidgets import QProgressDialog, QMessageBox
-                    from PyQt5.QtCore import QTimer, Qt
+                    from qt_compat.widgets import QProgressDialog, QMessageBox
+                    from qt_compat.core import QTimer, Qt
                     from classes.utils.progress_worker import ProgressWorker
                     from classes.data_fetch2.core.logic.fetch2_filelist_logic import fetch_files_json_for_dataset
                     import threading

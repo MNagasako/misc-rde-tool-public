@@ -169,47 +169,6 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
         if progress_callback:
             progress_callback(100, 100, f"エラー: {error_msg}")
         return error_msg
-        success_count = 0
-        failed_count = 0
-        failed_ids = []
-        total_templates = len(template_ids)
-        
-        for i, template_id in enumerate(template_ids):
-            # プログレス更新
-            if progress_callback:
-                if not progress_callback(i + 1, total_templates, f"invoiceSchema取得中: {template_id}"):
-                    break  # キャンセルされた場合
-                    
-            result = fetch_invoice_schema_from_api(
-                bearer_token, template_id, output_dir, summary, log_path, summary_path
-            )
-            if result == "skipped_summary" or result == "skipped_file":
-                logger.info(f"invoiceSchemasスキップ: {template_id}")
-                skipped_count += 1
-                skipped_ids.append(template_id)
-            elif result == "success":
-                logger.info(f"invoiceSchemas取得完了: {template_id}")
-                success_count += 1
-            elif result == "failed":
-                logger.error(f"invoiceSchemas取得失敗: {template_id}")
-                failed_count += 1
-                failed_ids.append(template_id)
-        # 最終的にも一度保存（冗長だが安全）
-        with open(summary_path, "w", encoding="utf-8") as f:
-            json.dump(summary, f, ensure_ascii=False, indent=2)
-        logger.info(f"invoiceSchemas処理完了: 成功={success_count}/全={len(template_ids)} スキップ={skipped_count} 失敗={failed_count}")
-        
-        # 結果をprint文で出力
-        msg = f"invoiceSchemas取得処理が完了しました。\n\n成功: {success_count}件\nスキップ: {skipped_count}件\n失敗: {failed_count}件\n\n既に取得済みのJSONやsummary.jsonで成功記録があるもの、403エラー等で拒否されたものはスキップされます。\n再取得したい場合は output/invoiceSchemas/ 内の該当JSONやsummary.jsonを削除して再実行してください。"
-        if failed_count > 0:
-            msg += f"\n\n失敗ID例: {', '.join(map(str, failed_ids[:5]))}{' ...' if failed_count > 5 else ''}"
-        if skipped_count > 0:
-            msg += f"\n\nスキップID例: {', '.join(map(str, skipped_ids[:5]))}{' ...' if skipped_count > 5 else ''}"
-        print(msg)
-        
-    except Exception as e:
-        logger.error(f"fetch_invoice_schemas処理失敗: {e}")
-        raise
 
 def get_self_username_from_json(json_path="output/rde/data/self.json"):
     """self.json から userName を取得して返す。存在しない場合は空文字列。"""
@@ -271,8 +230,17 @@ def fetch_self_info_from_api(bearer_token=None, output_dir="output/rde/data", pa
         raise
 
 
-def fetch_all_data_entrys_info(bearer_token, output_dir="output/rde/data"):
-    """dataset.json内の全データセットIDでfetch_data_entry_info_from_apiを呼び出す"""
+def fetch_all_data_entrys_info(bearer_token, output_dir="output/rde/data", progress_callback=None):
+    """
+    dataset.json内の全データセットIDでfetch_data_entry_info_from_apiを呼び出す
+    
+    改善版: データセット総数を事前計算し、プログレス更新頻度を向上
+    
+    Args:
+        bearer_token: 認証トークン
+        output_dir: 出力ディレクトリ
+        progress_callback: プログレスコールバック関数 (current, total, message) -> bool
+    """
     try:
         os.makedirs(output_dir, exist_ok=True)
         dataset_json = os.path.join(output_dir, "dataset.json")
@@ -280,27 +248,55 @@ def fetch_all_data_entrys_info(bearer_token, output_dir="output/rde/data"):
         if not os.path.exists(dataset_json):
             logger.error(f"dataset.jsonが存在しません: {dataset_json}")
             return
+        
+        if progress_callback:
+            if not progress_callback(0, 100, "データエントリ情報取得準備中..."):
+                return "キャンセルされました"
             
         with open(dataset_json, "r", encoding="utf-8") as f:
             data = json.load(f)
             
         datasets = data.get("data", [])
-        logger.info(f"データエントリ情報取得開始: {len(datasets)}件のデータセット処理")
+        total_datasets = len(datasets)
+        logger.info(f"データエントリ情報取得開始: {total_datasets}件のデータセット処理")
+        
+        if progress_callback:
+            if not progress_callback(5, 100, f"データセット総数: {total_datasets}件"):
+                return "キャンセルされました"
         
         processed_count = 0
-        for ds in datasets:
+        error_count = 0
+        
+        for idx, ds in enumerate(datasets):
             ds_id = ds.get("id")
             if ds_id:
+                # プログレス更新（5-95%の範囲）
+                if progress_callback:
+                    progress_percent = 5 + int((idx / total_datasets) * 90)
+                    msg = f"データエントリ取得中 ({idx + 1}/{total_datasets}): {ds_id}"
+                    if not progress_callback(progress_percent, 100, msg):
+                        return "キャンセルされました"
+                
                 try:
                     fetch_data_entry_info_from_api(bearer_token, ds_id)
                     processed_count += 1
                 except Exception as e:
                     logger.error(f"データエントリ処理失敗: ds_id={ds_id}, error={e}")
-                    
-        logger.info(f"データエントリ情報取得完了: 処理済み={processed_count}/{len(datasets)}")
+                    error_count += 1
+        
+        result_msg = f"データエントリ情報取得完了: 処理={processed_count}/{total_datasets}, エラー={error_count}"
+        logger.info(result_msg)
+        
+        if progress_callback:
+            progress_callback(100, 100, result_msg)
+        
+        return result_msg
         
     except Exception as e:
-        logger.error(f"fetch_all_data_entrys_info処理失敗: {e}")
+        error_msg = f"fetch_all_data_entrys_info処理失敗: {e}"
+        logger.error(error_msg)
+        if progress_callback:
+            progress_callback(100, 100, f"エラー: {error_msg}")
         raise
 
 
@@ -377,47 +373,107 @@ def fetch_invoice_info_from_api(bearer_token, entry_id, output_dir="output/rde/d
         raise
 
 
-def fetch_all_invoices_info(bearer_token, output_dir="output/rde/data"):
-    """dataEntry.json内の全エントリIDでfetch_invoice_info_from_apiを呼び出す"""
+def fetch_all_invoices_info(bearer_token, output_dir="output/rde/data", progress_callback=None):
+    """
+    dataEntry.json内の全エントリIDでfetch_invoice_info_from_apiを呼び出す
+    
+    改善版: データセット数とタイル数から総予定取得数を事前計算し、
+    プログレス更新頻度を大幅に向上させて処理の進行状況を明確化
+    
+    Args:
+        bearer_token: 認証トークン
+        output_dir: 出力ディレクトリ
+        progress_callback: プログレスコールバック関数 (current, total, message) -> bool
+    """
     try:
         dataentry_dir = os.path.join(output_dir, "dataEntry")
+        invoice_dir = os.path.join(output_dir, "invoice")
         
         if not os.path.exists(dataentry_dir):
             logger.error(f"dataEntryディレクトリが存在しません: {dataentry_dir}")
             return
-            
-        # dataEntryディレクトリ内の全JSONファイルを処理
-        dataentry_files = glob.glob(os.path.join(dataentry_dir, "*.json"))
-        logger.info(f"インボイス情報取得開始: {len(dataentry_files)}件のデータエントリファイル処理")
         
-        processed_count = 0
-        invoice_count = 0
+        # === 事前カウント：総予定取得数を計算 ===
+        if progress_callback:
+            if not progress_callback(0, 100, "インボイス総数を計算中..."):
+                return "キャンセルされました"
+        
+        dataentry_files = glob.glob(os.path.join(dataentry_dir, "*.json"))
+        
+        # 既存のインボイスファイルをカウント（スキップ予定）
+        existing_invoices = set()
+        if os.path.exists(invoice_dir):
+            existing_invoices = set(os.listdir(invoice_dir))
+        
+        # 全データエントリファイルを読み込み、総エントリ数を計算
+        total_entries = 0
+        entry_list = []  # [(file_path, entry_id), ...]
+        
+        logger.info(f"インボイス情報取得開始: {len(dataentry_files)}件のデータエントリファイルを解析中")
         
         for file_path in dataentry_files:
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 
-                # dataEntry.json内の各エントリからIDを抽出
                 entries = data.get("data", [])
                 for entry in entries:
                     entry_id = entry.get("id")
                     if entry_id:
-                        try:
-                            fetch_invoice_info_from_api(bearer_token, entry_id)
-                            invoice_count += 1
-                        except Exception as e:
-                            logger.error(f"インボイス処理失敗: entry_id={entry_id}, error={e}")
-                
-                processed_count += 1
-                
+                        entry_list.append((file_path, entry_id))
+                        total_entries += 1
+                        
             except Exception as e:
-                logger.error(f"データエントリファイル処理失敗: file={file_path}, error={e}")
-                    
-        logger.info(f"インボイス情報取得完了: 処理済みファイル={processed_count}/{len(dataentry_files)}, 取得インボイス={invoice_count}")
+                logger.error(f"データエントリファイル読み込み失敗: file={file_path}, error={e}")
+        
+        # 既存ファイルを除外した新規取得予定数
+        new_entries = [e for e in entry_list if f"{e[1]}.json" not in existing_invoices]
+        new_count = len(new_entries)
+        skip_count = len(entry_list) - new_count
+        
+        logger.info(f"インボイス取得計画: 総数={total_entries}, 新規取得={new_count}, スキップ={skip_count}")
+        
+        if progress_callback:
+            msg = f"インボイス取得開始 (データセット: {len(dataentry_files)}件, タイル総数: {total_entries}件, 新規: {new_count}件)"
+            if not progress_callback(5, 100, msg):
+                return "キャンセルされました"
+        
+        # === メイン処理：インボイス取得 ===
+        processed_count = 0
+        success_count = 0
+        error_count = 0
+        
+        for idx, (file_path, entry_id) in enumerate(entry_list):
+            # プログレス更新（5-95%の範囲で更新）
+            if progress_callback:
+                progress_percent = 5 + int((idx / total_entries) * 90)
+                msg = f"インボイス取得中 ({idx + 1}/{total_entries}): {entry_id}"
+                if not progress_callback(progress_percent, 100, msg):
+                    return "キャンセルされました"
+            
+            try:
+                fetch_invoice_info_from_api(bearer_token, entry_id, invoice_dir)
+                success_count += 1
+            except Exception as e:
+                logger.error(f"インボイス処理失敗: entry_id={entry_id}, error={e}")
+                error_count += 1
+            
+            processed_count += 1
+        
+        # === 完了処理 ===
+        result_msg = f"インボイス情報取得完了: 処理={processed_count}/{total_entries}, 成功={success_count}, エラー={error_count}"
+        logger.info(result_msg)
+        
+        if progress_callback:
+            progress_callback(100, 100, result_msg)
+        
+        return result_msg
         
     except Exception as e:
-        logger.error(f"fetch_all_invoices_info処理失敗: {e}")
+        error_msg = f"fetch_all_invoices_info処理失敗: {e}"
+        logger.error(error_msg)
+        if progress_callback:
+            progress_callback(100, 100, f"エラー: {error_msg}")
         raise
 
 
@@ -709,7 +765,7 @@ def move_webview_to_group(webview, project_group_id):
         url = f"https://rde.nims.go.jp/rde/datasets/groups/{project_group_id}"
         print(f"[DEBUG] setUrl前: {url}")
         try:
-            from PyQt5.QtCore import QTimer
+            from qt_compat.core import QTimer
             def do_set_url(wv, u):
                 try:
                     if wv is None:
@@ -761,7 +817,7 @@ def show_fetch_confirmation_dialog(parent, onlySelf, searchWords):
     """
     基本情報取得の確認ダイアログを表示
     """
-    from PyQt5.QtWidgets import QMessageBox, QPushButton, QDialog, QVBoxLayout, QTextEdit
+    from qt_compat.widgets import QMessageBox, QPushButton, QDialog, QVBoxLayout, QTextEdit
     import json
     
     # 取得対象の情報を生成
@@ -852,11 +908,11 @@ def show_fetch_confirmation_dialog(parent, onlySelf, searchWords):
         text_edit.setMinimumSize(600, 400)
         layout.addWidget(text_edit)
         dlg.setLayout(layout)
-        dlg.exec_()
+        dlg.exec()
     
     detail_btn.clicked.connect(show_detail)
     
-    reply = msg_box.exec_()
+    reply = msg_box.exec()
     return msg_box.clickedButton() == yes_btn
 
 # === 段階別実行関数 ===
@@ -1472,23 +1528,39 @@ def fetch_basic_info_logic(bearer_token, parent=None, webview=None, onlySelf=Fal
             return "キャンセルされました"
 
         # 8. データエントリ情報取得
-        if not update_stage_progress(7, 0, "開始"):
+        if not update_stage_progress(7, 0, "データエントリ情報取得準備中"):
             return "キャンセルされました"
             
         logger.debug("fetch_all_data_entrys_info")
-        fetch_all_data_entrys_info(bearer_token)
         
-        if not update_stage_progress(7, 100, "完了"):
+        # プログレスコールバックを作成（ステージ7の0-100%をマッピング）
+        def dataentry_progress_callback(current, total, message):
+            return update_stage_progress(7, current, message)
+        
+        result = fetch_all_data_entrys_info(bearer_token, progress_callback=dataentry_progress_callback)
+        if result == "キャンセルされました":
+            return "キャンセルされました"
+        
+        if not update_stage_progress(7, 100, "データエントリ情報取得完了"):
             return "キャンセルされました"
 
         # 9. インボイス情報取得
-        if not update_stage_progress(8, 0, "開始"):
+        if not update_stage_progress(8, 0, "インボイス情報取得準備中"):
             return "キャンセルされました"
             
         logger.debug("fetch_all_invoices_info")
-        fetch_all_invoices_info(bearer_token)
         
-        if not update_stage_progress(8, 100, "完了"):
+        # プログレスコールバックを作成（ステージ8の0-100%をマッピング）
+        def invoice_progress_callback(current, total, message):
+            # current, totalは fetch_all_invoices_info 内部の進捗（0-100%）
+            # これをステージ8の進捗にマッピング
+            return update_stage_progress(8, current, message)
+        
+        result = fetch_all_invoices_info(bearer_token, progress_callback=invoice_progress_callback)
+        if result == "キャンセルされました":
+            return "キャンセルされました"
+        
+        if not update_stage_progress(8, 100, "インボイス情報取得完了"):
             return "キャンセルされました"
 
         # 10. invoiceSchema情報取得

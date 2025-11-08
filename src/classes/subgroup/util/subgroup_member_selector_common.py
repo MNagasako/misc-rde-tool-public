@@ -7,13 +7,13 @@
 import json
 import os
 import urllib.parse
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QWidget, QVBoxLayout, QLabel, QCheckBox, QPushButton, QHBoxLayout, 
     QMessageBox, QDialog, QTextEdit, QTableWidget, QTableWidgetItem, 
     QHeaderView, QRadioButton, QButtonGroup, QLineEdit
 )
-from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QColor
+from qt_compat.core import Qt
+from qt_compat.gui import QColor
 from config.common import SUBGROUP_JSON_PATH
 from net.http_helpers import proxy_get
 
@@ -222,9 +222,9 @@ class CommonSubgroupMemberSelector(QWidget):
                 print(f"[DEBUG] テーブル再構築開始: {len(sorted_rows_data)}行")
                 
                 # 必要なクラスをインポート
-                from PyQt5.QtWidgets import QCheckBox, QRadioButton
-                from PyQt5.QtCore import Qt
-                from PyQt5.QtWidgets import QTableWidgetItem
+                from qt_compat.widgets import QCheckBox, QRadioButton
+                from qt_compat.core import Qt
+                from qt_compat.widgets import QTableWidgetItem
                 
                 # ソートを一時無効化
                 self.setSortingEnabled(False)
@@ -345,12 +345,12 @@ class CommonSubgroupMemberSelector(QWidget):
                         user_id = getattr(owner_radio, 'user_id', None)
                         # AGENTとVIEWERがない場合はダミーチェックボックスを作成
                         if agent_cb is None:
-                            from PyQt5.QtWidgets import QCheckBox
+                            from qt_compat.widgets import QCheckBox
                             agent_cb = QCheckBox()
                             agent_cb.user_id = user_id
                             agent_cb.setChecked(False)
                         if viewer_cb is None:
-                            from PyQt5.QtWidgets import QCheckBox
+                            from qt_compat.widgets import QCheckBox
                             viewer_cb = QCheckBox()
                             viewer_cb.user_id = user_id
                             viewer_cb.setChecked(False)
@@ -402,7 +402,7 @@ class CommonSubgroupMemberSelector(QWidget):
         table.verticalHeader().setVisible(False)
         
         # テーブルサイズを動的に計算（画面サイズを考慮）
-        from PyQt5.QtWidgets import QApplication
+        from qt_compat.widgets import QApplication
         screen = QApplication.primaryScreen().geometry()
         max_table_height = int(screen.height() * 0.6)  # 画面の40%まで
         
@@ -931,7 +931,7 @@ def create_common_subgroup_member_selector_with_api_complement(initial_roles=Non
 
 if __name__ == "__main__":
     import sys
-    from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout
+    from qt_compat.widgets import QApplication, QMainWindow, QVBoxLayout
     
     app = QApplication(sys.argv)
     
@@ -963,4 +963,4 @@ if __name__ == "__main__":
     window.setCentralWidget(central_widget)
     
     window.show()
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

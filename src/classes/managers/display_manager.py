@@ -64,7 +64,7 @@ class DisplayManager:
             # オブジェクトが削除されている場合は処理をスキップ
             return
             
-        from PyQt5.QtCore import QTimer
+        from qt_compat.core import QTimer
         self.blinking_state = True
         try:
             self.blinking_timer = QTimer(parent)

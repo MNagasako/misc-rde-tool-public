@@ -8,11 +8,11 @@
 
 import os
 import json
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QLabel, QLineEdit, QTextEdit, QGridLayout, QHBoxLayout, 
     QPushButton, QMessageBox, QDialog, QVBoxLayout, QWidget
 )
-from PyQt5.QtCore import Qt
+from qt_compat.core import Qt
 from config.common import SUBGROUP_JSON_PATH
 from ..core.subgroup_data_manager import SubgroupDataManager, MemberDataProcessor
 from .subgroup_validators import SubjectInputValidator, UserRoleValidator, FormValidator, UIValidator
@@ -149,7 +149,7 @@ class SubgroupFormBuilder:
             button_manual = self.create_auto_resize_button(
                 manual_text, 200, 40, self.button_style
             )
-            from PyQt5.QtWidgets import QSizePolicy
+            from qt_compat.widgets import QSizePolicy
             button_manual.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
             button_manual.setStyleSheet("""
                 QPushButton {
@@ -310,7 +310,7 @@ class SubgroupCreateHandler:
             text_edit.setMinimumSize(600, 400)
             layout.addWidget(text_edit)
             dlg.setLayout(layout)
-            dlg.exec_()
+            dlg.exec()
         
         detail_btn.clicked.connect(show_detail)
         return msg_box, yes_btn
@@ -594,9 +594,9 @@ def prepare_subgroup_create_request(widget, parent, user_rows=None):
             text_edit.setMinimumSize(600, 400)
             layout.addWidget(text_edit)
             dlg.setLayout(layout)
-            dlg.exec_()
+            dlg.exec()
         detail_btn.clicked.connect(show_detail)
-        reply = msg_box.exec_()
+        reply = msg_box.exec()
         if msg_box.clickedButton() == yes_btn:
             send_subgroup_request = subgroup_api_helper.send_subgroup_request
             send_subgroup_request(widget, api_url, headers, payload, group.get('group_name',''))

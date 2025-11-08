@@ -1,6 +1,6 @@
 import time
-from PyQt5.QtWidgets import QWidget, QPushButton
-from PyQt5.QtCore import QTimer
+from qt_compat.widgets import QWidget, QPushButton
+from qt_compat.core import QTimer
 
 def wait_for_form_and_click_button(window, form_object_name, button_object_name, timeout=10, interval=0.5, test_mode=False):
     """

@@ -3,8 +3,8 @@
 """
 import json
 import os
-from PyQt5.QtWidgets import QMessageBox, QDialog, QVBoxLayout, QTextEdit, QPushButton, QLabel
-from PyQt5.QtCore import QDate, QTimer, Qt
+from qt_compat.widgets import QMessageBox, QDialog, QVBoxLayout, QTextEdit, QPushButton, QLabel
+from qt_compat.core import QDate, QTimer, Qt
 from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
 from core.bearer_token_manager import BearerTokenManager
 
@@ -345,11 +345,11 @@ def send_dataset_update_request(widget, parent, selected_dataset,
         text_edit.setMinimumSize(600, 400)
         layout.addWidget(text_edit)
         dlg.setLayout(layout)
-        dlg.exec_()
+        dlg.exec()
     
     detail_btn.clicked.connect(show_detail)
     
-    reply = msg_box.exec_()
+    reply = msg_box.exec()
     if msg_box.clickedButton() == yes_btn:
         # API送信
         from classes.utils.api_request_helper import api_request  # セッション管理ベースのプロキシ対応
@@ -388,7 +388,7 @@ def send_dataset_update_request(widget, parent, selected_dataset,
                 
                 # 成功時にdataset.jsonを自動再取得
                 try:
-                    from PyQt5.QtCore import QTimer
+                    from qt_compat.core import QTimer
                     def auto_refresh():
                         try:
                             from classes.basic.core.basic_info_logic import auto_refresh_dataset_json
@@ -489,7 +489,7 @@ def show_response_dialog(parent, title, message, response_text):
         text_area.setReadOnly(True)
         
         # フォント設定（等幅フォント）
-        from PyQt5.QtGui import QFont
+        from qt_compat.gui import QFont
         font = QFont("Consolas", 10)
         text_area.setFont(font)
         
@@ -507,7 +507,7 @@ def show_response_dialog(parent, title, message, response_text):
         layout.addWidget(text_area)
         
         # ボタンレイアウト
-        from PyQt5.QtWidgets import QHBoxLayout
+        from qt_compat.widgets import QHBoxLayout
         button_layout = QHBoxLayout()
         
         # 全選択ボタン
@@ -521,7 +521,7 @@ def show_response_dialog(parent, title, message, response_text):
         copy_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 8px 16px; border-radius: 4px; font-weight: bold;")
         
         def copy_text():
-            from PyQt5.QtWidgets import QApplication
+            from qt_compat.widgets import QApplication
             cursor = text_area.textCursor()
             if cursor.hasSelection():
                 selected_text = cursor.selectedText()
@@ -545,9 +545,9 @@ def show_response_dialog(parent, title, message, response_text):
         dlg.setLayout(layout)
         
         # キーボードショートカット設定
-        from PyQt5.QtWidgets import QShortcut
-        from PyQt5.QtGui import QKeySequence
-        from PyQt5.QtCore import Qt
+        from qt_compat.widgets import QShortcut
+        from qt_compat.gui import QKeySequence
+        from qt_compat.core import Qt
         
         # Ctrl+A で全選択
         select_all_shortcut = QShortcut(QKeySequence.SelectAll, dlg)
@@ -561,7 +561,7 @@ def show_response_dialog(parent, title, message, response_text):
         escape_shortcut = QShortcut(QKeySequence(Qt.Key_Escape), dlg)
         escape_shortcut.activated.connect(dlg.close)
         
-        dlg.exec_()
+        dlg.exec()
     
     detail_btn.clicked.connect(show_response_detail)
-    msg_box.exec_()
+    msg_box.exec()

@@ -4,23 +4,16 @@
 """
 
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, TYPE_CHECKING
 
-try:
-    from PyQt5.QtWidgets import (
-        QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-        QLabel, QLineEdit, QSpinBox, QCheckBox, QComboBox,
-        QGroupBox, QPushButton, QScrollArea, QTextEdit,
-        QFrame, QButtonGroup, QRadioButton, QSlider
-    )
-    from PyQt5.QtCore import Qt, pyqtSignal
-    from PyQt5.QtGui import QFont, QIntValidator
-    PYQT5_AVAILABLE = True
-except ImportError:
-    PYQT5_AVAILABLE = False
-    # フォールバック定義
-    class QWidget: pass
-    class pyqtSignal: pass
+from qt_compat.widgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QLabel, QLineEdit, QSpinBox, QCheckBox, QComboBox,
+    QGroupBox, QPushButton, QScrollArea, QTextEdit,
+    QFrame, QButtonGroup, QRadioButton, QSlider
+)
+from qt_compat.core import Qt, Signal
+from qt_compat.gui import QFont, QIntValidator
 
 logger = logging.getLogger(__name__)
 
@@ -33,16 +26,12 @@ from ..util.file_filter_util import validate_filter_config, get_filter_summary
 class FileFilterWidget(QWidget):
     """ファイルフィルタ設定ウィジェット"""
     
-    # フィルタ変更通知シグナル
-    filterChanged = pyqtSignal(dict)
+    # フィルタ変更通知シグナル（PySide6: dict→objectに変更）
+    filterChanged = Signal(object)
     
     def __init__(self, parent=None):
         super().__init__(parent)
         
-        if not PYQT5_AVAILABLE:
-            logger.error("PyQt5が利用できません")
-            return
-            
         self.filter_config = get_default_filter()
         self.setup_ui()
         
@@ -88,7 +77,7 @@ class FileFilterWidget(QWidget):
         scroll_area.setWidget(content_widget)
         layout.addWidget(scroll_area)
         
-    def create_filetype_group(self) -> QGroupBox:
+    def create_filetype_group(self) -> "QGroupBox":
         """ファイルタイプ選択グループ"""
         group = QGroupBox("ファイルタイプ")
         layout = QVBoxLayout(group)
@@ -117,7 +106,7 @@ class FileFilterWidget(QWidget):
             
         return group
         
-    def create_mediatype_group(self) -> QGroupBox:
+    def create_mediatype_group(self) -> "QGroupBox":
         """メディアタイプ選択グループ"""
         group = QGroupBox("メディアタイプ")
         layout = QVBoxLayout(group)
@@ -143,7 +132,7 @@ class FileFilterWidget(QWidget):
             
         return group
         
-    def create_extension_group(self) -> QGroupBox:
+    def create_extension_group(self) -> "QGroupBox":
         """拡張子選択グループ"""
         group = QGroupBox("拡張子")
         layout = QVBoxLayout(group)
@@ -176,7 +165,7 @@ class FileFilterWidget(QWidget):
         layout.addLayout(grid_layout)
         return group
         
-    def create_filesize_group(self) -> QGroupBox:
+    def create_filesize_group(self) -> "QGroupBox":
         """ファイルサイズフィルタグループ"""
         group = QGroupBox("ファイルサイズ")
         layout = QVBoxLayout(group)
@@ -220,7 +209,7 @@ class FileFilterWidget(QWidget):
         layout.addLayout(detail_layout)
         return group
         
-    def create_filename_group(self) -> QGroupBox:
+    def create_filename_group(self) -> "QGroupBox":
         """ファイル名パターングループ"""
         group = QGroupBox("ファイル名パターン")
         layout = QVBoxLayout(group)
@@ -242,7 +231,7 @@ class FileFilterWidget(QWidget):
         
         return group
         
-    def create_download_limit_group(self) -> QGroupBox:
+    def create_download_limit_group(self) -> "QGroupBox":
         """ダウンロード上限設定グループ"""
         group = QGroupBox("ダウンロード上限")
         layout = QVBoxLayout(group)
@@ -268,7 +257,7 @@ class FileFilterWidget(QWidget):
         
         return group
         
-    def create_action_buttons(self) -> QWidget:
+    def create_action_buttons(self) -> "QWidget":
         """操作ボタン群"""
         widget = QWidget()
         layout = QHBoxLayout(widget)
@@ -295,7 +284,7 @@ class FileFilterWidget(QWidget):
         
         return widget
         
-    def create_status_display(self) -> QGroupBox:
+    def create_status_display(self) -> "QGroupBox":
         """フィルタ状況表示"""
         group = QGroupBox("現在のフィルタ設定")
         layout = QVBoxLayout(group)
@@ -485,8 +474,4 @@ class FileFilterWidget(QWidget):
 
 def create_file_filter_widget(parent=None) -> FileFilterWidget:
     """ファイルフィルタウィジェット作成ファクトリ関数"""
-    if not PYQT5_AVAILABLE:
-        logger.error("PyQt5が利用できません")
-        return QWidget(parent)  # フォールバック
-        
     return FileFilterWidget(parent)

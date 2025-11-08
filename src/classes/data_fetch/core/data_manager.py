@@ -7,7 +7,7 @@
 import os
 import json
 import logging
-from PyQt5.QtCore import QObject, pyqtSignal
+from qt_compat.core import QObject, Signal
 from classes.utils.debug_log import debug_log
 from .datatree_manager import DataTreeManager
 from config.common import DATATREE_FILE_PATH, OUTPUT_DIR, get_cookie_file_path
@@ -24,7 +24,7 @@ class DataManager(QObject):
     RDEのAPIアクセス・データ保存・データ抽出などを担当するデータマネージャクラス。
     """
     # シグナル定義
-    processing_completed = pyqtSignal(str, bool)  # (grant_number, success)
+    processing_completed = Signal(str, bool)  # (grant_number, success)
     
     def __init__(self, logger=None):
         super().__init__()

@@ -1,9 +1,9 @@
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
+from qt_compat.core import Qt, QThread, Signal
 from typing import Dict, Optional
 
 class RequestThread(QThread):
     """非同期HTTPリクエスト実行用スレッド"""
-    request_completed = pyqtSignal(dict)
+    request_completed = Signal(dict)
 
     def __init__(self, analyzer, method: str, url: str,
                  headers: Optional[Dict], data: Optional[Dict],

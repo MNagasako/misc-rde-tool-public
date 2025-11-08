@@ -5,12 +5,12 @@
 import os
 import json
 import webbrowser
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, 
     QListWidgetItem, QPushButton, QMessageBox, QTextEdit, QComboBox, QCompleter,
     QGroupBox
 )
-from PyQt5.QtCore import Qt
+from qt_compat.core import Qt
 from config.common import get_samples_dir_path, SUBGROUP_JSON_PATH
 
 
@@ -446,7 +446,7 @@ class RelatedSamplesDialog(QDialog):
         # 補完機能の更新
         completer = self.subgroup_combo.completer()
         if completer:
-            from PyQt5.QtCore import QStringListModel
+            from qt_compat.core import QStringListModel
             completer.setModel(QStringListModel(display_texts))
     
     def load_sample_sharing_groups(self, sample_id):
@@ -612,4 +612,4 @@ def show_related_samples_dialog(subgroup_id, parent=None):
         return
     
     dialog = RelatedSamplesDialog(subgroup_id, parent)
-    dialog.exec_()
+    dialog.exec()

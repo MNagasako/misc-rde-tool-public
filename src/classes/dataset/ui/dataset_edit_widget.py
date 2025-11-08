@@ -7,13 +7,13 @@ import datetime
 import webbrowser
 import shutil
 import codecs
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGridLayout, 
     QPushButton, QMessageBox, QScrollArea, QCheckBox, QRadioButton, 
     QButtonGroup, QDialog, QTextEdit, QComboBox, QCompleter, QDateEdit,
     QListWidget, QListWidgetItem, QProgressDialog, QApplication
 )
-from PyQt5.QtCore import Qt, QDate, QTimer
+from qt_compat.core import Qt, QDate, QTimer
 from config.common import get_dynamic_file_path
 from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
 from classes.dataset.ui.taxonomy_builder_dialog import TaxonomyBuilderDialog
@@ -1212,7 +1212,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                 # スピナー停止
                 ai_suggest_button.stop_loading()
                 
-                if dialog.exec_() == QDialog.Accepted:
+                if dialog.exec() == QDialog.Accepted:
                     suggestion = dialog.get_selected_suggestion()
                     if suggestion:
                         # QTextEditの場合はsetPlainTextを使用して改行を保持
@@ -1373,7 +1373,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                     lambda taxonomy: edit_taxonomy_edit.setText(taxonomy)
                 )
                 
-                dialog.exec_()
+                dialog.exec()
                 
             except Exception as e:
                 QMessageBox.warning(widget, "エラー", f"タクソノミービルダーの起動に失敗しました:\n{e}")
@@ -1422,7 +1422,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                     lambda tags: edit_tags_edit.setText(tags)
                 )
                 
-                dialog.exec_()
+                dialog.exec()
                 
             except Exception as e:
                 QMessageBox.warning(widget, "エラー", f"TAGビルダーの起動に失敗しました:\n{e}")

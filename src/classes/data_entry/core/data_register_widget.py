@@ -3,12 +3,12 @@
 """
 import os
 import json
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, 
     QTextEdit, QLineEdit, QFileDialog, QFrame, QScrollArea, QMessageBox
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from qt_compat.core import Qt, Signal
+from qt_compat.gui import QFont
 from config.common import get_dynamic_file_path
 
 

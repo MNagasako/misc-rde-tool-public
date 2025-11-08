@@ -42,7 +42,7 @@ def apply_basic_info_to_Xlsx_logic(bearer_token, parent=None, webview=None, ui_c
             f"対象: {abs_xlsx}"
         )
         try:
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             QMessageBox.information(None, "Excel書き込みエラー", msg)
         except Exception:
             print(msg)
@@ -50,7 +50,7 @@ def apply_basic_info_to_Xlsx_logic(bearer_token, parent=None, webview=None, ui_c
     except Exception as e:
         msg = f"XLSX書き込み時に予期せぬエラーが発生しました: {e}"
         try:
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             QMessageBox.information(None, "Excel書き込みエラー", msg)
         except Exception:
             print(msg)
@@ -63,7 +63,7 @@ def summary_basic_info_to_Xlsx_logic(bearer_token, parent=None, webview=None, ui
     各種JSONを読み込み、XLSXの対応シートに反映（責務分離構造）
     """
     import openpyxl
-    from PyQt5.QtWidgets import QMessageBox
+    from qt_compat.widgets import QMessageBox
     
     if progress_callback:
         if not progress_callback(0, 100, "XLSX書き出しを開始しています..."):
@@ -97,7 +97,7 @@ def summary_basic_info_to_Xlsx_logic(bearer_token, parent=None, webview=None, ui
     if progress_callback:
         if not progress_callback(10, 100, "ファイルアクセス権限チェック中..."):
             return "キャンセルされました"
-    from PyQt5.QtWidgets import QMessageBox
+    from qt_compat.widgets import QMessageBox
     import time
     def is_xlsx_writable(path):
         try:
@@ -119,7 +119,7 @@ def summary_basic_info_to_Xlsx_logic(bearer_token, parent=None, webview=None, ui
         retry_btn = mbox.addButton("再開", QMessageBox.AcceptRole)
         cancel_btn = mbox.addButton("キャンセル", QMessageBox.RejectRole)
         mbox.setDefaultButton(retry_btn)
-        mbox.exec_()
+        mbox.exec()
         if mbox.clickedButton() == cancel_btn:
             return 'cancel'
         else:

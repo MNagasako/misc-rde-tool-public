@@ -23,8 +23,8 @@ ImageProcessor - 画像処理・管理クラス
 # 大容量画像対応・効率的な処理アルゴリズム実装
 # 【注意】バージョン更新時はconfig/common.py のREVISIONも要確認
 
-from PyQt5.QtCore import QEventLoop, QTimer, QUrl
-from PyQt5.QtWidgets import QApplication
+from qt_compat.core import QEventLoop, QTimer, QUrl
+from qt_compat.widgets import QApplication
 # === セッション管理ベースのプロキシ対応 ===
 from classes.utils.api_request_helper import fetch_binary
 import json
@@ -130,14 +130,21 @@ class ImageProcessor:
                 logger.warning(f"ファイル追加失敗: {file.get('attributes', {}).get('fileName', 'unknown')} - {e}")
 
         try:
+            logger.info(f"[BLOB-INIT] イベントループ作成開始: data_id={data_id}")
             loop = QEventLoop()
             dataset_url = URLS["web"]["data_detail_page"].format(id=data_id)
+            logger.info(f"[BLOB-URL] WebView URL構築完了: {dataset_url}")
             logger.debug(f"save_webview_blob_images: url : {dataset_url}")
             logger.debug(f"save_webview_blob_images: subdir : {subdir}")
+            logger.info(f"[BLOB-SHOW] WebView表示開始")
             self.browser.webview.show()
+            logger.info(f"[BLOB-SHOW] WebView表示完了")
 
             def poll_for_blob_imgs():
                 nonlocal poll_count
+                # ポーリング開始ログ
+                logger.info(f"[BLOB-POLL-START] poll_count={poll_count}, data_id={data_id}")
+                
                 # data_idをローカル変数として使用（インスタンス変数に依存しない）
                 current_data_id = data_id
                 
@@ -145,7 +152,7 @@ class ImageProcessor:
                 if hasattr(self.browser, '_active_image_processes') and data_id not in self.browser._active_image_processes:
                     logger.warning(f"[BLOB] 画像取得がキャンセルされました: data_id={data_id}")
                     try:
-                        self.browser.webview.loadFinished.disconnect(after_load)
+                        self.browser.webview.page().loadFinished.disconnect(after_load)
                     except Exception:
                         pass
                     loop.quit()
@@ -157,7 +164,7 @@ class ImageProcessor:
                         logger.warning(f"[BLOB] grantNumber不一致ですが画像取得を継続: data_id={data_id}, 現在={self.browser.grant_number}, 期待={self.browser._current_image_grant_number}")
                         # 継続処理（中断しない）
                         # try:
-                        #     self.browser.webview.loadFinished.disconnect(after_load)
+                        #     self.browser.webview.page().loadFinished.disconnect(after_load)
                         # except Exception:
                         #     pass
                         # loop.quit()
@@ -168,7 +175,7 @@ class ImageProcessor:
                 if not self.browser.webview.isVisible():
                     logger.debug(f"WebViewが閉じられたためポーリング中断")
                     try:
-                        self.browser.webview.loadFinished.disconnect(after_load)
+                        self.browser.webview.page().loadFinished.disconnect(after_load)
                     except Exception:
                         pass
                     logger.debug("loop.quit() called (WebView非表示)")
@@ -177,36 +184,99 @@ class ImageProcessor:
                 logger.debug(f"poll_for_blob_imgs: poll_count={poll_count}")
 
                 js_code = load_js_template('poll_blob_imgs.js')
+                logger.info(f"[BLOB-JS-CODE] JavaScriptコード読み込み完了: 長さ={len(js_code)}文字")
 
                 def handle_count(results):
                     nonlocal poll_count
+                    # デバッグ: JavaScript実行結果の詳細をログ出力(INFOレベル)
+                    logger.info(f"[BLOB-JS-CALLBACK] poll_count={poll_count}, results type={type(results)}, results={results}")
+                    
+                    # 結果の詳細な型チェック
+                    if results is None:
+                        logger.warning(f"[BLOB-JS] JavaScript実行結果がNone (PySide6互換性問題)")
+                        results = []
+                    elif isinstance(results, str):
+                        logger.warning(f"[BLOB-JS] JavaScript実行結果が文字列型: len={len(results)}, content={results[:200] if results else '(empty)'}")
+                        # 空文字列の場合は空リストに変換
+                        if not results.strip():
+                            results = []
+                        else:
+                            # JSON文字列の可能性があるのでパースを試みる
+                            try:
+                                import json
+                                results = json.loads(results)
+                                logger.info(f"[BLOB-JS] JSON文字列をパース成功: {type(results)}, {len(results) if isinstance(results, list) else 'N/A'}件")
+                            except Exception as e:
+                                logger.error(f"[BLOB-JS] JSON文字列のパースに失敗: {e}")
+                                results = []
+                    elif not isinstance(results, list):
+                        logger.warning(f"[BLOB-JS] JavaScript実行結果が予期しない型: {type(results)}, value={results}")
+                        results = []
+                    
                     if results and len(results) > 0:
+                        logger.info(f"[BLOB-JS] {len(results)}件のblob画像を検出")
                         self._extract_and_save_blob_images(results, loop, data_id=data_id)
                     else:
                         poll_count += 1
+                        logger.debug(f"[BLOB-JS] blob画像未検出、リトライ {poll_count}/{max_poll}")
                         if poll_count < max_poll:
                             QTimer.singleShot(poll_interval, poll_for_blob_imgs)
                         else:
                             logger.warning(f"blob:画像が見つからずタイムアウト: {dataset_url}")
                             try:
-                                self.browser.webview.loadFinished.disconnect(after_load)
+                                self.browser.webview.page().loadFinished.disconnect(after_load)
                             except Exception:
                                 pass
                             logger.debug("loop.quit() called (timeout)")
                             loop.quit()
 
-                self.browser.webview.page().runJavaScript(js_code, handle_count)
+                # JavaScript実行開始ログ
+                logger.info(f"[BLOB-JS-START] JavaScript実行開始（JSON文字列化方式）: poll_count={poll_count}")
+                
+                # PySide6対応: JSON文字列化方式
+                # JavaScript側で配列をJSON.stringify()して文字列として返す
+                logger.info(f"[BLOB-JS-STEP1] 1段階目: JavaScriptを実行してJSON文字列をグローバル変数に格納")
+                self.browser.webview.page().runJavaScript(js_code)
+                
+                # 2段階目: 500ms待機してからJSON文字列を取得
+                def step2_retrieve_json():
+                    logger.info(f"[BLOB-JS-STEP2] 2段階目: JSON文字列を取得")
+                    retrieve_js = "typeof __pollBlobResults__ !== 'undefined' ? __pollBlobResults__ : '[]'"
+                    
+                    def handle_json_string(json_str):
+                        logger.info(f"[BLOB-JS-STEP2-RESULT] JSON文字列取得: type={type(json_str)}, length={len(json_str) if isinstance(json_str, str) else 'N/A'}")
+                        
+                        # JSON文字列をパース
+                        try:
+                            if isinstance(json_str, str) and json_str:
+                                import json
+                                results = json.loads(json_str)
+                                logger.info(f"[BLOB-JS-JSON-PARSED] JSON解析成功: type={type(results)}, count={len(results) if isinstance(results, list) else 'N/A'}")
+                                handle_count(results)
+                            else:
+                                logger.warning(f"[BLOB-JS-JSON-ERROR] 空またはnull: {json_str}")
+                                handle_count([])
+                        except Exception as e:
+                            logger.error(f"[BLOB-JS-JSON-ERROR] JSON解析失敗: {e}, raw={json_str[:200] if isinstance(json_str, str) else json_str}")
+                            handle_count([])
+                    
+                    self.browser.webview.page().runJavaScript(retrieve_js, handle_json_string)
+                
+                # 500ms遅延してステップ2実行
+                QTimer.singleShot(500, step2_retrieve_json)
 
             def after_load(ok):
+                logger.info(f"[AFTER-LOAD] コールバック呼び出し: ok={ok}, dataset_url={dataset_url}")
                 self.browser.set_webview_message(f"[after_load] ok={ok} dataset_url={dataset_url}")
                 logger.debug(f"after_load: ok={ok}")
                 if ok:
+                    logger.info(f"[AFTER-LOAD] ページロード成功。{IMAGE_LOAD_WAIT_TIME/1000}秒待機後にポーリング開始")
                     logger.debug(f"ページロード完了。10秒待機後にポーリング開始")
                     QTimer.singleShot(IMAGE_LOAD_WAIT_TIME, poll_for_blob_imgs)
                 else:
                     logger.warning(f"WebViewロード失敗: {dataset_url}")
                     try:
-                        self.browser.webview.loadFinished.disconnect(after_load)
+                        self.browser.webview.page().loadFinished.disconnect(after_load)
                     except Exception:
                         pass
                     loop.quit()
@@ -214,12 +284,17 @@ class ImageProcessor:
             poll_count = 0
             max_poll = MAX_POLL
             poll_interval = POLL_INTERVAL
-            self.browser.webview.loadFinished.connect(after_load)
+            logger.info(f"[BLOB-CONNECT] loadFinishedシグナル接続開始")
+            self.browser.webview.page().loadFinished.connect(after_load)
+            logger.info(f"[BLOB-LOAD] WebViewロード開始: {dataset_url}")
             self.browser.webview.load(QUrl(dataset_url))
+            logger.info(f"[BLOB-EXEC] イベントループ開始（ブロッキング）")
             logger.debug(f"WebViewロード開始: {dataset_url}")
             self.browser.set_webview_message(f"[WebViewロード開始] {dataset_url}")
-            loop.exec_()
+            loop.exec()
+            logger.info(f"[BLOB-EXEC-END] イベントループ終了")
         except Exception as e:
+            logger.error(f"[BLOB-EXCEPTION] WebViewでのblob画像保存処理例外: {e}", exc_info=True)
             logger.warning(f"WebViewでのblob画像保存処理例外: {e}")
 
     def _extract_and_save_blob_images(self, blob_srcs, loop, max_images=None, data_id=None):
@@ -268,55 +343,78 @@ class ImageProcessor:
 
             js_code = load_js_template('process_blob_image.js').replace('{src}', src)
 
-            def handle_result(result):
-                nonlocal filename
-                # BLOBのbase64は切り詰めてログ出力
-                if isinstance(result, dict):
-                    b64 = result.get('b64')
-                    b64_short = (b64[:40] + f"...({len(b64)} chars)..." + b64[-10:]) if b64 and len(b64) > 60 else b64
-                    # b64以外の値はそのまま、b64だけ短縮してjson化
-                    result_log = {k: (b64_short if k == 'b64' else v) for k, v in result.items()}
-                    logger.debug(f"[BLOB] handle_result: idx={idx}, filename={filename}, b64(short)={b64_short}")
-                    logger.debug(f"[BLOB] result_json={json.dumps(result_log, ensure_ascii=False, separators=(',', ':'))}")
-                else:
-                    logger.debug(f"[BLOB] handle_result: idx={idx}, filename={filename}, result_type={type(result)}")
-                b64 = result.get('b64') if isinstance(result, dict) else None
-                debug = result.get('debug') if isinstance(result, dict) else []
-                filename = result.get('filename') if isinstance(result, dict) else None
-                if not filename:
-                    filename = blob_srcs[idx].get('filename')
-                if not filename:
-                    filename = 'unnamed.png'
-                blob_hash = self._hash_blob(b64, filename)
-                # data_id毎のユニークキーを作成（同一data_id内での重複チェック）
-                unique_key = f"{data_id}_{blob_hash}"
-                if unique_key in self.browser._recent_blob_hashes:
-                    logger.debug(f"[BLOB] duplicate image detected, skipping: idx={idx}, filename={filename}, data_id={data_id}")
-                    process_next(idx + 1, b64_list, debug_logs, filenames)
-                    return
+            # PySide6対応: 2段階でJSON文字列を取得
+            logger.debug(f"[BLOB-EXTRACT-STEP1] JavaScript実行開始: idx={idx}")
+            self.browser.webview.page().runJavaScript(js_code)  # 1段階目: グローバル変数に格納（コールバックなし）
+            
+            def step2_retrieve_json():
+                """2段階目: JSON文字列をグローバル変数から取得"""
+                retrieve_js = "typeof __processBlobResult__ !== 'undefined' ? __processBlobResult__ : 'null'"
                 
-                # data_id単位の画像カウンタを更新
-                current_count = self.browser._data_id_image_counts.get(data_id, 0)
-                if max_images is not None and current_count >= max_images:
-                    logger.info(f"[BLOB] data_id={data_id} 画像上限に達したため処理終了: max_images={max_images}, 現在の件数={current_count}")
-                    self.handle_blob_images(self.browser.image_dir, {'b64_list': b64_list, 'debug_logs': debug_logs, 'filenames': filenames, 'blob_srcs': blob_srcs}, data_id=data_id)
-                    loop.quit()
-                    return
-                
-                self.browser._recent_blob_hashes.add(unique_key)
-                self.browser._data_id_image_counts[data_id] = current_count + 1
-                logger.debug(f"[BLOB] data_id={data_id} 画像カウンタ更新: {current_count} -> {current_count + 1}")
-                
-                # ハッシュセットのサイズ制限（メモリ効率）
-                if len(self.browser._recent_blob_hashes) > 100:  # data_id毎に管理するため上限を増加
-                    # 古いエントリを削除（セットなので適当に削除）
-                    self.browser._recent_blob_hashes.pop()
-                b64_list.append(b64)
-                debug_logs.extend(debug)
-                filenames.append(filename)
-                process_next(idx + 1, b64_list, debug_logs, filenames)
+                def handle_json_str(json_str):
+                    """JSON文字列を受け取ってパース"""
+                    nonlocal filename
+                    
+                    logger.debug(f"[BLOB-EXTRACT-STEP2] JSON文字列受信: idx={idx}, type={type(json_str)}, length={len(json_str) if isinstance(json_str, str) else 0}")
+                    
+                    result = None
+                    try:
+                        import json
+                        if isinstance(json_str, str) and json_str and json_str != 'null':
+                            result = json.loads(json_str)
+                            b64_len = len(result.get('b64', '')) if result.get('b64') else 0
+                            logger.info(f"[BLOB-EXTRACT] JSON解析成功: idx={idx}, b64_length={b64_len}, filename={result.get('filename')}")
+                        else:
+                            logger.error(f"[BLOB-EXTRACT] JSON文字列が無効: idx={idx}, value={json_str[:100] if isinstance(json_str, str) else json_str}")
+                            result = {'b64': None, 'debug': [], 'filename': None}
+                    except Exception as e:
+                        logger.error(f"[BLOB-EXTRACT] JSON解析失敗: idx={idx}, error={e}, raw={json_str[:200] if isinstance(json_str, str) else json_str}")
+                        result = {'b64': None, 'debug': [], 'filename': None}
 
-            self.browser.webview.page().runJavaScript(js_code, handle_result)
+                    b64 = result.get('b64') if isinstance(result, dict) else None
+                    debug = result.get('debug') if isinstance(result, dict) else []
+                    filename = result.get('filename') if isinstance(result, dict) else None
+                    b64 = result.get('b64') if isinstance(result, dict) else None
+                    debug = result.get('debug') if isinstance(result, dict) else []
+                    filename = result.get('filename') if isinstance(result, dict) else None
+                    if not filename:
+                        filename = blob_srcs[idx].get('filename')
+                    if not filename:
+                        filename = 'unnamed.png'
+                    blob_hash = self._hash_blob(b64, filename)
+                    # data_id毎のユニークキーを作成（同一data_id内での重複チェック）
+                    unique_key = f"{data_id}_{blob_hash}"
+                    if unique_key in self.browser._recent_blob_hashes:
+                        logger.debug(f"[BLOB] duplicate image detected, skipping: idx={idx}, filename={filename}, data_id={data_id}")
+                        process_next(idx + 1, b64_list, debug_logs, filenames)
+                        return
+                    
+                    # data_id単位の画像カウンタを更新
+                    current_count = self.browser._data_id_image_counts.get(data_id, 0)
+                    if max_images is not None and current_count >= max_images:
+                        logger.info(f"[BLOB] data_id={data_id} 画像上限に達したため処理終了: max_images={max_images}, 現在の件数={current_count}")
+                        self.handle_blob_images(self.browser.image_dir, {'b64_list': b64_list, 'debug_logs': debug_logs, 'filenames': filenames, 'blob_srcs': blob_srcs}, data_id=data_id)
+                        loop.quit()
+                        return
+                    
+                    self.browser._recent_blob_hashes.add(unique_key)
+                    self.browser._data_id_image_counts[data_id] = current_count + 1
+                    logger.debug(f"[BLOB] data_id={data_id} 画像カウンタ更新: {current_count} -> {current_count + 1}")
+                    
+                    # ハッシュセットのサイズ制限（メモリ効率）
+                    if len(self.browser._recent_blob_hashes) > 100:  # data_id毎に管理するため上限を増加
+                        # 古いエントリを削除（セットなので適当に削除）
+                        self.browser._recent_blob_hashes.pop()
+                    b64_list.append(b64)
+                    debug_logs.extend(debug)
+                    filenames.append(filename)
+                    process_next(idx + 1, b64_list, debug_logs, filenames)
+                
+                self.browser.webview.page().runJavaScript(retrieve_js, handle_json_str)
+            
+            # 500ms遅延後に2段階目を実行
+            from qt_compat.core import QTimer
+            QTimer.singleShot(500, step2_retrieve_json)
 
         process_next(0, [], [], [])
 

@@ -7,8 +7,8 @@ import os
 import json
 import datetime
 import traceback
-from PyQt5.QtWidgets import QMessageBox
-from PyQt5.QtCore import QTimer
+from qt_compat.widgets import QMessageBox
+from qt_compat.core import QTimer
 from .subgroup_api_client import SubgroupApiClient, SubgroupPayloadBuilder
 
 
@@ -882,7 +882,7 @@ def send_subgroup_request(widget, api_url, headers, payload, group_name, auto_re
                                     from classes.dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
                                     subgroup_notifier = get_subgroup_refresh_notifier()
                                     # 更新完了後に少し遅延して通知（ファイル更新完了を待つため）
-                                    from PyQt5.QtCore import QTimer
+                                    from qt_compat.core import QTimer
                                     def send_notification():
                                         try:
                                             subgroup_notifier.notify_refresh()

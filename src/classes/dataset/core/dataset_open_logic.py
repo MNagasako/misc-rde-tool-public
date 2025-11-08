@@ -1,8 +1,8 @@
 
-from PyQt5.QtWidgets import QMessageBox
+from qt_compat.widgets import QMessageBox
 import os
 import json
-from PyQt5.QtWidgets import QComboBox, QLabel, QVBoxLayout, QHBoxLayout, QWidget
+from qt_compat.widgets import QComboBox, QLabel, QVBoxLayout, QHBoxLayout, QWidget
 from classes.utils.api_request_helper import api_request  # refactored to use api_request_helper
 from core.bearer_token_manager import BearerTokenManager
 
@@ -123,7 +123,7 @@ def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, data
         f"\nこの操作はRDEに新規データセットを作成します。"
     )
 
-    from PyQt5.QtWidgets import QMessageBox, QPushButton, QDialog, QVBoxLayout, QTextEdit
+    from qt_compat.widgets import QMessageBox, QPushButton, QDialog, QVBoxLayout, QTextEdit
     msg_box = QMessageBox(parent)
     msg_box.setWindowTitle("データセット開設の確認")
     msg_box.setIcon(QMessageBox.Question)
@@ -165,7 +165,7 @@ def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, data
             
             # 成功時にdataset.jsonを自動再取得
             try:
-                from PyQt5.QtCore import QTimer
+                from qt_compat.core import QTimer
                 def auto_refresh():
                     try:
                         from classes.basic.core.basic_info_logic import auto_refresh_dataset_json
@@ -211,7 +211,7 @@ def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, data
 
 # グループ選択UIを事前に表示する関数
 def create_group_select_widget(parent=None):
-    from PyQt5.QtWidgets import QCheckBox
+    from qt_compat.widgets import QCheckBox
     # データ中核拠点広域シェア チェックボックス
     share_core_scope_checkbox = QCheckBox("データ中核拠点広域シェア（RDE全体での共有）を有効にする", parent)
     share_core_scope_checkbox.setChecked(False)
@@ -219,8 +219,8 @@ def create_group_select_widget(parent=None):
     anonymize_checkbox = QCheckBox("データセットを匿名にする", parent)
     anonymize_checkbox.setChecked(False)
 
-    from PyQt5.QtWidgets import QWidget, QPushButton, QLineEdit, QDateEdit, QComboBox
-    from PyQt5.QtCore import QDate, Qt
+    from qt_compat.widgets import QWidget, QPushButton, QLineEdit, QDateEdit, QComboBox
+    from qt_compat.core import QDate, Qt
     import datetime
     from config.common import SUBGROUP_JSON_PATH, TEMPLATE_JSON_PATH, SELF_JSON_PATH, ORGANIZATION_JSON_PATH, INSTRUMENTS_JSON_PATH
     
@@ -285,8 +285,8 @@ def create_group_select_widget(parent=None):
         error_widget.setLayout(error_layout)
         return error_widget, [], None, None, None, None, None, []
     
-    from PyQt5.QtWidgets import QSizePolicy
-    from PyQt5.QtWidgets import QCompleter
+    from qt_compat.widgets import QSizePolicy
+    from qt_compat.widgets import QCompleter
     
     # UIコンポーネントを先に定義（update_group_list関数で参照するため）
     combo = QComboBox(parent)
@@ -359,7 +359,7 @@ def create_group_select_widget(parent=None):
     
     # Completer の初期化（先に行う）
     group_completer = QCompleter([], combo)  # 空リストで初期化
-    group_completer.setCaseSensitivity(False)
+    group_completer.setCaseSensitivity(Qt.CaseInsensitive)  # PySide6: 列挙型が必要
     group_completer.setFilterMode(Qt.MatchContains)
     # 検索時の補完リスト（popup）の高さを12行分に制限
     popup_view = group_completer.popup()
@@ -429,7 +429,7 @@ def create_group_select_widget(parent=None):
                 if grant_items:
                     # 課題番号コンボボックス用のコンプリーター設定
                     grant_completer = QCompleter(grant_items, grant_combo)
-                    grant_completer.setCaseSensitivity(False)
+                    grant_completer.setCaseSensitivity(Qt.CaseInsensitive)  # PySide6: 列挙型が必要
                     grant_completer.setFilterMode(Qt.MatchContains)
                     grant_popup_view = grant_completer.popup()
                     grant_popup_view.setMinimumHeight(240)
@@ -569,7 +569,7 @@ def create_group_select_widget(parent=None):
         print(f"[ERROR] template.jsonの読み込みに失敗: {e}")
     template_combo.setMinimumWidth(260)
     template_completer = QCompleter(template_items, template_combo)
-    template_completer.setCaseSensitivity(False)
+    template_completer.setCaseSensitivity(Qt.CaseInsensitive)  # PySide6: 列挙型が必要
     template_completer.setFilterMode(Qt.MatchContains)
     t_popup_view = template_completer.popup()
     t_popup_view.setMinimumHeight(240)
@@ -577,7 +577,7 @@ def create_group_select_widget(parent=None):
     template_combo.setCompleter(template_completer)
     template_combo.setCurrentIndex(-1)
 
-    from PyQt5.QtWidgets import QFormLayout
+    from qt_compat.widgets import QFormLayout
     form_layout = QFormLayout()
     form_layout.setLabelAlignment(Qt.AlignRight)
     form_layout.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)

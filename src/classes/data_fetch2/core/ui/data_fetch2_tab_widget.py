@@ -2,7 +2,7 @@
 データ取得2タブウィジェット - QTabWidgetベース
 一括取得タブ（現状のUIをそのまま移植）
 """
-from PyQt5.QtWidgets import QWidget, QTabWidget, QVBoxLayout
+from qt_compat.widgets import QWidget, QTabWidget, QVBoxLayout
 from classes.data_fetch2.core.ui.data_fetch2_widget import create_data_fetch2_widget
 
 class DataFetch2TabWidget(QTabWidget):

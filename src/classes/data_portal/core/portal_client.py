@@ -155,7 +155,7 @@ class PortalClient:
             return False, str(e)
     
     def post(self, path: str = "", data: Optional[Dict[str, Any]] = None, 
-             files: Optional[Dict[str, Any]] = None) -> Tuple[bool, Any]:
+             files: Optional[Dict[str, Any]] = None, headers: Optional[Dict[str, str]] = None) -> Tuple[bool, Any]:
         """
         POSTリクエストを送信
         
@@ -163,6 +163,7 @@ class PortalClient:
             path: リクエストパス
             data: POSTデータ
             files: アップロードファイル
+            headers: HTTPヘッダー
         
         Returns:
             Tuple[bool, Any]: (成功フラグ, レスポンスまたはエラーメッセージ)
@@ -180,13 +181,16 @@ class PortalClient:
                 logger.info(f"[REQUEST] Basic Auth: {auth[0]}:***")
             if self.session_cookies:
                 logger.info(f"[REQUEST] Cookies: {list(self.session_cookies.keys())}")
+            if headers:
+                logger.info(f"[REQUEST] Custom Headers: {headers}")
             
             response = proxy_post(
                 url,
                 data=data,
                 files=files,
                 auth=auth,
-                cookies=self.session_cookies
+                cookies=self.session_cookies,
+                headers=headers
             )
             
             # 実際に送信されたリクエストヘッダーをログ出力
@@ -283,8 +287,15 @@ class PortalClient:
                 'pass_check': '1'  # ログインチェックフラグ
             }
             
+            # PySide6対応: Referer/Originヘッダーを明示的に設定
+            headers = {
+                'Referer': self._build_url("index.php"),
+                'Origin': self.base_url.rstrip('/'),
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+            
             logger.info(f"ログインフォーム送信: id={self.credentials.login_username}, pass_check=1")
-            success, response = self.post("index.php", data=login_data)
+            success, response = self.post("index.php", data=login_data, headers=headers)
             
             if not success:
                 return False, f"ログイン送信失敗: {response}"
@@ -299,19 +310,28 @@ class PortalClient:
             logger.info(f"レスポンス長: {len(response_text)} bytes")
             logger.info(f"'ログイン' in response: {'ログイン' in response_text}")
             logger.info(f"'Login' in response: {'Login' in response_text}")
-            logger.info(f"'ユーザーID' in response: {'ユーザーID' in response_text}")
+            logger.info(f"'ログアウト' in response: {'ログアウト' in response_text}")
+            logger.info(f"'page_header' in response: {'page_header' in response_text}")
             
-            # ログイン失敗判定：ログインページにリダイレクトされた場合
-            if 'ログイン' in response_text or 'Login' in response_text:
-                logger.error("❌ ログイン失敗（ログインページ再表示）")
+            # PySide6対応: ログイン成功判定を「ログアウトリンクの存在」で行う
+            # ログインページには「ログイン (Login)」ボタンがあり
+            # ログイン後のメインページには「ログアウト (Logout)」リンクが表示される
+            if 'ログアウト' in response_text or 'Logout' in response_text:
+                # ログアウトリンクがある = ログイン成功
+                self.authenticated = True
+                logger.info("[OK] ログイン成功（ログアウトリンク確認）")
+                return True, "ログイン成功"
+            elif 'ログイン' in response_text or 'Login' in response_text:
+                # ログインフォームが表示されている = ログイン失敗
+                logger.error("[X] ログイン失敗（ログインページ再表示）")
                 # レスポンスの先頭200文字をログ出力
                 logger.error(f"レスポンス先頭: {response_text[:200]}")
                 return False, "ログイン失敗: 認証情報が正しくありません"
             else:
-                # ログインページが表示されていない = ログイン成功
-                self.authenticated = True
-                logger.info("✅ ログイン成功（ログインページ非表示確認）")
-                return True, "ログイン成功"
+                # どちらでもない場合（予期しない状態）
+                logger.error("[X] ログイン判定不能（予期しないレスポンス）")
+                logger.error(f"レスポンス先頭: {response_text[:200]}")
+                return False, "ログイン失敗: 予期しないレスポンス"
             
         except Exception as e:
             logger.error(f"ログインエラー: {e}")

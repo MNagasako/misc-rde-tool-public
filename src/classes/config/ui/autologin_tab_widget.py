@@ -17,25 +17,27 @@ from datetime import datetime
 
 try:
     # WebEngine初期化問題の回避
-    from PyQt5.QtCore import QCoreApplication, Qt
-    if not QCoreApplication.testAttribute(Qt.AA_ShareOpenGLContexts):
-        QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+    from qt_compat import initialize_webengine
+    from qt_compat.core import Qt
     
-    from PyQt5.QtWidgets import (
+    # WebEngine初期化
+    initialize_webengine()
+    
+    from qt_compat.widgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
         QLabel, QPushButton, QLineEdit, QRadioButton, QButtonGroup,
         QCheckBox, QGroupBox, QTextEdit, QMessageBox, QProgressBar,
         QFrame, QSizePolicy, QComboBox
     )
-    from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
-    from PyQt5.QtGui import QFont, QPalette
+    from qt_compat.core import QTimer, QThread, Signal
+    from qt_compat.gui import QFont, QPalette
     PYQT5_AVAILABLE = True
 except ImportError:
     PYQT5_AVAILABLE = False
     # ダミークラス定義
     class QWidget: pass
     class QThread: pass
-    def pyqtSignal(*args): pass
+    def Signal(*args): pass
 
 from classes.core.credential_store import (
     perform_health_check, decide_autologin_source, get_credential_store,
@@ -50,7 +52,9 @@ class AutoLoginTabWidget(QWidget):
     """自動ログインタブウィジェット"""
     
     def __init__(self, parent=None):
-        super().__init__(parent)
+        # PySide6完全対応: QWidget.__init__を明示的に呼び出し
+        QWidget.__init__(self, parent)
+            
         if not PYQT5_AVAILABLE:
             logger.warning("PyQt5が利用できないため、自動ログインタブを初期化できません")
             return
@@ -612,7 +616,7 @@ class AutoLoginTabWidget(QWidget):
     def open_rde_page(self):
         """メインアプリでRDEページを開く"""
         try:
-            from PyQt5.QtWidgets import QApplication
+            from qt_compat.widgets import QApplication
             app = QApplication.instance()
             
             if not app:
@@ -632,7 +636,7 @@ class AutoLoginTabWidget(QWidget):
             
             # RDEページに移動
             from config.site_rde import URLS
-            from PyQt5.QtCore import QUrl
+            from qt_compat.core import QUrl
             
             rde_url = URLS["web"]["base"]
             main_browser.webview.setUrl(QUrl(rde_url))

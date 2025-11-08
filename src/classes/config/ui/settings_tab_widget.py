@@ -12,30 +12,32 @@ import sys
 import logging
 from typing import Dict, Any, Optional
 
+# ログ設定（インポート前に初期化）
+logger = logging.getLogger(__name__)
+
 try:
-    from PyQt5.QtWidgets import (
+    from qt_compat.widgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
         QLabel, QPushButton, QMessageBox, 
         QScrollArea, QGroupBox, QGridLayout, QApplication,
         QSplitter, QFrame
     )
-    from PyQt5.QtCore import Qt, QTimer, QSize
-    from PyQt5.QtGui import QFont
+    from qt_compat.core import Qt, QTimer, QSize
+    from qt_compat.gui import QFont
     PYQT5_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    logger.error(f"Qt互換レイヤーインポート失敗: {e}")
     PYQT5_AVAILABLE = False
     # ダミークラス定義
     class QWidget: pass
     class QApplication: pass
 
-# ログ設定
-logger = logging.getLogger(__name__)
-
 class SettingsTabWidget(QWidget):
     """設定タブウィジェットクラス"""
     
     def __init__(self, parent=None, bearer_token=None):
-        super().__init__(parent)
+        # PySide6完全対応: QWidget.__init__を明示的に呼び出し
+        QWidget.__init__(self, parent)
         self.parent_widget = parent
         self.bearer_token = bearer_token
         self.setup_ui()
@@ -43,7 +45,8 @@ class SettingsTabWidget(QWidget):
     def setup_ui(self):
         """UI初期化 - レスポンシブ・段組対応"""
         # メインレイアウト
-        layout = QVBoxLayout(self)
+        layout = QVBoxLayout()
+        self.setLayout(layout)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(10)
         
@@ -110,9 +113,9 @@ class SettingsTabWidget(QWidget):
             if self.parent_widget:
                 width = self.parent_widget.width()
             else:
-                desktop = QApplication.desktop()
-                screen_rect = desktop.screenGeometry()
-                width = screen_rect.width()
+                # PySide6対応
+                from qt_compat import get_screen_size
+                width, _ = get_screen_size(self)
             
             # 幅に応じて段組数を決定
             if width >= 1920:  # 4K以上
@@ -265,7 +268,7 @@ class SettingsTabWidget(QWidget):
         mode_layout = QVBoxLayout(mode_group)
         
         try:
-            from PyQt5.QtWidgets import QRadioButton, QButtonGroup
+            from qt_compat.widgets import QRadioButton, QButtonGroup
             
             self.mode_button_group = QButtonGroup(self)
             
@@ -293,7 +296,7 @@ class SettingsTabWidget(QWidget):
         enterprise_layout = QGridLayout(enterprise_group)
         
         try:
-            from PyQt5.QtWidgets import QCheckBox
+            from qt_compat.widgets import QCheckBox
             
             self.enable_truststore_checkbox = QCheckBox("truststoreを使用")
             self.enable_truststore_checkbox.setToolTip("システム証明書を自動取得")
@@ -334,7 +337,7 @@ class SettingsTabWidget(QWidget):
         details_layout = QGridLayout(details_group)
         
         try:
-            from PyQt5.QtWidgets import QLineEdit
+            from qt_compat.widgets import QLineEdit
             
             details_layout.addWidget(QLabel("HTTPプロキシ:"), 0, 0)
             self.http_proxy_edit = QLineEdit()
@@ -656,7 +659,10 @@ class SettingsTabWidget(QWidget):
 def create_settings_tab_widget(parent=None, bearer_token=None):
     """設定タブウィジェットを作成"""
     try:
-        return SettingsTabWidget(parent, bearer_token)
+        widget = SettingsTabWidget(parent, bearer_token)
+        return widget
     except Exception as e:
         logger.error(f"設定タブウィジェット作成エラー: {e}")
+        import traceback
+        traceback.print_exc()
         return None

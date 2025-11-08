@@ -5,12 +5,12 @@ AI拡張機能のプロンプトテンプレートを編集・管理する
 
 import os
 import json
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QTextEdit, QTabWidget, QWidget, QComboBox, QLineEdit,
     QMessageBox, QSplitter, QGroupBox, QFormLayout
 )
-from PyQt5.QtCore import Qt
+from qt_compat.core import Qt
 from config.common import get_dynamic_file_path
 
 

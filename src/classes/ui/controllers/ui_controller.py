@@ -6,10 +6,10 @@ Browserクラスから UI制御ロジックを分離
 """
 import pandas as pd
 
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QVBoxLayout, QWidget
 )
-from PyQt5.QtCore import QTimer
+from qt_compat.core import QTimer
 
 from config.common import INPUT_DIR, get_dynamic_file_path
 
@@ -33,7 +33,7 @@ class UIController(UIControllerCore):
     def show_error(self, message):
         """エラーメッセージを表示する"""
         try:
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             QMessageBox.critical(self.parent if hasattr(self, 'parent') else None, 
                                 "エラー", str(message))
         except Exception as e:
@@ -100,7 +100,7 @@ class UIController(UIControllerCore):
         if not hasattr(parent, 'sizeHint'):
             return
             
-        from PyQt5.QtWidgets import QApplication
+        from qt_compat.widgets import QApplication
         
         # 画面サイズを取得
         screen = QApplication.primaryScreen()
@@ -148,7 +148,7 @@ class UIController(UIControllerCore):
         if hasattr(parent, 'centralWidget'):
             central_widget = parent.centralWidget()
             if central_widget and hasattr(central_widget, 'findChildren'):
-                from PyQt5.QtWidgets import QScrollArea
+                from qt_compat.widgets import QScrollArea
                 scroll_areas = central_widget.findChildren(QScrollArea)
                 for scroll_area in scroll_areas:
                     if scroll_area.widget():
@@ -207,7 +207,7 @@ class UIController(UIControllerCore):
         """
         添付ファイル選択ボタン押下時の処理。添付ファイルパスを保存し、登録実行ボタンの有効/無効を制御。
         """
-        from PyQt5.QtWidgets import QFileDialog
+        from qt_compat.widgets import QFileDialog
         files, _ = QFileDialog.getOpenFileNames(None, "添付ファイルを選択", "", "すべてのファイル (*)")
         if files:
             self.selected_attachment_files = files
@@ -316,7 +316,7 @@ class UIController(UIControllerCore):
                 bearer_token = getattr(self.parent, 'bearer_token', None)
                 run_dataset_open_logic(parent=None, bearer_token=bearer_token)
             except Exception as e:
-                from PyQt5.QtWidgets import QMessageBox
+                from qt_compat.widgets import QMessageBox
                 QMessageBox.warning(None, "エラー", f"データセット開設ロジック呼び出し失敗: {e}")
                 if hasattr(self.parent, 'display_manager'):
                     self.parent.display_manager.set_message(f"データセット開設ロジック呼び出し失敗: {e}")
@@ -325,7 +325,7 @@ class UIController(UIControllerCore):
         """
         ファイル選択ボタン押下時の処理。ファイルパスを保存し、登録実行ボタンの有効/無効を制御。
         """
-        from PyQt5.QtWidgets import QFileDialog
+        from qt_compat.widgets import QFileDialog
         files, _ = QFileDialog.getOpenFileNames(None, "登録するファイルを選択", "", "すべてのファイル (*)")
         if files:
             self.selected_register_files = files
@@ -442,13 +442,13 @@ class UIController(UIControllerCore):
             file_paths = getattr(self, 'selected_register_files', None)
             attachment_paths = getattr(self, 'selected_attachment_files', None)
             if not file_paths:
-                from PyQt5.QtWidgets import QMessageBox
+                from qt_compat.widgets import QMessageBox
                 QMessageBox.warning(None, "エラー", "データファイルが選択されていません。")
                 return
 
             run_data_register_logic(parent=None, bearer_token=bearer_token, dataset_info=dataset_info, form_values=form_values, file_paths=file_paths, attachment_paths=attachment_paths)
         except Exception as e:
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             QMessageBox.warning(None, "エラー", f"データ登録ロジック呼び出し失敗: {e}")
             if hasattr(self.parent, 'display_manager'):
                 self.parent.display_manager.set_message(f"データ登録ロジック呼び出し失敗: {e}")
@@ -469,13 +469,13 @@ class UIController(UIControllerCore):
                 self.parent.display_manager.set_message("設定画面を起動しました")
                 
         except ImportError as e:
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             QMessageBox.warning(None, "設定エラー", f"設定モジュールの読み込みに失敗しました: {e}")
             if hasattr(self.parent, 'display_manager'):
                 self.parent.display_manager.set_message(f"設定モジュール読み込み失敗: {e}")
                 
         except Exception as e:
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             QMessageBox.warning(None, "エラー", f"設定ロジック呼び出し失敗: {e}")
             if hasattr(self.parent, 'display_manager'):
                 self.parent.display_manager.set_message(f"設定ロジック呼び出し失敗: {e}")
@@ -770,7 +770,7 @@ class UIController(UIControllerCore):
                 self.parent.webview.setFixedSize(900, 500)
                 # ログインURLを毎回読み込む
                 from config.site_rde import URLS
-                from PyQt5.QtCore import QUrl
+                from qt_compat.core import QUrl
                 self.parent.webview.setUrl(QUrl(URLS["web"]["login"]))
             webview_widget = self.parent.findChild(QWidget, 'webview_widget')
             if webview_widget:
@@ -807,7 +807,7 @@ class UIController(UIControllerCore):
             # サブグループ・データセット・基本情報・設定モードは初期高さをディスプレイの90%に設定（後から変更可）
             if mode in ["subgroup_create", "basic_info", "dataset_open", "data_register", "settings", "ai_test", "data_fetch2", "data_portal"]:
                 try:
-                    from PyQt5.QtWidgets import QApplication
+                    from qt_compat.widgets import QApplication
                     screen = QApplication.primaryScreen()
                     if screen:
                         screen_geometry = screen.geometry()
@@ -820,7 +820,7 @@ class UIController(UIControllerCore):
             # データセットは初期幅をディスプレイの75%に設定（後から変更可）
             if mode in [ "dataset_open" ]:
                 try:
-                    from PyQt5.QtWidgets import QApplication
+                    from qt_compat.widgets import QApplication
                     screen = QApplication.primaryScreen()
                     if screen:
                         screen_geometry = screen.geometry()
@@ -998,7 +998,7 @@ class UIController(UIControllerCore):
         Step 2.5.2.1: 基本情報UI構築層の分離
         データ取得・Excel・段階実行・ステータス表示の統合UI構築
         """
-        from PyQt5.QtWidgets import QLabel, QHBoxLayout, QVBoxLayout, QLineEdit, QMessageBox
+        from qt_compat.widgets import QLabel, QHBoxLayout, QVBoxLayout, QLineEdit, QMessageBox
         
         try:
             # RDE基本情報取得機能セクション
@@ -1165,7 +1165,7 @@ class UIController(UIControllerCore):
         Returns:
             QWidget: ダミーウィジェット
         """
-        from PyQt5.QtWidgets import QLabel, QPushButton
+        from qt_compat.widgets import QLabel, QPushButton
         
         widget = QWidget()
         layout = QVBoxLayout()
@@ -1201,7 +1201,7 @@ class UIController(UIControllerCore):
         Step 2.5.2.2: サブグループUI構築層の分離
         サブグループ作成機能のモジュール化
         """
-        from PyQt5.QtWidgets import QLabel
+        from qt_compat.widgets import QLabel
         try:
             from classes.subgroup.ui.subgroup_create_widget import create_subgroup_create_widget
             return create_subgroup_create_widget(self, title, color, self.create_auto_resize_button)
@@ -1228,11 +1228,11 @@ class UIController(UIControllerCore):
                 self._fetch2_tab_widget.set_bearer_token(bearer_token)
             layout.addWidget(self._fetch2_tab_widget)
         except ImportError as e:
-            from PyQt5.QtWidgets import QLabel
+            from qt_compat.widgets import QLabel
             self.show_error(f"データ取得2タブウィジェットのインポートに失敗しました: {e}")
             layout.addWidget(QLabel("データ取得2タブUIが利用できません"))
         except Exception as e:
-            from PyQt5.QtWidgets import QLabel
+            from qt_compat.widgets import QLabel
             self.show_error(f"データ取得2タブ画面の作成でエラーが発生しました: {e}")
             layout.addWidget(QLabel("データ取得2タブUIにエラーが発生しました"))
 
@@ -1249,11 +1249,11 @@ class UIController(UIControllerCore):
             self._dataset_tab_widget = create_dataset_tab_widget(widget, bearer_token=bearer_token, ui_controller=self)
             layout.addWidget(self._dataset_tab_widget)
         except ImportError as e:
-            from PyQt5.QtWidgets import QLabel
+            from qt_compat.widgets import QLabel
             self.show_error(f"データセットタブウィジェットのインポートに失敗しました: {e}")
             layout.addWidget(QLabel("データセットタブUIが利用できません"))
         except Exception as e:
-            from PyQt5.QtWidgets import QLabel
+            from qt_compat.widgets import QLabel
             self.show_error(f"データセットタブ画面の作成でエラーが発生しました: {e}")
             layout.addWidget(QLabel("データセットタブUIにエラーが発生しました"))
 
@@ -1278,7 +1278,7 @@ class UIController(UIControllerCore):
             QWidget: モードウィジェット
         """
         if mode == "data_fetch":
-            from PyQt5.QtWidgets import QWidget, QVBoxLayout
+            from qt_compat.widgets import QWidget, QVBoxLayout
             if self.data_fetch_widget is None:
                 self.data_fetch_widget = QWidget()
                 self.data_fetch_layout = QVBoxLayout()
@@ -1311,7 +1311,7 @@ class UIController(UIControllerCore):
                     log_path = "debug_trace.log"
                 with open(log_path, "a", encoding="utf-8") as f:
                     f.write(f"[ERROR] dataset_open_widget: {e}\n{traceback.format_exc()}\n")
-                from PyQt5.QtWidgets import QMessageBox, QWidget
+                from qt_compat.widgets import QMessageBox, QWidget
                 QMessageBox.critical(None, "データセット開設エラー", f"データセット開設ページの生成に失敗しました。\n{e}")
                 return QWidget()
         elif mode == "data_register":
@@ -1392,7 +1392,7 @@ class UIController(UIControllerCore):
                 """
                 # WebViewからCookieを取得
                 try:
-                    from PyQt5.QtWebEngineWidgets import QWebEngineProfile
+                    from qt_compat.webengine import QWebEngineProfile
                     profile = webview.page().profile()
                     cookie_store = profile.cookieStore()
                     
@@ -1477,7 +1477,7 @@ class UIController(UIControllerCore):
                 webview = self.parent.webview
                 
                 # 既存のloadFinishedシグナルに追加で接続（強制オーバーレイ制御）
-                webview.loadFinished.connect(self.prevent_overlay_on_navigation)
+                webview.page().loadFinished.connect(self.prevent_overlay_on_navigation)
                 print("オーバーレイ防止監視を開始しました")
                 
         except Exception as e:
@@ -1512,7 +1512,7 @@ class UIController(UIControllerCore):
             try:
                 webview.urlChanged.connect(self.on_webview_url_changed)
                 webview.loadStarted.connect(self.on_webview_load_started)
-                webview.loadFinished.connect(self.on_webview_load_finished)
+                webview.page().loadFinished.connect(self.on_webview_load_finished)
                 print("WebView監視を開始しました")
             except Exception as e:
                 print(f"WebView監視設定エラー: {e}")
@@ -1588,8 +1588,8 @@ class UIController(UIControllerCore):
                 try:
                     webview.urlChanged.disconnect(self.on_webview_url_changed)
                     webview.loadStarted.disconnect(self.on_webview_load_started)
-                    webview.loadFinished.disconnect(self.on_webview_load_finished)
-                    webview.loadFinished.disconnect(self.prevent_overlay_on_navigation)  # オーバーレイ防止監視も停止
+                    webview.page().loadFinished.disconnect(self.on_webview_load_finished)
+                    webview.page().loadFinished.disconnect(self.prevent_overlay_on_navigation)  # オーバーレイ防止監視も停止
                 except:
                     pass  # 既に切断されている場合は無視
             
@@ -1622,7 +1622,7 @@ class UIController(UIControllerCore):
     
     def _create_request_analyzer_widget(self):
         """リクエスト解析モード用のウィジェットを作成"""
-        from PyQt5.QtWidgets import QLabel, QPushButton, QTextEdit
+        from qt_compat.widgets import QLabel, QPushButton, QTextEdit
         
         widget = QWidget()
         layout = QVBoxLayout()
@@ -1853,7 +1853,7 @@ class UIController(UIControllerCore):
             print(f"[DEBUG] Progress label set to: '{full_message}'")
             
             # UIを強制更新
-            from PyQt5.QtWidgets import QApplication
+            from qt_compat.widgets import QApplication
             QApplication.processEvents()
         else:
             print(f"[DEBUG] Progress elements not found:")
@@ -1882,7 +1882,7 @@ class UIController(UIControllerCore):
                 print(f"[DEBUG] Progress updated: '{full_message}'")
             
             # UIを強制更新
-            from PyQt5.QtWidgets import QApplication
+            from qt_compat.widgets import QApplication
             QApplication.processEvents()
         else:
             print(f"[DEBUG] Progress elements not found in update_progress")
@@ -2251,7 +2251,7 @@ class UIController(UIControllerCore):
                     
                     # オートコンプリート用のモデルを更新
                     if hasattr(self, 'task_completer') and self.task_completer:
-                        from PyQt5.QtCore import QStringListModel
+                        from qt_compat.core import QStringListModel
                         completer_model = QStringListModel(task_items)
                         self.task_completer.setModel(completer_model)
                         # ポップアップの設定
@@ -3392,12 +3392,12 @@ class UIController(UIControllerCore):
             
             content = "\n".join(content_lines)
             popup = PopupDialog(self.parent, "ARIM拡張情報", content)
-            popup.exec_()
+            popup.exec()
                 
         except Exception as e:
             content = f"=== ARIM拡張情報 ===\n\n❌ エラーが発生しました:\n{e}"
             popup = PopupDialog(self.parent, "ARIM拡張情報", content)
-            popup.exec_()
+            popup.exec()
     
     def show_request_popup(self):
         """最後のリクエスト内容をポップアップ表示"""
@@ -3463,12 +3463,12 @@ class UIController(UIControllerCore):
                 content += "AI分析を実行してからもう一度お試しください。"
             
             popup = PopupDialog(self.parent, "リクエスト内容", content)
-            popup.exec_()
+            popup.exec()
             
         except Exception as e:
             content = f"=== リクエスト内容 ===\n\n❌ エラーが発生しました:\n{e}"
             popup = PopupDialog(self.parent, "リクエスト内容", content)
-            popup.exec_()
+            popup.exec()
     
     def show_response_popup(self):
         """AIレスポンス内容をポップアップ表示"""
@@ -3507,12 +3507,12 @@ class UIController(UIControllerCore):
                 content = "=== AIレスポンス内容 ===\n\n❌ 表示可能なレスポンス内容がありません\n\nAI分析を実行してからもう一度お試しください。"
             
             popup = PopupDialog(self.parent, "レスポンス内容", content)
-            popup.exec_()
+            popup.exec()
             
         except Exception as e:
             content = f"=== レスポンス内容 ===\n\n❌ エラーが発生しました:\n{e}"
             popup = PopupDialog(self.parent, "レスポンス内容", content)
-            popup.exec_()
+            popup.exec()
 
     def show_task_info_popup(self):
         """課題詳細情報をポップアップ表示"""
@@ -3811,8 +3811,8 @@ class UIController(UIControllerCore):
 
     def _create_fallback_settings_widget(self):
         """フォールバック：従来の設定ダイアログを開くボタンを含むウィジェット"""
-        from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLabel
-        from PyQt5.QtCore import Qt
+        from qt_compat.widgets import QWidget, QVBoxLayout, QPushButton, QLabel
+        from qt_compat.core import Qt
         
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -3864,8 +3864,8 @@ class UIController(UIControllerCore):
     def _apply_initial_data_register_sizing(self):
         """初回のデータ登録ウィジェット作成時にウィンドウサイズを95%に設定"""
         try:
-            from PyQt5.QtWidgets import QApplication
-            from PyQt5.QtCore import QTimer
+            from qt_compat.widgets import QApplication
+            from qt_compat.core import QTimer
             
             # 通常登録タブの初期サイズ (90%高さ、標準幅1200px)
             def apply_sizing():
@@ -3901,7 +3901,7 @@ class UIController(UIControllerCore):
             print(f"[ERROR] メニューからのAI拡張ダイアログ起動エラー: {e}")
             import traceback
             traceback.print_exc()
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             QMessageBox.critical(None, "エラー", f"AI拡張機能の起動に失敗しました: {str(e)}")
     
     def _launch_ai_extension_dialog_direct(self):
@@ -3932,7 +3932,7 @@ class UIController(UIControllerCore):
             
             # AI拡張タブを選択
             if hasattr(dialog, 'tab_widget'):
-                from PyQt5.QtCore import QTimer
+                from qt_compat.core import QTimer
                 def select_extension_tab():
                     try:
                         for i in range(dialog.tab_widget.count()):
@@ -3954,7 +3954,7 @@ class UIController(UIControllerCore):
             print(f"[ERROR] AI拡張ダイアログ直接起動エラー: {e}")
             import traceback
             traceback.print_exc()
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             QMessageBox.critical(None, "エラー", f"AI拡張ダイアログの起動に失敗しました: {str(e)}")
         except Exception as e:
             print(f"[ERROR] 初回データ登録ウィジェットサイズ適用エラー: {e}")

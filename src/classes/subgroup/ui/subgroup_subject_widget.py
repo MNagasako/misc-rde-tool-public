@@ -2,20 +2,20 @@
 サブグループ課題入力ウィジェット
 課題番号と課題名のペアを追加・編集・削除できるUIコンポーネント
 """
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
     QMessageBox, QAbstractItemView
 )
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+from qt_compat.core import Qt, Signal
+from qt_compat.gui import QFont
 
 
 class SubjectEntryWidget(QWidget):
     """課題入力専用ウィジェット"""
     
     # データ変更時のシグナル
-    dataChanged = pyqtSignal()
+    dataChanged = Signal()
     
     def __init__(self, initial_subjects=None):
         """

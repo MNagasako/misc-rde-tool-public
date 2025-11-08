@@ -1,5 +1,5 @@
-from PyQt5.QtWidgets import QPushButton
-from PyQt5.QtGui import QFont
+from qt_compat.widgets import QPushButton
+from qt_compat.gui import QFont
 
 class StyledButtonFactory:
     """

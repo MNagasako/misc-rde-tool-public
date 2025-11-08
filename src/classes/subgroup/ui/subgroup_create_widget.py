@@ -1,6 +1,6 @@
 import os
 import json
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QWidget, QVBoxLayout, QLabel, QScrollArea, QPushButton, QHBoxLayout, 
     QMessageBox, QTabWidget
 )
@@ -120,7 +120,7 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     scroll.setMaximumWidth(800)  # 余分な余白を削除
     
     # 画面サイズを取得してスクロールエリアの高さを動的に設定
-    from PyQt5.QtWidgets import QApplication
+    from qt_compat.widgets import QApplication
     screen = QApplication.primaryScreen().geometry()
     max_scroll_height = int(screen.height() * 0.35)  # 画面の35%まで
     
@@ -140,7 +140,7 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
         
         if hasattr(main_window, 'resize'):
             # 画面サイズを取得
-            from PyQt5.QtWidgets import QApplication
+            from qt_compat.widgets import QApplication
             screen = QApplication.primaryScreen().geometry()
             max_window_height = int(screen.height() * 0.9)  # 画面の90%まで
             
@@ -251,7 +251,7 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
         # 確認ダイアログ表示
         payload_str = json.dumps(payload, ensure_ascii=False, indent=2)
         msg_box, yes_btn = create_handler.create_confirmation_dialog(payload, payload_str)
-        reply = msg_box.exec_()
+        reply = msg_box.exec()
         
         if msg_box.clickedButton() != yes_btn:
             return

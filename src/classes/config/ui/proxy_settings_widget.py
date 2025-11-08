@@ -20,14 +20,14 @@ import logging
 from typing import Dict, Any, Optional
 
 try:
-    from PyQt5.QtWidgets import (
+    from qt_compat.widgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
         QLabel, QComboBox, QLineEdit, QPushButton, QTextEdit,
         QGroupBox, QRadioButton, QButtonGroup, QProgressBar,
         QMessageBox, QFrame, QScrollArea, QCheckBox, QInputDialog
     )
-    from PyQt5.QtCore import QTimer, QThread, pyqtSignal, Qt
-    from PyQt5.QtGui import QFont, QPalette
+    from qt_compat.core import QTimer, QThread, Signal, Qt
+    from qt_compat.gui import QFont, QPalette
     PYQT5_AVAILABLE = True
 except ImportError:
     # PyQt5が利用できない場合のフォールバック
@@ -36,14 +36,14 @@ except ImportError:
     # ダミークラス
     class QWidget: pass
     class QThread: pass
-    def pyqtSignal(*args): return lambda: None
+    def Signal(*args): return lambda: None
 
 # ログ設定
 logger = logging.getLogger(__name__)
 
 class ProxyTestWorker(QThread):
     """プロキシ接続テストのワーカースレッド"""
-    test_completed = pyqtSignal(bool, str)  # 成功/失敗, メッセージ
+    test_completed = Signal(bool, str)  # 成功/失敗, メッセージ
     
     def __init__(self, proxy_config: Dict[str, Any]):
         super().__init__()
@@ -797,7 +797,7 @@ class ProxySettingsWidget(QWidget):
             
     def save_current_as_preset(self):
         """現在の設定をプリセットとして保存"""
-        from PyQt5.QtWidgets import QInputDialog
+        from qt_compat.widgets import QInputDialog
         
         preset_name, ok = QInputDialog.getText(self, "プリセット保存", "プリセット名を入力してください:")
         

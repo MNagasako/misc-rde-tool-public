@@ -3,9 +3,11 @@ UIコントローラー基盤クラス - ARIM RDE Tool v1.13.1
 UIControllerの基本機能・初期化・モード管理を担当
 """
 import logging
-from PyQt5.QtWidgets import QPushButton, QVBoxLayout, QWidget
-from PyQt5.QtCore import QTimer
-from PyQt5.QtGui import QFontMetrics
+from qt_compat.widgets import QPushButton, QVBoxLayout, QWidget
+from qt_compat.core import QTimer
+from qt_compat.gui import QFontMetrics
+
+logger = logging.getLogger("RDE_WebView")
 
 class UIControllerCore:
     """UIコントローラーの基盤機能クラス"""
@@ -217,7 +219,7 @@ class UIControllerCore:
         ウィンドウを画面中央に移動
         """
         try:
-            from PyQt5.QtWidgets import QApplication
+            from qt_compat.widgets import QApplication
             
             screen = QApplication.primaryScreen()
             if screen:
@@ -235,9 +237,9 @@ class UIControllerCore:
         """
         try:
             import os
-            from PyQt5.QtWidgets import QHBoxLayout, QLineEdit, QLabel, QPushButton
-            from PyQt5.QtCore import QUrl
-            from PyQt5.QtGui import QDesktopServices
+            from qt_compat.widgets import QHBoxLayout, QLineEdit, QLabel, QPushButton
+            from qt_compat.core import QUrl
+            from qt_compat.gui import QDesktopServices
             from config.common import DATASETS_DIR, get_dynamic_file_path
             from functions.utils import wait_for_form_and_click_button
             
@@ -308,7 +310,7 @@ class UIControllerCore:
         メインレイアウトの設定
         """
         try:
-            from PyQt5.QtWidgets import QHBoxLayout, QWidget, QVBoxLayout
+            from qt_compat.widgets import QHBoxLayout, QWidget, QVBoxLayout
             
             root_layout = QHBoxLayout()
 
@@ -441,6 +443,9 @@ class UIControllerCore:
             
             # test_modeでは自動ログイン処理をスキップ
             if not self.parent.test_mode:
+                # v1.20.3: 自動ログイン開始時にマテリアルトークンフラグをリセット
+                logger.info("[LOGIN] 自動ログイン開始 - マテリアルトークンフラグをリセット")
+                self.parent.login_manager.reset_material_token_flag()
                 self.parent.login_manager.poll_dice_btn_status()
             else:
                 self.parent.update_autologin_msg('[TEST] テストモード - 自動ログイン処理をスキップ')

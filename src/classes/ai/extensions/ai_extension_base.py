@@ -44,7 +44,7 @@ class AIPromptTemplate:
                 if file_tree_value:
                     print(f"[DEBUG] file_tree の先頭100文字: {file_tree_value[:100]}")
             else:
-                print(f"[DEBUG] ⚠️  context_data に file_tree キーが存在しません")
+                print(f"[DEBUG] [WARN]  context_data に file_tree キーが存在しません")
             
             # 空値の場合のフォールバック処理
             safe_context = {}
@@ -410,7 +410,7 @@ ARIM課題データ:
             print(f"[DEBUG] file_tree の長さ: {len(context['file_tree'])} 文字")
             print(f"[DEBUG] file_tree の先頭100文字: {context['file_tree'][:100]}")
         else:
-            print(f"[DEBUG] ⚠️  file_tree が空です")
+            print(f"[DEBUG] [WARN]  file_tree が空です")
         
         return context
         

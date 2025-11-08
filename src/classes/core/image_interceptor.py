@@ -1,4 +1,4 @@
-from PyQt5.QtWebEngineCore import QWebEngineUrlRequestInterceptor
+from qt_compat.webengine import QWebEngineUrlRequestInterceptor
 import os
 import logging
 # === セッション管理ベースのプロキシ対応 ===

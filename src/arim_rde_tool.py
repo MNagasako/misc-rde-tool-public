@@ -22,13 +22,16 @@ import sys
 import argparse
 import os
 # PyQt5 - WebEngine初期化問題の回避
-from PyQt5.QtCore import QCoreApplication, Qt
-# WebEngine使用前に属性を設定
-QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
-from PyQt5.QtWidgets import QApplication, QWidget, QLabel
-from PyQt5.QtWebEngineWidgets import QWebEngineView
-from PyQt5.QtCore import QTimer
-from PyQt5.QtGui import QIcon
+from qt_compat import initialize_webengine
+from qt_compat.core import Qt
+
+# WebEngine初期化
+initialize_webengine()
+from qt_compat.widgets import QApplication, QWidget, QLabel
+from qt_compat.webengine import QWebEngineView, QWebEngineProfile
+from qt_compat.webengine_page import WebEnginePageWithConsole
+from qt_compat.core import QTimer
+from qt_compat.gui import QIcon
 # 設定・関数モジュール
 from config.common import REVISION, OUTPUT_DIR, DYNAMIC_IMAGE_DIR, get_static_resource_path
 from functions.common_funcs import read_login_info
@@ -80,11 +83,28 @@ class Browser(QWidget):
         self.app_initializer = AppInitializer(self)
         self.app_initializer.initialize_all()
 
-        # ログイン情報とLoginManagerの初期化
-        self.login_username, self.login_password ,self.login_mode= read_login_info()
-        print(f"[INFO] ログイン情報: {self.login_username}, {self.login_password}, {self.login_mode}")
-
+        # ログイン情報の初期化
+        # v1.20.3: レガシーファイルと新認証システムの統合
+        legacy_username, legacy_password, legacy_mode = read_login_info()
+        
+        # LoginManager初期化（新認証システム）
         self.login_manager = LoginManager(self, self.webview, self.autologin_msg_label)
+        
+        # レガシーファイルが優先（互換性維持）、なければ新認証システムの値を使用
+        if legacy_username or legacy_password:
+            self.login_username = legacy_username
+            self.login_password = legacy_password
+            self.login_mode = legacy_mode
+            print(f"[INFO] レガシーログイン情報使用: {self.login_username}")
+        else:
+            # 新認証システムから読み込まれた値を使用
+            self.login_username = getattr(self.login_manager, 'login_username', None)
+            self.login_password = getattr(self.login_manager, 'login_password', None)
+            self.login_mode = getattr(self.login_manager, 'login_mode', None)
+            if self.login_username:
+                print(f"[INFO] 新認証システムログイン情報使用: {self.login_username}")
+            else:
+                print(f"[INFO] ログイン情報なし - 手動ログインが必要です")
 
         # BrowserControllerの初期化
         self.browser_controller = BrowserController(self)
@@ -126,6 +146,15 @@ class Browser(QWidget):
         self.auto_close = auto_close
         self.bearer_token = None
         self.webview = QWebEngineView()
+        
+        # PySide6対応: JavaScriptコンソールメッセージを有効化するカスタムPageを設定
+        # デフォルトProfileを引き継ぐために、既存のProfileを渡す
+        from qt_compat.webengine import QWebEngineProfile
+        default_profile = QWebEngineProfile.defaultProfile()
+        custom_page = WebEnginePageWithConsole(default_profile, self.webview)
+        self.webview.setPage(custom_page)
+        logger.info("[WEBENGINE] カスタムPageを設定してJavaScriptコンソールを有効化")
+        
         self._recent_blob_hashes = set()
         self._data_id_image_counts = {}
         self._active_image_processes = set()
@@ -163,6 +192,15 @@ class Browser(QWidget):
 
     def _setup_webview_and_layout(self):
         """WebViewとレイアウトの設定"""
+        # v1.20.3: PySide6対応 - WebEngineの設定を明示的に有効化
+        from qt_compat.webengine import QWebEngineSettings
+        settings = self.webview.page().settings()
+        settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, True)
+        settings.setAttribute(QWebEngineSettings.WebAttribute.AllowRunningInsecureContent, True)
+        logger.info("[WEBENGINE] JavaScript と LocalStorage を有効化")
+        
         interceptor = ImageInterceptor()
         self.webview.page().profile().setUrlRequestInterceptor(interceptor)
         self.browser_controller.setup_webview(self.webview)
@@ -253,8 +291,8 @@ class Browser(QWidget):
                 # 既に表示済みの場合はスキップ
                 return
             
-            from PyQt5.QtWidgets import QFrame, QHBoxLayout, QPushButton, QLabel
-            from PyQt5.QtCore import Qt
+            from qt_compat.widgets import QFrame, QHBoxLayout, QPushButton, QLabel
+            from qt_compat.core import Qt
             
             # 警告バナーウィジェット作成
             self.legacy_warning_banner = QFrame()
@@ -326,7 +364,7 @@ class Browser(QWidget):
             run_settings_logic(self, getattr(self, 'bearer_token', None))
         except Exception as e:
             logger.error(f"設定ダイアログ起動エラー: {e}")
-            from PyQt5.QtWidgets import QMessageBox
+            from qt_compat.widgets import QMessageBox
             QMessageBox.warning(self, "エラー", f"設定画面の起動に失敗しました: {e}")
 
     def run_test_flow(self):
@@ -588,7 +626,7 @@ def main():
         show_splash_screen()
         app = QApplication(sys.argv)
         browser = Browser(auto_close=args.auto_close, test_mode=args.test)
-        app.exec_()
+        app.exec()
     except Exception as e:
         logger.error(f"メイン関数でエラーが発生しました: {e}")
         raise

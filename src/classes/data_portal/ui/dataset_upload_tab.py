@@ -8,13 +8,13 @@ import os
 import json
 from pathlib import Path
 from typing import Tuple, Any
-from PyQt5.QtWidgets import (
+from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QComboBox,
     QFormLayout, QTextEdit, QMessageBox, QFileDialog,
     QCheckBox, QProgressBar, QRadioButton, QButtonGroup
 )
-from PyQt5.QtCore import Qt, pyqtSignal, QThread
+from qt_compat.core import Qt, Signal, QThread
 
 from config.common import OUTPUT_DIR, get_dynamic_file_path
 from classes.managers.log_manager import get_logger
@@ -28,8 +28,8 @@ logger = get_logger("DataPortal.DatasetUploadTab")
 
 class UploadWorker(QThread):
     """アップロード処理を行うワーカースレッド"""
-    progress = pyqtSignal(str)  # 進捗メッセージ
-    finished = pyqtSignal(bool, str)  # 成功フラグ, メッセージ
+    progress = Signal(str)  # 進捗メッセージ
+    finished = Signal(bool, str)  # 成功フラグ, メッセージ
     
     def __init__(self, uploader: Uploader, json_path: str):
         super().__init__()
@@ -57,7 +57,7 @@ class DatasetUploadTab(QWidget):
     - アップロード実行
     """
     
-    upload_completed = pyqtSignal(bool, str)  # 成功フラグ, メッセージ
+    upload_completed = Signal(bool, str)  # 成功フラグ, メッセージ
     
     def __init__(self, parent=None):
         """初期化"""
@@ -305,8 +305,8 @@ class DatasetUploadTab(QWidget):
         file_list_left_layout.addLayout(checkbox_button_layout)
         
         # ファイルリストウィジェット（チェックボックス付き）
-        from PyQt5.QtWidgets import QListWidget, QListWidgetItem, QCheckBox, QLabel as QListLabel
-        from PyQt5.QtCore import Qt
+        from qt_compat.widgets import QListWidget, QListWidgetItem, QCheckBox, QLabel as QListLabel
+        from qt_compat.core import Qt
         
         self.file_list_widget = QListWidget()
         self.file_list_widget.setMaximumHeight(300)
@@ -616,8 +616,8 @@ class DatasetUploadTab(QWidget):
                 self.dataset_combo.addItem(display_text, dataset_info)
             
             # QCompleter設定（検索補完機能）
-            from PyQt5.QtCore import Qt
-            from PyQt5.QtWidgets import QCompleter
+            from qt_compat.core import Qt
+            from qt_compat.widgets import QCompleter
             
             completer = QCompleter([self.dataset_combo.itemText(i) for i in range(self.dataset_combo.count())])
             completer.setCaseSensitivity(Qt.CaseInsensitive)
@@ -1457,7 +1457,7 @@ class DatasetUploadTab(QWidget):
             cancel_btn = msg_box.addButton("キャンセル", QMessageBox.RejectRole)
             
             msg_box.setDefaultButton(use_existing_btn)
-            msg_box.exec_()
+            msg_box.exec()
             
             clicked_button = msg_box.clickedButton()
             
@@ -1518,8 +1518,8 @@ class DatasetUploadTab(QWidget):
                 return
             
             # プログレスダイアログ表示
-            from PyQt5.QtWidgets import QProgressDialog, QApplication
-            from PyQt5.QtCore import Qt
+            from qt_compat.widgets import QProgressDialog, QApplication
+            from qt_compat.core import Qt
             
             progress = QProgressDialog(
                 f"準備中...", 
@@ -1744,8 +1744,8 @@ class DatasetUploadTab(QWidget):
             file_list: ファイル情報リスト [{'name': ..., 'size': ..., 'path': ..., 'relative_path': ...}, ...]
         """
         try:
-            from PyQt5.QtWidgets import QListWidgetItem, QCheckBox, QWidget, QHBoxLayout
-            from PyQt5.QtCore import Qt
+            from qt_compat.widgets import QListWidgetItem, QCheckBox, QWidget, QHBoxLayout
+            from qt_compat.core import Qt
             
             self.file_list_widget.clear()
             
@@ -1823,8 +1823,8 @@ class DatasetUploadTab(QWidget):
             item: QListWidgetItem
         """
         try:
-            from PyQt5.QtGui import QPixmap
-            from PyQt5.QtCore import Qt
+            from qt_compat.gui import QPixmap
+            from qt_compat.core import Qt
             
             # アイテムを選択状態にする
             self.file_list_widget.setCurrentItem(item)
@@ -1901,8 +1901,8 @@ class DatasetUploadTab(QWidget):
             return
         
         try:
-            from PyQt5.QtCore import QUrl
-            from PyQt5.QtGui import QDesktopServices
+            from qt_compat.core import QUrl
+            from qt_compat.gui import QDesktopServices
             
             dataset_id = self.current_dataset_id
             
@@ -2002,7 +2002,7 @@ class DatasetUploadTab(QWidget):
             self._log_status(f"画像アップロード開始: {len(checked_files)}件")
             
             # プログレスダイアログ
-            from PyQt5.QtWidgets import QProgressDialog, QApplication
+            from qt_compat.widgets import QProgressDialog, QApplication
             progress = QProgressDialog("画像をアップロード中...", "キャンセル", 0, len(checked_files), self)
             progress.setWindowTitle("画像アップロード")
             progress.setWindowModality(Qt.WindowModal)
@@ -2060,7 +2060,7 @@ class DatasetUploadTab(QWidget):
                 cancel_btn = msg_box.addButton("キャンセル", QMessageBox.RejectRole)
                 
                 msg_box.setDefaultButton(skip_btn)
-                msg_box.exec_()
+                msg_box.exec()
                 
                 clicked_button = msg_box.clickedButton()
                 
@@ -2715,7 +2715,7 @@ class DatasetUploadTab(QWidget):
             
             dialog = PortalEditDialog(form_data, t_code, self.current_dataset_id, self.portal_client, self, metadata)
             
-            if dialog.exec_() == dialog.Accepted:
+            if dialog.exec() == dialog.Accepted:
                 self._log_status("✅ データポータル修正が完了しました")
                 self._show_info("データポータルの修正が完了しました")
                 
