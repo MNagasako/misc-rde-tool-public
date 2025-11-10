@@ -1,9 +1,65 @@
 <img width="400" height="400" alt="2025-09-17_12h59_55" src="https://github.com/user-attachments/assets/d63f3c1a-1efb-4bf7-9ed7-8608a8a73c0b" />
 
+> **暫定マニュアル（外部Notion）**
+> 最新の操作手順は下記を参照してください（随時更新・作成中）
+> [https://cuddly-stinger-40d.notion.site/v2-0-0-2a4fc2cb5fc380978d95fbd07c6fa37e?pvs=74](https://cuddly-stinger-40d.notion.site/v2-0-0-2a4fc2cb5fc380978d95fbd07c6fa37e?pvs=74)
+
 
 
 
 # ARIM RDE Tool v2.0.0
+
+## クイックスタート（Windows専用）
+1. [GitHub Releases](https://github.com/MNagasako/misc-rde-tool-public/releases) から最新版の実行ファイル（ZIP）をダウンロード
+2. ZIPを展開し、`arim_rde_tool.exe` を実行
+3. アプリ起動後、画面右上の「設定」機能を開く
+4. 「自動ログイン」タブを選択
+5. 「基本設定」で「自動ログインを有効にする」にチェック
+6. 「認証情報」にユーザーID・パスワードを入力し「保存」
+7. アプリを再起動
+
+これで次回以降は自動ログインが有効になります。
+
+---
+
+### AI機能を利用する場合
+
+1. [GitHub Releases](https://github.com/MNagasako/misc-rde-tool-public/releases) から `input-sample.zip` をダウンロード
+2. ZIPを解凍し、中身をバイナリ（`arim_rde_tool.exe`）と同じ階層の `input` フォルダに入れる
+3. `input/ai_config.json` をテキストエディタで修正
+   - OpenAI, Gemini, ローカルLLMのいずれかを設定
+   - クラウドAI（OpenAI/Gemini）を使う場合はAPIキーを記入
+   - ローカルLLMの場合はOllama等のサーバー設定が必要
+
+設定後、AI機能タブから各種AI分析が利用可能になります。
+
+---
+
+### 基本情報の取得
+
+1. アプリ画面左上の「基本情報」機能を開く
+2. 「基本情報取得（ALL）」ボタンをクリック（初回は時間がかかります）
+3. ログイン中の権限でアクセス可能なRDEデータベースのほぼ全データを取得します
+
+取得後は各種検索・データ操作が可能になります。
+
+---
+
+### データポータル連携を利用する場合
+
+1. `input/data_portal_config.json` をテキストエディタで開く
+2. テストサイトを利用する場合は、
+    ```json
+    "test": {
+       "url": "https://************/test.nanonet.go.jp/data_service/system_arim_data/"
+    }
+    ```
+    のURLを正しいテスト環境URLに修正
+3. アプリで「データポータル」機能を選択
+4. 「ログイン設定」タブで本番・テスト環境それぞれの認証情報を入力し保存
+5. 接続テストを実行し、成功することを確認
+
+これでデータポータル連携機能が利用可能になります。
 
 **ARIM RDE Tool** は、文部科学省 ARIM 事業の研究データ共有サイト（RDE）の Web 操作の煩雑さを緩和し、UXを改善する目的で**個人開発**した Windows 用デスクトップアプリです。本家 RDE サイトの画面・通信動作を観察しながら API リクエストを再現しているため、サイト側の仕様変更等により**一部機能が動作しない**場合があります。
 
