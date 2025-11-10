@@ -1,7 +1,22 @@
 
-arim_rde_tool v2.0.0
-2025-11-07
-メジャーアップデート: PyQt5→PySide6 移行、LGPLv3 へライセンス変更、ソースコード非公開化（配布方針変更）
+
+arim_rde_tool v2.0.1
+2025-11-10
+マイナーアップデート: トークン管理システム実装（TokenManager新規追加）
+	- OAuth2 RefreshToken対応完了
+	- 自動トークンリフレッシュ機能（QTimer 60秒間隔、5分前マージン）
+	- 手動リフレッシュAPI実装
+	- JWT有効期限解析・管理機能
+	- マルチホスト対応（RDE/Material API）
+トークン状態表示タブ追加
+	- 複数ホストのトークン一覧表示
+	- 有効期限・残り時間表示
+	- 手動リフレッシュボタン
+	- 自動リフレッシュON/OFF切替
+DICEログイン調査ツール実装 (v1.2.0)
+	- dice_login_flow_inspector.py（標準版・fragment mode）
+	- dice_login_flow_inspector_query_mode.py（クエリモード版）
+	- 自動ログイン機能・トークン抽出・JWT解析
 
 arim_rde_tool v1.20.0
 2025-11-07

@@ -68,6 +68,9 @@ class SettingsTabWidget(QWidget):
             
         # 自動ログインタブ
         self.setup_autologin_tab()
+        
+        # トークン状態タブ
+        self.setup_token_status_tab()
 
         # インポートタブ（ダミー）
         self.setup_import_tab_dummy()
@@ -624,6 +627,54 @@ class SettingsTabWidget(QWidget):
         except Exception as e:
             print(f"[settings_tab_widget] setup_autologin_tab全体エラー: {e}")
             logger.error(f"自動ログインタブ設定エラー: {e}")
+    
+    def setup_token_status_tab(self):
+        """トークン状態タブを設定"""
+        try:
+            logger.info("トークン状態タブ設定開始")
+            
+            # TokenStatusTabのインポート
+            from classes.config.ui.token_status_tab import TokenStatusTab
+            
+            # トークン状態タブウィジェットを作成
+            token_status_widget = TokenStatusTab(self)
+            logger.info("TokenStatusTab作成成功")
+            
+            # タブに追加
+            tab_index = self.tab_widget.addTab(token_status_widget, "トークン状態")
+            logger.info(f"トークン状態タブ追加完了: インデックス={tab_index}")
+            
+            # ウィジェットへの参照を保存
+            self.token_status_widget = token_status_widget
+            
+        except ImportError as e:
+            logger.error(f"TokenStatusTabのインポート失敗: {e}")
+            # フォールバック: ダミータブ表示
+            self._create_fallback_token_status_tab()
+        except Exception as e:
+            logger.error(f"トークン状態タブ設定エラー: {e}", exc_info=True)
+            self._create_fallback_token_status_tab()
+    
+    def _create_fallback_token_status_tab(self):
+        """トークン状態タブのフォールバック（エラー表示）"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        title_label = QLabel("トークン状態（読み込みエラー）")
+        title_font = QFont()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
+        
+        info_label = QLabel("トークン状態タブの読み込みに失敗しました。\nログを確認してください。")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+        
+        layout.addStretch()
+        self.tab_widget.addTab(widget, "トークン状態")
+
 
     def _create_fallback_autologin_tab(self):
         """自動ログインタブ - フォールバック版"""

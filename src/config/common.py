@@ -28,8 +28,9 @@ import os
 # 1. ドキュメント: VERSION.txt, README.md, RELEASE_NOTES_v*.md
 # 2. 各クラスファイル: ヘッダーコメント内のバージョン番号
 # 3. このREVISION変数（マスター管理）
+# 2025-11-10: v2.0.1 - トークン管理システム実装・DICEログイン調査ツール追加・包括的ドキュメント整備
+REVISION = "2.0.1"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
 # 2025-11-08: v2.0.0 - PyQt5→PySide6完全移行（破壊的変更）・blob画像取得修復・JavaScript連携改善
-REVISION = "2.0.0"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
 # 2025-11-07: v1.20.0 - データポータル統合機能完全実装・JSON/画像アップロード・修正機能・ステータス管理
 # 2025-10-31: v1.19.2 - ARIM報告書スクレイピング修正・AI拡張タブ検索補完機能強化
 # 2025-10-31: v1.19.1 - QWidgetサイズエラー修正・AI Test 2ボタン安定化
@@ -261,30 +262,41 @@ RDE_HOSTS = {
     'rde-material': 'rde-material.nims.go.jp'
 }
 
-def save_bearer_token(token: str, host: str = 'rde.nims.go.jp') -> bool:
+def save_bearer_token(token, host: str = 'rde.nims.go.jp') -> bool:
     """
     Bearer Tokenを保存（複数ホスト対応）
     
     Args:
-        token: 保存するBearerトークン
+        token: 保存するBearerトークン（文字列 or TokenManager形式の辞書）
         host: ホスト名（例: 'rde.nims.go.jp', 'rde-material.nims.go.jp'）
     
     Returns:
         bool: 保存成功時True
+    
+    Note:
+        v2.1.0: TokenManager形式（辞書）と従来形式（文字列）の両方に対応
     """
     try:
         import logging
         logger = logging.getLogger(__name__)
         
+        # TokenManager形式（辞書）の場合はaccess_tokenを抽出
+        if isinstance(token, dict):
+            access_token = token.get('access_token', '')
+            token_preview = access_token[:20] if access_token else 'N/A'
+        else:
+            access_token = token
+            token_preview = token[:20] if token else 'N/A'
+        
         # 既存のトークンを読み込み
         logger.debug(f"[TOKEN-SAVE] 既存トークンを読み込み: {BEARER_TOKENS_FILE}")
-        print(f"[TOKEN-SAVE] 保存開始 - host={host}, token={token[:20]}...")
+        print(f"[TOKEN-SAVE] 保存開始 - host={host}, token={token_preview}...")
         tokens = load_all_bearer_tokens()
         print(f"[TOKEN-SAVE] 既存トークン数: {len(tokens)}, ホスト: {list(tokens.keys())}")
         
         # 新しいトークンを追加
         tokens[host] = token
-        logger.info(f"[TOKEN-SAVE] トークンを追加: host={host}, token={token[:20]}...")
+        logger.info(f"[TOKEN-SAVE] トークンを追加: host={host}, token={token_preview}...")
         print(f"[TOKEN-SAVE] 追加後トークン数: {len(tokens)}, ホスト: {list(tokens.keys())}")
         
         # JSON形式で保存
@@ -298,13 +310,17 @@ def save_bearer_token(token: str, host: str = 'rde.nims.go.jp') -> bool:
         saved_tokens = load_all_bearer_tokens()
         print(f"[TOKEN-SAVE] 保存確認 - ホスト数: {len(saved_tokens)}, ホスト: {list(saved_tokens.keys())}")
         for saved_host, saved_token in saved_tokens.items():
-            print(f"[TOKEN-SAVE]   {saved_host}: {saved_token[:20]}...")
+            if isinstance(saved_token, dict):
+                token_str = saved_token.get('access_token', '')
+                print(f"[TOKEN-SAVE]   {saved_host}: {token_str[:20]}... (TokenManager形式)")
+            else:
+                print(f"[TOKEN-SAVE]   {saved_host}: {saved_token[:20]}...")
         
         # レガシー互換：rde.nims.go.jpの場合は従来のファイルにも保存
         if host == 'rde.nims.go.jp':
             logger.debug(f"[TOKEN-SAVE] レガシーファイルにも保存: {BEARER_TOKEN_FILE}")
             with open(BEARER_TOKEN_FILE, 'w', encoding='utf-8') as f:
-                f.write(f"BearerToken={token}\n")
+                f.write(f"BearerToken={access_token}\n")
             logger.info("[TOKEN-SAVE] レガシーファイル保存完了")
         
         return True
@@ -322,6 +338,9 @@ def load_bearer_token(host: str = 'rde.nims.go.jp') -> Optional[str]:
     
     Returns:
         str: トークン文字列、存在しない場合None
+    
+    Note:
+        v2.1.0: TokenManager形式（辞書）と従来形式（文字列）の両方に対応
     """
     try:
         import logging
@@ -338,10 +357,23 @@ def load_bearer_token(host: str = 'rde.nims.go.jp') -> Optional[str]:
                 tokens = _json.load(f)
                 print(f"[TOKEN-LOAD] ファイル内のホスト数: {len(tokens)}, ホスト: {list(tokens.keys())}")
                 if host in tokens:
-                    token = tokens[host]
-                    logger.info(f"[TOKEN-LOAD] トークン読み込み成功 ({host}): {token[:20]}...")
-                    print(f"[TOKEN-LOAD] トークン取得成功 - host={host}, token={token[:20]}...")
-                    return token
+                    token_data = tokens[host]
+                    
+                    # TokenManager形式（辞書）の場合はaccess_tokenを抽出
+                    if isinstance(token_data, dict):
+                        access_token = token_data.get('access_token', '')
+                        if access_token:
+                            logger.info(f"[TOKEN-LOAD] トークン読み込み成功 ({host}): {access_token[:20]}... (TokenManager形式)")
+                            print(f"[TOKEN-LOAD] トークン取得成功 (TokenManager形式) - host={host}, token={access_token[:20]}...")
+                            return access_token
+                        else:
+                            logger.warning(f"[TOKEN-LOAD] TokenManager形式だがaccess_tokenが空 ({host})")
+                            print(f"[TOKEN-LOAD] access_token欠落")
+                    else:
+                        # 従来形式（文字列）
+                        logger.info(f"[TOKEN-LOAD] トークン読み込み成功 ({host}): {token_data[:20]}... (従来形式)")
+                        print(f"[TOKEN-LOAD] トークン取得成功 (従来形式) - host={host}, token={token_data[:20]}...")
+                        return token_data
                 else:
                     logger.warning(f"[TOKEN-LOAD] ホスト {host} のトークンが見つかりません")
                     print(f"[TOKEN-LOAD] 指定ホストのトークンなし - host={host}")

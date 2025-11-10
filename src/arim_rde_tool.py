@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 
 """
-ARIM RDE Tool v1.19.2 - PyQt5によるRDE→ARIMデータポータル移行ツール
+ARIM RDE Tool v2.0.1 - PySide6によるRDE→ARIMデータポータル移行ツール
 
 主要機能:
 - RDEシステムへの自動ログイン・データセット一括取得・画像保存
-- PyQt5 WebView統合ブラウザによる認証・操作自動化
+- PySide6 WebView統合ブラウザによる認証・操作自動化
 - ARIM匿名化・HTMLログ出力・統合API処理・AI分析機能
+- OAuth2 RefreshToken対応トークン管理システム（TokenManager）
+
+v2.0.1新機能:
+- トークン自動リフレッシュ（QTimer 60秒間隔、5分前マージン）
+- トークン状態表示タブ（有効期限・残り時間表示）
+- マルチホストトークン管理（RDE/Material API対応）
+- 手動リフレッシュAPI実装
 
 アーキテクチャ:
 - 責務分離された専門クラス群による高保守性
@@ -89,6 +96,23 @@ class Browser(QWidget):
         
         # LoginManager初期化（新認証システム）
         self.login_manager = LoginManager(self, self.webview, self.autologin_msg_label)
+        
+        # v2.1.0: TokenManager初期化・自動リフレッシュ開始
+        try:
+            from classes.managers.token_manager import TokenManager
+            self.token_manager = TokenManager.get_instance()
+            self.token_manager.start_auto_refresh()
+            
+            # Signal接続: トークン更新成功/失敗通知
+            self.token_manager.token_refreshed.connect(self._on_token_refreshed)
+            self.token_manager.token_refresh_failed.connect(self._on_token_refresh_failed)
+            self.token_manager.token_expired.connect(self._on_token_expired)
+            
+            logger.info("[TokenManager] 自動リフレッシュタイマー開始")
+            print(f"[INFO] TokenManager初期化完了 - 自動リフレッシュ有効")
+        except Exception as tm_err:
+            logger.error(f"[TokenManager] 初期化エラー: {tm_err}", exc_info=True)
+            print(f"[ERROR] TokenManager初期化失敗: {tm_err}")
         
         # レガシーファイルが優先（互換性維持）、なければ新認証システムの値を使用
         if legacy_username or legacy_password:
@@ -253,6 +277,34 @@ class Browser(QWidget):
             logger.warning(f"プロキシ起動時通知エラー: {e}")
             import traceback
             logger.debug(traceback.format_exc())
+    
+    # v2.1.0: TokenManager Signal Handlers
+    def _on_token_refreshed(self, host):
+        """トークン更新成功通知ハンドラ"""
+        logger.info(f"[TokenManager] トークン自動更新成功: {host}")
+        print(f"[INFO] トークン更新成功: {host}")
+        # UI通知は不要（自動更新のため）
+    
+    def _on_token_refresh_failed(self, host, error):
+        """トークン更新失敗通知ハンドラ"""
+        logger.warning(f"[TokenManager] トークン自動更新失敗: {host} - {error}")
+        print(f"[WARNING] トークン更新失敗: {host} - {error}")
+        # 必要に応じてUI通知を追加可能
+    
+    def _on_token_expired(self, host):
+        """RefreshToken期限切れ通知ハンドラ（再ログイン必要）"""
+        logger.error(f"[TokenManager] RefreshToken期限切れ: {host} - 再ログインが必要です")
+        print(f"[ERROR] RefreshToken期限切れ: {host} - 再ログインしてください")
+        
+        # UI通知（ユーザーに再ログインを促す）
+        from qt_compat.widgets import QMessageBox
+        QMessageBox.warning(
+            self,
+            "トークン期限切れ",
+            f"ホスト '{host}' のRefreshTokenが期限切れです。\n\n"
+            "再ログインしてください。",
+            QMessageBox.StandardButton.Ok
+        )
 
     def switch_mode(self, mode):
         """モードを切り替える"""

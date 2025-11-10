@@ -2711,11 +2711,12 @@ class DatasetUploadTab(QWidget):
             metadata = self._fetch_theme_metadata(t_code)
             
             # 修正ダイアログを表示
+            from qt_compat.widgets import QDialog
             from .portal_edit_dialog import PortalEditDialog
             
             dialog = PortalEditDialog(form_data, t_code, self.current_dataset_id, self.portal_client, self, metadata)
             
-            if dialog.exec() == dialog.Accepted:
+            if dialog.exec() == QDialog.Accepted:
                 self._log_status("✅ データポータル修正が完了しました")
                 self._show_info("データポータルの修正が完了しました")
                 

@@ -8,6 +8,13 @@
 
 
 # ARIM RDE Tool v2.0.0
+---
+
+# ARIM RDE Tool v2.0.1
+
+> **注記**: 本READMEの使用方法説明はv2.0.0ベースですが、現在のバージョンはv2.0.1です。
+> v2.0.1では「トークン管理システム（TokenManager）」等の新機能が追加されています。
+> 詳細な差分・新機能は [rde/README.md](../rde/README.md) も参考にしてください。
 
 ## クイックスタート（Windows専用）
 1. [GitHub Releases](https://github.com/MNagasako/misc-rde-tool-public/releases) から最新版の実行ファイル（ZIP）をダウンロード

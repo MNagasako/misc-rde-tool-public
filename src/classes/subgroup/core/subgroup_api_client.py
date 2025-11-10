@@ -11,14 +11,46 @@ from core.bearer_token_manager import BearerTokenManager
 class SubgroupApiClient:
     """サブグループAPI通信クライアント"""
     
-    def __init__(self, widget):
+    def __init__(self, widget, browser=None):
         """
         Args:
             widget: 親ウィジェット（bearer_token取得用）
+            browser: Browserインスタンス（Cookie取得用、オプショナル）
         """
         self.widget = widget
+        self.browser = browser  # v2.1.0: Cookie取得用
+        
+        # v2.1.0: browserが明示的に渡されていない場合、widgetの親を辿ってBrowserインスタンスを探す
+        if not self.browser:
+            self.browser = self._find_browser_instance(widget)
+        
         self.api_base_url = "https://rde-api.nims.go.jp"
         self.bearer_token = None
+    
+    def _find_browser_instance(self, widget):
+        """widgetの親階層からBrowserインスタンスを探す"""
+        current = widget
+        max_depth = 10  # 無限ループ防止
+        depth = 0
+        
+        while current and depth < max_depth:
+            # cookiesアトリビュートを持つインスタンスがBrowser
+            if hasattr(current, 'cookies') and isinstance(getattr(current, 'cookies', None), list):
+                print(f"[TOKEN-DEBUG] Browserインスタンス発見: {type(current).__name__}")
+                return current
+            
+            # 親を辿る
+            if hasattr(current, 'parent') and callable(current.parent):
+                current = current.parent()
+            elif hasattr(current, 'parentWidget') and callable(current.parentWidget):
+                current = current.parentWidget()
+            else:
+                break
+            
+            depth += 1
+        
+        print("[WARNING] Browserインスタンスが見つかりませんでした")
+        return None
     
     def authenticate(self):
         """
@@ -245,6 +277,15 @@ class SubgroupApiClient:
         api_url = f"https://rde-material-api.nims.go.jp/samples/{sample_id}?include=sharingGroups"
         print(f"[TOKEN-DEBUG] API呼び出し: {api_url}")
         
+        # v2.1.0: WebViewのCookieを取得
+        browser_cookies = []
+        try:
+            if self.browser and hasattr(self.browser, 'cookies'):
+                browser_cookies = self.browser.cookies
+                print(f"[TOKEN-DEBUG] WebView Cookie取得: {len(browser_cookies)}個")
+        except Exception as e:
+            print(f"[WARNING] WebView Cookie取得失敗: {e}")
+        
         headers = {
             "Accept": "application/vnd.api+json",
             "Accept-Encoding": "gzip, deflate, br, zstd",
@@ -262,6 +303,17 @@ class SubgroupApiClient:
             "sec-ch-ua-mobile": "?0",
             "sec-ch-ua-platform": '"Windows"'
         }
+        
+        # v2.1.0: WebViewのCookieをヘッダーに追加
+        if browser_cookies:
+            from classes.subgroup.util.cookie_manager import CookieManager
+            material_cookies = CookieManager.get_cookies_for_domain(
+                browser_cookies, 
+                "rde-material.nims.go.jp"
+            )
+            if material_cookies:
+                headers = CookieManager.add_cookies_to_headers(headers, material_cookies)
+                print(f"[TOKEN-DEBUG] Material API Cookie追加完了: {len(material_cookies)}個")
         
         try:
             from net.http_helpers import proxy_get
@@ -299,6 +351,8 @@ class SubgroupApiClient:
         print(f"[TOKEN-DEBUG] set_sample_sharing_group() 開始 - sample_id={sample_id}")
         print("[TOKEN-DEBUG] Material API用トークン取得中...")
         from config.common import load_bearer_token
+        
+        # Material APIトークンを取得
         material_token = load_bearer_token('rde-material.nims.go.jp')
         
         if not material_token:
@@ -315,6 +369,19 @@ class SubgroupApiClient:
         if not is_valid:
             print("[ERROR] Material APIトークンが無効です")
             return False, "Material APIトークンが無効です"
+        
+        # v2.1.0: WebViewのCookieを取得してリクエストに含める
+        print("[TOKEN-DEBUG] WebViewのCookieを取得中...")
+        browser_cookies = []
+        try:
+            # Browserインスタンスからcookiesを取得
+            if self.browser and hasattr(self.browser, 'cookies'):
+                browser_cookies = self.browser.cookies
+                print(f"[TOKEN-DEBUG] WebView Cookie取得: {len(browser_cookies)}個")
+            else:
+                print("[WARNING] Browserインスタンスが設定されていません")
+        except Exception as e:
+            print(f"[WARNING] WebView Cookie取得失敗: {e}")
         
         api_url = f"https://rde-material-api.nims.go.jp/samples/{sample_id}/relationships/sharingGroups"
         print(f"[TOKEN-DEBUG] API呼び出し: {api_url}")
@@ -347,6 +414,21 @@ class SubgroupApiClient:
             "sec-ch-ua-mobile": "?0",
             "sec-ch-ua-platform": '"Windows"'
         }
+        
+        # v2.1.0: WebViewのCookieをヘッダーに追加
+        if browser_cookies:
+            from classes.subgroup.util.cookie_manager import CookieManager
+            material_cookies = CookieManager.get_cookies_for_domain(
+                browser_cookies, 
+                "rde-material.nims.go.jp"
+            )
+            if material_cookies:
+                headers = CookieManager.add_cookies_to_headers(headers, material_cookies)
+                print(f"[TOKEN-DEBUG] Material API Cookie追加完了: {len(material_cookies)}個")
+            else:
+                print("[WARNING] rde-material.nims.go.jp用のCookieが見つかりません")
+        else:
+            print("[WARNING] WebView Cookieが利用できません - Cookieなしでリクエスト")
         
         print(f"[DEBUG] POST Sample Sharing Group API URL: {api_url}")
         print(f"[DEBUG] ペイロード: {json.dumps(payload, ensure_ascii=False, indent=2)}")
