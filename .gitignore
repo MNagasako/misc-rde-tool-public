@@ -148,8 +148,8 @@ temp_*.py
 /temp_*.py
 
 # tools配下のテストファイル
-tools/test_*.py
-tools/*_test.py
+#tools/test_*.py
+#tools/*_test.py
 
 cleanup/**
 !cleanup/.gitkeep
@@ -163,7 +163,7 @@ test_logs_full/**
 #tests/**
 #!tests/.gitkeep
 tools/**
-
+tools/
 ref/**
 !ref/.gitkeep
 
