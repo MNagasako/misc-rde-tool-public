@@ -162,6 +162,7 @@ test_logs_full/**
 
 #tests/**
 #!tests/.gitkeep
+tools/**
 
 ref/**
 !ref/.gitkeep
