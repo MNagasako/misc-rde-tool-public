@@ -169,6 +169,47 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
         if progress_callback:
             progress_callback(100, 100, f"エラー: {error_msg}")
         return error_msg
+        success_count = 0
+        failed_count = 0
+        failed_ids = []
+        total_templates = len(template_ids)
+        
+        for i, template_id in enumerate(template_ids):
+            # プログレス更新
+            if progress_callback:
+                if not progress_callback(i + 1, total_templates, f"invoiceSchema取得中: {template_id}"):
+                    break  # キャンセルされた場合
+                    
+            result = fetch_invoice_schema_from_api(
+                bearer_token, template_id, output_dir, summary, log_path, summary_path
+            )
+            if result == "skipped_summary" or result == "skipped_file":
+                logger.info(f"invoiceSchemasスキップ: {template_id}")
+                skipped_count += 1
+                skipped_ids.append(template_id)
+            elif result == "success":
+                logger.info(f"invoiceSchemas取得完了: {template_id}")
+                success_count += 1
+            elif result == "failed":
+                logger.error(f"invoiceSchemas取得失敗: {template_id}")
+                failed_count += 1
+                failed_ids.append(template_id)
+        # 最終的にも一度保存（冗長だが安全）
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, ensure_ascii=False, indent=2)
+        logger.info(f"invoiceSchemas処理完了: 成功={success_count}/全={len(template_ids)} スキップ={skipped_count} 失敗={failed_count}")
+        
+        # 結果をprint文で出力
+        msg = f"invoiceSchemas取得処理が完了しました。\n\n成功: {success_count}件\nスキップ: {skipped_count}件\n失敗: {failed_count}件\n\n既に取得済みのJSONやsummary.jsonで成功記録があるもの、403エラー等で拒否されたものはスキップされます。\n再取得したい場合は output/invoiceSchemas/ 内の該当JSONやsummary.jsonを削除して再実行してください。"
+        if failed_count > 0:
+            msg += f"\n\n失敗ID例: {', '.join(map(str, failed_ids[:5]))}{' ...' if failed_count > 5 else ''}"
+        if skipped_count > 0:
+            msg += f"\n\nスキップID例: {', '.join(map(str, skipped_ids[:5]))}{' ...' if skipped_count > 5 else ''}"
+        print(msg)
+        
+    except Exception as e:
+        logger.error(f"fetch_invoice_schemas処理失敗: {e}")
+        raise
 
 def get_self_username_from_json(json_path="output/rde/data/self.json"):
     """self.json から userName を取得して返す。存在しない場合は空文字列。"""
@@ -189,11 +230,7 @@ def get_self_username_from_json(json_path="output/rde/data/self.json"):
 def fetch_self_info_from_api(bearer_token=None, output_dir="output/rde/data", parent_widget=None):
     """
     https://rde-user-api.nims.go.jp/users/self からユーザー情報を取得し、self.jsonとして保存
-    
-    v2.0.1改善:
-    - HTTPエラーの詳細ハンドリング
-    - 401/403エラーの明示的な検出と通知
-    - エラーメッセージの改善
+    v1.18.4: Bearer Token自動選択対応
     
     Args:
         bearer_token: Bearer Token（非推奨、互換性のため残存。Noneの場合は自動選択）
@@ -214,60 +251,28 @@ def fetch_self_info_from_api(bearer_token=None, output_dir="output/rde/data", pa
         logger.info("ユーザー情報取得開始")
         # v1.18.4: bearer_token=Noneで自動選択させる
         resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
-        
-        # レスポンスチェック
         if resp is None:
-            error_msg = "ユーザー情報取得失敗: APIリクエストがNoneを返しました（ネットワークエラーまたはタイムアウト）"
-            logger.error(error_msg)
-            raise Exception(error_msg)
+            logger.error("ユーザー情報取得失敗: リクエストエラー")
+            return False
+        resp.raise_for_status()
+        data = resp.json()
         
-        # HTTPステータスコードチェック（v2.0.1改善）
-        if resp.status_code == 401:
-            error_msg = "認証エラー（401）: Bearer Tokenが無効または期限切れです。再ログインしてください。"
-            logger.error(error_msg)
-            raise Exception(error_msg)
-        elif resp.status_code == 403:
-            error_msg = "アクセス拒否（403）: このユーザーにはユーザー情報取得の権限がありません。"
-            logger.error(error_msg)
-            raise Exception(error_msg)
-        elif resp.status_code != 200:
-            error_msg = f"ユーザー情報取得失敗: HTTPステータス {resp.status_code}"
-            logger.error(error_msg)
-            raise Exception(error_msg)
-        
-        # JSONパース
-        try:
-            data = resp.json()
-        except Exception as json_error:
-            error_msg = f"ユーザー情報のJSONパース失敗: {json_error}"
-            logger.error(error_msg)
-            raise Exception(error_msg)
-        
-        # ファイル保存
         os.makedirs(output_dir, exist_ok=True)
         save_path = os.path.join(output_dir, "self.json")
         with open(save_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         logger.info(f"self.json取得・保存完了: {save_path}")
         return True
-        
     except Exception as e:
         logger.error(f"self.json取得・保存失敗: {e}")
-        # v2.0.1: エラーを呼び出し元に伝播させる
+        # v1.18.4: 401エラーはapi_request_helperで自動選択されたトークンの問題
+        if hasattr(e, 'response') and e.response.status_code == 401:
+            logger.warning("認証エラー（401）が発生しました。ログインしてBearer Tokenを更新してください。")
         raise
 
 
-def fetch_all_data_entrys_info(bearer_token, output_dir="output/rde/data", progress_callback=None):
-    """
-    dataset.json内の全データセットIDでfetch_data_entry_info_from_apiを呼び出す
-    
-    改善版: データセット総数を事前計算し、プログレス更新頻度を向上
-    
-    Args:
-        bearer_token: 認証トークン
-        output_dir: 出力ディレクトリ
-        progress_callback: プログレスコールバック関数 (current, total, message) -> bool
-    """
+def fetch_all_data_entrys_info(bearer_token, output_dir="output/rde/data"):
+    """dataset.json内の全データセットIDでfetch_data_entry_info_from_apiを呼び出す"""
     try:
         os.makedirs(output_dir, exist_ok=True)
         dataset_json = os.path.join(output_dir, "dataset.json")
@@ -275,55 +280,27 @@ def fetch_all_data_entrys_info(bearer_token, output_dir="output/rde/data", progr
         if not os.path.exists(dataset_json):
             logger.error(f"dataset.jsonが存在しません: {dataset_json}")
             return
-        
-        if progress_callback:
-            if not progress_callback(0, 100, "データエントリ情報取得準備中..."):
-                return "キャンセルされました"
             
         with open(dataset_json, "r", encoding="utf-8") as f:
             data = json.load(f)
             
         datasets = data.get("data", [])
-        total_datasets = len(datasets)
-        logger.info(f"データエントリ情報取得開始: {total_datasets}件のデータセット処理")
-        
-        if progress_callback:
-            if not progress_callback(5, 100, f"データセット総数: {total_datasets}件"):
-                return "キャンセルされました"
+        logger.info(f"データエントリ情報取得開始: {len(datasets)}件のデータセット処理")
         
         processed_count = 0
-        error_count = 0
-        
-        for idx, ds in enumerate(datasets):
+        for ds in datasets:
             ds_id = ds.get("id")
             if ds_id:
-                # プログレス更新（5-95%の範囲）
-                if progress_callback:
-                    progress_percent = 5 + int((idx / total_datasets) * 90)
-                    msg = f"データエントリ取得中 ({idx + 1}/{total_datasets}): {ds_id}"
-                    if not progress_callback(progress_percent, 100, msg):
-                        return "キャンセルされました"
-                
                 try:
                     fetch_data_entry_info_from_api(bearer_token, ds_id)
                     processed_count += 1
                 except Exception as e:
                     logger.error(f"データエントリ処理失敗: ds_id={ds_id}, error={e}")
-                    error_count += 1
-        
-        result_msg = f"データエントリ情報取得完了: 処理={processed_count}/{total_datasets}, エラー={error_count}"
-        logger.info(result_msg)
-        
-        if progress_callback:
-            progress_callback(100, 100, result_msg)
-        
-        return result_msg
+                    
+        logger.info(f"データエントリ情報取得完了: 処理済み={processed_count}/{len(datasets)}")
         
     except Exception as e:
-        error_msg = f"fetch_all_data_entrys_info処理失敗: {e}"
-        logger.error(error_msg)
-        if progress_callback:
-            progress_callback(100, 100, f"エラー: {error_msg}")
+        logger.error(f"fetch_all_data_entrys_info処理失敗: {e}")
         raise
 
 
@@ -400,107 +377,47 @@ def fetch_invoice_info_from_api(bearer_token, entry_id, output_dir="output/rde/d
         raise
 
 
-def fetch_all_invoices_info(bearer_token, output_dir="output/rde/data", progress_callback=None):
-    """
-    dataEntry.json内の全エントリIDでfetch_invoice_info_from_apiを呼び出す
-    
-    改善版: データセット数とタイル数から総予定取得数を事前計算し、
-    プログレス更新頻度を大幅に向上させて処理の進行状況を明確化
-    
-    Args:
-        bearer_token: 認証トークン
-        output_dir: 出力ディレクトリ
-        progress_callback: プログレスコールバック関数 (current, total, message) -> bool
-    """
+def fetch_all_invoices_info(bearer_token, output_dir="output/rde/data"):
+    """dataEntry.json内の全エントリIDでfetch_invoice_info_from_apiを呼び出す"""
     try:
         dataentry_dir = os.path.join(output_dir, "dataEntry")
-        invoice_dir = os.path.join(output_dir, "invoice")
         
         if not os.path.exists(dataentry_dir):
             logger.error(f"dataEntryディレクトリが存在しません: {dataentry_dir}")
             return
-        
-        # === 事前カウント：総予定取得数を計算 ===
-        if progress_callback:
-            if not progress_callback(0, 100, "インボイス総数を計算中..."):
-                return "キャンセルされました"
-        
+            
+        # dataEntryディレクトリ内の全JSONファイルを処理
         dataentry_files = glob.glob(os.path.join(dataentry_dir, "*.json"))
+        logger.info(f"インボイス情報取得開始: {len(dataentry_files)}件のデータエントリファイル処理")
         
-        # 既存のインボイスファイルをカウント（スキップ予定）
-        existing_invoices = set()
-        if os.path.exists(invoice_dir):
-            existing_invoices = set(os.listdir(invoice_dir))
-        
-        # 全データエントリファイルを読み込み、総エントリ数を計算
-        total_entries = 0
-        entry_list = []  # [(file_path, entry_id), ...]
-        
-        logger.info(f"インボイス情報取得開始: {len(dataentry_files)}件のデータエントリファイルを解析中")
+        processed_count = 0
+        invoice_count = 0
         
         for file_path in dataentry_files:
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 
+                # dataEntry.json内の各エントリからIDを抽出
                 entries = data.get("data", [])
                 for entry in entries:
                     entry_id = entry.get("id")
                     if entry_id:
-                        entry_list.append((file_path, entry_id))
-                        total_entries += 1
-                        
+                        try:
+                            fetch_invoice_info_from_api(bearer_token, entry_id)
+                            invoice_count += 1
+                        except Exception as e:
+                            logger.error(f"インボイス処理失敗: entry_id={entry_id}, error={e}")
+                
+                processed_count += 1
+                
             except Exception as e:
-                logger.error(f"データエントリファイル読み込み失敗: file={file_path}, error={e}")
-        
-        # 既存ファイルを除外した新規取得予定数
-        new_entries = [e for e in entry_list if f"{e[1]}.json" not in existing_invoices]
-        new_count = len(new_entries)
-        skip_count = len(entry_list) - new_count
-        
-        logger.info(f"インボイス取得計画: 総数={total_entries}, 新規取得={new_count}, スキップ={skip_count}")
-        
-        if progress_callback:
-            msg = f"インボイス取得開始 (データセット: {len(dataentry_files)}件, タイル総数: {total_entries}件, 新規: {new_count}件)"
-            if not progress_callback(5, 100, msg):
-                return "キャンセルされました"
-        
-        # === メイン処理：インボイス取得 ===
-        processed_count = 0
-        success_count = 0
-        error_count = 0
-        
-        for idx, (file_path, entry_id) in enumerate(entry_list):
-            # プログレス更新（5-95%の範囲で更新）
-            if progress_callback:
-                progress_percent = 5 + int((idx / total_entries) * 90)
-                msg = f"インボイス取得中 ({idx + 1}/{total_entries}): {entry_id}"
-                if not progress_callback(progress_percent, 100, msg):
-                    return "キャンセルされました"
-            
-            try:
-                fetch_invoice_info_from_api(bearer_token, entry_id, invoice_dir)
-                success_count += 1
-            except Exception as e:
-                logger.error(f"インボイス処理失敗: entry_id={entry_id}, error={e}")
-                error_count += 1
-            
-            processed_count += 1
-        
-        # === 完了処理 ===
-        result_msg = f"インボイス情報取得完了: 処理={processed_count}/{total_entries}, 成功={success_count}, エラー={error_count}"
-        logger.info(result_msg)
-        
-        if progress_callback:
-            progress_callback(100, 100, result_msg)
-        
-        return result_msg
+                logger.error(f"データエントリファイル処理失敗: file={file_path}, error={e}")
+                    
+        logger.info(f"インボイス情報取得完了: 処理済みファイル={processed_count}/{len(dataentry_files)}, 取得インボイス={invoice_count}")
         
     except Exception as e:
-        error_msg = f"fetch_all_invoices_info処理失敗: {e}"
-        logger.error(error_msg)
-        if progress_callback:
-            progress_callback(100, 100, f"エラー: {error_msg}")
+        logger.error(f"fetch_all_invoices_info処理失敗: {e}")
         raise
 
 
@@ -792,7 +709,7 @@ def move_webview_to_group(webview, project_group_id):
         url = f"https://rde.nims.go.jp/rde/datasets/groups/{project_group_id}"
         print(f"[DEBUG] setUrl前: {url}")
         try:
-            from qt_compat.core import QTimer
+            from PyQt5.QtCore import QTimer
             def do_set_url(wv, u):
                 try:
                     if wv is None:
@@ -844,7 +761,7 @@ def show_fetch_confirmation_dialog(parent, onlySelf, searchWords):
     """
     基本情報取得の確認ダイアログを表示
     """
-    from qt_compat.widgets import QMessageBox, QPushButton, QDialog, QVBoxLayout, QTextEdit
+    from PyQt5.QtWidgets import QMessageBox, QPushButton, QDialog, QVBoxLayout, QTextEdit
     import json
     
     # 取得対象の情報を生成
@@ -935,11 +852,11 @@ def show_fetch_confirmation_dialog(parent, onlySelf, searchWords):
         text_edit.setMinimumSize(600, 400)
         layout.addWidget(text_edit)
         dlg.setLayout(layout)
-        dlg.exec()
+        dlg.exec_()
     
     detail_btn.clicked.connect(show_detail)
     
-    reply = msg_box.exec()
+    reply = msg_box.exec_()
     return msg_box.clickedButton() == yes_btn
 
 # === 段階別実行関数 ===
@@ -1348,69 +1265,20 @@ def execute_individual_stage(stage_name, bearer_token, webview=None, onlySelf=Fa
 def fetch_basic_info_logic(bearer_token, parent=None, webview=None, onlySelf=False, searchWords=None, skip_confirmation=False, progress_callback=None):
     """
     基本情報取得・保存・WebView遷移（開発用）
-    
-    v2.0.1改善:
-    - 事前トークン検証の追加
-    - 認証エラー時の再ログイン促進
-    - エラーメッセージの明確化
     """
-    import traceback
-    from core.bearer_token_manager import BearerTokenManager
-    from qt_compat.widgets import QMessageBox
-    
-    # ===== 1. トークン検証（v2.0.1新規追加） =====
-    logger.info("基本情報取得開始: トークン検証")
-    
-    # bearer_tokenが渡されていない、または空の場合はBearerTokenManagerから取得
-    if not bearer_token or bearer_token.strip() == "":
-        logger.warning("bearer_tokenが未指定のため、BearerTokenManagerから取得します")
-        bearer_token = BearerTokenManager.get_valid_token()
-    else:
-        # 渡されたトークンの有効性を検証
-        logger.debug("渡されたbearer_tokenの有効性を検証します")
-        if not BearerTokenManager.validate_token(bearer_token):
-            logger.warning("渡されたbearer_tokenが無効です")
-            bearer_token = None
-    
-    # トークンが取得できない、または無効な場合
     if not bearer_token:
-        error_msg = "認証トークンが無効または期限切れです。"
+        error_msg = "Bearerトークンが取得できません。ログイン状態を確認してください。"
         logger.error(error_msg)
-        
-        # 再ログイン促進ダイアログを表示
-        if parent and BearerTokenManager.request_relogin_if_invalid(parent):
-            # ユーザーが再ログインを選択した場合
-            # ログインタブへの切り替えを試みる
-            try:
-                if hasattr(parent, 'tabs'):
-                    # メインウィンドウのタブを検索
-                    for i in range(parent.tabs.count()):
-                        if parent.tabs.tabText(i) == "ログイン":
-                            parent.tabs.setCurrentIndex(i)
-                            logger.info("ログインタブに切り替えました")
-                            break
-                
-                # エラーメッセージを表示
-                QMessageBox.information(
-                    parent,
-                    "再ログインが必要",
-                    "ログインタブでRDEシステムに再ログインしてください。\n"
-                    "ログイン完了後、再度基本情報取得を実行してください。"
-                )
-            except Exception as e:
-                logger.error(f"ログインタブ切り替えエラー: {e}")
-        
         return error_msg
     
-    logger.info(f"トークン検証成功: {bearer_token[:20]}...")
-    
-    # ===== 2. 確認ダイアログ表示 =====
+    # 確認ダイアログ表示（skip_confirmationがTrueの場合はスキップ）
     if not skip_confirmation:
         if not show_fetch_confirmation_dialog(parent, onlySelf, searchWords):
             logger.info("基本情報取得処理はユーザーによりキャンセルされました。")
             return "キャンセルされました"
     
-    logger.info("基本情報取得処理を開始します")
+    import traceback
+    logger.info("基本情報取得開始")
     
     try:
         # プログレス管理
@@ -1604,39 +1472,23 @@ def fetch_basic_info_logic(bearer_token, parent=None, webview=None, onlySelf=Fal
             return "キャンセルされました"
 
         # 8. データエントリ情報取得
-        if not update_stage_progress(7, 0, "データエントリ情報取得準備中"):
+        if not update_stage_progress(7, 0, "開始"):
             return "キャンセルされました"
             
         logger.debug("fetch_all_data_entrys_info")
+        fetch_all_data_entrys_info(bearer_token)
         
-        # プログレスコールバックを作成（ステージ7の0-100%をマッピング）
-        def dataentry_progress_callback(current, total, message):
-            return update_stage_progress(7, current, message)
-        
-        result = fetch_all_data_entrys_info(bearer_token, progress_callback=dataentry_progress_callback)
-        if result == "キャンセルされました":
-            return "キャンセルされました"
-        
-        if not update_stage_progress(7, 100, "データエントリ情報取得完了"):
+        if not update_stage_progress(7, 100, "完了"):
             return "キャンセルされました"
 
         # 9. インボイス情報取得
-        if not update_stage_progress(8, 0, "インボイス情報取得準備中"):
+        if not update_stage_progress(8, 0, "開始"):
             return "キャンセルされました"
             
         logger.debug("fetch_all_invoices_info")
+        fetch_all_invoices_info(bearer_token)
         
-        # プログレスコールバックを作成（ステージ8の0-100%をマッピング）
-        def invoice_progress_callback(current, total, message):
-            # current, totalは fetch_all_invoices_info 内部の進捗（0-100%）
-            # これをステージ8の進捗にマッピング
-            return update_stage_progress(8, current, message)
-        
-        result = fetch_all_invoices_info(bearer_token, progress_callback=invoice_progress_callback)
-        if result == "キャンセルされました":
-            return "キャンセルされました"
-        
-        if not update_stage_progress(8, 100, "インボイス情報取得完了"):
+        if not update_stage_progress(8, 100, "完了"):
             return "キャンセルされました"
 
         # 10. invoiceSchema情報取得
@@ -1986,62 +1838,14 @@ def fetch_sample_info_for_dataset_only(bearer_token, dataset_id, output_dir="out
 def fetch_common_info_only_logic(bearer_token, parent=None, webview=None, progress_callback=None):
     """
     7種類の共通情報JSONのみを取得・保存（個別データセットJSONは取得しない）
-    
-    v2.0.1改善:
-    - 事前トークン検証の追加
-    - 認証エラー時の再ログイン促進
-    - エラーメッセージの明確化
     """
-    import traceback
-    from core.bearer_token_manager import BearerTokenManager
-    from qt_compat.widgets import QMessageBox
-    
-    # ===== 1. トークン検証（v2.0.1新規追加） =====
-    logger.info("共通情報取得開始: トークン検証")
-    
-    # bearer_tokenが渡されていない、または空の場合はBearerTokenManagerから取得
-    if not bearer_token or bearer_token.strip() == "":
-        logger.warning("bearer_tokenが未指定のため、BearerTokenManagerから取得します")
-        bearer_token = BearerTokenManager.get_valid_token()
-    else:
-        # 渡されたトークンの有効性を検証
-        logger.debug("渡されたbearer_tokenの有効性を検証します")
-        if not BearerTokenManager.validate_token(bearer_token):
-            logger.warning("渡されたbearer_tokenが無効です")
-            bearer_token = None
-    
-    # トークンが取得できない、または無効な場合
     if not bearer_token:
-        error_msg = "認証トークンが無効または期限切れです。"
+        error_msg = "Bearerトークンが取得できません。ログイン状態を確認してください。"
         logger.error(error_msg)
-        
-        # 再ログイン促進ダイアログを表示
-        if parent and BearerTokenManager.request_relogin_if_invalid(parent):
-            # ユーザーが再ログインを選択した場合
-            # ログインタブへの切り替えを試みる
-            try:
-                if hasattr(parent, 'tabs'):
-                    # メインウィンドウのタブを検索
-                    for i in range(parent.tabs.count()):
-                        if parent.tabs.tabText(i) == "ログイン":
-                            parent.tabs.setCurrentIndex(i)
-                            logger.info("ログインタブに切り替えました")
-                            break
-                
-                # エラーメッセージを表示
-                QMessageBox.information(
-                    parent,
-                    "再ログインが必要",
-                    "ログインタブでRDEシステムに再ログインしてください。\n"
-                    "ログイン完了後、再度共通情報取得を実行してください。"
-                )
-            except Exception as e:
-                logger.error(f"ログインタブ切り替えエラー: {e}")
-        
         return error_msg
     
-    logger.info(f"トークン検証成功: {bearer_token[:20]}...")
-    logger.info("共通情報取得処理を開始します")
+    import traceback
+    logger.info("共通情報取得開始")
     
     try:
         # プログレス管理 - 7段階の共通情報取得

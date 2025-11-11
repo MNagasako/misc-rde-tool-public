@@ -66,6 +66,12 @@ class LoginManager:
         # v1.18.3: マルチホストトークン取得フラグ
         self._material_token_fetched = False
         
+        # v2.0.2: トークン取得完了状態管理
+        self._rde_token_acquired = False
+        self._material_token_acquired = False
+        self._login_in_progress = False
+        self._autologin_cancelled = False  # 自動ログインキャンセルフラグ
+        
         # v1.16: 起動時に認証情報を決定
         self._initialize_credential_source()
     
@@ -178,10 +184,35 @@ class LoginManager:
                 
         except Exception as e:
             logger.error(f"認証情報クリーンアップエラー: {e}")
+    
+    def cancel_autologin(self):
+        """自動ログイン処理をキャンセル"""
+        try:
+            self._autologin_cancelled = True
+            self._login_in_progress = False
+            
+            if hasattr(self.browser, 'autologin_msg_label') and self.browser.autologin_msg_label:
+                self.browser.autologin_msg_label.setText("⚠️ 自動ログインをキャンセルしました")
+                self.browser.autologin_msg_label.setVisible(True)
+            
+            logger.info("自動ログイン処理をキャンセルしました")
+            
+        except Exception as e:
+            logger.error(f"自動ログインキャンセルエラー: {e}")
+    
+    def reset_autologin_cancel_flag(self):
+        """自動ログインキャンセルフラグをリセット"""
+        self._autologin_cancelled = False
+        logger.debug("自動ログインキャンセルフラグをリセットしました")
 
     def poll_dice_btn_status(self):
         # test_modeでは処理をスキップ
         if hasattr(self.browser, 'test_mode') and self.browser.test_mode:
+            return
+        
+        # 自動ログインがキャンセルされた場合はスキップ
+        if self._autologin_cancelled:
+            logger.info("自動ログインがキャンセルされました")
             return
             
         from qt_compat.core import QTimer
@@ -190,6 +221,10 @@ class LoginManager:
             try:
                 # 安全性チェック: browserが削除されていないか確認
                 if not hasattr(self, 'browser') or self.browser is None:
+                    return
+                
+                # 自動ログインがキャンセルされた場合はスキップ
+                if self._autologin_cancelled:
                     return
                     
                 # test_modeでは処理をスキップ
@@ -549,6 +584,20 @@ class LoginManager:
                 # v1.18.3: UIコンポーネントにトークン更新を通知
                 self._notify_token_updated(access_token, host)
                 
+                # v2.0.2: トークン取得完了フラグを更新
+                if host == 'rde.nims.go.jp':
+                    self._rde_token_acquired = True
+                    logger.info("[TOKEN] RDEトークン取得完了フラグを設定")
+                elif host == 'rde-material.nims.go.jp':
+                    self._material_token_acquired = True
+                    logger.info("[TOKEN] マテリアルトークン取得完了フラグを設定")
+                
+                # v2.0.2: 両トークン取得完了チェック
+                if self._rde_token_acquired and self._material_token_acquired:
+                    logger.info("[TOKEN] ✅ 両トークン取得完了")
+                    self._login_in_progress = False
+                    self._notify_login_complete()
+                
                 # v1.16: 認証完了後のクリーンアップ
                 self._secure_cleanup_credentials()
                 
@@ -558,6 +607,7 @@ class LoginManager:
                     logger.info("[TOKEN] rde-material.nims.go.jpのトークン取得を開始します")
                     print(f"[TOKEN-DEBUG] Material トークン取得プロセスを2秒後に開始")
                     QTimer.singleShot(2000, lambda: self.fetch_material_token())
+
                 
                 return
             else:
@@ -753,6 +803,93 @@ class LoginManager:
         """
         logger.info("[TOKEN] マテリアルトークン取得フラグをリセット")
         self._material_token_fetched = False
+    
+    def check_tokens_acquired(self) -> tuple[bool, bool]:
+        """
+        両方のトークン（RDE・マテリアル）が取得済みかチェック
+        
+        Returns:
+            tuple: (rde_token_exists, material_token_exists)
+        """
+        from config.common import load_bearer_token
+        
+        rde_token = load_bearer_token('rde.nims.go.jp')
+        material_token = load_bearer_token('rde-material.nims.go.jp')
+        
+        rde_exists = rde_token is not None and len(rde_token) > 0
+        material_exists = material_token is not None and len(material_token) > 0
+        
+        logger.info(f"[TOKEN-CHECK] RDE: {rde_exists}, Material: {material_exists}")
+        return rde_exists, material_exists
+    
+    def ensure_both_tokens(self, force_refresh=False):
+        """
+        両方のトークンが取得済みか確認し、不足分を取得
+        
+        Args:
+            force_refresh: Trueの場合、既存トークンを強制リフレッシュ
+        """
+        logger.info("[TOKEN-ENSURE] トークン確認開始")
+        
+        rde_exists, material_exists = self.check_tokens_acquired()
+        
+        if force_refresh:
+            logger.info("[TOKEN-ENSURE] 強制リフレッシュモード")
+            self._rde_token_acquired = False
+            self._material_token_acquired = False
+            self._material_token_fetched = False
+        
+        # RDEトークンが不足している場合
+        if not rde_exists or force_refresh:
+            logger.info("[TOKEN-ENSURE] RDEトークンを取得します")
+            self.browser.update_autologin_msg("🔄 RDEトークン取得中...")
+            # 3秒待機してからトークン取得（PySide6対応）
+            self.try_get_bearer_token(retries=3, host='rde.nims.go.jp', initial_delay=3000)
+        else:
+            logger.info("[TOKEN-ENSURE] RDEトークンは既に存在")
+            self._rde_token_acquired = True
+        
+        # マテリアルトークンが不足している場合
+        if not material_exists or force_refresh:
+            logger.info("[TOKEN-ENSURE] マテリアルトークンを取得します")
+            self.browser.update_autologin_msg("🔄 マテリアルトークン取得中...")
+            # RDEトークン取得後に実行
+            QTimer.singleShot(5000, self.fetch_material_token)
+        else:
+            logger.info("[TOKEN-ENSURE] マテリアルトークンは既に存在")
+            self._material_token_acquired = True
+    
+    def is_login_complete(self) -> bool:
+        """
+        ログインが完全に完了しているかチェック（両トークン取得済み）
+        
+        Returns:
+            bool: 両トークン取得済みの場合True
+        """
+        rde_exists, material_exists = self.check_tokens_acquired()
+        return rde_exists and material_exists
+    
+    def _notify_login_complete(self):
+        """ログイン完了を通知"""
+        try:
+            logger.info("[TOKEN] ログイン完了通知を送信")
+            
+            # メッセージ更新
+            if hasattr(self.browser, 'update_autologin_msg'):
+                self.browser.update_autologin_msg("✅ ログイン完了（両トークン取得済み）")
+            
+            # UIコントローラーに通知
+            if hasattr(self.browser, 'ui_controller'):
+                if hasattr(self.browser.ui_controller, 'on_login_complete'):
+                    self.browser.ui_controller.on_login_complete()
+            
+            # ディスプレイマネージャーに通知
+            if hasattr(self.browser, 'display_manager'):
+                self.browser.display_manager.set_message("ログイン完了 - 全機能が利用可能です")
+                
+        except Exception as e:
+            logger.error(f"[TOKEN] ログイン完了通知エラー: {e}", exc_info=True)
+
     
     def _notify_token_updated(self, token: str, host: str):
         """

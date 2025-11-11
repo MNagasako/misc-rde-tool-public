@@ -12,12 +12,12 @@ import logging
 from typing import Optional
 
 try:
-    from qt_compat.widgets import (
+    from PyQt5.QtWidgets import (
         QTabWidget, QWidget, QVBoxLayout, QHBoxLayout,
         QLabel, QPushButton, QApplication
     )
-    from qt_compat.core import Qt
-    from qt_compat.gui import QFont
+    from PyQt5.QtCore import Qt
+    from PyQt5.QtGui import QFont
     PYQT5_AVAILABLE = True
 except ImportError:
     PYQT5_AVAILABLE = False
@@ -68,9 +68,6 @@ class MainWindowTabIntegrator:
         # タブウィジェットを作成
         self.tab_widget = QTabWidget()
         
-        # タブ切り替えイベントを接続
-        self.tab_widget.currentChanged.connect(self._on_tab_changed)
-        
         # 既存の機能タブを作成
         self._create_main_functions_tab()
         
@@ -79,9 +76,6 @@ class MainWindowTabIntegrator:
         
         # タブウィジェットをメニューエリアに追加
         menu_area_layout.addWidget(self.tab_widget)
-        
-        # 親ウィジェットにタブウィジェットを保存
-        self.parent.tabs = self.tab_widget
         
         logger.info("メニューエリアがタブウィジェットに変換されました")
         
@@ -190,7 +184,7 @@ class MainWindowTabIntegrator:
         except Exception as e:
             logger.error(f"設定ダイアログ起動エラー: {e}")
             try:
-                from qt_compat.widgets import QMessageBox
+                from PyQt5.QtWidgets import QMessageBox
                 QMessageBox.warning(self.parent, "エラー", f"設定ダイアログの起動に失敗しました: {e}")
             except:
                 print(f"設定ダイアログエラー: {e}")
@@ -225,9 +219,9 @@ class MainWindowTabIntegrator:
             if self.parent:
                 width = self.parent.width()
             else:
-                # PySide6対応
-                from qt_compat import get_screen_size
-                width, _ = get_screen_size()
+                desktop = QApplication.desktop()
+                screen_rect = desktop.screenGeometry()
+                width = screen_rect.width()
             
             # 利用可能な幅からメニュー部分を除く
             available_width = width - 160  # メニュー幅 + マージン
@@ -262,40 +256,6 @@ class MainWindowTabIntegrator:
                 
         except Exception as e:
             logger.warning(f"レイアウト調整エラー: {e}")
-    
-    def _on_tab_changed(self, index: int):
-        """タブが切り替えられたときの処理"""
-        try:
-            # タブの名前を取得
-            tab_name = self.tab_widget.tabText(index)
-            logger.debug(f"タブ切り替え: {tab_name} (index={index})")
-            
-            # 基本情報タブが表示された場合、自動検証を実行
-            if "基本情報" in tab_name or "メイン機能" in tab_name:
-                self._trigger_basic_info_validation()
-                
-        except Exception as e:
-            logger.error(f"タブ切り替え処理エラー: {e}")
-    
-    def _trigger_basic_info_validation(self):
-        """基本情報タブの自動検証を起動"""
-        try:
-            # UIコントローラーから基本情報タブバリデータを取得
-            if hasattr(self.parent, 'ui_controller'):
-                ui_controller = self.parent.ui_controller
-                
-                # バリデータが存在する場合は検証を実行
-                if hasattr(ui_controller, 'basic_info_tab_validator'):
-                    validator = ui_controller.basic_info_tab_validator
-                    validator.validate_on_tab_shown()
-                    logger.debug("基本情報タブの自動検証を起動しました")
-                else:
-                    logger.debug("基本情報タブバリデータが未初期化です")
-            else:
-                logger.debug("UIコントローラーが見つかりません")
-                
-        except Exception as e:
-            logger.error(f"基本情報タブ自動検証の起動エラー: {e}")
 
 
 def integrate_settings_into_main_window(parent):

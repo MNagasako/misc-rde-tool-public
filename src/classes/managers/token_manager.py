@@ -470,7 +470,11 @@ class TokenManager(QObject):
         自動リフレッシュチェック (タイマーコールバック)
         
         全ホストのトークンをチェックし、期限切れ前のトークンをリフレッシュ
+        v2.0.3: アクティブホストのみ処理
         """
+        # アクティブなホストのみ処理
+        ACTIVE_HOSTS = ['rde.nims.go.jp', 'rde-material.nims.go.jp']
+        
         try:
             tokens_file = Path(common.BEARER_TOKENS_FILE)
             if not tokens_file.exists():
@@ -480,6 +484,11 @@ class TokenManager(QObject):
                 tokens_dict = json.load(f)
             
             for host, token_dict in tokens_dict.items():
+                # 非アクティブホストをスキップ
+                if host not in ACTIVE_HOSTS:
+                    logger.debug(f"非アクティブホストをスキップ: {host}")
+                    continue
+                
                 try:
                     token_data = TokenData.from_dict(token_dict)
                     

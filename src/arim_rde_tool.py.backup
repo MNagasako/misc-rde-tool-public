@@ -1,19 +1,12 @@
 #!/usr/bin/env python3
 
 """
-ARIM RDE Tool v2.0.1 - PySide6によるRDE→ARIMデータポータル移行ツール
+ARIM RDE Tool v1.19.2 - PyQt5によるRDE→ARIMデータポータル移行ツール
 
 主要機能:
 - RDEシステムへの自動ログイン・データセット一括取得・画像保存
-- PySide6 WebView統合ブラウザによる認証・操作自動化
+- PyQt5 WebView統合ブラウザによる認証・操作自動化
 - ARIM匿名化・HTMLログ出力・統合API処理・AI分析機能
-- OAuth2 RefreshToken対応トークン管理システム（TokenManager）
-
-v2.0.1新機能:
-- トークン自動リフレッシュ（QTimer 60秒間隔、5分前マージン）
-- トークン状態表示タブ（有効期限・残り時間表示）
-- マルチホストトークン管理（RDE/Material API対応）
-- 手動リフレッシュAPI実装
 
 アーキテクチャ:
 - 責務分離された専門クラス群による高保守性
@@ -29,16 +22,13 @@ import sys
 import argparse
 import os
 # PyQt5 - WebEngine初期化問題の回避
-from qt_compat import initialize_webengine
-from qt_compat.core import Qt
-
-# WebEngine初期化
-initialize_webengine()
-from qt_compat.widgets import QApplication, QWidget, QLabel
-from qt_compat.webengine import QWebEngineView, QWebEngineProfile
-from qt_compat.webengine_page import WebEnginePageWithConsole
-from qt_compat.core import QTimer
-from qt_compat.gui import QIcon
+from PyQt5.QtCore import QCoreApplication, Qt
+# WebEngine使用前に属性を設定
+QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
+from PyQt5.QtWidgets import QApplication, QWidget, QLabel
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtCore import QTimer
+from PyQt5.QtGui import QIcon
 # 設定・関数モジュール
 from config.common import REVISION, OUTPUT_DIR, DYNAMIC_IMAGE_DIR, get_static_resource_path
 from functions.common_funcs import read_login_info
@@ -90,45 +80,11 @@ class Browser(QWidget):
         self.app_initializer = AppInitializer(self)
         self.app_initializer.initialize_all()
 
-        # ログイン情報の初期化
-        # v1.20.3: レガシーファイルと新認証システムの統合
-        legacy_username, legacy_password, legacy_mode = read_login_info()
-        
-        # LoginManager初期化（新認証システム）
+        # ログイン情報とLoginManagerの初期化
+        self.login_username, self.login_password ,self.login_mode= read_login_info()
+        print(f"[INFO] ログイン情報: {self.login_username}, {self.login_password}, {self.login_mode}")
+
         self.login_manager = LoginManager(self, self.webview, self.autologin_msg_label)
-        
-        # v2.1.0: TokenManager初期化・自動リフレッシュ開始
-        try:
-            from classes.managers.token_manager import TokenManager
-            self.token_manager = TokenManager.get_instance()
-            self.token_manager.start_auto_refresh()
-            
-            # Signal接続: トークン更新成功/失敗通知
-            self.token_manager.token_refreshed.connect(self._on_token_refreshed)
-            self.token_manager.token_refresh_failed.connect(self._on_token_refresh_failed)
-            self.token_manager.token_expired.connect(self._on_token_expired)
-            
-            logger.info("[TokenManager] 自動リフレッシュタイマー開始")
-            print(f"[INFO] TokenManager初期化完了 - 自動リフレッシュ有効")
-        except Exception as tm_err:
-            logger.error(f"[TokenManager] 初期化エラー: {tm_err}", exc_info=True)
-            print(f"[ERROR] TokenManager初期化失敗: {tm_err}")
-        
-        # レガシーファイルが優先（互換性維持）、なければ新認証システムの値を使用
-        if legacy_username or legacy_password:
-            self.login_username = legacy_username
-            self.login_password = legacy_password
-            self.login_mode = legacy_mode
-            print(f"[INFO] レガシーログイン情報使用: {self.login_username}")
-        else:
-            # 新認証システムから読み込まれた値を使用
-            self.login_username = getattr(self.login_manager, 'login_username', None)
-            self.login_password = getattr(self.login_manager, 'login_password', None)
-            self.login_mode = getattr(self.login_manager, 'login_mode', None)
-            if self.login_username:
-                print(f"[INFO] 新認証システムログイン情報使用: {self.login_username}")
-            else:
-                print(f"[INFO] ログイン情報なし - 手動ログインが必要です")
 
         # BrowserControllerの初期化
         self.browser_controller = BrowserController(self)
@@ -150,9 +106,6 @@ class Browser(QWidget):
 
         # プロキシ起動時通知（UIが完全に表示された後）
         QTimer.singleShot(500, self._show_proxy_startup_notification)
-        
-        # v2.0.2: 起動時トークン確認とUI無効化
-        QTimer.singleShot(1000, self._check_initial_tokens)
 
         if self.test_mode:
             QTimer.singleShot(100, self.quick_test_exit)
@@ -173,15 +126,6 @@ class Browser(QWidget):
         self.auto_close = auto_close
         self.bearer_token = None
         self.webview = QWebEngineView()
-        
-        # PySide6対応: JavaScriptコンソールメッセージを有効化するカスタムPageを設定
-        # デフォルトProfileを引き継ぐために、既存のProfileを渡す
-        from qt_compat.webengine import QWebEngineProfile
-        default_profile = QWebEngineProfile.defaultProfile()
-        custom_page = WebEnginePageWithConsole(default_profile, self.webview)
-        self.webview.setPage(custom_page)
-        logger.info("[WEBENGINE] カスタムPageを設定してJavaScriptコンソールを有効化")
-        
         self._recent_blob_hashes = set()
         self._data_id_image_counts = {}
         self._active_image_processes = set()
@@ -208,25 +152,9 @@ class Browser(QWidget):
         self.webview.setFixedHeight(500)
         #self.webview.setFixedWidth(900)
         #self._webview_fixed_width = 900
-        # v2.0.2: 待機メッセージ専用ラベル（目立つスタイル）
-        from qt_compat.core import Qt
-        self.autologin_msg_label = QLabel('準備中...')
-        self.autologin_msg_label.setStyleSheet('''
-            QLabel {
-                background-color: #e3f2fd;
-                color: #1976d2;
-                font-size: 14px;
-                font-weight: bold;
-                padding: 12px;
-                border: 2px solid #1976d2;
-                border-radius: 6px;
-                margin: 5px;
-            }
-        ''')
-        self.autologin_msg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.autologin_msg_label.setMinimumHeight(50)
+        self.autologin_msg_label = QLabel('（自動ログインメッセージ欄）')
+        self.autologin_msg_label.setStyleSheet('color: #007acc; font-size: 12px; padding: 2px;')
         self.autologin_msg_label.setText('自動ログインは現在無効です')
-        
         self.webview_msg_label = QLabel('')
         self.webview_msg_label.setStyleSheet('color: #d2691e; font-size: 13px; padding: 2px;')
         
@@ -235,15 +163,6 @@ class Browser(QWidget):
 
     def _setup_webview_and_layout(self):
         """WebViewとレイアウトの設定"""
-        # v1.20.3: PySide6対応 - WebEngineの設定を明示的に有効化
-        from qt_compat.webengine import QWebEngineSettings
-        settings = self.webview.page().settings()
-        settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptEnabled, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanOpenWindows, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalStorageEnabled, True)
-        settings.setAttribute(QWebEngineSettings.WebAttribute.AllowRunningInsecureContent, True)
-        logger.info("[WEBENGINE] JavaScript と LocalStorage を有効化")
-        
         interceptor = ImageInterceptor()
         self.webview.page().profile().setUrlRequestInterceptor(interceptor)
         self.browser_controller.setup_webview(self.webview)
@@ -296,94 +215,6 @@ class Browser(QWidget):
             logger.warning(f"プロキシ起動時通知エラー: {e}")
             import traceback
             logger.debug(traceback.format_exc())
-    
-    # v2.1.0: TokenManager Signal Handlers
-    def _on_token_refreshed(self, host):
-        """トークン更新成功通知ハンドラ"""
-        logger.info(f"[TokenManager] トークン自動更新成功: {host}")
-        print(f"[INFO] トークン更新成功: {host}")
-        # UI通知は不要（自動更新のため）
-    
-    def _on_token_refresh_failed(self, host, error):
-        """トークン更新失敗通知ハンドラ"""
-        logger.warning(f"[TokenManager] トークン自動更新失敗: {host} - {error}")
-        print(f"[WARNING] トークン更新失敗: {host} - {error}")
-        # 必要に応じてUI通知を追加可能
-    
-    def _on_token_expired(self, host):
-        """RefreshToken期限切れ通知ハンドラ（再ログイン必要）"""
-        # v2.0.3: 現在使用中のホストのみ警告表示（test-host.example.comなど古いホストを無視）
-        ACTIVE_HOSTS = ['rde.nims.go.jp', 'rde-material.nims.go.jp']
-        
-        if host not in ACTIVE_HOSTS:
-            logger.debug(f"[TokenManager] 非アクティブホストの期限切れ通知を無視: {host}")
-            return
-        
-        logger.error(f"[TokenManager] RefreshToken期限切れ: {host} - 再ログインが必要です")
-        print(f"[ERROR] RefreshToken期限切れ: {host} - 再ログインしてください")
-        
-        # UI通知（ユーザーに再ログインを促す）
-        from qt_compat.widgets import QMessageBox
-        QMessageBox.warning(
-            self,
-            "トークン期限切れ",
-            f"ホスト '{host}' のRefreshTokenが期限切れです。\n\n"
-            "再ログインしてください。",
-            QMessageBox.StandardButton.Ok
-        )
-    
-    def _check_initial_tokens(self):
-        """
-        起動時にトークンの状態を確認し、UIを制御
-        v2.0.2: トークン確認機能
-        """
-        try:
-            logger.info("[TOKEN-CHECK] 起動時トークン確認開始")
-            
-            # トークンの存在確認
-            rde_exists, material_exists = self.login_manager.check_tokens_acquired()
-            
-            if rde_exists and material_exists:
-                # 両方のトークンが存在する場合
-                logger.info("[TOKEN-CHECK] 両トークン存在 - 全機能を有効化")
-                self.autologin_msg_label.setText("✅ ログイン済み（トークン確認完了）")
-                self.autologin_msg_label.setVisible(True)
-                QTimer.singleShot(3000, lambda: self.autologin_msg_label.setVisible(False))
-                
-                # UI有効化
-                if hasattr(self, 'ui_controller'):
-                    self.ui_controller.set_buttons_enabled_except_login_settings(True)
-            else:
-                # トークンが不足している場合
-                if not rde_exists and not material_exists:
-                    logger.info("[TOKEN-CHECK] トークンなし - ログインが必要")
-                    msg = "ログインしてください"
-                elif not rde_exists:
-                    logger.info("[TOKEN-CHECK] RDEトークンなし")
-                    msg = "RDEトークンが必要です"
-                else:
-                    logger.info("[TOKEN-CHECK] マテリアルトークンなし")
-                    msg = "マテリアルトークンが必要です"
-                
-                self.autologin_msg_label.setText(f"⚠️ {msg}")
-                self.autologin_msg_label.setVisible(True)
-                
-                # UI無効化（ログインと設定以外）
-                if hasattr(self, 'ui_controller'):
-                    self.ui_controller.set_buttons_enabled_except_login_settings(False)
-                
-                # 自動ログイン有効時は自動的にトークン取得を開始
-                if self.auto_login_enabled:
-                    logger.info("[TOKEN-CHECK] 自動ログイン有効 - トークン取得開始")
-                    self.autologin_msg_label.setText("🔄 自動ログイン中...")
-                    self.login_manager._login_in_progress = True
-                    
-                    # トークン取得を開始（不足分のみ）
-                    QTimer.singleShot(2000, lambda: self.login_manager.ensure_both_tokens())
-                    
-        except Exception as e:
-            logger.error(f"[TOKEN-CHECK] 起動時トークン確認エラー: {e}", exc_info=True)
-
 
     def switch_mode(self, mode):
         """モードを切り替える"""
@@ -422,8 +253,8 @@ class Browser(QWidget):
                 # 既に表示済みの場合はスキップ
                 return
             
-            from qt_compat.widgets import QFrame, QHBoxLayout, QPushButton, QLabel
-            from qt_compat.core import Qt
+            from PyQt5.QtWidgets import QFrame, QHBoxLayout, QPushButton, QLabel
+            from PyQt5.QtCore import Qt
             
             # 警告バナーウィジェット作成
             self.legacy_warning_banner = QFrame()
@@ -495,7 +326,7 @@ class Browser(QWidget):
             run_settings_logic(self, getattr(self, 'bearer_token', None))
         except Exception as e:
             logger.error(f"設定ダイアログ起動エラー: {e}")
-            from qt_compat.widgets import QMessageBox
+            from PyQt5.QtWidgets import QMessageBox
             QMessageBox.warning(self, "エラー", f"設定画面の起動に失敗しました: {e}")
 
     def run_test_flow(self):
@@ -552,70 +383,7 @@ class Browser(QWidget):
 
     @debug_log
     def update_autologin_msg(self, msg):
-        """
-        待機メッセージを更新（v2.0.2: スタイル動的変更対応）
-        """
         self.display_manager.set_autologin_message(msg)
-        
-        # メッセージ内容に応じてスタイルを変更
-        if hasattr(self, 'autologin_msg_label'):
-            if "✅" in msg or "完了" in msg or "ログイン済み" in msg:
-                # 成功スタイル（緑）
-                self.autologin_msg_label.setStyleSheet('''
-                    QLabel {
-                        background-color: #e8f5e9;
-                        color: #2e7d32;
-                        font-size: 14px;
-                        font-weight: bold;
-                        padding: 12px;
-                        border: 2px solid #4caf50;
-                        border-radius: 6px;
-                        margin: 5px;
-                    }
-                ''')
-            elif "⚠️" in msg or "エラー" in msg or "失敗" in msg:
-                # 警告スタイル（オレンジ/赤）
-                self.autologin_msg_label.setStyleSheet('''
-                    QLabel {
-                        background-color: #fff3e0;
-                        color: #e65100;
-                        font-size: 14px;
-                        font-weight: bold;
-                        padding: 12px;
-                        border: 2px solid #ff9800;
-                        border-radius: 6px;
-                        margin: 5px;
-                    }
-                ''')
-            elif "🔄" in msg or "処理中" in msg or "ログイン中" in msg:
-                # 処理中スタイル（青）
-                self.autologin_msg_label.setStyleSheet('''
-                    QLabel {
-                        background-color: #e3f2fd;
-                        color: #1976d2;
-                        font-size: 14px;
-                        font-weight: bold;
-                        padding: 12px;
-                        border: 2px solid #1976d2;
-                        border-radius: 6px;
-                        margin: 5px;
-                    }
-                ''')
-            else:
-                # デフォルトスタイル（グレー）
-                self.autologin_msg_label.setStyleSheet('''
-                    QLabel {
-                        background-color: #f5f5f5;
-                        color: #616161;
-                        font-size: 14px;
-                        font-weight: bold;
-                        padding: 12px;
-                        border: 2px solid #9e9e9e;
-                        border-radius: 6px;
-                        margin: 5px;
-                    }
-                ''')
-        
         # 点滅中はラベルを必ず表示
         if hasattr(self.display_manager, 'blinking_state') and self.display_manager.blinking_state:
             if self.display_manager.autologin_msg_label:
@@ -820,7 +588,7 @@ def main():
         show_splash_screen()
         app = QApplication(sys.argv)
         browser = Browser(auto_close=args.auto_close, test_mode=args.test)
-        app.exec()
+        app.exec_()
     except Exception as e:
         logger.error(f"メイン関数でエラーが発生しました: {e}")
         raise

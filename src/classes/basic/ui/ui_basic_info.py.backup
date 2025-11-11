@@ -2,8 +2,8 @@
 basic_info関連のUIロジック分離
 """
 import logging
-from qt_compat.core import QTimer, Qt
-from qt_compat.widgets import QProgressDialog, QMessageBox
+from PyQt5.QtCore import QTimer, Qt
+from PyQt5.QtWidgets import QProgressDialog, QMessageBox
 import threading
 from classes.utils.progress_worker import ProgressWorker, SimpleProgressWorker
 
@@ -56,32 +56,9 @@ def show_progress_dialog(parent, title, worker):
     return progress_dialog
 
 def fetch_basic_info(controller):
-    """
-    基本情報取得（全データセット）
-    
-    v2.0.1改善:
-    - トークン検証の追加
-    - エラーメッセージの明確化
-    - 再ログイン促進機能の統合
-    """
     try:
         from ..core.basic_info_logic import fetch_basic_info_logic, show_fetch_confirmation_dialog
-        from core.bearer_token_manager import BearerTokenManager
-        
-        # トークン取得（v2.0.1: BearerTokenManagerを使用）
-        bearer_token = BearerTokenManager.get_token_with_relogin_prompt(controller.parent)
-        
-        # トークンが取得できない場合は処理を中止
-        if not bearer_token:
-            logger.warning("基本情報取得処理: トークンが取得できませんでした")
-            QMessageBox.warning(
-                controller.parent,
-                "認証エラー",
-                "認証トークンが取得できません。\n"
-                "ログインタブでRDEシステムにログインしてから再度実行してください。"
-            )
-            return
-        
+        bearer_token = getattr(controller.parent, 'bearer_token', None)
         webview = getattr(controller.parent, 'webview', controller.parent)
         
         # 確認ダイアログをメインスレッドで表示
@@ -107,40 +84,17 @@ def fetch_basic_info(controller):
         show_progress_dialog(controller.parent, "基本情報取得", worker)
     except ImportError as e:
         logger.error(f"基本情報取得モジュールのインポートエラー: {e}")
-        from qt_compat.widgets import QMessageBox
+        from PyQt5.QtWidgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"基本情報取得機能の初期化に失敗しました: {e}")
     except Exception as e:
         logger.error(f"基本情報取得処理でエラー: {e}")
-        from qt_compat.widgets import QMessageBox
+        from PyQt5.QtWidgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"基本情報取得処理中にエラーが発生しました: {e}")
 
 def fetch_basic_info_self(controller):
-    """
-    基本情報取得（検索条件付き）
-    
-    v2.0.1改善:
-    - トークン検証の追加
-    - エラーメッセージの明確化
-    - 再ログイン促進機能の統合
-    """
     try:
         from ..core.basic_info_logic import fetch_basic_info_logic, show_fetch_confirmation_dialog
-        from core.bearer_token_manager import BearerTokenManager
-        
-        # トークン取得（v2.0.1: BearerTokenManagerを使用）
-        bearer_token = BearerTokenManager.get_token_with_relogin_prompt(controller.parent)
-        
-        # トークンが取得できない場合は処理を中止
-        if not bearer_token:
-            logger.warning("基本情報取得処理（検索）: トークンが取得できませんでした")
-            QMessageBox.warning(
-                controller.parent,
-                "認証エラー",
-                "認証トークンが取得できません。\n"
-                "ログインタブでRDEシステムにログインしてから再度実行してください。"
-            )
-            return
-        
+        bearer_token = getattr(controller.parent, 'bearer_token', None)
         webview = getattr(controller.parent, 'webview', controller.parent)
         searchWords = controller.basic_info_input.text() if hasattr(controller, 'basic_info_input') else None
         
@@ -167,11 +121,11 @@ def fetch_basic_info_self(controller):
         show_progress_dialog(controller.parent, "自分の基本情報取得", worker)
     except ImportError as e:
         logger.error(f"基本情報取得モジュールのインポートエラー: {e}")
-        from qt_compat.widgets import QMessageBox
+        from PyQt5.QtWidgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"基本情報取得機能の初期化に失敗しました: {e}")
     except Exception as e:
         logger.error(f"基本情報取得処理でエラー: {e}")
-        from qt_compat.widgets import QMessageBox
+        from PyQt5.QtWidgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"基本情報取得処理中にエラーが発生しました: {e}")
 
 def summary_basic_info_to_Xlsx(controller):
@@ -195,11 +149,11 @@ def summary_basic_info_to_Xlsx(controller):
         show_progress_dialog(controller.parent, "まとめXLSX作成", worker)
     except ImportError as e:
         logger.error(f"XLSX出力モジュールのインポートエラー: {e}")
-        from qt_compat.widgets import QMessageBox
+        from PyQt5.QtWidgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"XLSX出力機能の初期化に失敗しました: {e}")
     except Exception as e:
         logger.error(f"XLSX出力処理でエラー: {e}")
-        from qt_compat.widgets import QMessageBox
+        from PyQt5.QtWidgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"XLSX出力処理中にエラーが発生しました: {e}")
 
 def apply_basic_info_to_Xlsx(controller):
@@ -223,11 +177,11 @@ def apply_basic_info_to_Xlsx(controller):
         show_progress_dialog(controller.parent, "XLSX反映", worker)
     except ImportError as e:
         logger.error(f"XLSX反映モジュールのインポートエラー: {e}")
-        from qt_compat.widgets import QMessageBox
+        from PyQt5.QtWidgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"XLSX反映機能の初期化に失敗しました: {e}")
     except Exception as e:
         logger.error(f"XLSX反映処理でエラー: {e}")
-        from qt_compat.widgets import QMessageBox
+        from PyQt5.QtWidgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"XLSX反映処理中にエラーが発生しました: {e}")
 
 def fetch_invoice_schema(controller):
@@ -256,7 +210,7 @@ def fetch_sample_info_only(controller):
     サンプル情報のみを強制取得する
     """
     from ..core.basic_info_logic import fetch_sample_info_only as fetch_sample_info_only_logic
-    from qt_compat.widgets import QMessageBox
+    from PyQt5.QtWidgets import QMessageBox
     bearer_token = getattr(controller.parent, 'bearer_token', None)
     
     # 確認ダイアログ
@@ -288,30 +242,10 @@ def fetch_sample_info_only(controller):
 def fetch_common_info_only(controller):
     """
     9種類の共通情報JSONのみを取得する
-    
-    v2.0.1改善:
-    - トークン検証の追加
-    - エラーメッセージの明確化
-    - 再ログイン促進機能の統合
     """
     from ..core.basic_info_logic import fetch_common_info_only_logic
-    from core.bearer_token_manager import BearerTokenManager
-    from qt_compat.widgets import QMessageBox
-    
-    # トークン取得（v2.0.1: BearerTokenManagerを使用）
-    bearer_token = BearerTokenManager.get_token_with_relogin_prompt(controller.parent)
-    
-    # トークンが取得できない場合は処理を中止
-    if not bearer_token:
-        logger.warning("共通情報取得処理: トークンが取得できませんでした")
-        QMessageBox.warning(
-            controller.parent,
-            "認証エラー",
-            "認証トークンが取得できません。\n"
-            "ログインタブでRDEシステムにログインしてから再度実行してください。"
-        )
-        return
-    
+    from PyQt5.QtWidgets import QMessageBox
+    bearer_token = getattr(controller.parent, 'bearer_token', None)
     webview = getattr(controller.parent, 'webview', controller.parent)
     
     # 確認ダイアログ
@@ -367,8 +301,8 @@ def create_json_status_widget(parent=None):
     """
     JSON取得状況を表示するウィジェットを作成
     """
-    from qt_compat.widgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton
-    from qt_compat.core import Qt
+    from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton
+    from PyQt5.QtCore import Qt
     
     class JsonStatusWidget(QWidget):
         def __init__(self, parent=None):
@@ -446,7 +380,7 @@ def execute_individual_stage_ui(controller, stage_name):
     個別段階実行をUIから呼び出す
     """
     from ..core.basic_info_logic import execute_individual_stage, STAGE_FUNCTIONS
-    from qt_compat.widgets import QMessageBox
+    from PyQt5.QtWidgets import QMessageBox
     
     if stage_name not in STAGE_FUNCTIONS:
         QMessageBox.warning(controller.parent, "エラー", f"不正な段階名です: {stage_name}")
@@ -518,9 +452,9 @@ def create_individual_execution_widget(parent=None):
     """
     個別実行用のドロップダウンとボタンを作成
     """
-    from qt_compat.widgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+    from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
                                 QComboBox, QPushButton, QTextEdit)
-    from qt_compat.core import QTimer
+    from PyQt5.QtCore import QTimer
     from ..core.basic_info_logic import STAGE_FUNCTIONS
     
     class IndividualExecutionWidget(QWidget):
@@ -586,7 +520,7 @@ def create_individual_execution_widget(parent=None):
         def execute_stage(self):
             """選択された段階を実行"""
             if not self.controller:
-                from qt_compat.widgets import QMessageBox
+                from PyQt5.QtWidgets import QMessageBox
                 QMessageBox.warning(self, "エラー", "コントローラーが設定されていません")
                 return
                 

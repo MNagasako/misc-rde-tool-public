@@ -3,11 +3,9 @@ UIコントローラー基盤クラス - ARIM RDE Tool v1.13.1
 UIControllerの基本機能・初期化・モード管理を担当
 """
 import logging
-from qt_compat.widgets import QPushButton, QVBoxLayout, QWidget
-from qt_compat.core import QTimer
-from qt_compat.gui import QFontMetrics
-
-logger = logging.getLogger("RDE_WebView")
+from PyQt5.QtWidgets import QPushButton, QVBoxLayout, QWidget
+from PyQt5.QtCore import QTimer
+from PyQt5.QtGui import QFontMetrics
 
 class UIControllerCore:
     """UIコントローラーの基盤機能クラス"""
@@ -219,7 +217,7 @@ class UIControllerCore:
         ウィンドウを画面中央に移動
         """
         try:
-            from qt_compat.widgets import QApplication
+            from PyQt5.QtWidgets import QApplication
             
             screen = QApplication.primaryScreen()
             if screen:
@@ -237,9 +235,9 @@ class UIControllerCore:
         """
         try:
             import os
-            from qt_compat.widgets import QHBoxLayout, QLineEdit, QLabel, QPushButton
-            from qt_compat.core import QUrl
-            from qt_compat.gui import QDesktopServices
+            from PyQt5.QtWidgets import QHBoxLayout, QLineEdit, QLabel, QPushButton
+            from PyQt5.QtCore import QUrl
+            from PyQt5.QtGui import QDesktopServices
             from config.common import DATASETS_DIR, get_dynamic_file_path
             from functions.utils import wait_for_form_and_click_button
             
@@ -310,7 +308,7 @@ class UIControllerCore:
         メインレイアウトの設定
         """
         try:
-            from qt_compat.widgets import QHBoxLayout, QWidget, QVBoxLayout
+            from PyQt5.QtWidgets import QHBoxLayout, QWidget, QVBoxLayout
             
             root_layout = QHBoxLayout()
 
@@ -351,56 +349,19 @@ class UIControllerCore:
             right_main_layout.setSpacing(5)
             right_main_layout.setContentsMargins(5, 5, 5, 5)
             
-            # 上部：WebView + 待機メッセージ専用エリア
+            # 上部：WebView
             webview_widget = QWidget()
             webview_widget.setObjectName('webview_widget')
             # 初期サイズを設定してネガティブサイズエラーを防止
             webview_widget.setMinimumSize(100, 50)
-            
-            # WebViewレイアウト（WebView + ログインコントロール）
             webview_layout = QHBoxLayout()
             webview_layout.addWidget(self.parent.webview)
-            
-            # ログインコントロールウィジェットを追加
-            try:
-                from classes.login.ui.login_control_widget import create_login_control_widget
-                self.parent.login_control_widget = create_login_control_widget(
-                    self.parent, 
-                    self.parent.webview
-                )
-                self.parent.login_control_widget.setMaximumWidth(300)
-                webview_layout.addWidget(self.parent.login_control_widget)
-            except Exception as e:
-                logger.error(f"ログインコントロールウィジェット初期化エラー: {e}")
-                # エラー時はスペーサーで代替
-                webview_layout.addSpacing(20)
-            
-            # v2.0.2: 待機メッセージ専用エリア（WebView直下に配置）
+            webview_layout.addSpacing(20)
             vbox = QVBoxLayout()
             vbox.setSpacing(5)
             vbox.addLayout(webview_layout)
-            
-            # 待機メッセージ用の専用フレーム
-            message_frame = QWidget()
-            message_frame.setStyleSheet('''
-                QWidget {
-                    background-color: #f5f5f5;
-                    border: 1px solid #ddd;
-                    border-radius: 4px;
-                    margin: 5px 0px;
-                }
-            ''')
-            message_layout = QVBoxLayout()
-            message_layout.setContentsMargins(10, 5, 10, 5)
-            message_layout.setSpacing(3)
-            
-            # 待機メッセージラベル（目立つ位置）
-            message_layout.addWidget(self.parent.autologin_msg_label)
-            message_layout.addWidget(self.parent.webview_msg_label)
-            
-            message_frame.setLayout(message_layout)
-            vbox.addWidget(message_frame)
-            
+            vbox.addWidget(self.parent.autologin_msg_label)
+            vbox.addWidget(self.parent.webview_msg_label)
             webview_widget.setLayout(vbox)
             
             # 下部：個別メニュー（切り替え可能エリア）
@@ -480,9 +441,6 @@ class UIControllerCore:
             
             # test_modeでは自動ログイン処理をスキップ
             if not self.parent.test_mode:
-                # v1.20.3: 自動ログイン開始時にマテリアルトークンフラグをリセット
-                logger.info("[LOGIN] 自動ログイン開始 - マテリアルトークンフラグをリセット")
-                self.parent.login_manager.reset_material_token_flag()
                 self.parent.login_manager.poll_dice_btn_status()
             else:
                 self.parent.update_autologin_msg('[TEST] テストモード - 自動ログイン処理をスキップ')

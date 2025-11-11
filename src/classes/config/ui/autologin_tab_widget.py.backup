@@ -17,27 +17,25 @@ from datetime import datetime
 
 try:
     # WebEngine初期化問題の回避
-    from qt_compat import initialize_webengine
-    from qt_compat.core import Qt
+    from PyQt5.QtCore import QCoreApplication, Qt
+    if not QCoreApplication.testAttribute(Qt.AA_ShareOpenGLContexts):
+        QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
     
-    # WebEngine初期化
-    initialize_webengine()
-    
-    from qt_compat.widgets import (
+    from PyQt5.QtWidgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
         QLabel, QPushButton, QLineEdit, QRadioButton, QButtonGroup,
         QCheckBox, QGroupBox, QTextEdit, QMessageBox, QProgressBar,
         QFrame, QSizePolicy, QComboBox
     )
-    from qt_compat.core import QTimer, QThread, Signal
-    from qt_compat.gui import QFont, QPalette
+    from PyQt5.QtCore import Qt, QTimer, QThread, pyqtSignal
+    from PyQt5.QtGui import QFont, QPalette
     PYQT5_AVAILABLE = True
 except ImportError:
     PYQT5_AVAILABLE = False
     # ダミークラス定義
     class QWidget: pass
     class QThread: pass
-    def Signal(*args): pass
+    def pyqtSignal(*args): pass
 
 from classes.core.credential_store import (
     perform_health_check, decide_autologin_source, get_credential_store,
@@ -52,9 +50,7 @@ class AutoLoginTabWidget(QWidget):
     """自動ログインタブウィジェット"""
     
     def __init__(self, parent=None):
-        # PySide6完全対応: QWidget.__init__を明示的に呼び出し
-        QWidget.__init__(self, parent)
-            
+        super().__init__(parent)
         if not PYQT5_AVAILABLE:
             logger.warning("PyQt5が利用できないため、自動ログインタブを初期化できません")
             return
@@ -128,7 +124,6 @@ class AutoLoginTabWidget(QWidget):
         
         # 自動ログイン有効化チェックボックス
         self.autologin_enabled_checkbox = QCheckBox("自動ログインを有効にする")
-        self.autologin_enabled_checkbox.setStyleSheet("font-weight: bold; font-size: 11pt;")
         basic_layout.addWidget(self.autologin_enabled_checkbox)
         
         # 保存先選択
@@ -167,31 +162,6 @@ class AutoLoginTabWidget(QWidget):
         storage_layout.addWidget(self.none_radio, 4, 1)
         
         basic_layout.addWidget(storage_frame)
-        
-        # 設定保存ボタンを追加
-        settings_button_layout = QHBoxLayout()
-        settings_button_layout.addStretch()
-        
-        self.save_settings_button = QPushButton("💾 設定を保存")
-        self.save_settings_button.clicked.connect(self.save_current_settings)
-        self.save_settings_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-weight: bold;
-                padding: 8px 20px;
-                border-radius: 4px;
-                font-size: 11pt;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
-        self.save_settings_button.setToolTip("自動ログイン有効化と保存先設定を保存します")
-        settings_button_layout.addWidget(self.save_settings_button)
-        
-        basic_layout.addLayout(settings_button_layout)
-        
         layout.addWidget(basic_group)
     
     def setup_credentials_section(self, layout):
@@ -448,8 +418,8 @@ class AutoLoginTabWidget(QWidget):
         """現在の設定を保存"""
         try:
             # 自動ログイン有効化
-            autologin_enabled = self.autologin_enabled_checkbox.isChecked()
-            self.config_manager.set("autologin.autologin_enabled", autologin_enabled)
+            self.config_manager.set("autologin.autologin_enabled", 
+                                   self.autologin_enabled_checkbox.isChecked())
             
             # 保存先選択
             storage_map = {
@@ -469,27 +439,6 @@ class AutoLoginTabWidget(QWidget):
             
             # 設定ファイルに保存
             self.config_manager.save_to_file()
-            
-            # 保存成功メッセージ
-            storage_name_map = {
-                "auto": "自動選択",
-                "os_keychain": "OSキーチェーン",
-                "encrypted_file": "暗号化ファイル",
-                "legacy_file": "旧 login.txt",
-                "none": "保存しない"
-            }
-            storage_display = storage_name_map.get(storage_pref, storage_pref)
-            
-            QMessageBox.information(
-                self, 
-                "設定保存完了",
-                f"自動ログイン設定を保存しました。\n\n"
-                f"・自動ログイン: {'有効' if autologin_enabled else '無効'}\n"
-                f"・保存先: {storage_display}\n\n"
-                f"{'次回起動時から自動ログインが有効になります。' if autologin_enabled else '自動ログインは無効です。'}"
-            )
-            
-            logger.info(f"設定保存完了: 自動ログイン={'有効' if autologin_enabled else '無効'}, 保存先={storage_pref}")
             
         except Exception as e:
             logger.error(f"設定保存エラー: {e}")
@@ -663,7 +612,7 @@ class AutoLoginTabWidget(QWidget):
     def open_rde_page(self):
         """メインアプリでRDEページを開く"""
         try:
-            from qt_compat.widgets import QApplication
+            from PyQt5.QtWidgets import QApplication
             app = QApplication.instance()
             
             if not app:
@@ -683,7 +632,7 @@ class AutoLoginTabWidget(QWidget):
             
             # RDEページに移動
             from config.site_rde import URLS
-            from qt_compat.core import QUrl
+            from PyQt5.QtCore import QUrl
             
             rde_url = URLS["web"]["base"]
             main_browser.webview.setUrl(QUrl(rde_url))
