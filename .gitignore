@@ -133,11 +133,11 @@ bearer_token.txt
 .pytest_cache/cleanup/
 
 # テストファイル・デバッグファイル除外
-test_*.py
+#test_*.py
 debug_*.py
 demo_*.py
 temp_*.py
-*_test.py
+#*_test.py
 *_debug.py
 *_temp.py
 
@@ -160,8 +160,8 @@ test_logs/**
 test_logs_full/**
 !test_logs_full/.gitkeep
 
-tests/**
-!tests/.gitkeep
+#tests/**
+#!tests/.gitkeep
 
 ref/**
 !ref/.gitkeep
