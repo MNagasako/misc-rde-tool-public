@@ -28,7 +28,6 @@ arim_rde_tool v1.20.0
 - UI改善（デフォルト選択・フィルタ1行化）
 
 
-arim_rde_tool v1.19.2
 2025-10-31
 
 
@@ -36,6 +35,7 @@ arim_rde_tool v1.19.1
 2025-10-31
 
 
+arim_rde_tool v2.0.5
 arim_rde_tool v1.19.0
 2025-10-31
 
