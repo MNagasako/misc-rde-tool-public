@@ -124,7 +124,7 @@ src/input_/login.txt
 # PyInstaller
 dist/
 build/
-*.spec
+#.spec
 login.txt
 
 bearer_token.txt
