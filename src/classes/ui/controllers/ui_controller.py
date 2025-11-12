@@ -246,9 +246,21 @@ class UIController(UIControllerCore):
         
         Args:
             enabled: Trueで有効化、Falseで無効化
+        
+        Note:
+            DEBUG_SKIP_LOGIN_CHECK環境変数が設定されている場合、
+            無効化リクエストを無視して常に有効化します（デバッグ用）
         """
         import logging
+        import os
         logger = logging.getLogger(__name__)
+        
+        # デバッグモード確認
+        debug_skip = os.environ.get('DEBUG_SKIP_LOGIN_CHECK', '').lower() in ('1', 'true', 'yes')
+        if debug_skip and not enabled:
+            logger.warning("[DEBUG] DEBUG_SKIP_LOGIN_CHECK有効 - ボタン無効化リクエストを無視")
+            enabled = True  # 強制的に有効化
+        
         logger.info(f"[UI] ボタン有効化状態変更: {enabled}")
         
         if not hasattr(self, 'menu_buttons'):

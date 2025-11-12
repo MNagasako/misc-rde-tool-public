@@ -26,29 +26,27 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List
 
 # パス管理システムを使用（CWD非依存）
-from config.common import get_cookie_file_path, OUTPUT_LOG_DIR, BEARER_TOKEN_FILE
+from config.common import get_cookie_file_path, OUTPUT_LOG_DIR
+# v2.0.3: BEARER_TOKEN_FILE削除、load_bearer_tokenを使用
 
 
 class RDERequestAnalyzer:
-    def get_bearer_token_simple(self, response: _requests_types.Response) -> str:
+    def get_bearer_token_simple(self, response: _requests_types.Response) -> Optional[str]:
         """
-        bearer_token.txt からトークンを取得
+        bearer_tokens.json からトークンを取得（v2.0.3: JSON形式のみ）
         """
         try:
-            self.logger.info(f"[DEBUG] get_bearer_token_simple: ファイル読み込み {BEARER_TOKEN_FILE}")
-            if not os.path.exists(BEARER_TOKEN_FILE):
-                self.logger.warning(f"[WARN] BEARER_TOKEN_FILEが存在しません: {BEARER_TOKEN_FILE}")
+            from config.common import load_bearer_token
+            self.logger.info("[DEBUG] get_bearer_token_simple: bearer_tokens.jsonから取得")
+            token = load_bearer_token('rde.nims.go.jp')
+            if token:
+                self.logger.info(f"[SUCCESS] トークン取得成功: {token[:20]}...")
+                return token
+            else:
+                self.logger.warning("[WARN] トークンが見つかりません")
                 return None
-            with open(BEARER_TOKEN_FILE, 'r', encoding='utf-8') as f:
-                token = f.read().strip()
-                if token:
-                    self.logger.info(f"[SUCCESS] bearer_token.txtからトークン取得: {token[:20]}...")
-                    return token
-                else:
-                    self.logger.warning("[WARN] bearer_token.txtが空です")
-                    return None
         except Exception as e:
-            self.logger.error(f"[ERROR] bearer_token.txt読み込み失敗: {e}")
+            self.logger.error(f"[ERROR] トークン読み込み失敗: {e}")
             return None
     
     def __init__(self, log_to_file: bool = True):

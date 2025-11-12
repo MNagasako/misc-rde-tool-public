@@ -22,21 +22,12 @@ class DataRegisterLogic:
         self.logger = logger
     
     def _get_bearer_token(self) -> Optional[str]:
-        """Bearerトークンを取得"""
+        """Bearerトークンを取得（v2.0.3: JSON形式のみ）"""
         try:
-            from config.common import BEARER_TOKEN_FILE
+            from config.common import load_bearer_token
             
-            if not os.path.exists(BEARER_TOKEN_FILE):
-                return None
-                
-            with open(BEARER_TOKEN_FILE, 'r', encoding='utf-8') as f:
-                token = f.read().strip()
-                
-                # "BearerToken=" プレフィックスを除去
-                if token.startswith('BearerToken='):
-                    token = token[len('BearerToken='):]
-                
-                return token if token else None
+            token = load_bearer_token('rde.nims.go.jp')
+            return token if token else None
                 
         except Exception as e:
             self.logger.error(f"Bearerトークン取得エラー: {e}")

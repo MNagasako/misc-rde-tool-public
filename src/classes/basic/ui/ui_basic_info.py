@@ -107,11 +107,9 @@ def fetch_basic_info(controller):
         show_progress_dialog(controller.parent, "基本情報取得", worker)
     except ImportError as e:
         logger.error(f"基本情報取得モジュールのインポートエラー: {e}")
-        from qt_compat.widgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"基本情報取得機能の初期化に失敗しました: {e}")
     except Exception as e:
         logger.error(f"基本情報取得処理でエラー: {e}")
-        from qt_compat.widgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"基本情報取得処理中にエラーが発生しました: {e}")
 
 def fetch_basic_info_self(controller):
@@ -167,17 +165,37 @@ def fetch_basic_info_self(controller):
         show_progress_dialog(controller.parent, "自分の基本情報取得", worker)
     except ImportError as e:
         logger.error(f"基本情報取得モジュールのインポートエラー: {e}")
-        from qt_compat.widgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"基本情報取得機能の初期化に失敗しました: {e}")
     except Exception as e:
         logger.error(f"基本情報取得処理でエラー: {e}")
-        from qt_compat.widgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"基本情報取得処理中にエラーが発生しました: {e}")
 
 def summary_basic_info_to_Xlsx(controller):
+    """
+    基本情報をXLSXにまとめる
+    
+    v2.0.4改善:
+    - BearerTokenManager統一
+    - トークン検証の追加
+    """
     try:
         from ..util.xlsx_exporter import summary_basic_info_to_Xlsx_logic
-        bearer_token = getattr(controller.parent, 'bearer_token', None)
+        from core.bearer_token_manager import BearerTokenManager
+        
+        # トークン取得
+        bearer_token = BearerTokenManager.get_token_with_relogin_prompt(controller.parent)
+        
+        # トークンが取得できない場合は処理を中止
+        if not bearer_token:
+            logger.warning("XLSX出力処理: トークンが取得できませんでした")
+            QMessageBox.warning(
+                controller.parent,
+                "認証エラー",
+                "認証トークンが取得できません。\n"
+                "ログインタブでRDEシステムにログインしてから再度実行してください。"
+            )
+            return
+        
         webview = getattr(controller.parent, 'webview', controller.parent)
         
         # プログレス表示付きワーカーを作成
@@ -195,17 +213,37 @@ def summary_basic_info_to_Xlsx(controller):
         show_progress_dialog(controller.parent, "まとめXLSX作成", worker)
     except ImportError as e:
         logger.error(f"XLSX出力モジュールのインポートエラー: {e}")
-        from qt_compat.widgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"XLSX出力機能の初期化に失敗しました: {e}")
     except Exception as e:
         logger.error(f"XLSX出力処理でエラー: {e}")
-        from qt_compat.widgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"XLSX出力処理中にエラーが発生しました: {e}")
 
 def apply_basic_info_to_Xlsx(controller):
+    """
+    基本情報をXLSXに反映
+    
+    v2.0.4改善:
+    - BearerTokenManager統一
+    - トークン検証の追加
+    """
     try:
         from ..util.xlsx_exporter import apply_basic_info_to_Xlsx_logic
-        bearer_token = getattr(controller.parent, 'bearer_token', None)
+        from core.bearer_token_manager import BearerTokenManager
+        
+        # トークン取得
+        bearer_token = BearerTokenManager.get_token_with_relogin_prompt(controller.parent)
+        
+        # トークンが取得できない場合は処理を中止
+        if not bearer_token:
+            logger.warning("XLSX反映処理: トークンが取得できませんでした")
+            QMessageBox.warning(
+                controller.parent,
+                "認証エラー",
+                "認証トークンが取得できません。\n"
+                "ログインタブでRDEシステムにログインしてから再度実行してください。"
+            )
+            return
+        
         webview = getattr(controller.parent, 'webview', controller.parent)
         
         # プログレス表示付きワーカーを作成
@@ -223,19 +261,36 @@ def apply_basic_info_to_Xlsx(controller):
         show_progress_dialog(controller.parent, "XLSX反映", worker)
     except ImportError as e:
         logger.error(f"XLSX反映モジュールのインポートエラー: {e}")
-        from qt_compat.widgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"XLSX反映機能の初期化に失敗しました: {e}")
     except Exception as e:
         logger.error(f"XLSX反映処理でエラー: {e}")
-        from qt_compat.widgets import QMessageBox
         QMessageBox.critical(controller.parent, "エラー", f"XLSX反映処理中にエラーが発生しました: {e}")
 
 def fetch_invoice_schema(controller):
     """
     invoiceSchemasを取得する
+    
+    v2.0.4改善:
+    - BearerTokenManager統一
+    - トークン検証の追加
     """
     from ..core.basic_info_logic import fetch_invoice_schemas
-    bearer_token = getattr(controller.parent, 'bearer_token', None)
+    from core.bearer_token_manager import BearerTokenManager
+    
+    # トークン取得
+    bearer_token = BearerTokenManager.get_token_with_relogin_prompt(controller.parent)
+    
+    # トークンが取得できない場合は処理を中止
+    if not bearer_token:
+        logger.warning("invoiceSchemas取得処理: トークンが取得できませんでした")
+        QMessageBox.warning(
+            controller.parent,
+            "認証エラー",
+            "認証トークンが取得できません。\n"
+            "ログインタブでRDEシステムにログインしてから再度実行してください。"
+        )
+        return
+    
     output_dir = "output/rde/data"  # 必要に応じて動的に
 
     # プログレス表示付きワーカーを作成
@@ -254,10 +309,27 @@ def fetch_invoice_schema(controller):
 def fetch_sample_info_only(controller):
     """
     サンプル情報のみを強制取得する
+    
+    v2.0.4改善:
+    - BearerTokenManager統一
+    - トークン検証の追加
     """
     from ..core.basic_info_logic import fetch_sample_info_only as fetch_sample_info_only_logic
-    from qt_compat.widgets import QMessageBox
-    bearer_token = getattr(controller.parent, 'bearer_token', None)
+    from core.bearer_token_manager import BearerTokenManager
+    
+    # トークン取得
+    bearer_token = BearerTokenManager.get_token_with_relogin_prompt(controller.parent)
+    
+    # トークンが取得できない場合は処理を中止
+    if not bearer_token:
+        logger.warning("サンプル情報取得処理: トークンが取得できませんでした")
+        QMessageBox.warning(
+            controller.parent,
+            "認証エラー",
+            "認証トークンが取得できません。\n"
+            "ログインタブでRDEシステムにログインしてから再度実行してください。"
+        )
+        return
     
     # 確認ダイアログ
     reply = QMessageBox.question(
@@ -296,7 +368,6 @@ def fetch_common_info_only(controller):
     """
     from ..core.basic_info_logic import fetch_common_info_only_logic
     from core.bearer_token_manager import BearerTokenManager
-    from qt_compat.widgets import QMessageBox
     
     # トークン取得（v2.0.1: BearerTokenManagerを使用）
     bearer_token = BearerTokenManager.get_token_with_relogin_prompt(controller.parent)
@@ -446,7 +517,6 @@ def execute_individual_stage_ui(controller, stage_name):
     個別段階実行をUIから呼び出す
     """
     from ..core.basic_info_logic import execute_individual_stage, STAGE_FUNCTIONS
-    from qt_compat.widgets import QMessageBox
     
     if stage_name not in STAGE_FUNCTIONS:
         QMessageBox.warning(controller.parent, "エラー", f"不正な段階名です: {stage_name}")
@@ -457,7 +527,21 @@ def execute_individual_stage_ui(controller, stage_name):
         QMessageBox.information(controller.parent, "情報", f"「{stage_name}」はセパレータです。実行できません。")
         return
     
-    bearer_token = getattr(controller.parent, 'bearer_token', None)
+    # トークン取得（v2.0.4）
+    from core.bearer_token_manager import BearerTokenManager
+    bearer_token = BearerTokenManager.get_token_with_relogin_prompt(controller.parent)
+    
+    # トークンが取得できない場合は処理を中止
+    if not bearer_token:
+        logger.warning(f"個別段階実行（{stage_name}）: トークンが取得できませんでした")
+        QMessageBox.warning(
+            controller.parent,
+            "認証エラー",
+            "認証トークンが取得できません。\n"
+            "ログインタブでRDEシステムにログインしてから再度実行してください。"
+        )
+        return
+    
     webview = getattr(controller.parent, 'webview', controller.parent)
     
     # 確認ダイアログ
@@ -586,7 +670,6 @@ def create_individual_execution_widget(parent=None):
         def execute_stage(self):
             """選択された段階を実行"""
             if not self.controller:
-                from qt_compat.widgets import QMessageBox
                 QMessageBox.warning(self, "エラー", "コントローラーが設定されていません")
                 return
                 

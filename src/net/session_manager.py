@@ -115,20 +115,90 @@ class ProxySessionManager:
         self._configured = False
         self.configure(proxy_config)
     
+    def get_proxy_config(self) -> Dict[str, Any]:
+        """
+        現在のプロキシ設定を取得
+        
+        Returns:
+            Dict[str, Any]: 現在のプロキシ設定
+        """
+        if not self._configured:
+            self.configure()
+        return self._proxy_config.copy()
+    
+    def get_active_proxy_status(self) -> Dict[str, Any]:
+        """
+        現在アクティブなプロキシ設定の状態を取得
+        
+        Returns:
+            Dict[str, Any]: プロキシ状態情報
+                - mode: プロキシモード
+                - proxies: 実際に使用されているプロキシ辞書
+                - verify: SSL検証設定
+                - ca_bundle: CAバンドルパス
+                - trust_env: 環境変数信頼設定
+        """
+        if not self._configured:
+            self.configure()
+        
+        status = {
+            'mode': self._proxy_config.get('mode', 'UNKNOWN'),
+            'proxies': self._session.proxies.copy() if self._session else {},
+            'verify': getattr(self._session, 'verify', True) if self._session else True,
+            'trust_env': getattr(self._session, 'trust_env', False) if self._session else False,
+        }
+        
+        # CAバンドル情報を取得
+        if self._session:
+            verify_value = self._session.verify
+            if isinstance(verify_value, str):
+                status['ca_bundle'] = verify_value
+            elif verify_value is True:
+                # デフォルトのcertifiバンドルを使用
+                try:
+                    import certifi
+                    status['ca_bundle'] = certifi.where()
+                except ImportError:
+                    status['ca_bundle'] = 'system-default'
+            else:
+                status['ca_bundle'] = 'disabled'
+        else:
+            status['ca_bundle'] = 'not-configured'
+        
+        return status
+    
     def _load_proxy_config(self) -> Dict[str, Any]:
-        """設定ファイルからプロキシ設定を読み込み"""
+        """設定ファイルからプロキシ設定を読み込み（YAML優先、次にJSON）"""
         try:
-            if not YAML_AVAILABLE:
-                logger.warning("YAML未対応、デフォルト設定使用")
-                return {"mode": "DIRECT"}
-
-            # 絶対パスで設定ファイルを取得
             from config.common import get_dynamic_file_path
-            config_path = get_dynamic_file_path(self._config_file_path)
             
+            # 絶対パスで設定ファイルを取得
+            # 1. YAML を優先的に試行
+            if YAML_AVAILABLE:
+                config_path = get_dynamic_file_path("config/network.yaml")
+                if os.path.exists(config_path):
+                    with open(config_path, 'r', encoding='utf-8') as f:
+                        config_data = yaml.safe_load(f) or {}
+                        
+                        # networkセクションから設定を取得、なければトップレベルから
+                        proxy_config = config_data.get('network', {})
+                        
+                        # トップレベルのmode設定も確認
+                        if 'mode' in config_data:
+                            proxy_config['mode'] = config_data['mode']
+                        
+                        # modeが設定されていない場合はDIRECTをデフォルトに
+                        if 'mode' not in proxy_config:
+                            proxy_config['mode'] = 'DIRECT'
+                        
+                        logger.info(f"設定ファイル読み込み(YAML): {proxy_config}")
+                        return proxy_config
+            
+            # 2. JSON を試行
+            config_path = get_dynamic_file_path("config/network.json")
             if os.path.exists(config_path):
                 with open(config_path, 'r', encoding='utf-8') as f:
-                    config_data = yaml.safe_load(f) or {}
+                    config_data = json.load(f)
                     
                     # networkセクションから設定を取得、なければトップレベルから
                     proxy_config = config_data.get('network', {})
@@ -141,11 +211,11 @@ class ProxySessionManager:
                     if 'mode' not in proxy_config:
                         proxy_config['mode'] = 'DIRECT'
                     
-                    logger.info(f"設定ファイル読み込み: {proxy_config}")
+                    logger.info(f"設定ファイル読み込み(JSON): {proxy_config}")
                     return proxy_config
-            else:
-                logger.info(f"設定ファイル未発見({config_path})、DIRECT モード使用")
-                return {"mode": "DIRECT"}
+            
+            logger.info("設定ファイル未発見、DIRECT モード使用")
+            return {"mode": "DIRECT"}
                 
         except Exception as e:
             logger.warning(f"設定ファイル読み込み失敗: {e}")
@@ -163,7 +233,8 @@ class ProxySessionManager:
         if mode == 'DIRECT':
             # 直接接続（プロキシなし）
             self._session.proxies = {}
-            logger.info("プロキシモード: DIRECT")
+            self._session.trust_env = False  # システム/環境変数プロキシを無視
+            logger.info("プロキシモード: DIRECT - プロキシなし")
             
         elif mode == 'HTTP':
             # HTTPプロキシ
@@ -384,13 +455,7 @@ class ProxySessionManager:
         elif strategy == 'use_proxy_ca':
             # プロキシ証明書を使用（企業CA対応）
             if self._try_proxy_certificate_config(verify, ca_bundle, fallback_to_no_verify, log_ssl_errors, enterprise_ca_config):
-                logger.info("プロキシ証明書設定成功")
-                
-                # 接続テストを実行してフォールバック判定
-                if self._test_ssl_connection_with_fallback(fallback_to_no_verify, log_ssl_errors):
-                    logger.info("SSL接続テスト成功")
-                else:
-                    logger.warning("SSL接続テスト失敗、フォールバック適用済み")
+                logger.info("プロキシ証明書設定成功 - SSL検証有効")
             else:
                 logger.warning("プロキシ証明書設定失敗、フォールバック処理実行")
                 
@@ -406,7 +471,7 @@ class ProxySessionManager:
     def _try_proxy_certificate_config(self, verify: bool, ca_bundle: str, 
                                       fallback_to_no_verify: bool, log_ssl_errors: bool, enterprise_ca_config: Dict[str, Any] = None) -> bool:
         """
-        プロキシ証明書設定を試行（企業CA対応）
+        プロキシ証明書設定を試行（truststore優先、企業CA対応）
         
         Returns:
             bool: 設定成功可否
@@ -416,45 +481,39 @@ class ProxySessionManager:
             
         try:
             if verify:
-                # 1. 企業CA設定を優先的に試行
-                if self._try_enterprise_ca_config(enterprise_ca_config, log_ssl_errors):
-                    return True
+                # 1. truststore優先（Windowsシステム証明書ストア使用）
+                if enterprise_ca_config.get('enable_truststore', False) and TRUSTSTORE_AVAILABLE:
+                    try:
+                        import truststore
+                        import ssl
+                        
+                        # truststoreをデフォルトSSLコンテキストに注入
+                        truststore.inject_into_ssl()
+                        
+                        # カスタムSSLコンテキストを作成（Windowsシステム証明書ストア使用）
+                        ssl_context = ssl.create_default_context()
+                        ssl_context.load_default_certs()  # Windowsシステム証明書ストアを読み込む
+                        
+                        # HTTPAdapterにSSLコンテキストを渡す（後で_configure_session_adapters()でマウント）
+                        self._truststore_ssl_context = ssl_context
+                        self._session.verify = True
+                        logger.info("✅ truststore有効化（プロキシ環境）: Windowsシステム証明書ストア使用")
+                        return True
+                        
+                    except Exception as e:
+                        logger.warning(f"truststore初期化失敗（プロキシ環境）、次の方法を試行: {e}")
                 
                 # 2. カスタムCAバンドルを試行
                 if ca_bundle and os.path.exists(ca_bundle):
+                    self._truststore_ssl_context = None
                     self._session.verify = ca_bundle
                     logger.info(f"カスタムCA Bundle を使用: {ca_bundle}")
                     return True
                 
-                # 3. truststoreを優先的に試行（システム証明書ストア）
-                if TRUSTSTORE_AVAILABLE:
-                    try:
-                        import truststore
-                        from requests.adapters import HTTPAdapter
-                        
-                        class TruststoreProxyAdapter(HTTPAdapter):
-                            def init_poolmanager(self, *args, **kwargs):
-                                try:
-                                    ctx = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-                                    kwargs['ssl_context'] = ctx
-                                    logger.info("✅ truststore: プロキシ環境でシステム証明書使用")
-                                except Exception:
-                                    # プロキシ環境でのtruststore使用は慎重にフォールバック
-                                    kwargs.pop('ssl_context', None)
-                                return super().init_poolmanager(*args, **kwargs)
-                        
-                        self._session.mount('https://', TruststoreProxyAdapter())
-                        self._session.verify = True
-                        logger.info("🔐 truststore: プロキシ環境証明書設定完了")
-                        return True
-                        
-                    except Exception as e:
-                        if log_ssl_errors:
-                            logger.warning(f"truststore設定失敗: {e}")
-                
-                # 4. certifiバンドルを試行（フォールバック）
+                # 3. certifiバンドルを試行
                 try:
                     import certifi
+                    self._truststore_ssl_context = None
                     self._session.verify = certifi.where()
                     logger.info("⚠️ certifiフォールバック: 標準証明書バンドル使用")
                     return True
@@ -462,9 +521,10 @@ class ProxySessionManager:
                     if log_ssl_errors:
                         logger.warning("certifi利用不可")
                 
-                # 5. フォールバック処理
+                # 4. フォールバック処理
                 if fallback_to_no_verify:
                     logger.warning("すべてのSSL設定が失敗、検証を無効化します")
+                    self._truststore_ssl_context = None
                     self._session.verify = False
                     self._suppress_ssl_warnings()
                     return True
@@ -472,6 +532,7 @@ class ProxySessionManager:
                     return False
             else:
                 # verify=False の場合
+                self._truststore_ssl_context = None
                 self._session.verify = False
                 self._suppress_ssl_warnings()
                 return True
@@ -501,60 +562,15 @@ class ProxySessionManager:
             return False
             
         try:
-            # 企業CA証明書バンドルを生成
+            # 企業CA証明書バンドルを生成（certifi + python-certifi-win32）
             ca_bundle_path = self._create_enterprise_ca_bundle(enterprise_ca_config, log_ssl_errors)
             
             if ca_bundle_path and os.path.exists(ca_bundle_path):
-                # truststoreが利用可能な場合、優先的にtruststoreのSSLコンテキストを適用
-                if TRUSTSTORE_AVAILABLE:
-                    try:
-                        import truststore
-                        from requests.adapters import HTTPAdapter
-                        
-                        class TruststoreHTTPSAdapter(HTTPAdapter):
-                            def __init__(self, ca_bundle_path=None, *args, **kwargs):
-                                self.ca_bundle_path = ca_bundle_path
-                                super().__init__(*args, **kwargs)
-                                
-                            def init_poolmanager(self, *args, **kwargs):
-                                try:
-                                    # truststoreのSSLコンテキストを作成
-                                    ctx = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-                                    
-                                    # カスタム証明書バンドルも併用
-                                    if self.ca_bundle_path:
-                                        ctx.load_verify_locations(cafile=self.ca_bundle_path)
-                                    
-                                    kwargs['ssl_context'] = ctx
-                                    if log_ssl_errors:
-                                        logger.info("🔐 truststore優先: システム証明書 + カスタムバンドル")
-                                        
-                                except Exception as e:
-                                    # truststoreが失敗した場合、カスタムバンドルのみ使用
-                                    if self.ca_bundle_path:
-                                        kwargs.pop('ssl_context', None)  # デフォルトに戻す
-                                        if log_ssl_errors:
-                                            logger.warning(f"truststoreフォールバック: カスタムバンドルのみ使用 - {e}")
-                                    
-                                return super().init_poolmanager(*args, **kwargs)
-                        
-                        # truststoreベースのHTTPSアダプターを設定
-                        self._session.mount('https://', TruststoreHTTPSAdapter(ca_bundle_path))
-                        self._session.verify = ca_bundle_path  # フォールバック用
-                        
-                        if log_ssl_errors:
-                            logger.info("✅ truststore優先 SSL設定完了")
-                            
-                    except Exception as e:
-                        # truststoreが完全に失敗した場合、従来のcertifi方式にフォールバック
-                        self._session.verify = ca_bundle_path
-                        if log_ssl_errors:
-                            logger.warning(f"⚠️ truststore失敗、certifiフォールバック: {e}")
-                else:
-                    # truststoreが利用できない場合、従来の方式
-                    self._session.verify = ca_bundle_path
-                    if log_ssl_errors:
-                        logger.info("⚠️ truststore利用不可、certifi使用")
+                # カスタムバンドルを使用（certifi + Windowsシステム証明書）
+                self._session.verify = ca_bundle_path
+                
+                if log_ssl_errors:
+                    logger.info("✅ SSL設定完了: certifi + Windowsシステム証明書統合")
                 
                 logger.info(f"🔐 企業CA Bundle 適用完了: {ca_bundle_path}")
                 return True
@@ -570,7 +586,7 @@ class ProxySessionManager:
     
     def _create_enterprise_ca_bundle(self, enterprise_ca_config: Dict[str, Any], log_ssl_errors: bool) -> Optional[str]:
         """
-        企業CA証明書バンドルを生成（truststoreを優先、certifiフォールバック）
+        企業CA証明書バンドルを生成（python-certifi-win32優先、certifiフォールバック）
         
         Args:
             enterprise_ca_config: 企業CA設定
@@ -591,49 +607,23 @@ class ProxySessionManager:
             with tempfile.NamedTemporaryFile(mode='w', suffix='.pem', delete=False, encoding='utf-8') as bundle_file:
                 bundle_path = bundle_file.name
                 cert_count = 0
-                truststore_used = False
                 
-                # 1. truststoreを優先的に使用（利用可能な場合）
-                if TRUSTSTORE_AVAILABLE:
-                    try:
-                        import truststore
-                        import ssl
-                        
-                        # truststoreのSSLコンテキストから証明書情報を取得しようと試みる
-                        ctx = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-                        
-                        # truststoreが有効であることを確認
-                        # 実際の証明書データは直接取得できないため、
-                        # truststoreの存在確認と準備のみ行う
-                        truststore_used = True
-                        cert_count += 1  # truststoreの使用をカウント
-                        
-                        if log_ssl_errors:
-                            logger.info("✅ truststore: 優先利用 - システム証明書ストア統合")
-                            
-                    except Exception as e:
-                        if log_ssl_errors:
-                            logger.warning(f"truststore利用失敗、certifiにフォールバック: {e}")
-                        truststore_used = False
+                # 1. 標準certifiを使用（安定動作優先）
+                try:
+                    import certifi
+                    with open(certifi.where(), 'r', encoding='utf-8') as certifi_file:
+                        certifi_content = certifi_file.read()
+                        bundle_file.write(certifi_content)
+                        cert_count += 1
+                    
+                    if log_ssl_errors:
+                        logger.info(f"✅ certifi: 標準証明書バンドル使用")
+                    
+                except Exception as e:
+                    if log_ssl_errors:
+                        logger.warning(f"certifi証明書追加失敗: {e}")
                 
-                # 2. truststoreが使用できない場合、またはフォールバックとしてcertifiを使用
-                if not truststore_used or 'certifi' in ca_sources:
-                    try:
-                        import certifi
-                        with open(certifi.where(), 'r', encoding='utf-8') as certifi_file:
-                            certifi_content = certifi_file.read()
-                            bundle_file.write(certifi_content)
-                            cert_count += 1
-                            
-                        status = "フォールバック" if truststore_used else "単独利用"
-                        if log_ssl_errors:
-                            logger.info(f"{'⚠️' if truststore_used else '✅'} certifi: {status} - 標準証明書バンドル")
-                            
-                    except Exception as e:
-                        if log_ssl_errors:
-                            logger.warning(f"certifi証明書追加失敗: {e}")
-                
-                # 3. システム証明書ストア（OS固有）から追加証明書を取得
+                # 2. システム証明書ストア（OS固有）から追加証明書を取得
                 if 'system_ca' in ca_sources:
                     try:
                         system_certs = self._get_system_certificates()
@@ -647,7 +637,7 @@ class ProxySessionManager:
                         if log_ssl_errors:
                             logger.warning(f"システム証明書ストア取得失敗: {e}")
                 
-                # 4. カスタム証明書ファイルを追加
+                # 3. カスタム証明書ファイルを追加
                 if custom_ca_bundle and os.path.exists(custom_ca_bundle):
                     try:
                         with open(custom_ca_bundle, 'r', encoding='utf-8') as custom_file:
@@ -661,9 +651,8 @@ class ProxySessionManager:
                             logger.warning(f"カスタム証明書追加失敗: {e}")
                 
                 if cert_count > 0:
-                    priority_info = "truststore優先" if truststore_used else "certifiフォールバック"
                     if log_ssl_errors:
-                        logger.info(f"🔐 企業CA Bundle生成完了: {priority_info} ({cert_count}ソース)")
+                        logger.info(f"🔐 企業CA Bundle生成完了 ({cert_count}ソース)")
                     return bundle_path
                 else:
                     if log_ssl_errors:
@@ -798,22 +787,6 @@ class ProxySessionManager:
             
         return certificates
     
-    def _test_truststore_compatibility(self) -> bool:
-        """
-        truststore の互換性をテスト
-        
-        Returns:
-            bool: 互換性があるかどうか
-        """
-        try:
-            # 単純なテストでtruststore の動作を確認
-            import ssl
-            context = ssl.create_default_context()
-            # 基本的な設定が可能かテスト
-            return True
-        except Exception:
-            return False
-    
     def _is_proxy_active(self) -> bool:
         """プロキシが有効かどうかを判定"""
         try:
@@ -870,7 +843,7 @@ class ProxySessionManager:
     
     def _apply_standard_ssl_config(self, verify: bool, ca_bundle: str, cert_config: Dict[str, Any]):
         """
-        標準SSL設定を適用（truststoreを優先、certifiフォールバック）
+        標準SSL設定を適用（truststoreでWindowsシステム証明書ストア使用）
         
         Args:
             verify: SSL検証設定
@@ -883,76 +856,41 @@ class ProxySessionManager:
             self._suppress_ssl_warnings()
             return
         
-        truststore_success = False
-        
-        # 1. truststoreを優先的に使用
-        use_os_store = cert_config.get('use_os_store', True)
-        if use_os_store and TRUSTSTORE_AVAILABLE:
+        # truststoreが利用可能な場合はWindowsシステム証明書ストアを使用
+        if TRUSTSTORE_AVAILABLE:
             try:
                 import truststore
-                from requests.adapters import HTTPAdapter
+                import ssl
                 
-                class TruststoreStandardAdapter(HTTPAdapter):
-                    def __init__(self, ca_bundle_fallback=None, *args, **kwargs):
-                        self.ca_bundle_fallback = ca_bundle_fallback
-                        super().__init__(*args, **kwargs)
-                        
-                    def init_poolmanager(self, *args, **kwargs):
-                        try:
-                            # truststoreのSSLコンテキストを作成
-                            ctx = truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-                            
-                            # カスタムCAバンドルがある場合は併用
-                            if self.ca_bundle_fallback and os.path.exists(self.ca_bundle_fallback):
-                                ctx.load_verify_locations(cafile=self.ca_bundle_fallback)
-                                
-                            kwargs['ssl_context'] = ctx
-                            logger.info("✅ truststore優先: システム証明書ストア + カスタムCA")
-                            
-                        except Exception as e:
-                            # フォールバック: カスタムCAバンドルまたはcertifi
-                            kwargs.pop('ssl_context', None)
-                            logger.warning(f"truststoreフォールバック開始: {e}")
-                            
-                        return super().init_poolmanager(*args, **kwargs)
+                # truststoreをデフォルトSSLコンテキストに注入
+                truststore.inject_into_ssl()
                 
-                # HTTPSアダプターを設定
-                adapter = TruststoreStandardAdapter(ca_bundle_fallback=ca_bundle)
-                self._session.mount('https://', adapter)
+                # カスタムSSLコンテキストを作成（Windowsシステム証明書ストア使用）
+                ssl_context = ssl.create_default_context()
+                ssl_context.load_default_certs()  # Windowsシステム証明書ストアを読み込む
                 
-                # フォールバック用のverify設定
-                if ca_bundle and os.path.exists(ca_bundle):
-                    self._session.verify = ca_bundle
-                    logger.info(f"フォールバック用CA Bundle準備: {ca_bundle}")
-                else:
-                    try:
-                        import certifi
-                        self._session.verify = certifi.where()
-                        logger.info("フォールバック用certifi準備")
-                    except ImportError:
-                        self._session.verify = True
-                        logger.warning("フォールバック用デフォルト証明書準備")
-                
-                truststore_success = True
-                logger.info("🔐 truststore優先SSL設定完了")
+                # HTTPAdapterにSSLコンテキストを渡す（後で_configure_adapters()でマウント）
+                self._truststore_ssl_context = ssl_context
+                self._session.verify = True
+                logger.info("✅ truststore有効化: Windowsシステム証明書ストア使用")
+                return
                 
             except Exception as e:
-                logger.warning(f"truststore設定失敗、certifiフォールバック: {e}")
-                truststore_success = False
+                logger.warning(f"truststore初期化失敗、certifiにフォールバック: {e}")
         
-        # 2. truststoreが使用できない場合、または無効化されている場合
-        if not truststore_success:
-            if ca_bundle and os.path.exists(ca_bundle):
-                self._session.verify = ca_bundle
-                logger.info(f"⚠️ certifiフォールバック: カスタムCA使用 - {ca_bundle}")
-            else:
-                try:
-                    import certifi
-                    self._session.verify = certifi.where()
-                    logger.info("⚠️ certifiフォールバック: 標準証明書バンドル使用")
-                except ImportError:
-                    self._session.verify = True
-                    logger.warning("⚠️ certifi利用不可、システムデフォルト使用")
+        # truststoreが使えない場合、certifiまたはカスタムバンドルを使用
+        self._truststore_ssl_context = None  # truststoreを使わない
+        if ca_bundle and os.path.exists(ca_bundle):
+            self._session.verify = ca_bundle
+            logger.info(f"✅ カスタムCA Bundle使用: {ca_bundle}")
+        else:
+            try:
+                import certifi
+                self._session.verify = certifi.where()
+                logger.info(f"✅ certifi標準バンドル使用: {certifi.where()}")
+            except ImportError:
+                self._session.verify = True
+                logger.warning("⚠️ certifi利用不可、システムデフォルト使用")
     
     def _suppress_ssl_warnings(self):
         """SSL警告を抑制"""
@@ -973,11 +911,34 @@ class ProxySessionManager:
         )
         
         # HTTPアダプター設定
-        adapter = HTTPAdapter(
-            max_retries=retry_strategy,
-            pool_connections=10,
-            pool_maxsize=20
-        )
+        if hasattr(self, '_truststore_ssl_context') and self._truststore_ssl_context:
+            # truststoreを使用する場合、カスタムSSLコンテキストを持つHTTPAdapterを作成
+            from urllib3.util.ssl_ import create_urllib3_context
+            
+            adapter = HTTPAdapter(
+                max_retries=retry_strategy,
+                pool_connections=10,
+                pool_maxsize=20
+            )
+            
+            # urllib3のHTTPSConnectionPoolにSSLコンテキストを渡すため、
+            # アダプターのinit_poolmanager()をオーバーライド
+            original_init_poolmanager = adapter.init_poolmanager
+            
+            def init_poolmanager_with_truststore(*args, **kwargs):
+                kwargs['ssl_context'] = self._truststore_ssl_context
+                return original_init_poolmanager(*args, **kwargs)
+            
+            adapter.init_poolmanager = init_poolmanager_with_truststore
+            
+            logger.info("✅ truststore用HTTPAdapter設定完了")
+        else:
+            # 通常のHTTPAdapter
+            adapter = HTTPAdapter(
+                max_retries=retry_strategy,
+                pool_connections=10,
+                pool_maxsize=20
+            )
         
         self._session.mount("http://", adapter)
         self._session.mount("https://", adapter)
@@ -1128,3 +1089,17 @@ def reconfigure_proxy_session(config: Dict[str, Any]):
 def get_current_proxy_config() -> Dict[str, Any]:
     """現在のプロキシ設定を取得"""
     return _session_manager.get_proxy_config()
+
+def get_active_proxy_status() -> Dict[str, Any]:
+    """
+    現在アクティブなプロキシ設定の状態を取得
+    
+    Returns:
+        Dict[str, Any]: プロキシ状態情報
+            - mode: プロキシモード
+            - proxies: 実際に使用されているプロキシ辞書
+            - verify: SSL検証設定
+            - ca_bundle: CAバンドルパス
+            - trust_env: 環境変数信頼設定
+    """
+    return _session_manager.get_active_proxy_status()

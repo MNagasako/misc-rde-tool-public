@@ -9,9 +9,17 @@ import requests as _original_requests  # 元のrequestsライブラリを別名�
 import logging
 import os
 import json
+import time
 from typing import Dict, Optional, Any, Union
 from urllib3.util.retry import Retry
 from requests.adapters import HTTPAdapter
+
+# APIログ機能
+try:
+    from . import api_logger
+    API_LOGGER_AVAILABLE = True
+except ImportError:
+    API_LOGGER_AVAILABLE = False
 
 # YAML サポートの確認
 try:
@@ -230,46 +238,143 @@ def get_config() -> Dict[str, Any]:
 # ===== requests互換API =====
 # 既存コードから透過的に使用できるようにrequests.getなどと同じインターフェースを提供
 
+def _log_and_execute_request(method: str, url: str, session: _original_requests.Session, **kwargs) -> _original_requests.Response:
+    """
+    APIリクエストをログ記録して実行
+    
+    Args:
+        method: HTTPメソッド
+        url: リクエストURL
+        session: Requestsセッション
+        **kwargs: requests.request()のパラメータ
+        
+    Returns:
+        requests.Response: レスポンスオブジェクト
+    """
+    if not API_LOGGER_AVAILABLE:
+        # ログ機能が無効な場合は直接実行
+        return session.request(method, url, **kwargs)
+    
+    # リクエスト情報をログ記録
+    proxies = session.proxies or {}
+    verify = session.verify
+    truststore_enabled = TRUSTSTORE_AVAILABLE
+    
+    api_logger.log_request(
+        method=method.upper(),
+        url=url,
+        proxies=proxies,
+        verify=verify,
+        ssl_context_used=truststore_enabled,
+        truststore_enabled=truststore_enabled
+    )
+    
+    # リクエスト実行（時間計測）
+    start_time = time.time()
+    success = False
+    error_msg = None
+    response = None
+    
+    try:
+        response = session.request(method, url, **kwargs)
+        success = True
+        
+        # レスポンスログ記録
+        elapsed_ms = (time.time() - start_time) * 1000
+        api_logger.log_response(
+            method=method.upper(),
+            url=url,
+            status_code=response.status_code,
+            elapsed_ms=elapsed_ms,
+            success=True
+        )
+        
+        return response
+        
+    except _original_requests.exceptions.SSLError as e:
+        elapsed_ms = (time.time() - start_time) * 1000
+        error_msg = f"SSL Error: {str(e)[:100]}"
+        api_logger.log_response(
+            method=method.upper(),
+            url=url,
+            status_code=0,
+            elapsed_ms=elapsed_ms,
+            success=False,
+            error=error_msg
+        )
+        api_logger.log_ssl_verification_failure(url, str(e)[:200])
+        raise
+        
+    except _original_requests.exceptions.ProxyError as e:
+        elapsed_ms = (time.time() - start_time) * 1000
+        error_msg = f"Proxy Error: {str(e)[:100]}"
+        api_logger.log_response(
+            method=method.upper(),
+            url=url,
+            status_code=0,
+            elapsed_ms=elapsed_ms,
+            success=False,
+            error=error_msg
+        )
+        proxy_url = proxies.get('https') or proxies.get('http')
+        if proxy_url:
+            api_logger.log_proxy_connection(proxy_url, False)
+        raise
+        
+    except Exception as e:
+        elapsed_ms = (time.time() - start_time) * 1000
+        error_msg = f"{type(e).__name__}: {str(e)[:100]}"
+        api_logger.log_response(
+            method=method.upper(),
+            url=url,
+            status_code=0,
+            elapsed_ms=elapsed_ms,
+            success=False,
+            error=error_msg
+        )
+        raise
+
+
 def get(url: str, **kwargs) -> _original_requests.Response:
     """requests.get互換のGETリクエスト"""
     session = get_session()
-    return session.get(url, **kwargs)
+    return _log_and_execute_request('GET', url, session, **kwargs)
 
 
 def post(url: str, **kwargs) -> _original_requests.Response:
     """requests.post互換のPOSTリクエスト"""
     session = get_session()
-    return session.post(url, **kwargs)
+    return _log_and_execute_request('POST', url, session, **kwargs)
 
 
 def put(url: str, **kwargs) -> _original_requests.Response:
     """requests.put互換のPUTリクエスト"""
     session = get_session()
-    return session.put(url, **kwargs)
+    return _log_and_execute_request('PUT', url, session, **kwargs)
 
 
 def patch(url: str, **kwargs) -> _original_requests.Response:
     """requests.patch互換のPATCHリクエスト"""
     session = get_session()
-    return session.patch(url, **kwargs)
+    return _log_and_execute_request('PATCH', url, session, **kwargs)
 
 
 def delete(url: str, **kwargs) -> _original_requests.Response:
     """requests.delete互換のDELETEリクエスト"""
     session = get_session()
-    return session.delete(url, **kwargs)
+    return _log_and_execute_request('DELETE', url, session, **kwargs)
 
 
 def head(url: str, **kwargs) -> _original_requests.Response:
     """requests.head互換のHEADリクエスト"""
     session = get_session()
-    return session.head(url, **kwargs)
+    return _log_and_execute_request('HEAD', url, session, **kwargs)
 
 
 def request(method: str, url: str, **kwargs) -> _original_requests.Response:
     """requests.request互換の汎用リクエスト"""
     session = get_session()
-    return session.request(method, url, **kwargs)
+    return _log_and_execute_request(method, url, session, **kwargs)
 
 
 # ===== requests互換のクラス・関数エクスポート =====

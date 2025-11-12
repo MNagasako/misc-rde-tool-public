@@ -6,9 +6,103 @@ HTTP ヘルパー関数
 プロキシ対応HTTPリクエストを提供します。
 """
 
-from .session_manager import get_proxy_session
+from .session_manager import get_proxy_session, _session_manager
 from typing import Dict, Optional, Any, Union
 import requests  # 型ヒント用のみ
+import time
+from . import api_logger
+
+def _log_and_execute(method: str, url: str, session: requests.Session, **kwargs) -> requests.Response:
+    """
+    APIリクエストをログ記録して実行
+    
+    Args:
+        method: HTTPメソッド
+        url: リクエストURL
+        session: Requestsセッション
+        **kwargs: requests.request()のパラメータ
+        
+    Returns:
+        requests.Response: レスポンスオブジェクト
+    """
+    # リクエスト情報をログ記録
+    proxies = session.proxies or {}
+    verify = session.verify
+    truststore_enabled = hasattr(_session_manager, '_truststore_ssl_context') and _session_manager._truststore_ssl_context is not None
+    
+    api_logger.log_request(
+        method=method.upper(),
+        url=url,
+        proxies=proxies,
+        verify=verify,
+        ssl_context_used=truststore_enabled,
+        truststore_enabled=truststore_enabled
+    )
+    
+    # リクエスト実行（時間計測）
+    start_time = time.time()
+    success = False
+    error_msg = None
+    response = None
+    
+    try:
+        response = session.request(method, url, **kwargs)
+        success = True
+        
+        # レスポンスログ記録
+        elapsed_ms = (time.time() - start_time) * 1000
+        api_logger.log_response(
+            method=method.upper(),
+            url=url,
+            status_code=response.status_code,
+            elapsed_ms=elapsed_ms,
+            success=True
+        )
+        
+        return response
+        
+    except requests.exceptions.SSLError as e:
+        elapsed_ms = (time.time() - start_time) * 1000
+        error_msg = f"SSL Error: {str(e)[:100]}"
+        api_logger.log_response(
+            method=method.upper(),
+            url=url,
+            status_code=0,
+            elapsed_ms=elapsed_ms,
+            success=False,
+            error=error_msg
+        )
+        api_logger.log_ssl_verification_failure(url, str(e)[:200])
+        raise
+        
+    except requests.exceptions.ProxyError as e:
+        elapsed_ms = (time.time() - start_time) * 1000
+        error_msg = f"Proxy Error: {str(e)[:100]}"
+        api_logger.log_response(
+            method=method.upper(),
+            url=url,
+            status_code=0,
+            elapsed_ms=elapsed_ms,
+            success=False,
+            error=error_msg
+        )
+        proxy_url = proxies.get('https') or proxies.get('http')
+        if proxy_url:
+            api_logger.log_proxy_connection(proxy_url, False)
+        raise
+        
+    except Exception as e:
+        elapsed_ms = (time.time() - start_time) * 1000
+        error_msg = f"{type(e).__name__}: {str(e)[:100]}"
+        api_logger.log_response(
+            method=method.upper(),
+            url=url,
+            status_code=0,
+            elapsed_ms=elapsed_ms,
+            success=False,
+            error=error_msg
+        )
+        raise
 
 def proxy_get(url: str, **kwargs) -> requests.Response:
     """
@@ -22,7 +116,7 @@ def proxy_get(url: str, **kwargs) -> requests.Response:
         requests.Response: レスポンスオブジェクト
     """
     session = get_proxy_session()
-    return session.get(url, **kwargs)
+    return _log_and_execute('GET', url, session, **kwargs)
 
 def proxy_post(url: str, data: Optional[Union[Dict, str, bytes]] = None,
                json: Optional[Dict] = None, **kwargs) -> requests.Response:
@@ -39,7 +133,7 @@ def proxy_post(url: str, data: Optional[Union[Dict, str, bytes]] = None,
         requests.Response: レスポンスオブジェクト
     """
     session = get_proxy_session()
-    return session.post(url, data=data, json=json, **kwargs)
+    return _log_and_execute('POST', url, session, data=data, json=json, **kwargs)
 
 def proxy_put(url: str, data: Optional[Union[Dict, str, bytes]] = None,
               json: Optional[Dict] = None, **kwargs) -> requests.Response:
@@ -56,7 +150,7 @@ def proxy_put(url: str, data: Optional[Union[Dict, str, bytes]] = None,
         requests.Response: レスポンスオブジェクト
     """
     session = get_proxy_session()
-    return session.put(url, data=data, json=json, **kwargs)
+    return _log_and_execute('PUT', url, session, data=data, json=json, **kwargs)
 
 def proxy_patch(url: str, data: Optional[Union[Dict, str, bytes]] = None,
                 json: Optional[Dict] = None, **kwargs) -> requests.Response:
@@ -73,7 +167,7 @@ def proxy_patch(url: str, data: Optional[Union[Dict, str, bytes]] = None,
         requests.Response: レスポンスオブジェクト
     """
     session = get_proxy_session()
-    return session.patch(url, data=data, json=json, **kwargs)
+    return _log_and_execute('PATCH', url, session, data=data, json=json, **kwargs)
 
 def proxy_delete(url: str, data: Optional[Union[Dict, str, bytes]] = None,
                  json: Optional[Dict] = None, **kwargs) -> requests.Response:
@@ -90,7 +184,7 @@ def proxy_delete(url: str, data: Optional[Union[Dict, str, bytes]] = None,
         requests.Response: レスポンスオブジェクト
     """
     session = get_proxy_session()
-    return session.delete(url, data=data, json=json, **kwargs)
+    return _log_and_execute('DELETE', url, session, data=data, json=json, **kwargs)
 
 def proxy_head(url: str, **kwargs) -> requests.Response:
     """
@@ -104,7 +198,7 @@ def proxy_head(url: str, **kwargs) -> requests.Response:
         requests.Response: レスポンスオブジェクト
     """
     session = get_proxy_session()
-    return session.head(url, **kwargs)
+    return _log_and_execute('HEAD', url, session, **kwargs)
 
 def proxy_request(method: str, url: str, **kwargs) -> requests.Response:
     """
@@ -119,7 +213,7 @@ def proxy_request(method: str, url: str, **kwargs) -> requests.Response:
         requests.Response: レスポンスオブジェクト
     """
     session = get_proxy_session()
-    return session.request(method, url, **kwargs)
+    return _log_and_execute(method, url, session, **kwargs)
 
 # ============================================================================
 # 便利な設定関数

@@ -151,7 +151,7 @@ class TokenStatusTab(QWidget):
         parent_layout.addLayout(button_layout)
     
     def refresh_display(self):
-        """表示更新"""
+        """表示更新（v2.0.3: 2ホスト固定表示 - TokenManager.ACTIVE_HOSTS使用）"""
         try:
             # トークンファイル読み込み
             tokens = self.token_manager._load_all_tokens()
@@ -159,17 +159,20 @@ class TokenStatusTab(QWidget):
             # テーブルクリア
             self.token_table.setRowCount(0)
             
-            if not tokens:
-                logger.info("保存されたトークンがありません")
-                return
-            
-            # 各トークンの行を追加
-            for host, token_dict in tokens.items():
-                try:
-                    token_data = TokenData.from_dict(token_dict)
-                    self.add_token_row(host, token_data)
-                except Exception as e:
-                    logger.error(f"トークンデータ解析エラー ({host}): {e}")
+            # v2.0.3: TokenManagerのクラス定数を使用（必ず表示する2つのホスト）
+            for host in self.token_manager.ACTIVE_HOSTS:
+                if host in tokens:
+                    # トークンが存在する場合
+                    try:
+                        token_data = TokenData.from_dict(tokens[host])
+                        self.add_token_row(host, token_data)
+                    except Exception as e:
+                        logger.error(f"トークンデータ解析エラー ({host}): {e}")
+                        # エラーでも行は表示
+                        self.add_empty_token_row(host, "データエラー")
+                else:
+                    # トークンが存在しない場合も行を表示
+                    self.add_empty_token_row(host, "未取得")
         
         except Exception as e:
             logger.error(f"表示更新エラー: {e}", exc_info=True)
@@ -210,6 +213,33 @@ class TokenStatusTab(QWidget):
         # 手動リフレッシュボタン
         refresh_button = QPushButton("リフレッシュ")
         refresh_button.clicked.connect(lambda checked, h=host: self.refresh_token(h))
+        self.token_table.setCellWidget(row, 4, refresh_button)
+    
+    def add_empty_token_row(self, host: str, status: str):
+        """トークン未取得行追加（v2.0.3新規）"""
+        row = self.token_table.rowCount()
+        self.token_table.insertRow(row)
+        
+        # ホスト名
+        host_item = QTableWidgetItem(host)
+        self.token_table.setItem(row, 0, host_item)
+        
+        # 有効期限
+        status_item = QTableWidgetItem(status)
+        status_item.setForeground(QColor("red"))
+        self.token_table.setItem(row, 1, status_item)
+        
+        # 残り時間
+        empty_item = QTableWidgetItem("-")
+        self.token_table.setItem(row, 2, empty_item)
+        
+        # 最終更新
+        empty_item2 = QTableWidgetItem("-")
+        self.token_table.setItem(row, 3, empty_item2)
+        
+        # ボタンは無効化
+        refresh_button = QPushButton("取得必要")
+        refresh_button.setEnabled(False)
         self.token_table.setCellWidget(row, 4, refresh_button)
     
     def set_remaining_time_cell(self, row: int, col: int, token_data: TokenData):

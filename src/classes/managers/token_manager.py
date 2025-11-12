@@ -224,6 +224,9 @@ class TokenManager(QObject):
     # シングルトンインスタンス
     _instance: Optional['TokenManager'] = None
     
+    # v2.0.3: 管理対象ホスト（この2つのみ使用）
+    ACTIVE_HOSTS = ['rde.nims.go.jp', 'rde-material.nims.go.jp']
+    
     # Qt Signals (PySide6)
     token_refreshed = Signal(str)  # host: トークン更新成功
     token_refresh_failed = Signal(str, str)  # host, error: トークン更新失敗
@@ -470,11 +473,8 @@ class TokenManager(QObject):
         自動リフレッシュチェック (タイマーコールバック)
         
         全ホストのトークンをチェックし、期限切れ前のトークンをリフレッシュ
-        v2.0.3: アクティブホストのみ処理
+        v2.0.3: アクティブホストのみ処理（クラス定数ACTIVE_HOSTSを使用）
         """
-        # アクティブなホストのみ処理
-        ACTIVE_HOSTS = ['rde.nims.go.jp', 'rde-material.nims.go.jp']
-        
         try:
             tokens_file = Path(common.BEARER_TOKENS_FILE)
             if not tokens_file.exists():
@@ -484,9 +484,9 @@ class TokenManager(QObject):
                 tokens_dict = json.load(f)
             
             for host, token_dict in tokens_dict.items():
-                # 非アクティブホストをスキップ
-                if host not in ACTIVE_HOSTS:
-                    logger.debug(f"非アクティブホストをスキップ: {host}")
+                # v2.0.3: クラス定数を使用してアクティブホストのみ処理
+                if host not in self.ACTIVE_HOSTS:
+                    logger.debug(f"[自動リフレッシュ] 非アクティブホストをスキップ: {host}")
                     continue
                 
                 try:

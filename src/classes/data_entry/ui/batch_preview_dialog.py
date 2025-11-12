@@ -1647,22 +1647,18 @@ API情報:
                     except Exception as e:
                         print(f"[WARNING] メインコントローラからのトークン取得エラー: {e}")
                 
-                # それでもない場合はファイルから読み取り
+                # それでもない場合はファイルから読み取り（v2.0.3: JSON形式のみ）
                 if not bearer_token:
-                    print("[DEBUG] ファイルからBearerトークンを読み取り試行")
-                    from config.common import BEARER_TOKEN_FILE
+                    print("[DEBUG] bearer_tokens.jsonからBearerトークンを読み取り試行")
+                    from config.common import load_bearer_token
                     try:
-                        if os.path.exists(BEARER_TOKEN_FILE):
-                            with open(BEARER_TOKEN_FILE, 'r', encoding='utf-8') as f:
-                                file_token = f.read().strip()
-                            # ファイルから読み取ったトークンの形式をチェック
-                            if file_token and file_token.startswith('Bearer '):
-                                bearer_token = file_token[7:]  # 'Bearer 'プレフィックスを除去
-                            elif file_token:
-                                bearer_token = file_token
-                            print(f"[DEBUG] ファイルからBearerトークンを取得: 長さ={len(bearer_token) if bearer_token else 0}")
+                        bearer_token = load_bearer_token('rde.nims.go.jp')
+                        if bearer_token:
+                            print(f"[DEBUG] bearer_tokens.jsonからBearerトークンを取得: 長さ={len(bearer_token)}")
+                        else:
+                            print("[WARNING] bearer_tokens.jsonからトークン取得失敗")
                     except Exception as e:
-                        print(f"[WARNING] Bearerトークンファイル読み取りエラー: {e}")
+                        print(f"[WARNING] Bearerトークン読み取りエラー: {e}")
             
             if not bearer_token:
                 print("[ERROR] Bearerトークンが取得できません")
@@ -3144,24 +3140,18 @@ class BatchRegisterPreviewDialog(QDialog):
                         print(f"[DEBUG] 親ウィジェット({type(current_widget).__name__})からBearerトークンを取得")
                         break
                 
-                # ファイルから読み取り
+                # ファイルから読み取り（v2.0.3: JSON形式のみ）
                 if not bearer_token:
-                    print("[DEBUG] ファイルからBearerトークンを読み取り試行")
-                    from config.common import BEARER_TOKEN_FILE
+                    print("[DEBUG] bearer_tokens.jsonからBearerトークンを読み取り試行")
+                    from config.common import load_bearer_token
                     try:
-                        if os.path.exists(BEARER_TOKEN_FILE):
-                            with open(BEARER_TOKEN_FILE, 'r', encoding='utf-8') as f:
-                                file_token = f.read().strip()
-                            # ファイルから読み取ったトークンの形式をチェック
-                            if file_token.startswith('BearerToken='):
-                                bearer_token = file_token[12:]  # 'BearerToken='プレフィックスを除去
-                            elif file_token.startswith('Bearer '):
-                                bearer_token = file_token[7:]  # 'Bearer 'プレフィックスを除去
-                            elif file_token:
-                                bearer_token = file_token
-                            print(f"[DEBUG] ファイルからBearerトークンを取得: 長さ={len(bearer_token) if bearer_token else 0}")
+                        bearer_token = load_bearer_token('rde.nims.go.jp')
+                        if bearer_token:
+                            print(f"[DEBUG] bearer_tokens.jsonからBearerトークンを取得: 長さ={len(bearer_token)}")
+                        else:
+                            print("[WARNING] bearer_tokens.jsonからトークン取得失敗")
                     except Exception as e:
-                        print(f"[WARNING] Bearerトークンファイル読み取りエラー: {e}")
+                        print(f"[WARNING] Bearerトークン読み取りエラー: {e}")
             
             if not bearer_token:
                 print("[ERROR] Bearerトークンが取得できません")

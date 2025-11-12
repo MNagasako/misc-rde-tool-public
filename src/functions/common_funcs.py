@@ -68,12 +68,14 @@ def external_path(relative_path):
     バイナリやスクリプトと同じ場所に置いた外部ファイルへのパスを取得。
     - バイナリ：その .exe のある場所
     - スクリプト：その .py のある場所
+    
+    注意: この関数は非推奨です。config.common.get_dynamic_file_path()を使用してください。
     """
     if getattr(sys, 'frozen', False):
-        # バイナリ実行中
+        # バイナリ実行中: 実行ファイルのディレクトリ
         base_path = os.path.dirname(sys.executable)
     else:
-        # スクリプト実行中
+        # スクリプト実行中: メインスクリプトのあるディレクトリの親
         base_path = os.path.dirname(MAIN_DIR)
     return os.path.join(base_path, relative_path)
 

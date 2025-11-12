@@ -1,12 +1,12 @@
 """
-Bearer Token統一管理クラス v1.0
+Bearer Token統一管理クラス v2.0.3
 
 概要:
 Bearer Tokenの取得・検証・再ログイン促進を統一的に管理し、
 アプリ全体でのAPI認証を簡素化・堅牢化するクラスです。
 
 主要機能:
-- ファイルベース（output/.private/bearer_token.txt）からの統一トークン取得
+- JSON形式（output/.private/bearer_tokens.json）からの統一トークン取得
 - self.json API呼び出しによるトークン有効性検証
 - 無効時の再ログイン促進（ユーザーへの明確な通知）
 - エラーハンドリングの統一
@@ -14,12 +14,16 @@ Bearer Tokenの取得・検証・再ログイン促進を統一的に管理し�
 設計思想:
 複数箇所に散在するトークン取得・検証ロジックを一元化し、
 保守性・可読性・信頼性を向上させます。
+
+v2.0.3変更:
+- bearer_token.txt廃止、bearer_tokens.jsonのみ使用
 """
 
 import os
 import logging
 from typing import Optional
-from config.common import BEARER_TOKEN_FILE, get_dynamic_file_path
+from config.common import get_dynamic_file_path
+# v2.0.3: BEARER_TOKEN_FILE削除
 
 logger = logging.getLogger("BearerTokenManager")
 
@@ -87,20 +91,20 @@ class BearerTokenManager:
     def _load_token_from_file() -> Optional[str]:
         """
         ファイルからBearer Tokenを読み込み（内部用）
-        複数ホスト対応のJSONファイルを優先し、レガシーファイルをフォールバックとする
+        v2.0.3: bearer_tokens.jsonのみから読み込み
         
         Returns:
             str: ファイルから読み込んだトークン、失敗時はNone
         """
         try:
-            # v1.18.3: load_bearer_token関数を使用（複数ホスト対応）
+            # v2.0.3: load_bearer_token関数を使用（JSON形式のみ）
             from config.common import load_bearer_token
             token = load_bearer_token('rde.nims.go.jp')
             if token:
-                logger.debug("[TOKEN] 複数ホスト対応ファイルからトークン読み込み成功")
+                logger.debug("[TOKEN] bearer_tokens.jsonからトークン読み込み成功")
                 return token
             
-            logger.warning("[TOKEN] Bearerトークンファイルが見つからないか空です")
+            logger.warning("[TOKEN] Bearerトークンが見つからないか空です")
             return None
             
         except Exception as e:
@@ -192,7 +196,21 @@ class BearerTokenManager:
             
             if msg_box.clickedButton() == relogin_button:
                 logger.info("ユーザーが再ログインを選択しました")
-                # 実際のログイン処理は呼び出し元で実装
+                
+                # ログインタブに切り替え（v2.0.4）
+                try:
+                    # parent_widgetからメインウィンドウを取得してログインタブに切り替え
+                    if hasattr(parent_widget, 'switch_mode'):
+                        logger.info("ログインタブに切り替えます")
+                        parent_widget.switch_mode('login')
+                    elif hasattr(parent_widget, 'ui_controller') and hasattr(parent_widget.ui_controller, 'switch_mode'):
+                        logger.info("ログインタブに切り替えます（ui_controller経由）")
+                        parent_widget.ui_controller.switch_mode('login')
+                    else:
+                        logger.warning("ログインタブへの切り替え機能が見つかりません")
+                except Exception as switch_error:
+                    logger.error(f"ログインタブ切り替えエラー: {switch_error}")
+                
                 return True
             else:
                 logger.info("ユーザーが再ログインをキャンセルしました")

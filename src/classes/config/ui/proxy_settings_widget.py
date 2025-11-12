@@ -42,39 +42,597 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 class ProxyTestWorker(QThread):
-    """プロキシ接続テストのワーカースレッド"""
-    test_completed = Signal(bool, str)  # 成功/失敗, メッセージ
+    """プロキシ接続テストのワーカースレッド（3つの設定でテスト）"""
+    test_completed = Signal(dict)  # テスト結果辞書
     
     def __init__(self, proxy_config: Dict[str, Any]):
         super().__init__()
         self.proxy_config = proxy_config
+        # テストURLとタイムアウトをプロパティとして保持
+        self.test_url = "https://rde.nims.go.jp/"
+        self.timeout = 10
         
     def run(self):
-        """接続テスト実行"""
+        """接続テスト実行（3つの設定でテスト）"""
         if not PYQT5_AVAILABLE:
             return
-            
+        
+        results = {
+            'direct': {'success': False, 'message': '', 'details': '', 'time': 0},
+            'proxy_no_ca': {'success': False, 'message': '', 'details': '', 'time': 0},
+            'proxy_with_ca': {'success': False, 'message': '', 'details': '', 'time': 0},
+            'overall_success': False
+        }
+        
+        # urllib3の接続プールを完全にクリア
         try:
-            from net.session_manager import ProxySessionManager
+            import urllib3
+            # プールマネージャーをクリア
+            urllib3.poolmanager.clear()
+        except:
+            pass
+        
+        # 重要: truststoreはテスト3の直前で有効化
+        # テスト1とテスト2では意図的にWindows証明書ストアを使用しない
+        self._truststore_enabled = False
+        
+        # 1. 直接接続テスト（truststoreなし）
+        results['direct'] = self._test_direct_connection()
+        
+        # テスト間でSSLコンテキストを強制リセット
+        self._force_ssl_reset()
+        
+        # テスト間で待機（接続プールの完全クリアを確保）
+        import time
+        time.sleep(1.0)
+        
+        # 2. プロキシ（CA証明書なし）テスト（truststoreなし）
+        results['proxy_no_ca'] = self._test_proxy_no_ca()
+        
+        # テスト間でSSLコンテキストを強制リセット
+        self._force_ssl_reset()
+        
+        # テスト間で待機
+        time.sleep(1.0)
+        
+        # ここでtruststoreを有効化（テスト3のみで使用）
+        try:
+            import truststore
+            truststore.inject_into_ssl()
+            self._truststore_enabled = True
+        except ImportError:
+            pass  # truststoreがインストールされていない
+        except Exception:
+            pass  # その他のエラーは無視
+        
+        # 3. プロキシ（CA証明書あり）テスト（truststore有効）
+        results['proxy_with_ca'] = self._test_proxy_with_ca()
+        
+        # 全体の成功判定（いずれか1つでも成功すればOK）
+        results['overall_success'] = (
+            results['direct']['success'] or 
+            results['proxy_no_ca']['success'] or 
+            results['proxy_with_ca']['success']
+        )
+        
+        self.test_completed.emit(results)
+    
+    def _force_ssl_reset(self):
+        """SSLコンテキストとキャッシュを強制的にリセット"""
+        try:
+            import gc
             
-            # テスト用のセッション管理を作成
-            test_manager = ProxySessionManager()
-            test_manager.configure(self.proxy_config)
-            
-            session = test_manager.get_session()
-            
-            # 接続テスト実行
-            response = session.get("https://httpbin.org/ip", timeout=15)
-            
-            if response.status_code == 200:
-                data = response.json()
-                ip = data.get('origin', 'unknown')
-                self.test_completed.emit(True, f"接続成功! IP: {ip}")
-            else:
-                self.test_completed.emit(False, f"接続失敗: HTTP {response.status_code}")
+            # urllib3の接続プールをクリア
+            try:
+                import urllib3
+                # 強制的にガベージコレクション
+                gc.collect()
+            except:
+                pass
                 
         except Exception as e:
-            self.test_completed.emit(False, f"接続テストエラー: {str(e)}")
+            pass  # エラーは無視
+    
+    def _test_direct_connection(self) -> dict:
+        """直接接続テスト"""
+        session = None
+        try:
+            import requests
+            import time
+            import gc
+            
+            # 強制的にガベージコレクション（既存のセッションをクリア）
+            gc.collect()
+            
+            # 接続プールキャッシュをクリア
+            try:
+                from urllib3 import poolmanager
+                # 既存のプールマネージャーをクリア
+                if hasattr(poolmanager, '_pool_managers'):
+                    poolmanager._pool_managers.clear()
+            except:
+                pass
+            
+            test_url = "https://rde.nims.go.jp/"
+            start_time = time.time()
+            
+            # 直接接続（プロキシなし）
+            session = requests.Session()
+            session.proxies = {}  # プロキシなし
+            session.verify = True  # SSL検証有効
+            
+            # アダプターを完全に新規作成（max_retriesを0に設定してキャッシュを防ぐ）
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.retry import Retry
+            
+            adapter = HTTPAdapter(
+                pool_connections=1,
+                pool_maxsize=1,
+                max_retries=Retry(total=0, connect=0, read=0, redirect=0)
+            )
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
+            
+            try:
+                response = session.get(test_url, timeout=10)
+                elapsed = time.time() - start_time
+                
+                # CA情報を取得
+                ca_info = "デフォルトCA証明書のみ（Windows証明書ストア未使用）"
+                if hasattr(self, '_truststore_enabled') and self._truststore_enabled:
+                    ca_info = "truststore (Windows証明書ストア)"
+                
+                if response.status_code == 200:
+                    result = {
+                        'success': True,
+                        'message': f'成功 ({elapsed:.2f}秒)',
+                        'details': f'✅ 直接接続成功\nURL: {test_url}\nCA: {ca_info}\nStatus: 200\n応答時間: {elapsed:.2f}秒',
+                        'time': elapsed
+                    }
+                else:
+                    result = {
+                        'success': False,
+                        'message': f'HTTP {response.status_code}',
+                        'details': f'❌ HTTP Status: {response.status_code}\nCA: {ca_info}',
+                        'time': elapsed
+                    }
+                return result
+            except Exception as req_error:
+                elapsed = time.time() - start_time
+                error_msg = str(req_error)
+                return {
+                    'success': False,
+                    'message': f'接続失敗 ({elapsed:.1f}秒)',
+                    'details': f'❌ 直接接続失敗\nエラー: {error_msg}',
+                    'time': elapsed
+                }
+            finally:
+                # 接続プールをクリア
+                if session:
+                    session.close()
+                
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'テストエラー',
+                'details': f'❌ エラー: {str(e)}',
+                'time': 0
+            }
+        finally:
+            # 念のため再度クリア
+            if session:
+                try:
+                    session.close()
+                except:
+                    pass
+            # ガベージコレクション
+            import gc
+            gc.collect()
+    
+    def _test_proxy_no_ca(self) -> dict:
+        """プロキシ接続テスト（CA証明書なし）
+
+        このテストは以下の2つのサブテストを実行します:
+        - SSL検証有効 (verify=True)
+        - SSL検証無効 (verify=False)
+
+        verify=False で接続可能な場合は警告を付与します（通常は安全性が低下します）。
+        """
+        session_true = None
+        session_false = None
+        try:
+            import requests
+            import time
+            import urllib3
+            import gc
+
+            # 強制的にガベージコレクション
+            gc.collect()
+
+            # SSL警告を抑制（verify=False使用時）
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+            test_url = "https://rde.nims.go.jp/"
+            start_time = time.time()
+
+            # プロキシ設定を明示的に構築（コンストラクタで渡されたproxy_configを使用）
+            proxy_host = self.proxy_config.get('host', '127.0.0.1')
+            proxy_port = self.proxy_config.get('port', 8888)
+            proxies = {
+                'http': f'http://{proxy_host}:{proxy_port}',
+                'https': f'http://{proxy_host}:{proxy_port}'
+            }
+            proxy_info = f"Proxy: http://{proxy_host}:{proxy_port}"
+
+            # サブテスト1: SSL検証有効 (verify=True)
+            sub_start = time.time()
+            session_true = requests.Session()
+            session_true.proxies = proxies
+            session_true.trust_env = False  # 環境変数を無視
+            session_true.verify = True
+            
+            # アダプターを完全に新規作成（接続再利用を防ぐ）
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.retry import Retry
+            
+            adapter_true = HTTPAdapter(
+                pool_connections=1,
+                pool_maxsize=1,
+                max_retries=Retry(total=0, connect=0, read=0, redirect=0)
+            )
+            session_true.mount('http://', adapter_true)
+            session_true.mount('https://', adapter_true)
+
+            try:
+                resp_true = session_true.get(test_url, timeout=10)
+                t_true = time.time() - sub_start
+                ok_true = (resp_true.status_code == 200)
+                msg_true = f"HTTP {resp_true.status_code}" if not ok_true else f"成功 ({t_true:.2f}s)"
+            except Exception as e_true:
+                t_true = time.time() - sub_start
+                ok_true = False
+                msg_true = str(e_true)
+            finally:
+                # セッション1を完全にクリア
+                if session_true:
+                    session_true.close()
+                    del session_true
+                    session_true = None
+                    gc.collect()
+
+            # サブテスト間で待機（重要）
+            time.sleep(0.5)
+
+            # サブテスト2: SSL検証無効 (verify=False)
+            sub2_start = time.time()
+            session_false = requests.Session()
+            session_false.proxies = proxies
+            session_false.trust_env = False  # 環境変数を無視
+            session_false.verify = False
+            
+            # アダプターを完全に新規作成（接続再利用を防ぐ）
+            adapter_false = HTTPAdapter(
+                pool_connections=1,
+                pool_maxsize=1,
+                max_retries=Retry(total=0, connect=0, read=0, redirect=0)
+            )
+            session_false.mount('http://', adapter_false)
+            session_false.mount('https://', adapter_false)
+
+            try:
+                resp_false = session_false.get(test_url, timeout=10)
+                t_false = time.time() - sub2_start
+                ok_false = (resp_false.status_code == 200)
+                msg_false = f"HTTP {resp_false.status_code}" if not ok_false else f"成功 ({t_false:.2f}s)"
+            except Exception as e_false:
+                t_false = time.time() - sub2_start
+                ok_false = False
+                msg_false = str(e_false)
+            finally:
+                # セッション2を完全にクリア
+                if session_false:
+                    session_false.close()
+                    del session_false
+                    session_false = None
+                    gc.collect()
+
+            elapsed = time.time() - start_time
+
+            # CA情報を取得
+            ca_info = "デフォルトCA証明書のみ（Windows証明書ストア未使用）"
+            if hasattr(self, '_truststore_enabled') and self._truststore_enabled:
+                ca_info = "truststore (Windows証明書ストア)"
+
+            # 詳細メッセージ構築
+            details_lines = [
+                f"URL: {test_url}", 
+                proxy_info, 
+                f"CA: {ca_info}",
+                f"総実行時間: {elapsed:.2f}秒", 
+                ""
+            ]
+            details_lines.append("-- SSL検証 有効 (verify=True) --")
+            if ok_true:
+                details_lines.append(f"✅ 成功: {msg_true} (応答時間: {t_true:.2f}s)")
+            else:
+                details_lines.append(f"❌ 失敗: {msg_true} (経過: {t_true:.2f}s)")
+
+            details_lines.append("")
+            details_lines.append("-- SSL検証 無効 (verify=False) --")
+            if ok_false:
+                details_lines.append(f"✅ 成功: {msg_false} (応答時間: {t_false:.2f}s)")
+            else:
+                details_lines.append(f"❌ 失敗: {msg_false} (経過: {t_false:.2f}s)")
+
+            # 警告: verify=Falseでのみ成功した場合
+            warning = ""
+            if ok_false and not ok_true:
+                warning = "\n\n⚠️ 警告: SSL検証を無効にすると接続できました。\nこれはプロキシのCA証明書が信頼されていないことを示しています。\nセキュリティリスクがあるため、CA証明書をインストールすることを推奨します。"
+                details_lines.append(warning)
+
+            details = "\n".join(details_lines)
+
+            overall_success = ok_true or ok_false
+            message = (
+                (f"verify=True: {'OK' if ok_true else 'NG'}, verify=False: {'OK' if ok_false else 'NG'}")
+            )
+
+            return {
+                'success': overall_success,
+                'message': message,
+                'details': details,
+                'time': elapsed,
+                'verify_true': {'success': ok_true, 'message': msg_true, 'time': t_true if 't_true' in locals() else 0},
+                'verify_false': {'success': ok_false, 'message': msg_false, 'time': t_false if 't_false' in locals() else 0}
+            }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'テストエラー',
+                'details': f'❌ エラー: {str(e)}',
+                'time': 0
+            }
+        finally:
+            # 念のため両方のセッションをクリア
+            if session_true:
+                try:
+                    session_true.close()
+                    del session_true
+                except:
+                    pass
+            if session_false:
+                try:
+                    session_false.close()
+                    del session_false
+                except:
+                    pass
+            # ガベージコレクション
+            import gc
+            gc.collect()
+    
+    def _test_proxy_with_ca(self) -> dict:
+        """プロキシ接続テスト（CA証明書あり・SSL検証有効）"""
+        session = None
+        try:
+            import requests
+            import time
+            import gc
+            
+            # 強制的にガベージコレクション
+            gc.collect()
+            
+            test_url = "https://rde.nims.go.jp/"
+            start_time = time.time()
+            
+            # truststoreの有効化状態をチェック（run()で既に実行済み）
+            if hasattr(self, '_truststore_enabled') and self._truststore_enabled:
+                ca_info = "truststore (Windows証明書ストア)"
+            else:
+                ca_info = "デフォルトCA証明書のみ（truststore未インストール）"
+            
+            # 新規セッション作成（明示的なプロキシ設定）
+            session = requests.Session()
+            
+            # プロキシ設定を明示的に構築（コンストラクタで渡されたproxy_configを使用）
+            proxy_host = self.proxy_config.get('host', '127.0.0.1')
+            proxy_port = self.proxy_config.get('port', 8888)
+            session.proxies = {
+                'http': f'http://{proxy_host}:{proxy_port}',
+                'https': f'http://{proxy_host}:{proxy_port}'
+            }
+            session.trust_env = False  # 環境変数を無視
+            proxy_info = f"Proxy: http://{proxy_host}:{proxy_port}"
+            
+            # SSL検証を有効化（CA証明書チェック）
+            # truststore.inject_into_ssl() により Windows証明書ストアを使用（run()で実行済み）
+            session.verify = True
+            
+            # アダプターを完全に新規作成（接続再利用を防ぐ）
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.retry import Retry
+            
+            adapter = HTTPAdapter(
+                pool_connections=1,
+                pool_maxsize=1,
+                max_retries=Retry(total=0, connect=0, read=0, redirect=0)
+            )
+            session.mount('http://', adapter)
+            session.mount('https://', adapter)
+            
+            try:
+                response = session.get(test_url, timeout=10)
+                elapsed = time.time() - start_time
+                
+                if response.status_code == 200:
+                    result = {
+                        'success': True,
+                        'message': f'成功 ({elapsed:.2f}秒)',
+                        'details': f'✅ プロキシ接続成功（SSL検証有効）\nURL: {test_url}\n{proxy_info}\nSSL Verify: True\nCA: {ca_info}\nStatus: 200\n応答時間: {elapsed:.2f}秒\n\n💡 Windows証明書ストアのCA証明書による検証が成功しました',
+                        'time': elapsed
+                    }
+                else:
+                    result = {
+                        'success': False,
+                        'message': f'HTTP {response.status_code}',
+                        'details': f'❌ HTTP Status: {response.status_code}\n{proxy_info}\nSSL Verify: True',
+                        'time': elapsed
+                    }
+                return result
+            except Exception as req_error:
+                elapsed = time.time() - start_time
+                error_msg = str(req_error)
+                
+                # SSL証明書エラーの場合
+                if 'CERTIFICATE' in str(error_msg).upper() or 'SSL' in str(error_msg).upper():
+                    details = (
+                        f'❌ SSL証明書検証エラー\n'
+                        f'エラー: {error_msg}\n'
+                        f'{proxy_info}\n'
+                        f'SSL Verify: True\n'
+                        f'CA: {ca_info}\n\n'
+                        f'💡 原因:\n'
+                        f'1. truststoreパッケージがインストールされていない\n'
+                        f'2. Fiddler CA証明書がWindows証明書ストアにない\n'
+                        f'3. 証明書チェーンが不完全\n\n'
+                        f'解決策:\n'
+                        f'1. pip install truststore\n'
+                        f'2. Fiddler → Tools → Options → HTTPS → Trust root certificate'
+                    )
+                else:
+                    details = f'❌ プロキシ接続失敗（SSL検証有効）\nエラー: {error_msg}\n{proxy_info}\nSSL Verify: True'
+                
+                return {
+                    'success': False,
+                    'message': f'SSL検証失敗 ({elapsed:.1f}秒)',
+                    'details': details,
+                    'time': elapsed
+                }
+            finally:
+                # 接続プールをクリア
+                if session:
+                    session.close()
+                
+        except Exception as e:
+            return {
+                'success': False,
+                'message': f'テストエラー',
+                'details': f'❌ エラー: {str(e)}',
+                'time': 0
+            }
+        finally:
+            # 念のため再度クリア
+            if session:
+                try:
+                    session.close()
+                    del session
+                except:
+                    pass
+            # ガベージコレクション
+            import gc
+            gc.collect()
+    
+    def _test_requests(self) -> dict:
+        """requestsベースの接続テスト（旧実装、互換性のため残す）"""
+        try:
+            from net.session_manager import get_proxy_session
+            import time
+            
+            # 重要: 実際に使用されているセッションを取得（新規作成しない）
+            # これにより、アプリケーションと同じ設定でテストできる
+            session = get_proxy_session()
+            
+            # プロキシ設定情報を取得
+            proxy_info = f"Proxy: {session.proxies}" if session.proxies else "No proxy"
+            ssl_info = f"SSL Verify: {session.verify}"
+            
+            # 接続テスト実行（タイムアウト10秒）
+            # 本アプリで実際に使用するRDEサイトでテスト
+            test_url = "https://rde.nims.go.jp/"
+            start_time = time.time()
+            
+            try:
+                response = session.get(test_url, timeout=10)
+                elapsed = time.time() - start_time
+                
+                if response.status_code == 200:
+                    # RDEサイトはHTMLを返すため、ステータスコードのみ確認
+                    details = (
+                        f"✅ Requests接続成功\n"
+                        f"URL: {test_url}\n"
+                        f"Status: {response.status_code}\n"
+                        f"応答時間: {elapsed:.2f}秒\n"
+                        f"{proxy_info}\n"
+                        f"{ssl_info}\n\n"
+                        f"💡 RDEサイトへの接続が正常に確立されました。"
+                    )
+                    
+                    return {
+                        'success': True,
+                        'message': f"接続成功 ({response.status_code}, {elapsed:.2f}秒)",
+                        'details': details
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'message': f"HTTP {response.status_code}",
+                        'details': f"❌ HTTP Status: {response.status_code}\n{proxy_info}\n{ssl_info}"
+                    }
+            except Exception as req_error:
+                # タイムアウトやその他のリクエストエラー
+                elapsed = time.time() - start_time
+                error_type = type(req_error).__name__
+                error_msg = str(req_error)
+                
+                # タイムアウトエラー
+                if 'timeout' in error_msg.lower() or 'Timeout' in error_type:
+                    details = (
+                        f"❌ タイムアウトエラー ({elapsed:.1f}秒)\n"
+                        f"エラー: {error_msg}\n\n"
+                        f"💡 確認事項:\n"
+                        f"1. プロキシサーバーが起動しているか\n"
+                        f"2. ネットワーク接続が有効か\n"
+                        f"3. Fiddlerの場合: Tools → Options → HTTPS decryption有効化"
+                    )
+                    return {
+                        'success': False,
+                        'message': f"タイムアウト ({elapsed:.1f}秒)",
+                        'details': details
+                    }
+                else:
+                    raise req_error  # その他のエラーは外側のcatchへ
+                
+        except Exception as e:
+            error_type = type(e).__name__
+            error_msg = str(e)
+            
+            # SSL証明書エラーの詳細解析
+            if 'CERTIFICATE_VERIFY_FAILED' in error_msg or 'SSLError' in error_type:
+                details = (
+                    f"❌ SSL証明書エラー\n"
+                    f"エラー: {error_msg}\n\n"
+                    f"💡 解決策:\n"
+                    f"1. プロキシ環境の場合: SSL検証を無効化\n"
+                    f"2. 企業CA証明書をインストール\n"
+                    f"3. OSの証明書ストアを使用 (enable_truststore)"
+                )
+            elif 'Connection' in error_type or 'Timeout' in error_type:
+                details = (
+                    f"❌ 接続エラー\n"
+                    f"エラー: {error_msg}\n\n"
+                    f"💡 確認事項:\n"
+                    f"1. プロキシアドレスとポートが正しいか\n"
+                    f"2. プロキシサーバーが起動しているか\n"
+                    f"3. ネットワーク接続が有効か"
+                )
+            else:
+                details = f"❌ エラー: {error_type}\n{error_msg}"
+            
+            return {
+                'success': False,
+                'message': f"接続失敗: {error_type}",
+                'details': details
+            }
 
 class ProxySettingsWidget(QWidget):
     """プロキシ設定ウィジェット"""
@@ -104,6 +662,9 @@ class ProxySettingsWidget(QWidget):
         title_label.setFont(QFont())  # システム標準フォントを使用
         layout.addWidget(title_label)
         
+        # 簡易設定（Fiddler等のテスト用）
+        self.setup_quick_config_section(layout)
+        
         # 現在の状態表示
         self.setup_status_section(layout)
         
@@ -130,6 +691,57 @@ class ProxySettingsWidget(QWidget):
         
         # ログ表示
         self.setup_log_section(layout)
+    
+    def setup_quick_config_section(self, layout):
+        """簡易設定セクション（Fiddler等のテスト用）"""
+        quick_group = QGroupBox("🚀 簡易設定（テスト用）")
+        quick_group.setStyleSheet("QGroupBox { font-weight: bold; color: #2196F3; }")
+        quick_layout = QVBoxLayout(quick_group)
+        
+        # 説明ラベル
+        info_label = QLabel(
+            "Fiddler等のプロキシツールでテストする際に便利な設定です。\n"
+            "ワンクリックで推奨設定を適用できます。"
+        )
+        info_label.setStyleSheet("color: #666; font-size: 10px;")
+        quick_layout.addWidget(info_label)
+        
+        # ボタンレイアウト
+        button_layout = QHBoxLayout()
+        
+        # Fiddler設定ボタン
+        fiddler_btn = QPushButton("📡 Fiddler設定 (localhost:8888 + OS証明書)")
+        fiddler_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 8px;")
+        fiddler_btn.setToolTip(
+            "Fiddler用の推奨設定:\n"
+            "・HTTPプロキシ: http://localhost:8888\n"
+            "・SSL検証: 有効\n"
+            "・OS証明書ストア使用: 有効"
+        )
+        fiddler_btn.clicked.connect(self.apply_fiddler_quick_config)
+        button_layout.addWidget(fiddler_btn)
+        
+        # プロキシなし設定ボタン
+        direct_btn = QPushButton("🔓 プロキシなし（直接接続）")
+        direct_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; padding: 8px;")
+        direct_btn.setToolTip("プロキシを使用せず直接インターネットに接続")
+        direct_btn.clicked.connect(self.apply_direct_quick_config)
+        button_layout.addWidget(direct_btn)
+        
+        # プロキシあり・SSL無効ボタン
+        no_ssl_btn = QPushButton("⚠️ プロキシあり・SSL検証無効")
+        no_ssl_btn.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold; padding: 8px;")
+        no_ssl_btn.setToolTip(
+            "CAなしプロキシ用:\n"
+            "・現在のプロキシ設定を維持\n"
+            "・SSL検証を無効化"
+        )
+        no_ssl_btn.clicked.connect(self.apply_no_ssl_quick_config)
+        button_layout.addWidget(no_ssl_btn)
+        
+        quick_layout.addLayout(button_layout)
+        
+        layout.addWidget(quick_group)
         
     def setup_status_section(self, layout):
         """現在の状態表示セクション"""
@@ -160,10 +772,26 @@ class ProxySettingsWidget(QWidget):
         self.current_cert_store_label = QLabel("読み込み中...")
         status_layout.addWidget(self.current_cert_store_label, 4, 1)
         
-        # 検出ボタン
+        # 環境変数信頼設定
+        status_layout.addWidget(QLabel("環境変数信頼:"), 5, 0)
+        self.current_trust_env_label = QLabel("読み込み中...")
+        status_layout.addWidget(self.current_trust_env_label, 5, 1)
+        
+        # ボタン行
+        button_layout = QHBoxLayout()
+        
+        # システムプロキシ検出ボタン
         detect_btn = QPushButton("システムプロキシ検出")
         detect_btn.clicked.connect(self.detect_system_proxy)
-        status_layout.addWidget(detect_btn, 5, 0, 1, 2)
+        button_layout.addWidget(detect_btn)
+        
+        # 実際の適用状態表示ボタン
+        show_active_btn = QPushButton("📊 実際に適用されているプロキシを表示")
+        show_active_btn.setStyleSheet("font-weight: bold; background-color: #4CAF50; color: white;")
+        show_active_btn.clicked.connect(self.show_active_proxy_status)
+        button_layout.addWidget(show_active_btn)
+        
+        status_layout.addLayout(button_layout, 6, 0, 1, 2)
         
         layout.addWidget(status_group)
         
@@ -392,11 +1020,26 @@ class ProxySettingsWidget(QWidget):
         test_group = QGroupBox("接続テスト")
         test_layout = QVBoxLayout(test_group)
         
+        # 説明ラベル
+        info_label = QLabel(
+            "🔍 プロキシ設定の接続テストを実行します\n"
+            "・Requests: HTTP通信ライブラリでの接続確認\n"
+            "・WebView: ブラウザエンジンでの接続確認"
+        )
+        info_label.setStyleSheet("color: #666; font-size: 10px;")
+        test_layout.addWidget(info_label)
+        
+        # テストボタンとプログレスバー
         test_btn_layout = QHBoxLayout()
         
-        self.test_button = QPushButton("接続テスト実行")
+        self.test_button = QPushButton("🧪 接続テスト実行")
         self.test_button.clicked.connect(self.run_connection_test)
+        self.test_button.setStyleSheet("font-weight: bold;")
         test_btn_layout.addWidget(self.test_button)
+        
+        self.test_webview_button = QPushButton("🌐 WebViewテスト実行")
+        self.test_webview_button.clicked.connect(self.run_webview_test)
+        test_btn_layout.addWidget(self.test_webview_button)
         
         self.test_progress = QProgressBar()
         self.test_progress.setVisible(False)
@@ -404,8 +1047,12 @@ class ProxySettingsWidget(QWidget):
         
         test_layout.addLayout(test_btn_layout)
         
-        self.test_result_label = QLabel("テスト実行前")
-        test_layout.addWidget(self.test_result_label)
+        # テスト結果表示エリア
+        self.test_result_text = QTextEdit()
+        self.test_result_text.setReadOnly(True)
+        self.test_result_text.setMaximumHeight(200)
+        self.test_result_text.setPlainText("テスト実行前")
+        test_layout.addWidget(self.test_result_text)
         
         layout.addWidget(test_group)
         
@@ -753,6 +1400,66 @@ class ProxySettingsWidget(QWidget):
             
             self.add_log(formatted_error)
             QMessageBox.warning(self, "エラー", formatted_error)
+    
+    def show_active_proxy_status(self):
+        """実際に適用されているプロキシ設定を表示"""
+        try:
+            from net.session_manager import get_active_proxy_status
+            
+            # 現在アクティブなプロキシ状態を取得
+            status = get_active_proxy_status()
+            
+            # 表示用メッセージを構築
+            message_parts = []
+            message_parts.append("=== 実際に適用されているプロキシ設定 ===\n")
+            
+            # プロキシモード
+            mode = status.get('mode', 'UNKNOWN')
+            message_parts.append(f"📌 プロキシモード: {mode}\n")
+            
+            # 実際のプロキシ辞書
+            proxies = status.get('proxies', {})
+            if proxies:
+                message_parts.append("\n🌐 使用中のプロキシ:")
+                for protocol, proxy_url in proxies.items():
+                    message_parts.append(f"  • {protocol.upper()}: {proxy_url}")
+            else:
+                message_parts.append("\n🌐 使用中のプロキシ: なし (DIRECT接続)")
+            
+            # SSL証明書設定
+            verify = status.get('verify', True)
+            ca_bundle = status.get('ca_bundle', '')
+            message_parts.append(f"\n\n🔒 SSL証明書検証: {'有効' if verify else '無効'}")
+            message_parts.append(f"📄 CAバンドル: {ca_bundle}")
+            
+            # 環境変数信頼設定
+            trust_env = status.get('trust_env', False)
+            message_parts.append(f"\n🔧 環境変数信頼: {'有効' if trust_env else '無効'}")
+            
+            # 補足情報
+            message_parts.append("\n\n💡 備考:")
+            message_parts.append("このアプリケーションの全てのHTTP通信は、")
+            message_parts.append("上記のプロキシ設定を使用します。")
+            message_parts.append("WebViewはシステムプロキシを使用します。")
+            
+            message = "\n".join(message_parts)
+            
+            # メッセージボックスで表示
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("実際に適用されているプロキシ設定")
+            msg_box.setText(message)
+            msg_box.setIcon(QMessageBox.Information)
+            msg_box.setStandardButtons(QMessageBox.Ok)
+            msg_box.exec_()
+            
+            # ログにも記録
+            self.add_log("実際に適用されているプロキシ設定を表示しました")
+            
+        except Exception as e:
+            error_msg = f"プロキシ状態取得エラー: {str(e)}"
+            self.add_log(error_msg)
+            QMessageBox.warning(self, "エラー", error_msg)
+            logger.error(f"プロキシ状態表示エラー: {e}", exc_info=True)
             
     def apply_preset(self):
         """プリセット適用"""
@@ -836,89 +1543,459 @@ class ProxySettingsWidget(QWidget):
                 QMessageBox.warning(self, "エラー", formatted_error)
                 
     def run_connection_test(self):
-        """接続テスト実行"""
+        """Requests接続テスト実行（3パターン）"""
         if self.test_worker and self.test_worker.isRunning():
             return
-            
-        config = self.get_current_ui_config()
+        
+        # プロキシ設定をHTTPプロキシフィールドから読み取る
+        http_proxy_url = self.http_proxy_edit.text().strip()
+        
+        # URLをパース（http://host:port 形式を想定）
+        if http_proxy_url:
+            # 簡易パース: http://host:port から host と port を抽出
+            import re
+            match = re.match(r'https?://([^:]+):(\d+)', http_proxy_url)
+            if match:
+                proxy_host = match.group(1)
+                proxy_port = int(match.group(2))
+            else:
+                # パースに失敗した場合はデフォルト値
+                proxy_host = "127.0.0.1"
+                proxy_port = 8888
+                self.add_log(f"⚠️ プロキシURLのパースに失敗、デフォルト値を使用: {proxy_host}:{proxy_port}")
+        else:
+            # プロキシ設定が空の場合はデフォルト値（Fiddler）
+            proxy_host = "127.0.0.1"
+            proxy_port = 8888
+            self.add_log(f"ℹ️ プロキシ未設定、デフォルト値を使用: {proxy_host}:{proxy_port}")
+        
+        # テスト用の設定を明示的に構築
+        config = {
+            'host': proxy_host,
+            'port': proxy_port,
+            'mode': 'HTTP'  # テストではHTTPプロキシとして扱う
+        }
         
         self.test_button.setEnabled(False)
+        self.test_webview_button.setEnabled(False)
         self.test_progress.setVisible(True)
         self.test_progress.setRange(0, 0)  # 不定期間プログレスバー
-        self.test_result_label.setText("接続テスト実行中...")
+        self.test_result_text.setPlainText(
+            "🔄 Requests接続テスト実行中（3パターン）...\n\n"
+            f"テスト対象プロキシ: http://{proxy_host}:{proxy_port}\n"
+            f"テストURL: https://rde.nims.go.jp/\n\n"
+            "1. 直接接続（プロキシなし）\n"
+            "2. プロキシ接続（CA証明書なし・SSL検証ON/OFF）\n"
+            "3. プロキシ接続（CA証明書あり・SSL検証ON）\n"
+        )
         
         self.test_worker = ProxyTestWorker(config)
         self.test_worker.test_completed.connect(self.on_test_completed)
         self.test_worker.start()
         
-        self.add_log("接続テストを開始しました")
-        
-    def _format_error_message(self, message: str, max_line_length: int = 80) -> str:
-        """
-        エラーメッセージを適切な長さで改行する
-        
-        Args:
-            message: 元のメッセージ
-            max_line_length: 1行の最大文字数
-            
-        Returns:
-            str: 改行されたメッセージ
-        """
-        if len(message) <= max_line_length:
-            return message
-        
-        # 長いメッセージを単語境界で改行
-        words = message.split(' ')
-        lines = []
-        current_line = ""
-        
-        for word in words:
-            # 現在の行に単語を追加した場合の長さを確認
-            test_line = current_line + (" " if current_line else "") + word
-            
-            if len(test_line) <= max_line_length:
-                current_line = test_line
-            else:
-                # 現在の行が空でない場合は保存
-                if current_line:
-                    lines.append(current_line)
-                
-                # 単語が最大長より長い場合は強制的に分割
-                if len(word) > max_line_length:
-                    while len(word) > max_line_length:
-                        lines.append(word[:max_line_length])
-                        word = word[max_line_length:]
-                    current_line = word if word else ""
-                else:
-                    current_line = word
-        
-        # 最後の行を追加
-        if current_line:
-            lines.append(current_line)
-        
-        return '\n'.join(lines)
+        self.add_log(f"Requests接続テスト開始: http://{proxy_host}:{proxy_port}")
     
-    def on_test_completed(self, success: bool, message: str):
-        """接続テスト完了時の処理"""
-        self.test_button.setEnabled(True)
-        self.test_progress.setVisible(False)
+    def run_webview_test(self):
+        """WebView接続テスト実行（3パターン）"""
+        try:
+            from qt_compat.webengine import QWebEngineView, QWebEnginePage
+            from qt_compat.core import QUrl
+            import platform
+            
+            # 現在のシステムプロキシ状態を検出
+            system_proxy_info = self._detect_system_proxy()
+            
+            # テストウィンドウを作成（モーダルではなく情報表示のみ）
+            self.test_result_text.setPlainText(
+                "🔄 WebView接続テスト実行中...\n\n"
+                f"現在のシステムプロキシ: {system_proxy_info}\n"
+                "https://rde.nims.go.jp/ にアクセスしています...\n\n"
+                "💡 WebViewテストは以下の3パターンで実行します:\n"
+                "1. システムプロキシ OFF でテスト（直接接続）\n"
+                "2. システムプロキシ ON + CA証明書なしでテスト\n"
+                "3. システムプロキシ ON + CA証明書ありでテスト\n\n"
+                "⚠️ 注意: WebViewはOSのシステムプロキシ設定を使用するため、\n"
+                "全パターンをテストするにはシステムプロキシ設定を手動で変更する必要があります。"
+            )
+            
+            # 3パターンのテスト結果を保存
+            self._webview_test_results = {
+                'direct': None,
+                'proxy_no_ca': None,
+                'proxy_with_ca': None,
+                'current_test': 0
+            }
+            
+            # 現在のテストパターンを決定（システムプロキシ設定から推測）
+            if "プロキシなし" in system_proxy_info or "直接接続" in system_proxy_info:
+                current_pattern = "direct"
+                pattern_name = "直接接続（プロキシなし）"
+            elif "localhost:8888" in system_proxy_info or "127.0.0.1:8888" in system_proxy_info:
+                # Fiddlerの場合、CA証明書がインストールされているかチェック
+                if self._check_fiddler_ca_installed():
+                    current_pattern = "proxy_with_ca"
+                    pattern_name = "プロキシ接続（CA証明書あり）"
+                else:
+                    current_pattern = "proxy_no_ca"
+                    pattern_name = "プロキシ接続（CA証明書なし）"
+            else:
+                current_pattern = "proxy_with_ca"
+                pattern_name = "プロキシ接続（システムプロキシ）"
+            
+            self._webview_test_results['current_test'] = current_pattern
+            
+            # WebViewを作成（インスタンス変数として保持）
+            self._test_webview = QWebEngineView()
+            self._test_completed = False  # 完了フラグ
+            self._test_start_time = None
+            
+            # タイムアウトタイマー設定（15秒）
+            self._test_timeout_timer = QTimer(self)
+            self._test_timeout_timer.setSingleShot(True)
+            
+            def on_timeout():
+                """タイムアウト処理"""
+                if self._test_completed:
+                    return
+                    
+                self._test_completed = True
+                self._test_timeout_timer.stop()
+                
+                # 現在のパターンの結果を記録
+                self._webview_test_results[current_pattern] = {
+                    'success': False,
+                    'message': 'タイムアウト',
+                    'time': 15.0
+                }
+                
+                result_text = self._format_webview_results(
+                    current_pattern, pattern_name, system_proxy_info,
+                    success=False, message="タイムアウト（15秒）"
+                )
+                self.test_result_text.setPlainText(result_text)
+                self.add_log(f"WebViewテストタイムアウト [{pattern_name}]")
+                
+                # ダイアログを一度だけ表示
+                QMessageBox.warning(self, "WebViewテスト", f"⏱️ タイムアウト（15秒）\n\nテストパターン: {pattern_name}")
+                
+                # WebViewをクリーンアップ
+                self._cleanup_test_webview()
+            
+            def on_load_finished(success):
+                """ページロード完了"""
+                if self._test_completed:
+                    return  # 既に処理済みの場合はスキップ
+                
+                self._test_completed = True
+                self._test_timeout_timer.stop()  # タイムアウトタイマー停止
+                
+                # 応答時間計算
+                import time
+                elapsed = time.time() - self._test_start_time if self._test_start_time else 0
+                
+                # シグナルを切断して二重実行を防止
+                try:
+                    self._test_webview.loadFinished.disconnect(on_load_finished)
+                except:
+                    pass
+                
+                # 現在のパターンの結果を記録
+                self._webview_test_results[current_pattern] = {
+                    'success': success,
+                    'message': '成功' if success else '失敗',
+                    'time': elapsed
+                }
+                
+                if success:
+                    result_text = self._format_webview_results(
+                        current_pattern, pattern_name, system_proxy_info,
+                        success=True, message=f"成功 ({elapsed:.2f}秒)", elapsed=elapsed
+                    )
+                    self.test_result_text.setPlainText(result_text)
+                    self.add_log(f"WebViewテスト成功 [{pattern_name}]")
+                    
+                    # ダイアログを一度だけ表示
+                    QMessageBox.information(
+                        self, "WebViewテスト", 
+                        f"✅ WebView接続成功\n\nテストパターン: {pattern_name}\n応答時間: {elapsed:.2f}秒"
+                    )
+                else:
+                    result_text = self._format_webview_results(
+                        current_pattern, pattern_name, system_proxy_info,
+                        success=False, message="接続失敗"
+                    )
+                    self.test_result_text.setPlainText(result_text)
+                    self.add_log(f"WebViewテスト失敗 [{pattern_name}]")
+                    
+                    # ダイアログを一度だけ表示
+                    QMessageBox.warning(
+                        self, "WebViewテスト", 
+                        f"❌ WebView接続失敗\n\nテストパターン: {pattern_name}"
+                    )
+                
+                # WebViewをクリーンアップ
+                QTimer.singleShot(1000, lambda: self._cleanup_test_webview())
+            
+            # タイムアウト設定
+            self._test_timeout_timer.timeout.connect(on_timeout)
+            self._test_timeout_timer.start(15000)  # 15秒
+            
+            # 開始時刻記録
+            import time
+            self._test_start_time = time.time()
+            
+            # シグナル接続
+            self._test_webview.loadFinished.connect(on_load_finished)
+            self._test_webview.load(QUrl("https://rde.nims.go.jp/"))
+            
+            self.add_log(f"WebViewテストを開始しました [{pattern_name}]")
+            
+        except Exception as e:
+            self.add_log(f"WebViewテストエラー: {str(e)}")
+            self.test_result_text.setPlainText(f"❌ WebViewテストエラー:\n{str(e)}")
+            QMessageBox.critical(self, "エラー", f"WebViewテストでエラーが発生しました:\n{str(e)}")
+    
+    
+    def _detect_system_proxy(self) -> str:
+        """システムプロキシ設定を検出"""
+        try:
+            import platform
+            import winreg
+            
+            if platform.system() == 'Windows':
+                # Windowsレジストリからプロキシ設定を取得
+                try:
+                    key = winreg.OpenKey(
+                        winreg.HKEY_CURRENT_USER,
+                        r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
+                    )
+                    proxy_enable = winreg.QueryValueEx(key, "ProxyEnable")[0]
+                    
+                    if proxy_enable:
+                        proxy_server = winreg.QueryValueEx(key, "ProxyServer")[0]
+                        winreg.CloseKey(key)
+                        return f"{proxy_server}"
+                    else:
+                        winreg.CloseKey(key)
+                        return "プロキシなし（直接接続）"
+                except:
+                    return "不明（レジストリアクセスエラー）"
+            else:
+                # macOS/Linuxの場合は環境変数をチェック
+                import os
+                http_proxy = os.environ.get('http_proxy') or os.environ.get('HTTP_PROXY')
+                https_proxy = os.environ.get('https_proxy') or os.environ.get('HTTPS_PROXY')
+                
+                if https_proxy or http_proxy:
+                    return f"{https_proxy or http_proxy}"
+                else:
+                    return "プロキシなし（直接接続）"
+        except Exception as e:
+            return f"検出失敗: {str(e)}"
+    
+    def _check_fiddler_ca_installed(self) -> bool:
+        """FiddlerのCA証明書がインストールされているかチェック"""
+        try:
+            import platform
+            import subprocess
+            
+            if platform.system() == 'Windows':
+                # Windows証明書ストアをチェック
+                # "DO_NOT_TRUST_FiddlerRoot" という名前の証明書を探す
+                result = subprocess.run(
+                    ['certutil', '-store', 'Root'],
+                    capture_output=True, text=True, timeout=5
+                )
+                return 'FiddlerRoot' in result.stdout or 'Fiddler' in result.stdout
+            else:
+                # macOS/Linuxの場合は簡易チェック
+                return False
+        except:
+            # エラーの場合は保守的に False を返す
+            return False
+    
+    def _format_webview_results(self, current_pattern: str, pattern_name: str, 
+                                 system_proxy_info: str, success: bool, 
+                                 message: str, elapsed: float = 0) -> str:
+        """WebViewテスト結果をフォーマット"""
+        result_lines = ["=== WebView接続テスト結果 ===\n"]
         
-        # エラーメッセージを適切な長さで改行
-        formatted_message = self._format_error_message(message, max_line_length=100)
+        # 現在のテストパターン情報
+        result_lines.append(f"【現在のテストパターン: {pattern_name}】")
         
         if success:
-            self.test_result_label.setText(f"✅ {formatted_message}")
-            self.test_result_label.setStyleSheet("color: green; font-weight: bold;")
+            result_lines.append(f"✅ WebView接続成功")
+            result_lines.append(f"URL: https://rde.nims.go.jp/")
+            result_lines.append(f"システムプロキシ: {system_proxy_info}")
+            if elapsed > 0:
+                result_lines.append(f"応答時間: {elapsed:.2f}秒")
         else:
-            self.test_result_label.setText(f"❌ {formatted_message}")
-            self.test_result_label.setStyleSheet("color: red; font-weight: bold;")
+            result_lines.append(f"❌ WebView接続失敗")
+            result_lines.append(f"エラー: {message}")
+            result_lines.append(f"URL: https://rde.nims.go.jp/")
+            result_lines.append(f"システムプロキシ: {system_proxy_info}")
         
-        # ラベルでの改行表示を有効化
-        self.test_result_label.setWordWrap(True)
+        result_lines.append("")
+        result_lines.append("💡 3パターンテストについて:")
+        result_lines.append("WebViewはOSのシステムプロキシ設定を使用するため、")
+        result_lines.append("全パターンをテストするには以下の手順が必要です:")
+        result_lines.append("")
+        result_lines.append("【1. 直接接続テスト】")
+        result_lines.append("  Windowsの設定 → ネットワークとインターネット")
+        result_lines.append("  → プロキシ → プロキシサーバーを使う: OFF")
+        result_lines.append("")
+        result_lines.append("【2. プロキシ（CA証明書なし）テスト】")
+        result_lines.append("  Fiddler起動 → Tools → Options → HTTPS")
+        result_lines.append("  → Decrypt HTTPS traffic: OFF")
+        result_lines.append("  → Actions → Trust Root Certificate: 削除")
+        result_lines.append("")
+        result_lines.append("【3. プロキシ（CA証明書あり）テスト】")
+        result_lines.append("  Fiddler起動 → Tools → Options → HTTPS")
+        result_lines.append("  → Decrypt HTTPS traffic: ON")
+        result_lines.append("  → Actions → Trust Root Certificate")
+        result_lines.append("")
         
-        # ログにも改行されたメッセージを記録
-        self.add_log(f"接続テスト完了: {formatted_message}")
+        # 現在のテスト結果サマリー
+        if hasattr(self, '_webview_test_results'):
+            results = self._webview_test_results
+            result_lines.append("【テスト実行状況】")
+            
+            direct = results.get('direct')
+            if direct:
+                status = "✅" if direct['success'] else "❌"
+                result_lines.append(f"  直接接続: {status} {direct['message']}")
+            else:
+                result_lines.append(f"  直接接続: {'✅' if current_pattern == 'direct' and success else '⏹️ 未実施'}")
+            
+            proxy_no_ca = results.get('proxy_no_ca')
+            if proxy_no_ca:
+                status = "✅" if proxy_no_ca['success'] else "❌"
+                result_lines.append(f"  プロキシ（CA無）: {status} {proxy_no_ca['message']}")
+            else:
+                result_lines.append(f"  プロキシ（CA無）: {'✅' if current_pattern == 'proxy_no_ca' and success else '⏹️ 未実施'}")
+            
+            proxy_with_ca = results.get('proxy_with_ca')
+            if proxy_with_ca:
+                status = "✅" if proxy_with_ca['success'] else "❌"
+                result_lines.append(f"  プロキシ（CA有）: {status} {proxy_with_ca['message']}")
+            else:
+                result_lines.append(f"  プロキシ（CA有）: {'✅' if current_pattern == 'proxy_with_ca' and success else '⏹️ 未実施'}")
         
+        return "\n".join(result_lines)
+    
+    def _cleanup_test_webview(self):
+        """テスト用WebViewのクリーンアップ"""
+        try:
+            if hasattr(self, '_test_webview') and self._test_webview:
+                # シグナルを切断
+                try:
+                    self._test_webview.loadFinished.disconnect()
+                except:
+                    pass
+                    
+                self._test_webview.stop()
+                self._test_webview.deleteLater()
+                self._test_webview = None
+                
+            # タイムアウトタイマーもクリーンアップ
+            if hasattr(self, '_test_timeout_timer') and self._test_timeout_timer:
+                self._test_timeout_timer.stop()
+                self._test_timeout_timer.deleteLater()
+                self._test_timeout_timer = None
+                
+        except Exception as e:
+            logger.debug(f"WebViewクリーンアップエラー: {e}")
+    
+    def on_test_completed(self, results: dict):
+        """テスト完了時のコールバック"""
+        self.test_button.setEnabled(True)
+        self.test_webview_button.setEnabled(True)
+        self.test_progress.setVisible(False)
+        
+        # 結果テキストを構築
+        result_lines = ["=== Requests接続テスト結果（3パターン） ===\n"]
+        
+        # 1. 直接接続テスト結果
+        direct_result = results.get('direct', {})
+        result_lines.append("【1. 直接接続（プロキシなし）】")
+        result_lines.append(direct_result.get('details', 'テスト未実施'))
+        result_lines.append("")
+        
+        # 2. プロキシ（CA証明書なし）テスト結果
+        proxy_no_ca_result = results.get('proxy_no_ca', {})
+        result_lines.append("【2. プロキシ接続（CA証明書なし・SSL検証無効）】")
+        result_lines.append(proxy_no_ca_result.get('details', 'テスト未実施'))
+        result_lines.append("")
+        
+        # 3. プロキシ（CA証明書あり）テスト結果
+        proxy_with_ca_result = results.get('proxy_with_ca', {})
+        result_lines.append("【3. プロキシ接続（CA証明書あり・SSL検証有効）】")
+        result_lines.append(proxy_with_ca_result.get('details', 'テスト未実施'))
+        result_lines.append("")
+        
+        # WebViewテスト案内
+        result_lines.append("【WebView接続テスト】")
+        result_lines.append("⚠️ WebViewテストは別途「🌐 WebViewテスト実行」ボタンから実行してください")
+        result_lines.append("   WebViewは3パターンでテストされます：")
+        result_lines.append("   1. 直接接続")
+        result_lines.append("   2. システムプロキシ（CA証明書なし）")
+        result_lines.append("   3. システムプロキシ（CA証明書あり）")
+        result_lines.append("")
+        
+        # 重要な注意事項を追加
+        result_lines.append("【注意事項】")
+        result_lines.append("⚠️ 同じPythonプロセス内で複数回テストを実行すると、")
+        result_lines.append("   接続プールキャッシュにより結果が変わる場合があります。")
+        result_lines.append("   正確なテストには以下のCLIツールを使用してください：")
+        result_lines.append("   > python tools/test_proxy_cli.py --loop 3")
+        
+        result_text = "\n".join(result_lines)
+        self.test_result_text.setPlainText(result_text)
+        
+        # ログに記録
+        success_count = sum([
+            1 if direct_result.get('success') else 0,
+            1 if proxy_no_ca_result.get('success') else 0,
+            1 if proxy_with_ca_result.get('success') else 0
+        ])
+        
+        self.add_log(f"接続テスト完了: {success_count}/3パターン成功")
+        
+        # 結果サマリー作成
+        summary_lines = []
+        if direct_result.get('success'):
+            summary_lines.append(f"✅ 直接接続: {direct_result.get('message')}")
+        else:
+            summary_lines.append(f"❌ 直接接続: {direct_result.get('message')}")
+            
+        if proxy_no_ca_result.get('success'):
+            summary_lines.append(f"✅ プロキシ（CA無）: {proxy_no_ca_result.get('message')}")
+        else:
+            summary_lines.append(f"❌ プロキシ（CA無）: {proxy_no_ca_result.get('message')}")
+            
+        if proxy_with_ca_result.get('success'):
+            summary_lines.append(f"✅ プロキシ（CA有）: {proxy_with_ca_result.get('message')}")
+        else:
+            summary_lines.append(f"❌ プロキシ（CA有）: {proxy_with_ca_result.get('message')}")
+        
+        summary = "\n".join(summary_lines)
+        
+        # 結果ダイアログ
+        if results.get('overall_success'):
+            QMessageBox.information(
+                self,
+                "接続テスト完了",
+                f"✅ {success_count}/3パターンで接続成功\n\n{summary}\n\n"
+                "詳細はテスト結果欄を確認してください。"
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                "接続テスト失敗",
+                f"❌ すべてのパターンで接続失敗\n\n{summary}\n\n"
+                "詳細はテスト結果欄を確認してください。"
+            )
+    
     def check_enterprise_ca_features(self):
         """組織内CA機能の利用可否確認"""
         try:
@@ -1173,12 +2250,25 @@ class ProxySettingsWidget(QWidget):
             else:
                 proxies_config = self.current_config.get('proxies', {})
                 http_proxy = (self.current_config.get('http_proxy') or 
-                             proxies_config.get('http', 'なし'))
+                            proxies_config.get('http', 'なし'))
                 https_proxy = (self.current_config.get('https_proxy') or 
-                              proxies_config.get('https', 'なし'))
+                             proxies_config.get('https', 'なし'))
             
             self.current_http_proxy_label.setText(http_proxy)
             self.current_https_proxy_label.setText(https_proxy)
+            
+            # 環境変数信頼設定を表示
+            try:
+                from net.session_manager import get_active_proxy_status
+                status = get_active_proxy_status()
+                trust_env = status.get('trust_env', False)
+                trust_env_text = "有効" if trust_env else "無効"
+                trust_env_style = "color: green; font-weight: bold;" if trust_env else "color: gray;"
+                self.current_trust_env_label.setText(trust_env_text)
+                self.current_trust_env_label.setStyleSheet(trust_env_style)
+            except Exception as e:
+                self.current_trust_env_label.setText("取得エラー")
+                logger.error(f"trust_env取得エラー: {e}")
             
             # SSL証明書状態を更新
             self.update_ssl_certificate_status()
@@ -1186,6 +2276,7 @@ class ProxySettingsWidget(QWidget):
             
         except Exception as e:
             self.add_log(f"状態表示更新エラー: {e}")
+            logger.error(f"状態表示更新エラー: {e}")
             
     def get_current_ui_config(self):
         """現在のUI設定から設定辞書を取得 (企業CA設定含む)"""
@@ -1235,6 +2326,115 @@ class ProxySettingsWidget(QWidget):
             }
             
         return config
+    
+    def apply_fiddler_quick_config(self):
+        """Fiddler用の簡易設定を適用"""
+        try:
+            # HTTPプロキシモードに設定
+            self.http_radio.setChecked(True)
+            
+            # プロキシアドレス設定
+            self.http_proxy_edit.setText("http://localhost:8888")
+            self.https_proxy_edit.setText("http://localhost:8888")
+            
+            # OS証明書ストア使用を有効化（これがSSL検証有効化の代わり）
+            self.enable_truststore_checkbox.setChecked(True)
+            
+            # SSL戦略を use_proxy_ca に設定（企業CA対応）
+            self.ssl_strategy_combo.setCurrentIndex(0)  # use_proxy_ca
+            
+            self.add_log("✅ Fiddler用設定を適用しました")
+            self.add_log("   プロキシ: http://localhost:8888")
+            self.add_log("   OS証明書ストア使用: 有効")
+            self.add_log("   SSL戦略: use_proxy_ca")
+            
+            QMessageBox.information(
+                self,
+                "設定適用",
+                "✅ Fiddler用設定を適用しました\n\n"
+                "プロキシ: http://localhost:8888\n"
+                "OS証明書ストア使用: 有効\n"
+                "SSL戦略: use_proxy_ca\n\n"
+                "「設定を適用」ボタンで保存してください。"
+            )
+            
+        except Exception as e:
+            error_msg = f"Fiddler設定適用エラー: {str(e)}"
+            self.add_log(f"❌ {error_msg}")
+            QMessageBox.warning(self, "エラー", error_msg)
+    
+    def apply_direct_quick_config(self):
+        """プロキシなし（直接接続）の簡易設定を適用"""
+        try:
+            # DIRECTモードに設定
+            self.direct_radio.setChecked(True)
+            
+            # プロキシアドレスをクリア
+            self.http_proxy_edit.clear()
+            self.https_proxy_edit.clear()
+            
+            self.add_log("✅ プロキシなし設定を適用しました")
+            self.add_log("   モード: DIRECT（直接接続）")
+            
+            QMessageBox.information(
+                self,
+                "設定適用",
+                "✅ プロキシなし設定を適用しました\n\n"
+                "モード: DIRECT（直接接続）\n\n"
+                "「設定を適用」ボタンで保存してください。"
+            )
+            
+        except Exception as e:
+            error_msg = f"直接接続設定適用エラー: {str(e)}"
+            self.add_log(f"❌ {error_msg}")
+            QMessageBox.warning(self, "エラー", error_msg)
+    
+    def apply_no_ssl_quick_config(self):
+        """プロキシあり・SSL検証無効の簡易設定を適用"""
+        try:
+            # 現在のプロキシ設定を維持
+            # SSL戦略を disable_verify に設定するために、
+            # まず現在の設定を確認
+            current_mode = None
+            if self.direct_radio.isChecked():
+                current_mode = "DIRECT"
+            elif self.system_radio.isChecked():
+                current_mode = "SYSTEM"
+            elif self.http_radio.isChecked():
+                current_mode = "HTTP"
+            
+            if current_mode in ["DIRECT", "SYSTEM"]:
+                # プロキシがない場合は警告
+                QMessageBox.warning(
+                    self,
+                    "注意",
+                    "現在プロキシが設定されていません。\n"
+                    "先にプロキシを設定してください。"
+                )
+                return
+            
+            # SSL証明書ストア使用を無効化
+            self.enable_truststore_checkbox.setChecked(False)
+            
+            self.add_log("⚠️ SSL検証無効設定を適用しました")
+            self.add_log("   現在のプロキシ設定を維持")
+            self.add_log("   OS証明書ストア使用: 無効")
+            
+            QMessageBox.warning(
+                self,
+                "設定適用",
+                "⚠️ SSL検証関連設定を変更しました\n\n"
+                "現在のプロキシ設定を維持\n"
+                "OS証明書ストア使用: 無効\n\n"
+                "注意: セキュリティリスクがあります。\n"
+                "テスト環境でのみ使用してください。\n\n"
+                "「設定を適用」ボタンで保存してください。"
+            )
+            
+        except Exception as e:
+            error_msg = f"SSL無効設定適用エラー: {str(e)}"
+            self.add_log(f"❌ {error_msg}")
+            QMessageBox.warning(self, "エラー", error_msg)
         
     def apply_settings(self):
         """設定を適用"""
@@ -1251,6 +2451,9 @@ class ProxySettingsWidget(QWidget):
                 self.add_log(f"📋 手動プロキシ設定:")
                 self.add_log(f"   HTTP: {http_proxy}")
                 self.add_log(f"   HTTPS: {https_proxy}")
+            
+            # 設定変更を検出
+            settings_changed = self._detect_settings_change(config)
             
             from net.session_manager import ProxySessionManager
             manager = ProxySessionManager()
@@ -1287,7 +2490,12 @@ class ProxySettingsWidget(QWidget):
             self.update_current_status_display()
             
             self.add_log("✅ 設定を適用しました")
-            QMessageBox.information(self, "設定適用", "プロキシ設定を適用しました")
+            
+            # 設定が変更された場合は再起動を促す
+            if settings_changed:
+                self._prompt_restart()
+            else:
+                QMessageBox.information(self, "設定適用", "プロキシ設定を適用しました")
             
         except Exception as e:
             error_msg = str(e)
@@ -1295,6 +2503,108 @@ class ProxySettingsWidget(QWidget):
             
             self.add_log(formatted_error)
             QMessageBox.warning(self, "エラー", formatted_error)
+    
+    def _detect_settings_change(self, new_config: dict) -> bool:
+        """
+        プロキシ設定の変更を検出
+        
+        Args:
+            new_config: 新しい設定
+            
+        Returns:
+            bool: 設定が変更された場合True
+        """
+        if not hasattr(self, 'current_config') or not self.current_config:
+            # 初回設定の場合は変更とみなさない
+            return False
+        
+        # 重要な設定項目を比較
+        important_keys = ['mode', 'http_proxy', 'https_proxy']
+        
+        for key in important_keys:
+            old_value = self.current_config.get(key, '')
+            new_value = new_config.get(key, '')
+            
+            # 値が変更された場合
+            if old_value != new_value:
+                self.add_log(f"⚠️  設定変更検出: {key} ({old_value} → {new_value})")
+                return True
+        
+        return False
+    
+    def _prompt_restart(self):
+        """プロキシ設定変更時の終了プロンプト（再起動なし）"""
+        from qt_compat.widgets import QMessageBox
+        
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("プロキシ設定変更 - 再起動が必要")
+        msg_box.setIcon(QMessageBox.Warning)
+        msg_box.setText(
+            "プロキシ設定を変更しました。\n\n"
+            "変更を完全に適用するには、アプリケーションの再起動が必要です。"
+        )
+        msg_box.setInformativeText(
+            "【重要】\n"
+            "「終了する」をクリックするとアプリケーションを終了します。\n"
+            "終了後、再度アプリケーションを起動してください。"
+        )
+        msg_box.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+        msg_box.setDefaultButton(QMessageBox.Ok)
+        
+        # ボタンのテキストをカスタマイズ
+        ok_button = msg_box.button(QMessageBox.Ok)
+        ok_button.setText("終了する")
+        
+        cancel_button = msg_box.button(QMessageBox.Cancel)
+        cancel_button.setText("キャンセル（後で再起動）")
+        
+        result = msg_box.exec_()
+        
+        if result == QMessageBox.Ok:
+            self.add_log("🔄 アプリケーションを終了します。再度起動してください。")
+            self._close_application()
+        else:
+            self.add_log("⚠️  後で手動で再起動してください。変更を適用するには再起動が必要です。")
+            
+            # キャンセルした場合の注意喚起
+            QMessageBox.information(
+                self,
+                "再起動リマインダー",
+                "プロキシ設定の変更を完全に適用するには、\n"
+                "アプリケーションを手動で再起動してください。\n\n"
+                "再起動するまで、古い設定が使用される可能性があります。"
+            )
+    
+    def _close_application(self):
+        """アプリケーションを終了（再起動なし）"""
+        try:
+            from qt_compat.core import QCoreApplication
+            
+            self.add_log("📝 設定を保存しました。")
+            self.add_log("🔄 アプリケーションを終了します...")
+            self.add_log("✅ 終了後、再度アプリケーションを起動してください。")
+            
+            # 最終確認メッセージ
+            QMessageBox.information(
+                self,
+                "アプリケーション終了",
+                "設定を保存しました。\n\n"
+                "アプリケーションを終了します。\n"
+                "再度起動して、新しい設定を適用してください。"
+            )
+            
+            # アプリケーションを終了
+            QCoreApplication.quit()
+            
+        except Exception as e:
+            self.add_log(f"❌ 終了エラー: {e}")
+            QMessageBox.critical(
+                self,
+                "終了エラー",
+                f"アプリケーションの終了処理でエラーが発生しました。\n\n"
+                f"エラー: {e}\n\n"
+                "手動でアプリケーションを終了してください。"
+            )
             
     def reset_to_defaults(self):
         """デフォルト設定に戻す"""

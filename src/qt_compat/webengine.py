@@ -39,18 +39,24 @@ if not WEBENGINE_AVAILABLE:
     class QWebEngineSettings:
         def __init__(self, *args, **kwargs):
             raise RuntimeError("WebEngineが利用できません")
+    
+    class QWebEnginePage:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("WebEngineが利用できません")
 else:
     # よく使用されるクラスのエイリアス
     QWebEngineView = QtWebEngineWidgets.QWebEngineView
     
-    # QWebEngineProfile の場所はフレームワークによって異なる
+    # QWebEngineProfile, QWebEnginePage, QWebEngineSettings の場所はフレームワークによって異なる
     try:
         # PySide6では QtWebEngineCore にある
         QWebEngineProfile = QtWebEngineCore.QWebEngineProfile
+        QWebEnginePage = QtWebEngineCore.QWebEnginePage
         QWebEngineSettings = QtWebEngineCore.QWebEngineSettings
     except AttributeError:
         # PyQt5では QtWebEngineWidgets にある
         QWebEngineProfile = QtWebEngineWidgets.QWebEngineProfile
+        QWebEnginePage = QtWebEngineWidgets.QWebEnginePage
         QWebEngineSettings = QtWebEngineWidgets.QWebEngineSettings
     
     QWebEngineCookieStore = QtWebEngineCore.QWebEngineCookieStore
@@ -60,6 +66,7 @@ __all__ = [
     'QtWebEngineWidgets',
     'QtWebEngineCore',
     'QWebEngineView',
+    'QWebEnginePage',
     'QWebEngineProfile',
     'QWebEngineCookieStore',
     'QWebEngineUrlRequestInterceptor',

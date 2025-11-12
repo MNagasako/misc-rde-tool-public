@@ -28,8 +28,9 @@ import os
 # 1. ドキュメント: VERSION.txt, README.md, RELEASE_NOTES_v*.md
 # 2. 各クラスファイル: ヘッダーコメント内のバージョン番号
 # 3. このREVISION変数（マスター管理）
-# 2025-11-10: v2.0.1 - トークン管理システム実装・DICEログイン調査ツール追加・包括的ドキュメント整備
-REVISION = "2.0.1"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+# 2025-11-12: v2.0.5 - truststore統合SSL検証強化・APIログ機能・プロキシ再起動プロンプト実装
+REVISION = "2.0.5"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+# 2025-11-11: v2.0.3 - ログインUI完全簡素化・手動ログイン実行機能・トークン管理2ホスト固定
 # 2025-11-08: v2.0.0 - PyQt5→PySide6完全移行（破壊的変更）・blob画像取得修復・JavaScript連携改善
 # 2025-11-07: v1.20.0 - データポータル統合機能完全実装・JSON/画像アップロード・修正機能・ステータス管理
 # 2025-10-31: v1.19.2 - ARIM報告書スクレイピング修正・AI拡張タブ検索補完機能強化
@@ -165,8 +166,8 @@ def get_input_directory():
 # セキュリティ関連ファイル
 COOKIE_FILE_RDE = os.path.join(HIDDEN_DIR, '.cookies_rde.txt')
 DEBUG_INFO_FILE = os.path.join(HIDDEN_DIR, 'info.txt')
-BEARER_TOKEN_FILE = os.path.join(HIDDEN_DIR, 'bearer_token.txt')  # レガシー互換用（rde.nims.go.jp）
-BEARER_TOKENS_FILE = os.path.join(HIDDEN_DIR, 'bearer_tokens.json')  # 複数ホスト対応（v1.18.3+）
+# v2.0.3: bearer_token.txt廃止、bearer_tokens.jsonのみ使用
+BEARER_TOKENS_FILE = os.path.join(HIDDEN_DIR, 'bearer_tokens.json')  # 複数ホスト対応（統一形式）
 
 # 入力ファイル
 ARIM_BATCH_LIST_FILE = get_dynamic_file_path('input/list.txt')
@@ -316,12 +317,7 @@ def save_bearer_token(token, host: str = 'rde.nims.go.jp') -> bool:
             else:
                 print(f"[TOKEN-SAVE]   {saved_host}: {saved_token[:20]}...")
         
-        # レガシー互換：rde.nims.go.jpの場合は従来のファイルにも保存
-        if host == 'rde.nims.go.jp':
-            logger.debug(f"[TOKEN-SAVE] レガシーファイルにも保存: {BEARER_TOKEN_FILE}")
-            with open(BEARER_TOKEN_FILE, 'w', encoding='utf-8') as f:
-                f.write(f"BearerToken={access_token}\n")
-            logger.info("[TOKEN-SAVE] レガシーファイル保存完了")
+        # v2.0.3: レガシーファイル（bearer_token.txt）への保存は廃止
         
         return True
     except Exception as e:
@@ -381,19 +377,7 @@ def load_bearer_token(host: str = 'rde.nims.go.jp') -> Optional[str]:
             logger.debug(f"[TOKEN-LOAD] JSON形式トークンファイルが存在しません: {BEARER_TOKENS_FILE}")
             print(f"[TOKEN-LOAD] JSONファイルが存在しません")
         
-        # レガシー互換：rde.nims.go.jpの場合は従来のファイルからも読み込み
-        if host == 'rde.nims.go.jp' and os.path.exists(BEARER_TOKEN_FILE):
-            logger.debug(f"[TOKEN-LOAD] レガシートークンファイル読み込み: {BEARER_TOKEN_FILE}")
-            print(f"[TOKEN-LOAD] レガシーファイルから読み込み試行")
-            with open(BEARER_TOKEN_FILE, 'r', encoding='utf-8') as f:
-                content = f.read().strip()
-                # "BearerToken=" プレフィックスを除去
-                if content.startswith('BearerToken='):
-                    content = content[len('BearerToken='):]
-                if content:
-                    logger.info(f"[TOKEN-LOAD] レガシーファイルからトークン読み込み成功: {content[:20]}...")
-                    print(f"[TOKEN-LOAD] レガシーファイルから取得成功 - token={content[:20]}...")
-                    return content
+        # v2.0.3: レガシーファイル（bearer_token.txt）からの読み込みは廃止
         
         logger.warning(f"[TOKEN-LOAD] トークンが見つかりません ({host})")
         print(f"[TOKEN-LOAD] トークンが見つかりませんでした - host={host}")

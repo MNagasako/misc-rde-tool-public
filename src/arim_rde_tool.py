@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-ARIM RDE Tool v2.0.1 - PySide6によるRDE→ARIMデータポータル移行ツール
+ARIM RDE Tool v2.0.5 - PySide6によるRDE→ARIMデータポータル移行ツール
 
 主要機能:
 - RDEシステムへの自動ログイン・データセット一括取得・画像保存
@@ -9,7 +9,20 @@ ARIM RDE Tool v2.0.1 - PySide6によるRDE→ARIMデータポータル移行ツ�
 - ARIM匿名化・HTMLログ出力・統合API処理・AI分析機能
 - OAuth2 RefreshToken対応トークン管理システム（TokenManager）
 
-v2.0.1新機能:
+v2.0.5新機能:
+- truststore統合によるSSL検証強化（Windows証明書ストア対応）
+- APIアクセスログ機能実装（daily rotation・自動クリーンアップ）
+- プロキシ設定変更時の自動再起動プロンプト実装
+- SSL/プロキシ/処理時間の包括的ログ記録
+
+v2.0.3機能:
+- ログインUI完全簡素化（ボタンのみ表示）
+- 自動ログイン手動実行機能
+- test-host.example.comトークンエラー完全除外
+- 包括的デバッグログ実装（LOGIN-EXECUTE/TOKEN-ACQ）
+- トークン状態タブで2ホスト固定表示
+
+v2.0.1機能:
 - トークン自動リフレッシュ（QTimer 60秒間隔、5分前マージン）
 - トークン状態表示タブ（有効期限・残り時間表示）
 - マルチホストトークン管理（RDE/Material API対応）
@@ -144,6 +157,10 @@ class Browser(QWidget):
         if hasattr(self, 'overlay_manager') and self.overlay_manager:
             self.overlay_manager.hide_overlay()
         self.switch_mode(self.current_mode)
+
+        # v2.0.4: デバッグモード起動時のクリーンアップ
+        from classes.utils.token_cleanup import cleanup_on_startup
+        cleanup_on_startup()
 
         # ウィンドウの表示と最終設定
         self._finalize_window_setup()
@@ -312,10 +329,10 @@ class Browser(QWidget):
     
     def _on_token_expired(self, host):
         """RefreshToken期限切れ通知ハンドラ（再ログイン必要）"""
-        # v2.0.3: 現在使用中のホストのみ警告表示（test-host.example.comなど古いホストを無視）
-        ACTIVE_HOSTS = ['rde.nims.go.jp', 'rde-material.nims.go.jp']
+        # v2.0.3: TokenManagerのクラス定数を使用（2ホスト固定）
+        from classes.managers.token_manager import TokenManager
         
-        if host not in ACTIVE_HOSTS:
+        if host not in TokenManager.ACTIVE_HOSTS:
             logger.debug(f"[TokenManager] 非アクティブホストの期限切れ通知を無視: {host}")
             return
         
@@ -336,9 +353,21 @@ class Browser(QWidget):
         """
         起動時にトークンの状態を確認し、UIを制御
         v2.0.2: トークン確認機能
+        v2.0.4: DEBUG_SKIP_LOGIN_CHECK環境変数対応・トークン自動クリア
         """
         try:
             logger.info("[TOKEN-CHECK] 起動時トークン確認開始")
+            
+            # デバッグモード確認
+            debug_skip = os.environ.get('DEBUG_SKIP_LOGIN_CHECK', '').lower() in ('1', 'true', 'yes')
+            if debug_skip:
+                from classes.utils.token_cleanup import get_debug_status_message
+                logger.warning("[DEBUG] DEBUG_SKIP_LOGIN_CHECK有効 - ログインチェックをスキップして全機能を有効化")
+                self.autologin_msg_label.setText(get_debug_status_message())
+                self.autologin_msg_label.setVisible(True)
+                if hasattr(self, 'ui_controller'):
+                    self.ui_controller.set_buttons_enabled_except_login_settings(True)
+                return
             
             # トークンの存在確認
             rde_exists, material_exists = self.login_manager.check_tokens_acquired()
@@ -650,6 +679,10 @@ class Browser(QWidget):
 
     @debug_log
     def closeEvent(self, event):
+        # v2.0.4: デバッグモード終了時のクリーンアップ
+        from classes.utils.token_cleanup import cleanup_on_exit
+        cleanup_on_exit()
+        
         event.accept()
 
     @debug_log

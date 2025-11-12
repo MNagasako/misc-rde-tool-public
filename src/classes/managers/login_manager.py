@@ -25,7 +25,8 @@ from config.common import LOGIN_FILE
 from functions.common_funcs import load_js_template
 from qt_compat.core import QTimer, QUrl
 from qt_compat.widgets import QApplication, QMessageBox
-from config.common import get_cookie_file_path, BEARER_TOKEN_FILE
+from config.common import get_cookie_file_path
+# v2.0.3: BEARER_TOKEN_FILE削除、bearer_tokens.jsonのみ使用
 
 logger = logging.getLogger("RDE_WebView")
 
@@ -596,6 +597,8 @@ class LoginManager:
                 if self._rde_token_acquired and self._material_token_acquired:
                     logger.info("[TOKEN] ✅ 両トークン取得完了")
                     self._login_in_progress = False
+                    # メッセージ更新: 全トークン取得完了
+                    self.browser.update_autologin_msg("✅ ログイン完了")
                     self._notify_login_complete()
                 
                 # v1.16: 認証完了後のクリーンアップ
@@ -606,6 +609,8 @@ class LoginManager:
                 if host == 'rde.nims.go.jp' and not self._material_token_fetched:
                     logger.info("[TOKEN] rde-material.nims.go.jpのトークン取得を開始します")
                     print(f"[TOKEN-DEBUG] Material トークン取得プロセスを2秒後に開始")
+                    # メッセージ更新: Materialトークン取得開始
+                    self.browser.update_autologin_msg("🔄 Materialトークン取得中...")
                     QTimer.singleShot(2000, lambda: self.fetch_material_token())
 
                 
@@ -672,6 +677,9 @@ class LoginManager:
         # フラグを先に設定して二重実行を防止
         logger.info("[TOKEN] rde-material.nims.go.jpトークン取得フラグを設定")
         self._material_token_fetched = True
+        
+        # メッセージ更新: Material取得開始
+        self.browser.update_autologin_msg("🔄 Material認証中...")
             
         try:
             # 重要: rde-material.nims.go.jpのログインページに遷移してトークンを取得
@@ -699,6 +707,8 @@ class LoginManager:
                     logger.info("[TOKEN] ✅ URL変化で認証成功検出")
                     print(f"[TOKEN-DEBUG] URL変化で認証成功")
                     self._material_auth_completed = True
+                    # メッセージ更新: Material認証完了
+                    self.browser.update_autologin_msg("✅ Material認証完了")
                     
                     # シグナルを切断
                     try:
@@ -746,6 +756,8 @@ class LoginManager:
                     logger.info("[TOKEN] ✅ rde-material.nims.go.jp 認証成功 - /rde/samplesに到達")
                     print(f"[TOKEN-DEBUG] Material 認証成功、トークン取得準備")
                     self._material_auth_completed = True
+                    # メッセージ更新: Materialトークン取得開始
+                    self.browser.update_autologin_msg("🔑 Materialトークン取得中...")
                     
                     # シグナルを切断（無限ループ防止）
                     try:

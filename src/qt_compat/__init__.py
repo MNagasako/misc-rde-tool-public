@@ -52,12 +52,34 @@ def initialize_webengine():
     """
     WebEngineの初期化処理を実行
     
-    PyQt5とPySide6の両方で正しく動作するように初期化します。
+    PyInstallerバイナリ実行時のQt Platformプラグインパス設定を含みます。
     この関数はQApplicationインスタンス作成前に呼び出す必要があります。
     
     Returns:
         bool: 初期化が成功した場合True
     """
+    import os
+    import sys
+    
+    # PyInstallerバイナリ実行時のQt設定
+    if getattr(sys, 'frozen', False):
+        # _MEIPASSからQtプラグインディレクトリを設定
+        if hasattr(sys, '_MEIPASS'):
+            qt_plugin_path = os.path.join(sys._MEIPASS, 'PySide6', 'plugins')
+            if os.path.exists(qt_plugin_path):
+                os.environ['QT_PLUGIN_PATH'] = qt_plugin_path
+                os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = os.path.join(qt_plugin_path, 'platforms')
+                logger.info(f"[PyInstaller] Qt Plugin Path設定: {qt_plugin_path}")
+            else:
+                # fallback: _MEIPASS直下のpluginsを試す
+                fallback_path = os.path.join(sys._MEIPASS, 'plugins')
+                if os.path.exists(fallback_path):
+                    os.environ['QT_PLUGIN_PATH'] = fallback_path
+                    os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = os.path.join(fallback_path, 'platforms')
+                    logger.info(f"[PyInstaller] Qt Plugin Path設定（fallback）: {fallback_path}")
+                else:
+                    logger.warning(f"[PyInstaller] Qtプラグインが見つかりません: {qt_plugin_path}")
+    
     if not WEBENGINE_AVAILABLE:
         logger.warning("WebEngineが利用できません")
         return False
@@ -68,8 +90,9 @@ def initialize_webengine():
         
         # PySide6固有の設定
         if USE_PYSIDE6:
-            # PySide6では追加の設定が必要な場合がある
-            pass
+            # ハードウェアアクセラレーション無効化（互換性向上）
+            if getattr(sys, 'frozen', False):
+                QtCore.QCoreApplication.setAttribute(QtCore.Qt.AA_UseSoftwareOpenGL)
         
         logger.info("WebEngine初期化完了")
         return True
