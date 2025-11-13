@@ -28,8 +28,8 @@ import os
 # 1. ドキュメント: VERSION.txt, README.md, RELEASE_NOTES_v*.md
 # 2. 各クラスファイル: ヘッダーコメント内のバージョン番号
 # 3. このREVISION変数（マスター管理）
-# 2025-11-13: v2.0.6 - バージョン管理統一・ドキュメント更新・品質改善継続
-REVISION = "2.0.6"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+# 2025-11-13: v2.0.7 - マテリアルトークン取得タイムアウト機能・UI改善・認証堅牢性向上
+REVISION = "2.0.7"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
 # 2025-11-11: v2.0.3 - ログインUI完全簡素化・手動ログイン実行機能・トークン管理2ホスト固定
 # 2025-11-08: v2.0.0 - PyQt5→PySide6完全移行（破壊的変更）・blob画像取得修復・JavaScript連携改善
 # 2025-11-07: v1.20.0 - データポータル統合機能完全実装・JSON/画像アップロード・修正機能・ステータス管理
@@ -402,6 +402,50 @@ def load_all_bearer_tokens() -> Dict[str, str]:
     except Exception as e:
         logger.error("Bearer Token一括読み込みエラー: %s", e)
         return {}
+
+def delete_bearer_token(host: str = 'rde.nims.go.jp') -> bool:
+    """
+    指定ホストのBearer Tokenを削除
+    
+    Args:
+        host: ホスト名（例: 'rde.nims.go.jp', 'rde-material.nims.go.jp'）
+    
+    Returns:
+        bool: 削除成功時True（元々存在しない場合もTrue）
+    
+    Note:
+        v2.0.6: ログインボタン押下時のトークン無効化に使用
+    """
+    try:
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.debug(f"[TOKEN-DELETE] トークン削除開始: host={host}")
+        
+        # 既存のトークンを読み込み
+        if not os.path.exists(BEARER_TOKENS_FILE):
+            logger.info(f"[TOKEN-DELETE] トークンファイルが存在しません（削除不要）")
+            return True
+        
+        with open(BEARER_TOKENS_FILE, 'r', encoding='utf-8') as f:
+            tokens = _json.load(f)
+        
+        # 指定ホストのトークンを削除
+        if host in tokens:
+            del tokens[host]
+            logger.info(f"[TOKEN-DELETE] トークンを削除: host={host}")
+        else:
+            logger.info(f"[TOKEN-DELETE] 削除対象のトークンが存在しません: host={host}")
+        
+        # JSON形式で保存（空になった場合も保存）
+        with open(BEARER_TOKENS_FILE, 'w', encoding='utf-8') as f:
+            _json.dump(tokens, f, indent=2, ensure_ascii=False)
+        logger.info(f"[TOKEN-DELETE] 削除後のトークン保存完了: {len(tokens)}個")
+        
+        return True
+    except Exception as e:
+        logger.error(f"[TOKEN-DELETE] Bearer Token削除エラー ({host}): {e}", exc_info=True)
+        return False
 
 def get_bearer_token_for_url(url: str) -> Optional[str]:
     """

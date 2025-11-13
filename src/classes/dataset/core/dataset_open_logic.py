@@ -157,7 +157,7 @@ def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, data
     if msg_box.clickedButton() == yes_btn:
         success, result = create_dataset(bearer_token, payload=payload)
         if success:
-            QMessageBox.information(parent, "データセット開設", "データセットの開設に成功しました。\nID: {}".format(result.get('data', {}).get('id', '不明') if isinstance(result, dict) else '不明'))
+            dataset_id = result.get('data', {}).get('id', '不明') if isinstance(result, dict) else '不明'
             
             # データセット更新通知を発火
             try:
@@ -168,7 +168,7 @@ def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, data
             except Exception as e:
                 logger.warning("データセット更新通知の発火に失敗: %s", e)
             
-            # 成功時にdataset.jsonを自動再取得
+            # 成功時にdataset.jsonを自動再取得（完了ダイアログなし）
             try:
                 from qt_compat.core import QTimer
                 def auto_refresh():
@@ -178,36 +178,49 @@ def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, data
                         from classes.basic.ui.ui_basic_info import show_progress_dialog
                         
                         if bearer_token:
-                            # プログレス表示付きで自動更新
+                            # プログレス表示付きで自動更新（完了ダイアログなし）
                             worker = SimpleProgressWorker(
                                 task_func=auto_refresh_dataset_json,
                                 task_kwargs={'bearer_token': bearer_token},
                                 task_name="データセット一覧自動更新"
                             )
                             
-                            # プログレス表示
-                            progress_dialog = show_progress_dialog(parent, "データセット一覧自動更新", worker)
+                            # プログレス表示（完了ダイアログなし）
+                            progress_dialog = show_progress_dialog(parent, "データセット一覧自動更新", worker, show_completion_dialog=False)
                             
-                            # dataset.json更新完了後に再度通知を発火
-                            def notify_after_json_update():
+                            # dataset.json更新完了後に統合完了ダイアログを表示
+                            def show_completion_and_notify():
                                 try:
+                                    # 統合完了ダイアログ表示
+                                    QMessageBox.information(
+                                        parent, 
+                                        "データセット開設完了", 
+                                        f"データセットの開設に成功しました。\nID: {dataset_id}\n\nデータセット一覧も更新されました。"
+                                    )
+                                    
+                                    # 再度通知を発火
                                     from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
                                     dataset_notifier = get_dataset_refresh_notifier()
                                     dataset_notifier.notify_refresh()
                                     logger.info("dataset.json更新完了: 再通知を発火")
                                 except Exception as e:
-                                    logger.warning("dataset.json更新後の通知発火に失敗: %s", e)
+                                    logger.warning("完了ダイアログ表示・通知発火に失敗: %s", e)
                             
-                            QTimer.singleShot(3000, notify_after_json_update)  # 3秒後に再通知
+                            # 自動更新完了後に統合ダイアログ表示（3秒後）
+                            QTimer.singleShot(3000, show_completion_and_notify)
                             
                     except Exception as e:
                         logger.error("データセット一覧自動更新でエラー: %s", e)
+                        # エラー時は即座にエラーダイアログを表示
+                        QMessageBox.critical(parent, "自動更新エラー", f"データセット開設には成功しましたが、一覧の自動更新に失敗しました。\n{e}")
                 
                 # 少し遅延してから自動更新実行
                 QTimer.singleShot(1000, auto_refresh)
                 
             except Exception as e:
                 logger.warning("データセット一覧自動更新の設定に失敗: %s", e)
+                # エラー時は開設成功のみを通知
+                QMessageBox.information(parent, "データセット開設", f"データセットの開設に成功しました。\nID: {dataset_id}\n\n（注意: 一覧の自動更新に失敗しました）")
         else:
             QMessageBox.critical(parent, "データセット開設エラー", f"データセットの開設に失敗しました。\n{result}")
         update_dataset(bearer_token)

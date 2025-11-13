@@ -181,6 +181,8 @@ class LoginControlWidget(QWidget):
         """
         ログイン実行（v2.0.3: 手動トリガー）
         自動ログインが有効な場合は自動ログインプロセスを実行
+        
+        v2.0.6: ログインボタン押下時に既存トークンを無効化
         """
         try:
             logger.info("[LOGIN-EXECUTE] ログイン実行ボタンがクリックされました")
@@ -210,6 +212,14 @@ class LoginControlWidget(QWidget):
                 return
             
             login_manager = self.parent_widget.login_manager
+            
+            # v2.0.6: 既存トークンを無効化（再ログイン時のトークン取得を確実に）
+            logger.info("[LOGIN-EXECUTE] 既存トークンを無効化します")
+            invalidate_success = login_manager.invalidate_all_tokens()
+            if invalidate_success:
+                logger.info("[LOGIN-EXECUTE] ✅ トークン無効化完了")
+            else:
+                logger.warning("[LOGIN-EXECUTE] ⚠️ トークン無効化に一部失敗しました（継続）")
             
             # トークン取得状態を確認
             logger.info("[LOGIN-EXECUTE] 現在のトークン状態を確認中...")

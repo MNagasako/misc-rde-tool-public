@@ -419,20 +419,35 @@ class UIControllerForms:
             self.logger.info("試料情報の早期バリデーション開始")
             
             # 既存試料が選択されている場合はバリデーション不要
-            if (hasattr(self.ui_controller, 'sample_combo') and 
-                self.ui_controller.sample_combo.currentIndex() > 0):
-                self.logger.info("既存試料が選択済み - バリデーション省略")
-                return True
+            # RuntimeErrorを防ぐために、削除済みウィジェットをチェック
+            if hasattr(self.ui_controller, 'sample_combo'):
+                try:
+                    # ウィジェットが有効かつ選択済みかをチェック
+                    if (self.ui_controller.sample_combo and 
+                        not isinstance(self.ui_controller.sample_combo, type(None)) and
+                        self.ui_controller.sample_combo.currentIndex() > 0):
+                        self.logger.info("既存試料が選択済み - バリデーション省略")
+                        return True
+                except RuntimeError:
+                    # C++オブジェクトが既に削除されている場合
+                    self.logger.debug("sample_comboは削除済み - 新規入力モードとして継続")
+                    pass
                 
             # 新規入力時のバリデーション（試料名のみ必須）
             sample_names = ""
             
             # 試料名の取得（新しいフォーム構造）
-            if (hasattr(self.ui_controller, 'sample_input_widgets') and
-                'name' in self.ui_controller.sample_input_widgets):
-                sample_names = self.ui_controller.sample_input_widgets['name'].text().strip()
-            elif hasattr(self.ui_controller, 'sample_names_input'):
-                sample_names = self.ui_controller.sample_names_input.text().strip()
+            # RuntimeErrorを防ぐために、削除済みウィジェットをチェック
+            try:
+                if (hasattr(self.ui_controller, 'sample_input_widgets') and
+                    'name' in self.ui_controller.sample_input_widgets):
+                    sample_names = self.ui_controller.sample_input_widgets['name'].text().strip()
+                elif hasattr(self.ui_controller, 'sample_names_input'):
+                    sample_names = self.ui_controller.sample_names_input.text().strip()
+            except RuntimeError:
+                # ウィジェットが削除済みの場合は空文字列として処理
+                self.logger.debug("試料入力ウィジェットは削除済み")
+                sample_names = ""
             
             # 試料名のみチェック（試料の説明は任意）
             if not sample_names:
@@ -445,12 +460,16 @@ class UIControllerForms:
                 
                 QMessageBox.warning(None, "試料情報入力エラー", message)
                 
-                # 試料名入力欄にフォーカスを移動
-                if (hasattr(self.ui_controller, 'sample_input_widgets') and
-                    'name' in self.ui_controller.sample_input_widgets):
-                    self.ui_controller.sample_input_widgets['name'].setFocus()
-                elif hasattr(self.ui_controller, 'sample_names_input'):
-                    self.ui_controller.sample_names_input.setFocus()
+                # 試料名入力欄にフォーカスを移動（RuntimeError対策）
+                try:
+                    if (hasattr(self.ui_controller, 'sample_input_widgets') and
+                        'name' in self.ui_controller.sample_input_widgets):
+                        self.ui_controller.sample_input_widgets['name'].setFocus()
+                    elif hasattr(self.ui_controller, 'sample_names_input'):
+                        self.ui_controller.sample_names_input.setFocus()
+                except RuntimeError:
+                    # ウィジェットが削除済みの場合はフォーカス移動をスキップ
+                    self.logger.debug("試料入力ウィジェットが削除済みのためフォーカス移動をスキップ")
                     
                 self.logger.warning("試料名が未入力のためバリデーション失敗")
                 return False
@@ -484,9 +503,16 @@ class UIControllerForms:
             
             for field_name in input_fields:
                 if hasattr(self.ui_controller, field_name):
-                    field = getattr(self.ui_controller, field_name)
-                    field.setEnabled(enabled)
-                    field.setStyleSheet(style)
+                    try:
+                        field = getattr(self.ui_controller, field_name)
+                        # RuntimeError対策: ウィジェットが削除済みかチェック
+                        if field and not isinstance(field, type(None)):
+                            field.setEnabled(enabled)
+                            field.setStyleSheet(style)
+                    except RuntimeError:
+                        # C++オブジェクトが既に削除されている場合
+                        self.logger.debug(f"{field_name}は削除済み - スキップ")
+                        continue
             
             self.logger.info(f"試料入力欄の状態変更: enabled={enabled}")
             

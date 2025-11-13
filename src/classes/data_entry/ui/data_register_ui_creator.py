@@ -214,7 +214,13 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
                         pass
                 QTimer.singleShot(100, safe_show_schema_form)
                 QTimer.singleShot(100, safe_update_widget_schema)
-                for child in form.findChildren((QLineEdit, QComboBox)):
+                
+                # PySide6ではfindChildrenにタプルを渡せないため、個別に取得
+                line_edits = form.findChildren(QLineEdit)
+                combo_boxes = form.findChildren(QComboBox)
+                all_children = line_edits + combo_boxes
+                
+                for child in all_children:
                     name = child.objectName() or child.placeholderText() or child.__class__.__name__
                     safe_name = f"schema_{name}".replace(' ', '_').replace('（', '').replace('）', '')
                     setattr(parent_controller, safe_name, child)

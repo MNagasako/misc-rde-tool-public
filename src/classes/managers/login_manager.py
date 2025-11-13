@@ -662,37 +662,85 @@ class LoginManager:
         # ページロード完了後の処理をここに実装
         logger.debug("ページロード完了 - ログイン状態チェック")
     
-    def fetch_material_token(self):
+    def fetch_material_token(self, retry_count=0, max_retries=3):
         """
         rde-material.nims.go.jpからBearerトークンを取得
         認証情報は共通のため、既にログイン済みの状態でアクセスして
         Cookieからトークンを抽出する
         
         トークン取得後、rde.nims.go.jp/rde/datasetsに戻る(データ取得機能用)
+        
+        Args:
+            retry_count: 現在のリトライ回数（内部使用）
+            max_retries: 最大リトライ回数（デフォルト: 3）
         """
-        # v1.18.3: 二重実行防止 - 既に取得プロセス実行中の場合はスキップ
-        if self._material_token_fetched:
+        # v2.0.7: リトライロジック追加 - 最大試行回数チェック
+        if retry_count >= max_retries:
+            logger.error(f"[TOKEN] マテリアルトークン取得が{max_retries}回失敗しました")
+            self.browser.update_autologin_msg(f"❌ マテリアルトークン取得失敗（{max_retries}回試行）")
+            # フラグをリセットして次回再試行可能にする
+            self._material_token_fetched = False
+            return
+        
+        # v1.18.3: 二重実行防止 - 既に取得プロセス実行中の場合はスキップ（初回のみ）
+        if retry_count == 0 and self._material_token_fetched:
             logger.info("[TOKEN] rde-material.nims.go.jpトークン取得は既に実行済みです（スキップ）")
             return
         
-        # フラグを先に設定して二重実行を防止
-        logger.info("[TOKEN] rde-material.nims.go.jpトークン取得フラグを設定")
-        self._material_token_fetched = True
+        # フラグを先に設定して二重実行を防止（初回のみ）
+        if retry_count == 0:
+            logger.info("[TOKEN] rde-material.nims.go.jpトークン取得フラグを設定")
+            self._material_token_fetched = True
         
         # メッセージ更新: Material取得開始
-        self.browser.update_autologin_msg("🔄 Material認証中...")
+        retry_msg = f" (試行 {retry_count + 1}/{max_retries})" if retry_count > 0 else ""
+        self.browser.update_autologin_msg(f"🔄 Material認証中...{retry_msg}")
             
         try:
             # 重要: rde-material.nims.go.jpのログインページに遷移してトークンを取得
             # 正しいURL: /samples/samples（/rde/samplesは存在しない）
             material_url = "https://rde-material.nims.go.jp/samples/samples"
-            logger.info(f"[TOKEN] rde-material.nims.go.jpへ遷移開始: {mask_sensitive_url(material_url)}")
+            logger.info(f"[TOKEN] rde-material.nims.go.jpへ遷移開始: {mask_sensitive_url(material_url)} (retry={retry_count})")
             logger.debug("Material URL遷移: %s", mask_sensitive_url(material_url))
             
             # 認証完了を待つための状態管理
             self._material_auth_redirect_count = 0
             self._material_token_fetch_timer = None
             self._material_auth_completed = False
+            
+            # v2.0.7: タイムアウト監視タイマー（10秒）- ハング防止機能
+            def on_timeout():
+                if not self._material_auth_completed:
+                    logger.warning(f"[TOKEN] マテリアルトークン取得がタイムアウト（10秒経過） - リトライします (retry={retry_count})")
+                    self.browser.update_autologin_msg("⚠️ タイムアウト - 再試行中...")
+                    
+                    # シグナルを切断
+                    try:
+                        self.webview.loadFinished.disconnect(on_load_finished)
+                    except:
+                        pass
+                    try:
+                        self.webview.urlChanged.disconnect(on_url_changed)
+                    except:
+                        pass
+                    
+                    # リトライ
+                    if retry_count < max_retries - 1:
+                        logger.info(f"[TOKEN] タイムアウトによるリトライ - {2000}ms後に再試行")
+                        QTimer.singleShot(2000, lambda: self.fetch_material_token(retry_count + 1, max_retries))
+                    else:
+                        logger.error("[TOKEN] Material認証が最大リトライ回数に達しました（タイムアウト）")
+                        self._material_token_fetched = False
+                        self.browser.update_autologin_msg("❌ マテリアルトークン取得失敗（タイムアウト）")
+            
+            # 10秒後にタイムアウトチェック
+            self._material_timeout_timer = QTimer.singleShot(10000, on_timeout)
+            
+            # リトライコンテキストを保存（エラー時に使用）
+            self._material_retry_context = {
+                'retry_count': retry_count,
+                'max_retries': max_retries
+            }
             
             # URL変化を監視（認証リダイレクト検出用）
             def on_url_changed(url):
@@ -711,6 +759,11 @@ class LoginManager:
                     self._material_auth_completed = True
                     # メッセージ更新: Materialトークン取得開始
                     self.browser.update_autologin_msg("🔑 Materialトークン取得中...")
+                    
+                    # タイムアウトタイマーをキャンセル
+                    if hasattr(self, '_material_timeout_timer'):
+                        # QTimer.singleShotは直接stopできないが、フラグで制御される
+                        logger.debug("[TOKEN] タイムアウト監視を停止（認証成功）")
                     
                     # シグナルを切断
                     try:
@@ -755,6 +808,14 @@ class LoginManager:
                         self.webview.urlChanged.disconnect(on_url_changed)
                     except:
                         pass
+                    
+                    # v2.0.7: ページロード失敗時のリトライ
+                    if retry_count < max_retries - 1:
+                        logger.info(f"[TOKEN] Material認証失敗 - {2000}ms後にリトライします")
+                        QTimer.singleShot(2000, lambda: self.fetch_material_token(retry_count + 1, max_retries))
+                    else:
+                        logger.error("[TOKEN] Material認証が最大リトライ回数に達しました")
+                        self._material_token_fetched = False  # フラグリセット
                     return
                 
                 current_url = self.webview.url().toString()
@@ -779,6 +840,14 @@ class LoginManager:
                             self.webview.urlChanged.disconnect(on_url_changed)
                         except:
                             pass
+                        
+                        # v2.0.7: 認証タイムアウト時のリトライ
+                        if retry_count < max_retries - 1:
+                            logger.info(f"[TOKEN] リダイレクトタイムアウト - {3000}ms後にリトライします")
+                            QTimer.singleShot(3000, lambda: self.fetch_material_token(retry_count + 1, max_retries))
+                        else:
+                            logger.error("[TOKEN] Material認証が最大リトライ回数に達しました")
+                            self._material_token_fetched = False  # フラグリセット
                     return
                 
                 # /samples/samples への到達を確認（認証成功）
@@ -788,6 +857,10 @@ class LoginManager:
                     self._material_auth_completed = True
                     # メッセージ更新: Materialトークン取得開始
                     self.browser.update_autologin_msg("🔑 Materialトークン取得中...")
+                    
+                    # タイムアウトタイマーをキャンセル
+                    if hasattr(self, '_material_timeout_timer'):
+                        logger.debug("[TOKEN] タイムアウト監視を停止（認証成功）")
                     
                     # シグナルを切断（無限ループ防止）- 順序に注意
                     try:
@@ -806,6 +879,11 @@ class LoginManager:
                     def after_token_fetch():
                         logger.info("[TOKEN] rde-material.nims.go.jpのトークン取得を試行")
                         logger.debug("Material トークン取得開始")
+                        
+                        # タイムアウト監視を完全停止
+                        if hasattr(self, '_material_timeout_timer'):
+                            logger.debug("[TOKEN] タイムアウト監視を停止（トークン取得開始）")
+                        
                         self.try_get_bearer_token(retries=3, host='rde-material.nims.go.jp')
                         # トークン取得完了後、元のrde.nims.go.jp/rde/datasetsに戻る
                         # 注意: try_get_bearer_token内で_notify_login_completeが呼ばれる
@@ -830,8 +908,14 @@ class LoginManager:
         except Exception as e:
             logger.error(f"[TOKEN] rde-material.nims.go.jpトークン取得エラー: {e}")
             logger.debug("Material トークン取得エラー: %s", e)
-            # エラー時はフラグをリセット
-            self._material_token_fetched = False
+            
+            # v2.0.7: 例外発生時のリトライ
+            if retry_count < max_retries - 1:
+                logger.info(f"[TOKEN] 例外発生 - {3000}ms後にリトライします: {e}")
+                QTimer.singleShot(3000, lambda: self.fetch_material_token(retry_count + 1, max_retries))
+            else:
+                logger.error("[TOKEN] Material認証が最大リトライ回数に達しました（例外）")
+                self._material_token_fetched = False  # フラグリセット
     
     def return_to_rde_datasets(self):
         """
@@ -852,12 +936,52 @@ class LoginManager:
         logger.info("[TOKEN] マテリアルトークン取得フラグをリセット")
         self._material_token_fetched = False
     
+    def invalidate_all_tokens(self):
+        """
+        全トークンを無効化（ログインボタン押下時に使用）
+        
+        v2.0.6: ファイル削除 + フラグリセット + メモリクリア
+        """
+        try:
+            from config.common import delete_bearer_token
+            
+            logger.info("[TOKEN] 全トークン無効化を開始")
+            
+            # 1. トークンファイルを削除
+            rde_deleted = delete_bearer_token('rde.nims.go.jp')
+            material_deleted = delete_bearer_token('rde-material.nims.go.jp')
+            
+            if rde_deleted:
+                logger.info("[TOKEN] RDEトークンファイルを削除")
+            if material_deleted:
+                logger.info("[TOKEN] マテリアルトークンファイルを削除")
+            
+            # 2. 取得完了フラグをリセット
+            self._rde_token_acquired = False
+            self._material_token_acquired = False
+            self._material_token_fetched = False
+            logger.info("[TOKEN] トークン取得フラグをリセット")
+            
+            # 3. メモリ上のトークンをクリア
+            if hasattr(self.browser, 'bearer_token'):
+                self.browser.bearer_token = None
+            
+            logger.info("[TOKEN] ✅ 全トークン無効化完了")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[TOKEN] トークン無効化エラー: {e}", exc_info=True)
+            return False
+    
     def check_tokens_acquired(self) -> tuple[bool, bool]:
         """
         両方のトークン（RDE・マテリアル）が取得済みかチェック
         
         Returns:
             tuple: (rde_token_exists, material_token_exists)
+        
+        Note:
+            v2.0.6: 存在チェックのみ（高速）。有効性検証はvalidate_tokens_with_api()を使用。
         """
         from config.common import load_bearer_token
         
@@ -869,6 +993,87 @@ class LoginManager:
         
         logger.info(f"[TOKEN-CHECK] RDE: {rde_exists}, Material: {material_exists}")
         return rde_exists, material_exists
+    
+    def validate_tokens_with_api(self) -> tuple[bool, bool]:
+        """
+        両方のトークンの有効性をAPI呼び出しで検証
+        
+        Returns:
+            tuple: (rde_token_valid, material_token_valid)
+        
+        Note:
+            v2.0.6: 実際のAPI呼び出しで401エラーをチェック（低速）
+        """
+        try:
+            from config.common import load_bearer_token
+            from net.http_helpers import proxy_request
+            
+            logger.info("[TOKEN-VALIDATE] トークン有効性検証開始")
+            
+            # RDEトークン検証
+            rde_valid = False
+            rde_token = load_bearer_token('rde.nims.go.jp')
+            if rde_token:
+                try:
+                    # RDE APIエンドポイント: /rde/subGroups（軽量）
+                    test_url = "https://rde.nims.go.jp/rde/api/v1/subGroups"
+                    headers = {"Authorization": f"Bearer {rde_token}"}
+                    
+                    response = proxy_request(
+                        method='GET',
+                        url=test_url,
+                        headers=headers,
+                        timeout=5
+                    )
+                    
+                    if response and response.status_code == 200:
+                        rde_valid = True
+                        logger.info("[TOKEN-VALIDATE] RDEトークン有効")
+                    elif response and response.status_code == 401:
+                        logger.warning("[TOKEN-VALIDATE] RDEトークン無効（401）")
+                    else:
+                        logger.warning(f"[TOKEN-VALIDATE] RDE検証エラー: {response.status_code if response else 'No response'}")
+                        
+                except Exception as e:
+                    logger.error(f"[TOKEN-VALIDATE] RDE検証例外: {e}")
+            else:
+                logger.info("[TOKEN-VALIDATE] RDEトークンが存在しません")
+            
+            # マテリアルトークン検証
+            material_valid = False
+            material_token = load_bearer_token('rde-material.nims.go.jp')
+            if material_token:
+                try:
+                    # Material APIエンドポイント: /samples/samples（軽量）
+                    test_url = "https://rde-material.nims.go.jp/samples/api/v1/samples"
+                    headers = {"Authorization": f"Bearer {material_token}"}
+                    
+                    response = proxy_request(
+                        method='GET',
+                        url=test_url,
+                        headers=headers,
+                        timeout=5
+                    )
+                    
+                    if response and response.status_code == 200:
+                        material_valid = True
+                        logger.info("[TOKEN-VALIDATE] マテリアルトークン有効")
+                    elif response and response.status_code == 401:
+                        logger.warning("[TOKEN-VALIDATE] マテリアルトークン無効（401）")
+                    else:
+                        logger.warning(f"[TOKEN-VALIDATE] Material検証エラー: {response.status_code if response else 'No response'}")
+                        
+                except Exception as e:
+                    logger.error(f"[TOKEN-VALIDATE] Material検証例外: {e}")
+            else:
+                logger.info("[TOKEN-VALIDATE] マテリアルトークンが存在しません")
+            
+            logger.info(f"[TOKEN-VALIDATE] 検証完了 - RDE: {rde_valid}, Material: {material_valid}")
+            return rde_valid, material_valid
+            
+        except Exception as e:
+            logger.error(f"[TOKEN-VALIDATE] トークン検証エラー: {e}", exc_info=True)
+            return False, False
     
     def ensure_both_tokens(self, force_refresh=False):
         """

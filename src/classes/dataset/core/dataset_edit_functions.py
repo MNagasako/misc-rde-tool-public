@@ -373,7 +373,7 @@ def send_dataset_update_request(widget, parent, selected_dataset,
             logger.debug("  - データセット名: %s", attrs.get('name'))
             logger.debug("  - 課題番号: %s", attrs.get('grantNumber'))
             logger.debug("  - 関連リンク数: %s", len(attrs.get('relatedLinks', [])))
-            logger.debug("  - 関連データセット数: %s).get('data', []))}", len(rels.get('relatedDatasets', {)
+            logger.debug("  - 関連データセット数: %s", len(rels.get('relatedDatasets', {}).get('data', [])))
             logger.debug("  - リレーションシップ: %s", list(rels.keys()))
             
             # リレーションシップの詳細
@@ -388,10 +388,7 @@ def send_dataset_update_request(widget, parent, selected_dataset,
             
             response = api_request('PATCH', api_url, headers=headers, json_data=payload, timeout=15)
             if response.status_code in (200, 201):
-                # 成功時は簡潔なメッセージと詳細表示ボタン
-                show_response_dialog(widget, "更新成功", f"データセット[{dataset_name}]の更新に成功しました。", response.text)
-                
-                # 成功時にdataset.jsonを自動再取得
+                # 成功時にdataset.jsonを自動再取得（完了ダイアログなし）
                 try:
                     from qt_compat.core import QTimer
                     def auto_refresh():
@@ -401,38 +398,59 @@ def send_dataset_update_request(widget, parent, selected_dataset,
                             from classes.basic.ui.ui_basic_info import show_progress_dialog
                             
                             if bearer_token:
-                                # プログレス表示付きで自動更新
+                                # プログレス表示付きで自動更新（完了ダイアログなし）
                                 worker = SimpleProgressWorker(
                                     task_func=auto_refresh_dataset_json,
                                     task_kwargs={'bearer_token': bearer_token},
                                     task_name="データセット一覧自動更新"
                                 )
                                 
-                                # プログレス表示
-                                progress_dialog = show_progress_dialog(widget, "データセット一覧自動更新", worker)
+                                # プログレス表示（完了ダイアログなし）
+                                progress_dialog = show_progress_dialog(widget, "データセット一覧自動更新", worker, show_completion_dialog=False)
+                                
+                                # dataset.json更新完了後に統合完了ダイアログを表示
+                                def show_completion_and_notify():
+                                    try:
+                                        # 統合完了ダイアログ表示（詳細表示ボタン付き）
+                                        show_response_dialog(
+                                            widget, 
+                                            "更新完了", 
+                                            f"データセット[{dataset_name}]の更新に成功しました。\n\nデータセット一覧も更新されました。", 
+                                            response.text
+                                        )
+                                        
+                                        # UIリフレッシュコールバックを呼び出し
+                                        if ui_refresh_callback:
+                                            QTimer.singleShot(500, ui_refresh_callback)
+                                        
+                                        # グローバル通知を発行（他のタブも更新）
+                                        notifier = get_dataset_refresh_notifier()
+                                        notifier.notify_refresh()
+                                        logger.info("データセット更新完了: グローバル通知を発火")
+                                        
+                                    except Exception as e:
+                                        logger.error("完了ダイアログ表示・通知発火エラー: %s", e)
+                                
+                                # 自動更新完了後に統合ダイアログ表示（3秒後）
+                                QTimer.singleShot(3000, show_completion_and_notify)
                                 
                         except Exception as e:
                             logger.error("データセット一覧自動更新でエラー: %s", e)
+                            # エラー時は即座にエラーダイアログを表示
+                            show_response_dialog(
+                                widget, 
+                                "更新成功（一覧更新失敗）", 
+                                f"データセット[{dataset_name}]の更新には成功しましたが、一覧の自動更新に失敗しました。\n\n{e}", 
+                                response.text
+                            )
                     
-                    # 少し遅延してから自動更新実行（安全性向上のため遅延を増加）
-                    QTimer.singleShot(2000, auto_refresh)  # 1秒 → 2秒に変更
-                    
-                    # UIリフレッシュコールバックを呼び出し（dataset.json更新後）
-                    if ui_refresh_callback:
-                        QTimer.singleShot(4000, ui_refresh_callback)  # 2秒 → 4秒に変更
-                    
-                    # グローバル通知を発行（他のタブも更新）
-                    def notify_global_refresh():
-                        try:
-                            notifier = get_dataset_refresh_notifier()
-                            notifier.notify_refresh()
-                        except Exception as e:
-                            logger.error("グローバルリフレッシュ通知エラー: %s", e)
-                    
-                    QTimer.singleShot(5000, notify_global_refresh)  # 3秒 → 5秒に変更
+                    # 少し遅延してから自動更新実行
+                    QTimer.singleShot(1000, auto_refresh)
                     
                 except Exception as e:
                     logger.warning("データセット一覧自動更新の設定に失敗: %s", e)
+                    # エラー時は更新成功のみを通知
+                    show_response_dialog(widget, "更新成功", f"データセット[{dataset_name}]の更新に成功しました。\n\n（注意: 一覧の自動更新に失敗しました）", response.text)
                     # 自動更新が失敗してもUIリフレッシュは実行
                     if ui_refresh_callback:
                         QTimer.singleShot(1000, ui_refresh_callback)

@@ -442,25 +442,40 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                     progress.setLabelText(f"データセットを処理しています... ({i+1}/{total_datasets})")
                     QApplication.processEvents()  # UIの更新を強制
                 
-                dataset_grant_number = dataset.get("attributes", {}).get("grantNumber", "")
-                dataset_name = dataset.get("attributes", {}).get("name", "名前なし")
-                
-                # デバッグ用：最初の10件のデータセットの課題番号を表示
-                if i < 10:
-                    logger.debug("データセット%s: '%s' (課題番号: '%s')", i+1, dataset_name, dataset_grant_number)
-                
-                # 課題番号部分一致フィルタを適用
-                if grant_number_filter and grant_number_filter.lower() not in dataset_grant_number.lower():
+                try:
+                    # データ構造の検証
+                    if not isinstance(dataset, dict):
+                        logger.warning("データセット%s: 無効なデータ構造（dict以外）- スキップ", i+1)
+                        continue
+                    
+                    attributes = dataset.get("attributes")
+                    if not isinstance(attributes, dict):
+                        logger.warning("データセット%s: attributes が dict でない - スキップ", i+1)
+                        continue
+                    
+                    dataset_grant_number = attributes.get("grantNumber", "")
+                    dataset_name = attributes.get("name", "名前なし")
+                    
+                    # デバッグ用：最初の10件のデータセットの課題番号を表示
+                    if i < 10:
+                        logger.debug("データセット%s: '%s' (課題番号: '%s')", i+1, dataset_name, dataset_grant_number)
+                    
+                    # 課題番号部分一致フィルタを適用
+                    if grant_number_filter and grant_number_filter.lower() not in dataset_grant_number.lower():
+                        continue
+                    
+                    # ユーザー所属かどうかで分類
+                    if dataset_grant_number in user_grant_numbers:
+                        user_datasets.append(dataset)
+                        if dataset_grant_number not in grant_number_matches:
+                            grant_number_matches[dataset_grant_number] = 0
+                        grant_number_matches[dataset_grant_number] += 1
+                    else:
+                        other_datasets.append(dataset)
+                        
+                except Exception as dataset_error:
+                    logger.error("データセット%s の処理中にエラー: %s", i+1, dataset_error)
                     continue
-                
-                # ユーザー所属かどうかで分類
-                if dataset_grant_number in user_grant_numbers:
-                    user_datasets.append(dataset)
-                    if dataset_grant_number not in grant_number_matches:
-                        grant_number_matches[dataset_grant_number] = 0
-                    grant_number_matches[dataset_grant_number] += 1
-                else:
-                    other_datasets.append(dataset)
             
             # 最終プログレス更新
             progress.setValue(total_datasets)
@@ -506,21 +521,38 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                     progress.setLabelText(f"表示用データを作成しています... ({i+1}/{total_datasets})")
                     QApplication.processEvents()
                 
-                attrs = dataset.get("attributes", {})
-                dataset_id = dataset.get("id", "")
-                name = attrs.get("name", "名前なし")
-                grant_number = attrs.get("grantNumber", "")
-                dataset_type = attrs.get("datasetType", "")
-                
-                # ユーザー所属かどうかで表示を区別
-                if grant_number in user_grant_numbers:
-                    display_text = f"★ {grant_number} - {name} (ID: {dataset_id})"
-                else:
-                    display_text = f"{grant_number} - {name} (ID: {dataset_id})"
-                
-                if dataset_type:
-                    display_text += f" [{dataset_type}]"
-                display_names.append(display_text)
+                try:
+                    # データ構造の検証
+                    if not isinstance(dataset, dict):
+                        logger.warning("表示名作成%s: 無効なデータ構造 - スキップ", i+1)
+                        display_names.append(f"[エラー: 無効なデータ] (インデックス: {i+1})")
+                        continue
+                    
+                    attrs = dataset.get("attributes", {})
+                    if not isinstance(attrs, dict):
+                        logger.warning("表示名作成%s: attributes が dict でない - スキップ", i+1)
+                        display_names.append(f"[エラー: 属性なし] (インデックス: {i+1})")
+                        continue
+                    
+                    dataset_id = dataset.get("id", "")
+                    name = attrs.get("name", "名前なし")
+                    grant_number = attrs.get("grantNumber", "")
+                    dataset_type = attrs.get("datasetType", "")
+                    
+                    # ユーザー所属かどうかで表示を区別
+                    if grant_number in user_grant_numbers:
+                        display_text = f"★ {grant_number} - {name} (ID: {dataset_id})"
+                    else:
+                        display_text = f"{grant_number} - {name} (ID: {dataset_id})"
+                    
+                    if dataset_type:
+                        display_text += f" [{dataset_type}]"
+                    display_names.append(display_text)
+                    
+                except Exception as display_error:
+                    logger.error("表示名作成%s でエラー: %s", i+1, display_error)
+                    display_names.append(f"[エラー: {str(display_error)}] (インデックス: {i+1})")
+                    continue
             
             # 最終プログレス更新
             progress.setValue(total_datasets)
@@ -673,99 +705,99 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             if not is_cache_valid() or force_reload:
                 logger.info("基本データを新規読み込み")
                 
-                # ファイル読み込みのプログレス表示
-                file_progress = create_progress_dialog("ファイル読み込み中", "dataset.jsonを読み込んでいます...", 0)
-                file_progress.show()
+                # 統合プログレス表示
+                loading_progress = create_progress_dialog("データ読み込み中", "データセット情報を読み込んでいます...", 0)
+                loading_progress.show()
                 QApplication.processEvents()
                 
                 try:
-                    with open(dataset_path, encoding="utf-8", errors='replace') as f:
-                        data = json.load(f)
-                        
-                    file_progress.setLabelText("JSONデータを解析中...")
+                    loading_progress.setLabelText("dataset.jsonを読み込んでいます...")
                     QApplication.processEvents()
                     
-                except (json.JSONDecodeError, UnicodeDecodeError) as json_error:
-                    file_progress.close()
-                    logger.error("データセット読み込みエラー: %s", json_error)
-                    logger.error("ファイルパス: %s", dataset_path)
-                    
-                    # UTF-8デコードエラーの場合は修復を試行
-                    if isinstance(json_error, UnicodeDecodeError):
-                        logger.info("UTF-8デコードエラーを検出、ファイル修復を試行します")
-                        try:
-                            repaired_data = repair_json_file(dataset_path)
-                            if repaired_data:
-                                data = repaired_data
-                                logger.info("ファイル修復に成功しました")
-                            else:
-                                logger.error("ファイル修復に失敗しました")
-                                return
-                        except Exception as repair_error:
-                            logger.error("ファイル修復中にエラー: %s", repair_error)
-                            return
-                    else:
-                        # ファイルサイズ確認
-                        file_size = os.path.getsize(dataset_path)
-                        logger.error("ファイルサイズ: %s bytes", file_size)
-                    
-                    # バックアップファイルの確認と復旧試行
-                    backup_file = dataset_path + ".backup"
-                    if os.path.exists(backup_file):
-                        logger.info("バックアップファイルから復旧を試行: %s", backup_file)
-                        try:
-                            # バックアップファイルも修復機能を使用
-                            backup_data = repair_json_file(backup_file)
-                            if backup_data:
-                                data = backup_data
-                                logger.info("バックアップファイルから正常に読み込み、元ファイルを置き換えました")
-                                # 修復したバックアップで元ファイルを置き換え
-                                shutil.copy2(backup_file, dataset_path)
-                            else:
-                                logger.error("バックアップファイルも破損しています")
-                                return
+                    try:
+                        with open(dataset_path, encoding="utf-8", errors='replace') as f:
+                            data = json.load(f)
                             
-                        except Exception as backup_error:
-                            logger.error("バックアップファイルからの復旧も失敗: %s", backup_error)
-                            return
-                    else:
-                        logger.error("バックアップファイルが見つかりません: %s", backup_file)
-                        logger.info("最初から読み込みなおしを試行します...")
+                        loading_progress.setLabelText("JSONデータを解析中...")
+                        QApplication.processEvents()
                         
-                        # 最後の手段として、元ファイルを修復機能で直接修復
-                        try:
-                            repaired_original = repair_json_file(dataset_path)
-                            if repaired_original:
-                                data = repaired_original
-                                logger.info("元ファイルの直接修復が成功しました")
-                            else:
-                                logger.error("元ファイルの修復も失敗しました")
+                    except (json.JSONDecodeError, UnicodeDecodeError) as json_error:
+                        logger.error("データセット読み込みエラー: %s", json_error)
+                        logger.error("ファイルパス: %s", dataset_path)
+                        
+                        # UTF-8デコードエラーの場合は修復を試行
+                        if isinstance(json_error, UnicodeDecodeError):
+                            logger.info("UTF-8デコードエラーを検出、ファイル修復を試行します")
+                            try:
+                                repaired_data = repair_json_file(dataset_path)
+                                if repaired_data:
+                                    data = repaired_data
+                                    logger.info("ファイル修復に成功しました")
+                                else:
+                                    logger.error("ファイル修復に失敗しました")
+                                    return
+                            except Exception as repair_error:
+                                logger.error("ファイル修復中にエラー: %s", repair_error)
+                                return
+                        else:
+                            # ファイルサイズ確認
+                            file_size = os.path.getsize(dataset_path)
+                            logger.error("ファイルサイズ: %s bytes", file_size)
+                        
+                        # バックアップファイルの確認と復旧試行
+                        backup_file = dataset_path + ".backup"
+                        if os.path.exists(backup_file):
+                            logger.info("バックアップファイルから復旧を試行: %s", backup_file)
+                            try:
+                                # バックアップファイルも修復機能を使用
+                                backup_data = repair_json_file(backup_file)
+                                if backup_data:
+                                    data = backup_data
+                                    logger.info("バックアップファイルから正常に読み込み、元ファイルを置き換えました")
+                                    # 修復したバックアップで元ファイルを置き換え
+                                    shutil.copy2(backup_file, dataset_path)
+                                else:
+                                    logger.error("バックアップファイルも破損しています")
+                                    return
+                                
+                            except Exception as backup_error:
+                                logger.error("バックアップファイルからの復旧も失敗: %s", backup_error)
+                                return
+                        else:
+                            logger.error("バックアップファイルが見つかりません: %s", backup_file)
+                            logger.info("最初から読み込みなおしを試行します...")
+                            
+                            # 最後の手段として、元ファイルを修復機能で直接修復
+                            try:
+                                repaired_original = repair_json_file(dataset_path)
+                                if repaired_original:
+                                    data = repaired_original
+                                    logger.info("元ファイルの直接修復が成功しました")
+                                else:
+                                    logger.error("元ファイルの修復も失敗しました")
+                                    QMessageBox.critical(widget, "エラー", 
+                                                       "データセットファイルが破損しており、修復できませんでした。\n"
+                                                       "新しいファイルが作成されます。")
+                                    data = {"data": [], "links": {}, "meta": {}}
+                            except Exception as final_error:
+                                logger.error("最終修復試行も失敗: %s", final_error)
                                 QMessageBox.critical(widget, "エラー", 
-                                                   "データセットファイルが破損しており、修復できませんでした。\n"
-                                                   "新しいファイルが作成されます。")
+                                                   "データセットファイルの読み込みに完全に失敗しました。\n"
+                                                   "空のデータセットリストから開始します。")
                                 data = {"data": [], "links": {}, "meta": {}}
-                        except Exception as final_error:
-                            logger.error("最終修復試行も失敗: %s", final_error)
-                            QMessageBox.critical(widget, "エラー", 
-                                               "データセットファイルの読み込みに完全に失敗しました。\n"
-                                               "空のデータセットリストから開始します。")
-                            data = {"data": [], "links": {}, "meta": {}}
-                finally:
-                    file_progress.close()
-                
-                # ユーザーのgrantNumber取得のプログレス表示
-                user_progress = create_progress_dialog("ユーザー情報取得中", "ユーザーの権限情報を取得しています...", 0)
-                user_progress.show()
-                QApplication.processEvents()
-                
-                try:
+                    
+                    # ユーザーのgrantNumber取得
+                    loading_progress.setLabelText("ユーザーの権限情報を取得しています...")
+                    QApplication.processEvents()
+                    
                     # データをキャッシュに保存
                     dataset_cache["raw_data"] = data.get("data", [])
                     dataset_cache["last_modified"] = current_modified
                     dataset_cache["user_grant_numbers"] = get_user_grant_numbers()
                     logger.info("基本データキャッシュ更新: データセット数=%s", len(dataset_cache['raw_data']))
+                    
                 finally:
-                    user_progress.close()
+                    loading_progress.close()
             else:
                 logger.info("キャッシュから基本データを使用")
             

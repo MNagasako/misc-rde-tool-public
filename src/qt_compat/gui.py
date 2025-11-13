@@ -28,6 +28,7 @@ QIntValidator = QtGui.QIntValidator  # PySide6/PyQt5共通
 QDoubleValidator = QtGui.QDoubleValidator
 QValidator = QtGui.QValidator
 QShortcut = QtGui.QShortcut
+QKeyEvent = QtGui.QKeyEvent  # キーボードイベント
 
 __all__ = [
     'QtGui',
@@ -49,4 +50,5 @@ __all__ = [
     'QDoubleValidator',
     'QValidator',
     'QShortcut',
+    'QKeyEvent',
 ]

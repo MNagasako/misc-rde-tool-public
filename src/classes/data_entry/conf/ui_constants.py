@@ -101,7 +101,6 @@ QPushButton {
     margin-top: 0.05em;
     margin-bottom: 0.05em;
     min-height: 1.3em;
-    transition: background 0.2s;
 }
 QPushButton:enabled {
     background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #42a5f5, stop:1 #1976d2);

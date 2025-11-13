@@ -227,10 +227,22 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
             subgroup_path = get_dynamic_file_path("output/rde/data/subGroup.json")
             if os.path.exists(subgroup_path):
                 with open(subgroup_path, 'r', encoding='utf-8') as f:
-                    subgroups = json.load(f)
+                    subgroup_data = json.load(f)
+                
+                # 正しいデータ構造から読み込み: {"data": {...}, "included": [...]}
+                subgroups = subgroup_data.get("included", [])
                 
                 for subgroup in subgroups:
+                    # データ構造の検証
+                    if not isinstance(subgroup, dict):
+                        logger.warning("サブグループデータが辞書でない - スキップ")
+                        continue
+                    
                     attrs = subgroup.get("attributes", {})
+                    if not isinstance(attrs, dict):
+                        logger.warning("サブグループのattributesが辞書でない - スキップ")
+                        continue
+                    
                     subgroup_id = subgroup.get("id", "")
                     subgroup_name = attrs.get("name", "")
                     display_text = f"{subgroup_name} ({subgroup_id})"
@@ -240,6 +252,8 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
             
         except Exception as e:
             logger.error("サブグループ読み込みエラー: %s", e)
+            import traceback
+            traceback.print_exc()
     
     def get_user_grant_numbers():
         """

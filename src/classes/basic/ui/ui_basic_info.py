@@ -10,8 +10,18 @@ from classes.utils.progress_worker import ProgressWorker, SimpleProgressWorker
 # ロガー設定
 logger = logging.getLogger(__name__)
 
-def show_progress_dialog(parent, title, worker):
-    """プログレス表示付きで処理を実行する共通関数"""
+def show_progress_dialog(parent, title, worker, show_completion_dialog=True):
+    """プログレス表示付きで処理を実行する共通関数
+    
+    Args:
+        parent: 親ウィジェット
+        title: プログレスダイアログのタイトル
+        worker: ProgressWorker or SimpleProgressWorker
+        show_completion_dialog: 完了時にダイアログを表示するか（デフォルト: True）
+    
+    Returns:
+        QProgressDialog: プログレスダイアログインスタンス
+    """
     progress_dialog = QProgressDialog(parent)
     progress_dialog.setWindowTitle(title)
     progress_dialog.setLabelText("処理を開始しています...")
@@ -34,10 +44,12 @@ def show_progress_dialog(parent, title, worker):
         def handle_finished():
             if progress_dialog:
                 progress_dialog.close()
-            if success:
-                QMessageBox.information(parent, title, message)
-            else:
-                QMessageBox.critical(parent, f"{title} - エラー", message)
+            # show_completion_dialog=Falseの場合はダイアログを表示しない
+            if show_completion_dialog:
+                if success:
+                    QMessageBox.information(parent, title, message)
+                else:
+                    QMessageBox.critical(parent, f"{title} - エラー", message)
         QTimer.singleShot(0, handle_finished)
     
     # キャンセル処理

@@ -311,7 +311,21 @@ class DatasetUploadTab(QWidget):
         self.file_list_widget = QListWidget()
         self.file_list_widget.setMaximumHeight(300)
         self.file_list_widget.setMaximumWidth(500)  # 幅を制限
-        self.file_list_widget.itemClicked.connect(self._on_file_item_clicked)  # クリックイベントに変更
+        self.file_list_widget.itemClicked.connect(self._on_file_item_clicked)  # クリックイベント
+        self.file_list_widget.currentItemChanged.connect(self._on_file_item_selection_changed)  # カーソルキー対応
+        self.file_list_widget.installEventFilter(self)  # キーボードイベントフィルタ
+        # スタイルシート: ホバー時の背景色を少し濃く、選択時は更に濃く
+        self.file_list_widget.setStyleSheet("""
+            QListWidget::item:hover {
+                background-color: #e8f4f8;
+            }
+            QListWidget::item:selected {
+                background-color: #d0e8f0;
+            }
+            QListWidget::item:selected:hover {
+                background-color: #d0e8f0;  /* 選択時はホバー色を無効化 */
+            }
+        """)
         file_list_left_layout.addWidget(self.file_list_widget)
         
         file_list_main_layout.addWidget(file_list_left_container)
@@ -713,6 +727,8 @@ class DatasetUploadTab(QWidget):
                     self.file_list_widget.clear()
                     self.file_list_group.setVisible(False)
                     self.thumbnail_label.setText("ファイルにマウスオーバーで\nプレビューを表示")
+                    # 画像アップロードボタンも無効化
+                    self._update_image_upload_button_state()
                 
                 # データ取得2タブとの同期（将来実装）
                 # self._sync_with_data_fetch2(dataset_id)
@@ -802,6 +818,8 @@ class DatasetUploadTab(QWidget):
                 self.file_list_widget.clear()
                 self.file_list_group.setVisible(False)
                 self.thumbnail_label.setText("ファイルにマウスオーバーで\nプレビューを表示")
+                # 画像アップロードボタンも無効化
+                self._update_image_upload_button_state()
         else:
             self.dataset_info_label.setText(f"⚠️ JSONファイルが見つかりません: {dataset_id}")
             self._log_status(f"❌ JSONファイル未検出: {dataset_id}", error=True)
@@ -810,6 +828,8 @@ class DatasetUploadTab(QWidget):
             self.open_files_folder_btn.setEnabled(False)
             self.file_list_widget.clear()
             self.file_list_group.setVisible(False)
+            # 画像アップロードボタンも無効化
+            self._update_image_upload_button_state()
     
     def _get_dataset_info_from_json(self, dataset_id: str) -> dict:
         """dataset.jsonからデータセット情報を取得"""
@@ -1765,6 +1785,8 @@ class DatasetUploadTab(QWidget):
                 # チェックボックス
                 checkbox = QCheckBox()
                 checkbox.setChecked(False)  # デフォルトで未チェックに変更
+                # チェックボックス変更時にプレビュー表示
+                checkbox.stateChanged.connect(lambda state, itm=item: self._on_checkbox_changed(itm))
                 item_layout.addWidget(checkbox)
                 
                 # ファイル名ラベル
@@ -1800,20 +1822,80 @@ class DatasetUploadTab(QWidget):
         画像アップロードボタンの有効/無効を更新
         
         条件:
-        - JSONアップロード完了済み
+        - JSONアップロード完了済み OR データポータル修正ボタンが有効（エントリ登録済み）
         - ファイルリストに1件以上のファイルがある
         """
         has_files = self.file_list_widget.count() > 0
-        can_upload = self.json_uploaded and has_files
+        # JSONアップロード済み、またはデータポータル修正ボタンが有効（既存エントリ）
+        entry_exists = self.json_uploaded or self.edit_portal_btn.isEnabled()
+        can_upload = entry_exists and has_files
         
         self.upload_images_btn.setEnabled(can_upload)
         
-        if not self.json_uploaded and has_files:
+        if not entry_exists and has_files:
             self.upload_images_btn.setToolTip("先に書誌情報JSONをアップロードしてください")
         elif can_upload:
-            self.upload_images_btn.setToolTip("チェックした画像をData Serviceにアップロードします")
+            self.upload_images_btn.setToolTip("チェックした画像をデータポータルにアップロードします")
         else:
             self.upload_images_btn.setToolTip("画像ファイルを取得してください")
+    
+    def eventFilter(self, obj, event):
+        """
+        イベントフィルタ: スペースキーでチェックボックスのオン/オフ
+        
+        Args:
+            obj: イベントを受け取るオブジェクト
+            event: イベント
+        
+        Returns:
+            bool: イベントを処理した場合True
+        """
+        try:
+            from qt_compat.core import QEvent
+            from qt_compat.gui import QKeyEvent
+            from qt_compat.core import Qt
+            
+            if obj == self.file_list_widget and event.type() == QEvent.KeyPress:
+                key_event = event
+                if key_event.key() == Qt.Key_Space:
+                    # 現在選択されているアイテムのチェックボックスをトグル
+                    current_item = self.file_list_widget.currentItem()
+                    if current_item:
+                        item_widget = self.file_list_widget.itemWidget(current_item)
+                        if item_widget:
+                            checkbox = item_widget.findChild(QCheckBox)
+                            if checkbox:
+                                checkbox.setChecked(not checkbox.isChecked())
+                                logger.debug(f"スペースキーでチェックボックスをトグル: {checkbox.isChecked()}")
+                        return True  # イベントを処理済みとしてマーク
+            
+        except Exception as e:
+            logger.error(f"イベントフィルタエラー: {e}")
+        
+        return super().eventFilter(obj, event)
+    
+    def _on_file_item_selection_changed(self, current, previous):
+        """
+        ファイルアイテムの選択が変更された時の処理（カーソルキー対応）
+        
+        Args:
+            current: 現在選択されているアイテム (QListWidgetItem)
+            previous: 前に選択されていたアイテム (QListWidgetItem)
+        """
+        if current:
+            self._show_file_preview(current)
+    
+    def _on_checkbox_changed(self, item):
+        """
+        チェックボックスの状態が変更された時の処理
+        
+        Args:
+            item: QListWidgetItem
+        """
+        # チェックボックスをクリックした時もプレビューを表示
+        # アイテムを選択状態にしてからプレビュー表示
+        self.file_list_widget.setCurrentItem(item)
+        self._show_file_preview(item)
     
     def _on_file_item_clicked(self, item):
         """
@@ -1822,12 +1904,19 @@ class DatasetUploadTab(QWidget):
         Args:
             item: QListWidgetItem
         """
+        # アイテムを選択状態にする（currentItemChangedが発火してプレビュー表示される）
+        self.file_list_widget.setCurrentItem(item)
+    
+    def _show_file_preview(self, item):
+        """
+        ファイルのプレビューを表示（共通処理）
+        
+        Args:
+            item: QListWidgetItem
+        """
         try:
             from qt_compat.gui import QPixmap
             from qt_compat.core import Qt
-            
-            # アイテムを選択状態にする
-            self.file_list_widget.setCurrentItem(item)
             
             file_info = item.data(Qt.UserRole)
             if not file_info:
@@ -2668,11 +2757,15 @@ class DatasetUploadTab(QWidget):
                 self.current_status = None
             
             logger.info(f"[CHECK_ENTRY] ===== エントリ確認完了 (ボタン有効: {self.edit_portal_btn.isEnabled()}, ステータス: {self.current_status}) =====")
+            
+            # 画像アップロードボタンの状態も更新
+            self._update_image_upload_button_state()
                 
         except Exception as e:
             logger.error(f"[CHECK_ENTRY] ❌ エラー発生: {e}", exc_info=True)
             self.edit_portal_btn.setEnabled(False)
             self.toggle_status_btn.setEnabled(False)
+            self._update_image_upload_button_state()
     
     def _on_edit_portal(self):
         """データポータル修正処理"""
