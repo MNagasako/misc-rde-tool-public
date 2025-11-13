@@ -47,9 +47,11 @@ def _cleanup_old_logs():
             
             if date_str != today:
                 log_file.unlink()
-                logger.debug("古いAPIログ削除: %s", log_file.name)
+                # モジュール初期化時はloggerがまだ存在しないため、printを使用
+                # print(f"[API_LOGGER] 古いAPIログ削除: {log_file.name}")
     except Exception as e:
-        logger.error("APIログクリーンアップエラー: %s", e)
+        # モジュール初期化時のエラーは静かに無視（ログシステムが未初期化のため）
+        pass
 
 
 def _init_logger():
@@ -90,8 +92,13 @@ def _init_logger():
 
 def get_logger() -> logging.Logger:
     """APIロガーを取得（自動初期化）"""
+    global _api_logger
+    
     if _api_logger is None or _current_log_date != datetime.now().strftime("%Y%m%d"):
         _init_logger()
+    
+    # _init_logger()は必ず_api_loggerを初期化するため、ここではNoneではない
+    assert _api_logger is not None, "Logger initialization failed"
     return _api_logger
 
 
