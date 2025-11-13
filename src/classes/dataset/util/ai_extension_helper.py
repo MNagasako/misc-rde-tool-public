@@ -7,6 +7,11 @@ import os
 import json
 from config.common import get_base_dir
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 def load_ai_extension_config():
     """AI拡張設定ファイルを読み込む"""
     try:
@@ -15,15 +20,15 @@ def load_ai_extension_config():
         if os.path.exists(config_path):
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-                print(f"[INFO] AI拡張設定ファイルを読み込みました: {config_path}")
+                logger.info("AI拡張設定ファイルを読み込みました: %s", config_path)
                 return config
         else:
-            print(f"[INFO] AI拡張設定ファイルが見つかりません。デフォルト設定を使用します: {config_path}")
+            logger.info("AI拡張設定ファイルが見つかりません。デフォルト設定を使用します: %s", config_path)
             return get_default_ai_extension_config()
             
     except Exception as e:
-        print(f"[ERROR] AI拡張設定読み込みエラー: {e}")
-        print("[INFO] デフォルト設定を使用します")
+        logger.error("AI拡張設定読み込みエラー: %s", e)
+        logger.info("デフォルト設定を使用します")
         return get_default_ai_extension_config()
 
 def get_default_ai_extension_config():
@@ -62,19 +67,19 @@ def load_prompt_file(prompt_file_path):
             # 相対パスの場合はベースディレクトリから構築
             full_path = os.path.join(get_base_dir(), prompt_file_path)
         
-        print(f"[DEBUG] プロンプトファイル読み込み試行: {full_path}")
+        logger.debug("プロンプトファイル読み込み試行: %s", full_path)
         
         if os.path.exists(full_path):
             with open(full_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-                print(f"[INFO] プロンプトファイル読み込み成功: {full_path}")
+                logger.info("プロンプトファイル読み込み成功: %s", full_path)
                 return content
         else:
-            print(f"[WARNING] プロンプトファイルが見つかりません: {full_path}")
+            logger.warning("プロンプトファイルが見つかりません: %s", full_path)
             return None
             
     except Exception as e:
-        print(f"[ERROR] プロンプトファイル読み込みエラー: {e}")
+        logger.error("プロンプトファイル読み込みエラー: %s", e)
         return None
 
 def save_prompt_file(prompt_file_path, content):
@@ -90,7 +95,7 @@ def save_prompt_file(prompt_file_path, content):
         return True
             
     except Exception as e:
-        print(f"[ERROR] プロンプトファイル保存エラー: {e}")
+        logger.error("プロンプトファイル保存エラー: %s", e)
         return False
 
 def format_prompt_with_context(prompt_template, context_data):
@@ -104,22 +109,22 @@ def format_prompt_with_context(prompt_template, context_data):
         grant_number = context_data.get('grant_number')
         
         if grant_number and grant_number != "未設定":
-            print(f"[DEBUG] ARIM報告書データ取得開始: {grant_number}")
+            logger.debug("ARIM報告書データ取得開始: %s", grant_number)
             try:
                 from classes.dataset.util.arim_report_fetcher import fetch_arim_report_data
                 arim_data = fetch_arim_report_data(grant_number)
                 
                 if arim_data:
                     enhanced_context.update(arim_data)
-                    print(f"[INFO] ARIM報告書データを統合: {len(arim_data)}項目")
+                    logger.info("ARIM報告書データを統合: %s項目", len(arim_data))
                     
                     # デバッグ用：取得したキーを表示
                     for key in arim_data.keys():
-                        print(f"[DEBUG] ARIM データキー: {key}")
+                        logger.debug("ARIM データキー: %s", key)
                 else:
-                    print(f"[INFO] ARIM報告書が見つかりませんでした: {grant_number}")
+                    logger.info("ARIM報告書が見つかりませんでした: %s", grant_number)
             except Exception as e:
-                print(f"[WARNING] ARIM報告書取得でエラー: {e}")
+                logger.warning("ARIM報告書取得でエラー: %s", e)
                 # エラーがあってもベースのコンテキストで続行
         
         # コンテキストデータのキーと値で置換
@@ -133,5 +138,5 @@ def format_prompt_with_context(prompt_template, context_data):
         return formatted_prompt
         
     except Exception as e:
-        print(f"[ERROR] プロンプト置換エラー: {e}")
+        logger.error("プロンプト置換エラー: %s", e)
         return prompt_template

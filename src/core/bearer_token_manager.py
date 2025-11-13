@@ -51,40 +51,40 @@ class BearerTokenManager:
         Returns:
             str: 有効なBearer Token、無効または存在しない場合はNone
         """
-        print("[TOKEN-DEBUG] get_valid_token() 開始")
+        logger.debug("get_valid_token() 開始")
         try:
-            print("[TOKEN-DEBUG] logger.info呼び出し前")
+            logger.debug("logger.info呼び出し前")
             logger.info("[TOKEN] 有効なBearerトークン取得を開始")
-            print("[TOKEN-DEBUG] logger.info呼び出し後")
+            logger.debug("logger.info呼び出し後")
             
             # 1. ファイルからトークンを読み込み
-            print("[TOKEN-DEBUG] _load_token_from_file()呼び出し前")
+            logger.debug("_load_token_from_file()呼び出し前")
             token = BearerTokenManager._load_token_from_file()
-            print(f"[TOKEN-DEBUG] _load_token_from_file()結果: {token[:20] if token else 'None'}...")
+            logger.debug("_load_token_from_file()結果: %s...", token[:20] if token else 'None')
             if not token:
                 logger.warning("[TOKEN] Bearerトークンファイルが存在しないか空です")
-                print("[TOKEN-DEBUG] トークンファイルが存在しないか空、Noneを返却")
+                logger.debug("トークンファイルが存在しないか空、Noneを返却")
                 return None
             
             logger.info(f"[TOKEN] ファイルから読み込んだトークン: {token[:20]}...")
             
             # 2. トークンの有効性を検証
             logger.debug("[TOKEN] トークンの有効性を検証中...")
-            print("[TOKEN-DEBUG] validate_token()呼び出し前")
+            logger.debug("validate_token()呼び出し前")
             is_valid = BearerTokenManager.validate_token(token)
-            print(f"[TOKEN-DEBUG] validate_token()結果: {is_valid}")
+            logger.debug("validate_token()結果: %s", is_valid)
             if is_valid:
                 logger.info("[TOKEN] Bearerトークン検証成功")
-                print(f"[TOKEN-DEBUG] 検証成功、トークン返却: {token[:20]}...")
+                logger.debug("検証成功、トークン返却: %s...", token[:20])
                 return token
             else:
                 logger.warning("[TOKEN] Bearerトークンが無効です")
-                print("[TOKEN-DEBUG] 検証失敗、Noneを返却")
+                logger.debug("検証失敗、Noneを返却")
                 return None
                 
         except Exception as e:
             logger.error(f"[TOKEN] Bearerトークン取得エラー: {e}", exc_info=True)
-            print(f"[TOKEN-DEBUG] 例外発生: {e}")
+            logger.debug("例外発生: %s", e)
             return None
     
     @staticmethod
@@ -231,21 +231,21 @@ class BearerTokenManager:
         Returns:
             str: 有効なBearer Token、取得失敗時はNone
         """
-        print("[TOKEN-DEBUG] get_token_with_relogin_prompt() 開始")
-        print("[TOKEN-DEBUG] get_valid_token()呼び出し前")
+        logger.debug("get_token_with_relogin_prompt() 開始")
+        logger.debug("get_valid_token()呼び出し前")
         token = BearerTokenManager.get_valid_token()
-        print(f"[TOKEN-DEBUG] get_valid_token()結果: {token[:20] if token else 'None'}...")
+        logger.debug("get_valid_token()結果: %s...", token[:20] if token else 'None')
         
         if token:
-            print(f"[TOKEN-DEBUG] トークン取得成功、返却: {token[:20]}...")
+            logger.debug("トークン取得成功、返却: %s...", token[:20])
             return token
         
         # 無効時は再ログイン促進
-        print("[TOKEN-DEBUG] トークン取得失敗、再ログイン促進を実行")
+        logger.debug("トークン取得失敗、再ログイン促進を実行")
         if BearerTokenManager.request_relogin_if_invalid(parent_widget):
             # 再ログイン後の再試行（実装は呼び出し元で行う）
             logger.info("再ログイン促進を実行しました")
-            print("[TOKEN-DEBUG] 再ログイン促進完了")
+            logger.debug("再ログイン促進完了")
         
-        print("[TOKEN-DEBUG] None返却")
+        logger.debug("None返却")
         return None

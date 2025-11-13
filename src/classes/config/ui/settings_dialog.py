@@ -464,7 +464,7 @@ def run_settings_logic(parent=None, bearer_token=None):
                 from qt_compat.widgets import QMessageBox
                 QMessageBox.warning(parent, "エラー", f"設定ダイアログの起動に失敗しました: {e}")
             except:
-                print(f"設定ダイアログエラー: {e}")
+                logger.error("設定ダイアログエラー: %s", e)
 
 
 def create_settings_widget(parent=None, bearer_token=None):

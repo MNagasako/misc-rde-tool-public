@@ -7,6 +7,7 @@ import datetime
 import webbrowser
 import shutil
 import codecs
+import logging
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGridLayout, 
     QPushButton, QMessageBox, QScrollArea, QCheckBox, QRadioButton, 
@@ -19,6 +20,9 @@ from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_no
 from classes.dataset.ui.taxonomy_builder_dialog import TaxonomyBuilderDialog
 from classes.dataset.ui.ai_suggestion_dialog import AISuggestionDialog
 
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 
 def repair_json_file(file_path):
     """破損したJSONファイルの修復を試行"""
@@ -26,23 +30,23 @@ def repair_json_file(file_path):
         import codecs
         import re
         
-        print("[INFO] JSONファイル修復を開始")
-        print(f"[DEBUG] 対象ファイル: {file_path}")
+        logger.info("JSONファイル修復を開始")
+        logger.debug("対象ファイル: %s", file_path)
         
         # 複数のエンコーディングでの読み込みを試行
         encodings = ['utf-8', 'utf-8-sig', 'cp1252', 'latin1', 'shift_jis']
         
         for encoding in encodings:
             try:
-                print(f"[DEBUG] エンコーディング '{encoding}' で読み込み試行")
+                logger.debug("エンコーディング '%s' で読み込み試行", encoding)
                 with codecs.open(file_path, 'r', encoding=encoding, errors='replace') as f:
                     content = f.read()
                 
-                print(f"[DEBUG] 読み込み完了。文字数: {len(content)}")
+                logger.debug("読み込み完了。文字数: %s", len(content))
                 
                 # より包括的なクリーンアップ
                 # 1. すべての制御文字を除去（\t, \n, \r, スペースは保持）
-                print("[DEBUG] 制御文字クリーンアップを実行")
+                logger.debug("制御文字クリーンアップを実行")
                 original_len = len(content)
                 # \x00-\x1F の制御文字のうち、\t(\x09), \n(\x0A), \r(\x0D), space(\x20)以外を除去
                 content = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', content)
@@ -54,55 +58,55 @@ def repair_json_file(file_path):
                 # NULL文字やその他の問題を引き起こす可能性のある文字
                 content = content.replace('\x00', '')
                 
-                print(f"[DEBUG] クリーンアップ後の文字数: {len(content)} (削減: {original_len - len(content)}文字)")
+                logger.debug("クリーンアップ後の文字数: %s (削減: %s文字)", len(content), original_len - len(content))
                 
                 # JSONとしてパース可能かテスト
                 try:
                     data = json.loads(content)
-                    print(f"[INFO] エンコーディング '{encoding}' で読み込み成功")
+                    logger.info("エンコーディング '%s' で読み込み成功", encoding)
                     
                     # 修復したファイルをUTF-8で保存
                     backup_path = file_path + '.corrupted_backup'
                     shutil.copy2(file_path, backup_path)
-                    print(f"[INFO] 破損ファイルをバックアップ: {backup_path}")
+                    logger.info("破損ファイルをバックアップ: %s", backup_path)
                     
                     with open(file_path, 'w', encoding='utf-8') as f:
                         json.dump(data, f, ensure_ascii=False, indent=2)
-                    print(f"[INFO] ファイルをUTF-8で再保存しました")
+                    logger.info("ファイルをUTF-8で再保存しました")
                     
                     return data
                     
                 except json.JSONDecodeError as json_err:
                     # JSONパースエラーの詳細を表示
-                    print(f"[DEBUG] JSONパースエラー詳細: {json_err}")
-                    print(f"[DEBUG] エラー位置: 行{getattr(json_err, 'lineno', '不明')} 列{getattr(json_err, 'colno', '不明')}")
+                    logger.debug("JSONパースエラー詳細: %s", json_err)
+                    logger.debug("エラー位置: 行%s 列%s", getattr(json_err, 'lineno', '不明'), getattr(json_err, 'colno', '不明'))
                     
                     # エラー位置周辺のテキストを表示
                     if hasattr(json_err, 'pos') and json_err.pos:
                         start_pos = max(0, json_err.pos - 50)
                         end_pos = min(len(content), json_err.pos + 50)
                         context = content[start_pos:end_pos]
-                        print(f"[DEBUG] エラー位置周辺のテキスト: {context!r}")
+                        logger.debug("エラー位置周辺のテキスト: %r", context)
                     
                     continue
                 
             except (UnicodeError, Exception) as e:
-                print(f"[DEBUG] エンコーディング '{encoding}' 失敗: {e}")
+                logger.debug("エンコーディング '%s' 失敗: %s", encoding, e)
                 continue
         
-        print("[ERROR] すべてのエンコーディング試行が失敗しました")
+        logger.error("すべてのエンコーディング試行が失敗しました")
         
         # 最後の手段として、ファイルの修復を試みる
-        print("[INFO] 最後の手段として、部分的な修復を試行")
+        logger.info("最後の手段として、部分的な修復を試行")
         try:
             return attempt_partial_recovery(file_path)
         except Exception as recovery_err:
-            print(f"[ERROR] 部分回復も失敗: {recovery_err}")
+            logger.error("部分回復も失敗: %s", recovery_err)
         
         return None
         
     except Exception as e:
-        print(f"[ERROR] ファイル修復中の予期しないエラー: {e}")
+        logger.error("ファイル修復中の予期しないエラー: %s", e)
         import traceback
         traceback.print_exc()
         return None
@@ -112,7 +116,7 @@ def attempt_partial_recovery(file_path):
     """部分的な修復を試行"""
     import re
     
-    print("[DEBUG] 部分的修復を開始")
+    logger.debug("部分的修復を開始")
     
     # バイナリモードで読み込み、有効なJSON部分を抽出を試みる
     with open(file_path, 'rb') as f:
@@ -127,18 +131,18 @@ def attempt_partial_recovery(file_path):
         json_start = content.find('{"')
     
     if json_start == -1:
-        print("[ERROR] JSON構造の開始が見つかりません")
+        logger.error("JSON構造の開始が見つかりません")
         return None
     
-    print(f"[DEBUG] JSON開始位置: {json_start}")
+    logger.debug("JSON開始位置: %s", json_start)
     
     # 後方から有効な終了位置を見つける
     json_end = content.rfind('}')
     if json_end == -1:
-        print("[ERROR] JSON構造の終了が見つかりません")
+        logger.error("JSON構造の終了が見つかりません")
         return None
     
-    print(f"[DEBUG] JSON終了位置: {json_end}")
+    logger.debug("JSON終了位置: %s", json_end)
     
     # 部分的なJSONを抽出
     partial_json = content[json_start:json_end + 1]
@@ -149,10 +153,10 @@ def attempt_partial_recovery(file_path):
     
     try:
         data = json.loads(partial_json)
-        print("[INFO] 部分的修復に成功")
+        logger.info("部分的修復に成功")
         return data
     except json.JSONDecodeError as e:
-        print(f"[ERROR] 部分的修復も失敗: {e}")
+        logger.error("部分的修復も失敗: %s", e)
         return None
 
 
@@ -175,7 +179,7 @@ def get_grant_numbers_from_dataset(dataset_data):
         dataset_grant_number = dataset_data.get("attributes", {}).get("grantNumber", "")
         if dataset_grant_number:
             grant_numbers.add(dataset_grant_number)
-            print(f"[DEBUG] データセットの課題番号: {dataset_grant_number}")
+            logger.debug("データセットの課題番号: %s", dataset_grant_number)
             
             # このgrantNumberを持つサブグループを探し、そのサブグループの全課題番号を取得
             sub_group_path = get_dynamic_file_path('output/rde/data/subGroup.json')
@@ -202,11 +206,11 @@ def get_grant_numbers_from_dataset(dataset_data):
                         if dataset_grant_found:
                             grant_numbers = group_grant_numbers
                             group_name = item.get("attributes", {}).get("name", "不明")
-                            print(f"[DEBUG] データセットのサブグループ '{group_name}' の全課題番号: {sorted(grant_numbers)}")
+                            logger.debug("データセットのサブグループ '%s' の全課題番号: %s", group_name, sorted(grant_numbers))
                             break
     
     except Exception as e:
-        print(f"[ERROR] データセットから課題番号取得に失敗: {e}")
+        logger.error("データセットから課題番号取得に失敗: %s", e)
     
     return grant_numbers
 
@@ -220,20 +224,20 @@ def get_user_grant_numbers():
     self_path = get_dynamic_file_path('output/rde/data/self.json')
     user_grant_numbers = set()
     
-    print(f"[DEBUG] サブグループファイルパス: {sub_group_path}")
-    print(f"[DEBUG] セルフファイルパス: {self_path}")
-    print(f"[DEBUG] サブグループファイル存在: {os.path.exists(sub_group_path)}")
-    print(f"[DEBUG] セルフファイル存在: {os.path.exists(self_path)}")
+    logger.debug("サブグループファイルパス: %s", sub_group_path)
+    logger.debug("セルフファイルパス: %s", self_path)
+    logger.debug("サブグループファイル存在: %s", os.path.exists(sub_group_path))
+    logger.debug("セルフファイル存在: %s", os.path.exists(self_path))
     
     try:
         # ログインユーザーID取得
         with open(self_path, encoding="utf-8") as f:
             self_data = json.load(f)
         user_id = self_data.get("data", {}).get("id", None)
-        print(f"[DEBUG] ユーザーID: {user_id}")
+        logger.debug("ユーザーID: %s", user_id)
         
         if not user_id:
-            print("[ERROR] self.jsonからユーザーIDが取得できませんでした。")
+            logger.error("self.jsonからユーザーIDが取得できませんでした。")
             return user_grant_numbers
         
         # ユーザーが属するサブグループを抽出
@@ -257,19 +261,19 @@ def get_user_grant_numbers():
                     # このグループのgrantNumbersを取得
                     subjects = item.get("attributes", {}).get("subjects", [])
                     group_name = item.get("attributes", {}).get("name", "不明")
-                    print(f"[DEBUG] ユーザーが所属するグループ: '{group_name}' (課題数: {len(subjects)})")
+                    logger.debug("ユーザーが所属するグループ: '%s' (課題数: %s)", group_name, len(subjects))
                     
                     for subject in subjects:
                         grant_number = subject.get("grantNumber", "")
                         if grant_number:
                             user_grant_numbers.add(grant_number)
-                            print(f"[DEBUG]   課題番号追加: {grant_number}")
+                            logger.debug("課題番号追加: %s", grant_number)
         
-        print(f"[DEBUG] 検査したTEAMグループ数: {groups_count}")
-        print(f"[DEBUG] 最終的なユーザー課題番号: {sorted(user_grant_numbers)}")
+        logger.debug("検査したTEAMグループ数: %s", groups_count)
+        logger.debug("最終的なユーザー課題番号: %s", sorted(user_grant_numbers))
     
     except Exception as e:
-        print(f"[ERROR] ユーザーgrantNumber取得に失敗: {e}")
+        logger.error("ユーザーgrantNumber取得に失敗: %s", e)
         import traceback
         traceback.print_exc()
     
@@ -399,7 +403,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         dataset_cache["user_grant_numbers"] = None
         dataset_cache["filtered_datasets"].clear()
         dataset_cache["display_data"].clear()
-        print("[INFO] データセットキャッシュをクリアしました")
+        logger.info("データセットキャッシュをクリアしました")
     
     def create_progress_dialog(title, text, maximum=0):
         """プログレスダイアログを作成"""
@@ -443,7 +447,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                 
                 # デバッグ用：最初の10件のデータセットの課題番号を表示
                 if i < 10:
-                    print(f"[DEBUG] データセット{i+1}: '{dataset_name}' (課題番号: '{dataset_grant_number}')")
+                    logger.debug("データセット%s: '%s' (課題番号: '%s')", i+1, dataset_name, dataset_grant_number)
                 
                 # 課題番号部分一致フィルタを適用
                 if grant_number_filter and grant_number_filter.lower() not in dataset_grant_number.lower():
@@ -469,13 +473,13 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         # フィルタタイプに基づいて表示対象を決定
         if filter_type == "user_only":
             filtered_datasets = user_datasets
-            print(f"[DEBUG] フィルタ適用: ユーザー所属のみ ({len(filtered_datasets)}件)")
+            logger.debug("フィルタ適用: ユーザー所属のみ (%s件)", len(filtered_datasets))
         elif filter_type == "others_only":
             filtered_datasets = other_datasets
-            print(f"[DEBUG] フィルタ適用: その他のみ ({len(filtered_datasets)}件)")
+            logger.debug("フィルタ適用: その他のみ (%s件)", len(filtered_datasets))
         elif filter_type == "all":
             filtered_datasets = user_datasets + other_datasets
-            print(f"[DEBUG] フィルタ適用: すべて (ユーザー所属: {len(user_datasets)}件, その他: {len(other_datasets)}件, 合計: {len(filtered_datasets)}件)")
+            logger.debug("フィルタ適用: すべて (ユーザー所属: %s件, その他: %s件, 合計: %s件)", len(user_datasets), len(other_datasets), len(filtered_datasets))
         
         return filtered_datasets, grant_number_matches
     
@@ -635,31 +639,31 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             force_reload: キャッシュを無視して強制再読み込み
         """
         dataset_path = get_dynamic_file_path("output/rde/data/dataset.json")
-        print(f"[DEBUG] データセットファイルパス: {dataset_path}")
-        print(f"[DEBUG] ファイル存在確認: {os.path.exists(dataset_path)}")
-        print(f"[DEBUG] フィルタタイプ: {filter_type}, 課題番号フィルタ: '{grant_number_filter}'")
-        print(f"[DEBUG] 強制再読み込み: {force_reload}")
+        logger.debug("データセットファイルパス: %s", dataset_path)
+        logger.debug("ファイル存在確認: %s", os.path.exists(dataset_path))
+        logger.debug("フィルタタイプ: %s, 課題番号フィルタ: '%s'", filter_type, grant_number_filter)
+        logger.debug("強制再読み込み: %s", force_reload)
         
         # キャッシュキーを生成
         cache_key = get_cache_key(filter_type, grant_number_filter)
         
         # キャッシュが有効で、強制再読み込みでない場合はキャッシュを使用
         if not force_reload and is_cache_valid() and cache_key in dataset_cache["filtered_datasets"]:
-            print(f"[INFO] キャッシュからデータセット一覧を読み込み: {cache_key}")
+            logger.info("キャッシュからデータセット一覧を読み込み: %s", cache_key)
             datasets = dataset_cache["filtered_datasets"][cache_key]
             display_names = dataset_cache["display_data"][cache_key]
             user_grant_numbers = dataset_cache["user_grant_numbers"]
             
             # UIを更新
             update_combo_box_ui(datasets, display_names, filter_type, grant_number_filter, len(datasets))
-            print(f"[INFO] キャッシュからの読み込み完了: {len(datasets)}件")
+            logger.info("キャッシュからの読み込み完了: %s件", len(datasets))
             return
         
         try:
-            print("[INFO] データセット一覧の再読み込みを開始")
+            logger.info("データセット一覧の再読み込みを開始")
             
             if not os.path.exists(dataset_path):
-                print(f"[ERROR] データセットファイルが見つかりません: {dataset_path}")
+                logger.error("データセットファイルが見つかりません: %s", dataset_path)
                 return
             
             # ファイルの最終更新時刻を取得
@@ -667,7 +671,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             
                 # 基本データの読み込み（キャッシュまたは新規読み込み）
             if not is_cache_valid() or force_reload:
-                print("[INFO] 基本データを新規読み込み")
+                logger.info("基本データを新規読み込み")
                 
                 # ファイル読み込みのプログレス表示
                 file_progress = create_progress_dialog("ファイル読み込み中", "dataset.jsonを読み込んでいます...", 0)
@@ -683,65 +687,65 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                     
                 except (json.JSONDecodeError, UnicodeDecodeError) as json_error:
                     file_progress.close()
-                    print(f"[ERROR] データセット読み込みエラー: {json_error}")
-                    print(f"[ERROR] ファイルパス: {dataset_path}")
+                    logger.error("データセット読み込みエラー: %s", json_error)
+                    logger.error("ファイルパス: %s", dataset_path)
                     
                     # UTF-8デコードエラーの場合は修復を試行
                     if isinstance(json_error, UnicodeDecodeError):
-                        print("[INFO] UTF-8デコードエラーを検出、ファイル修復を試行します")
+                        logger.info("UTF-8デコードエラーを検出、ファイル修復を試行します")
                         try:
                             repaired_data = repair_json_file(dataset_path)
                             if repaired_data:
                                 data = repaired_data
-                                print("[INFO] ファイル修復に成功しました")
+                                logger.info("ファイル修復に成功しました")
                             else:
-                                print("[ERROR] ファイル修復に失敗しました")
+                                logger.error("ファイル修復に失敗しました")
                                 return
                         except Exception as repair_error:
-                            print(f"[ERROR] ファイル修復中にエラー: {repair_error}")
+                            logger.error("ファイル修復中にエラー: %s", repair_error)
                             return
                     else:
                         # ファイルサイズ確認
                         file_size = os.path.getsize(dataset_path)
-                        print(f"[ERROR] ファイルサイズ: {file_size} bytes")
+                        logger.error("ファイルサイズ: %s bytes", file_size)
                     
                     # バックアップファイルの確認と復旧試行
                     backup_file = dataset_path + ".backup"
                     if os.path.exists(backup_file):
-                        print(f"[INFO] バックアップファイルから復旧を試行: {backup_file}")
+                        logger.info("バックアップファイルから復旧を試行: %s", backup_file)
                         try:
                             # バックアップファイルも修復機能を使用
                             backup_data = repair_json_file(backup_file)
                             if backup_data:
                                 data = backup_data
-                                print(f"[INFO] バックアップファイルから正常に読み込み、元ファイルを置き換えました")
+                                logger.info("バックアップファイルから正常に読み込み、元ファイルを置き換えました")
                                 # 修復したバックアップで元ファイルを置き換え
                                 shutil.copy2(backup_file, dataset_path)
                             else:
-                                print(f"[ERROR] バックアップファイルも破損しています")
+                                logger.error("バックアップファイルも破損しています")
                                 return
                             
                         except Exception as backup_error:
-                            print(f"[ERROR] バックアップファイルからの復旧も失敗: {backup_error}")
+                            logger.error("バックアップファイルからの復旧も失敗: %s", backup_error)
                             return
                     else:
-                        print(f"[ERROR] バックアップファイルが見つかりません: {backup_file}")
-                        print("[INFO] 最初から読み込みなおしを試行します...")
+                        logger.error("バックアップファイルが見つかりません: %s", backup_file)
+                        logger.info("最初から読み込みなおしを試行します...")
                         
                         # 最後の手段として、元ファイルを修復機能で直接修復
                         try:
                             repaired_original = repair_json_file(dataset_path)
                             if repaired_original:
                                 data = repaired_original
-                                print("[INFO] 元ファイルの直接修復が成功しました")
+                                logger.info("元ファイルの直接修復が成功しました")
                             else:
-                                print("[ERROR] 元ファイルの修復も失敗しました")
+                                logger.error("元ファイルの修復も失敗しました")
                                 QMessageBox.critical(widget, "エラー", 
                                                    "データセットファイルが破損しており、修復できませんでした。\n"
                                                    "新しいファイルが作成されます。")
                                 data = {"data": [], "links": {}, "meta": {}}
                         except Exception as final_error:
-                            print(f"[ERROR] 最終修復試行も失敗: {final_error}")
+                            logger.error("最終修復試行も失敗: %s", final_error)
                             QMessageBox.critical(widget, "エラー", 
                                                "データセットファイルの読み込みに完全に失敗しました。\n"
                                                "空のデータセットリストから開始します。")
@@ -759,17 +763,17 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                     dataset_cache["raw_data"] = data.get("data", [])
                     dataset_cache["last_modified"] = current_modified
                     dataset_cache["user_grant_numbers"] = get_user_grant_numbers()
-                    print(f"[INFO] 基本データキャッシュ更新: データセット数={len(dataset_cache['raw_data'])}")
+                    logger.info("基本データキャッシュ更新: データセット数=%s", len(dataset_cache['raw_data']))
                 finally:
                     user_progress.close()
             else:
-                print("[INFO] キャッシュから基本データを使用")
+                logger.info("キャッシュから基本データを使用")
             
             # キャッシュからデータを取得
             all_datasets = dataset_cache["raw_data"]
             user_grant_numbers = dataset_cache["user_grant_numbers"]
-            print(f"[DEBUG] データセット数: {len(all_datasets)}")
-            print(f"[DEBUG] ユーザーのgrantNumber一覧: {sorted(user_grant_numbers)}")
+            logger.debug("データセット数: %s", len(all_datasets))
+            logger.debug("ユーザーのgrantNumber一覧: %s", sorted(user_grant_numbers))
             
             # フィルタリング処理（プログレス表示付き）
             datasets, grant_number_matches = process_datasets_with_progress(
@@ -778,14 +782,14 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             
             # 課題番号ごとのマッチ結果を表示（ユーザー所属のみ）
             if grant_number_matches:
-                print(f"[DEBUG] 課題番号別マッチ結果（ユーザー所属）:")
+                logger.debug("課題番号別マッチ結果（ユーザー所属）:")
                 for grant_number, count in grant_number_matches.items():
-                    print(f"[DEBUG]   {grant_number}: {count}件")
+                    logger.debug("%s: %s件", grant_number, count)
             
             # セキュリティ情報をログ出力
-            print(f"[INFO] データセット編集: 全データセット数={len(all_datasets)}, 表示データセット数={len(datasets)}")
-            print(f"[INFO] ユーザーが属するgrantNumber: {sorted(user_grant_numbers)}")
-            print(f"[INFO] フィルタ設定: タイプ={filter_type}, 課題番号='{grant_number_filter}'")
+            logger.info("データセット編集: 全データセット数=%s, 表示データセット数=%s", len(all_datasets), len(datasets))
+            logger.info("ユーザーが属するgrantNumber: %s", sorted(user_grant_numbers))
+            logger.info("フィルタ設定: タイプ=%s, 課題番号='%s'", filter_type, grant_number_filter)
             
             # 表示名リストを作成（プログレス表示付き）
             display_names = create_display_names_with_progress(datasets, user_grant_numbers)
@@ -793,12 +797,12 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             # キャッシュに保存
             dataset_cache["filtered_datasets"][cache_key] = datasets
             dataset_cache["display_data"][cache_key] = display_names
-            print(f"[INFO] フィルタ結果をキャッシュに保存: {cache_key} -> {len(datasets)}件")
+            logger.info("フィルタ結果をキャッシュに保存: %s -> %s件", cache_key, len(datasets))
             
             # UIを更新
             update_combo_box_ui(datasets, display_names, filter_type, grant_number_filter, len(datasets))
             
-            print(f"[INFO] データセット一覧の再読み込み完了: {len(datasets)}件")
+            logger.info("データセット一覧の再読み込み完了: %s件", len(datasets))
             
             # QComboBox自体のmousePressEventをラップして全リスト表示＋popup（初回のみ設定）
             if not hasattr(existing_dataset_combo, '_mouse_press_event_set'):
@@ -812,7 +816,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                         cached_datasets = getattr(existing_dataset_combo, '_datasets_cache', [])
                         cached_display_names = getattr(existing_dataset_combo, '_display_names_cache', [])
                         
-                        print(f"[DEBUG] コンボボックス展開: {len(cached_datasets)}件のデータセット")
+                        logger.debug("コンボボックス展開: %s件のデータセット", len(cached_datasets))
                         
                         # 高速化されたアイテム追加処理
                         if cached_datasets:
@@ -829,7 +833,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             
         except Exception as e:
             QMessageBox.warning(widget, "エラー", f"データセット情報の読み込みに失敗しました: {e}")
-            print(f"[ERROR] データセット読み込みエラー: {e}")
+            logger.error("データセット読み込みエラー: %s", e)
             import traceback
             traceback.print_exc()
     
@@ -843,42 +847,42 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         """
         try:
             datasets_file = get_dynamic_file_path("output/rde/data/dataset.json")
-            print(f"[DEBUG] 関連データセット用全データセット読み込み開始: {datasets_file}")
+            logger.debug("関連データセット用全データセット読み込み開始: %s", datasets_file)
             
             if not os.path.exists(datasets_file):
-                print(f"[ERROR] データセットファイルが見つかりません: {datasets_file}")
+                logger.error("データセットファイルが見つかりません: %s", datasets_file)
                 return
             
             try:
                 with open(datasets_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
             except json.JSONDecodeError as json_error:
-                print(f"[ERROR] JSONパースエラー: {json_error}")
-                print(f"[ERROR] ファイルパス: {datasets_file}")
+                logger.error("JSONパースエラー: %s", json_error)
+                logger.error("ファイルパス: %s", datasets_file)
                 
                 # ファイルサイズ確認
                 file_size = os.path.getsize(datasets_file)
-                print(f"[ERROR] ファイルサイズ: {file_size} bytes")
+                logger.error("ファイルサイズ: %s bytes", file_size)
                 
                 # バックアップファイルの確認と復旧試行
                 backup_file = datasets_file + ".backup"
                 if os.path.exists(backup_file):
-                    print(f"[INFO] バックアップファイルから復旧を試行: {backup_file}")
+                    logger.info("バックアップファイルから復旧を試行: %s", backup_file)
                     try:
                         with open(backup_file, 'r', encoding='utf-8') as f:
                             data = json.load(f)
-                        print(f"[INFO] バックアップファイルから正常に読み込みました")
+                        logger.info("バックアップファイルから正常に読み込みました")
                         
                         # 破損したファイルを置き換え
                         import shutil
                         shutil.copy2(backup_file, datasets_file)
-                        print(f"[INFO] バックアップファイルで破損ファイルを置き換えました")
+                        logger.info("バックアップファイルで破損ファイルを置き換えました")
                         
                     except Exception as backup_error:
-                        print(f"[ERROR] バックアップファイルからの復旧も失敗: {backup_error}")
+                        logger.error("バックアップファイルからの復旧も失敗: %s", backup_error)
                         return
                 else:
-                    print(f"[ERROR] バックアップファイルが見つかりません: {backup_file}")
+                    logger.error("バックアップファイルが見つかりません: %s", backup_file)
                     return
             
             all_datasets = data.get("data", [])
@@ -886,9 +890,9 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             # 除外するデータセットIDがある場合はフィルタリング
             if exclude_dataset_id:
                 all_datasets = [dataset for dataset in all_datasets if dataset.get("id") != exclude_dataset_id]
-                print(f"[DEBUG] データセットID '{exclude_dataset_id}' を除外")
+                logger.debug("データセットID '%s' を除外", exclude_dataset_id)
             
-            print(f"[INFO] 全データセット読み込み完了: {len(all_datasets)}件")
+            logger.info("全データセット読み込み完了: %s件", len(all_datasets))
             
             # ユーザーのgrantNumberを取得
             user_grant_numbers = get_user_grant_numbers()
@@ -967,10 +971,10 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             # データセット一覧をComboBoxに保存
             related_dataset_combo._all_datasets_cache = sorted_datasets
             
-            print(f"[INFO] 関連データセット選択機能セットアップ完了: ユーザー所属={len(user_datasets)}件, その他={len(other_datasets)}件")
+            logger.info("関連データセット選択機能セットアップ完了: ユーザー所属=%s件, その他=%s件", len(user_datasets), len(other_datasets))
             
         except Exception as e:
-            print(f"[ERROR] 関連データセット読み込み中にエラー: {e}")
+            logger.error("関連データセット読み込み中にエラー: %s", e)
     
     # 関連データセット選択イベント処理
     def on_related_dataset_selected(related_dataset_combo, selected_datasets_list):
@@ -1005,7 +1009,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             for i in range(selected_datasets_list.count()):
                 item = selected_datasets_list.item(i)
                 if item.data(Qt.UserRole) == dataset_id:
-                    print(f"[INFO] データセット '{dataset_name}' は既に選択済みです")
+                    logger.info("データセット '%s' は既に選択済みです", dataset_name)
                     related_dataset_combo.lineEdit().clear()
                     return
             
@@ -1016,7 +1020,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             
             # コンボボックスをクリア
             related_dataset_combo.lineEdit().clear()
-            print(f"[INFO] 関連データセットを追加: {dataset_name} (ID: {dataset_id})")
+            logger.info("関連データセットを追加: %s (ID: %s)", dataset_name, dataset_id)
     
     # 関連データセット削除処理
     def on_remove_dataset(selected_datasets_list):
@@ -1026,7 +1030,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             dataset_id = current_item.data(Qt.UserRole)
             dataset_text = current_item.text()
             selected_datasets_list.takeItem(selected_datasets_list.row(current_item))
-            print(f"[INFO] 関連データセットを削除: {dataset_text}")
+            logger.info("関連データセットを削除: %s", dataset_text)
     
     # 編集フォーム作成
     def create_edit_form():
@@ -1069,9 +1073,9 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                 grant_completer.setFilterMode(Qt.MatchContains)
                 edit_grant_number_combo.setCompleter(grant_completer)
                 
-                print(f"[DEBUG] 課題番号コンボボックスを更新: {sorted_grant_numbers}")
+                logger.debug("課題番号コンボボックスを更新: %s", sorted_grant_numbers)
             else:
-                print("[DEBUG] 課題番号が空のため、コンボボックスは空のまま")
+                logger.debug("課題番号が空のため、コンボボックスは空のまま")
         
         # この関数をedit_grant_number_comboのプロパティとして保存
         edit_grant_number_combo.update_grant_numbers = update_grant_number_combo_local
@@ -1080,7 +1084,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             user_grant_numbers = get_user_grant_numbers()
             update_grant_number_combo_local(user_grant_numbers)
         except Exception as e:
-            print(f"[DEBUG] 初期課題番号リスト取得エラー: {e}")
+            logger.debug("初期課題番号リスト取得エラー: %s", e)
         
         form_layout.addWidget(edit_grant_number_combo, 1, 1)
         
@@ -1175,7 +1179,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                         dataset_id = selected_dataset.get("id")
                         if dataset_id:
                             context_data['dataset_id'] = dataset_id
-                            print(f"[DEBUG] データセットID設定: {dataset_id}")
+                            logger.debug("データセットID設定: %s", dataset_id)
                 
                 # データセット名
                 if hasattr(edit_dataset_name_edit, 'text'):
@@ -1204,7 +1208,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                 if hasattr(edit_contact_edit, 'text'):
                     context_data['contact'] = edit_contact_edit.text().strip()
                 
-                print(f"[DEBUG] AI提案に渡すコンテキストデータ: {context_data}")
+                logger.debug("AI提案に渡すコンテキストデータ: %s", context_data)
                 
                 # AI提案ダイアログを表示（自動生成有効）
                 dialog = AISuggestionDialog(parent=widget, context_data=context_data, auto_generate=True)
@@ -1244,7 +1248,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                         dataset_id = selected_dataset.get("id")
                         if dataset_id:
                             context_data['dataset_id'] = dataset_id
-                            print(f"[DEBUG] データセットID設定（クイック版）: {dataset_id}")
+                            logger.debug("データセットID設定（クイック版）: %s", dataset_id)
                 
                 # データセット名
                 if hasattr(edit_dataset_name_edit, 'text'):
@@ -1273,7 +1277,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                 if hasattr(edit_contact_edit, 'text'):
                     context_data['contact'] = edit_contact_edit.text().strip()
                 
-                print(f"[DEBUG] クイックAI提案に渡すコンテキストデータ: {context_data}")
+                logger.debug("クイックAI提案に渡すコンテキストデータ: %s", context_data)
                 
                 # クイック版AI機能を実行（ダイアログなし）
                 from classes.dataset.core.quick_ai_suggestion import generate_quick_suggestion
@@ -1285,7 +1289,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                         edit_description_edit.setPlainText(suggestion)
                     else:
                         edit_description_edit.setText(suggestion)
-                    print(f"[INFO] クイックAI提案を適用: {len(suggestion)}文字")
+                    logger.info("クイックAI提案を適用: %s文字", len(suggestion))
                 else:
                     QMessageBox.warning(widget, "警告", "クイックAI提案の生成に失敗しました")
                     
@@ -1451,15 +1455,15 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                 with open(LICENSES_JSON_PATH, 'r', encoding='utf-8') as f:
                     licenses_json = json.load(f)
                     license_data = licenses_json.get("data", [])
-                print(f"[INFO] licenses.jsonから{len(license_data)}件のライセンス情報を読み込みました")
+                logger.info("licenses.jsonから%s件のライセンス情報を読み込みました", len(license_data))
             else:
-                print(f"[WARNING] licenses.jsonが見つかりません: {LICENSES_JSON_PATH}")
+                logger.warning("licenses.jsonが見つかりません: %s", LICENSES_JSON_PATH)
         except Exception as e:
-            print(f"[ERROR] licenses.json読み込みエラー: {e}")
+            logger.error("licenses.json読み込みエラー: %s", e)
         
         # フォールバック用のデフォルトライセンスリスト
         if not license_data:
-            print("[INFO] デフォルトライセンスリストを使用します")
+            logger.info("デフォルトライセンスリストを使用します")
             license_data = [
                 {"id": "CC0-1.0", "fullName": "Creative Commons Zero v1.0 Universal"},
                 {"id": "CC-BY-4.0", "fullName": "Creative Commons Attribution 4.0 International"},
@@ -1621,7 +1625,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                     if current_dataset:
                         current_dataset_id = current_dataset.get("id", "")
                         if dataset_id == current_dataset_id:
-                            print(f"[INFO] 自分自身を関連データセットに指定することはできません: {dataset_title}")
+                            logger.info("自分自身を関連データセットに指定することはできません: %s", dataset_title)
                             related_dataset_combo.setCurrentIndex(-1)  # 選択をクリア
                             return
                 
@@ -1629,7 +1633,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                 for row in range(selected_datasets_list.count()):
                     existing_item = selected_datasets_list.item(row)
                     if existing_item.data(Qt.UserRole) == dataset_id:
-                        print(f"[INFO] データセットは既に選択されています: {dataset_title}")
+                        logger.info("データセットは既に選択されています: %s", dataset_title)
                         related_dataset_combo.setCurrentIndex(-1)  # 選択をクリア
                         return
                 
@@ -1638,7 +1642,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                 item.setData(Qt.UserRole, dataset_id)
                 selected_datasets_list.addItem(item)
                 
-                print(f"[INFO] 関連データセットを追加: {dataset_title}")
+                logger.info("関連データセットを追加: %s", dataset_title)
                 related_dataset_combo.setCurrentIndex(-1)  # 選択をクリア
     
     related_dataset_combo.activated.connect(on_related_combo_activated)
@@ -1753,7 +1757,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         # テンプレートIDをウィジェットに保存し、表示フィールドにも設定
         widget.current_template_id = current_template_id
         edit_template_display.setText(current_template_id)
-        print(f"[DEBUG] テンプレートID保存・表示: {current_template_id}")
+        logger.debug("テンプレートID保存・表示: %s", current_template_id)
         
         attrs = selected_dataset.get("attributes", {})
         
@@ -1777,13 +1781,13 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             
             if found_index >= 0:
                 edit_grant_number_combo.setCurrentIndex(found_index)
-                print(f"[DEBUG] 課題番号 '{current_grant_number}' を選択状態に設定")
+                logger.debug("課題番号 '%s' を選択状態に設定", current_grant_number)
             else:
                 # 見つからない場合はテキストとして設定
                 edit_grant_number_combo.lineEdit().setText(current_grant_number)
-                print(f"[DEBUG] 課題番号 '{current_grant_number}' をテキストとして設定")
+                logger.debug("課題番号 '%s' をテキストとして設定", current_grant_number)
         else:
-            print(f"[DEBUG] 課題番号設定スキップ: current='{current_grant_number}', available={len(dataset_grant_numbers) if dataset_grant_numbers else 0}")
+            logger.debug("課題番号設定スキップ: current='%s', available=%s", current_grant_number, len(dataset_grant_numbers) if dataset_grant_numbers else 0)
         edit_description_edit.setText(attrs.get("description", ""))
         edit_contact_edit.setText(attrs.get("contact", ""))
         
@@ -1802,7 +1806,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                 qdate = QDate(year, month, day)
                 edit_embargo_edit.setDate(qdate)
             except Exception as e:
-                print(f"[WARNING] エンバーゴ日付のパースに失敗: {e}")
+                logger.warning("エンバーゴ日付のパースに失敗: %s", e)
                 # デフォルト値のまま
         
         # タクソノミーキー（スペース区切りで表示）
@@ -1814,7 +1818,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         
         # 関連情報（新しい書式で表示）
         related_links = attrs.get("relatedLinks", [])
-        print(f"[DEBUG] データセットの関連リンク: {related_links}")
+        logger.debug("データセットの関連リンク: %s", related_links)
         
         if related_links:
             links_text = []
@@ -1825,13 +1829,13 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                     # 新しい書式: タイトル:URL
                     link_line = f"{title}:{url}"
                     links_text.append(link_line)
-                    print(f"[DEBUG] 関連情報行追加: '{link_line}'")
+                    logger.debug("関連情報行追加: '%s'", link_line)
             
             final_text = ",".join(links_text)  # カンマ区切りに変更
-            print(f"[DEBUG] テキストエリアに設定する関連情報: '{final_text}'")
+            logger.debug("テキストエリアに設定する関連情報: '%s'", final_text)
             edit_related_links_edit.setText(final_text)
         else:
-            print("[DEBUG] 関連情報が空 - テキストエリアをクリアします")
+            logger.debug("関連情報が空 - テキストエリアをクリアします")
             edit_related_links_edit.clear()  # 関連情報が空の場合は明示的にクリア
         
         # TAGフィールド
@@ -1839,19 +1843,19 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         if tags:
             tags_text = ", ".join(tags)
             edit_tags_edit.setText(tags_text)
-            print(f"[DEBUG] TAGを設定: '{tags_text}'")
+            logger.debug("TAGを設定: '%s'", tags_text)
         else:
             edit_tags_edit.clear()
-            print("[DEBUG] TAGが空 - テキストエリアをクリアします")
+            logger.debug("TAGが空 - テキストエリアをクリアします")
         
         # データセット引用の書式
         citation_format = attrs.get("citationFormat", "")
         if citation_format:
             edit_citation_format_edit.setText(citation_format)
-            print(f"[DEBUG] 引用書式を設定: '{citation_format}'")
+            logger.debug("引用書式を設定: '%s'", citation_format)
         else:
             edit_citation_format_edit.clear()
-            print("[DEBUG] 引用書式が空 - テキストエリアをクリアします")
+            logger.debug("引用書式が空 - テキストエリアをクリアします")
         
         # 利用ライセンスの設定（relationshipsから取得）
         license_value = ""
@@ -1872,14 +1876,14 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             
             if found_index >= 0:
                 edit_license_combo.setCurrentIndex(found_index)
-                print(f"[DEBUG] ライセンス設定 (コンボボックス): '{license_value}'")
+                logger.debug("ライセンス設定 (コンボボックス): '%s'", license_value)
             else:
                 # 見つからない場合はテキストとして設定
                 edit_license_combo.lineEdit().setText(license_value)
-                print(f"[DEBUG] ライセンス設定 (テキスト): '{license_value}'")
+                logger.debug("ライセンス設定 (テキスト): '%s'", license_value)
         else:
             edit_license_combo.setCurrentIndex(-1)
-            print("[DEBUG] ライセンスが空 - 選択をクリア")
+            logger.debug("ライセンスが空 - 選択をクリア")
         
         # 関連データセット表示
         relationships = selected_dataset.get("relationships", {})
@@ -1889,7 +1893,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         selected_datasets_list.clear()
         
         if related_datasets_data:
-            print(f"[DEBUG] 関連データセット: {len(related_datasets_data)}件")
+            logger.debug("関連データセット: %s件", len(related_datasets_data))
             for related_dataset in related_datasets_data:
                 dataset_id = related_dataset.get("id", "")
                 if dataset_id:
@@ -1905,9 +1909,9 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                     list_item = QListWidgetItem(f"{dataset_name} (ID: {dataset_id})")
                     list_item.setData(Qt.UserRole, dataset_id)
                     selected_datasets_list.addItem(list_item)
-                    print(f"[DEBUG] 関連データセット追加: {dataset_name} (ID: {dataset_id})")
+                    logger.debug("関連データセット追加: %s (ID: %s)", dataset_name, dataset_id)
         else:
-            print("[DEBUG] 関連データセットが空")
+            logger.debug("関連データセットが空")
         
         # チェックボックス
         edit_anonymize_checkbox.setChecked(attrs.get("isAnonymized", False))
@@ -1939,10 +1943,10 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
     # ドロップダウン選択時の処理
     def on_dataset_selection_changed():
         current_index = existing_dataset_combo.currentIndex()
-        print(f"[DEBUG] データセット選択変更: インデックス={current_index}")
+        logger.debug("データセット選択変更: インデックス=%s", current_index)
         
         if current_index <= 0:  # 最初のアイテム（"-- データセットを選択してください --"）または無効な選択
-            print("[DEBUG] データセット未選択状態 - フォームをクリアします")
+            logger.debug("データセット未選択状態 - フォームをクリアします")
             clear_edit_form()
             # 関連データセットリストを再セットアップ（除外なし）
             setup_related_datasets(related_dataset_combo)
@@ -1951,14 +1955,14 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
             if selected_dataset:
                 dataset_name = selected_dataset.get("attributes", {}).get("name", "不明")
                 dataset_id = selected_dataset.get("id", "")
-                print(f"[DEBUG] データセット '{dataset_name}' を選択 - フォームに反映します")
+                logger.debug("データセット '%s' を選択 - フォームに反映します", dataset_name)
                 
                 # 関連データセットリストを再セットアップ（現在のデータセットを除外）
                 setup_related_datasets(related_dataset_combo, exclude_dataset_id=dataset_id)
                 
                 populate_edit_form_local(selected_dataset)
             else:
-                print("[DEBUG] データセットデータが取得できません - フォームをクリアします")
+                logger.debug("データセットデータが取得できません - フォームをクリアします")
                 clear_edit_form()
                 # 関連データセットリストを再セットアップ（除外なし）
                 setup_related_datasets(related_dataset_combo)
@@ -1981,9 +1985,9 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         grant_number_filter = grant_number_filter_edit.text().strip()
         
         if force_reload:
-            print(f"[INFO] キャッシュ更新: タイプ={filter_type}, 課題番号='{grant_number_filter}'")
+            logger.info("キャッシュ更新: タイプ=%s, 課題番号='%s'", filter_type, grant_number_filter)
         else:
-            print(f"[INFO] フィルタ適用: タイプ={filter_type}, 課題番号='{grant_number_filter}'")
+            logger.info("フィルタ適用: タイプ=%s, 課題番号='%s'", filter_type, grant_number_filter)
         
         # データセット一覧を再読み込み
         load_existing_datasets(filter_type, grant_number_filter, force_reload)
@@ -2052,7 +2056,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         url = f"https://rde.nims.go.jp/rde/datasets/{dataset_id}"
         try:
             webbrowser.open(url)
-            print(f"[INFO] データセットページをブラウザで開きました: {url}")
+            logger.info("データセットページをブラウザで開きました: %s", url)
         except Exception as e:
             QMessageBox.warning(widget, "エラー", f"ブラウザでページを開けませんでした: {str(e)}")
     
@@ -2074,7 +2078,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         def refresh_ui_after_update():
             """データセット更新後のUI再読み込み"""
             try:
-                print("[INFO] データセット更新後のUI再読み込みを開始")
+                logger.info("データセット更新後のUI再読み込みを開始")
                 # 現在のフィルタ設定でデータセットリストを再読み込み（強制再読み込み）
                 if filter_user_only_radio.isChecked():
                     filter_type = "user_only"
@@ -2107,7 +2111,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                         # 高速化されたアイテム追加処理を使用
                         existing_dataset_combo.clear()
                         if cached_datasets and cached_display_names:
-                            print(f"[INFO] 高速再選択処理: {len(cached_datasets)}件のデータセット")
+                            logger.info("高速再選択処理: %s件のデータセット", len(cached_datasets))
                             populate_combo_box_with_progress(existing_dataset_combo, cached_datasets, cached_display_names)
                         else:
                             # フォールバック処理
@@ -2140,7 +2144,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                         
                         # 更新したデータセットを選択
                         existing_dataset_combo.setCurrentIndex(selected_index)
-                        print(f"[INFO] データセット '{current_dataset_id}' を再選択しました (インデックス: {selected_index})")
+                        logger.info("データセット '%s' を再選択しました (インデックス: %s)", current_dataset_id, selected_index)
                         
                         # 選択されたデータセットの情報をフォームに再表示
                         if selected_index > 0:
@@ -2148,7 +2152,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                             if selected_dataset_new:
                                 populate_edit_form_local(selected_dataset_new)
                     else:
-                        print(f"[WARNING] 更新後のデータセット '{current_dataset_id}' がキャッシュに見つかりません")
+                        logger.warning("更新後のデータセット '%s' がキャッシュに見つかりません", current_dataset_id)
                         # コンボボックスをクリア状態に戻す
                         existing_dataset_combo.clear()
                 else:
@@ -2156,7 +2160,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
                     existing_dataset_combo.clear()
                     
             except Exception as e:
-                print(f"[ERROR] UI再読み込み中にエラー: {e}")
+                logger.error("UI再読み込み中にエラー: %s", e)
         
         # 編集機能を実装（後で追加）
         from classes.dataset.core.dataset_edit_functions import send_dataset_update_request
@@ -2179,7 +2183,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
     
     # 初期状態でフォームをクリア
     clear_edit_form()
-    print("[INFO] データセット編集ウィジェット初期化完了 - フォームをクリアしました")
+    logger.info("データセット編集ウィジェット初期化完了 - フォームをクリアしました")
     
     # 外部からリフレッシュできるように関数を属性として追加
     def refresh_with_current_filter(force_reload=False):
@@ -2196,7 +2200,7 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         grant_number_filter = grant_number_filter_edit.text().strip()
         
         if force_reload:
-            print("[INFO] 外部からキャッシュクリア付きリフレッシュ")
+            logger.info("外部からキャッシュクリア付きリフレッシュ")
             clear_cache()
         
         load_existing_datasets(filter_type, grant_number_filter, force_reload)

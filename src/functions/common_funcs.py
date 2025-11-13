@@ -3,6 +3,11 @@ import os
 from config.common import LOGIN_FILE, OUTPUT_DIR, DEBUG_LOG_PATH, get_base_dir, get_static_resource_path
 import json
 import inspect
+
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
 # === セッション管理ベースのプロキシ対応 ===
 from classes.utils.api_request_helper import api_request
 from datetime import datetime
@@ -17,7 +22,7 @@ def read_login_info():
 
     if not os.path.exists(filepath):
         # ログメッセージを統一（INFOレベル）
-        print(f"[INFO] login.txt が見つかりません: {filepath}")
+        logger.info("login.txt が見つかりません: %s", filepath)
         # login.txtがない場合でもエラーとしては扱わず、None を返す
         return None, None, None
 
@@ -32,14 +37,14 @@ def read_login_info():
             elif len(lines) == 1:
                 # 1行しかない場合（ユーザー名のみ）
                 user = lines[0].strip()
-                print(f"[WARN] login.txt にパスワードが設定されていません")
+                logger.warning("login.txt にパスワードが設定されていません")
                 return user, None, None
             else:
                 # 空ファイル
-                print(f"[WARN] login.txt が空です")
+                logger.warning("login.txt が空です")
                 return None, None, None
     except Exception as e:
-        print(f"[WARN] ログイン情報読込エラー: {e}")
+        logger.warning("ログイン情報読込エラー: %s", e)
         return None, None, None
 
 
@@ -48,7 +53,7 @@ def parse_cookies_txt(filepath):
     """cookies_rde.txt から requests用のdictを生成"""
     cookies = {}
     if not os.path.exists(filepath):
-        print(f"Cookieファイルが存在しません: {filepath}\nWebViewでログインし直してください。")
+        logger.debug("Cookieファイルが存在しません: %s\nWebViewでログインし直してください。", filepath)
         return cookies
     try:
         with open(filepath, encoding='utf-8') as f:
@@ -58,7 +63,7 @@ def parse_cookies_txt(filepath):
                     name, value = pair.strip().split('=', 1)
                     cookies[name.strip()] = value.strip()
     except Exception as e:
-        print(f"Cookieファイル読込エラー: {e}")
+        logger.error("Cookieファイル読込エラー: %s", e)
     return cookies
 
 

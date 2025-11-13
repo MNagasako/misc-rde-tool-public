@@ -7,6 +7,7 @@ import os
 import json
 import datetime
 import time
+import logging
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QMessageBox, QComboBox, 
@@ -18,6 +19,9 @@ from qt_compat.core import Qt, QTimer, QUrl
 from qt_compat.gui import QDesktopServices
 from config.common import get_dynamic_file_path
 from core.bearer_token_manager import BearerTokenManager
+
+# ロガー設定
+logger = logging.getLogger(__name__)
 
 
 def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_button):
@@ -235,7 +239,7 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
             # サブグループフィルタ除去
             
         except Exception as e:
-            print(f"[ERROR] サブグループ読み込みエラー: {e}")
+            logger.error("サブグループ読み込みエラー: %s", e)
     
     def get_user_grant_numbers():
         """
@@ -246,20 +250,20 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
         self_path = get_dynamic_file_path('output/rde/data/self.json')
         user_grant_numbers = set()
         
-        print(f"[DEBUG] サブグループファイルパス: {sub_group_path}")
-        print(f"[DEBUG] セルフファイルパス: {self_path}")
-        print(f"[DEBUG] サブグループファイル存在: {os.path.exists(sub_group_path)}")
-        print(f"[DEBUG] セルフファイル存在: {os.path.exists(self_path)}")
+        logger.debug("サブグループファイルパス: %s", sub_group_path)
+        logger.debug("セルフファイルパス: %s", self_path)
+        logger.debug("サブグループファイル存在: %s", os.path.exists(sub_group_path))
+        logger.debug("セルフファイル存在: %s", os.path.exists(self_path))
         
         try:
             # ログインユーザーID取得
             with open(self_path, encoding="utf-8") as f:
                 self_data = json.load(f)
             user_id = self_data.get("data", {}).get("id", None)
-            print(f"[DEBUG] ユーザーID: {user_id}")
+            logger.debug("ユーザーID: %s", user_id)
             
             if not user_id:
-                print("[ERROR] self.jsonからユーザーIDが取得できませんでした。")
+                logger.error("self.jsonからユーザーIDが取得できませんでした。")
                 return user_grant_numbers
             
             # ユーザーが属するサブグループを抽出
@@ -282,19 +286,19 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
                         # このグループのgrantNumbersを取得
                         subjects = item.get("attributes", {}).get("subjects", [])
                         group_name = item.get("attributes", {}).get("name", "不明")
-                        print(f"[DEBUG] ユーザーが所属するグループ: '{group_name}' (課題数: {len(subjects)})")
+                        logger.debug("ユーザーが所属するグループ: '%s' (課題数: %s)", group_name, len(subjects))
                         
                         for subject in subjects:
                             grant_number = subject.get("grantNumber", "")
                             if grant_number:
                                 user_grant_numbers.add(grant_number)
-                                print(f"[DEBUG]   課題番号追加: {grant_number}")
+                                logger.debug("課題番号追加: %s", grant_number)
             
-            print(f"[DEBUG] 検査したTEAMグループ数: {groups_count}")
-            print(f"[DEBUG] 最終的なユーザー課題番号: {sorted(user_grant_numbers)}")
+            logger.debug("検査したTEAMグループ数: %s", groups_count)
+            logger.debug("最終的なユーザー課題番号: %s", sorted(user_grant_numbers))
         
         except Exception as e:
-            print(f"[ERROR] ユーザーgrantNumber取得に失敗: {e}")
+            logger.error("ユーザーgrantNumber取得に失敗: %s", e)
             import traceback
             traceback.print_exc()
         
@@ -359,13 +363,13 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
             # フィルタタイプに基づいて表示対象を決定
             if filter_type == "user_only":
                 filtered_datasets = user_datasets
-                print(f"[DEBUG] フィルタ適用: ユーザー所属のみ ({len(filtered_datasets)}件)")
+                logger.debug("フィルタ適用: ユーザー所属のみ (%s件)", len(filtered_datasets))
             elif filter_type == "others_only":
                 filtered_datasets = other_datasets
-                print(f"[DEBUG] フィルタ適用: その他のみ ({len(filtered_datasets)}件)")
+                logger.debug("フィルタ適用: その他のみ (%s件)", len(filtered_datasets))
             elif filter_type == "all":
                 filtered_datasets = user_datasets + other_datasets
-                print(f"[DEBUG] フィルタ適用: すべて (ユーザー所属: {len(user_datasets)}件, その他: {len(other_datasets)}件, 合計: {len(filtered_datasets)}件)")
+                logger.debug("フィルタ適用: すべて (ユーザー所属: %s件, その他: %s件, 合計: %s件)", len(user_datasets), len(other_datasets), len(filtered_datasets))
             
             # コンボボックス更新
             dataset_combo.blockSignals(True)
@@ -392,10 +396,10 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
             
             dataset_combo.blockSignals(False)
             
-            print(f"[INFO] フィルタ適用後のデータセット: {len(filtered_datasets)}件 (全{len(datasets)}件中)")
+            logger.info("フィルタ適用後のデータセット: %s件 (全%s件中)", len(filtered_datasets), len(datasets))
             
         except Exception as e:
-            print(f"[ERROR] dataset.json読み込みエラー: {e}")
+            logger.error("dataset.json読み込みエラー: %s", e)
             dataset_combo.clear()
             dataset_combo.addItem("-- データセット読み込みエラー --", "")
     
@@ -426,14 +430,14 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
             
             if current_time - file_mtime < 300:  # 5分 = 300秒
                 needs_fetch = False
-            print(f"[DEBUG][データエントリーキャッシュ] needs_fetch={needs_fetch} now={current_time} file={dataentry_file} 最終更新: {datetime.datetime.fromtimestamp(file_mtime)}")
+            logger.debug("[データエントリーキャッシュ] needs_fetch=%s now=%s file=%s 最終更新: %s", needs_fetch, current_time, dataentry_file, datetime.datetime.fromtimestamp(file_mtime))
         if needs_fetch:
             # データエントリー情報を取得する必要がある
             dataset_info_label.setText(f"データセット: {dataset_id} (取得中...)")
             entry_count_label.setText("データエントリー件数: 取得中...")
             last_updated_label.setText("最終取得: 取得中...")
             entry_table.setRowCount(0)
-            print(f"[DEBUG][データエントリー取得] fetch_dataentry_info({dataset_id}, {force_refresh})")
+            logger.debug("[データエントリー取得] fetch_dataentry_info(%s, %s)", dataset_id, force_refresh)
                 # 少し遅延させてから取得処理を実行
             QTimer.singleShot(100, lambda: fetch_dataentry_info(dataset_id, force_refresh))
         else:
@@ -472,7 +476,7 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
             #return #debug 一時的
             progress.setValue(90)
             QApplication.processEvents()
-            print(f"[DEBUG] fetch_dataset_dataentry result: {success}")
+            logger.debug("fetch_dataset_dataentry result: %s", success)
             if success:
                 # 取得成功、表示を更新
                 load_and_display_dataentry_info(dataset_id)
@@ -483,17 +487,17 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
                 QMessageBox.warning(widget, "取得エラー", "データエントリー情報の取得に失敗しました。")
             
         except ImportError:
-            print("[WARNING] データエントリーロジックモジュールが見つかりません。ダミーデータで対応します。")
+            logger.warning("データエントリーロジックモジュールが見つかりません。ダミーデータで対応します。")
             # データエントリーロジックモジュールが見つからない場合、ダミーデータで対応
             progress.close()
             # QMessageBox.information(widget, "開発中", "データエントリー取得機能は開発中です。\n既存のJSONファイルがあれば表示されます。")
             load_and_display_dataentry_info(dataset_id)
             
         except Exception as e:
-            print(f"[ERROR] データエントリー取得エラー: {e}")
+            logger.error("データエントリー取得エラー: %s", e)
             if progress:
                 progress.close()
-            print(f"[ERROR] データエントリー取得エラー: {e}")
+            logger.error("データエントリー取得エラー: %s", e)
             dataset_info_label.setText(f"データセット: {dataset_id} (取得エラー)")
             entry_count_label.setText("データエントリー件数: エラー")
             last_updated_label.setText("最終取得: エラー")
@@ -513,7 +517,7 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
                 dataentry_file = os.path.join(output_dir, f"{dataset_id}.json")
                 if os.path.exists(dataentry_file):
                     os.remove(dataentry_file)
-                    print(f"[INFO] 強制更新のため既存ファイルを削除: {dataentry_file}")
+                    logger.info("強制更新のため既存ファイルを削除: %s", dataentry_file)
             
             # データエントリー情報を取得
             fetch_data_entry_info_from_api(bearer_token, dataset_id, output_dir)
@@ -522,7 +526,7 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
             QTimer.singleShot(500, lambda: load_and_display_dataentry_info(dataset_id))
             
         except Exception as e:
-            print(f"[ERROR] データエントリー取得エラー: {e}")
+            logger.error("データエントリー取得エラー: %s", e)
             QMessageBox.critical(widget, "エラー", f"データエントリー情報の取得に失敗しました:\n{e}")
             dataset_info_label.setText(f"データセット: {dataset_id} (取得エラー)")
             entry_count_label.setText("データエントリー件数: エラー")
@@ -631,13 +635,13 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
                 
            
         except Exception as e:
-            print(f"[ERROR] データエントリー情報表示エラー: {e}")
+            logger.error("データエントリー情報表示エラー: %s", e)
             dataset_info_label.setText(f"データセット: {dataset_id} (表示エラー)")
             entry_count_label.setText("データエントリー件数: エラー")
             last_updated_label.setText("最終取得: エラー")
             
         except Exception as e:
-            print(f"[ERROR] データエントリー表示エラー: {e}")
+            logger.error("データエントリー表示エラー: %s", e)
             QMessageBox.critical(widget, "エラー", f"データエントリー情報の表示に失敗しました:\n{e}")
             dataset_info_label.setText(f"データセット: {dataset_id} (表示エラー)")
             entry_count_label.setText("データエントリー件数: エラー")
@@ -685,7 +689,7 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
                         all_entries.append(entry)
                         
                 except Exception as e:
-                    print(f"[ERROR] {json_file} 読み込みエラー: {e}")
+                    logger.error("%s 読み込みエラー: %s", json_file, e)
             
             # テーブル表示を更新
             dataset_info_label.setText("データセット: 全エントリー表示")

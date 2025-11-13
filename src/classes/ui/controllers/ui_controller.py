@@ -43,7 +43,7 @@ class UIController(UIControllerCore):
             # フォールバック：ログのみ
             if hasattr(self, 'logger'):
                 self.logger.error(f"エラーメッセージ表示失敗: {e}, 元のメッセージ: {message}")
-            print(f"エラー表示失敗: {e}, 元のメッセージ: {message}")
+            logger.error("エラー表示失敗: %s, 元のメッセージ: %s", e, message)
     
     def show_text_area_expanded(self, text_widget, title):
         """
@@ -87,7 +87,7 @@ class UIController(UIControllerCore):
                 dialog.show()
             
             except Exception as e:
-                print(f"拡大表示エラー: {e}")
+                logger.error("拡大表示エラー: %s", e)
             # エラー時もダイアログを表示
             dialog = TextAreaExpandDialog(self.parent, title, f"エラーが発生しました: {e}", False)
             dialog.show()
@@ -145,7 +145,7 @@ class UIController(UIControllerCore):
         # ウィンドウをリサイズ
         parent.resize(new_width, new_height)
         
-        print(f"[DEBUG] ウィンドウ高さ自動調整: {new_width}x{new_height} (画面比率: {new_height/screen_geometry.height()*100:.1f}%)")
+        logger.debug("ウィンドウ高さ自動調整: %sx%s (画面比率: %.1f%%)", new_width, new_height, new_height/screen_geometry.height()*100)
         
         # スクロールエリア内のウィジェットが画面に収まるようにする
         if hasattr(parent, 'centralWidget'):
@@ -343,7 +343,7 @@ class UIController(UIControllerCore):
         except Exception as e:
             if hasattr(self.parent, 'display_manager'):
                 self.parent.display_manager.set_message(f"試料選択変更処理エラー: {e}")
-            print(f"試料選択変更処理エラー: {e}")
+            logger.error("試料選択変更処理エラー: %s", e)
 
     def set_sample_inputs_enabled(self, enabled):
         """
@@ -359,7 +359,7 @@ class UIController(UIControllerCore):
             if hasattr(self, 'sample_composition_input'):
                 self.sample_composition_input.setEnabled(enabled)
         except Exception as e:
-            print(f"試料入力フィールド編集可能状態設定エラー: {e}")
+            logger.error("試料入力フィールド編集可能状態設定エラー: %s", e)
 
     def update_register_exec_button_state(self):
         """
@@ -472,7 +472,7 @@ class UIController(UIControllerCore):
                         if 'composition' in self.sample_input_widgets:
                             form_values['sampleComposition'] = self.sample_input_widgets['composition'].text()
                 except Exception as e:
-                    print(f"[ERROR] 新しいフォーム構造から試料データ取得エラー: {e}")
+                    logger.error("新しいフォーム構造から試料データ取得エラー: %s", e)
             else:
                 # 旧フォーム構造から取得（互換性維持）
                 if hasattr(self, 'sample_description_input'):
@@ -803,7 +803,7 @@ class UIController(UIControllerCore):
             try:
                 self.parent.tab_integrator.update_current_mode(mode)
             except Exception as e:
-                print(f"タブ統合機能の更新エラー: {e}")
+                logger.error("タブ統合機能の更新エラー: %s", e)
 
         # メニューエリアの更新
         if hasattr(self.parent, 'menu_area_layout'):
@@ -895,7 +895,7 @@ class UIController(UIControllerCore):
                         if top_level and hasattr(top_level, 'resize'):
                             top_level.resize(top_level.width(), max_height)
                 except Exception as e:
-                    print(f"[DEBUG] 初期高さ90%リサイズ失敗: {e}")
+                    logger.debug("初期高さ90%リサイズ失敗: %s", e)
 
             # データセットは初期幅をディスプレイの75%に設定（後から変更可）
             if mode in [ "dataset_open" ]:
@@ -908,7 +908,7 @@ class UIController(UIControllerCore):
                         if top_level and hasattr(top_level, 'resize'):
                             top_level.resize(max_width, top_level.height())
                 except Exception as e:
-                    print(f"[DEBUG] 初期幅75%リサイズ失敗: {e}")
+                    logger.debug("初期幅75%リサイズ失敗: %s", e)
 
         elif mode == "data_fetch":
             # データ取得モード：WebViewを表示してオーバーレイも表示
@@ -1406,22 +1406,22 @@ class UIController(UIControllerCore):
         elif mode == "data_register":
             if self.data_register_widget is None:
                 try:
-                    print("[DEBUG] データ登録タブウィジェット作成開始")
+                    logger.debug("データ登録タブウィジェット作成開始")
                     from classes.data_entry.ui.data_register_tab_widget import create_data_register_tab_widget
                     self.data_register_widget = create_data_register_tab_widget(self, "データ登録", "#2196f3")
-                    print(f"[DEBUG] データ登録タブウィジェット作成結果: {type(self.data_register_widget)}")
+                    logger.debug("データ登録タブウィジェット作成結果: %s", type(self.data_register_widget))
                     if self.data_register_widget is None:
-                        print("[DEBUG] データ登録タブウィジェット作成失敗 - フォールバック使用")
+                        logger.debug("データ登録タブウィジェット作成失敗 - フォールバック使用")
                         # フォールバック：従来のダミーウィジェット
                         self.data_register_widget = self._create_widget("データ登録", "#2196f3")
                     else:
-                        print("[DEBUG] データ登録タブウィジェット作成成功")
+                        logger.debug("データ登録タブウィジェット作成成功")
                         
                         # 初回のデータ登録ウィジェット作成時に95%の高さを適用
                         self._apply_initial_data_register_sizing()
                         
                 except Exception as e:
-                    print(f"[ERROR] データ登録ウィジェット作成エラー: {e}")
+                    logger.error("データ登録ウィジェット作成エラー: %s", e)
                     import traceback
                     traceback.print_exc()
                     self.data_register_widget = self._create_widget("データ登録", "#2196f3")
@@ -1437,7 +1437,7 @@ class UIController(UIControllerCore):
                         # フォールバック：従来の設定ダイアログを開くボタン
                         self.settings_widget = self._create_fallback_settings_widget()
                 except Exception as e:
-                    print(f"設定ウィジェット作成エラー: {e}")
+                    logger.error("設定ウィジェット作成エラー: %s", e)
                     self.settings_widget = self._create_fallback_settings_widget()
             return self.settings_widget
         elif mode == "subgroup_create":
@@ -1454,7 +1454,7 @@ class UIController(UIControllerCore):
                     from classes.data_portal.ui.data_portal_widget import DataPortalWidget
                     self.data_portal_widget = DataPortalWidget(self.parent)
                 except Exception as e:
-                    print(f"データポータルウィジェット作成エラー: {e}")
+                    logger.error("データポータルウィジェット作成エラー: %s", e)
                     import traceback
                     traceback.print_exc()
                     self.data_portal_widget = self._create_widget("データポータル", "#ff9800")
@@ -1492,7 +1492,7 @@ class UIController(UIControllerCore):
                     if hasattr(self.parent, 'overlay_manager'):
                         self.parent.overlay_manager.hide_overlay()
                         self.overlay_disabled_for_analyzer = True
-                        print("解析ツール用にオーバーレイを無効化しました")
+                        logger.debug("解析ツール用にオーバーレイを無効化しました")
                         
                         # WebViewのナビゲーション変更でオーバーレイが再表示されないように監視
                         self.setup_overlay_prevention()
@@ -1505,18 +1505,18 @@ class UIController(UIControllerCore):
                     webview.raise_()
                     
                     # WebViewの状態をデバッグ表示
-                    print(f"WebView状態確認:")
-                    print(f"  - isEnabled: {webview.isEnabled()}")
-                    print(f"  - isVisible: {webview.isVisible()}")
-                    print(f"  - focusPolicy: {webview.focusPolicy()}")
-                    print(f"  - hasMouseTracking: {webview.hasMouseTracking()}")
-                    print("WebViewを操作可能状態に設定しました")
+                    logger.debug("WebView状態確認:")
+                    logger.debug("  - isEnabled: %s", webview.isEnabled())
+                    logger.debug("  - isVisible: %s", webview.isVisible())
+                    logger.debug("  - focusPolicy: %s", webview.focusPolicy())
+                    logger.debug("  - hasMouseTracking: %s", webview.hasMouseTracking())
+                    logger.debug("WebViewを操作可能状態に設定しました")
                     
                     if hasattr(self.parent, 'display_manager'):
         # データセット開設ボタン生成は_create_widgetで処理されるため、ここでは不要
                     
                 except Exception as e:
-                    print(f"WebView情報取得エラー: {e}")
+                    logger.error("WebView情報取得エラー: %s", e)
                 """
             # 認証付きリクエスト解析GUIを起動（WebView情報を渡す）
             self.analyzer_gui = create_authenticated_gui(parent_webview=webview, parent_controller=self)
@@ -1533,7 +1533,7 @@ class UIController(UIControllerCore):
                 if hasattr(self.parent, 'display_manager'):
                     self.parent.display_manager.set_message("リクエスト解析ツール起動完了 - WebView内のリンククリックが可能です")
                 
-                print("リクエスト解析ツールがWebView連携で起動されました")
+                logger.debug("リクエスト解析ツールがWebView連携で起動されました")
             else:
                 # 認証失敗時の処理
                 if hasattr(self.parent, 'display_manager'):
@@ -1543,9 +1543,9 @@ class UIController(UIControllerCore):
                 if hasattr(self.parent, 'overlay_manager') and self.overlay_disabled_for_analyzer:
                     self.parent.overlay_manager.show_overlay()
                     self.overlay_disabled_for_analyzer = False
-                    print("認証失敗のためオーバーレイを復元しました")
+                    logger.debug("認証失敗のためオーバーレイを復元しました")
                 
-                print("リクエスト解析ツール: 認証に失敗しました")
+                logger.debug("リクエスト解析ツール: 認証に失敗しました")
                 
         except ImportError as e:
             error_msg = f"リクエスト解析ツールのインポートエラー: {e}"
@@ -1567,10 +1567,10 @@ class UIController(UIControllerCore):
                 
                 # 既存のloadFinishedシグナルに追加で接続（強制オーバーレイ制御）
                 webview.page().loadFinished.connect(self.prevent_overlay_on_navigation)
-                print("オーバーレイ防止監視を開始しました")
+                logger.debug("オーバーレイ防止監視を開始しました")
                 
         except Exception as e:
-            print(f"オーバーレイ防止設定エラー: {e}")
+            logger.error("オーバーレイ防止設定エラー: %s", e)
     
     def prevent_overlay_on_navigation(self, ok):
         """ナビゲーション時のオーバーレイ再表示を防止"""
@@ -1586,10 +1586,10 @@ class UIController(UIControllerCore):
                     webview.setAttribute(webview.WA_TransparentForMouseEvents, False)
                     webview.setFocusPolicy(webview.StrongFocus)
                 
-                print("ナビゲーション後: オーバーレイを再度無効化しました")
+                logger.debug("ナビゲーション後: オーバーレイを再度無効化しました")
                 
         except Exception as e:
-            print(f"オーバーレイ防止処理エラー: {e}")
+            logger.error("オーバーレイ防止処理エラー: %s", e)
 
     def setup_webview_monitoring(self):
         """WebViewのナビゲーション変更を監視してリクエストを自動解析"""
@@ -1602,9 +1602,9 @@ class UIController(UIControllerCore):
                 webview.urlChanged.connect(self.on_webview_url_changed)
                 webview.loadStarted.connect(self.on_webview_load_started)
                 webview.page().loadFinished.connect(self.on_webview_load_finished)
-                print("WebView監視を開始しました")
+                logger.debug("WebView監視を開始しました")
             except Exception as e:
-                print(f"WebView監視設定エラー: {e}")
+                logger.error("WebView監視設定エラー: %s", e)
     
     def on_webview_url_changed(self, url):
         """WebViewのURL変更時の処理"""
@@ -1654,19 +1654,19 @@ class UIController(UIControllerCore):
             # 少し遅延してもう一度実行（確実に無効化）
             QTimer.singleShot(500, self.delayed_overlay_disable)
             
-            print("ナビゲーション後: オーバーレイを強制無効化しました")
+            logger.debug("ナビゲーション後: オーバーレイを強制無効化しました")
             
         except Exception as e:
-            print(f"オーバーレイ強制無効化エラー: {e}")
+            logger.error("オーバーレイ強制無効化エラー: %s", e)
     
     def delayed_overlay_disable(self):
         """遅延オーバーレイ無効化"""
         try:
             if self.overlay_disabled_for_analyzer and hasattr(self.parent, 'overlay_manager'):
                 self.parent.overlay_manager.hide_overlay()
-                print("遅延オーバーレイ無効化実行")
+                logger.debug("遅延オーバーレイ無効化実行")
         except Exception as e:
-            print(f"遅延オーバーレイ無効化エラー: {e}")
+            logger.error("遅延オーバーレイ無効化エラー: %s", e)
     
     def cleanup_request_analyzer_mode(self):
         """リクエスト解析モード終了時のクリーンアップ"""
@@ -1704,10 +1704,10 @@ class UIController(UIControllerCore):
             if self.current_mode == "request_analyzer":
                 self.current_mode = "data_fetch"  # デフォルトモードに戻す
             
-            print("リクエスト解析モードのクリーンアップ完了")
+            logger.info("リクエスト解析モードのクリーンアップ完了")
             
         except Exception as e:
-            print(f"クリーンアップエラー: {e}")
+            logger.error("クリーンアップエラー: %s", e)
     
     def _create_request_analyzer_widget(self):
         """リクエスト解析モード用のウィジェットを作成"""
@@ -1762,35 +1762,35 @@ class UIController(UIControllerCore):
     def _initialize_task_data(self):
         """タスクデータの初期化（遅延実行用）"""
         try:
-            print("[DEBUG] _initialize_task_data called")
+            logger.debug("_initialize_task_data called")
             
             # ウィジェットの存在確認
             if not hasattr(self, 'task_id_combo'):
-                print("[ERROR] task_id_combo is not initialized")
+                logger.error("task_id_combo is not initialized")
                 return
                 
             if not hasattr(self, 'experiment_combo'):
-                print("[ERROR] experiment_combo is not initialized")
+                logger.error("experiment_combo is not initialized")
                 return
                 
-            print(f"[DEBUG] task_id_combo initialized: {self.task_id_combo is not None}")
-            print(f"[DEBUG] experiment_combo initialized: {self.experiment_combo is not None}")
+            logger.debug("task_id_combo initialized: %s", self.task_id_combo is not None)
+            logger.debug("experiment_combo initialized: %s", self.experiment_combo is not None)
             
             # データソースの初期選択を確認
             if hasattr(self, 'arim_exp_radio') and hasattr(self, 'normal_exp_radio'):
-                print(f"[DEBUG] arim_exp_radio checked: {self.arim_exp_radio.isChecked()}")
-                print(f"[DEBUG] normal_exp_radio checked: {self.normal_exp_radio.isChecked()}")
+                logger.debug("arim_exp_radio checked: %s", self.arim_exp_radio.isChecked())
+                logger.debug("normal_exp_radio checked: %s", self.normal_exp_radio.isChecked())
                 
                 # どちらも選択されていない場合は、標準実験データを選択
                 if not self.arim_exp_radio.isChecked() and not self.normal_exp_radio.isChecked():
-                    print("[DEBUG] No datasource selected, defaulting to normal_exp_radio")
+                    logger.debug("No datasource selected, defaulting to normal_exp_radio")
                     self.normal_exp_radio.setChecked(True)
             
             # 課題番号リストを更新
             self.refresh_task_ids()
             
         except Exception as e:
-            print(f"[ERROR] _initialize_task_data failed: {e}")
+            logger.error("_initialize_task_data failed: %s", e)
             import traceback
             traceback.print_exc()
     
@@ -1834,7 +1834,7 @@ class UIController(UIControllerCore):
             elif hasattr(self, 'force_log'):
                 self.force_log(error_msg, "ERROR")
             else:
-                print(f"[ERROR] {error_msg}")
+                logger.error("%s", error_msg)
     
     def _update_model_list(self, provider):
         """選択されたプロバイダーのモデル一覧を更新"""
@@ -1862,7 +1862,7 @@ class UIController(UIControllerCore):
             elif hasattr(self, 'force_log'):
                 self.force_log(error_msg, "ERROR")
             else:
-                print(f"[ERROR] {error_msg}")
+                logger.error("%s", error_msg)
     
     def _init_datasource_selection(self):
         """データソース選択の初期化"""
@@ -1874,7 +1874,7 @@ class UIController(UIControllerCore):
             normal_exp_exists = os.path.exists(os.path.join(INPUT_DIR, "ai", "exp.xlsx"))
             
             if not hasattr(self, 'arim_exp_radio') or not hasattr(self, 'normal_exp_radio'):
-                print("[DEBUG] データソースラジオボタンが初期化されていません")
+                logger.debug("データソースラジオボタンが初期化されていません")
                 return
             
             if arim_exp_exists and normal_exp_exists:
@@ -1883,30 +1883,30 @@ class UIController(UIControllerCore):
                 self.normal_exp_radio.setEnabled(True)
                 self.arim_exp_radio.setChecked(True)
                 self.datasource_info_label.setText("📊 両方のデータファイルが利用可能です。ARIM実験データがデフォルトで選択されています。")
-                print("[DEBUG] 両方のファイルが存在 - ARIM実験データを選択")
+                logger.debug("両方のファイルが存在 - ARIM実験データを選択")
             elif arim_exp_exists:
                 # arim_exp.xlsxのみ存在
                 self.arim_exp_radio.setEnabled(True)
                 self.normal_exp_radio.setEnabled(False)
                 self.arim_exp_radio.setChecked(True)
                 self.datasource_info_label.setText("📊 ARIM実験データのみ利用可能です。")
-                print("[DEBUG] ARIM実験データのみ存在")
+                logger.debug("ARIM実験データのみ存在")
             elif normal_exp_exists:
                 # exp.xlsxのみ存在
                 self.arim_exp_radio.setEnabled(False)
                 self.normal_exp_radio.setEnabled(True)
                 self.normal_exp_radio.setChecked(True)
                 self.datasource_info_label.setText("📊 標準実験データのみ利用可能です。")
-                print("[DEBUG] 標準実験データのみ存在")
+                logger.debug("標準実験データのみ存在")
             else:
                 # どちらも存在しない
                 self.arim_exp_radio.setEnabled(False)
                 self.normal_exp_radio.setEnabled(False)
                 self.datasource_info_label.setText("⚠️ 実験データファイルが見つかりません。")
-                print("[DEBUG] 実験データファイルが存在しません")
+                logger.debug("実験データファイルが存在しません")
                 
         except Exception as e:
-            print(f"[ERROR] データソース初期化エラー: {e}")
+            logger.error("データソース初期化エラー: %s", e)
             if hasattr(self, 'datasource_info_label'):
                 self.datasource_info_label.setText(f"⚠️ データソース初期化エラー: {e}")
     
@@ -1914,17 +1914,17 @@ class UIController(UIControllerCore):
         """データソース変更時の処理"""
         try:
             if button == self.arim_exp_radio and button.isChecked():
-                print("[DEBUG] ARIM実験データが選択されました")
+                logger.debug("ARIM実験データが選択されました")
                 self.datasource_info_label.setText("📊 ARIM実験データ (arim_exp.xlsx) を使用します。詳細な課題情報と実験手法が含まれます。")
             elif button == self.normal_exp_radio and button.isChecked():
-                print("[DEBUG] 標準実験データが選択されました")
+                logger.debug("標準実験データが選択されました")
                 self.datasource_info_label.setText("📊 標準実験データ (exp.xlsx) を使用します。基本的な実験情報が含まれます。")
             
             # 課題番号リストを更新
             self.refresh_task_ids()
             
         except Exception as e:
-            print(f"[ERROR] データソース変更処理エラー: {e}")
+            logger.error("データソース変更処理エラー: %s", e)
             if hasattr(self, 'datasource_info_label'):
                 self.datasource_info_label.setText(f"⚠️ データソース変更エラー: {e}")
     
@@ -1932,13 +1932,13 @@ class UIController(UIControllerCore):
         """プログレス表示を開始（経過時間記録開始）"""
         import time
         
-        print(f"[DEBUG] show_progress called: message='{message}', current={current}, total={total}")
+        logger.debug("show_progress called: message='%s', current=%s, total=%s", message, current, total)
         
         # 開始時刻を記録
         self._progress_start_time = time.time()
         
         if hasattr(self, 'ai_progress_bar') and hasattr(self, 'ai_progress_label'):
-            print(f"[DEBUG] Progress elements found - showing progress")
+            logger.debug("Progress elements found - showing progress")
             self.ai_progress_bar.setVisible(True)
             self.ai_progress_label.setVisible(True)
             self.ai_progress_bar.setValue(current)
@@ -1948,19 +1948,19 @@ class UIController(UIControllerCore):
             elapsed_text = self._format_elapsed_time(0)
             full_message = f"{message} [{elapsed_text}]"
             self.ai_progress_label.setText(full_message)
-            print(f"[DEBUG] Progress label set to: '{full_message}'")
+            logger.debug("Progress label set to: '%s'", full_message)
             
             # UIを強制更新
             from qt_compat.widgets import QApplication
             QApplication.processEvents()
         else:
-            print(f"[DEBUG] Progress elements not found:")
-            print(f"[DEBUG]   ai_progress_bar exists: {hasattr(self, 'ai_progress_bar')}")
-            print(f"[DEBUG]   ai_progress_label exists: {hasattr(self, 'ai_progress_label')}")
+            logger.debug("Progress elements not found:")
+            logger.debug("ai_progress_bar exists: %s", hasattr(self, 'ai_progress_bar'))
+            logger.debug("ai_progress_label exists: %s", hasattr(self, 'ai_progress_label'))
     
     def update_progress(self, current, total, message=None):
         """プログレス更新（経過時間表示付き）"""
-        print(f"[DEBUG] update_progress called: current={current}, total={total}, message='{message}'")
+        logger.debug("update_progress called: current=%s, total=%s, message='%s'", current, total, message)
         
         if hasattr(self, 'ai_progress_bar') and hasattr(self, 'ai_progress_label'):
             self.ai_progress_bar.setValue(current)
@@ -1977,13 +1977,13 @@ class UIController(UIControllerCore):
                 progress_percent = int((current / total * 100)) if total > 0 else 0
                 full_message = f"{message} [{elapsed_text}] ({progress_percent}%)"
                 self.ai_progress_label.setText(full_message)
-                print(f"[DEBUG] Progress updated: '{full_message}'")
+                logger.debug("Progress updated: '%s'", full_message)
             
             # UIを強制更新
             from qt_compat.widgets import QApplication
             QApplication.processEvents()
         else:
-            print(f"[DEBUG] Progress elements not found in update_progress")
+            logger.debug("Progress elements not found in update_progress")
     
     def _format_elapsed_time(self, seconds):
         """経過時間を見やすい形式でフォーマット"""
@@ -2002,7 +2002,7 @@ class UIController(UIControllerCore):
     
     def hide_progress(self):
         """プログレス表示を非表示（最終経過時間表示）"""
-        print(f"[DEBUG] hide_progress called")
+        logger.debug("hide_progress called")
         
         if hasattr(self, 'ai_progress_bar') and hasattr(self, 'ai_progress_label'):
             # 最終経過時間を計算
@@ -2014,20 +2014,20 @@ class UIController(UIControllerCore):
             # 最終時間をログに出力
             if final_elapsed > 0:
                 elapsed_text = self._format_elapsed_time(final_elapsed)
-                print(f"[DEBUG] Final elapsed time: {elapsed_text}")
+                logger.debug("Final elapsed time: %s", elapsed_text)
                 # ai_response_displayの存在と有効性を確認
                 if (hasattr(self, 'ai_response_display') and 
                     self.ai_response_display is not None):
                     try:
                         self.ai_response_display.append(f"[INFO] 処理完了 - 総経過時間: {elapsed_text}")
                     except RuntimeError:
-                        print(f"[WARNING] ai_response_display が削除されているため、最終時間表示をスキップ")
+                        logger.warning("ai_response_display が削除されているため、最終時間表示をスキップ")
             
             self.ai_progress_bar.setVisible(False)
             self.ai_progress_label.setVisible(False)
-            print(f"[DEBUG] Progress elements hidden")
+            logger.debug("Progress elements hidden")
         else:
-            print(f"[DEBUG] Progress elements not found in hide_progress")
+            logger.debug("Progress elements not found in hide_progress")
             
             # 開始時刻をリセット
             if hasattr(self, '_progress_start_time'):
@@ -2101,10 +2101,10 @@ class UIController(UIControllerCore):
             if hasattr(self, 'ai_controller') and self.ai_controller:
                 return self.ai_controller._merge_with_arim_data(experiment_data, arim_data)
             else:
-                print("[ERROR] AIコントローラーが利用できません")
+                logger.error("AIコントローラーが利用できません")
                 return experiment_data
         except Exception as e:
-            print(f"[ERROR] ARIMデータ結合委譲エラー: {e}")
+            logger.error("ARIMデータ結合委譲エラー: %s", e)
             return experiment_data
     
     def _load_experiment_data(self):
@@ -2125,7 +2125,7 @@ class UIController(UIControllerCore):
                 exp_file_path = os.path.join(INPUT_DIR, "ai", "exp.xlsx")
                 data_source_name = "標準実験データ"
             
-            print(f"[DEBUG] {data_source_name}を読み込み中: {exp_file_path}")
+            logger.debug("%sを読み込み中: %s", data_source_name, exp_file_path)
             
             if not os.path.exists(exp_file_path):
                 self.ai_response_display.append(f"[ERROR] {data_source_name}ファイルが見つかりません: {exp_file_path}")
@@ -2147,7 +2147,7 @@ class UIController(UIControllerCore):
                     return None
                 # ARIM IDを課題番号列としてマッピング
                 df['課題番号'] = df['ARIM ID']
-                print(f"[DEBUG] ARIM ID列を課題番号列にマッピングしました")
+                logger.debug("ARIM ID列を課題番号列にマッピングしました")
             else:
                 # 標準実験データの場合は'課題番号'列を確認
                 if "課題番号" not in df.columns:
@@ -2159,7 +2159,7 @@ class UIController(UIControllerCore):
             experiments = df.to_dict('records')
             
             self.ai_response_display.append(f"[INFO] {data_source_name}を読み込み完了: {len(experiments)} 件")
-            print(f"[DEBUG] 一括分析用データ読み込み完了: {len(experiments)} 件")
+            logger.debug("一括分析用データ読み込み完了: %s 件", len(experiments))
             return experiments
             
         except Exception as e:
@@ -2267,7 +2267,7 @@ class UIController(UIControllerCore):
             if hasattr(self, 'ai_response_display') and self.ai_response_display:
                 self.ai_response_display.append("[INFO] 課題番号リストを更新中...")
             else:
-                print("[INFO] 課題番号リストを更新中...")
+                logger.info("課題番号リストを更新中...")
             
             # 実験データの読み込み
             exp_data = self._load_experiment_data_for_task_list()
@@ -2306,20 +2306,20 @@ class UIController(UIControllerCore):
                     task_summary[task_id]['count'] += 1
             
             # コンボボックスの更新（コンボボックスが存在する場合のみ）
-            print(f"[DEBUG] hasattr(self, 'task_id_combo'): {hasattr(self, 'task_id_combo')}")
+            logger.debug("hasattr(self, 'task_id_combo'): %s", hasattr(self, 'task_id_combo'))
             if hasattr(self, 'task_id_combo'):
-                print(f"[DEBUG] self.task_id_combo: {self.task_id_combo}")
-                print(f"[DEBUG] task_id_combo is not None: {self.task_id_combo is not None}")
-                print(f"[DEBUG] task_id_combo bool value: {bool(self.task_id_combo)}")
+                logger.debug("self.task_id_combo: %s", self.task_id_combo)
+                logger.debug("task_id_combo is not None: %s", self.task_id_combo is not None)
+                logger.debug("task_id_combo bool value: %s", bool(self.task_id_combo))
                 try:
-                    print(f"[DEBUG] task_id_combo.isVisible(): {self.task_id_combo.isVisible()}")
-                    print(f"[DEBUG] task_id_combo.isEnabled(): {self.task_id_combo.isEnabled()}")
+                    logger.debug("task_id_combo.isVisible(): %s", self.task_id_combo.isVisible())
+                    logger.debug("task_id_combo.isEnabled(): %s", self.task_id_combo.isEnabled())
                 except Exception as e:
-                    print(f"[DEBUG] task_id_combo状態確認エラー: {e}")
+                    logger.debug("task_id_combo状態確認エラー: %s", e)
             
             if hasattr(self, 'task_id_combo') and self.task_id_combo is not None:
                 self.task_id_combo.clear()
-                print(f"[DEBUG] コンボボックスをクリア後の項目数: {self.task_id_combo.count()}")
+                logger.debug("コンボボックスをクリア後の項目数: %s", self.task_id_combo.count())
                 task_items = []
                 
                 if task_summary:
@@ -2331,21 +2331,21 @@ class UIController(UIControllerCore):
                         display_text = f"{task_id} ({info['count']}件) - {info['sample_title']}"
                         task_items.append(display_text)
                         self.task_id_combo.addItem(display_text, task_id)  # データとして実際の課題番号を保存
-                        print(f"[DEBUG] コンボボックスにアイテム追加: {display_text}")
+                        logger.debug("コンボボックスにアイテム追加: %s", display_text)
                     
-                    print(f"[DEBUG] コンボボックス項目数: {self.task_id_combo.count()}")
-                    print(f"[DEBUG] コンプリーター項目数: {len(task_items)}")
+                    logger.debug("コンボボックス項目数: %s", self.task_id_combo.count())
+                    logger.debug("コンプリーター項目数: %s", len(task_items))
                     
                     # UIの強制更新
                     self.task_id_combo.update()
                     self.task_id_combo.repaint()
                     
                     # 確認のため最初の数項目を表示
-                    print(f"[DEBUG] コンボボックス内容確認:")
+                    logger.debug("コンボボックス内容確認:")
                     for i in range(min(3, self.task_id_combo.count())):
                         item_text = self.task_id_combo.itemText(i)
                         item_data = self.task_id_combo.itemData(i)
-                        print(f"  [{i}] text: '{item_text}', data: '{item_data}'")
+                        logger.debug("  [%s] text: '%s', data: '%s'", i, item_text, item_data)
                     
                     # オートコンプリート用のモデルを更新
                     if hasattr(self, 'task_completer') and self.task_completer:
@@ -2382,7 +2382,7 @@ class UIController(UIControllerCore):
                         print(warning_msg)
             else:
                 # コンボボックスが存在しない場合は、データのみ確認
-                print("[DEBUG] コンボボックスが存在しないため、UIは更新されません")
+                logger.debug("コンボボックスが存在しないため、UIは更新されません")
                 success_msg = f"[SUCCESS] 実験データを確認: {len(task_summary)} 種類の課題番号"
                 print(success_msg)
                 
@@ -2431,7 +2431,7 @@ class UIController(UIControllerCore):
                            self.arim_exp_radio.isChecked() and 
                            self.arim_exp_radio.isEnabled())
             
-            print(f"[DEBUG] _load_experiment_data_for_task_list - use_arim_data: {use_arim_data}")
+            logger.debug("_load_experiment_data_for_task_list - use_arim_data: %s", use_arim_data)
             
             # AIDataManagerを使用してデータを読み込み
             experiments = self.ai_data_manager.load_experiment_data_file(use_arim_data)
@@ -2450,26 +2450,26 @@ class UIController(UIControllerCore):
     def _safe_string_length(self, value):
         """安全に文字列の長さを取得（float NaN対応）"""
         try:
-            print(f"[DEBUG] _safe_string_length called with: {repr(value)} (type: {type(value)})")
+            logger.debug("_safe_string_length called with: %s (type: %s)", repr(value), type(value))
             
             if value is None:
-                print(f"[DEBUG] Value is None, returning 0")
+                logger.debug("Value is None, returning 0")
                 return 0
             
             # pandas NaN チェック
             import pandas as pd
             if pd.isna(value):
-                print(f"[DEBUG] Value is pd.isna, returning 0")
+                logger.debug("Value is pd.isna, returning 0")
                 return 0
             
             # 文字列に変換
             str_value = str(value).strip()
             result = len(str_value)
-            print(f"[DEBUG] str_value: {repr(str_value)}, length: {result}")
+            logger.debug("str_value: %s, length: %s", repr(str_value), result)
             return result
             
         except Exception as e:
-            print(f"[DEBUG] Error in _safe_string_length with value {repr(value)}: {e}")
+            logger.debug("Error in _safe_string_length with value %s: %s", repr(value), e)
             import traceback
             traceback.print_exc()
             return 0
@@ -2497,7 +2497,7 @@ class UIController(UIControllerCore):
         """特定の課題IDに関連するすべての実験データを取得（AI分析一括処理用）"""
         # AIDataManagerに移行：既存の処理をAIDataManagerに委譲
         try:
-            print(f"[DEBUG] _get_all_experiments_for_task called with task_id: {task_id}")
+            logger.debug("_get_all_experiments_for_task called with task_id: %s", task_id)
             
             # データソース選択を確認
             use_arim_data = (hasattr(self, 'arim_exp_radio') and 
@@ -2508,10 +2508,10 @@ class UIController(UIControllerCore):
             experiments = self.ai_data_manager.get_experiments_for_task(task_id, use_arim_data)
             
             if experiments is None:
-                print(f"[ERROR] 実験データの読み込みに失敗")
+                logger.error("実験データの読み込みに失敗")
                 return []
                 
-            print(f"[DEBUG] 実験データ数: {len(experiments)}")
+            logger.debug("実験データ数: %s", len(experiments))
             
             # 有効なデータのみをフィルタリング
             valid_experiments = []
@@ -2519,11 +2519,11 @@ class UIController(UIControllerCore):
                 if self._has_any_valid_experiment_data(exp):
                     valid_experiments.append(exp)
             
-            print(f"[DEBUG] 有効な実験データ数: {len(valid_experiments)}")
+            logger.debug("有効な実験データ数: %s", len(valid_experiments))
             return valid_experiments
             
         except Exception as e:
-            print(f"[ERROR] _get_all_experiments_for_task エラー: {e}")
+            logger.error("_get_all_experiments_for_task エラー: %s", e)
             import traceback
             traceback.print_exc()
             return []
@@ -2531,14 +2531,14 @@ class UIController(UIControllerCore):
     def _has_any_valid_experiment_data(self, experiment):
         """実験データに何らかの有効な情報があるかどうかを判定（両データ形式対応）"""
         try:
-            print(f"[DEBUG] _has_any_valid_experiment_data called for experiment: {experiment.get('ARIM ID', experiment.get('実験ID', 'No ID'))}")
+            logger.debug("_has_any_valid_experiment_data called for experiment: %s", experiment.get('ARIM ID', experiment.get('実験ID', 'No ID')))
             
             # データソースを確認
             use_arim_data = (hasattr(self, 'arim_exp_radio') and 
                            self.arim_exp_radio.isChecked() and 
                            self.arim_exp_radio.isEnabled())
             
-            print(f"[DEBUG] use_arim_data: {use_arim_data}")
+            logger.debug("use_arim_data: %s", use_arim_data)
             
             if use_arim_data:
                 # ARIM実験データの場合の必須列
@@ -2557,26 +2557,26 @@ class UIController(UIControllerCore):
                     "実験名", "測定名", "実験ID", "実験実施日"
                 ]
             
-            print(f"[DEBUG] Checking {len(essential_columns)} essential columns")
+            logger.debug("Checking %s essential columns", len(essential_columns))
             
             for col in essential_columns:
                 try:
                     value = experiment.get(col)
-                    print(f"[DEBUG] Checking column '{col}': {repr(value)} (type: {type(value)})")
+                    logger.debug("Checking column '%s': %s (type: %s)", col, repr(value), type(value))
                     
                     if self._is_valid_data_value(value):
-                        print(f"[DEBUG] Found valid data in column '{col}', returning True")
+                        logger.debug("Found valid data in column '%s', returning True", col)
                         return True
                         
                 except Exception as col_error:
-                    print(f"[DEBUG] Error checking column '{col}': {col_error}")
+                    logger.debug("Error checking column '%s': %s", col, col_error)
                     continue
             
-            print(f"[DEBUG] No valid data found in any essential column, returning False")
+            logger.debug("No valid data found in any essential column, returning False")
             return False
             
         except Exception as e:
-            print(f"[DEBUG] Error in _has_any_valid_experiment_data: {e}")
+            logger.debug("Error in _has_any_valid_experiment_data: %s", e)
             import traceback
             traceback.print_exc()
             return False
@@ -2584,40 +2584,40 @@ class UIController(UIControllerCore):
     def on_task_id_changed(self, text):
         """課題番号が変更された時の処理"""
         try:
-            print(f"[DEBUG] on_task_id_changed called with text: '{text}'")
+            logger.debug("on_task_id_changed called with text: '%s'", text)
             
             # 重複呼び出し防止のためのフラグチェック
             if hasattr(self, '_updating_task_info') and self._updating_task_info:
-                print("[DEBUG] Already updating task info, skipping duplicate call")
+                logger.debug("Already updating task info, skipping duplicate call")
                 return
                 
             # 必要なコンポーネントの安全な存在確認
             if not hasattr(self, 'task_id_combo'):
-                print("[DEBUG] task_id_combo attribute does not exist")
+                logger.debug("task_id_combo attribute does not exist")
                 return
                 
             if not self.task_id_combo:
-                print("[DEBUG] task_id_combo is None")
+                logger.debug("task_id_combo is None")
                 return
                 
             # コンボボックスが初期化されているか確認
             try:
                 if not self.task_id_combo.isVisible():
-                    print("[DEBUG] task_id_combo is not visible yet")
+                    logger.debug("task_id_combo is not visible yet")
                     return
             except Exception as e:
-                print(f"[DEBUG] Error checking visibility: {e}")
+                logger.debug("Error checking visibility: %s", e)
                 return
                 
             try:
                 # コンボボックスの状態確認
                 combo_count = self.task_id_combo.count()
-                print(f"[DEBUG] task_id_combo count: {combo_count}")
+                logger.debug("task_id_combo count: %s", combo_count)
                 if combo_count == 0:
-                    print("[DEBUG] task_id_combo is empty, skipping update")
+                    logger.debug("task_id_combo is empty, skipping update")
                     return
             except Exception as e:
-                print(f"[DEBUG] Error checking combo state: {e}")
+                logger.debug("Error checking combo state: %s", e)
                 return
                 
             self._updating_task_info = True
@@ -2625,11 +2625,11 @@ class UIController(UIControllerCore):
             try:
                 # 現在選択されている課題番号の詳細情報を取得
                 current_index = self.task_id_combo.currentIndex()
-                print(f"[DEBUG] current_index: {current_index}")
+                logger.debug("current_index: %s", current_index)
                 
                 if current_index >= 0:
                     task_id = self.task_id_combo.itemData(current_index)
-                    print(f"[DEBUG] task_id from itemData: '{task_id}'")
+                    logger.debug("task_id from itemData: '%s'", task_id)
                     
                     if task_id:
                         # 選択された課題番号の詳細情報を表示
@@ -2638,17 +2638,17 @@ class UIController(UIControllerCore):
                         # 実験データリストを更新
                         self._update_experiment_list(task_id)
                     else:
-                        print("[DEBUG] task_id is empty or None")
+                        logger.debug("task_id is empty or None")
                         self._clear_task_info_display()
                 else:
-                    print("[DEBUG] current_index is negative")
+                    logger.debug("current_index is negative")
                     self._clear_task_info_display()
                     
             finally:
                 self._updating_task_info = False
                 
         except Exception as e:
-            print(f"[ERROR] on_task_id_changed failed: {e}")
+            logger.error("on_task_id_changed failed: %s", e)
             import traceback
             traceback.print_exc()
             
@@ -2660,11 +2660,11 @@ class UIController(UIControllerCore):
         """課題情報表示を更新"""
         try:
             exp_data = self._load_experiment_data_for_task_list()
-            print(f"[DEBUG] exp_data loaded: {len(exp_data) if exp_data else 0} records")
+            logger.debug("exp_data loaded: %s records", len(exp_data) if exp_data else 0)
             
             if exp_data:
                 matching_experiments = [exp for exp in exp_data if exp.get("課題番号") == task_id]
-                print(f"[DEBUG] matching_experiments for '{task_id}': {len(matching_experiments)} records")
+                logger.debug("matching_experiments for '%s': %s records", task_id, len(matching_experiments))
                 
                 if matching_experiments:
                     sample_exp = matching_experiments[0]
@@ -2731,7 +2731,7 @@ class UIController(UIControllerCore):
                 self._clear_task_info_display()
                 
         except Exception as e:
-            print(f"[ERROR] _update_task_info_display failed: {e}")
+            logger.error("_update_task_info_display failed: %s", e)
             self._clear_task_info_display()
 
     def _clear_task_info_display(self):
@@ -2740,7 +2740,7 @@ class UIController(UIControllerCore):
             if hasattr(self, 'task_info_label') and self.task_info_label:
                 self.task_info_label.setText("課題番号を選択してください")
         except Exception as e:
-            print(f"[ERROR] _clear_task_info_display failed: {e}")
+            logger.error("_clear_task_info_display failed: %s", e)
 
     def _update_experiment_list(self, task_id):
         """実験データリストを更新"""
@@ -2748,7 +2748,7 @@ class UIController(UIControllerCore):
             import pandas as pd
             
             if not hasattr(self, 'experiment_combo') or not self.experiment_combo:
-                print("[DEBUG] experiment_combo is not available")
+                logger.debug("experiment_combo is not available")
                 return
                 
             # 実験データリストをクリア
@@ -2815,7 +2815,7 @@ class UIController(UIControllerCore):
                 }
                 self.experiment_combo.addItem(no_data_text, no_data_dict)
                 
-                print(f"[DEBUG] Added {len(exp_data)} experiments ({valid_experiments_count} valid) + 1 no-data option")
+                logger.debug("Added %s experiments (%s valid) + 1 no-data option", len(exp_data), valid_experiments_count)
             else:
                 # 実験データが存在しない場合
                 no_data_text = "実験データなし（課題のみ）"
@@ -2826,7 +2826,7 @@ class UIController(UIControllerCore):
                     "_has_valid_content": False
                 }
                 self.experiment_combo.addItem(no_data_text, no_data_dict)
-                print("[DEBUG] No experiment data found, added no-data option only")
+                logger.debug("No experiment data found, added no-data option only")
             
             # 最初の項目を選択（実験データありを優先）
             if self.experiment_combo.count() > 0:
@@ -2841,10 +2841,10 @@ class UIController(UIControllerCore):
                         break
                 
                 self.experiment_combo.setCurrentIndex(selected_index)
-                print(f"[DEBUG] Selected experiment index: {selected_index}")
+                logger.debug("Selected experiment index: %s", selected_index)
                 
         except Exception as e:
-            print(f"[ERROR] _update_experiment_list failed: {e}")
+            logger.error("_update_experiment_list failed: %s", e)
             import traceback
             traceback.print_exc()
             
@@ -2859,75 +2859,75 @@ class UIController(UIControllerCore):
     def on_task_index_changed(self, index):
         """課題番号のインデックスが変更された時の処理（ドロップダウン選択対応）"""
         try:
-            print(f"[DEBUG] on_task_index_changed called with index: {index}")
+            logger.debug("on_task_index_changed called with index: %s", index)
             
             if not hasattr(self, 'task_id_combo') or not self.task_id_combo:
-                print("[DEBUG] task_id_combo is not available in index changed")
+                logger.debug("task_id_combo is not available in index changed")
                 return
                 
             if index >= 0:
                 # インデックスから対応するテキストを取得
                 text = self.task_id_combo.itemText(index)
-                print(f"[DEBUG] Index {index} corresponds to text: '{text}'")
+                logger.debug("Index %s corresponds to text: '%s'", index, text)
                 
                 # テキストが変更されていない場合は手動で更新処理を呼び出し
                 current_text = self.task_id_combo.currentText()
                 if text == current_text:
-                    print("[DEBUG] Text matches current text, manually triggering update")
+                    logger.debug("Text matches current text, manually triggering update")
                     self.on_task_id_changed(text)
                 
         except Exception as e:
-            print(f"[DEBUG] Error in on_task_index_changed: {e}")
+            logger.debug("Error in on_task_index_changed: %s", e)
     
     def on_completer_activated(self, text):
         """コンプリーターから選択された時の処理"""
         try:
-            print(f"[DEBUG] on_completer_activated called with text: '{text}'")
+            logger.debug("on_completer_activated called with text: '%s'", text)
             
             # 短い遅延の後に更新処理を実行（UIの更新を待つため）
             QTimer.singleShot(100, lambda: self.on_task_id_changed(text))
             
         except Exception as e:
-            print(f"[DEBUG] Error in on_completer_activated: {e}")
+            logger.debug("Error in on_completer_activated: %s", e)
     
     def _update_experiment_choices(self, task_id, experiments):
         """実験データ選択肢を更新"""
         try:
-            print(f"[DEBUG] _update_experiment_choices called with task_id='{task_id}', experiments count={len(experiments) if experiments else 0}")
+            logger.debug("_update_experiment_choices called with task_id='%s', experiments count=%s", task_id, len(experiments) if experiments else 0)
             
             # experiment_comboの存在確認
             if not hasattr(self, 'experiment_combo') or not self.experiment_combo:
-                print("[DEBUG] experiment_combo is not available")
+                logger.debug("experiment_combo is not available")
                 return
                 
             # コンボボックスをクリア
             self.experiment_combo.clear()
-            print("[DEBUG] experiment_combo cleared")
+            logger.debug("experiment_combo cleared")
             
             # 実験データが存在する場合
             if experiments:
-                print(f"[DEBUG] Processing {len(experiments)} experiments")
+                logger.debug("Processing %s experiments", len(experiments))
                 
                 # 有効な実験データのみをフィルタリング
                 valid_experiments = []
                 for i, exp in enumerate(experiments):
                     try:
                         exp_id = exp.get('実験ID', exp.get('ARIM ID', f'Exp{i+1}'))
-                        print(f"[DEBUG] Checking experiment {i+1}/{len(experiments)}: {exp_id}")
+                        logger.debug("Checking experiment %s/%s: %s", i+1, len(experiments), exp_id)
                         
                         if self._has_any_valid_experiment_data(exp):
                             valid_experiments.append(exp)
-                            print(f"[DEBUG] Experiment {exp_id} is valid, added to list")
+                            logger.debug("Experiment %s is valid, added to list", exp_id)
                         else:
-                            print(f"[DEBUG] Skipping experiment with no valid data: {exp_id}")
+                            logger.debug("Skipping experiment with no valid data: %s", exp_id)
                     except Exception as exp_error:
-                        print(f"[DEBUG] Error checking experiment validity for {exp.get('実験ID', exp.get('ARIM ID', f'Exp{i+1}'))}: {exp_error}")
+                        logger.debug("Error checking experiment validity for %s: %s", exp.get('実験ID', exp.get('ARIM ID', f'Exp{i+1}')), exp_error)
                         import traceback
                         traceback.print_exc()
                         # エラーがあっても処理を続行
                         continue
                 
-                print(f"[DEBUG] Valid experiments count: {len(valid_experiments)}")
+                logger.debug("Valid experiments count: %s", len(valid_experiments))
                 
                 if valid_experiments:
                     # データソースを確認
@@ -2938,7 +2938,7 @@ class UIController(UIControllerCore):
                     for i, exp in enumerate(valid_experiments):
                         try:
                             exp_id = exp.get('実験ID', exp.get('ARIM ID', f'Exp{i+1}'))
-                            print(f"[DEBUG] Processing experiment {i+1}: {exp_id}")
+                            logger.debug("Processing experiment %s: %s", i+1, exp_id)
                             
                             # 表示用のテキストを作成
                             display_text = f"[{i+1}] "
@@ -2960,17 +2960,17 @@ class UIController(UIControllerCore):
                             
                             # コンボボックスに追加
                             self.experiment_combo.addItem(display_text, exp)
-                            print(f"[DEBUG] Added experiment item: {display_text}")
+                            logger.debug("Added experiment item: %s", display_text)
                             
                         except Exception as exp_error:
-                            print(f"[DEBUG] Error processing experiment {i+1}: {exp_error}")
+                            logger.debug("Error processing experiment %s: %s", i+1, exp_error)
                             # エラーがあってもフォールバック表示を追加
                             try:
                                 fallback_text = f"[{i+1}] 実験データ {i+1} (表示エラー)"
                                 self.experiment_combo.addItem(fallback_text, exp)
-                                print(f"[DEBUG] Added fallback experiment item: {fallback_text}")
+                                logger.debug("Added fallback experiment item: %s", fallback_text)
                             except:
-                                print(f"[DEBUG] Failed to add fallback item for experiment {i+1}")
+                                logger.debug("Failed to add fallback item for experiment %s", i+1)
                                 continue
                     
                     # 実験選択UI要素を表示
@@ -2984,18 +2984,18 @@ class UIController(UIControllerCore):
                         try:
                             self._update_experiment_info(valid_experiments[0])
                         except Exception as info_error:
-                            print(f"[DEBUG] Error updating experiment info: {info_error}")
+                            logger.debug("Error updating experiment info: %s", info_error)
                 else:
-                    print("[DEBUG] No valid experiments found, clearing choices")
+                    logger.debug("No valid experiments found, clearing choices")
                     self._clear_experiment_choices()
                 
             else:
-                print("[DEBUG] No experiments data provided, clearing choices")
+                logger.debug("No experiments data provided, clearing choices")
                 self._clear_experiment_choices()
                 
         except Exception as main_error:
             error_message = f"実験データ選択でエラーが発生: {str(main_error)}"
-            print(f"[ERROR] {error_message}")
+            logger.error("%s", error_message)
             
             # GUIにエラーメッセージを表示
             if hasattr(self, 'ai_response_display'):
@@ -3009,23 +3009,23 @@ class UIController(UIControllerCore):
             try:
                 self._clear_experiment_choices()
             except:
-                print("[DEBUG] Failed to clear experiment choices in error handling")
+                logger.debug("Failed to clear experiment choices in error handling")
 
     def _get_safe_display_content_arim(self, exp):
         """ARIM実験データの安全な表示内容取得"""
         try:
-            print(f"[DEBUG] _get_safe_display_content_arim called")
+            logger.debug("_get_safe_display_content_arim called")
             
             # ARIM IDを優先表示（識別用）
             arim_id = exp.get("ARIM ID", "")
-            print(f"[DEBUG] arim_id: {repr(arim_id)}")
+            logger.debug("arim_id: %s", repr(arim_id))
             
             # タイトルまたは概要から主要内容を取得
             title_val = exp.get("タイトル")
             gaiyo_val = exp.get("概要")
             
-            print(f"[DEBUG] title_val: {repr(title_val)} (type: {type(title_val)})")
-            print(f"[DEBUG] gaiyo_val: {repr(gaiyo_val)} (type: {type(gaiyo_val)})")
+            logger.debug("title_val: %s (type: %s)", repr(title_val), type(title_val))
+            logger.debug("gaiyo_val: %s (type: %s)", repr(gaiyo_val), type(gaiyo_val))
             
             # ARIM IDが有効な場合は、それを基本とする
             if self._is_valid_data_value(arim_id):
@@ -3041,10 +3041,10 @@ class UIController(UIControllerCore):
             else:
                 # ARIM IDが無効な場合はタイトルまたは概要を使用
                 if self._is_valid_data_value(title_val):
-                    print(f"[DEBUG] Using title_val")
+                    logger.debug("Using title_val")
                     main_content = str(title_val).strip()
                 elif self._is_valid_data_value(gaiyo_val):
-                    print(f"[DEBUG] Using gaiyo_val")
+                    logger.debug("Using gaiyo_val")
                     main_content = str(gaiyo_val).strip()
                 else:
                     main_content = "タイトル不明"
@@ -3054,12 +3054,12 @@ class UIController(UIControllerCore):
                 if content_len > 35:
                     main_content = main_content[:35] + "..."
             
-            print(f"[DEBUG] main_content: {repr(main_content)}")
-            print(f"[DEBUG] Returning: {repr(main_content)}")
+            logger.debug("main_content: %s", repr(main_content))
+            logger.debug("Returning: %s", repr(main_content))
             return main_content
                 
         except Exception as e:
-            print(f"[DEBUG] Error in _get_safe_display_content_arim: {e}")
+            logger.debug("Error in _get_safe_display_content_arim: %s", e)
             import traceback
             traceback.print_exc()
             return "データ取得エラー"
@@ -3103,7 +3103,7 @@ class UIController(UIControllerCore):
             return main_content
                 
         except Exception as e:
-            print(f"[DEBUG] Error in _get_safe_display_content_standard: {e}")
+            logger.debug("Error in _get_safe_display_content_standard: %s", e)
             return "データ取得エラー"
 
     def _get_safe_additional_info(self, exp, use_arim_data):
@@ -3177,46 +3177,46 @@ class UIController(UIControllerCore):
             return " | ".join(additional_info)  # 区切り文字を"|"に変更してより読みやすく
             
         except Exception as e:
-            print(f"[DEBUG] Error in _get_safe_additional_info: {e}")
+            logger.debug("Error in _get_safe_additional_info: %s", e)
             return ""
     
     def _clear_experiment_choices(self):
         """実験データ選択肢をクリア"""
         try:
-            print("[DEBUG] _clear_experiment_choices called")
+            logger.debug("_clear_experiment_choices called")
             if hasattr(self, 'experiment_combo') and self.experiment_combo:
                 self.experiment_combo.clear()
                 self.experiment_combo.addItem("課題番号を選択してください", None)
-                print("[DEBUG] experiment_combo cleared and reset to placeholder")
+                logger.debug("experiment_combo cleared and reset to placeholder")
                 
             if hasattr(self, 'experiment_info_label') and self.experiment_info_label:
                 self.experiment_info_label.setText("課題番号を選択すると、該当する実験データが表示されます。")
-                print("[DEBUG] experiment_info_label reset to placeholder")
+                logger.debug("experiment_info_label reset to placeholder")
                 
         except Exception as e:
-            print(f"実験選択肢クリアエラー: {e}")
+            logger.error("実験選択肢クリアエラー: %s", e)
     
     def _clear_experiment_choices_safe(self):
         """実験データ選択肢をクリア（安全版）"""
         try:
-            print("[DEBUG] _clear_experiment_choices_safe called")
+            logger.debug("_clear_experiment_choices_safe called")
             if hasattr(self, 'experiment_combo') and self.experiment_combo is not None:
                 try:
                     self.experiment_combo.clear()
                     self.experiment_combo.addItem("課題番号を選択してください", None)
-                    print("[DEBUG] experiment_combo safely cleared and reset")
+                    logger.debug("experiment_combo safely cleared and reset")
                 except Exception as e:
-                    print(f"[DEBUG] Error clearing experiment_combo: {e}")
+                    logger.debug("Error clearing experiment_combo: %s", e)
                 
             if hasattr(self, 'experiment_info_label') and self.experiment_info_label is not None:
                 try:
                     self.experiment_info_label.setText("課題番号を選択すると、該当する実験データが表示されます。")
-                    print("[DEBUG] experiment_info_label safely reset")
+                    logger.debug("experiment_info_label safely reset")
                 except Exception as e:
-                    print(f"[DEBUG] Error clearing experiment_info_label: {e}")
+                    logger.debug("Error clearing experiment_info_label: %s", e)
                 
         except Exception as e:
-            print(f"実験選択肢安全クリアエラー: {e}")
+            logger.error("実験選択肢安全クリアエラー: %s", e)
     
     def on_experiment_changed(self, index):
         """実験データが変更された時の処理"""
@@ -3236,7 +3236,7 @@ class UIController(UIControllerCore):
                     self.experiment_info_label.setText("")
                     
         except Exception as e:
-            print(f"実験変更処理エラー: {e}")
+            logger.error("実験変更処理エラー: %s", e)
             if hasattr(self, 'experiment_info_label'):
                 self.experiment_info_label.setText(f"エラー: {e}")
     
@@ -3378,7 +3378,7 @@ class UIController(UIControllerCore):
             self.experiment_info_label.setText(info_text)
             
         except Exception as e:
-            print(f"実験情報更新エラー: {e}")
+            logger.error("実験情報更新エラー: %s", e)
             if hasattr(self, 'experiment_info_label'):
                 self.experiment_info_label.setText(f"情報取得エラー: {e}")
     
@@ -3409,7 +3409,7 @@ class UIController(UIControllerCore):
                             if match:
                                 selected_task_id = match.group(1)
             
-            print(f"[DEBUG] show_arim_extension_popup: selected_task_id = {selected_task_id}")
+            logger.debug("show_arim_extension_popup: selected_task_id = %s", selected_task_id)
             
             # キャッシュされたデータがある場合はそれを使用、なければ新たに読み込み
             arim_data = None
@@ -3490,12 +3490,12 @@ class UIController(UIControllerCore):
             
             content = "\n".join(content_lines)
             popup = PopupDialog(self.parent, "ARIM拡張情報", content)
-            popup.exec()
+            popup.exec_()
                 
         except Exception as e:
             content = f"=== ARIM拡張情報 ===\n\n❌ エラーが発生しました:\n{e}"
             popup = PopupDialog(self.parent, "ARIM拡張情報", content)
-            popup.exec()
+            popup.exec_()
     
     def show_request_popup(self):
         """最後のリクエスト内容をポップアップ表示"""
@@ -3505,7 +3505,7 @@ class UIController(UIControllerCore):
             content_exists = has_attr and bool(self.last_request_content)
             content_length = len(self.last_request_content) if has_attr else 0
             
-            print(f"[DEBUG] show_request_popup: has_attr={has_attr}, content_exists={content_exists}, length={content_length}")
+            logger.debug("show_request_popup: has_attr=%s, content_exists=%s, length=%s", has_attr, content_exists, content_length)
             
             if content_exists:
                 # ARIM拡張情報が含まれているかチェック（正しいセクション名で検索）
@@ -3561,12 +3561,12 @@ class UIController(UIControllerCore):
                 content += "AI分析を実行してからもう一度お試しください。"
             
             popup = PopupDialog(self.parent, "リクエスト内容", content)
-            popup.exec()
+            popup.exec_()
             
         except Exception as e:
             content = f"=== リクエスト内容 ===\n\n❌ エラーが発生しました:\n{e}"
             popup = PopupDialog(self.parent, "リクエスト内容", content)
-            popup.exec()
+            popup.exec_()
     
     def show_response_popup(self):
         """AIレスポンス内容をポップアップ表示"""
@@ -3605,12 +3605,12 @@ class UIController(UIControllerCore):
                 content = "=== AIレスポンス内容 ===\n\n❌ 表示可能なレスポンス内容がありません\n\nAI分析を実行してからもう一度お試しください。"
             
             popup = PopupDialog(self.parent, "レスポンス内容", content)
-            popup.exec()
+            popup.exec_()
             
         except Exception as e:
             content = f"=== レスポンス内容 ===\n\n❌ エラーが発生しました:\n{e}"
             popup = PopupDialog(self.parent, "レスポンス内容", content)
-            popup.exec()
+            popup.exec_()
 
     def show_task_info_popup(self):
         """課題詳細情報をポップアップ表示"""
@@ -3626,43 +3626,43 @@ class UIController(UIControllerCore):
             elif hasattr(self, 'ai_test_widget'):
                 ai_test_widget = self.ai_test_widget
                 
-            print(f"[DEBUG] show_task_info_popup: ai_test_widget = {ai_test_widget}")
+            logger.debug("show_task_info_popup: ai_test_widget = %s", ai_test_widget)
             
             if ai_test_widget:
-                print(f"[DEBUG] show_task_info_popup: ai_test_widget exists")
-                print(f"[DEBUG] show_task_info_popup: hasattr(ai_test_widget, 'task_info_label')={hasattr(ai_test_widget, 'task_info_label')}")
+                logger.debug("show_task_info_popup: ai_test_widget exists")
+                logger.debug("show_task_info_popup: hasattr(ai_test_widget, 'task_info_label')=%s", hasattr(ai_test_widget, 'task_info_label'))
                 
                 # AIテストウィジェットのtask_info_labelから取得
                 if hasattr(ai_test_widget, 'task_info_label') and ai_test_widget.task_info_label:
                     task_info_text = ai_test_widget.task_info_label.text()
-                    print(f"[DEBUG] show_task_info_popup: ai_test_widget.task_info_label.text()='{task_info_text}'")
+                    logger.debug("show_task_info_popup: ai_test_widget.task_info_label.text()='%s'", task_info_text)
                 else:
-                    print(f"[DEBUG] show_task_info_popup: ai_test_widget.task_info_label not available")
+                    logger.debug("show_task_info_popup: ai_test_widget.task_info_label not available")
                     
                 # 現在選択されている課題番号を取得
                 if hasattr(ai_test_widget, 'task_id_combo') and ai_test_widget.task_id_combo:
                     current_task = ai_test_widget.task_id_combo.currentText()
                     current_index = ai_test_widget.task_id_combo.currentIndex()
                     current_data = ai_test_widget.task_id_combo.itemData(current_index) if current_index >= 0 else None
-                    print(f"[DEBUG] show_task_info_popup: ai_test_widget.task_id_combo.currentText()='{current_task}'")
-                    print(f"[DEBUG] show_task_info_popup: ai_test_widget.task_id_combo.currentIndex()={current_index}")
-                    print(f"[DEBUG] show_task_info_popup: ai_test_widget.task_id_combo.itemData()='{current_data}'")
+                    logger.debug("show_task_info_popup: ai_test_widget.task_id_combo.currentText()='%s'", current_task)
+                    logger.debug("show_task_info_popup: ai_test_widget.task_id_combo.currentIndex()=%s", current_index)
+                    logger.debug("show_task_info_popup: ai_test_widget.task_id_combo.itemData()='%s'", current_data)
                 else:
-                    print(f"[DEBUG] show_task_info_popup: ai_test_widget.task_id_combo not available")
+                    logger.debug("show_task_info_popup: ai_test_widget.task_id_combo not available")
             else:
-                print(f"[DEBUG] show_task_info_popup: ai_test_widget not available")
+                logger.debug("show_task_info_popup: ai_test_widget not available")
             
             # フォールバック: 通常のtask_info_labelも確認
             if not task_info_text and hasattr(self, 'task_info_label') and self.task_info_label:
                 task_info_text = self.task_info_label.text()
-                print(f"[DEBUG] show_task_info_popup: fallback task_info_label.text()='{task_info_text}'")
+                logger.debug("show_task_info_popup: fallback task_info_label.text()='%s'", task_info_text)
                 
             # フォールバック: 通常のtask_id_comboも確認
             if not current_task and hasattr(self, 'task_id_combo') and self.task_id_combo:
                 current_task = self.task_id_combo.currentText()
-                print(f"[DEBUG] show_task_info_popup: fallback task_id_combo.currentText()='{current_task}'")
+                logger.debug("show_task_info_popup: fallback task_id_combo.currentText()='%s'", current_task)
             
-            print(f"[DEBUG] show_task_info_popup: final task_info_text='{task_info_text}', current_task='{current_task}'")
+            logger.debug("show_task_info_popup: final task_info_text='%s', current_task='%s'", task_info_text, current_task)
             
             if task_info_text and task_info_text not in ["課題番号を選択してください", ""]:
                 content = "=== 選択した課題の詳細情報 ===\n\n"
@@ -3688,9 +3688,9 @@ class UIController(UIControllerCore):
             dialog.show()
             
         except Exception as e:
-            print(f"[ERROR] show_task_info_popup: {e}")
+            logger.error("show_task_info_popup: %s", e)
             import traceback
-            print(f"[ERROR] show_task_info_popup traceback: {traceback.format_exc()}")
+            logger.error("show_task_info_popup traceback: %s", traceback.format_exc())
             content = f"=== 課題詳細情報 ===\n\n❌ エラーが発生しました:\n{e}"
             dialog = TextAreaExpandDialog(self.parent, "課題詳細情報", content, False, None)
             dialog.show()
@@ -3709,42 +3709,42 @@ class UIController(UIControllerCore):
             elif hasattr(self, 'ai_test_widget'):
                 ai_test_widget = self.ai_test_widget
                 
-            print(f"[DEBUG] show_experiment_info_popup: ai_test_widget = {ai_test_widget}")
+            logger.debug("show_experiment_info_popup: ai_test_widget = %s", ai_test_widget)
             
             if ai_test_widget:
-                print(f"[DEBUG] show_experiment_info_popup: ai_test_widget exists")
+                logger.debug("show_experiment_info_popup: ai_test_widget exists")
                 
                 # AIテストウィジェットのexperiment_info_labelから取得
                 if hasattr(ai_test_widget, 'experiment_info_label') and ai_test_widget.experiment_info_label:
                     experiment_info_text = ai_test_widget.experiment_info_label.text()
-                    print(f"[DEBUG] show_experiment_info_popup: ai_test_widget.experiment_info_label.text()='{experiment_info_text[:100]}...'")
+                    logger.debug("show_experiment_info_popup: ai_test_widget.experiment_info_label.text()='%s...'", experiment_info_text[:100])
                 else:
-                    print(f"[DEBUG] show_experiment_info_popup: ai_test_widget.experiment_info_label not available")
+                    logger.debug("show_experiment_info_popup: ai_test_widget.experiment_info_label not available")
                     
                 # 現在選択されている実験データを取得
                 if hasattr(ai_test_widget, 'experiment_combo') and ai_test_widget.experiment_combo:
                     current_experiment = ai_test_widget.experiment_combo.currentText()
                     current_index = ai_test_widget.experiment_combo.currentIndex()
                     current_data = ai_test_widget.experiment_combo.itemData(current_index) if current_index >= 0 else None
-                    print(f"[DEBUG] show_experiment_info_popup: ai_test_widget.experiment_combo.currentText()='{current_experiment}'")
-                    print(f"[DEBUG] show_experiment_info_popup: ai_test_widget.experiment_combo.currentIndex()={current_index}")
-                    print(f"[DEBUG] show_experiment_info_popup: ai_test_widget.experiment_combo.itemData()='{current_data}'")
+                    logger.debug("show_experiment_info_popup: ai_test_widget.experiment_combo.currentText()='%s'", current_experiment)
+                    logger.debug("show_experiment_info_popup: ai_test_widget.experiment_combo.currentIndex()=%s", current_index)
+                    logger.debug("show_experiment_info_popup: ai_test_widget.experiment_combo.itemData()='%s'", current_data)
                 else:
-                    print(f"[DEBUG] show_experiment_info_popup: ai_test_widget.experiment_combo not available")
+                    logger.debug("show_experiment_info_popup: ai_test_widget.experiment_combo not available")
             else:
-                print(f"[DEBUG] show_experiment_info_popup: ai_test_widget not available")
+                logger.debug("show_experiment_info_popup: ai_test_widget not available")
             
             # フォールバック: 通常のexperiment_info_labelも確認
             if not experiment_info_text and hasattr(self, 'experiment_info_label') and self.experiment_info_label:
                 experiment_info_text = self.experiment_info_label.text()
-                print(f"[DEBUG] show_experiment_info_popup: fallback experiment_info_label.text()='{experiment_info_text[:100]}...'")
+                logger.debug("show_experiment_info_popup: fallback experiment_info_label.text()='%s...'", experiment_info_text[:100])
                 
             # フォールバック: 通常のexperiment_comboも確認
             if not current_experiment and hasattr(self, 'experiment_combo') and self.experiment_combo:
                 current_experiment = self.experiment_combo.currentText()
-                print(f"[DEBUG] show_experiment_info_popup: fallback experiment_combo.currentText()='{current_experiment}'")
+                logger.debug("show_experiment_info_popup: fallback experiment_combo.currentText()='%s'", current_experiment)
             
-            print(f"[DEBUG] show_experiment_info_popup: final experiment_info_text='{experiment_info_text[:100] if experiment_info_text else ''}...', current_experiment='{current_experiment}'")
+            logger.debug("show_experiment_info_popup: final experiment_info_text='%s...', current_experiment='%s'", experiment_info_text[:100] if experiment_info_text else '', current_experiment)
             
             if experiment_info_text and experiment_info_text not in ["課題番号を選択すると、該当する実験データが表示されます。", ""]:
                 content = "=== 選択した実験データの詳細情報 ===\n\n"
@@ -3763,23 +3763,23 @@ class UIController(UIControllerCore):
             dialog.show()
             
         except Exception as e:
-            print(f"[ERROR] show_experiment_info_popup: {e}")
+            logger.error("show_experiment_info_popup: %s", e)
             import traceback
-            print(f"[ERROR] show_experiment_info_popup traceback: {traceback.format_exc()}")
+            logger.error("show_experiment_info_popup traceback: %s", traceback.format_exc())
             content = f"=== 実験データ詳細情報 ===\n\n❌ エラーが発生しました:\n{e}"
             dialog = TextAreaExpandDialog(self.parent, "実験データ詳細情報", content, False, None)
             dialog.show()
 
     def on_analysis_method_changed(self, index):
         """分析方法が変更された時の処理"""
-        print(f"[DEBUG] ui_controller.on_analysis_method_changed called with index: {index}")
+        logger.debug("ui_controller.on_analysis_method_changed called with index: %s", index)
         try:
             if index >= 0 and hasattr(self, 'analysis_method_combo'):
-                print(f"[DEBUG] analysis_method_combo exists, getting item data for index {index}")
+                logger.debug("analysis_method_combo exists, getting item data for index %s", index)
                 method_data = self.analysis_method_combo.itemData(index)
-                print(f"[DEBUG] method_data: {method_data}")
+                logger.debug("method_data: %s", method_data)
                 if method_data and hasattr(self, 'analysis_description_label'):
-                    print(f"[DEBUG] analysis_description_label exists, updating text")
+                    logger.debug("analysis_description_label exists, updating text")
                     description = method_data.get("description", "")
                     exec_type = method_data.get("exec_type", "SINGLE")
                     data_methods = method_data.get("data_methods", [])
@@ -3799,20 +3799,20 @@ class UIController(UIControllerCore):
                         extended_description += f"\n📁 静的データ: {', '.join(static_files)}"
                     
                     self.analysis_description_label.setText(extended_description)
-                    print(f"[DEBUG] analysis_description_label updated with: {extended_description[:100]}...")
+                    logger.debug("analysis_description_label updated with: %s...", extended_description[:100])
                     
                     # 単体処理の場合は実験データ選択が必要であることを強調
                     if exec_type == "SINGLE":
                         final_text = f"{extended_description}\n⚠️ 単体の実験データを選択してください"
                         self.analysis_description_label.setText(final_text)
-                        print(f"[DEBUG] Single exec type warning added")
+                        logger.debug("Single exec type warning added")
                 else:
-                    print(f"[DEBUG] method_data is None or analysis_description_label missing")
+                    logger.debug("method_data is None or analysis_description_label missing")
             else:
-                print(f"[DEBUG] Invalid index ({index}) or analysis_method_combo missing")
+                logger.debug("Invalid index (%s) or analysis_method_combo missing", index)
                         
         except Exception as e:
-            print(f"分析方法変更処理エラー: {e}")
+            logger.error("分析方法変更処理エラー: %s", e)
             import traceback
             traceback.print_exc()
             if hasattr(self, 'analysis_description_label'):
@@ -3952,7 +3952,7 @@ class UIController(UIControllerCore):
                 bearer_token = getattr(parent_widget, 'bearer_token', None)
                 run_settings_logic(parent_widget, bearer_token)
             except Exception as e:
-                print(f"設定ダイアログオープンエラー: {e}")
+                logger.error("設定ダイアログオープンエラー: %s", e)
         
         open_settings_button.clicked.connect(open_legacy_settings)
         layout.addWidget(open_settings_button)
@@ -3972,7 +3972,7 @@ class UIController(UIControllerCore):
                     target_height = int(screen.height() * 0.90)
                     target_width = 1200  # 通常登録タブの標準幅
                     
-                    print(f"[DEBUG] 初回データ登録ウィジェット作成: 画面サイズ適用 {target_width}x{target_height}")
+                    logger.debug("初回データ登録ウィジェット作成: 画面サイズ適用 %sx%s", target_width, target_height)
                     self.parent.resize(target_width, target_height)
                     
                     # 画面中央に配置
@@ -3985,18 +3985,18 @@ class UIController(UIControllerCore):
             QTimer.singleShot(50, apply_sizing)
             
         except Exception as e:
-            print(f"[ERROR] 初回データ登録サイズ適用エラー: {e}")
+            logger.error("初回データ登録サイズ適用エラー: %s", e)
     
     def open_ai_extension_dialog_from_menu(self):
         """メニューからAI拡張ダイアログを直接開く（簡素化版）"""
         try:
-            print("[DEBUG] メニューからAI拡張ダイアログを開く")
+            logger.debug("メニューからAI拡張ダイアログを開く")
             
             # AI拡張ダイアログを直接起動
             self._launch_ai_extension_dialog_direct()
             
         except Exception as e:
-            print(f"[ERROR] メニューからのAI拡張ダイアログ起動エラー: {e}")
+            logger.error("メニューからのAI拡張ダイアログ起動エラー: %s", e)
             import traceback
             traceback.print_exc()
             from qt_compat.widgets import QMessageBox
@@ -4007,7 +4007,7 @@ class UIController(UIControllerCore):
         try:
             from classes.dataset.ui.ai_suggestion_dialog import AISuggestionDialog
             
-            print("[DEBUG] AI拡張ダイアログを直接起動")
+            logger.debug("AI拡張ダイアログを直接起動")
             
             # 基本的なコンテキストデータを作成
             context_data = {
@@ -4037,25 +4037,25 @@ class UIController(UIControllerCore):
                             tab_text = dialog.tab_widget.tabText(i)
                             if "AI拡張" in tab_text:
                                 dialog.tab_widget.setCurrentIndex(i)
-                                print(f"[DEBUG] AI拡張タブを選択: インデックス {i}")
+                                logger.debug("AI拡張タブを選択: インデックス %s", i)
                                 break
                     except Exception as e:
-                        print(f"[ERROR] AI拡張タブ選択エラー: {e}")
+                        logger.error("AI拡張タブ選択エラー: %s", e)
                 
                 QTimer.singleShot(100, select_extension_tab)
             
             # ダイアログを表示
             dialog.show()
-            print("[DEBUG] AI拡張ダイアログ表示完了")
+            logger.debug("AI拡張ダイアログ表示完了")
             
         except Exception as e:
-            print(f"[ERROR] AI拡張ダイアログ直接起動エラー: {e}")
+            logger.error("AI拡張ダイアログ直接起動エラー: %s", e)
             import traceback
             traceback.print_exc()
             from qt_compat.widgets import QMessageBox
             QMessageBox.critical(None, "エラー", f"AI拡張ダイアログの起動に失敗しました: {str(e)}")
         except Exception as e:
-            print(f"[ERROR] 初回データ登録ウィジェットサイズ適用エラー: {e}")
+            logger.error("初回データ登録ウィジェットサイズ適用エラー: %s", e)
             import traceback
     
 

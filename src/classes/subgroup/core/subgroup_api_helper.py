@@ -11,6 +11,11 @@ from qt_compat.widgets import QMessageBox
 from qt_compat.core import QTimer
 from .subgroup_api_client import SubgroupApiClient, SubgroupPayloadBuilder
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 
 def fetch_user_details_by_id(user_id, bearer_token=None):
     """
@@ -25,11 +30,11 @@ def fetch_user_details_by_id(user_id, bearer_token=None):
               取得失敗時は None
     """
     if not user_id:
-        print("[WARNING] fetch_user_details_by_id: user_idが空です")
+        logger.warning("fetch_user_details_by_id: user_idが空です")
         return None
     
     if not bearer_token:
-        print("[WARNING] fetch_user_details_by_id: bearer_tokenが提供されていません")
+        logger.warning("fetch_user_details_by_id: bearer_tokenが提供されていません")
         return None
     
     try:
@@ -56,7 +61,7 @@ def fetch_user_details_by_id(user_id, bearer_token=None):
             'sec-ch-ua-platform': '"Windows"'
         }
         
-        print(f"[DEBUG] ユーザー詳細取得API呼び出し: {api_url}")
+        logger.debug("ユーザー詳細取得API呼び出し: %s", api_url)
         
         # API呼び出し（統一管理システム使用）
         response = api_request("GET", api_url, bearer_token=bearer_token, headers=headers, timeout=10)
@@ -67,7 +72,7 @@ def fetch_user_details_by_id(user_id, bearer_token=None):
         user_data = data.get('data', {})
         
         if user_data.get('type') != 'user':
-            print(f"[WARNING] 期待されるユーザータイプではありません: {user_data.get('type')}")
+            logger.warning("期待されるユーザータイプではありません: %s", user_data.get('type'))
             return None
         
         # 詳細情報を抽出
@@ -83,11 +88,11 @@ def fetch_user_details_by_id(user_id, bearer_token=None):
             'source': 'api_fetch'
         }
         
-        print(f"[DEBUG] ユーザー詳細取得成功: {user_details.get('userName', 'Unknown')} ({user_id})")
+        logger.debug("ユーザー詳細取得成功: %s (%s)", user_details.get('userName', 'Unknown'), user_id)
         return user_details
         
     except Exception as e:
-        print(f"[ERROR] ユーザー詳細取得エラー (ID: {user_id}): {e}")
+        logger.error("ユーザー詳細取得エラー (ID: %s): %s", user_id, e)
         return None
 
 
@@ -199,20 +204,56 @@ def load_unified_member_list(subgroup_id=None, dynamic_users=None, bearer_token=
             unified_users: 統合されたユーザーリスト
             member_info: ユーザーID -> ユーザー詳細情報のマッピング
     """
-    print(f"[DEBUG] load_unified_member_list 開始: subgroup_id={subgroup_id}, bearer_token={'あり' if bearer_token else 'なし'}")
+    logger.debug("load_unified_member_list 開始: subgroup_id=%s, bearer_token=%s", subgroup_id, 'あり' if bearer_token else 'なし')
     
+    # 0. subGroup.jsonを最初に読み込み（複数箇所で使用するため）
+    subgroup_data = None
+    email_to_user_map = {}
+    try:
+        from config.common import get_dynamic_file_path
+        subgroup_json_path = get_dynamic_file_path("output/rde/data/subGroup.json")
+        if os.path.exists(subgroup_json_path):
+            with open(subgroup_json_path, 'r', encoding='utf-8') as f:
+                subgroup_data = json.load(f)
+            
+            # includedセクションからメールアドレス→ユーザー情報マッピングを作成
+            included_items = subgroup_data.get("included", [])
+            for item in included_items:
+                if item.get("type") == "user":
+                    attr = item.get("attributes", {})
+                    email = attr.get('emailAddress', '').strip()
+                    if email:
+                        email_to_user_map[email] = {
+                            'id': item.get('id', ''),
+                            'userName': attr.get('userName', ''),
+                            'emailAddress': email,
+                            'organizationName': attr.get('organizationName', ''),
+                            'familyName': attr.get('familyName', ''),
+                            'givenName': attr.get('givenName', '')
+                        }
+            logger.debug("subGroup.json読み込み完了: %s名のメールマッピング作成", len(email_to_user_map))
+    except Exception as e:
+        logger.warning("subGroup.json事前読み込みエラー: %s", e)
+
     # 1. rde-member.txtからメンバー読み込み
     rde_members = {}
     try:
         paths = check_subgroup_files()
         if os.path.exists(paths["member_path"]):
             with open(paths["member_path"], 'r', encoding='utf-8') as f:
-                member_lines = f.read().split(';')
+                content = f.read()
             
-            for line in member_lines:
-                if line.strip():
+            # JSON形式（セミコロン区切り）とCSV形式（カンマ区切り）の両方に対応
+            # まずJSON形式を試行
+            is_json_format = False
+            if ';' in content:
+                member_lines = content.split(';')
+                for line in member_lines:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
                     try:
-                        member_data = json.loads(line.strip())
+                        member_data = json.loads(line)
                         user_id = member_data.get('id', '')
                         if user_id:
                             rde_members[user_id] = {
@@ -222,24 +263,118 @@ def load_unified_member_list(subgroup_id=None, dynamic_users=None, bearer_token=
                                 'organizationName': member_data.get('organizationName', ''),
                                 'familyName': member_data.get('familyName', ''),
                                 'givenName': member_data.get('givenName', ''),
-                                'source': 'rde-member.txt'
+                                'source': 'rde-member.txt',
+                                'source_format': 'json'
                             }
+                            is_json_format = True
                     except json.JSONDecodeError:
                         continue
-    except Exception as e:
-        print(f"[WARNING] rde-member.txt読み込みエラー: {e}")
-
-    # 2. subGroup.jsonから既存ロール情報読み込み
-    subgroup_roles = {}
-    subgroup_data = None  # 後でユーザー情報検索に使用
-    try:
-        from config.common import get_dynamic_file_path
-        subgroup_json_path = get_dynamic_file_path("output/rde/data/subGroup.json")
-        
-        if os.path.exists(subgroup_json_path):
-            with open(subgroup_json_path, 'r', encoding='utf-8') as f:
-                subgroup_data = json.load(f)
             
+            # JSON形式でない場合はCSV形式（カンマ区切り）として読み込み
+            if not is_json_format:
+                logger.debug("rde-member.txt: CSV形式として読み込みます")
+                
+                # CSV形式で読み込み: メールアドレス, role, canCreateDatasets, canEditMembers
+                lines = content.split('\n')
+                for line in lines:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    
+                    # セミコロンで終わる場合は削除
+                    if line.endswith(';'):
+                        line = line[:-1]
+                    
+                    parts = [x.strip() for x in line.split(',')]
+                    if len(parts) >= 4:
+                        email = parts[0]
+                        role_num = parts[1]  # 1=OWNER, 2=ASSISTANT
+                        can_create = parts[2] == '1'
+                        can_edit = parts[3] == '1'
+                        
+                        # メールアドレスからユーザー情報を取得（まずローカルマップから）
+                        user_info = None
+                        user_id = None
+                        
+                        if email in email_to_user_map:
+                            user_info = email_to_user_map[email]
+                            user_id = user_info['id']
+                            logger.debug("CSV読み込み（ローカル）: %s -> %s (ID: %s...)", email, user_info.get('userName'), user_id[:20])
+                        else:
+                            # subGroup.jsonに存在しない場合、APIで検索
+                            logger.debug("rde-member.txt: メールアドレス %s がローカルに存在しないため、APIで検索します", email)
+                            
+                            if bearer_token:
+                                import urllib.parse
+                                from net.http_helpers import proxy_get
+                                
+                                try:
+                                    # APIでメールアドレス検索
+                                    encoded_email = urllib.parse.quote_plus(email)
+                                    filter_param = urllib.parse.quote('filter[emailAddress]', safe='')
+                                    url = f"https://rde-user-api.nims.go.jp/users?{filter_param}={encoded_email}"
+                                    
+                                    headers = {
+                                        'Authorization': f'Bearer {bearer_token}',
+                                        'Accept': 'application/vnd.api+json',
+                                        'Content-Type': 'application/json'
+                                    }
+                                    
+                                    response = proxy_get(url, headers=headers)
+                                    response.raise_for_status()
+                                    
+                                    data = response.json()
+                                    users = data.get('data', [])
+                                    
+                                    if users:
+                                        # 最初のユーザーを取得
+                                        user = users[0]
+                                        attr = user.get('attributes', {})
+                                        user_id = user.get('id', '')
+                                        user_info = {
+                                            'id': user_id,
+                                            'userName': attr.get('userName', 'Unknown'),
+                                            'emailAddress': attr.get('emailAddress', email),
+                                            'organizationName': attr.get('organizationName', ''),
+                                            'familyName': attr.get('familyName', ''),
+                                            'givenName': attr.get('givenName', '')
+                                        }
+                                        logger.debug("CSV読み込み（API）: %s -> %s (ID: %s...)", email, user_info.get('userName'), user_id[:20])
+                                    else:
+                                        logger.warning("rde-member.txt: メールアドレス %s のユーザーがAPIでも見つかりません", email)
+                                except Exception as api_error:
+                                    logger.error("rde-member.txt API検索エラー (%s): %s", email, api_error)
+                            else:
+                                logger.warning("rde-member.txt: Bearer token未提供のため、%s のAPI検索をスキップ", email)
+                        
+                        # ユーザー情報が取得できた場合のみ追加
+                        if user_info and user_id:
+                            rde_members[user_id] = {
+                                'id': user_id,
+                                'userName': user_info.get('userName', 'Unknown'),
+                                'emailAddress': email,
+                                'organizationName': user_info.get('organizationName', ''),
+                                'familyName': user_info.get('familyName', ''),
+                                'givenName': user_info.get('givenName', ''),
+                                'source': 'rde-member.txt',
+                                'source_format': 'csv',
+                                'role_from_file': 'OWNER' if role_num == '1' else 'ASSISTANT',
+                                'canCreateDatasets': can_create,
+                                'canEditMembers': can_edit
+                            }
+                
+                logger.debug("CSV形式rde-member.txt読み込み完了: %s名", len(rde_members))
+    except Exception as e:
+        logger.warning("rde-member.txt読み込みエラー: %s", e)
+        import traceback
+        logger.debug("詳細エラー: %s", traceback.format_exc())
+
+    # 2. subGroup.jsonから既存ロール情報読み込み（既に読み込み済みのsubgroup_dataを使用）
+    subgroup_roles = {}
+    subgroup_all_users = {}  # 新規作成時：全ユーザー情報（実施機関メンバー）
+    
+    try:
+        if subgroup_data:
             # 修正対象のサブグループを検索
             if subgroup_id:
                 # まず included セクションから探す（新しい形式）
@@ -280,7 +415,7 @@ def load_unified_member_list(subgroup_id=None, dynamic_users=None, bearer_token=
                     if isinstance(attributes, dict):
                         roles = attributes.get('roles', [])
                         if isinstance(roles, list):
-                            print(f"[DEBUG] サブグループ {subgroup_id} のロール情報取得: {len(roles)}件")
+                            logger.debug("サブグループ %s のロール情報取得: %s件", subgroup_id, len(roles))
                             for role in roles:
                                 if isinstance(role, dict):
                                     user_id = role.get('userId', '')
@@ -291,11 +426,30 @@ def load_unified_member_list(subgroup_id=None, dynamic_users=None, bearer_token=
                                             'canEditMembers': role.get('canEditMembers', False)
                                         }
                 else:
-                    print(f"[WARNING] サブグループ {subgroup_id} が見つかりませんでした")
+                    logger.warning("サブグループ %s が見つかりませんでした", subgroup_id)
+            else:
+                # 新規作成時：subGroup.jsonの全ユーザーを実施機関メンバーとして取得
+                included_items = subgroup_data.get("included", [])
+                for item in included_items:
+                    if item.get("type") == "user":
+                        user_id = item.get('id', '')
+                        if user_id:
+                            attr = item.get('attributes', {})
+                            subgroup_all_users[user_id] = {
+                                'id': user_id,
+                                'userName': attr.get('userName', ''),
+                                'emailAddress': attr.get('emailAddress', ''),
+                                'organizationName': attr.get('organizationName', ''),
+                                'familyName': attr.get('familyName', ''),
+                                'givenName': attr.get('givenName', ''),
+                                'source': 'subGroup.json',
+                                'source_format': 'included'
+                            }
+                logger.debug("新規作成時：subGroup.jsonから全ユーザー取得 - %s名", len(subgroup_all_users))
     except Exception as e:
-        print(f"[WARNING] subGroup.json読み込みエラー: {e}")
+        logger.warning("subGroup.json読み込みエラー: %s", e)
         import traceback
-        print(f"[DEBUG] 詳細エラー: {traceback.format_exc()}")
+        logger.debug("詳細エラー: %s", traceback.format_exc())
 
     # 3. 動的追加ユーザーを組み込み（一時ファイル + パラメータ）
     dynamic_members = {}
@@ -326,6 +480,7 @@ def load_unified_member_list(subgroup_id=None, dynamic_users=None, bearer_token=
     all_user_ids = set()
     all_user_ids.update(rde_members.keys())
     all_user_ids.update(subgroup_roles.keys())
+    all_user_ids.update(subgroup_all_users.keys())  # 新規作成時の全ユーザー
     all_user_ids.update(dynamic_members.keys())
 
     # 5. 統合ユーザーリスト作成
@@ -333,13 +488,16 @@ def load_unified_member_list(subgroup_id=None, dynamic_users=None, bearer_token=
     member_info = {}
     
     for user_id in all_user_ids:
-        # 優先順位: rde-member.txt > dynamic_users > subGroup.json（IDのみ）
+        # 優先順位: rde-member.txt > dynamic_users > subgroup_all_users（新規作成時） > subGroup.json（IDのみ）
         user_data = None
         
         if user_id in rde_members:
             user_data = rde_members[user_id]
         elif user_id in dynamic_members:
             user_data = dynamic_members[user_id]
+        elif user_id in subgroup_all_users:
+            # 新規作成時：subGroup.jsonの全ユーザー情報を使用
+            user_data = subgroup_all_users[user_id]
         else:
             # subGroup.jsonにしか存在しない場合、API補完を試行
             # まずsubGroup.jsonのincludedセクションからユーザー情報を探す
@@ -359,12 +517,13 @@ def load_unified_member_list(subgroup_id=None, dynamic_users=None, bearer_token=
                                 'organizationName': attr.get('organizationName', ''),
                                 'familyName': attr.get('familyName', ''),
                                 'givenName': attr.get('givenName', ''),
-                                'source': 'subGroup.json_included'
+                                'source': 'subGroup.json',
+                                'source_format': 'included'
                             }
-                            print(f"[DEBUG] subGroup.jsonからユーザー詳細取得: {user_data.get('userName', 'Unknown')} ({user_id})")
+                            logger.debug("subGroup.jsonからユーザー詳細取得: %s (%s)", user_data.get('userName', 'Unknown'), user_id)
                             break
             except Exception as e:
-                print(f"[DEBUG] subGroup.json ユーザー検索エラー: {e}")
+                logger.debug("subGroup.json ユーザー検索エラー: %s", e)
             
             # 見つからない場合は最小限のデータで初期化
             if not user_data:
@@ -375,20 +534,25 @@ def load_unified_member_list(subgroup_id=None, dynamic_users=None, bearer_token=
                     'organizationName': '',
                     'familyName': '',
                     'givenName': '',
-                    'source': 'subGroup.json'
+                    'source': 'subGroup.json',
+                    'source_format': 'roles_only'
                 }
         
         # 詳細データが不足している場合はAPI呼び出しで補完
         if (user_data.get('userName', '').strip() in ['', 'Unknown User', 'Unknown'] or 
             not user_data.get('emailAddress', '').strip()):
             
-            print(f"[DEBUG] ユーザー詳細データ不足: {user_id} - API補完を試行")
+            logger.debug("ユーザー詳細データ不足: %s - API補完を試行", user_id)
+            
+            # 元のsourceを保存
+            original_source = user_data.get('source', 'unknown')
+            original_source_format = user_data.get('source_format', '')
             
             # API呼び出しでユーザー詳細を取得
             api_user_data = fetch_user_details_by_id(user_id, bearer_token)
             
             if api_user_data:
-                # API取得データで既存データを更新
+                # API取得データで既存データを更新（sourceとsource_formatは保持）
                 user_data.update({
                     'userName': api_user_data.get('userName', user_data.get('userName', '')),
                     'emailAddress': api_user_data.get('emailAddress', user_data.get('emailAddress', '')),
@@ -396,31 +560,40 @@ def load_unified_member_list(subgroup_id=None, dynamic_users=None, bearer_token=
                     'givenName': api_user_data.get('givenName', user_data.get('givenName', '')),
                     'organizationName': api_user_data.get('organizationName', user_data.get('organizationName', '')),
                     'isDeleted': api_user_data.get('isDeleted', False),
-                    'source': f"{user_data.get('source', 'unknown')}_+_api"
+                    'source': original_source,  # 元のsourceを保持
+                    'source_format': original_source_format  # 元のsource_formatを保持
                 })
-                print(f"[DEBUG] API補完成功: {user_data.get('userName', 'Unknown')}")
+                logger.debug("API補完成功: %s (source=%s, source_format=%s)", user_data.get('userName', 'Unknown'), original_source, original_source_format)
             else:
                 if bearer_token:
-                    print(f"[WARNING] API補完失敗: {user_id} - 元データを使用")
+                    logger.warning("API補完失敗: %s - 元データを使用", user_id)
                 else:
-                    print(f"[DEBUG] bearer_token未提供のためAPI補完スキップ: {user_id}")
+                    logger.debug("bearer_token未提供のためAPI補完スキップ: %s", user_id)
         
-        # 既存ロール情報があれば設定
+        # 既存ロール情報があれば設定（優先順位: subgroup_roles > rde-member.txt）
         if user_id in subgroup_roles:
             user_data.update({
                 'existingRole': subgroup_roles[user_id]['role'],
                 'canCreateDatasets': subgroup_roles[user_id]['canCreateDatasets'],
                 'canEditMembers': subgroup_roles[user_id]['canEditMembers']
             })
+        # subgroup_rolesに存在しない場合、rde-member.txtからのロール情報を使用
+        elif 'role_from_file' in user_data:
+            user_data.update({
+                'existingRole': user_data['role_from_file'],
+                'canCreateDatasets': user_data.get('canCreateDatasets', False),
+                'canEditMembers': user_data.get('canEditMembers', False)
+            })
         
         unified_users.append(user_data)
         member_info[user_id] = user_data
     
-    print(f"[DEBUG] load_unified_member_list 完了:")
-    print(f"  - rde-member.txt: {len(rde_members)}名")
-    print(f"  - subgroup_roles: {len(subgroup_roles)}名")
-    print(f"  - dynamic_members: {len(dynamic_members)}名") 
-    print(f"  - 統合結果: {len(unified_users)}名")
+    logger.debug("load_unified_member_list 完了:")
+    logger.debug("  - rde-member.txt: %s名", len(rde_members))
+    logger.debug("  - subgroup_roles: %s名", len(subgroup_roles))
+    logger.debug("  - subgroup_all_users: %s名", len(subgroup_all_users))
+    logger.debug("  - dynamic_members: %s名", len(dynamic_members)) 
+    logger.debug("  - 統合結果: %s名", len(unified_users))
     
     return unified_users, member_info
 
@@ -470,7 +643,7 @@ def load_dynamic_users_from_temp():
             data = json.load(f)
         return data.get('dynamic_users', [])
     except Exception as e:
-        print(f"[WARNING] 動的ユーザー一時ファイル読み込みエラー: {e}")
+        logger.warning("動的ユーザー一時ファイル読み込みエラー: %s", e)
         return []
 
 
@@ -495,11 +668,11 @@ def save_dynamic_users_to_temp(dynamic_users):
         with open(temp_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         
-        print(f"[DEBUG] 動的ユーザーを一時ファイルに保存: {len(dynamic_users)}件")
+        logger.debug("動的ユーザーを一時ファイルに保存: %s件", len(dynamic_users))
         return True
         
     except Exception as e:
-        print(f"[ERROR] 動的ユーザー一時保存エラー: {e}")
+        logger.error("動的ユーザー一時保存エラー: %s", e)
         return False
 
 
@@ -521,7 +694,7 @@ def add_dynamic_user_to_member_list(user_data):
         # 重複チェック
         user_id = user_data.get('id', '')
         if user_id in existing_ids:
-            print(f"[DEBUG] ユーザーID {user_id} は既に動的ユーザーリストに存在します")
+            logger.debug("ユーザーID %s は既に動的ユーザーリストに存在します", user_id)
             return True
         
         # 新しいユーザーを追加
@@ -531,12 +704,12 @@ def add_dynamic_user_to_member_list(user_data):
         success = save_dynamic_users_to_temp(existing_dynamic_users)
         
         if success:
-            print(f"[DEBUG] 動的ユーザーを一時ファイルに保存: {user_data.get('userName', 'Unknown')}")
+            logger.debug("動的ユーザーを一時ファイルに保存: %s", user_data.get('userName', 'Unknown'))
         
         return success
         
     except Exception as e:
-        print(f"[ERROR] 動的ユーザー保存エラー: {e}")
+        logger.error("動的ユーザー保存エラー: %s", e)
         return False
 
 
@@ -557,7 +730,7 @@ def load_dynamic_users_backup():
             data = json.load(f)
         return data.get('backup_users', [])
     except Exception as e:
-        print(f"[WARNING] 動的ユーザーバックアップファイル読み込みエラー: {e}")
+        logger.warning("動的ユーザーバックアップファイル読み込みエラー: %s", e)
         return []
 
 
@@ -607,11 +780,11 @@ def save_dynamic_users_backup(new_users):
         with open(backup_path, 'w', encoding='utf-8') as f:
             json.dump(backup_data, f, ensure_ascii=False, indent=2)
         
-        print(f"[DEBUG] 動的ユーザーバックアップ保存完了: 新規{new_count}件、合計{len(merged_users)}件")
+        logger.debug("動的ユーザーバックアップ保存完了: 新規%s件、合計%s件", new_count, len(merged_users))
         return True
         
     except Exception as e:
-        print(f"[ERROR] 動的ユーザーバックアップ保存エラー: {e}")
+        logger.error("動的ユーザーバックアップ保存エラー: %s", e)
         return False
 
 
@@ -628,7 +801,7 @@ def backup_and_clear_dynamic_users():
         current_dynamic_users = load_dynamic_users_from_temp()
         
         if current_dynamic_users:
-            print(f"[DEBUG] 修正タブ開始: 動的ユーザー{len(current_dynamic_users)}件をバックアップ中...")
+            logger.debug("修正タブ開始: 動的ユーザー%s件をバックアップ中...", len(current_dynamic_users))
             
             # バックアップに保存
             backup_success = save_dynamic_users_backup(current_dynamic_users)
@@ -638,20 +811,20 @@ def backup_and_clear_dynamic_users():
                 clear_success = save_dynamic_users_to_temp([])
                 
                 if clear_success:
-                    print(f"[DEBUG] 修正タブ開始: 動的ユーザー初期化完了 (バックアップ済み)")
+                    logger.debug("修正タブ開始: 動的ユーザー初期化完了 (バックアップ済み)")
                     return True
                 else:
-                    print(f"[WARNING] 修正タブ開始: 動的ユーザークリア失敗")
+                    logger.warning("修正タブ開始: 動的ユーザークリア失敗")
                     return False
             else:
-                print(f"[WARNING] 修正タブ開始: 動的ユーザーバックアップ失敗")
+                logger.warning("修正タブ開始: 動的ユーザーバックアップ失敗")
                 return False
         else:
-            print(f"[DEBUG] 修正タブ開始: 動的ユーザーが存在しないため初期化処理スキップ")
+            logger.debug("修正タブ開始: 動的ユーザーが存在しないため初期化処理スキップ")
             return True
             
     except Exception as e:
-        print(f"[ERROR] 修正タブ開始時の動的ユーザー初期化エラー: {e}")
+        logger.error("修正タブ開始時の動的ユーザー初期化エラー: %s", e)
         return False
 
 
@@ -677,7 +850,7 @@ def get_dynamic_users_backup_info():
             "users": data.get('backup_users', [])
         }
     except Exception as e:
-        print(f"[ERROR] バックアップ情報取得エラー: {e}")
+        logger.error("バックアップ情報取得エラー: %s", e)
         return {"total_users": 0, "last_backup": None, "users": []}
 
 
@@ -693,7 +866,7 @@ def restore_dynamic_users_from_backup():
         backup_users = load_dynamic_users_backup()
         
         if not backup_users:
-            print("[INFO] バックアップが空のため復元処理をスキップ")
+            logger.info("バックアップが空のため復元処理をスキップ")
             return True
         
         # バックアップから一時ファイルに復元
@@ -706,12 +879,12 @@ def restore_dynamic_users_from_backup():
         success = save_dynamic_users_to_temp(restored_users)
         
         if success:
-            print(f"[INFO] 動的ユーザー復元完了: {len(restored_users)}件")
+            logger.info("動的ユーザー復元完了: %s件", len(restored_users))
         
         return success
         
     except Exception as e:
-        print(f"[ERROR] 動的ユーザー復元エラー: {e}")
+        logger.error("動的ユーザー復元エラー: %s", e)
         return False
 
 
@@ -886,21 +1059,21 @@ def send_subgroup_request(widget, api_url, headers, payload, group_name, auto_re
                                     def send_notification():
                                         try:
                                             subgroup_notifier.notify_refresh()
-                                            print("[INFO] サブグループ更新通知を送信しました")
+                                            logger.info("サブグループ更新通知を送信しました")
                                         except Exception as e:
-                                            print(f"[WARNING] サブグループ更新通知送信に失敗: {e}")
+                                            logger.warning("サブグループ更新通知送信に失敗: %s", e)
                                     QTimer.singleShot(2000, send_notification)  # 2秒後に通知
                                 except Exception as e:
-                                    print(f"[WARNING] サブグループ更新通知の設定に失敗: {e}")
+                                    logger.warning("サブグループ更新通知の設定に失敗: %s", e)
                                 
                         except Exception as e:
-                            print(f"[ERROR] サブグループ情報自動更新でエラー: {e}")
+                            logger.error("サブグループ情報自動更新でエラー: %s", e)
                     
                     # 少し遅延してから自動更新実行
                     QTimer.singleShot(1000, auto_refresh_func)
                     
                 except Exception as e:
-                    print(f"[WARNING] サブグループ情報自動更新の設定に失敗: {e}")
+                    logger.warning("サブグループ情報自動更新の設定に失敗: %s", e)
             
             return True
         else:

@@ -8,6 +8,7 @@
 
 import os
 import json
+import logging
 from qt_compat.widgets import (
     QLabel, QLineEdit, QTextEdit, QGridLayout, QHBoxLayout, 
     QPushButton, QMessageBox, QDialog, QVBoxLayout, QWidget
@@ -17,6 +18,9 @@ from config.common import SUBGROUP_JSON_PATH
 from ..core.subgroup_data_manager import SubgroupDataManager, MemberDataProcessor
 from .subgroup_validators import SubjectInputValidator, UserRoleValidator, FormValidator, UIValidator
 from ..ui.subgroup_subject_widget import SubjectEntryWidget, parse_subjects_from_text, subjects_to_text
+
+# ロガー設定
+logger = logging.getLogger(__name__)
 
 
 def _is_widget_checked_safe(widget):
@@ -344,7 +348,7 @@ class MemberDataProcessor:
                             'canEditMembers': canEditMembers
                         }
         except Exception as e:
-            print(f"rde-member.txt読み込みエラー: {e}")
+            logger.error("rde-member.txt読み込みエラー: %s", e)
         
         return member_info
     
@@ -601,4 +605,4 @@ def prepare_subgroup_create_request(widget, parent, user_rows=None):
             send_subgroup_request = subgroup_api_helper.send_subgroup_request
             send_subgroup_request(widget, api_url, headers, payload, group.get('group_name',''))
         else:
-            print("[INFO] サブグループ作成処理はユーザーによりキャンセルされました。")
+            logger.info("サブグループ作成処理はユーザーによりキャンセルされました。")

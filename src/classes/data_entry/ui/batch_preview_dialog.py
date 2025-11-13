@@ -57,9 +57,9 @@ class FileSetPreviewWidget(QWidget):
                 (screen_rect.height() - target_height) // 2
             )
             
-            print(f"[DEBUG] プレビューダイアログサイズ設定: {target_width}x{target_height}")
+            logger.debug("プレビューダイアログサイズ設定: %sx%s", target_width, target_height)
         except Exception as e:
-            print(f"[WARNING] ダイアログサイズ設定エラー: {e}")
+            logger.warning("ダイアログサイズ設定エラー: %s", e)
             self.resize(1000, 700)  # フォールバック
     
     def setup_ui(self):
@@ -343,7 +343,7 @@ class FileSetPreviewWidget(QWidget):
                 self.files_table.setCellWidget(row, 6, upload_btn)
                 
         except Exception as e:
-            print(f"ファイルテーブル読み込み中にエラー: {e}")
+            logger.error("ファイルテーブル読み込み中にエラー: %s", e)
             # 空のテーブルを表示
             self.files_table.setRowCount(0)
     
@@ -362,7 +362,7 @@ class FileSetPreviewWidget(QWidget):
             sample_info = []
             sample_mode = getattr(self.file_set, 'sample_mode', None)
             
-            print(f"[DEBUG] _load_settings_info - 試料モード取得: sample_mode={sample_mode}")
+            logger.debug("_load_settings_info - 試料モード取得: sample_mode=%s", sample_mode)
             
             # 拡張設定から試料情報を補完
             extended_config = getattr(self.file_set, 'extended_config', {})
@@ -377,7 +377,7 @@ class FileSetPreviewWidget(QWidget):
                 sample_name = getattr(self.file_set, 'sample_name', None) or extended_config.get('sample_name', None)
                 sample_description = getattr(self.file_set, 'sample_description', None) or extended_config.get('sample_description', None)
                 
-                print(f"[DEBUG] _load_settings_info - 既存試料モード: sample_id={sample_id}, sample_name={sample_name}")
+                logger.debug("_load_settings_info - 既存試料モード: sample_id=%s, sample_name=%s", sample_id, sample_name)
                 
                 sample_info.append(f"  既存試料ID: {sample_id or '未設定'}")
                 if sample_name:
@@ -390,7 +390,7 @@ class FileSetPreviewWidget(QWidget):
                 sample_description = getattr(self.file_set, 'sample_description', None) or extended_config.get('sample_description', None)
                 sample_composition = getattr(self.file_set, 'sample_composition', None) or extended_config.get('sample_composition', None)
                 
-                print(f"[DEBUG] _load_settings_info - 新規作成モード: sample_name={sample_name}, sample_composition={sample_composition}")
+                logger.debug("_load_settings_info - 新規作成モード: sample_name=%s, sample_composition=%s", sample_name, sample_composition)
                 
                 sample_info.append(f"  試料名: {sample_name or '未設定'}")
                 sample_info.append(f"  試料説明: {sample_description or '未設定'}")
@@ -400,11 +400,11 @@ class FileSetPreviewWidget(QWidget):
             custom_values = getattr(self.file_set, 'custom_values', {}) or {}
             
             # デバッグ情報を出力
-            print(f"[DEBUG] プレビュー - ファイルセット属性custom_values: {custom_values}")
+            logger.debug("プレビュー - ファイルセット属性custom_values: %s", custom_values)
             
             # カスタム値が空の場合でも、拡張設定から取得を試行
             extended_config = getattr(self.file_set, 'extended_config', {})
-            print(f"[DEBUG] プレビュー - extended_config全体: {extended_config}")
+            logger.debug("プレビュー - extended_config全体: %s", extended_config)
             
             # 拡張設定内のカスタム値やインボイススキーマ関連の値を抽出
             custom_candidates = {}
@@ -414,7 +414,7 @@ class FileSetPreviewWidget(QWidget):
                 extended_custom = extended_config['custom_values']
                 if extended_custom:
                     custom_candidates.update(extended_custom)
-                    print(f"[DEBUG] プレビュー - extended_config.custom_values: {extended_custom}")
+                    logger.debug("プレビュー - extended_config.custom_values: %s", extended_custom)
                 
                 # その他のカスタムフィールドを探す（基本フィールドと内部データ以外）
                 basic_fields = {
@@ -429,7 +429,7 @@ class FileSetPreviewWidget(QWidget):
                     # 基本フィールド、内部フィールド、プライベートフィールドを除外
                     if key not in basic_fields and value and not key.startswith('_'):
                         custom_candidates[key] = value
-                        print(f"[DEBUG] プレビュー - カスタム値候補: {key} = {value}")
+                        logger.debug("プレビュー - カスタム値候補: %s = %s", key, value)
                 
                 # インボイススキーマの項目も検索（よくある固有情報フィールド名）
                 schema_fields = [
@@ -440,13 +440,13 @@ class FileSetPreviewWidget(QWidget):
                 for field in schema_fields:
                     if field in extended_config and extended_config[field]:
                         custom_candidates[field] = extended_config[field]
-                        print(f"[DEBUG] プレビュー - インボイススキーマ項目: {field} = {extended_config[field]}")
+                        logger.debug("プレビュー - インボイススキーマ項目: %s = %s", field, extended_config[field])
                 
                 custom_values = custom_candidates
                 
                 # ファイルセット属性に反映（次回以降の取得を効率化）
                 self.file_set.custom_values = custom_values
-                print(f"[DEBUG] プレビュー - custom_valuesをファイルセット属性に反映: {len([v for v in custom_values.values() if v and v.strip()])}個の非空値")
+                logger.debug("プレビュー - custom_valuesをファイルセット属性に反映: %s個の非空値", len([v for v in custom_values.values() if v and v.strip()]))
             
             custom_info = []
             # 空文字列を含む場合もカスタム情報として表示
@@ -569,9 +569,9 @@ class FileSetPreviewWidget(QWidget):
         for item in all_items:
             if item.file_type == FileType.DIRECTORY and getattr(item, 'is_zip', False):
                 zip_directories.add(item.relative_path)
-                print(f"[DEBUG] プレビュー: ZIP化ディレクトリ特定 - {item.relative_path}")
+                logger.debug("プレビュー: ZIP化ディレクトリ特定 - %s", item.relative_path)
         
-        print(f"[DEBUG] プレビュー: ZIP化対象ディレクトリ数 = {len(zip_directories)}")
+        logger.debug("プレビュー: ZIP化対象ディレクトリ数 = %s", len(zip_directories))
         
         for item in file_items:
             # このファイルがZIP化対象ディレクトリ配下かチェック
@@ -593,11 +593,11 @@ class FileSetPreviewWidget(QWidget):
                     zip_item = self._create_zip_file_item_for_directory(zip_dir_name, zip_filename)
                     display_items.append(zip_item)
                     zip_files_added.add(zip_filename)
-                    print(f"[DEBUG] プレビュー: ZIPファイル追加 - {zip_filename}")
+                    logger.debug("プレビュー: ZIPファイル追加 - %s", zip_filename)
             else:
                 # 通常のファイルはそのまま表示
                 display_items.append(item)
-                print(f"[DEBUG] プレビュー: 通常ファイル追加 - {item.name}")
+                logger.debug("プレビュー: 通常ファイル追加 - %s", item.name)
         
         # path_mapping.xlsx を添付ファイルとして追加
         mapping_file_path = self._get_mapping_file_path()
@@ -610,9 +610,9 @@ class FileSetPreviewWidget(QWidget):
                 item_type=FileItemType.ATTACHMENT  # 添付ファイルとして設定
             )
             display_items.append(mapping_item)
-            print(f"[DEBUG] プレビュー: path_mapping.xlsx を表示アイテムに追加 - {mapping_file_path}")
+            logger.debug("プレビュー: path_mapping.xlsx を表示アイテムに追加 - %s", mapping_file_path)
         
-        print(f"[DEBUG] プレビュー: 最終表示アイテム数 = {len(display_items)}")
+        logger.debug("プレビュー: 最終表示アイテム数 = %s", len(display_items))
         return display_items
     
     def _get_zip_filename_for_directory(self, dir_relative_path):
@@ -632,7 +632,7 @@ class FileSetPreviewWidget(QWidget):
                 temp_folder = extended_config.get('temp_folder', None)
             
             if not temp_folder or not os.path.exists(temp_folder):
-                print(f"[DEBUG] プレビュー: tempフォルダが存在しない - {temp_folder}")
+                logger.debug("プレビュー: tempフォルダが存在しない - %s", temp_folder)
                 return None
                 
             # ディレクトリ名からZIPファイル名を生成
@@ -641,15 +641,15 @@ class FileSetPreviewWidget(QWidget):
             zip_path = os.path.join(temp_folder, zip_filename)
             
             if os.path.exists(zip_path):
-                print(f"[DEBUG] プレビュー: ZIPファイル発見 - {zip_path}")
+                logger.debug("プレビュー: ZIPファイル発見 - %s", zip_path)
                 return zip_path
             else:
-                print(f"[DEBUG] プレビュー: ZIPファイル未発見 - {zip_path}")
+                logger.debug("プレビュー: ZIPファイル未発見 - %s", zip_path)
                 
             return None
             
         except Exception as e:
-            print(f"[ERROR] プレビュー: ZIP ファイル名取得エラー: {e}")
+            logger.error("プレビュー: ZIP ファイル名取得エラー: %s", e)
             return None
     
     def _create_zip_file_item_for_directory(self, dir_relative_path, zip_path):
@@ -679,11 +679,11 @@ class FileSetPreviewWidget(QWidget):
             if os.path.exists(zip_path):
                 zip_item.size = os.path.getsize(zip_path)
             
-            print(f"[DEBUG] プレビュー: ZIPアイテム作成 - {zip_item.name} ({zip_item.size} bytes)")
+            logger.debug("プレビュー: ZIPアイテム作成 - %s (%s bytes)", zip_item.name, zip_item.size)
             return zip_item
             
         except Exception as e:
-            print(f"[ERROR] プレビュー: ZIP ファイル項目作成エラー: {e}")
+            logger.error("プレビュー: ZIP ファイル項目作成エラー: %s", e)
             # エラー時はダミーアイテムを返す
             return FileItem(
                 path=zip_path or "",
@@ -780,7 +780,7 @@ class FileSetPreviewWidget(QWidget):
             else:
                 return file_item.relative_path
         except Exception as e:
-            print(f"[DEBUG] _get_register_filename エラー: {e}")
+            logger.debug("_get_register_filename エラー: %s", e)
             return file_item.name or "不明なファイル"
     
     def _get_zip_display_filename_for_fileset(self, file_item: FileItem, file_set: FileSet) -> str:
@@ -801,7 +801,7 @@ class FileSetPreviewWidget(QWidget):
                 # ZIP化されないファイル：元ファイル名
                 return file_item.name
         except Exception as e:
-            print(f"[ERROR] ZIP表示ファイル名取得エラー: {e}")
+            logger.error("ZIP表示ファイル名取得エラー: %s", e)
             return file_item.name or "不明なファイル"
     
     def _get_zip_display_filename(self, file_item: FileItem) -> str:
@@ -830,7 +830,7 @@ class FileSetPreviewWidget(QWidget):
                 # フォルダ内ファイル：フォルダがZIP化される
                 return f"{relative_path.parts[0]}.zip"
         except Exception as e:
-            print(f"[ERROR] ZIP表示ファイル名取得エラー: {e}")
+            logger.error("ZIP表示ファイル名取得エラー: %s", e)
             return file_item.name or "不明なファイル"
     
     def _is_file_zipped_for_fileset(self, file_item: FileItem, file_set: FileSet) -> bool:
@@ -857,7 +857,7 @@ class FileSetPreviewWidget(QWidget):
             return False
             
         except Exception as e:
-            print(f"[ERROR] ファイルZIP化判定エラー: {e}")
+            logger.error("ファイルZIP化判定エラー: %s", e)
             return False
     
     def _is_file_zipped(self, file_item: FileItem) -> bool:
@@ -883,7 +883,7 @@ class FileSetPreviewWidget(QWidget):
             return False
             
         except Exception as e:
-            print(f"[ERROR] ファイルZIP化判定エラー: {e}")
+            logger.error("ファイルZIP化判定エラー: %s", e)
             return False
     
     def _get_file_type_category(self, file_item: FileItem) -> str:
@@ -908,13 +908,13 @@ class FileSetPreviewWidget(QWidget):
             else:
                 file_item.item_type = FileItemType.DATA
                 
-            print(f"[DEBUG] ファイル種別変更: {file_item.name} → {text} ({file_item.item_type})")
+            logger.debug("ファイル種別変更: %s → %s (%s)", file_item.name, text, file_item.item_type)
             
             # マッピングファイルを再作成（必要に応じて）
             # self._recreate_mapping_file()
             
         except Exception as e:
-            print(f"[ERROR] ファイル種別変更処理エラー: {e}")
+            logger.error("ファイル種別変更処理エラー: %s", e)
 
     def _recreate_mapping_file(self):
         """マッピングファイルを再作成"""
@@ -944,10 +944,10 @@ class FileSetPreviewWidget(QWidget):
                 if hasattr(self.file_set, 'extended_config'):
                     self.file_set.extended_config['mapping_file'] = mapping_file
                 
-                print(f"[INFO] マッピングファイルを再作成: {mapping_file}")
+                logger.info("マッピングファイルを再作成: %s", mapping_file)
                 
         except Exception as e:
-            print(f"[ERROR] マッピングファイル再作成エラー: {e}")
+            logger.error("マッピングファイル再作成エラー: %s", e)
     
     def _open_temp_folder(self):
         """一時フォルダを開く"""
@@ -998,7 +998,7 @@ class FileSetPreviewWidget(QWidget):
                 else:  # Linux
                     subprocess.run(["xdg-open", mapping_file])
                     
-                print(f"[INFO] マッピングファイルを開きました: {mapping_file}")
+                logger.info("マッピングファイルを開きました: %s", mapping_file)
             else:
                 QMessageBox.warning(self, "警告", "マッピングファイルが存在しません。")
         except Exception as e:
@@ -1049,7 +1049,7 @@ class FileSetPreviewWidget(QWidget):
                 f"パス: {mapping_file}")
                 
         except Exception as e:
-            print(f"[ERROR] マッピングファイル更新エラー: {e}")
+            logger.error("マッピングファイル更新エラー: %s", e)
             QMessageBox.warning(self, "エラー", f"マッピングファイルの更新に失敗しました: {str(e)}")
     
     def _export_fileset_folder(self):
@@ -1131,7 +1131,7 @@ class FileSetPreviewWidget(QWidget):
                     f"パス: {dest_folder}")
                 
         except Exception as e:
-            print(f"[ERROR] フォルダ書き出しエラー: {e}")
+            logger.error("フォルダ書き出しエラー: %s", e)
             QMessageBox.warning(self, "エラー", f"フォルダ書き出しに失敗しました: {str(e)}")
     
     def _update_temp_folder_buttons(self):
@@ -1164,7 +1164,7 @@ class FileSetPreviewWidget(QWidget):
                 self.open_mapping_file_button.setText("マッピングファイルなし")
                 
         except Exception as e:
-            print(f"[WARNING] ボタン状態更新エラー: {e}")
+            logger.warning("ボタン状態更新エラー: %s", e)
             self.open_temp_folder_button.setEnabled(False)
             self.open_temp_folder_button.setText("一時フォルダなし")
             self.open_mapping_file_button.setEnabled(False)
@@ -1176,7 +1176,7 @@ class FileSetPreviewWidget(QWidget):
             # 直接の属性から取得を試行
             sample_mode = getattr(self.file_set, 'sample_mode', None)
             
-            print(f"[DEBUG] _get_sample_mode_display - 直接属性: sample_mode={sample_mode}")
+            logger.debug("_get_sample_mode_display - 直接属性: sample_mode=%s", sample_mode)
             
             # 属性ベースの変換を優先
             if sample_mode:
@@ -1186,14 +1186,14 @@ class FileSetPreviewWidget(QWidget):
                     "same_as_previous": "前回と同じ"
                 }
                 display_mode = mode_map.get(sample_mode, sample_mode)
-                print(f"[DEBUG] _get_sample_mode_display - 属性ベース変換: {sample_mode} -> {display_mode}")
+                logger.debug("_get_sample_mode_display - 属性ベース変換: %s -> %s", sample_mode, display_mode)
                 return display_mode
             
             # 属性にない場合は拡張設定から取得
             extended_config = getattr(self.file_set, 'extended_config', {})
             sample_mode_text = extended_config.get('sample_mode', '新規作成')
             
-            print(f"[DEBUG] _get_sample_mode_display - 拡張設定: sample_mode_text={sample_mode_text}")
+            logger.debug("_get_sample_mode_display - 拡張設定: sample_mode_text=%s", sample_mode_text)
             
             # テキストベースで判定
             if sample_mode_text == "既存試料使用":
@@ -1204,7 +1204,7 @@ class FileSetPreviewWidget(QWidget):
                 return "新規作成"
                 
         except Exception as e:
-            print(f"[ERROR] _get_sample_mode_display エラー: {e}")
+            logger.error("_get_sample_mode_display エラー: %s", e)
             return "未設定"
     
     def _format_size(self, size_bytes: int) -> str:
@@ -1254,25 +1254,25 @@ class FileSetPreviewWidget(QWidget):
             return None
             
         except Exception as e:
-            print(f"[WARNING] マッピングファイルパス取得エラー: {e}")
+            logger.warning("マッピングファイルパス取得エラー: %s", e)
             return None
 
     def _upload_file(self, file_item: FileItem):
         """ファイルアップロード処理（改良版：デバッグ情報表示・確認ダイアログ付き）"""
         try:
-            print(f"[DEBUG] _upload_file 開始: {file_item.name}")
-            print(f"[DEBUG] ファイルパス: {file_item.path}")
+            logger.debug("_upload_file 開始: %s", file_item.name)
+            logger.debug("ファイルパス: %s", file_item.path)
             
             if not os.path.exists(file_item.path):
-                print(f"[ERROR] ファイルが存在しません: {file_item.path}")
+                logger.error("ファイルが存在しません: %s", file_item.path)
                 QMessageBox.warning(self, "エラー", f"ファイルが存在しません: {file_item.path}")
                 return
             
             # データセットIDを取得
             dataset_id = getattr(self.file_set, 'dataset_id', None)
-            print(f"[DEBUG] データセットID: {dataset_id}")
+            logger.debug("データセットID: %s", dataset_id)
             if not dataset_id:
-                print(f"[ERROR] データセットが選択されていません")
+                logger.error("データセットが選択されていません")
                 QMessageBox.warning(self, "エラー", "データセットが選択されていません")
                 return
                 
@@ -1321,12 +1321,12 @@ API情報:
             )
             
             if reply != QMessageBox.Yes:
-                print("[INFO] ユーザーがアップロードをキャンセルしました")
+                logger.info("ユーザーがアップロードをキャンセルしました")
                 return
             
-            print(f"[INFO] アップロード開始: {filename} ({self._format_size(file_size)})")
-            print(f"[INFO] API URL: {url}")
-            print(f"[INFO] エンコード済みファイル名: {encoded_filename}")
+            logger.info("アップロード開始: %s (%s)", filename, self._format_size(file_size))
+            logger.info("API URL: %s", url)
+            logger.info("エンコード済みファイル名: %s", encoded_filename)
             
             # プログレスダイアログ
             progress = QProgressDialog("ファイルをアップロード中...", "キャンセル", 0, 0, self)
@@ -1346,7 +1346,7 @@ API情報:
                     # ファイルアイテムにアップロードIDを記録
                     setattr(file_item, 'upload_id', upload_id)
                     setattr(file_item, 'upload_response', response_data)
-                    print(f"[SUCCESS] ファイルにアップロードID記録: {file_item.name} -> {upload_id}")
+                    logger.debug("[SUCCESS] ファイルにアップロードID記録: %s -> %s", file_item.name, upload_id)
                     
                     # 成功ダイアログでレスポンス情報も表示
                     success_message = f"""ファイルアップロードが完了しました
@@ -1363,20 +1363,20 @@ API情報:
 {str(response_data)[:500]}{'...' if len(str(response_data)) > 500 else ''}"""
                     
                     QMessageBox.information(self, "アップロード成功", success_message)
-                    print(f"[SUCCESS] アップロード完了: {file_item.name} -> ID: {upload_id}")
+                    logger.info("[SUCCESS] アップロード完了: %s -> ID: %s", file_item.name, upload_id)
                     
                 else:
                     error_detail = upload_result.get('error', '不明なエラー') if upload_result else '戻り値がありません'
-                    print(f"[ERROR] アップロード失敗: {error_detail}")
+                    logger.error("アップロード失敗: %s", error_detail)
                     QMessageBox.warning(self, "アップロード失敗", f"ファイルアップロードに失敗しました\n\nエラー詳細:\n{error_detail}")
                     
             finally:
                 progress.close()
                 
         except Exception as e:
-            print(f"[ERROR] アップロード処理中にエラー: {e}")
+            logger.error("アップロード処理中にエラー: %s", e)
             import traceback
-            print(f"[ERROR] スタックトレース:\n{traceback.format_exc()}")
+            logger.error("スタックトレース:\n%s", traceback.format_exc())
             QMessageBox.critical(self, "エラー", f"アップロード処理中にエラーが発生しました: {e}")
     
     def _execute_upload_with_debug(self, dataset_id, file_path, headers, url):
@@ -1385,9 +1385,9 @@ API情報:
         v1.18.4: Bearer Token自動選択対応、api_request_helper使用に変更
         """
         try:
-            print(f"[DEBUG] _execute_upload_with_debug 開始")
-            print(f"[DEBUG] ファイルパス: {file_path}")
-            print(f"[DEBUG] データセットID: {dataset_id}")
+            logger.debug("_execute_upload_with_debug 開始")
+            logger.debug("ファイルパス: %s", file_path)
+            logger.debug("データセットID: %s", dataset_id)
             
             # ファイルを読み込み
             with open(file_path, 'rb') as f:
@@ -1396,9 +1396,9 @@ API情報:
             file_size = len(binary_data)
             filename = os.path.basename(file_path)
             encoded_filename = urllib.parse.quote(filename)
-            print(f"[DEBUG] ファイルサイズ (バイナリ): {file_size} bytes")
-            print(f"[DEBUG] オリジナルファイル名: {filename}")
-            print(f"[DEBUG] エンコード済みファイル名: {encoded_filename}")
+            logger.debug("ファイルサイズ (バイナリ): %s bytes", file_size)
+            logger.debug("オリジナルファイル名: %s", filename)
+            logger.debug("エンコード済みファイル名: %s", encoded_filename)
             
             # ヘッダー準備（v1.18.4: Authorizationヘッダーは自動設定されるため除外）
             actual_headers = {
@@ -1407,11 +1407,11 @@ API情報:
                 "User-Agent": "PythonUploader/1.0",
             }
             
-            print(f"[DEBUG] API呼び出し開始: POST {url}")
-            print(f"[DEBUG] リクエストヘッダー数: {len(actual_headers)}")
-            print(f"[DEBUG] X-File-Name: {actual_headers['X-File-Name']}")
-            print(f"[DEBUG] バイナリデータサイズ: {len(binary_data)} bytes")
-            print(f"[DEBUG] Bearer Token: URLから自動選択されます")
+            logger.debug("API呼び出し開始: POST %s", url)
+            logger.debug("リクエストヘッダー数: %s", len(actual_headers))
+            logger.debug("X-File-Name: %s", actual_headers['X-File-Name'])
+            logger.debug("バイナリデータサイズ: %s bytes", len(binary_data))
+            logger.debug("Bearer Token: URLから自動選択されます")
             
             # v1.18.4: api_request_helper.post_binaryを使用（Bearer Token自動選択）
             from classes.utils.api_request_helper import post_binary
@@ -1426,47 +1426,47 @@ API情報:
             )
             
             if resp is None:
-                print(f"[ERROR] API呼び出し失敗: レスポンスがNone")
+                logger.error("API呼び出し失敗: レスポンスがNone")
                 return {"error": "API呼び出し失敗: レスポンスがありません"}
             
-            print(f"[DEBUG] レスポンス受信: ステータスコード {resp.status_code}")
-            print(f"[DEBUG] レスポンスヘッダー: {dict(resp.headers)}")
+            logger.debug("レスポンス受信: ステータスコード %s", resp.status_code)
+            logger.debug("レスポンスヘッダー: %s", dict(resp.headers))
             
             # ステータスコードチェック（200番台は成功）
             if not (200 <= resp.status_code < 300):
                 error_text = resp.text[:500] if hasattr(resp, 'text') else 'レスポンステキストなし'
-                print(f"[ERROR] HTTPエラー: {resp.status_code}")
-                print(f"[ERROR] レスポンス内容: {error_text}")
+                logger.error("HTTPエラー: %s", resp.status_code)
+                logger.error("レスポンス内容: %s", error_text)
                 
                 # 502エラーの場合の詳細情報
                 if resp.status_code == 502:
-                    print(f"[ERROR] 502 Bad Gateway - サーバー側の問題またはリクエスト形式の問題")
-                    print(f"[ERROR] ファイルサイズ制限チェック: {file_size} bytes")
-                    print(f"[ERROR] Content-Type確認: {actual_headers.get('Content-Type')}")
-                    print(f"[ERROR] X-File-Name確認: {actual_headers.get('X-File-Name')}")
+                    logger.error("502 Bad Gateway - サーバー側の問題またはリクエスト形式の問題")
+                    logger.error("ファイルサイズ制限チェック: %s bytes", file_size)
+                    logger.error("Content-Type確認: %s", actual_headers.get('Content-Type'))
+                    logger.error("X-File-Name確認: %s", actual_headers.get('X-File-Name'))
                 
                 return {"error": f"HTTP {resp.status_code}: {error_text}"}
             
-            print(f"[SUCCESS] HTTPレスポンス成功: {resp.status_code}")
+            logger.info("[SUCCESS] HTTPレスポンス成功: %s", resp.status_code)
             
             # JSONレスポンスをパース
             try:
                 response_data = resp.json()
-                print(f"[DEBUG] JSONパース成功: {len(str(response_data))} 文字")
-                print(f"[DEBUG] レスポンス構造: {list(response_data.keys()) if isinstance(response_data, dict) else type(response_data)}")
+                logger.debug("JSONパース成功: %s 文字", len(str(response_data)))
+                logger.debug("レスポンス構造: %s", list(response_data.keys()) if isinstance(response_data, dict) else type(response_data))
             except Exception as json_error:
-                print(f"[ERROR] JSONパースエラー: {json_error}")
-                print(f"[ERROR] レスポンステキスト: {resp.text[:200]}")
+                logger.error("JSONパースエラー: %s", json_error)
+                logger.error("レスポンステキスト: %s", resp.text[:200])
                 return {"error": f"JSONパースエラー: {json_error}"}
             
             # uploadIdを抽出
             upload_id = response_data.get("uploadId")
             if not upload_id:
-                print(f"[ERROR] uploadIdがレスポンスに含まれていません")
-                print(f"[ERROR] レスポンス内容: {response_data}")
+                logger.error("uploadIdがレスポンスに含まれていません")
+                logger.error("レスポンス内容: %s", response_data)
                 return {"error": "レスポンスにuploadIdが含まれていません", "response_data": response_data}
             
-            print(f"[SUCCESS] アップロードID取得成功: {upload_id}")
+            logger.info("[SUCCESS] アップロードID取得成功: %s", upload_id)
             
             # レスポンスをファイルに保存（デバッグ用）
             try:
@@ -1477,9 +1477,9 @@ API情報:
                 import json
                 with open(output_path, "w", encoding="utf-8") as outf:
                     json.dump(response_data, outf, ensure_ascii=False, indent=2)
-                print(f"[DEBUG] レスポンスファイル保存: {output_path}")
+                logger.debug("レスポンスファイル保存: %s", output_path)
             except Exception as save_error:
-                print(f"[WARNING] レスポンスファイル保存エラー: {save_error}")
+                logger.warning("レスポンスファイル保存エラー: %s", save_error)
             
             return {
                 "upload_id": upload_id,
@@ -1489,16 +1489,16 @@ API情報:
             }
             
         except Exception as e:
-            print(f"[ERROR] _execute_upload_with_debug エラー: {e}")
+            logger.error("_execute_upload_with_debug エラー: %s", e)
             import traceback
-            print(f"[ERROR] スタックトレース:\n{traceback.format_exc()}")
+            logger.error("スタックトレース:\n%s", traceback.format_exc())
             return {"error": str(e)}
-            print(f"[ERROR] ファイルアップロードエラー: {e}")
+            logger.error("ファイルアップロードエラー: %s", e)
     
     def _batch_upload_files(self):
         """ファイル一括アップロード処理"""
         try:
-            print("[INFO] ファイル一括アップロード処理開始")
+            logger.info("ファイル一括アップロード処理開始")
             
             # 前提条件チェック
             if not self._validate_upload_prerequisites():
@@ -1514,7 +1514,7 @@ API情報:
             )
             
             if reply != QMessageBox.Yes:
-                print("[INFO] ユーザーがアップロードをキャンセルしました")
+                logger.info("ユーザーがアップロードをキャンセルしました")
                 return
             
             # アップロード実行
@@ -1526,7 +1526,7 @@ API情報:
                 QMessageBox.warning(self, "エラー", "ファイル一括アップロードに失敗しました。詳細はログを確認してください。")
             
         except Exception as e:
-            print(f"[ERROR] ファイル一括アップロード処理エラー: {e}")
+            logger.error("ファイル一括アップロード処理エラー: %s", e)
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "エラー", f"ファイル一括アップロード処理でエラーが発生しました:\n{str(e)}")
@@ -1550,13 +1550,13 @@ API情報:
             # データセットIDの取得（優先順位：1. dataset_info, 2. fileset.dataset_id, 3. extended_config）
             if dataset_info and dataset_info.get('id'):
                 dataset_id = dataset_info['id']
-                print(f"[DEBUG] dataset_infoからデータセットID取得: {dataset_id}")
+                logger.debug("dataset_infoからデータセットID取得: %s", dataset_id)
             elif hasattr(self.file_set, 'dataset_id') and self.file_set.dataset_id:
                 dataset_id = self.file_set.dataset_id
-                print(f"[DEBUG] fileset.dataset_idからデータセットID取得: {dataset_id}")
+                logger.debug("fileset.dataset_idからデータセットID取得: %s", dataset_id)
             elif extended_config.get('dataset_id'):
                 dataset_id = extended_config['dataset_id']
-                print(f"[DEBUG] extended_configからデータセットID取得: {dataset_id}")
+                logger.debug("extended_configからデータセットID取得: %s", dataset_id)
                 
             # dataset_infoが不足している場合、データセットファイルから読み込み
             if dataset_id and not dataset_info:
@@ -1569,20 +1569,20 @@ API情報:
                         # dataset_infoとしてfile_setに設定
                         self.file_set.dataset_info = dataset_data
                         dataset_info = dataset_data
-                        print(f"[DEBUG] データセット情報をファイルから復元: {dataset_data.get('attributes', {}).get('name', dataset_id)}")
+                        logger.debug("データセット情報をファイルから復元: %s", dataset_data.get('attributes', {}).get('name', dataset_id))
                     else:
-                        print(f"[WARNING] データセットファイルが見つかりません: {dataset_file_path}")
+                        logger.warning("データセットファイルが見つかりません: %s", dataset_file_path)
                 except Exception as e:
-                    print(f"[WARNING] データセット情報復元エラー: {e}")
+                    logger.warning("データセット情報復元エラー: %s", e)
             
             if not dataset_id:
                 # デバッグ情報を詳細に出力
-                print("[DEBUG] データセットID取得失敗 - 詳細情報:")
-                print(f"[DEBUG] - hasattr(file_set, 'dataset_id'): {hasattr(self.file_set, 'dataset_id')}")
-                print(f"[DEBUG] - file_set.dataset_id: {getattr(self.file_set, 'dataset_id', 'NONE')}")
-                print(f"[DEBUG] - dataset_info: {dataset_info}")
-                print(f"[DEBUG] - extended_config keys: {list(extended_config.keys()) if extended_config else 'NONE'}")
-                print(f"[DEBUG] - extended_config.dataset_id: {extended_config.get('dataset_id', 'NONE')}")
+                logger.debug("データセットID取得失敗 - 詳細情報:")
+                logger.debug("- hasattr(file_set, 'dataset_id'): %s", hasattr(self.file_set, 'dataset_id'))
+                logger.debug("- file_set.dataset_id: %s", getattr(self.file_set, 'dataset_id', 'NONE'))
+                logger.debug("- dataset_info: %s", dataset_info)
+                logger.debug("- extended_config keys: %s", list(extended_config.keys()) if extended_config else 'NONE')
+                logger.debug("- extended_config.dataset_id: %s", extended_config.get('dataset_id', 'NONE'))
                 QMessageBox.warning(self, "エラー", "データセット情報が設定されていません。")
                 return False
             
@@ -1607,11 +1607,11 @@ API情報:
                     (f"\n... 他{len(missing_files) - 5}件" if len(missing_files) > 5 else ""))
                 return False
             
-            print(f"[INFO] アップロード前提条件チェック完了: ファイル={len(display_items)}個")
+            logger.info("アップロード前提条件チェック完了: ファイル=%s個", len(display_items))
             return True
             
         except Exception as e:
-            print(f"[ERROR] アップロード前提条件チェックエラー: {e}")
+            logger.error("アップロード前提条件チェックエラー: %s", e)
             QMessageBox.critical(self, "エラー", f"前提条件の確認でエラーが発生しました:\n{str(e)}")
             return False
     
@@ -1621,7 +1621,7 @@ API情報:
             # ベアラートークン確認（個別アップロードと同じロジック）
             bearer_token = getattr(self, 'bearer_token', None)
             if not bearer_token:
-                print("[DEBUG] Bearer トークンが親から取得できない - 他の方法を試行")
+                logger.debug("Bearer トークンが親から取得できない - 他の方法を試行")
                 
                 # 親ウィジェットから取得を試行（複数階層遡及）
                 current_widget = self
@@ -1629,7 +1629,7 @@ API情報:
                     current_widget = current_widget.parent()
                     if current_widget and hasattr(current_widget, 'bearer_token'):
                         bearer_token = current_widget.bearer_token
-                        print(f"[DEBUG] 親ウィジェット({type(current_widget).__name__})からBearerトークンを取得")
+                        logger.debug("親ウィジェット(%s)からBearerトークンを取得", type(current_widget).__name__)
                         break
                 
                 # まだない場合は、メインコントローラから取得を試行
@@ -1642,26 +1642,26 @@ API情報:
                             for widget in app.topLevelWidgets():
                                 if hasattr(widget, 'controller') and hasattr(widget.controller, 'bearer_token'):
                                     bearer_token = widget.controller.bearer_token
-                                    print("[DEBUG] メインコントローラからBearerトークンを取得")
+                                    logger.debug("メインコントローラからBearerトークンを取得")
                                     break
                     except Exception as e:
-                        print(f"[WARNING] メインコントローラからのトークン取得エラー: {e}")
+                        logger.warning("メインコントローラからのトークン取得エラー: %s", e)
                 
                 # それでもない場合はファイルから読み取り（v2.0.3: JSON形式のみ）
                 if not bearer_token:
-                    print("[DEBUG] bearer_tokens.jsonからBearerトークンを読み取り試行")
+                    logger.debug("bearer_tokens.jsonからBearerトークンを読み取り試行")
                     from config.common import load_bearer_token
                     try:
                         bearer_token = load_bearer_token('rde.nims.go.jp')
                         if bearer_token:
-                            print(f"[DEBUG] bearer_tokens.jsonからBearerトークンを取得: 長さ={len(bearer_token)}")
+                            logger.debug("bearer_tokens.jsonからBearerトークンを取得: 長さ=%s", len(bearer_token))
                         else:
-                            print("[WARNING] bearer_tokens.jsonからトークン取得失敗")
+                            logger.warning("bearer_tokens.jsonからトークン取得失敗")
                     except Exception as e:
-                        print(f"[WARNING] Bearerトークン読み取りエラー: {e}")
+                        logger.warning("Bearerトークン読み取りエラー: %s", e)
             
             if not bearer_token:
-                print("[ERROR] Bearerトークンが取得できません")
+                logger.error("Bearerトークンが取得できません")
                 QMessageBox.warning(self, "エラー", "認証トークンが設定されていません。ログインを確認してください。")
                 return False
             
@@ -1674,7 +1674,7 @@ API情報:
             elif bearer_token.startswith('Bearer '):
                 bearer_token = bearer_token[7:]  # 'Bearer 'プレフィックスを除去
             
-            print(f"[DEBUG] データ登録前提条件チェック - 取得したトークン: 長さ={len(bearer_token)}, 先頭10文字={bearer_token[:10]}")
+            logger.debug("データ登録前提条件チェック - 取得したトークン: 長さ=%s, 先頭10文字=%s", len(bearer_token), bearer_token[:10])
             
             # 取得したトークンをインスタンス変数に保存（後続処理で使用）
             self.bearer_token = bearer_token
@@ -1692,13 +1692,13 @@ API情報:
             # データセットIDの取得（優先順位：1. dataset_info, 2. fileset.dataset_id, 3. extended_config）
             if dataset_info and dataset_info.get('id'):
                 dataset_id = dataset_info['id']
-                print(f"[DEBUG] dataset_infoからデータセットID取得: {dataset_id}")
+                logger.debug("dataset_infoからデータセットID取得: %s", dataset_id)
             elif hasattr(self.file_set, 'dataset_id') and self.file_set.dataset_id:
                 dataset_id = self.file_set.dataset_id
-                print(f"[DEBUG] fileset.dataset_idからデータセットID取得: {dataset_id}")
+                logger.debug("fileset.dataset_idからデータセットID取得: %s", dataset_id)
             elif extended_config.get('dataset_id'):
                 dataset_id = extended_config['dataset_id']
-                print(f"[DEBUG] extended_configからデータセットID取得: {dataset_id}")
+                logger.debug("extended_configからデータセットID取得: %s", dataset_id)
                 
             # dataset_infoが不足している場合、データセットファイルから読み込み
             if dataset_id and not dataset_info:
@@ -1711,20 +1711,20 @@ API情報:
                         # dataset_infoとしてfile_setに設定
                         self.file_set.dataset_info = dataset_data
                         dataset_info = dataset_data
-                        print(f"[DEBUG] データセット情報をファイルから復元: {dataset_data.get('attributes', {}).get('name', dataset_id)}")
+                        logger.debug("データセット情報をファイルから復元: %s", dataset_data.get('attributes', {}).get('name', dataset_id))
                     else:
-                        print(f"[WARNING] データセットファイルが見つかりません: {dataset_file_path}")
+                        logger.warning("データセットファイルが見つかりません: %s", dataset_file_path)
                 except Exception as e:
-                    print(f"[WARNING] データセット情報復元エラー: {e}")
+                    logger.warning("データセット情報復元エラー: %s", e)
             
             if not dataset_id:
                 # デバッグ情報を詳細に出力
-                print("[DEBUG] データセットID取得失敗 - 詳細情報:")
-                print(f"[DEBUG] - hasattr(file_set, 'dataset_id'): {hasattr(self.file_set, 'dataset_id')}")
-                print(f"[DEBUG] - file_set.dataset_id: {getattr(self.file_set, 'dataset_id', 'NONE')}")
-                print(f"[DEBUG] - dataset_info: {dataset_info}")
-                print(f"[DEBUG] - extended_config keys: {list(extended_config.keys()) if extended_config else 'NONE'}")
-                print(f"[DEBUG] - extended_config.dataset_id: {extended_config.get('dataset_id', 'NONE')}")
+                logger.debug("データセットID取得失敗 - 詳細情報:")
+                logger.debug("- hasattr(file_set, 'dataset_id'): %s", hasattr(self.file_set, 'dataset_id'))
+                logger.debug("- file_set.dataset_id: %s", getattr(self.file_set, 'dataset_id', 'NONE'))
+                logger.debug("- dataset_info: %s", dataset_info)
+                logger.debug("- extended_config keys: %s", list(extended_config.keys()) if extended_config else 'NONE')
+                logger.debug("- extended_config.dataset_id: %s", extended_config.get('dataset_id', 'NONE'))
                 QMessageBox.warning(self, "エラー", "データセット情報が設定されていません。")
                 return False
             
@@ -1749,18 +1749,18 @@ API情報:
                     (f"\n... 他{len(missing_files) - 5}件" if len(missing_files) > 5 else ""))
                 return False
             
-            print(f"[INFO] データ登録前提条件チェック完了: ファイル={len(display_items)}個")
+            logger.info("データ登録前提条件チェック完了: ファイル=%s個", len(display_items))
             return True
             
         except Exception as e:
-            print(f"[ERROR] データ登録前提条件チェックエラー: {e}")
+            logger.error("データ登録前提条件チェックエラー: %s", e)
             QMessageBox.critical(self, "エラー", f"前提条件の確認でエラーが発生しました:\n{str(e)}")
             return False
     
     def _batch_register_data(self):
         """データ登録処理（ファイル一括アップロード + データ登録）"""
         try:
-            print("[INFO] データ登録処理開始")
+            logger.info("データ登録処理開始")
             
             # 前提条件チェック
             if not self._validate_registration_prerequisites():
@@ -1780,11 +1780,11 @@ API情報:
             )
             
             if reply != QMessageBox.Yes:
-                print("[INFO] ユーザーがデータ登録をキャンセルしました")
+                logger.info("ユーザーがデータ登録をキャンセルしました")
                 return
             
             # 段階1: ファイル一括アップロード
-            print("[INFO] 段階1: ファイル一括アップロード")
+            logger.info("段階1: ファイル一括アップロード")
             upload_success = self._execute_batch_upload()
             
             if not upload_success:
@@ -1792,7 +1792,7 @@ API情報:
                 return
             
             # 段階2: データ登録実行
-            print("[INFO] 段階2: データ登録実行")
+            logger.info("段階2: データ登録実行")
             registration_success = self._execute_data_registration()
             
             if registration_success:
@@ -1801,7 +1801,7 @@ API情報:
                 QMessageBox.warning(self, "エラー", "データ登録に失敗しました。詳細はログを確認してください。")
             
         except Exception as e:
-            print(f"[ERROR] データ登録処理エラー: {e}")
+            logger.error("データ登録処理エラー: %s", e)
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "エラー", f"データ登録処理でエラーが発生しました:\n{str(e)}")
@@ -1809,7 +1809,7 @@ API情報:
     def _build_form_values_from_fileset(self):
         """ファイルセットからフォーム値を構築"""
         try:
-            print(f"[DEBUG] _build_form_values_from_fileset開始 - ファイルセット: {self.file_set.name}")
+            logger.debug("_build_form_values_from_fileset開始 - ファイルセット: %s", self.file_set.name)
             
             # 基本情報
             form_values = {
@@ -1822,12 +1822,12 @@ API情報:
             
             # デバッグ：ファイルセットの内容確認
             extended_config = getattr(self.file_set, 'extended_config', {})
-            print(f"[DEBUG] ファイルセット内容確認:")
-            print(f"[DEBUG] - ファイルセット名: {self.file_set.name}")
-            print(f"[DEBUG] - extended_config keys: {list(extended_config.keys())}")
-            print(f"[DEBUG] - sample_mode: {extended_config.get('sample_mode', 'None')}")
-            print(f"[DEBUG] - sample_id: {extended_config.get('sample_id', 'None')}")
-            print(f"[DEBUG] - sample_name: {extended_config.get('sample_name', 'None')}")
+            logger.debug("ファイルセット内容確認:")
+            logger.debug("- ファイルセット名: %s", self.file_set.name)
+            logger.debug("- extended_config keys: %s", list(extended_config.keys()))
+            logger.debug("- sample_mode: %s", extended_config.get('sample_mode', 'None'))
+            logger.debug("- sample_id: %s", extended_config.get('sample_id', 'None'))
+            logger.debug("- sample_name: %s", extended_config.get('sample_name', 'None'))
             
             # 試料情報
             sample_mode = extended_config.get('sample_mode', 'new')
@@ -1843,12 +1843,12 @@ API情報:
                                 getattr(self.file_set, 'sample_composition', '') or 
                                 '')
             # 試料モード別処理
-            print(f"[DEBUG] 試料モード判定: sample_mode={sample_mode}")
+            logger.debug("試料モード判定: sample_mode=%s", sample_mode)
             
             if sample_mode == 'existing':
                 # 既存試料ID を取得
                 sample_id = extended_config.get('sample_id', None)
-                print(f"[DEBUG] 既存試料モード - sample_id={sample_id}")
+                logger.debug("既存試料モード - sample_id=%s", sample_id)
                 
                 if sample_id:
                     # 既存試料：sampleIdのみ設定（通常登録と同じ）
@@ -1859,7 +1859,7 @@ API情報:
                         'sampleDescription': sample_description,
                         'sampleComposition': sample_composition
                     })
-                    print(f"[DEBUG] 既存試料設定完了: sample_id={sample_id}")
+                    logger.debug("既存試料設定完了: sample_id=%s", sample_id)
                 else:
                     # 既存試料IDがない場合は新規作成にフォールバック
                     form_values.update({
@@ -1867,7 +1867,7 @@ API情報:
                         'sampleDescription': sample_description,
                         'sampleComposition': sample_composition
                     })
-                    print(f"[WARNING] 既存試料モードですが試料IDがありません。新規作成に変更します。")
+                    logger.warning("既存試料モードですが試料IDがありません。新規作成に変更します。")
             else:
                 # 新規作成モード：sampleNamesを設定（通常登録と同じ）
                 form_values.update({
@@ -1875,13 +1875,13 @@ API情報:
                     'sampleDescription': sample_description,
                     'sampleComposition': sample_composition
                 })
-                print(f"[DEBUG] 新規作成モード設定完了: sample_name={sample_name}")
+                logger.debug("新規作成モード設定完了: sample_name=%s", sample_name)
             
             # 試料名が設定されていない場合の補完
             if form_values.get('sampleMode') == 'new' and not form_values.get('sampleNames'):
                 fallback_name = f"Sample_{self.file_set.name}"
                 form_values['sampleNames'] = fallback_name
-                print(f"[DEBUG] 試料名を補完: {fallback_name}")
+                logger.debug("試料名を補完: %s", fallback_name)
             
             # 固有情報（カスタム値） - インボイススキーマ項目のみを抽出
             raw_custom_values = getattr(self.file_set, 'custom_values', {}) or {}
@@ -1890,7 +1890,7 @@ API情報:
             extended_config = getattr(self.file_set, 'extended_config', {})
             if not raw_custom_values and extended_config.get('custom_values'):
                 raw_custom_values = extended_config['custom_values']
-                print(f"[DEBUG] extended_configからカスタム値を取得: {len(raw_custom_values)}個")
+                logger.debug("extended_configからカスタム値を取得: %s個", len(raw_custom_values))
             elif not raw_custom_values:
                 # extended_configから直接インボイススキーマ項目を抽出
                 schema_fields = [
@@ -1901,7 +1901,7 @@ API情報:
                 for field in schema_fields:
                     if field in extended_config and extended_config[field]:
                         raw_custom_values[field] = extended_config[field]
-                        print(f"[DEBUG] extended_configから直接取得: {field} = {extended_config[field]}")
+                        logger.debug("extended_configから直接取得: %s = %s", field, extended_config[field])
             
             custom_values = {}
             
@@ -1919,24 +1919,24 @@ API情報:
             
             if custom_values:
                 form_values['custom'] = custom_values
-                print(f"[DEBUG] カスタム値設定: {len(custom_values)}個の項目")
+                logger.debug("カスタム値設定: %s個の項目", len(custom_values))
                 for key, value in list(custom_values.items())[:3]:  # 最初の3件のみログ出力
-                    print(f"[DEBUG]   - {key}: {value}")
+                    logger.debug("- %s: %s", key, value)
                 if len(custom_values) > 3:
-                    print(f"[DEBUG]   ... 他{len(custom_values) - 3}件")
+                    logger.debug("... 他%s件", len(custom_values) - 3)
             else:
-                print(f"[DEBUG] カスタム値なし（除外後）")
+                logger.debug("カスタム値なし（除外後）")
                 
             # 除外されたキーがあればログ出力
             excluded_items = {k: v for k, v in raw_custom_values.items() if k in excluded_keys}
             if excluded_items:
-                print(f"[DEBUG] 除外されたカスタム項目: {list(excluded_items.keys())}")
+                logger.debug("除外されたカスタム項目: %s", list(excluded_items.keys()))
             
-            print(f"[DEBUG] フォーム値構築完了: dataName={form_values.get('dataName')}, sampleMode={form_values.get('sampleMode')}")
+            logger.debug("フォーム値構築完了: dataName=%s, sampleMode=%s", form_values.get('dataName'), form_values.get('sampleMode'))
             return form_values
             
         except Exception as e:
-            print(f"[ERROR] _build_form_values_from_fileset エラー: {e}")
+            logger.error("_build_form_values_from_fileset エラー: %s", e)
             import traceback
             traceback.print_exc()
             return {
@@ -1949,7 +1949,7 @@ API情報:
     def _build_files_payload(self, uploaded_files):
         """アップロード済みファイルからペイロードを構築（修正版：item_type属性を優先）"""
         try:
-            print(f"[DEBUG] _build_files_payload開始 - ファイル数: {len(uploaded_files)}")
+            logger.debug("_build_files_payload開始 - ファイル数: %s", len(uploaded_files))
             
             dataFiles = {"data": []}
             attachments = []
@@ -1957,7 +1957,7 @@ API情報:
             for file_item in uploaded_files:
                 upload_id = getattr(file_item, 'upload_id', None)
                 if not upload_id:
-                    print(f"[WARNING] アップロードIDがないファイル: {file_item.name}")
+                    logger.warning("アップロードIDがないファイル: %s", file_item.name)
                     continue
                 
                 file_name = file_item.name
@@ -1974,14 +1974,14 @@ API情報:
                             "uploadId": upload_id,
                             "description": file_name
                         })
-                        print(f"[DEBUG] 添付ファイル追加（item_type指定）: {file_name} -> {upload_id}")
+                        logger.debug("添付ファイル追加（item_type指定）: %s -> %s", file_name, upload_id)
                     else:
                         # DATA またはその他はデータファイル
                         dataFiles["data"].append({
                             "type": "upload", 
                             "id": upload_id
                         })
-                        print(f"[DEBUG] データファイル追加（item_type指定）: {file_name} -> {upload_id}")
+                        logger.debug("データファイル追加（item_type指定）: %s -> %s", file_name, upload_id)
                         
                 else:
                     # item_type属性がない場合は拡張子で判定（後方互換性）
@@ -1992,19 +1992,19 @@ API情報:
                             "uploadId": upload_id,
                             "description": file_name
                         })
-                        print(f"[DEBUG] 添付ファイル追加（拡張子判定）: {file_name} -> {upload_id}")
+                        logger.debug("添付ファイル追加（拡張子判定）: %s -> %s", file_name, upload_id)
                     else:
                         dataFiles["data"].append({
                             "type": "upload", 
                             "id": upload_id
                         })
-                        print(f"[DEBUG] データファイル追加（拡張子判定）: {file_name} -> {upload_id}")
+                        logger.debug("データファイル追加（拡張子判定）: %s -> %s", file_name, upload_id)
             
-            print(f"[DEBUG] ペイロード構築完了 - データファイル: {len(dataFiles['data'])}個, 添付ファイル: {len(attachments)}個")
+            logger.debug("ペイロード構築完了 - データファイル: %s個, 添付ファイル: %s個", len(dataFiles['data']), len(attachments))
             return dataFiles, attachments
             
         except Exception as e:
-            print(f"[ERROR] _build_files_payload エラー: {e}")
+            logger.error("_build_files_payload エラー: %s", e)
             import traceback
             traceback.print_exc()
             return {"data": []}, []
@@ -2020,7 +2020,7 @@ API情報:
             file_size = os.path.getsize(file_item.path)
             encoded_filename = urllib.parse.quote(register_filename)
             
-            print(f"[INFO] アップロード実行: {register_filename} (元ファイル: {os.path.basename(file_item.path)})")
+            logger.info("アップロード実行: %s (元ファイル: %s)", register_filename, os.path.basename(file_item.path))
             
             # APIエンドポイント
             url = f"https://rde-entry-api-arim.nims.go.jp/uploads?datasetId={dataset_id}"
@@ -2032,8 +2032,8 @@ API情報:
                 "User-Agent": "PythonUploader/1.0"
             }
             
-            print(f"[DEBUG] URL: {url}")
-            print(f"[DEBUG] X-File-Name: {encoded_filename}")
+            logger.debug("URL: %s", url)
+            logger.debug("X-File-Name: %s", encoded_filename)
             
             # バイナリデータ読み込み
             with open(file_item.path, 'rb') as f:
@@ -2042,44 +2042,44 @@ API情報:
             # Bearer Token自動選択対応のpost_binaryを使用
             from classes.utils.api_request_helper import post_binary
             
-            print(f"[DEBUG] API呼び出し開始: POST {url}")
-            print(f"[DEBUG] バイナリデータサイズ: {len(binary_data)} bytes")
+            logger.debug("API呼び出し開始: POST %s", url)
+            logger.debug("バイナリデータサイズ: %s bytes", len(binary_data))
             
             resp = post_binary(url, data=binary_data, bearer_token=None, headers=headers)
             if resp is None:
-                print(f"[ERROR] API呼び出し失敗: レスポンスがNone")
+                logger.error("API呼び出し失敗: レスポンスがNone")
                 return {"error": "API呼び出し失敗: レスポンスがありません"}
             
-            print(f"[DEBUG] レスポンス受信: ステータスコード {resp.status_code}")
-            print(f"[DEBUG] レスポンスヘッダー: {dict(resp.headers)}")
+            logger.debug("レスポンス受信: ステータスコード %s", resp.status_code)
+            logger.debug("レスポンスヘッダー: %s", dict(resp.headers))
             
             # ステータスコードチェック（200番台は成功）
             if not (200 <= resp.status_code < 300):
                 error_text = resp.text[:500] if hasattr(resp, 'text') else 'レスポンステキストなし'
-                print(f"[ERROR] HTTPエラー: {resp.status_code}")
-                print(f"[ERROR] レスポンス内容: {error_text}")
+                logger.error("HTTPエラー: %s", resp.status_code)
+                logger.error("レスポンス内容: %s", error_text)
                 return {"error": f"HTTP {resp.status_code}: {error_text}"}
             
-            print(f"[SUCCESS] HTTPレスポンス成功: {resp.status_code}")
+            logger.info("[SUCCESS] HTTPレスポンス成功: %s", resp.status_code)
             
             # JSONレスポンスをパース
             try:
                 data = resp.json()
-                print(f"[DEBUG] JSONパース成功: {len(str(data))} 文字")
-                print(f"[DEBUG] レスポンス構造: {list(data.keys()) if isinstance(data, dict) else type(data)}")
+                logger.debug("JSONパース成功: %s 文字", len(str(data)))
+                logger.debug("レスポンス構造: %s", list(data.keys()) if isinstance(data, dict) else type(data))
             except Exception as json_error:
-                print(f"[ERROR] JSONパースエラー: {json_error}")
-                print(f"[ERROR] レスポンステキスト: {resp.text[:200]}")
+                logger.error("JSONパースエラー: %s", json_error)
+                logger.error("レスポンステキスト: %s", resp.text[:200])
                 return {"error": f"JSONパースエラー: {json_error}"}
             
             # uploadIdを抽出
             upload_id = data.get("uploadId")
             if not upload_id:
-                print(f"[ERROR] uploadIdがレスポンスに含まれていません")
-                print(f"[ERROR] レスポンス内容: {data}")
+                logger.error("uploadIdがレスポンスに含まれていません")
+                logger.error("レスポンス内容: %s", data)
                 return {"error": "レスポンスにuploadIdが含まれていません", "response_data": data}
             
-            print(f"[SUCCESS] アップロード成功: {register_filename} -> uploadId = {upload_id}")
+            logger.info("[SUCCESS] アップロード成功: %s -> uploadId = %s", register_filename, upload_id)
             
             # レスポンス保存
             from config.common import OUTPUT_RDE_DIR
@@ -2096,7 +2096,7 @@ API情報:
             }
             
         except Exception as e:
-            print(f"[ERROR] 単一ファイルアップロードエラー: {e}")
+            logger.error("単一ファイルアップロードエラー: %s", e)
             import traceback
             traceback.print_exc()
             return {"error": str(e)}
@@ -2104,7 +2104,7 @@ API情報:
     def _execute_batch_upload(self) -> bool:
         """ファイル一括アップロードを実行（Bearer Token自動選択対応）"""
         try:
-            print("[INFO] ファイル一括アップロード開始")
+            logger.info("ファイル一括アップロード開始")
             
             # 注意: Bearer Tokenは不要（API呼び出し時に自動選択される）
             
@@ -2119,7 +2119,7 @@ API情報:
                     dataset_id = extended_config.get('dataset_id')
             
             if not dataset_id:
-                print("[ERROR] データセットIDが取得できません")
+                logger.error("データセットIDが取得できません")
                 QMessageBox.warning(self, "エラー", "データセット情報が設定されていません。")
                 return False
             
@@ -2129,7 +2129,7 @@ API情報:
             display_items = self._get_display_file_items(file_items)
             
             # path_mapping.xlsxは既に_get_display_file_itemsで追加されているため、ここでは追加しない
-            print(f"[DEBUG] アップロード処理: 対象ファイル数 = {len(display_items)}")
+            logger.debug("アップロード処理: 対象ファイル数 = %s", len(display_items))
             
             if not display_items:
                 QMessageBox.warning(self, "エラー", "アップロード対象のファイルがありません。")
@@ -2146,7 +2146,7 @@ API情報:
             
             for i, file_item in enumerate(display_items):
                 if progress.wasCanceled():
-                    print("[INFO] ユーザーによりアップロードがキャンセルされました")
+                    logger.info("ユーザーによりアップロードがキャンセルされました")
                     progress.close()
                     return False
                 
@@ -2163,27 +2163,27 @@ API情報:
                         setattr(file_item, 'upload_id', upload_id)
                         setattr(file_item, 'upload_response', upload_result.get('response_data', {}))
                         upload_success_count += 1
-                        print(f"[SUCCESS] {file_item.name} -> アップロードID: {upload_id}")
+                        logger.debug("[SUCCESS] %s -> アップロードID: %s", file_item.name, upload_id)
                     else:
                         upload_failed_count += 1
                         error_detail = upload_result.get('error', '不明なエラー') if upload_result else 'レスポンスなし'
-                        print(f"[ERROR] {file_item.name} -> {error_detail}")
+                        logger.error("%s -> %s", file_item.name, error_detail)
                         
                 except Exception as e:
                     upload_failed_count += 1
-                    print(f"[ERROR] {file_item.name} -> 例外: {str(e)}")
+                    logger.error("%s -> 例外: %s", file_item.name, str(e))
             
             progress.setValue(total_files)
             progress.close()
             
             # 結果表示
-            print(f"[INFO] アップロード完了 - 成功: {upload_success_count}件, 失敗: {upload_failed_count}件")
+            logger.info("アップロード完了 - 成功: %s件, 失敗: %s件", upload_success_count, upload_failed_count)
             
             # アップロード済みファイル情報をファイルセットに保存（データ登録で再利用するため）
             if upload_success_count > 0:
                 uploaded_items = [item for item in display_items if hasattr(item, 'upload_id') and item.upload_id]
                 setattr(self.file_set, '_uploaded_items', uploaded_items)
-                print(f"[DEBUG] アップロード済みアイテムをファイルセットに保存: {len(uploaded_items)}個")
+                logger.debug("アップロード済みアイテムをファイルセットに保存: %s個", len(uploaded_items))
             
             if upload_failed_count == 0:
                 QMessageBox.information(self, "完了", f"全{total_files}ファイルのアップロードが完了しました。")
@@ -2201,7 +2201,7 @@ API情報:
                 return False
                 
         except Exception as e:
-            print(f"[ERROR] 一括アップロード処理エラー: {e}")
+            logger.error("一括アップロード処理エラー: %s", e)
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "エラー", f"一括アップロード処理でエラーが発生しました:\n{str(e)}")
@@ -2268,32 +2268,32 @@ API情報:
     def _execute_data_registration(self) -> bool:
         """データ登録を実行（Bearer Token自動選択対応）"""
         try:
-            print("[INFO] データ登録実行開始")
+            logger.info("データ登録実行開始")
             
             # 注意: Bearer Tokenは不要（entry_data関数内で自動選択される）
             
             # データセット情報取得
             dataset_info = getattr(self.file_set, 'dataset_info', None)
             if not dataset_info:
-                print("[ERROR] データセット情報が取得できません")
+                logger.error("データセット情報が取得できません")
                 QMessageBox.warning(self, "エラー", "データセット情報が設定されていません。")
                 return False
             
             dataset_id = dataset_info.get('id')
             if not dataset_id:
-                print("[ERROR] データセットIDが取得できません")
+                logger.error("データセットIDが取得できません")
                 return False
             
             # アップロード済みファイルを取得（保存されたアイテムを優先使用）
             if hasattr(self.file_set, '_uploaded_items') and self.file_set._uploaded_items:
                 display_items = self.file_set._uploaded_items
-                print(f"[DEBUG] データ登録処理: 保存されたアップロード済みアイテムを使用 - {len(display_items)}個")
+                logger.debug("データ登録処理: 保存されたアップロード済みアイテムを使用 - %s個", len(display_items))
             else:
                 # フォールバック: 新規に取得（アップロードIDは失われている可能性あり）
                 valid_items = self.file_set.get_valid_items()
                 file_items = [item for item in valid_items if item.file_type == FileType.FILE]
                 display_items = self._get_display_file_items(file_items)
-                print(f"[DEBUG] データ登録処理: 新規取得（フォールバック） - {len(display_items)}個")
+                logger.debug("データ登録処理: 新規取得（フォールバック） - %s個", len(display_items))
             
             # アップロードIDが設定されているファイルのみ対象
             uploaded_files = [item for item in display_items if hasattr(item, 'upload_id') and item.upload_id]
@@ -2301,10 +2301,10 @@ API情報:
                 QMessageBox.warning(self, "エラー", "アップロード済みファイルがありません。\n先にファイルアップロードを実行してください。")
                 return False
 
-            print(f"[INFO] データ登録対象ファイル数: {len(uploaded_files)}")
-            print("[DEBUG] uploaded_files 内容:")
+            logger.info("データ登録対象ファイル数: %s", len(uploaded_files))
+            logger.debug("uploaded_files 内容:")
             for item in uploaded_files:
-                print(f"  - name: {getattr(item, 'name', None)}, item_type: {getattr(item, 'item_type', None)}, upload_id: {getattr(item, 'upload_id', None)}")
+                logger.debug("  - name: %s, item_type: %s, upload_id: %s", getattr(item, 'name', None), getattr(item, 'item_type', None), getattr(item, 'upload_id', None))
 
             # フォーム値を構築
             form_values = self._build_form_values_from_fileset()
@@ -2315,21 +2315,21 @@ API情報:
             # ファイルペイロードを構築
             dataFiles, attachments = self._build_files_payload(uploaded_files)
 
-            print(f"[DEBUG] attachments 構築直後の内容: {attachments}")
+            logger.debug("attachments 構築直後の内容: %s", attachments)
 
             if not dataFiles.get('data') and not attachments:
-                print("[ERROR] データファイルまたは添付ファイルが必要です")
+                logger.error("データファイルまたは添付ファイルが必要です")
                 return False
 
             # ペイロードプレビュー表示
             if not self._show_payload_confirmation(dataset_info, form_values, dataFiles, attachments):
                 return False  # ユーザーがキャンセルした場合
 
-            print(f"[DEBUG] データ登録開始:")
-            print(f"  - データセット: {dataset_info}")
-            print(f"  - フォーム値: {form_values}")
-            print(f"  - データファイル数: {len(dataFiles.get('data', []))}")
-            print(f"  - 添付ファイル数: {len(attachments)}")
+            logger.debug("データ登録開始:")
+            logger.debug("  - データセット: %s", dataset_info)
+            logger.debug("  - フォーム値: %s", form_values)
+            logger.debug("  - データファイル数: %s", len(dataFiles.get('data', [])))
+            logger.debug("  - 添付ファイル数: %s", len(attachments))
             
             # プログレスダイアログ
             progress = QProgressDialog("データ登録中...", None, 0, 0, self)
@@ -2353,7 +2353,7 @@ API情報:
                 
                 if result and not result.get('error'):
                     # 成功処理
-                    print("[SUCCESS] データ登録完了")
+                    logger.info("[SUCCESS] データ登録完了")
                     
                     # 試料ID保存
                     sample_info = self._extract_sample_info_from_response(result)
@@ -2364,16 +2364,16 @@ API情報:
                 else:
                     # エラー処理
                     error_detail = result.get('detail', '不明なエラー') if result else 'レスポンスなし'
-                    print(f"[ERROR] データ登録エラー: {error_detail}")
+                    logger.error("データ登録エラー: %s", error_detail)
                     return False
                 
             except Exception as e:
                 progress.close()
-                print(f"[ERROR] entry_data呼び出しエラー: {e}")
+                logger.error("entry_data呼び出しエラー: %s", e)
                 return False
                 
         except Exception as e:
-            print(f"[ERROR] データ登録処理エラー: {e}")
+            logger.error("データ登録処理エラー: %s", e)
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "エラー", f"データ登録処理でエラーが発生しました:\n{str(e)}")
@@ -2382,11 +2382,11 @@ API情報:
     def _extract_sample_info_from_response(self, response_data: dict) -> Optional[dict]:
         """APIレスポンスから試料情報を抽出"""
         try:
-            print(f"[DEBUG] _extract_sample_info_from_response開始")
-            print(f"[DEBUG] レスポンスデータ構造: {type(response_data)}")
+            logger.debug("_extract_sample_info_from_response開始")
+            logger.debug("レスポンスデータ構造: %s", type(response_data))
             
             if not response_data or not isinstance(response_data, dict):
-                print(f"[WARNING] レスポンスデータが無効: {response_data}")
+                logger.warning("レスポンスデータが無効: %s", response_data)
                 return None
                 
             # レスポンス構造の確認：通常形式 vs wrapped形式
@@ -2396,14 +2396,14 @@ API情報:
             elif 'response' in response_data and response_data.get('response', {}).get('data'):
                 # wrapped形式（success/responseで包まれている）
                 data = response_data['response']['data']
-                print(f"[DEBUG] wrapped形式のレスポンスを検出")
+                logger.debug("wrapped形式のレスポンスを検出")
             
             if not data:
-                print(f"[WARNING] レスポンスに'data'フィールドがありません")
-                print(f"[DEBUG] レスポンス構造: {list(response_data.keys())}")
+                logger.warning("レスポンスに'data'フィールドがありません")
+                logger.debug("レスポンス構造: %s", list(response_data.keys()))
                 return None
                 
-            print(f"[DEBUG] data構造: {data}")
+            logger.debug("data構造: %s", data)
             
             # relationshipsから試料情報を取得
             relationships = data.get('relationships', {})
@@ -2417,14 +2417,14 @@ API情報:
                     'sample_name': f'Sample (ID: {sample_id[:8]}...)',
                     'mode': 'existing'
                 }
-                print(f"[DEBUG] 試料情報抽出成功: {sample_info}")
+                logger.debug("試料情報抽出成功: %s", sample_info)
                 return sample_info
             else:
-                print(f"[WARNING] レスポンスから試料IDを抽出できませんでした")
+                logger.warning("レスポンスから試料IDを抽出できませんでした")
                 return None
             
         except Exception as e:
-            print(f"[ERROR] 試料情報抽出エラー: {e}")
+            logger.error("試料情報抽出エラー: %s", e)
             import traceback
             traceback.print_exc()
             return None
@@ -2432,10 +2432,10 @@ API情報:
     def _save_sample_info_to_fileset(self, sample_info: dict):
         """試料情報をファイルセットに保存"""
         try:
-            print(f"[DEBUG] 試料情報をファイルセットに保存: {sample_info}")
+            logger.debug("試料情報をファイルセットに保存: %s", sample_info)
             
             if not sample_info or not hasattr(self, 'file_set'):
-                print("[WARNING] 試料情報またはファイルセットが無効です")
+                logger.warning("試料情報またはファイルセットが無効です")
                 return
             
             # extended_configに試料情報を保存
@@ -2446,7 +2446,7 @@ API情報:
             if 'sample_id' in sample_info:
                 self.file_set.extended_config['sample_id'] = sample_info['sample_id']
                 self.file_set.extended_config['sample_mode'] = 'existing'
-                print(f"[DEBUG] 既存試料ID保存: {sample_info['sample_id']}")
+                logger.debug("既存試料ID保存: %s", sample_info['sample_id'])
             
             if 'sample_name' in sample_info:
                 self.file_set.extended_config['sample_name'] = sample_info['sample_name']
@@ -2455,10 +2455,10 @@ API情報:
             from datetime import datetime
             self.file_set.extended_config['registration_timestamp'] = datetime.now().isoformat()
             
-            print(f"[DEBUG] ファイルセットへの試料情報保存完了")
+            logger.debug("ファイルセットへの試料情報保存完了")
             
         except Exception as e:
-            print(f"[ERROR] 試料情報保存エラー: {e}")
+            logger.error("試料情報保存エラー: %s", e)
             import traceback
             traceback.print_exc()
     
@@ -2624,7 +2624,7 @@ API情報:
             else:
                 return file_item.relative_path
         except Exception as e:
-            print(f"[DEBUG] FileSetPreviewWidget._get_register_filename エラー: {e}")
+            logger.debug("FileSetPreviewWidget._get_register_filename エラー: %s", e)
             return file_item.name or "不明なファイル"
     
     def _get_zip_display_filename_for_single_fileset(self, file_item: FileItem) -> str:
@@ -2645,7 +2645,7 @@ API情報:
                 # ZIP化されないファイル：元ファイル名
                 return file_item.name
         except Exception as e:
-            print(f"[ERROR] 単一ファイルセットZIP表示ファイル名取得エラー: {e}")
+            logger.error("単一ファイルセットZIP表示ファイル名取得エラー: %s", e)
             return file_item.name or "不明なファイル"
     
     def _is_file_zipped_for_single_fileset(self, file_item: FileItem) -> bool:
@@ -2672,7 +2672,7 @@ API情報:
             return False
             
         except Exception as e:
-            print(f"[ERROR] 単一ファイルセットZIP化判定エラー: {e}")
+            logger.error("単一ファイルセットZIP化判定エラー: %s", e)
             return False
 
 
@@ -2719,9 +2719,9 @@ class BatchRegisterPreviewDialog(QDialog):
                 (screen_rect.height() - target_height) // 2
             )
             
-            print(f"[DEBUG] プレビューダイアログサイズ設定: {target_width}x{target_height}")
+            logger.debug("プレビューダイアログサイズ設定: %sx%s", target_width, target_height)
         except Exception as e:
-            print(f"[WARNING] ダイアログサイズ設定エラー: {e}")
+            logger.warning("ダイアログサイズ設定エラー: %s", e)
             self.resize(1000, 700)  # フォールバック
         
         self.setup_ui()
@@ -2779,7 +2779,7 @@ class BatchRegisterPreviewDialog(QDialog):
                                 item.is_excluded = True
                                 
         except Exception as e:
-            print(f"重複チェック中にエラー: {e}")
+            logger.error("重複チェック中にエラー: %s", e)
     
     def load_data(self):
         """データを読み込み"""
@@ -2801,7 +2801,7 @@ class BatchRegisterPreviewDialog(QDialog):
                         total_files += len(valid_items)
                         total_size += fs.get_total_size()
                     except Exception as e:
-                        print(f"ファイルセット '{fs.name}' の統計取得中にエラー: {e}")
+                        logger.error("ファイルセット '%s' の統計取得中にエラー: %s", fs.name, e)
             
             duplicate_count = len(self.duplicate_files)
             
@@ -2834,19 +2834,19 @@ class BatchRegisterPreviewDialog(QDialog):
                     
                     self.tab_widget.addTab(preview_widget, tab_name)
                 except Exception as e:
-                    print(f"ファイルセット '{file_set.name}' のタブ作成中にエラー: {e}")
+                    logger.error("ファイルセット '%s' のタブ作成中にエラー: %s", file_set.name, e)
                     # エラーが発生したファイルセットのタブには簡易メッセージを表示
                     error_widget = QLabel(f"エラー: {str(e)}")
                     self.tab_widget.addTab(error_widget, f"{file_set.name or 'エラー'} ❌")
                     
         except Exception as e:
-            print(f"プレビューデータ読み込み中にエラー: {e}")
+            logger.error("プレビューデータ読み込み中にエラー: %s", e)
             self.summary_label.setText(f"エラー: {str(e)}")
     
     def _batch_upload_files(self):
         """ファイル一括アップロード処理（Bearer Token自動選択対応）"""
         try:
-            print("[INFO] ファイル一括アップロード開始")
+            logger.info("ファイル一括アップロード開始")
             
             # 注意: Bearer Tokenは不要（API呼び出し時に自動選択される）
             
@@ -2887,10 +2887,10 @@ class BatchRegisterPreviewDialog(QDialog):
                     file_type=FileType.FILE
                 )
                 display_items.append(mapping_item)
-                print(f"[INFO] マッピングファイルも追加: {mapping_file_path}")
+                logger.info("マッピングファイルも追加: %s", mapping_file_path)
             
             total_files = len(display_items)
-            print(f"[INFO] 一括アップロード対象ファイル数: {total_files}個")
+            logger.info("一括アップロード対象ファイル数: %s個", total_files)
             
             # プログレスダイアログ
             progress = QProgressDialog("ファイル一括アップロード中...", "キャンセル", 0, total_files, self)
@@ -2903,7 +2903,7 @@ class BatchRegisterPreviewDialog(QDialog):
             
             for i, file_item in enumerate(display_items):
                 if progress.wasCanceled():
-                    print("[INFO] ユーザーによりアップロードがキャンセルされました")
+                    logger.info("ユーザーによりアップロードがキャンセルされました")
                     break
                 
                 progress.setLabelText(f"アップロード中: {file_item.name} ({i+1}/{total_files})")
@@ -2919,16 +2919,16 @@ class BatchRegisterPreviewDialog(QDialog):
                         setattr(file_item, 'upload_id', upload_id)
                         setattr(file_item, 'upload_response', upload_result.get('response_data', {}))
                         upload_results.append(upload_result)
-                        print(f"[SUCCESS] {file_item.name} -> ID: {upload_id}")
+                        logger.debug("[SUCCESS] %s -> ID: %s", file_item.name, upload_id)
                     else:
                         error_detail = upload_result.get('error', '不明なエラー') if upload_result else 'レスポンスなし'
                         failed_files.append((file_item.name, error_detail))
-                        print(f"[ERROR] {file_item.name} -> {error_detail}")
+                        logger.error("%s -> %s", file_item.name, error_detail)
                         
                 except Exception as e:
                     error_msg = str(e)
                     failed_files.append((file_item.name, error_msg))
-                    print(f"[ERROR] {file_item.name} -> 例外: {error_msg}")
+                    logger.error("%s -> 例外: %s", file_item.name, error_msg)
             
             progress.setValue(total_files)
             progress.close()
@@ -2955,10 +2955,10 @@ class BatchRegisterPreviewDialog(QDialog):
             else:
                 QMessageBox.warning(self, "アップロード完了（一部失敗）", result_message)
             
-            print(f"[INFO] 一括アップロード完了: 成功={success_count}, 失敗={failed_count}")
+            logger.info("一括アップロード完了: 成功=%s, 失敗=%s", success_count, failed_count)
             
         except Exception as e:
-            print(f"[ERROR] 一括アップロード処理エラー: {e}")
+            logger.error("一括アップロード処理エラー: %s", e)
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "エラー", f"一括アップロード処理でエラーが発生しました:\n{str(e)}")
@@ -2974,7 +2974,7 @@ class BatchRegisterPreviewDialog(QDialog):
             file_size = os.path.getsize(file_item.path)
             encoded_filename = urllib.parse.quote(register_filename)
             
-            print(f"[INFO] アップロード実行: {register_filename} (元ファイル: {os.path.basename(file_item.path)})")
+            logger.info("アップロード実行: %s (元ファイル: %s)", register_filename, os.path.basename(file_item.path))
             
             # APIエンドポイント
             url = f"https://rde-entry-api-arim.nims.go.jp/uploads?datasetId={dataset_id}"
@@ -2986,8 +2986,8 @@ class BatchRegisterPreviewDialog(QDialog):
                 "User-Agent": "PythonUploader/1.0"
             }
             
-            print(f"[DEBUG] URL: {url}")
-            print(f"[DEBUG] X-File-Name: {encoded_filename}")
+            logger.debug("URL: %s", url)
+            logger.debug("X-File-Name: %s", encoded_filename)
             
             # バイナリデータ読み込み
             with open(file_item.path, 'rb') as f:
@@ -2996,44 +2996,44 @@ class BatchRegisterPreviewDialog(QDialog):
             # Bearer Token自動選択対応のpost_binaryを使用
             from classes.utils.api_request_helper import post_binary
             
-            print(f"[DEBUG] API呼び出し開始: POST {url}")
-            print(f"[DEBUG] バイナリデータサイズ: {len(binary_data)} bytes")
+            logger.debug("API呼び出し開始: POST %s", url)
+            logger.debug("バイナリデータサイズ: %s bytes", len(binary_data))
             
             resp = post_binary(url, data=binary_data, bearer_token=None, headers=headers)
             if resp is None:
-                print(f"[ERROR] API呼び出し失敗: レスポンスがNone")
+                logger.error("API呼び出し失敗: レスポンスがNone")
                 return {"error": "API呼び出し失敗: レスポンスがありません"}
             
-            print(f"[DEBUG] レスポンス受信: ステータスコード {resp.status_code}")
-            print(f"[DEBUG] レスポンスヘッダー: {dict(resp.headers)}")
+            logger.debug("レスポンス受信: ステータスコード %s", resp.status_code)
+            logger.debug("レスポンスヘッダー: %s", dict(resp.headers))
             
             # ステータスコードチェック（200番台は成功）
             if not (200 <= resp.status_code < 300):
                 error_text = resp.text[:500] if hasattr(resp, 'text') else 'レスポンステキストなし'
-                print(f"[ERROR] HTTPエラー: {resp.status_code}")
-                print(f"[ERROR] レスポンス内容: {error_text}")
+                logger.error("HTTPエラー: %s", resp.status_code)
+                logger.error("レスポンス内容: %s", error_text)
                 return {"error": f"HTTP {resp.status_code}: {error_text}"}
             
-            print(f"[SUCCESS] HTTPレスポンス成功: {resp.status_code}")
+            logger.info("[SUCCESS] HTTPレスポンス成功: %s", resp.status_code)
             
             # JSONレスポンスをパース
             try:
                 data = resp.json()
-                print(f"[DEBUG] JSONパース成功: {len(str(data))} 文字")
-                print(f"[DEBUG] レスポンス構造: {list(data.keys()) if isinstance(data, dict) else type(data)}")
+                logger.debug("JSONパース成功: %s 文字", len(str(data)))
+                logger.debug("レスポンス構造: %s", list(data.keys()) if isinstance(data, dict) else type(data))
             except Exception as json_error:
-                print(f"[ERROR] JSONパースエラー: {json_error}")
-                print(f"[ERROR] レスポンステキスト: {resp.text[:200]}")
+                logger.error("JSONパースエラー: %s", json_error)
+                logger.error("レスポンステキスト: %s", resp.text[:200])
                 return {"error": f"JSONパースエラー: {json_error}"}
             
             # uploadIdを抽出
             upload_id = data.get("uploadId")
             if not upload_id:
-                print(f"[ERROR] uploadIdがレスポンスに含まれていません")
-                print(f"[ERROR] レスポンス内容: {data}")
+                logger.error("uploadIdがレスポンスに含まれていません")
+                logger.error("レスポンス内容: %s", data)
                 return {"error": "レスポンスにuploadIdが含まれていません", "response_data": data}
             
-            print(f"[SUCCESS] アップロード成功: {register_filename} -> uploadId = {upload_id}")
+            logger.info("[SUCCESS] アップロード成功: %s -> uploadId = %s", register_filename, upload_id)
             
             # レスポンス保存
             from config.common import OUTPUT_RDE_DIR
@@ -3050,7 +3050,7 @@ class BatchRegisterPreviewDialog(QDialog):
             }
             
         except Exception as e:
-            print(f"[ERROR] 単一ファイルアップロードエラー: {e}")
+            logger.error("単一ファイルアップロードエラー: %s", e)
             import traceback
             traceback.print_exc()
             return {"error": str(e)}
@@ -3071,13 +3071,13 @@ class BatchRegisterPreviewDialog(QDialog):
             
             return None
         except Exception as e:
-            print(f"[WARNING] マッピングファイル取得エラー: {e}")
+            logger.warning("マッピングファイル取得エラー: %s", e)
             return None
     
     def _batch_register_data(self):
         """データ登録処理（一括アップロード + データ登録）"""
         try:
-            print("[INFO] データ登録処理開始")
+            logger.info("データ登録処理開始")
             
             # 前提条件チェック
             if not self._validate_registration_prerequisites():
@@ -3097,11 +3097,11 @@ class BatchRegisterPreviewDialog(QDialog):
             )
             
             if reply != QMessageBox.Yes:
-                print("[INFO] ユーザーがデータ登録をキャンセルしました")
+                logger.info("ユーザーがデータ登録をキャンセルしました")
                 return
             
             # 段階1: ファイル一括アップロード
-            print("[INFO] 段階1: ファイル一括アップロード")
+            logger.info("段階1: ファイル一括アップロード")
             upload_success = self._execute_batch_upload()
             
             if not upload_success:
@@ -3109,7 +3109,7 @@ class BatchRegisterPreviewDialog(QDialog):
                 return
             
             # 段階2: データ登録実行
-            print("[INFO] 段階2: データ登録実行")
+            logger.info("段階2: データ登録実行")
             registration_success = self._execute_data_registration()
             
             if registration_success:
@@ -3118,7 +3118,7 @@ class BatchRegisterPreviewDialog(QDialog):
                 QMessageBox.warning(self, "エラー", "データ登録に失敗しました。詳細はログを確認してください。")
             
         except Exception as e:
-            print(f"[ERROR] データ登録処理エラー: {e}")
+            logger.error("データ登録処理エラー: %s", e)
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "エラー", f"データ登録処理でエラーが発生しました:\n{str(e)}")
@@ -3129,7 +3129,7 @@ class BatchRegisterPreviewDialog(QDialog):
             # ベアラートークンを取得（親から継承またはファイルから読み取り）
             bearer_token = getattr(self, 'bearer_token', None)
             if not bearer_token:
-                print("[DEBUG] Bearer トークンが親から取得できない - 他の方法を試行")
+                logger.debug("Bearer トークンが親から取得できない - 他の方法を試行")
                 
                 # 親ウィジェットから取得を試行（複数階層遡及）
                 current_widget = self
@@ -3137,24 +3137,24 @@ class BatchRegisterPreviewDialog(QDialog):
                     current_widget = current_widget.parent()
                     if current_widget and hasattr(current_widget, 'bearer_token'):
                         bearer_token = current_widget.bearer_token
-                        print(f"[DEBUG] 親ウィジェット({type(current_widget).__name__})からBearerトークンを取得")
+                        logger.debug("親ウィジェット(%s)からBearerトークンを取得", type(current_widget).__name__)
                         break
                 
                 # ファイルから読み取り（v2.0.3: JSON形式のみ）
                 if not bearer_token:
-                    print("[DEBUG] bearer_tokens.jsonからBearerトークンを読み取り試行")
+                    logger.debug("bearer_tokens.jsonからBearerトークンを読み取り試行")
                     from config.common import load_bearer_token
                     try:
                         bearer_token = load_bearer_token('rde.nims.go.jp')
                         if bearer_token:
-                            print(f"[DEBUG] bearer_tokens.jsonからBearerトークンを取得: 長さ={len(bearer_token)}")
+                            logger.debug("bearer_tokens.jsonからBearerトークンを取得: 長さ=%s", len(bearer_token))
                         else:
-                            print("[WARNING] bearer_tokens.jsonからトークン取得失敗")
+                            logger.warning("bearer_tokens.jsonからトークン取得失敗")
                     except Exception as e:
-                        print(f"[WARNING] Bearerトークン読み取りエラー: {e}")
+                        logger.warning("Bearerトークン読み取りエラー: %s", e)
             
             if not bearer_token:
-                print("[ERROR] Bearerトークンが取得できません")
+                logger.error("Bearerトークンが取得できません")
                 return False
                 
             # データセット情報取得
@@ -3168,7 +3168,7 @@ class BatchRegisterPreviewDialog(QDialog):
                 dataset_id = extended_config['dataset_id']
             
             if not dataset_id:
-                print("[ERROR] データセットIDが取得できません")
+                logger.error("データセットIDが取得できません")
                 return False
             
             # 対象ファイル取得
@@ -3187,7 +3187,7 @@ class BatchRegisterPreviewDialog(QDialog):
                     file_type=FileType.FILE,
                     item_type=FileItemType.ATTACHMENT  # 添付ファイルとして設定
                 )
-                print(f"[DEBUG] path_mapping.xlsx を添付ファイルとして追加: {mapping_file_path}")
+                logger.debug("path_mapping.xlsx を添付ファイルとして追加: %s", mapping_file_path)
                 display_items.append(mapping_item)
             
             total_files = len(display_items)
@@ -3203,7 +3203,7 @@ class BatchRegisterPreviewDialog(QDialog):
             
             for i, file_item in enumerate(display_items):
                 if progress.wasCanceled():
-                    print("[INFO] アップロードがキャンセルされました")
+                    logger.info("アップロードがキャンセルされました")
                     progress.close()
                     return False
                 
@@ -3219,16 +3219,16 @@ class BatchRegisterPreviewDialog(QDialog):
                         setattr(file_item, 'upload_id', upload_id)
                         setattr(file_item, 'upload_response', upload_result.get('response_data', {}))
                         upload_results.append(upload_result)
-                        print(f"[SUCCESS] {file_item.name} -> ID: {upload_id}")
+                        logger.debug("[SUCCESS] %s -> ID: %s", file_item.name, upload_id)
                     else:
                         error_detail = upload_result.get('error', '不明なエラー') if upload_result else 'レスポンスなし'
                         failed_files.append((file_item.name, error_detail))
-                        print(f"[ERROR] {file_item.name} -> {error_detail}")
+                        logger.error("%s -> %s", file_item.name, error_detail)
                         
                 except Exception as e:
                     error_msg = str(e)
                     failed_files.append((file_item.name, error_msg))
-                    print(f"[ERROR] {file_item.name} -> 例外: {error_msg}")
+                    logger.error("%s -> 例外: %s", file_item.name, error_msg)
             
             progress.setValue(total_files)
             progress.close()
@@ -3237,7 +3237,7 @@ class BatchRegisterPreviewDialog(QDialog):
             success_count = len(upload_results)
             failed_count = len(failed_files)
             
-            print(f"[INFO] アップロード結果: 成功={success_count}, 失敗={failed_count}")
+            logger.info("アップロード結果: 成功=%s, 失敗=%s", success_count, failed_count)
             
             if failed_count == 0:
                 return True
@@ -3258,7 +3258,7 @@ class BatchRegisterPreviewDialog(QDialog):
                 return False
                 
         except Exception as e:
-            print(f"[ERROR] 一括アップロード実行エラー: {e}")
+            logger.error("一括アップロード実行エラー: %s", e)
             return False
     
     def _execute_data_registration(self) -> bool:
@@ -3267,11 +3267,11 @@ class BatchRegisterPreviewDialog(QDialog):
             bearer_token = getattr(self, 'bearer_token', None)
             
             # ファイルセット状態詳細確認
-            print(f"[DEBUG] データ登録実行 - ファイルセット詳細確認:")
-            print(f"  - name: {getattr(self.file_set, 'name', 'None')}")
-            print(f"  - dataset_id: {getattr(self.file_set, 'dataset_id', 'None')}")
-            print(f"  - dataset_info: {getattr(self.file_set, 'dataset_info', 'None')}")
-            print(f"  - extended_config keys: {list(getattr(self.file_set, 'extended_config', {}).keys())}")
+            logger.debug("データ登録実行 - ファイルセット詳細確認:")
+            logger.debug("  - name: %s", getattr(self.file_set, 'name', 'None'))
+            logger.debug("  - dataset_id: %s", getattr(self.file_set, 'dataset_id', 'None'))
+            logger.debug("  - dataset_info: %s", getattr(self.file_set, 'dataset_info', 'None'))
+            logger.debug("  - extended_config keys: %s", list(getattr(self.file_set, 'extended_config', {}).keys()))
             
             # データセット情報を取得（複数の方法を試行）
             dataset_info = None
@@ -3279,12 +3279,12 @@ class BatchRegisterPreviewDialog(QDialog):
             # 方法1: dataset_info属性から直接取得
             if hasattr(self.file_set, 'dataset_info') and self.file_set.dataset_info:
                 dataset_info = self.file_set.dataset_info
-                print(f"[DEBUG] データセット情報取得成功 (dataset_info): {dataset_info}")
+                logger.debug("データセット情報取得成功 (dataset_info): %s", dataset_info)
             
             # 方法2: dataset_id属性から構築
             elif hasattr(self.file_set, 'dataset_id') and self.file_set.dataset_id:
                 dataset_info = {'id': self.file_set.dataset_id}
-                print(f"[DEBUG] データセット情報構築 (dataset_id): {dataset_info}")
+                logger.debug("データセット情報構築 (dataset_id): %s", dataset_info)
             
             # 方法3: extended_configから取得
             elif hasattr(self.file_set, 'extended_config') and self.file_set.extended_config:
@@ -3293,14 +3293,14 @@ class BatchRegisterPreviewDialog(QDialog):
                     selected_dataset = extended_config['selected_dataset']
                     if isinstance(selected_dataset, dict) and 'id' in selected_dataset:
                         dataset_info = selected_dataset
-                        print(f"[DEBUG] データセット情報取得 (extended_config): {dataset_info}")
+                        logger.debug("データセット情報取得 (extended_config): %s", dataset_info)
                     elif isinstance(selected_dataset, str):
                         dataset_info = {'id': selected_dataset}
-                        print(f"[DEBUG] データセット情報構築 (extended_config str): {dataset_info}")
+                        logger.debug("データセット情報構築 (extended_config str): %s", dataset_info)
             
             if not dataset_info or not dataset_info.get('id'):
-                print(f"[ERROR] データセット情報が取得できません - ファイルセット全属性:")
-                print(f"  {vars(self.file_set)}")
+                logger.error("データセット情報が取得できません - ファイルセット全属性:")
+                logger.debug("  %s", vars(self.file_set))
                 return False
             
             # アップロード済みファイルを取得
@@ -3318,7 +3318,7 @@ class BatchRegisterPreviewDialog(QDialog):
                     file_type=FileType.FILE,
                     item_type=FileItemType.ATTACHMENT  # 添付ファイルとして設定
                 )
-                print(f"[DEBUG] path_mapping.xlsx を添付ファイルとして設定: {mapping_file_path}")
+                logger.debug("path_mapping.xlsx を添付ファイルとして設定: %s", mapping_file_path)
                 # マッピングファイルにアップロードIDがあるかチェック
                 for item in display_items:
                     if item.name == "path_mapping.xlsx" and hasattr(item, 'upload_id'):
@@ -3335,7 +3335,7 @@ class BatchRegisterPreviewDialog(QDialog):
                     uploaded_files.append(item)
             
             if not uploaded_files:
-                print("[ERROR] アップロード済みファイルが見つかりません")
+                logger.error("アップロード済みファイルが見つかりません")
                 return False
             
             # フォーム値とペイロード構築
@@ -3343,7 +3343,7 @@ class BatchRegisterPreviewDialog(QDialog):
             dataFiles, attachments = self._build_files_payload(uploaded_files)
             
             if not dataFiles.get('data') and not attachments:
-                print("[ERROR] データファイルまたは添付ファイルが必要です")
+                logger.error("データファイルまたは添付ファイルが必要です")
                 return False
             
             # プログレスダイアログ
@@ -3368,7 +3368,7 @@ class BatchRegisterPreviewDialog(QDialog):
                 
                 if result and not result.get('error'):
                     # 成功処理
-                    print("[SUCCESS] データ登録完了")
+                    logger.info("[SUCCESS] データ登録完了")
                     
                     # 試料ID保存
                     sample_info = self._extract_sample_info_from_response(result)
@@ -3379,16 +3379,16 @@ class BatchRegisterPreviewDialog(QDialog):
                 else:
                     # エラー処理
                     error_detail = result.get('detail', '不明なエラー') if result else 'レスポンスなし'
-                    print(f"[ERROR] データ登録エラー: {error_detail}")
+                    logger.error("データ登録エラー: %s", error_detail)
                     return False
                 
             except Exception as e:
                 progress.close()
-                print(f"[ERROR] entry_data呼び出しエラー: {e}")
+                logger.error("entry_data呼び出しエラー: %s", e)
                 return False
             
         except Exception as e:
-            print(f"[ERROR] データ登録実行エラー: {e}")
+            logger.error("データ登録実行エラー: %s", e)
             return False
     
     def _save_sample_info_to_fileset(self, sample_info: dict):
@@ -3401,10 +3401,10 @@ class BatchRegisterPreviewDialog(QDialog):
             self.file_set.extended_config['last_sample_name'] = sample_info.get('sample_name', '')
             self.file_set.extended_config['registration_timestamp'] = str(datetime.now().isoformat())
             
-            print(f"[INFO] 試料情報保存完了: ID={sample_info['sample_id']}")
+            logger.info("試料情報保存完了: ID=%s", sample_info['sample_id'])
             
         except Exception as e:
-            print(f"[WARNING] 試料情報保存エラー: {e}")
+            logger.warning("試料情報保存エラー: %s", e)
     
     def _build_form_values_from_fileset(self) -> dict:
         """ファイルセット情報からフォーム値を構築（通常登録との互換性確保）"""
@@ -3421,7 +3421,7 @@ class BatchRegisterPreviewDialog(QDialog):
             sample_mode = extended_config.get('sample_mode') or getattr(self.file_set, 'sample_mode', 'new')
             sample_id_from_config = extended_config.get('sample_id') or getattr(self.file_set, 'sample_id', '')
             
-            print(f"[DEBUG] 試料モード判定: sample_mode='{sample_mode}', sample_id='{sample_id_from_config}'")
+            logger.debug("試料モード判定: sample_mode='%s', sample_id='%s'", sample_mode, sample_id_from_config)
             
             # 試料モードによる分岐処理（通常登録と同じ仕様）
             if sample_mode == 'existing' and sample_id_from_config:
@@ -3431,7 +3431,7 @@ class BatchRegisterPreviewDialog(QDialog):
                 form_values['sampleNames'] = extended_config.get('sample_name') or getattr(self.file_set, 'sample_name', '') or f"試料_{self.file_set.name}"
                 form_values['sampleDescription'] = extended_config.get('sample_description') or getattr(self.file_set, 'sample_description', '') or "一括登録試料"
                 form_values['sampleComposition'] = extended_config.get('sample_composition') or getattr(self.file_set, 'sample_composition', '') or ""
-                print(f"[DEBUG] 既存試料ID設定: {sample_id_from_config}")
+                logger.debug("既存試料ID設定: %s", sample_id_from_config)
             else:
                 # 新規作成の場合：sampleNamesを設定（通常登録と同じ）
                 form_values['sampleNames'] = extended_config.get('sample_name') or getattr(self.file_set, 'sample_name', '') or f"試料_{self.file_set.name}"
@@ -3440,7 +3440,7 @@ class BatchRegisterPreviewDialog(QDialog):
                 # 追加の新規試料情報
                 form_values['sampleReferenceUrl'] = extended_config.get('reference_url') or getattr(self.file_set, 'reference_url', '') or ""
                 form_values['sampleTags'] = extended_config.get('tags') or getattr(self.file_set, 'tags', '') or ""
-                print(f"[DEBUG] 新規試料情報設定完了: {form_values['sampleNames']}")
+                logger.debug("新規試料情報設定完了: %s", form_values['sampleNames'])
             
             # 固有情報（カスタム値）の抽出 - ファイルセット属性とextended_configから
             custom_values = getattr(self.file_set, 'custom_values', {}) or extended_config.get('custom_values', {})
@@ -3458,15 +3458,15 @@ class BatchRegisterPreviewDialog(QDialog):
                 for key, value in extended_config.items():
                     if key not in exclude_keys and value is not None and value != "":
                         custom_values[key] = value
-                        print(f"[DEBUG] カスタム値抽出: {key} = {value}")
+                        logger.debug("カスタム値抽出: %s = %s", key, value)
             
             form_values['custom'] = custom_values
             
-            print(f"[DEBUG] 構築されたフォーム値: dataName='{form_values['dataName']}', sampleId='{form_values.get('sampleId', 'new')}', custom={len(custom_values)}項目")
+            logger.debug("構築されたフォーム値: dataName='%s', sampleId='%s', custom=%s項目", form_values['dataName'], form_values.get('sampleId', 'new'), len(custom_values))
             return form_values
             
         except Exception as e:
-            print(f"[ERROR] フォーム値構築エラー: {e}")
+            logger.error("フォーム値構築エラー: %s", e)
             import traceback
             traceback.print_exc()
             return {}
@@ -3496,13 +3496,13 @@ class BatchRegisterPreviewDialog(QDialog):
                         "description": file_item.name
                     })
             
-            print(f"[DEBUG] データファイル数: {len(dataFiles['data'])}")
-            print(f"[DEBUG] 添付ファイル数: {len(attachments)}")
+            logger.debug("データファイル数: %s", len(dataFiles['data']))
+            logger.debug("添付ファイル数: %s", len(attachments))
             
             return dataFiles, attachments
             
         except Exception as e:
-            print(f"[ERROR] ファイルペイロード構築エラー: {e}")
+            logger.error("ファイルペイロード構築エラー: %s", e)
             return {"data": []}, []
     
     def _get_file_type_from_table(self, file_item: FileItem) -> str:
@@ -3521,7 +3521,7 @@ class BatchRegisterPreviewDialog(QDialog):
             return self._get_file_type_category(file_item)
             
         except Exception as e:
-            print(f"[WARNING] ファイル種別取得エラー: {e}")
+            logger.warning("ファイル種別取得エラー: %s", e)
             return "添付ファイル"  # デフォルト
     
     def _extract_sample_info_from_response(self, response_data: dict) -> Optional[dict]:
@@ -3540,7 +3540,7 @@ class BatchRegisterPreviewDialog(QDialog):
             return None
             
         except Exception as e:
-            print(f"[WARNING] 試料情報抽出エラー: {e}")
+            logger.warning("試料情報抽出エラー: %s", e)
             return None
     
     def _format_size(self, size_bytes: int) -> str:
@@ -3605,9 +3605,9 @@ class BatchRegisterPreviewDialog(QDialog):
                 (screen_rect.height() - target_height) // 2
             )
             
-            print(f"[DEBUG] 複数ファイルセットプレビューダイアログサイズ設定: {target_width}x{target_height}")
+            logger.debug("複数ファイルセットプレビューダイアログサイズ設定: %sx%s", target_width, target_height)
         except Exception as e:
-            print(f"[WARNING] ダイアログサイズ設定エラー: {e}")
+            logger.warning("ダイアログサイズ設定エラー: %s", e)
             self.resize(1200, 800)  # フォールバック
     
     def setup_ui(self):
@@ -3712,10 +3712,10 @@ class BatchRegisterPreviewDialog(QDialog):
             for path, file_set_names in file_paths.items():
                 if len(file_set_names) > 1:
                     self.duplicate_files.add(path)
-                    print(f"[WARNING] 重複ファイル検出: {path} → {', '.join(file_set_names)}")
+                    logger.warning("重複ファイル検出: %s → %s", path, ', '.join(file_set_names))
                     
         except Exception as e:
-            print(f"重複チェック中にエラー: {e}")
+            logger.error("重複チェック中にエラー: %s", e)
     
     def load_data(self):
         """データを読み込み"""
@@ -3748,7 +3748,7 @@ class BatchRegisterPreviewDialog(QDialog):
                             elif isinstance(fs.dataset_info, str):
                                 dataset_names.add(fs.dataset_info)
                     except Exception as e:
-                        print(f"ファイルセット '{fs.name}' の統計取得中にエラー: {e}")
+                        logger.error("ファイルセット '%s' の統計取得中にエラー: %s", fs.name, e)
             
             datasets_count = len(dataset_names)
             duplicate_count = len(self.duplicate_files)
@@ -3807,19 +3807,19 @@ class BatchRegisterPreviewDialog(QDialog):
                     
                     self.tab_widget.addTab(preview_widget, tab_name)
                 except Exception as e:
-                    print(f"ファイルセット '{file_set.name}' のタブ作成中にエラー: {e}")
+                    logger.error("ファイルセット '%s' のタブ作成中にエラー: %s", file_set.name, e)
                     # エラーが発生したファイルセットのタブには簡易メッセージを表示
                     error_widget = QLabel(f"エラー: {str(e)}")
                     self.tab_widget.addTab(error_widget, f"{file_set.name or 'エラー'} ❌")
                     
         except Exception as e:
-            print(f"複数ファイルセットプレビューデータ読み込み中にエラー: {e}")
+            logger.error("複数ファイルセットプレビューデータ読み込み中にエラー: %s", e)
             self.summary_label.setText(f"エラー: {str(e)}")
     
     def _batch_upload_all(self):
         """全ファイルセット一括アップロード処理（Bearer Token自動選択対応）"""
         try:
-            print("[INFO] 全ファイルセット一括アップロード開始")
+            logger.info("全ファイルセット一括アップロード開始")
             
             # 注意: Bearer Tokenは不要（API呼び出し時に自動選択される）
             
@@ -3848,7 +3848,7 @@ class BatchRegisterPreviewDialog(QDialog):
             )
             
             if reply != QMessageBox.Yes:
-                print("[INFO] ユーザーが全ファイルセット一括アップロードをキャンセルしました")
+                logger.info("ユーザーが全ファイルセット一括アップロードをキャンセルしました")
                 return
             
             # プログレスダイアログ
@@ -3863,7 +3863,7 @@ class BatchRegisterPreviewDialog(QDialog):
             
             for i, file_set in enumerate(valid_file_sets):
                 if progress.wasCanceled():
-                    print("[INFO] ユーザーによりアップロードがキャンセルされました")
+                    logger.info("ユーザーによりアップロードがキャンセルされました")
                     break
                 
                 progress.setLabelText(f"アップロード中: {file_set.name} ({i+1}/{len(valid_file_sets)})")
@@ -3884,10 +3884,10 @@ class BatchRegisterPreviewDialog(QDialog):
                     total_uploaded += success_count
                     total_failed += failed_count
                     
-                    print(f"[INFO] {file_set.name}: 成功={success_count}, 失敗={failed_count}")
+                    logger.info("%s: 成功=%s, 失敗=%s", file_set.name, success_count, failed_count)
                     
                 except Exception as e:
-                    print(f"[ERROR] ファイルセット '{file_set.name}' のアップロードエラー: {e}")
+                    logger.error("ファイルセット '%s' のアップロードエラー: %s", file_set.name, e)
                     fileset_results.append({
                         'name': file_set.name,
                         'success': 0,
@@ -3922,10 +3922,10 @@ class BatchRegisterPreviewDialog(QDialog):
             else:
                 QMessageBox.warning(self, "アップロード完了（一部失敗）", result_message)
             
-            print(f"[INFO] 全ファイルセット一括アップロード完了: 成功={total_uploaded}, 失敗={total_failed}")
+            logger.info("全ファイルセット一括アップロード完了: 成功=%s, 失敗=%s", total_uploaded, total_failed)
             
         except Exception as e:
-            print(f"[ERROR] 全ファイルセット一括アップロード処理エラー: {e}")
+            logger.error("全ファイルセット一括アップロード処理エラー: %s", e)
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "エラー", f"全ファイルセット一括アップロード処理でエラーが発生しました:\n{str(e)}")
@@ -3933,37 +3933,37 @@ class BatchRegisterPreviewDialog(QDialog):
     def _batch_register_all(self):
         """全ファイルセット一括データ登録処理（Bearer Token自動選択対応）"""
         try:
-            print("[INFO] 全ファイルセット一括データ登録開始")
+            logger.info("全ファイルセット一括データ登録開始")
             
             # 注意: Bearer Tokenは不要（API呼び出し時に自動選択される）
             
             # データ登録対象ファイルセット確認（デバッグログ付き）
-            print(f"[DEBUG] 全体のファイルセット数: {len(self.file_sets)}")
+            logger.debug("全体のファイルセット数: %s", len(self.file_sets))
             
             valid_file_sets = []
             for i, fs in enumerate(self.file_sets):
-                print(f"[DEBUG] ファイルセット{i}: {fs.name if fs else 'None'}")
+                logger.debug("ファイルセット%s: %s", i, fs.name if fs else 'None')
                 if fs:
                     has_dataset_info = hasattr(fs, 'dataset_info')
                     dataset_info_value = getattr(fs, 'dataset_info', None) if has_dataset_info else None
                     has_dataset_id = hasattr(fs, 'dataset_id')
                     dataset_id_value = getattr(fs, 'dataset_id', None) if has_dataset_id else None
                     
-                    print(f"[DEBUG]   - hasattr(dataset_info): {has_dataset_info}")
-                    print(f"[DEBUG]   - dataset_info: {dataset_info_value}")
-                    print(f"[DEBUG]   - hasattr(dataset_id): {has_dataset_id}")
-                    print(f"[DEBUG]   - dataset_id: {dataset_id_value}")
+                    logger.debug("- hasattr(dataset_info): %s", has_dataset_info)
+                    logger.debug("- dataset_info: %s", dataset_info_value)
+                    logger.debug("- hasattr(dataset_id): %s", has_dataset_id)
+                    logger.debug("- dataset_id: %s", dataset_id_value)
                     
                     # dataset_info または dataset_id のいずれかがあれば有効とする
                     if (has_dataset_info and dataset_info_value) or (has_dataset_id and dataset_id_value):
                         valid_file_sets.append(fs)
-                        print(f"[DEBUG]   -> 有効なファイルセット")
+                        logger.debug("-> 有効なファイルセット")
                     else:
-                        print(f"[DEBUG]   -> 無効なファイルセット（データセット未設定）")
+                        logger.debug("-> 無効なファイルセット（データセット未設定）")
                 else:
-                    print(f"[DEBUG]   -> Noneファイルセット")
+                    logger.debug("-> Noneファイルセット")
             
-            print(f"[DEBUG] 有効なファイルセット数: {len(valid_file_sets)}")
+            logger.debug("有効なファイルセット数: %s", len(valid_file_sets))
             
             if not valid_file_sets:
                 QMessageBox.warning(self, "エラー", "データセットが設定されたファイルセットがありません。")
@@ -4001,7 +4001,7 @@ class BatchRegisterPreviewDialog(QDialog):
             )
             
             if reply != QMessageBox.Yes:
-                print("[INFO] ユーザーが全ファイルセット一括データ登録をキャンセルしました")
+                logger.info("ユーザーが全ファイルセット一括データ登録をキャンセルしました")
                 return
             
             # プログレスダイアログ
@@ -4017,7 +4017,7 @@ class BatchRegisterPreviewDialog(QDialog):
             
             for i, file_set in enumerate(valid_file_sets):
                 if progress.wasCanceled():
-                    print("[INFO] ユーザーによりデータ登録がキャンセルされました")
+                    logger.info("ユーザーによりデータ登録がキャンセルされました")
                     break
                 
                 progress.setLabelText(f"データ登録中: {file_set.name} ({i+1}/{len(valid_file_sets)})")
@@ -4037,7 +4037,7 @@ class BatchRegisterPreviewDialog(QDialog):
                             file_set.extended_config = {}
                         file_set.extended_config['sample_mode'] = '既存試料使用'
                         file_set.extended_config['sample_id'] = previous_sample_id
-                        print(f"[INFO] 前回サンプルID継承: {file_set.name} -> {previous_sample_id}")
+                        logger.info("前回サンプルID継承: %s -> %s", file_set.name, previous_sample_id)
                     
                     register_result = self._register_single_fileset(None, file_set)
                     
@@ -4055,7 +4055,7 @@ class BatchRegisterPreviewDialog(QDialog):
                         if sample_id:
                             previous_sample_id = sample_id
                         
-                        print(f"[SUCCESS] {file_set.name}: 登録完了, sample_id={sample_id}")
+                        logger.info("[SUCCESS] %s: 登録完了, sample_id=%s", file_set.name, sample_id)
                     else:
                         error_detail = register_result.get('error', '不明なエラー')
                         fileset_results.append({
@@ -4064,10 +4064,10 @@ class BatchRegisterPreviewDialog(QDialog):
                             'error': error_detail
                         })
                         total_failed += 1
-                        print(f"[ERROR] {file_set.name}: 登録失敗 - {error_detail}")
+                        logger.error("%s: 登録失敗 - %s", file_set.name, error_detail)
                     
                 except Exception as e:
-                    print(f"[ERROR] ファイルセット '{file_set.name}' のデータ登録エラー: {e}")
+                    logger.error("ファイルセット '%s' のデータ登録エラー: %s", file_set.name, e)
                     fileset_results.append({
                         'name': file_set.name,
                         'success': False,
@@ -4104,10 +4104,10 @@ class BatchRegisterPreviewDialog(QDialog):
             else:
                 QMessageBox.warning(self, "データ登録完了（一部失敗）", result_message)
             
-            print(f"[INFO] 全ファイルセット一括データ登録完了: 成功={total_registered}, 失敗={total_failed}")
+            logger.info("全ファイルセット一括データ登録完了: 成功=%s, 失敗=%s", total_registered, total_failed)
             
         except Exception as e:
-            print(f"[ERROR] 全ファイルセット一括データ登録処理エラー: {e}")
+            logger.error("全ファイルセット一括データ登録処理エラー: %s", e)
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "エラー", f"全ファイルセット一括データ登録処理でエラーが発生しました:\n{str(e)}")
@@ -4115,13 +4115,13 @@ class BatchRegisterPreviewDialog(QDialog):
     def _upload_single_fileset(self, bearer_token: str, file_set: FileSet) -> dict:
         """単一ファイルセットのアップロード処理"""
         try:
-            print(f"[INFO] ファイルセットアップロード開始: {file_set.name}")
+            logger.info("ファイルセットアップロード開始: %s", file_set.name)
             
             # ファイルセット状態デバッグ出力
-            print(f"[DEBUG] FileSet属性確認:")
-            print(f"  - dataset_id: {getattr(file_set, 'dataset_id', 'None')}")
-            print(f"  - dataset_info: {getattr(file_set, 'dataset_info', 'None')}")
-            print(f"  - extended_config keys: {list(getattr(file_set, 'extended_config', {}).keys())}")
+            logger.debug("FileSet属性確認:")
+            logger.debug("  - dataset_id: %s", getattr(file_set, 'dataset_id', 'None'))
+            logger.debug("  - dataset_info: %s", getattr(file_set, 'dataset_info', 'None'))
+            logger.debug("  - extended_config keys: %s", list(getattr(file_set, 'extended_config', {}).keys()))
             
             # データセット情報取得
             dataset_info = getattr(file_set, 'dataset_info', None)
@@ -4130,14 +4130,14 @@ class BatchRegisterPreviewDialog(QDialog):
             # 優先順位1: dataset_id属性から直接取得
             if hasattr(file_set, 'dataset_id') and file_set.dataset_id:
                 dataset_id = file_set.dataset_id
-                print(f"[DEBUG] データセットID取得: file_set.dataset_id = {dataset_id}")
+                logger.debug("データセットID取得: file_set.dataset_id = %s", dataset_id)
             # 優先順位2: dataset_infoから取得
             elif dataset_info and isinstance(dataset_info, dict):
                 dataset_id = dataset_info.get('id')
-                print(f"[DEBUG] データセットID取得: dataset_info['id'] = {dataset_id}")
+                logger.debug("データセットID取得: dataset_info['id'] = %s", dataset_id)
             elif dataset_info and isinstance(dataset_info, str):
                 dataset_id = dataset_info
-                print(f"[DEBUG] データセットID取得: dataset_info = {dataset_id}")
+                logger.debug("データセットID取得: dataset_info = %s", dataset_id)
             # 優先順位3: extended_configから取得
             elif hasattr(file_set, 'extended_config') and file_set.extended_config:
                 extended_config = file_set.extended_config
@@ -4145,14 +4145,14 @@ class BatchRegisterPreviewDialog(QDialog):
                     selected_dataset = extended_config['selected_dataset']
                     if isinstance(selected_dataset, dict) and 'id' in selected_dataset:
                         dataset_id = selected_dataset['id']
-                        print(f"[DEBUG] データセットID取得: extended_config['selected_dataset']['id'] = {dataset_id}")
+                        logger.debug("データセットID取得: extended_config['selected_dataset']['id'] = %s", dataset_id)
                     elif isinstance(selected_dataset, str):
                         dataset_id = selected_dataset
-                        print(f"[DEBUG] データセットID取得: extended_config['selected_dataset'] = {dataset_id}")
+                        logger.debug("データセットID取得: extended_config['selected_dataset'] = %s", dataset_id)
             
             if not dataset_id:
-                print(f"[ERROR] データセットID取得失敗 - ファイルセット詳細:")
-                print(f"  - FileSet全属性: {vars(file_set)}")
+                logger.error("データセットID取得失敗 - ファイルセット詳細:")
+                logger.debug("  - FileSet全属性: %s", vars(file_set))
                 return {'success_count': 0, 'failed_count': 1, 'error': 'データセットIDが取得できません'}
             
             # 対象ファイル取得
@@ -4170,7 +4170,7 @@ class BatchRegisterPreviewDialog(QDialog):
                     file_type=FileType.FILE,
                     item_type=FileItemType.ATTACHMENT  # 添付ファイルとして設定
                 )
-                print(f"[DEBUG] path_mapping.xlsx を添付ファイルとして追加: {mapping_file_path}")
+                logger.debug("path_mapping.xlsx を添付ファイルとして追加: %s", mapping_file_path)
                 display_items.append(mapping_item)
             
             if not display_items:
@@ -4196,9 +4196,9 @@ class BatchRegisterPreviewDialog(QDialog):
                         # 失敗時は mapping_upload_id をクリアしない（前回成功分を保持）
                         failed_count += 1
                 except Exception as e:
-                    print(f"[ERROR] ファイルアップロードエラー ({file_item.name}): {e}")
+                    logger.error("ファイルアップロードエラー (%s): %s", file_item.name, e)
                     failed_count += 1
-            print(f"[INFO] ファイルセットアップロード完了: {file_set.name} - 成功={success_count}, 失敗={failed_count}")
+            logger.info("ファイルセットアップロード完了: %s - 成功=%s, 失敗=%s", file_set.name, success_count, failed_count)
             return {
                 'success_count': success_count,
                 'failed_count': failed_count,
@@ -4206,13 +4206,13 @@ class BatchRegisterPreviewDialog(QDialog):
             }
             
         except Exception as e:
-            print(f"[ERROR] ファイルセットアップロードエラー: {e}")
+            logger.error("ファイルセットアップロードエラー: %s", e)
             return {'success_count': 0, 'failed_count': 1, 'error': str(e)}
     
     def _register_single_fileset(self, bearer_token: str, file_set: FileSet) -> dict:
         """単一ファイルセットのデータ登録処理"""
         try:
-            print(f"[INFO] ファイルセットデータ登録開始: {file_set.name}")
+            logger.info("ファイルセットデータ登録開始: %s", file_set.name)
             
             # アップロードが先に実行されているかチェック・実行
             upload_result = self._upload_single_fileset(bearer_token, file_set)
@@ -4236,12 +4236,12 @@ class BatchRegisterPreviewDialog(QDialog):
                             # dataset_infoとしてfile_setに設定
                             file_set.dataset_info = dataset_data
                             dataset_info = dataset_data
-                            print(f"[DEBUG] ファイルセット用データセット情報復元: {dataset_data.get('attributes', {}).get('name', dataset_id)}")
+                            logger.debug("ファイルセット用データセット情報復元: %s", dataset_data.get('attributes', {}).get('name', dataset_id))
                         else:
-                            print(f"[WARNING] データセットファイルが見つかりません: {dataset_file_path}")
+                            logger.warning("データセットファイルが見つかりません: %s", dataset_file_path)
                             return {'success': False, 'error': 'データセット情報が取得できません'}
                     except Exception as e:
-                        print(f"[ERROR] データセット情報復元エラー: {e}")
+                        logger.error("データセット情報復元エラー: %s", e)
                         return {'success': False, 'error': f'データセット情報復元エラー: {e}'}
                 else:
                     return {'success': False, 'error': 'データセット情報が設定されていません'}
@@ -4261,7 +4261,7 @@ class BatchRegisterPreviewDialog(QDialog):
                     file_type=FileType.FILE,
                     item_type=FileItemType.ATTACHMENT  # 添付ファイルとして設定
                 )
-                print(f"[DEBUG] path_mapping.xlsx を添付ファイルとして設定: {mapping_file_path}")
+                logger.debug("path_mapping.xlsx を添付ファイルとして設定: %s", mapping_file_path)
                 for item in display_items:
                     if item.name == "path_mapping.xlsx" and hasattr(item, 'upload_id'):
                         mapping_item = item
@@ -4308,7 +4308,7 @@ class BatchRegisterPreviewDialog(QDialog):
                 return {'success': False, 'error': error_detail}
             
         except Exception as e:
-            print(f"[ERROR] ファイルセットデータ登録エラー: {e}")
+            logger.error("ファイルセットデータ登録エラー: %s", e)
             return {'success': False, 'error': str(e)}
     
     def _get_display_file_items_for_fileset(self, file_set: FileSet, file_items: List[FileItem]) -> List[FileItem]:
@@ -4357,7 +4357,7 @@ class BatchRegisterPreviewDialog(QDialog):
                 item_type=FileItemType.ATTACHMENT  # 添付ファイルとして設定
             )
             display_items.append(mapping_item)
-            print(f"[DEBUG] path_mapping.xlsx を表示アイテムに追加: {mapping_file_path}")
+            logger.debug("path_mapping.xlsx を表示アイテムに追加: %s", mapping_file_path)
         
         return display_items
     
@@ -4382,7 +4382,7 @@ class BatchRegisterPreviewDialog(QDialog):
             return None
             
         except Exception as e:
-            print(f"[ERROR] ZIP ファイル名取得エラー: {e}")
+            logger.error("ZIP ファイル名取得エラー: %s", e)
             return None
     
     def _create_zip_file_item_for_directory_and_fileset(self, file_set: FileSet, dir_relative_path: str, zip_path: str) -> FileItem:
@@ -4403,7 +4403,7 @@ class BatchRegisterPreviewDialog(QDialog):
             return zip_item
             
         except Exception as e:
-            print(f"[ERROR] ZIP ファイル項目作成エラー: {e}")
+            logger.error("ZIP ファイル項目作成エラー: %s", e)
             return FileItem(
                 path=zip_path or "",
                 relative_path=os.path.basename(zip_path) if zip_path else "error.zip",
@@ -4427,22 +4427,22 @@ class BatchRegisterPreviewDialog(QDialog):
             
             return None
         except Exception as e:
-            print(f"[WARNING] マッピングファイル取得エラー: {e}")
+            logger.warning("マッピングファイル取得エラー: %s", e)
             return None
     
     def _execute_single_upload_for_fileset(self, bearer_token: str, dataset_id: str, file_item: FileItem) -> dict:
         """ファイルセット用の単一ファイルアップロード処理"""
         try:
             if not os.path.exists(file_item.path):
-                print(f"[ERROR] ファイルが存在しません: {file_item.path}")
+                logger.error("ファイルが存在しません: %s", file_item.path)
                 return {"error": f"ファイルが存在しません: {file_item.path}"}
             
             # 登録ファイル名を取得（重複回避のためフラット化されたファイル名を使用）
             register_filename = self._get_safe_register_filename(file_item)
             encoded_filename = urllib.parse.quote(register_filename)
             
-            print(f"[DEBUG] アップロード実行: {register_filename} (元ファイル: {os.path.basename(file_item.path)})")
-            print(f"[DEBUG] データセットID: {dataset_id}")
+            logger.debug("アップロード実行: %s (元ファイル: %s)", register_filename, os.path.basename(file_item.path))
+            logger.debug("データセットID: %s", dataset_id)
             
             # APIエンドポイント
             url = f"https://rde-entry-api-arim.nims.go.jp/uploads?datasetId={dataset_id}"
@@ -4456,28 +4456,28 @@ class BatchRegisterPreviewDialog(QDialog):
             
             # ファイルサイズ確認
             file_size = os.path.getsize(file_item.path)
-            print(f"[DEBUG] ファイルサイズ: {file_size} bytes")
+            logger.debug("ファイルサイズ: %s bytes", file_size)
             
             # ファイルを読み込み
             with open(file_item.path, 'rb') as f:
                 binary_data = f.read()
             
-            print(f"[DEBUG] リクエスト送信 - URL: {url}")
-            print(f"[DEBUG] リクエスト送信 - ヘッダー: {headers}")
+            logger.debug("リクエスト送信 - URL: %s", url)
+            logger.debug("リクエスト送信 - ヘッダー: %s", headers)
             
             # Bearer Token自動選択対応のpost_binaryを使用
             from classes.utils.api_request_helper import post_binary
             
             resp = post_binary(url, binary_data, bearer_token=None, headers=headers)
             
-            print(f"[DEBUG] レスポンス受信 - ステータス: {resp.status_code if resp else 'None'}")
+            logger.debug("レスポンス受信 - ステータス: %s", resp.status_code if resp else 'None')
             if resp:
-                print(f"[DEBUG] レスポンス受信 - テキスト: {resp.text[:500]}")
+                logger.debug("レスポンス受信 - テキスト: %s", resp.text[:500])
             
             if resp is None or not (200 <= resp.status_code < 300):
                 error_text = resp.text[:200] if resp else '通信エラー'
                 error_msg = f"HTTP {resp.status_code if resp else 'None'}: {error_text}"
-                print(f"[ERROR] アップロード失敗: {error_msg}")
+                logger.error("アップロード失敗: %s", error_msg)
                 return {"error": error_msg}
             
             # JSONレスポンスをパース
@@ -4487,10 +4487,10 @@ class BatchRegisterPreviewDialog(QDialog):
                 
                 if not upload_id:
                     error_msg = "レスポンスにuploadIdが含まれていません"
-                    print(f"[ERROR] {error_msg}: {response_data}")
+                    logger.error("%s: %s", error_msg, response_data)
                     return {"error": error_msg, "response_data": response_data}
                 
-                print(f"[DEBUG] アップロード成功: uploadId = {upload_id}")
+                logger.debug("アップロード成功: uploadId = %s", upload_id)
                 return {
                     "upload_id": upload_id,
                     "response_data": response_data,
@@ -4499,12 +4499,12 @@ class BatchRegisterPreviewDialog(QDialog):
                 
             except Exception as json_error:
                 error_msg = f"JSONパースエラー: {str(json_error)}"
-                print(f"[ERROR] {error_msg}")
+                logger.error("%s", error_msg)
                 return {"error": error_msg}
             
         except Exception as e:
             error_msg = f"アップロード処理エラー: {str(e)}"
-            print(f"[ERROR] {error_msg}")
+            logger.error("%s", error_msg)
             import traceback
             traceback.print_exc()
             return {"error": error_msg}
@@ -4530,14 +4530,14 @@ class BatchRegisterPreviewDialog(QDialog):
             
             if not target_file_set:
                 # ファイルセットが見つからない場合はrelative_pathを使用
-                print(f"[DEBUG] ファイルセットが見つからないため、relative_pathを使用: {file_item.relative_path}")
+                logger.debug("ファイルセットが見つからないため、relative_pathを使用: %s", file_item.relative_path)
                 return file_item.relative_path.replace('/', '__').replace('\\', '__')
             
             organize_method = getattr(target_file_set, 'organize_method', None)
             if organize_method == PathOrganizeMethod.FLATTEN:
                 # フラット化の場合は、相対パスをダブルアンダースコアで置き換え
                 relative_path = file_item.relative_path.replace('/', '__').replace('\\', '__')
-                print(f"[DEBUG] フラット化ファイル名生成: {file_item.relative_path} -> {relative_path}")
+                logger.debug("フラット化ファイル名生成: %s -> %s", file_item.relative_path, relative_path)
                 return relative_path
             elif organize_method == PathOrganizeMethod.ZIP:
                 # ZIP化の場合は適切なメソッドを呼び出し
@@ -4551,12 +4551,12 @@ class BatchRegisterPreviewDialog(QDialog):
                 return file_item.relative_path
                 
         except Exception as e:
-            print(f"[ERROR] _get_safe_register_filename エラー: {e}")
+            logger.error("_get_safe_register_filename エラー: %s", e)
             import traceback
             traceback.print_exc()
             # フォールバック：相対パスベースのユニークファイル名
             fallback_name = file_item.relative_path.replace('/', '__').replace('\\', '__')
-            print(f"[DEBUG] フォールバック名を使用: {fallback_name}")
+            logger.debug("フォールバック名を使用: %s", fallback_name)
             return fallback_name
 
     def _build_form_values_from_fileset(self, file_set: FileSet) -> dict:
@@ -4582,7 +4582,7 @@ class BatchRegisterPreviewDialog(QDialog):
                 form_values['sampleNames'] = extended_config.get('sample_name') or getattr(file_set, 'sample_name', '') or f"試料_{file_set.name}"
                 form_values['sampleDescription'] = extended_config.get('sample_description') or getattr(file_set, 'sample_description', '') or "一括登録試料"
                 form_values['sampleComposition'] = extended_config.get('sample_composition') or getattr(file_set, 'sample_composition', '') or ""
-                print(f"[DEBUG] static既存試料ID設定: {sample_id_from_config}")
+                logger.debug("static既存試料ID設定: %s", sample_id_from_config)
             else:
                 # 新規作成の場合：sampleNamesを設定（通常登録と同じ）
                 form_values['sampleNames'] = extended_config.get('sample_name') or getattr(file_set, 'sample_name', '') or f"試料_{file_set.name}"
@@ -4591,7 +4591,7 @@ class BatchRegisterPreviewDialog(QDialog):
                 # 追加の新規試料情報
                 form_values['sampleReferenceUrl'] = extended_config.get('reference_url') or getattr(file_set, 'reference_url', '') or ""
                 form_values['sampleTags'] = extended_config.get('tags') or getattr(file_set, 'tags', '') or ""
-                print(f"[DEBUG] static新規試料情報設定完了: {form_values['sampleNames']}")
+                logger.debug("static新規試料情報設定完了: %s", form_values['sampleNames'])
             
             # 固有情報（カスタム値）の抽出 - ファイルセット属性とextended_configから
             custom_values = getattr(file_set, 'custom_values', {}) or extended_config.get('custom_values', {})
@@ -4615,7 +4615,7 @@ class BatchRegisterPreviewDialog(QDialog):
             return form_values
             
         except Exception as e:
-            print(f"[ERROR] フォーム値構築エラー: {e}")
+            logger.error("フォーム値構築エラー: %s", e)
             return {}
     
     def _build_files_payload_for_fileset(self, file_set: FileSet, uploaded_files: List[FileItem]) -> Tuple[dict, List[dict]]:
@@ -4651,7 +4651,7 @@ class BatchRegisterPreviewDialog(QDialog):
                 })
             return dataFiles, attachments
         except Exception as e:
-            print(f"[ERROR] ファイルペイロード構築エラー: {e}")
+            logger.error("ファイルペイロード構築エラー: %s", e)
             return {"data": []}, []
     
     def _is_data_file_extension(self, file_item: FileItem) -> bool:
@@ -4671,7 +4671,7 @@ class BatchRegisterPreviewDialog(QDialog):
             file_set.extended_config['registration_timestamp'] = str(datetime.now().isoformat())
             
         except Exception as e:
-            print(f"[WARNING] 試料情報保存エラー: {e}")
+            logger.warning("試料情報保存エラー: %s", e)
     
     def _extract_sample_info_from_response(self, response_data: dict) -> Optional[dict]:
         """レスポンスから試料情報を抽出"""
@@ -4689,7 +4689,7 @@ class BatchRegisterPreviewDialog(QDialog):
             return None
             
         except Exception as e:
-            print(f"[WARNING] 試料情報抽出エラー: {e}")
+            logger.warning("試料情報抽出エラー: %s", e)
             return None
     
     def _format_size(self, size_bytes: int) -> str:
@@ -4713,10 +4713,10 @@ class BatchRegisterPreviewDialog(QDialog):
     def _batch_register_all_filesets_without_confirmation(self):
         """確認ダイアログなしで全ファイルセット一括データ登録"""
         try:
-            print("[INFO] 確認ダイアログなしで全ファイルセット一括データ登録開始")
+            logger.info("確認ダイアログなしで全ファイルセット一括データ登録開始")
             self._batch_register_all()
         except Exception as e:
-            print(f"[ERROR] 全ファイルセット一括データ登録処理でエラー: {e}")
+            logger.error("全ファイルセット一括データ登録処理でエラー: %s", e)
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "エラー", f"全ファイルセット一括データ登録処理でエラーが発生しました:\n{str(e)}")

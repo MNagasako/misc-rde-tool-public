@@ -9,7 +9,7 @@ PyQt5の依存を完全に削除し、PySide6のみで動作します。
     
     # 現在使用中のQt実装を確認
     from qt_compat import QT_VERSION
-    print(f"Using: {QT_VERSION}")
+    logger.debug("Using: %s", QT_VERSION)
 
 バージョン: 2.0.0 (PySide6 Only)
 作成日: 2025-11-08
@@ -156,6 +156,6 @@ __all__.extend(['get_screen_geometry', 'get_screen_size', 'get_available_geometr
 
 # バージョン情報の出力
 if __name__ == '__main__':
-    print(f"Qt互換レイヤー (PySide6 Only)")
-    print(f"  使用中: {QT_VERSION}")
-    print(f"  WebEngine: {WEBENGINE_AVAILABLE}")
+    logger.debug("Qt互換レイヤー (PySide6 Only)")
+    logger.debug("  使用中: %s", QT_VERSION)
+    logger.debug("  WebEngine: %s", WEBENGINE_AVAILABLE)

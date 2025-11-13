@@ -146,7 +146,7 @@ class EventHandler:
         if hasattr(self.parent, 'login_manager'):
             self.parent.login_manager.check_login_status(url_str)
             
-        print(f"URL変更: {url_str}")
+        logger.debug("URL変更: %s", url_str)
         
     def handle_load_finished(self, success):
         """

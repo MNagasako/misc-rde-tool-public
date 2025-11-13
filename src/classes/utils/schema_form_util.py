@@ -13,6 +13,11 @@ import json
 from qt_compat.widgets import QGroupBox, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit
 from qt_compat.core import Qt
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 
 def create_schema_form(schema_path, parent=None):
     """
@@ -29,7 +34,7 @@ def create_schema_form(schema_path, parent=None):
         with open(schema_path, encoding="utf-8") as f:
             schema = json.load(f)
     except Exception as e:
-        print(f"[ERROR] スキーマファイル読み込み失敗: {e}")
+        logger.error("スキーマファイル読み込み失敗: %s", e)
         return None
 
     # 固有情報（custom）セクションを取得
@@ -93,7 +98,7 @@ def create_schema_form(schema_path, parent=None):
             return
         
         key_to_widget = getattr(group, '_schema_key_to_widget', {})
-        print(f"[DEBUG] set_form_data呼び出し: data={data}, available_keys={list(key_to_widget.keys())}")
+        logger.debug("set_form_data呼び出し: data=%s, available_keys=%s", data, list(key_to_widget.keys()))
         
         for key, value in data.items():
             if key in key_to_widget:
@@ -102,15 +107,15 @@ def create_schema_form(schema_path, parent=None):
                     if hasattr(widget, 'setCurrentText'):
                         # コンボボックスの場合
                         widget.setCurrentText(str(value))
-                        print(f"[DEBUG] コンボボックス設定: {key}={value}")
+                        logger.debug("コンボボックス設定: %s=%s", key, value)
                     elif hasattr(widget, 'setText'):
                         # テキストフィールドの場合
                         widget.setText(str(value))
-                        print(f"[DEBUG] テキストフィールド設定: {key}={value}")
+                        logger.debug("テキストフィールド設定: %s=%s", key, value)
                 except Exception as e:
-                    print(f"[WARNING] フィールド設定エラー ({key}={value}): {e}")
+                    logger.warning("フィールド設定エラー (%s=%s): %s", key, value, e)
             else:
-                print(f"[WARNING] 未知のフィールドキー: {key}")
+                logger.warning("未知のフィールドキー: %s", key)
     
     def clear_form():
         """フォームをクリア"""
@@ -125,7 +130,7 @@ def create_schema_form(schema_path, parent=None):
                 elif hasattr(widget, 'setText'):
                     widget.setText('')  # テキストフィールドは空文字
             except Exception as e:
-                print(f"[WARNING] フィールドクリアエラー ({key}): {e}")
+                logger.warning("フィールドクリアエラー (%s): %s", key, e)
     
     # メソッドをフォームに動的に追加
     group.get_form_data = get_form_data
@@ -139,11 +144,11 @@ def create_schema_form(schema_path, parent=None):
         group.setParent(parent)  # 親ウィジェットを明示的に再設定
     
     # デバッグ情報
-    print(f"[DEBUG] スキーマフォーム作成完了: parent={type(parent) if parent else None}, flags={group.windowFlags()}")
-    print(f"[DEBUG] parent object id: {id(parent) if parent else None}")
-    print(f"[DEBUG] group object id: {id(group)}")
-    print(f"[DEBUG] ウィンドウフラグ詳細: {int(group.windowFlags())}")
-    print(f"[DEBUG] 可視性: visible={group.isVisible()}, window={group.isWindow()}")
+    logger.debug("スキーマフォーム作成完了: parent=%s, flags=%s", type(parent) if parent else None, group.windowFlags())
+    logger.debug("parent object id: %s", id(parent) if parent else None)
+    logger.debug("group object id: %s", id(group))
+    logger.debug("ウィンドウフラグ詳細: %s", int(group.windowFlags()))
+    logger.debug("可視性: visible=%s, window=%s", group.isVisible(), group.isWindow())
     
     return group
 

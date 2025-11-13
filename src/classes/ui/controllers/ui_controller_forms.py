@@ -118,7 +118,7 @@ class UIControllerForms:
                 if hasattr(self.ui_controller, 'show_error'):
                     self.ui_controller.show_error(f"テキストエリア拡大表示エラー: {e}")
                 else:
-                    print(f"テキストエリア拡大表示エラー: {e}")
+                    logger.error("テキストエリア拡大表示エラー: %s", e)
     
     def update_sample_form(self, group_id, widget, layout):
         """

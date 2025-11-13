@@ -1,14 +1,18 @@
 import os
 import json
+import logging
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QLabel, QScrollArea, QPushButton, QHBoxLayout, 
-    QMessageBox, QTabWidget
+    QMessageBox, QTabWidget, QDialog
 )
 from ..core import subgroup_api_helper
 from ..util.subgroup_ui_helpers import (
     SubgroupFormBuilder, SubgroupCreateHandler, MemberDataProcessor,
     show_selected_user_ids, load_user_entries, prepare_subgroup_create_request
 )
+
+# ロガー設定
+logger = logging.getLogger(__name__)
 
 
 
@@ -43,20 +47,20 @@ def create_subgroup_create_widget(parent, title, color, create_auto_resize_butto
             try:
                 # 修正タブ（インデックス1）が選択された場合
                 if index == 1:  # 0: 新規作成, 1: 修正
-                    print("[INFO] 修正タブが選択されました - サブグループリストをリフレッシュします")
+                    logger.info("修正タブが選択されました - サブグループリストをリフレッシュします")
                     # edit_tab内のload_existing_subgroups関数を呼び出し
                     if hasattr(edit_tab, '_refresh_subgroup_list'):
                         edit_tab._refresh_subgroup_list()
-                        print("[INFO] サブグループリストのリフレッシュが完了しました")
+                        logger.info("サブグループリストのリフレッシュが完了しました")
                     else:
-                        print("[WARNING] サブグループリフレッシュ機能が見つかりません")
+                        logger.warning("サブグループリフレッシュ機能が見つかりません")
             except Exception as e:
-                print(f"[ERROR] タブ切り替え時のリフレッシュ処理でエラー: {e}")
+                logger.error("タブ切り替え時のリフレッシュ処理でエラー: %s", e)
         
         tab_widget.currentChanged.connect(on_tab_changed)
         
     except Exception as e:
-        print(f"[WARNING] サブグループ修正タブの作成に失敗: {e}")
+        logger.warning("サブグループ修正タブの作成に失敗: %s", e)
         # エラー時は新規作成のみ
     
     main_layout.addWidget(tab_widget)
@@ -79,18 +83,41 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     # --- メンバー選択部（共通化コード使用） ---
     from config.common import OUTPUT_RDE_DIR, INPUT_DIR
     from ..util.subgroup_member_selector_common import create_common_subgroup_member_selector
+    from ..core import subgroup_api_helper
+    from core.bearer_token_manager import BearerTokenManager
     
-    user_entries = load_user_entries()
+    # Bearer token取得
+    bearer_token = BearerTokenManager.get_valid_token()
     
-    # 新しいクラスを使用してメンバー情報を処理
-    member_path = os.path.join(INPUT_DIR, "rde-member.txt")
-    member_info = MemberDataProcessor.load_member_info(member_path)
-    prechecked_user_ids, initial_roles = MemberDataProcessor.create_initial_role_mapping(user_entries, member_info)
+    # 統合メンバーリスト取得（rde-member.txt + subGroup.json + API補完）
+    unified_users, member_info_map = subgroup_api_helper.load_unified_member_list(
+        subgroup_id=None,  # 新規作成時はNone
+        dynamic_users=None,
+        bearer_token=bearer_token
+    )
     
-    # 共通化されたメンバー選択ウィジェット作成
+    logger.debug("新規作成タブ: 統合メンバーリスト取得完了 - %s名", len(unified_users))
+    
+    # rde-member.txtからロール情報を抽出
+    initial_roles = {}
+    prechecked_user_ids = set()
+    
+    for user in unified_users:
+        user_id = user.get('id')
+        if user_id:
+            # rde-member.txtから来たユーザーの場合、ロール情報を設定
+            if 'role_from_file' in user:
+                initial_roles[user_id] = user.get('role_from_file', 'ASSISTANT')
+                prechecked_user_ids.add(user_id)
+    
+    logger.debug("新規作成タブ: 初期ロール設定完了 - %s名", len(initial_roles))
+    
+    # 共通化されたメンバー選択ウィジェット作成（統合ユーザーリストを使用）
     member_selector = create_common_subgroup_member_selector(
         initial_roles=initial_roles, 
-        prechecked_user_ids=prechecked_user_ids
+        prechecked_user_ids=prechecked_user_ids,
+        show_filter=True,  # 新規作成タブではフィルタを表示
+        user_entries=unified_users  # 統合ユーザーリストを渡す
     )
     
     # widget参照用の属性設定（既存コードとの互換性維持）
@@ -154,7 +181,7 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
             new_height = min(calculated_height, max_window_height)
             main_window.resize(current_width, new_height)
             
-            print(f"[DEBUG] ウィンドウサイズ調整: {calculated_height} → {new_height} (画面制限: {max_window_height})")
+            logger.debug("ウィンドウサイズ調整: %s → %s (画面制限: %s)", calculated_height, new_height, max_window_height)
             
     except Exception as e:
         # ウィンドウサイズ調整に失敗してもメンバー表示は続行
@@ -173,14 +200,32 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     layout.addLayout(member_layout)
     scroll.setWidget(member_selector)
 
-    # --- 選択ユーザー/ロール表示ボタン ---
+    # --- 選択ユーザー/ロール表示ボタン & カスタムメンバー編集ボタン ---
+    button_row = QHBoxLayout()
+    
     def on_show_selected():
         # 共通セレクターから直接user_rowsを取得
         current_user_rows = member_selector.user_rows
-        show_selected_user_ids(widget, current_user_rows, user_entries)
+        show_selected_user_ids(widget, current_user_rows, unified_users)
     exec_button = QPushButton("選択ユーザー/ロールを表示")
     exec_button.clicked.connect(on_show_selected)
-    layout.addWidget(exec_button)
+    button_row.addWidget(exec_button)
+    
+    def on_edit_rde_member():
+        """rde-member.txt編集ダイアログを開く"""
+        from .rde_member_editor_dialog import RdeMemberEditorDialog
+        dialog = RdeMemberEditorDialog(widget)
+        result = dialog.exec()
+        if result == QDialog.Accepted:
+            # 保存後、メンバーセレクターをリフレッシュ
+            QMessageBox.information(widget, "リフレッシュ", "メンバー設定を反映するには、このタブを再度開いてください。")
+    
+    edit_member_button = QPushButton("カスタムメンバー編集")
+    edit_member_button.setToolTip("rde-member.txtのメンバーをGUIで編集")
+    edit_member_button.clicked.connect(on_edit_rde_member)
+    button_row.addWidget(edit_member_button)
+    
+    layout.addLayout(button_row)
 
     # --- 新しいクラスを使用したフォーム構築 ---
     form_builder = SubgroupFormBuilder(layout, create_auto_resize_button, button_style)
@@ -287,7 +332,7 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
         success = subgroup_api_helper.send_subgroup_request(widget, api_url, headers_dict, payload, group_name, auto_refresh=True)
         
         if not success:
-            print(f"[ERROR] サブグループ作成に失敗: {group_name}")
+            logger.error("サブグループ作成に失敗: %s", group_name)
             return
     
     def on_create_subgroup_bulk():

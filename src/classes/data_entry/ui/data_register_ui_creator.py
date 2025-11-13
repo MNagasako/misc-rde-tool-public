@@ -4,15 +4,19 @@
 データ登録機能のUI構築を担当します。
 """
 
+import json
+import os
+import logging
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QLabel, QLineEdit, QHBoxLayout, QTextEdit, QGroupBox, QComboBox, QSizePolicy, QMessageBox
 )
 from classes.data_entry.conf.ui_constants import DATA_REGISTER_FORM_STYLE
 from qt_compat.gui import QFont
 from qt_compat.core import QTimer, Qt
-import json
-import os
 from config.common import get_dynamic_file_path
+
+# ロガー設定
+logger = logging.getLogger(__name__)
 from classes.data_entry.util.data_entry_forms import create_schema_form_from_path
 from classes.data_entry.util.data_entry_forms_fixed import create_sample_form
 
@@ -165,7 +169,7 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
                 parent_controller.sample_form_widget.update()
                 widget.update()
         except Exception as form_error:
-            print(f"[ERROR] 試料フォーム作成エラー: {form_error}")
+            logger.error("試料フォーム作成エラー: %s", form_error)
             import traceback
             traceback.print_exc()
             parent_controller.sample_form_widget = None

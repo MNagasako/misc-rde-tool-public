@@ -3,9 +3,12 @@
 HTTP通信、認証、ペイロード構築を統一管理
 """
 import json
+import logging
 from qt_compat.widgets import QMessageBox
 from qt_compat.core import QTimer
 from core.bearer_token_manager import BearerTokenManager
+
+logger = logging.getLogger(__name__)
 
 
 class SubgroupApiClient:
@@ -36,7 +39,7 @@ class SubgroupApiClient:
         while current and depth < max_depth:
             # cookiesアトリビュートを持つインスタンスがBrowser
             if hasattr(current, 'cookies') and isinstance(getattr(current, 'cookies', None), list):
-                print(f"[TOKEN-DEBUG] Browserインスタンス発見: {type(current).__name__}")
+                logger.debug("Browserインスタンス発見: %s", type(current).__name__)
                 return current
             
             # 親を辿る
@@ -49,7 +52,7 @@ class SubgroupApiClient:
             
             depth += 1
         
-        print("[WARNING] Browserインスタンスが見つかりませんでした")
+        logger.warning("Browserインスタンスが見つかりませんでした")
         return None
     
     def authenticate(self):
@@ -60,20 +63,20 @@ class SubgroupApiClient:
         Returns:
             bool: 認証成功かどうか
         """
-        print("[TOKEN-DEBUG] SubgroupApiClient.authenticate() 開始")
-        print("[TOKEN-DEBUG] RDE API用トークン取得中...")
+        logger.debug("SubgroupApiClient.authenticate() 開始")
+        logger.debug("RDE API用トークン取得中...")
         
         # v1.18.3: キャッシュせず、毎回最新のトークンを取得
-        print("[TOKEN-DEBUG] BearerTokenManager.get_token_with_relogin_prompt() 呼び出し前")
+        logger.debug("BearerTokenManager.get_token_with_relogin_prompt() 呼び出し前")
         self.bearer_token = BearerTokenManager.get_token_with_relogin_prompt(self.widget)
-        print(f"[TOKEN-DEBUG] get_token_with_relogin_prompt() 結果: {self.bearer_token[:20] if self.bearer_token else 'None'}...")
+        logger.debug("get_token_with_relogin_prompt() 結果: %s...", self.bearer_token[:20] if self.bearer_token else 'None')
         
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"[TOKEN] サブグループAPI認証: token={'取得成功' if self.bearer_token else '取得失敗'}")
         
         if not self.bearer_token:
-            print("[TOKEN-DEBUG] トークンが取得できませんでした")
+            logger.debug("トークンが取得できませんでした")
             QMessageBox.warning(
                 self.widget, 
                 "認証エラー", 
@@ -81,15 +84,15 @@ class SubgroupApiClient:
             )
             return False
         
-        print(f"[TOKEN-DEBUG] 認証成功: {self.bearer_token[:20]}...")
+        logger.debug("認証成功: %s...", self.bearer_token[:20])
         
         # トークン検証
-        print("[TOKEN-DEBUG] トークン検証を実行...")
+        logger.debug("トークン検証を実行...")
         is_valid = BearerTokenManager.validate_token(self.bearer_token)
-        print(f"[TOKEN-DEBUG] トークン検証結果: {'有効' if is_valid else '無効'}")
+        logger.debug("トークン検証結果: %s", '有効' if is_valid else '無効')
         
         if not is_valid:
-            print("[TOKEN-DEBUG] トークンが無効です")
+            logger.debug("トークンが無効です")
             QMessageBox.warning(
                 self.widget,
                 "認証エラー",
@@ -138,24 +141,24 @@ class SubgroupApiClient:
         Returns:
             bool: 更新成功かどうか
         """
-        print(f"[TOKEN-DEBUG] update_subgroup() 開始 - group_id={group_id}")
+        logger.debug("update_subgroup() 開始 - group_id=%s", group_id)
         if not self.authenticate():
-            print("[TOKEN-DEBUG] 認証失敗")
+            logger.debug("認証失敗")
             return False
         
-        print(f"[TOKEN-DEBUG] 認証成功、RDEトークン使用: {self.bearer_token[:20]}...")
+        logger.debug("認証成功、RDEトークン使用: %s...", self.bearer_token[:20])
         api_url = f"{self.api_base_url}/groups/{group_id}"
-        print(f"[TOKEN-DEBUG] API呼び出し: {api_url}")
+        logger.debug("API呼び出し: %s", api_url)
         headers = self._build_headers()
         
         try:
             from net.http_helpers import proxy_patch
-            print("[TOKEN-DEBUG] proxy_patch() 呼び出し中...")
+            logger.debug("proxy_patch() 呼び出し中...")
             resp = proxy_patch(api_url, headers=headers, json=payload, timeout=15)
-            print(f"[TOKEN-DEBUG] API レスポンス: status_code={resp.status_code}")
+            logger.debug("API レスポンス: status_code=%s", resp.status_code)
             return self._handle_response(resp, group_name, "更新", auto_refresh)
         except Exception as e:
-            print(f"[ERROR] API送信エラー: {e}")
+            logger.error("API送信エラー: %s", e)
             import traceback
             traceback.print_exc()
             QMessageBox.warning(self.widget, "APIエラー", f"API送信中にエラーが発生しました: {e}")
@@ -229,19 +232,19 @@ class SubgroupApiClient:
                         def send_notification():
                             try:
                                 subgroup_notifier.notify_refresh()
-                                print("[INFO] サブグループ更新通知を送信しました")
+                                logger.info("サブグループ更新通知を送信しました")
                             except Exception as e:
-                                print(f"[WARNING] サブグループ更新通知送信に失敗: {e}")
+                                logger.warning("サブグループ更新通知送信に失敗: %s", e)
                         QTimer.singleShot(2000, send_notification)  # 2秒後に通知
                     except Exception as e:
-                        print(f"[WARNING] サブグループ更新通知の設定に失敗: {e}")
+                        logger.warning("サブグループ更新通知の設定に失敗: %s", e)
                         
                 except Exception as e:
-                    print(f"[WARNING] サブグループ情報自動更新に失敗: {e}")
+                    logger.warning("サブグループ情報自動更新に失敗: %s", e)
             
             QTimer.singleShot(1000, auto_refresh)
         except Exception as e:
-            print(f"[WARNING] サブグループ情報自動更新の設定に失敗: {e}")
+            logger.warning("サブグループ情報自動更新の設定に失敗: %s", e)
     
     def get_sample_detail(self, sample_id):
         """
@@ -254,37 +257,37 @@ class SubgroupApiClient:
             dict: 試料詳細情報、エラー時はNone
         """
         # Material API用のトークンを取得
-        print(f"[TOKEN-DEBUG] get_sample_detail() 開始 - sample_id={sample_id}")
-        print("[TOKEN-DEBUG] Material API用トークン取得中...")
+        logger.debug("get_sample_detail() 開始 - sample_id=%s", sample_id)
+        logger.debug("Material API用トークン取得中...")
         from config.common import load_bearer_token
         material_token = load_bearer_token('rde-material.nims.go.jp')
         
         if not material_token:
-            print("[ERROR] Material APIトークンが取得できません")
+            logger.error("Material APIトークンが取得できません")
             return None
         
-        print(f"[TOKEN-DEBUG] Material トークン取得成功: {material_token[:20]}...")
+        logger.debug("Material トークン取得成功: %s...", material_token[:20])
         
         # トークン検証
-        print("[TOKEN-DEBUG] Material トークン検証中...")
+        logger.debug("Material トークン検証中...")
         is_valid = BearerTokenManager.validate_token(material_token)
-        print(f"[TOKEN-DEBUG] Material トークン検証結果: {'有効' if is_valid else '無効'}")
+        logger.debug("Material トークン検証結果: %s", '有効' if is_valid else '無効')
         
         if not is_valid:
-            print("[ERROR] Material APIトークンが無効です")
+            logger.error("Material APIトークンが無効です")
             return None
         
         api_url = f"https://rde-material-api.nims.go.jp/samples/{sample_id}?include=sharingGroups"
-        print(f"[TOKEN-DEBUG] API呼び出し: {api_url}")
+        logger.debug("API呼び出し: %s", api_url)
         
         # v2.1.0: WebViewのCookieを取得
         browser_cookies = []
         try:
             if self.browser and hasattr(self.browser, 'cookies'):
                 browser_cookies = self.browser.cookies
-                print(f"[TOKEN-DEBUG] WebView Cookie取得: {len(browser_cookies)}個")
+                logger.debug("WebView Cookie取得: %s個", len(browser_cookies))
         except Exception as e:
-            print(f"[WARNING] WebView Cookie取得失敗: {e}")
+            logger.warning("WebView Cookie取得失敗: %s", e)
         
         headers = {
             "Accept": "application/vnd.api+json",
@@ -313,24 +316,24 @@ class SubgroupApiClient:
             )
             if material_cookies:
                 headers = CookieManager.add_cookies_to_headers(headers, material_cookies)
-                print(f"[TOKEN-DEBUG] Material API Cookie追加完了: {len(material_cookies)}個")
+                logger.debug("Material API Cookie追加完了: %s個", len(material_cookies))
         
         try:
             from net.http_helpers import proxy_get
-            print("[TOKEN-DEBUG] proxy_get() 呼び出し中...")
+            logger.debug("proxy_get() 呼び出し中...")
             response = proxy_get(api_url, headers=headers)
-            print(f"[TOKEN-DEBUG] API レスポンス: status_code={response.status_code}")
+            logger.debug("API レスポンス: status_code=%s", response.status_code)
             
             if response.status_code == 200:
-                print("[TOKEN-DEBUG] 試料詳細取得成功")
+                logger.debug("試料詳細取得成功")
                 return response.json()
             else:
-                print(f"[ERROR] 試料詳細取得エラー (Status: {response.status_code})")
-                print(f"[TOKEN-DEBUG] レスポンス内容: {response.text[:200]}")
+                logger.error("試料詳細取得エラー (Status: %s)", response.status_code)
+                logger.debug("レスポンス内容: %s", response.text[:200])
                 return None
                 
         except Exception as e:
-            print(f"[ERROR] API呼び出しエラー: {str(e)}")
+            logger.error("API呼び出しエラー: %s", str(e))
             import traceback
             traceback.print_exc()
             return None
@@ -348,43 +351,43 @@ class SubgroupApiClient:
             tuple: (success: bool, message: str)
         """
         # Material API用のトークンを取得
-        print(f"[TOKEN-DEBUG] set_sample_sharing_group() 開始 - sample_id={sample_id}")
-        print("[TOKEN-DEBUG] Material API用トークン取得中...")
+        logger.debug("set_sample_sharing_group() 開始 - sample_id=%s", sample_id)
+        logger.debug("Material API用トークン取得中...")
         from config.common import load_bearer_token
         
         # Material APIトークンを取得
         material_token = load_bearer_token('rde-material.nims.go.jp')
         
         if not material_token:
-            print("[ERROR] Material APIトークンが取得できません")
+            logger.error("Material APIトークンが取得できません")
             return False, "Material APIトークンが取得できません"
         
-        print(f"[TOKEN-DEBUG] Material トークン取得成功: {material_token[:20]}...")
+        logger.debug("Material トークン取得成功: %s...", material_token[:20])
         
         # トークン検証
-        print("[TOKEN-DEBUG] Material トークン検証中...")
+        logger.debug("Material トークン検証中...")
         is_valid = BearerTokenManager.validate_token(material_token)
-        print(f"[TOKEN-DEBUG] Material トークン検証結果: {'有効' if is_valid else '無効'}")
+        logger.debug("Material トークン検証結果: %s", '有効' if is_valid else '無効')
         
         if not is_valid:
-            print("[ERROR] Material APIトークンが無効です")
+            logger.error("Material APIトークンが無効です")
             return False, "Material APIトークンが無効です"
         
         # v2.1.0: WebViewのCookieを取得してリクエストに含める
-        print("[TOKEN-DEBUG] WebViewのCookieを取得中...")
+        logger.debug("WebViewのCookieを取得中...")
         browser_cookies = []
         try:
             # Browserインスタンスからcookiesを取得
             if self.browser and hasattr(self.browser, 'cookies'):
                 browser_cookies = self.browser.cookies
-                print(f"[TOKEN-DEBUG] WebView Cookie取得: {len(browser_cookies)}個")
+                logger.debug("WebView Cookie取得: %s個", len(browser_cookies))
             else:
-                print("[WARNING] Browserインスタンスが設定されていません")
+                logger.warning("Browserインスタンスが設定されていません")
         except Exception as e:
-            print(f"[WARNING] WebView Cookie取得失敗: {e}")
+            logger.warning("WebView Cookie取得失敗: %s", e)
         
         api_url = f"https://rde-material-api.nims.go.jp/samples/{sample_id}/relationships/sharingGroups"
-        print(f"[TOKEN-DEBUG] API呼び出し: {api_url}")
+        logger.debug("API呼び出し: %s", api_url)
         
         payload = {
             "data": [{
@@ -424,23 +427,23 @@ class SubgroupApiClient:
             )
             if material_cookies:
                 headers = CookieManager.add_cookies_to_headers(headers, material_cookies)
-                print(f"[TOKEN-DEBUG] Material API Cookie追加完了: {len(material_cookies)}個")
+                logger.debug("Material API Cookie追加完了: %s個", len(material_cookies))
             else:
-                print("[WARNING] rde-material.nims.go.jp用のCookieが見つかりません")
+                logger.warning("rde-material.nims.go.jp用のCookieが見つかりません")
         else:
-            print("[WARNING] WebView Cookieが利用できません - Cookieなしでリクエスト")
+            logger.warning("WebView Cookieが利用できません - Cookieなしでリクエスト")
         
-        print(f"[DEBUG] POST Sample Sharing Group API URL: {api_url}")
-        print(f"[DEBUG] ペイロード: {json.dumps(payload, ensure_ascii=False, indent=2)}")
+        logger.debug("POST Sample Sharing Group API URL: %s", api_url)
+        logger.debug("ペイロード: %s", json.dumps(payload, ensure_ascii=False, indent=2))
         
         try:
             from net.http_helpers import proxy_post
-            print("[TOKEN-DEBUG] proxy_post() 呼び出し中...")
+            logger.debug("proxy_post() 呼び出し中...")
             response = proxy_post(api_url, headers=headers, json=payload)
-            print(f"[TOKEN-DEBUG] API レスポンス: status_code={response.status_code}")
+            logger.debug("API レスポンス: status_code=%s", response.status_code)
             
             if response.status_code == 204:
-                print(f"[INFO] 試料共有グループ設定成功: sample_id={sample_id}, group={sharing_group_name}")
+                logger.info("試料共有グループ設定成功: sample_id=%s, group=%s", sample_id, sharing_group_name)
                 return True, f"試料に共有グループ「{sharing_group_name}」を設定しました"
             else:
                 error_msg = f"API エラー (Status: {response.status_code})"
@@ -449,13 +452,13 @@ class SubgroupApiClient:
                     error_msg += f"\n詳細: {json.dumps(error_detail, ensure_ascii=False, indent=2)}"
                 except:
                     error_msg += f"\n応答: {response.text}"
-                print(f"[ERROR] {error_msg}")
-                print(f"[TOKEN-DEBUG] レスポンス内容: {response.text[:200]}")
+                logger.error("%s", error_msg)
+                logger.debug("レスポンス内容: %s", response.text[:200])
                 return False, error_msg
                 
         except Exception as e:
             error_msg = f"API呼び出しエラー: {str(e)}"
-            print(f"[ERROR] {error_msg}")
+            logger.error("%s", error_msg)
             return False, error_msg
     
     def delete_sample_sharing_group(self, sample_id, sharing_group_id):
@@ -504,15 +507,15 @@ class SubgroupApiClient:
             "sec-ch-ua-platform": '"Windows"'
         }
         
-        print(f"[DEBUG] DELETE Sample Sharing Group API URL: {api_url}")
-        print(f"[DEBUG] ペイロード: {json.dumps(payload, ensure_ascii=False, indent=2)}")
+        logger.debug("DELETE Sample Sharing Group API URL: %s", api_url)
+        logger.debug("ペイロード: %s", json.dumps(payload, ensure_ascii=False, indent=2))
         
         try:
             from net.http_helpers import proxy_delete
             response = proxy_delete(api_url, headers=headers, json=payload)
             
             if response.status_code == 204:
-                print(f"[INFO] 試料共有グループ削除成功: sample_id={sample_id}")
+                logger.info("試料共有グループ削除成功: sample_id=%s", sample_id)
                 return True, "試料から共有グループを削除しました"
             else:
                 error_msg = f"API エラー (Status: {response.status_code})"
@@ -521,12 +524,12 @@ class SubgroupApiClient:
                     error_msg += f"\n詳細: {json.dumps(error_detail, ensure_ascii=False, indent=2)}"
                 except:
                     error_msg += f"\n応答: {response.text}"
-                print(f"[ERROR] {error_msg}")
+                logger.error("%s", error_msg)
                 return False, error_msg
                 
         except Exception as e:
             error_msg = f"API呼び出しエラー: {str(e)}"
-            print(f"[ERROR] {error_msg}")
+            logger.error("%s", error_msg)
             return False, error_msg
 
 
@@ -705,7 +708,7 @@ def send_subgroup_request(widget, api_url, headers, payload, group_name, auto_re
         return client.create_subgroup(payload, group_name, auto_refresh)
     else:
         # その他の場合（要実装）
-        print(f"[WARNING] 未対応のAPIリクエスト: {api_url}")
+        logger.warning("未対応のAPIリクエスト: %s", api_url)
         return False
 
 

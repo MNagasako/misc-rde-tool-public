@@ -11,6 +11,11 @@ from config.common import get_dynamic_file_path
 from .arim_data_collector import get_arim_data_collector
 from .arim_data_collector import get_arim_data_collector
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 
 class DatasetContextCollector:
     """データセット関連のコンテキストデータ収集クラス"""
@@ -44,27 +49,27 @@ class DatasetContextCollector:
         # 追加データを収集
         if dataset_id:
             # データセットIDが指定されている場合（修正時）
-            print(f"[DEBUG] データセット詳細情報を取得開始: dataset_id={dataset_id}")
+            logger.debug("データセット詳細情報を取得開始: dataset_id=%s", dataset_id)
             details = self._collect_dataset_details(dataset_id)
             context.update(details)
             
-            print(f"[DEBUG] 取得した詳細情報のキー: {list(details.keys())}")
+            logger.debug("取得した詳細情報のキー: %s", list(details.keys()))
             if 'file_info' in details:
-                print(f"[DEBUG] file_info の長さ: {len(details['file_info'])} 文字")
-                print(f"[DEBUG] file_info の先頭100文字: {details['file_info'][:100]}")
-                print(f"[DEBUG] file_info の型: {type(details['file_info'])}")
-                print(f"[DEBUG] file_info が空: {not details['file_info']}")
+                logger.debug("file_info の長さ: %s 文字", len(details['file_info']))
+                logger.debug("file_info の先頭100文字: %s", details['file_info'][:100])
+                logger.debug("file_info の型: %s", type(details['file_info']))
+                logger.debug("file_info が空: %s", not details['file_info'])
             
             # ファイルツリー情報を個別キーとしても設定（プロンプトテンプレート用）
             if 'file_info' in details and details['file_info']:
                 context['file_tree'] = details['file_info']
-                print(f"[DEBUG] [OK] file_tree をセット: {len(context['file_tree'])} 文字")
+                logger.debug("[OK] file_tree をセット: %s 文字", len(context['file_tree']))
             else:
                 # file_infoが空の場合もメッセージを設定
                 context['file_tree'] = details.get('file_info', '（ファイルツリー情報の取得に失敗しました）')
-                print(f"[DEBUG] [WARN] file_info が空またはFalsy - file_tree = '{context['file_tree'][:50]}...'")
+                logger.debug("file_info が空またはFalsy - file_tree = '%s...'", context['file_tree'][:50])
             
-            print(f"[DEBUG] 最終的な context['file_tree'] の長さ: {len(context.get('file_tree', ''))} 文字")
+            logger.debug("最終的な context['file_tree'] の長さ: %s 文字", len(context.get('file_tree', '')))
         else:
             # 新規作成時はフォームデータのみ
             context.update(self._collect_general_data())
@@ -92,7 +97,7 @@ class DatasetContextCollector:
         arim_formatted = {}
         
         try:
-            print(f"[INFO] ARIM課題データ収集開始: {grant_number}")
+            logger.info("ARIM課題データ収集開始: %s", grant_number)
             
             # ARIMデータコレクターを使用してデータを取得
             arim_collector = get_arim_data_collector()
@@ -112,7 +117,7 @@ class DatasetContextCollector:
                     for eq_id in dataset_equipment_ids:
                         if eq_id not in equipment_ids:
                             equipment_ids.append(eq_id)
-                            print(f"[INFO] データセット名から設備ID抽出: {eq_id} from {dataset_name}")
+                            logger.info("データセット名から設備ID抽出: %s from %s", eq_id, dataset_name)
                 
                 # データセットJSONデータからも設備IDを抽出（データセットテンプレートIDを含む）
                 dataset_json_data = form_data.get('dataset_json_data')
@@ -124,18 +129,18 @@ class DatasetContextCollector:
             
             arim_formatted['equipment_ids'] = equipment_ids
             
-            print(f"[INFO] ARIM課題データ収集完了: {arim_formatted.get('collection_summary', 'N/A')}")
-            print(f"[INFO] 設備ID抽出結果: {equipment_ids}")
+            logger.info("ARIM課題データ収集完了: %s", arim_formatted.get('collection_summary', 'N/A'))
+            logger.info("設備ID抽出結果: %s", equipment_ids)
             
             # 詳細ログ追加
             for key, value in arim_formatted.items():
                 if key not in ['collection_summary', 'equipment_ids']:
                     has_data = '[ARIM拡張情報なし]' not in str(value) and '[ARIM課題データ取得エラー]' not in str(value)
                     status = "○" if has_data else "×"
-                    print(f"[DEBUG] {key}: {status} ({len(str(value))}文字)")
+                    logger.debug("%s: %s (%s文字)", key, status, len(str(value)))
             
         except Exception as e:
-            print(f"[WARNING] ARIM課題データ収集エラー: {e}")
+            logger.warning("ARIM課題データ収集エラー: %s", e)
             # エラー時のフォールバック
             arim_formatted = {
                 'dataset_existing_info': '[ARIM課題データ取得エラー]',
@@ -172,7 +177,7 @@ class DatasetContextCollector:
             details['related_datasets'] = self._get_related_datasets(dataset_id)
             
         except Exception as e:
-            print(f"[WARNING] データセット詳細取得エラー: {e}")
+            logger.warning("データセット詳細取得エラー: %s", e)
             details['file_info'] = f'（データセット詳細取得中にエラーが発生しました: {str(e)}）'
             details['metadata'] = '（メタデータ取得失敗）'
             details['related_datasets'] = '（関連データセット取得失敗）'
@@ -197,7 +202,7 @@ class DatasetContextCollector:
             general['related_datasets'] = '関連データセットは自動検出されます'
             
         except Exception as e:
-            print(f"[WARNING] 一般データ取得エラー: {e}")
+            logger.warning("一般データ取得エラー: %s", e)
             general['file_info'] = ''
             general['metadata'] = ''
             general['related_datasets'] = ''
@@ -215,22 +220,22 @@ class DatasetContextCollector:
             ファイル情報の文字列（プロンプトテンプレート用にフォーマット済み）
         """
         try:
-            print(f"[DEBUG] ファイル情報取得開始: dataset_id={dataset_id}")
+            logger.debug("ファイル情報取得開始: dataset_id=%s", dataset_id)
             from core.bearer_token_manager import BearerTokenManager
             from net.http_helpers import proxy_get
             
             # Bearer Token取得
             bearer_token = BearerTokenManager.get_token_with_relogin_prompt()
             if not bearer_token:
-                print("[WARNING] Bearer Token取得失敗 - ログインが必要です")
+                logger.warning("Bearer Token取得失敗 - ログインが必要です")
                 return '（ファイルツリー情報の取得にはログインが必要です。RDEシステムにログインしてから再試行してください）'
             
-            print(f"[DEBUG] Bearer Token取得成功: {bearer_token[:20]}...")
+            logger.debug("Bearer Token取得成功: %s...", bearer_token[:20])
             
             # RDE APIでデータ情報を取得
             api_url = f"https://rde-api.nims.go.jp/data?filter%5Bdataset.id%5D={dataset_id}&sort=-created&page%5Boffset%5D=0&page%5Blimit%5D=24&include=owner%2Csample%2CthumbnailFile%2Cfiles"
             
-            print(f"[DEBUG] API URL: {api_url}")
+            logger.debug("API URL: %s", api_url)
             
             headers = {
                 "Accept": "application/vnd.api+json",
@@ -242,11 +247,11 @@ class DatasetContextCollector:
             
             response = proxy_get(api_url, headers=headers)
             
-            print(f"[DEBUG] API Response Status: {response.status_code}")
+            logger.debug("API Response Status: %s", response.status_code)
             
             if response.status_code != 200:
                 error_msg = f"（データ情報取得API失敗: HTTP {response.status_code}）"
-                print(f"[WARNING] {error_msg}")
+                logger.warning("%s", error_msg)
                 if response.status_code == 401:
                     error_msg += "\n認証エラー - 再ログインが必要です"
                 elif response.status_code == 403:
@@ -257,16 +262,16 @@ class DatasetContextCollector:
             
             data = response.json()
             
-            print(f"[DEBUG] API Response Data: {len(data.get('data', []))} タイル取得")
+            logger.debug("API Response Data: %s タイル取得", len(data.get('data', [])))
             
             # ファイルツリー情報をフォーマット
             formatted_result = self._format_file_tree(data)
-            print(f"[DEBUG] フォーマット結果の長さ: {len(formatted_result)} 文字")
+            logger.debug("フォーマット結果の長さ: %s 文字", len(formatted_result))
             return formatted_result
             
         except Exception as e:
             error_msg = f"（ファイル情報取得中にエラーが発生: {str(e)}）"
-            print(f"[WARNING] {error_msg}")
+            logger.warning("%s", error_msg)
             import traceback
             traceback.print_exc()
             return error_msg
@@ -391,11 +396,11 @@ class DatasetContextCollector:
             result += f"※ RDEシステムではファイルはフラット配置（階層構造なし）\n\n"
             result += "\n\n".join(tile_info_list)
             
-            print(f"[INFO] ファイルツリー情報を生成しました: {total_tiles}タイル, {total_files}ファイル")
+            logger.info("ファイルツリー情報を生成しました: %sタイル, %sファイル", total_tiles, total_files)
             return result
             
         except Exception as e:
-            print(f"[ERROR] ファイルツリーフォーマットエラー: {e}")
+            logger.error("ファイルツリーフォーマットエラー: %s", e)
             import traceback
             traceback.print_exc()
             return f'（ファイルツリーのフォーマット中にエラーが発生しました: {str(e)}）'
@@ -425,7 +430,7 @@ class DatasetContextCollector:
             return '; '.join(metadata_items)
             
         except Exception as e:
-            print(f"[WARNING] メタデータ取得エラー: {e}")
+            logger.warning("メタデータ取得エラー: %s", e)
             return ''
             
     def _get_related_datasets(self, dataset_id: str) -> str:
@@ -452,7 +457,7 @@ class DatasetContextCollector:
             return '; '.join(related_list)
             
         except Exception as e:
-            print(f"[WARNING] 関連データセット取得エラー: {e}")
+            logger.warning("関連データセット取得エラー: %s", e)
             return ''
 
 

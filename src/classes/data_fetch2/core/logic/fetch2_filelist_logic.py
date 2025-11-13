@@ -259,7 +259,7 @@ def download_file_for_data_id(data_id, bearer_token=None, save_dir_base=None, fi
         log_path = os.path.join(base_log_dir, "download_error.log")
         with open(log_path, "a", encoding="utf-8") as logf:
             logf.write(f"[ERROR] makedirs failed for data_id={data_id}, grantNumber={grantNumber}, dataset_name={dataset_name}, tile_name={tile_name}, tile_number={tile_number}\nException: {e}\n")
-        print(f"[ERROR] makedirs failed: {e}")
+        logger.error("makedirs failed: %s", e)
         return False
     url = f"https://rde-api.nims.go.jp/files/{data_id}?isDownload=true"
     headers = {
@@ -269,21 +269,21 @@ def download_file_for_data_id(data_id, bearer_token=None, save_dir_base=None, fi
         "Origin": "https://rde.nims.go.jp",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
     }
-    print(f"[INFO] Downloading file for data_id: {data_id} from {url}")
+    logger.info("Downloading file for data_id: %s from %s", data_id, url)
     try:
         resp = download_request(url, bearer_token=None, timeout=30, headers=headers, stream=True)  # download_request returns Response object
-        print(f"{url} -> HTTP {resp.status_code if resp else 'No Response'} ")
+        logger.debug("%s -> HTTP %s ", url, resp.status_code if resp else 'No Response')
         if resp is None:
-            print(f"[ERROR] Request failed for data_id: {data_id}")
+            logger.error("Request failed for data_id: %s", data_id)
             if parent:
                 safe_show_message(parent, "エラー", f"data_id {data_id} のダウンロードに失敗しました。", "warning")
             return False
         if resp.status_code != 200:
             if parent:
                 from qt_compat.widgets import QMessageBox
-                print(f"[WARNING] data_id {data_id} has no fileName in attributes, skipping download.")
+                logger.warning("data_id %s has no fileName in attributes, skipping download.", data_id)
             else:
-                print(f"[ERROR] {resp.status_code}: {url}\n{resp.text}")
+                logger.error("%s: %s\n%s", resp.status_code, url, resp.text)
             return False
         # ファイル名決定: Content-Disposition優先、なければURL末尾
         fname = None
@@ -305,7 +305,7 @@ def download_file_for_data_id(data_id, bearer_token=None, save_dir_base=None, fi
             for chunk in resp.iter_content(chunk_size=8192):
                 if chunk:
                     f.write(chunk)
-        print(f"[INFO] Saved: {save_path}")
+        logger.info("Saved: %s", save_path)
         return save_path
     except Exception as e:
         import traceback
@@ -318,7 +318,7 @@ def download_file_for_data_id(data_id, bearer_token=None, save_dir_base=None, fi
         if parent:
             safe_show_message(parent, "ファイルダウンロード失敗", f"{url}\n{e}", "critical")
         else:
-            print(f"[ERROR] {url}: {e}")
+            logger.error("%s: %s", url, e)
         return False
 # 任意のJSONファイルからdata配列内のidを全て取得し表示する関数
 
@@ -423,7 +423,7 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
     try:
         # プログレスコールバック初期化
         if progress_callback:
-            if not progress_callback(0, 10, "処理を開始しています..."):
+            if not progress_callback(0, 1, "処理を開始しています..."):
                 return None
 
         dataset_id = dataset_obj.get('id', '')
@@ -446,7 +446,7 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
         
         # プログレス更新
         if progress_callback:
-            if not progress_callback(1, 10, "データセット情報を処理中..."):
+            if not progress_callback(0, 1, "データセット情報を処理中..."):
                 return None
         
         # dataset_obj を　保存
@@ -462,7 +462,7 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
 
         # プログレス更新
         if progress_callback:
-            if not progress_callback(2, 10, "匿名化ファイルを作成中..."):
+            if not progress_callback(0, 1, "匿名化ファイルを作成中..."):
                 return None
 
         #C:\vscode\rde\src\classes\anonymizer.py を参考にoriginal_dataset_json_path　の匿名化版を同じディレクトリに保存
@@ -477,7 +477,7 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
 
         # プログレス更新
         if progress_callback:
-            if not progress_callback(3, 10, "データエントリファイルを読み込み中..."):
+            if not progress_callback(0, 1, "データエントリファイルを読み込み中..."):
                 return None
 
         # 1. dataEntry/{dataset_id}.jsonを読む
@@ -491,7 +491,7 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
                 
                 # プログレス更新（APIリクエスト前）
                 if progress_callback:
-                    if not progress_callback(3, 10, f"APIからデータエントリ取得中..."):
+                    if not progress_callback(0, 1, f"APIからデータエントリ取得中..."):
                         return None
                 
                 # dataEntry APIを呼び出し（正しいエンドポイント形式）
@@ -603,26 +603,23 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
             # データなしの場合でも処理を継続する場合があるため、特別な戻り値を返す
             return "no_data"
 
-        # プログレス更新
-        if progress_callback:
-            if not progress_callback(4, 10, f"ファイル情報を取得中... ({len(data_entries)}件)"):
-                return None
-
         # 2. 各dataエントリのidごとにfiles APIを呼び、dataFiles/{id}.jsonに保存
         files_dir = os.path.normpath(os.path.join(OUTPUT_DIR, f'rde/data/dataFiles/sub'))
         os.makedirs(files_dir, exist_ok=True)
         
+        # プログレス管理変数
         total_entries = len(data_entries)
         processed_entries = 0
+        processed_files = 0
+        total_files = 0  # 動的にカウント
+        
+        # プログレス更新（処理開始）
+        if progress_callback:
+            if not progress_callback(0, 1, f"ファイル取得開始... ({len(data_entries)}エントリ)"):
+                return None
         
         for data_entry in data_entries:
             try:
-                # キャンセルチェック
-                if progress_callback:
-                    if not progress_callback(4 + int((processed_entries / total_entries) * 4), 10, 
-                                           f"データエントリ処理中... ({processed_entries + 1}/{total_entries})"):
-                        return None
-                
                 data_id = data_entry.get('id')
                 attributes = data_entry.get('attributes', {})
                 tile_name = attributes.get("name", "")
@@ -704,6 +701,9 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
                     filtered_files = [entry for entry in data_entries_files 
                                     if entry.get("attributes", {}).get("fileType") == "MAIN_IMAGE"]
                 
+                # 総ファイル数を累積
+                total_files += len(filtered_files)
+                
                 download_count = 0
                 max_download = file_filter_config.get("max_download_count", 0)
                 
@@ -744,7 +744,19 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
                     if download_success:
                         download_count += 1
                     
-                logger.info(f"データエントリ処理完了: data_id={data_id}")
+                    # ファイル単位でプログレス更新
+                    processed_files += 1
+                    if progress_callback:
+                        if total_files > processed_files:
+                            remaining = total_files - processed_files
+                            progress_callback(processed_files, total_files,
+                                            f"ダウンロード中: {processed_files}/{total_files}ファイル (残り: {remaining}件)")
+                        else:
+                            # 総数が未確定または同数の場合
+                            progress_callback(processed_files, max(processed_files, total_files),
+                                            f"ダウンロード中: {processed_files}ファイル処理済み")
+                    
+                logger.info(f"データエントリ処理完了: data_id={data_id}, ファイル数: {download_count}")
                 processed_entries += 1
                 
             except Exception as e:
@@ -756,9 +768,10 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
 
         # プログレス完了
         if progress_callback:
-            progress_callback(10, 10, f"処理完了: {processed_entries}/{total_entries}件処理")
+            progress_callback(processed_files, processed_files, 
+                            f"処理完了: {processed_files}ファイルダウンロード完了")
 
-        success_msg = f"dataEntry/{dataset_id}.json内の各data idについてdataFiles/に保存しました。処理件数: {processed_entries}/{total_entries}"
+        success_msg = f"dataEntry/{dataset_id}.json内の各data idについてdataFiles/に保存しました。処理済みファイル数: {processed_files}"
         logger.info(success_msg)
         return success_msg
 

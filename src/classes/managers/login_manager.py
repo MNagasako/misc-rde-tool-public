@@ -27,6 +27,7 @@ from qt_compat.core import QTimer, QUrl
 from qt_compat.widgets import QApplication, QMessageBox
 from config.common import get_cookie_file_path
 # v2.0.3: BEARER_TOKEN_FILE削除、bearer_tokens.jsonのみ使用
+from classes.core.browser_controller import mask_sensitive_url
 
 logger = logging.getLogger("RDE_WebView")
 
@@ -252,11 +253,11 @@ class LoginManager:
         def after_click(result):
             if result:
                 logger.info('[INFO] DICEアカウントボタンを自動クリックしました')
-                logger.info(f'[LOGIN] 現在のURL: {self.webview.url().toString()}')
+                logger.info(f'[LOGIN] 現在のURL: {mask_sensitive_url(self.webview.url().toString())}')
                 self.poll_identifier_input()
             else:
                 logger.warning('[WARN] DICEアカウントボタンの自動クリックに失敗')
-                logger.warning(f'[LOGIN] エラー時のURL: {self.webview.url().toString()}')
+                logger.warning(f'[LOGIN] エラー時のURL: {mask_sensitive_url(self.webview.url().toString())}')
         self.webview.page().runJavaScript(js_code, after_click)
 
     def poll_identifier_input(self):
@@ -281,16 +282,16 @@ class LoginManager:
         def after_set(result):
             if result == 'set_and_submitted':
                 logger.info(f"[INFO] identifier欄に値をセットしsubmitボタンを自動クリックしました: {value}")
-                logger.info(f'[LOGIN] identifier送信後のURL: {self.webview.url().toString()}')
+                logger.info(f'[LOGIN] identifier送信後のURL: {mask_sensitive_url(self.webview.url().toString())}')
                 self.browser.update_autologin_msg('identifier入力・submit自動実行')
                 self.poll_password_input()
             elif result == 'set_only':
                 logger.info(f"[INFO] identifier欄に値をセットしました（submitボタンは見つからず）: {value}")
-                logger.info(f'[LOGIN] identifier入力後のURL: {self.webview.url().toString()}')
+                logger.info(f'[LOGIN] identifier入力後のURL: {mask_sensitive_url(self.webview.url().toString())}')
                 self.browser.update_autologin_msg('identifier入力のみ自動実行')
             else:
                 logger.warning("[WARN] identifier欄が見つかりませんでした")
-                logger.warning(f'[LOGIN] エラー時のURL: {self.webview.url().toString()}')
+                logger.warning(f'[LOGIN] エラー時のURL: {mask_sensitive_url(self.webview.url().toString())}')
         self.webview.page().runJavaScript(js_code, after_set)
 
     def poll_password_input(self):
@@ -318,16 +319,16 @@ class LoginManager:
         def after_set(result):
             if result == 'set_and_submitted':
                 self.browser.update_autologin_msg('パスワード入力・フォーム自動submit')
-                logger.info(f'[LOGIN] パスワード送信完了、URL: {self.webview.url().toString()}')
+                logger.info(f'[LOGIN] パスワード送信完了、URL: {mask_sensitive_url(self.webview.url().toString())}')
             elif result == 'set_and_clicked':
                 self.browser.update_autologin_msg('パスワード入力・Nextボタン自動クリック')
-                logger.info(f'[LOGIN] パスワード送信完了（Nextボタン）、URL: {self.webview.url().toString()}')
+                logger.info(f'[LOGIN] パスワード送信完了（Nextボタン）、URL: {mask_sensitive_url(self.webview.url().toString())}')
             elif result == 'set_only':
                 self.browser.update_autologin_msg('パスワード入力のみ自動実行')
-                logger.info(f'[LOGIN] パスワード入力のみ、URL: {self.webview.url().toString()}')
+                logger.info(f'[LOGIN] パスワード入力のみ、URL: {mask_sensitive_url(self.webview.url().toString())}')
             else:
                 self.browser.update_autologin_msg('パスワード欄が見つかりませんでした')
-                logger.warning(f'[LOGIN] パスワード欄エラー、URL: {self.webview.url().toString()}')
+                logger.warning(f'[LOGIN] パスワード欄エラー、URL: {mask_sensitive_url(self.webview.url().toString())}')
         
         self.webview.page().runJavaScript(js_code, after_set)
     
@@ -337,7 +338,7 @@ class LoginManager:
         v1.20.3: PySide6ではフォーム送信後のリダイレクトが遅延する可能性がある
         """
         current_url = self.webview.url().toString()
-        logger.info(f'[LOGIN] リダイレクト確認 (残り{retries}回): {current_url}')
+        logger.info(f'[LOGIN] リダイレクト確認 (残り{retries}回): {mask_sensitive_url(current_url)}')
         
         # /rde/datasets に到達したか確認
         if '/rde/datasets' in current_url:
@@ -361,7 +362,7 @@ class LoginManager:
             return
         
         # その他のURL
-        logger.info(f'[LOGIN] 予期しないURL: {current_url}')
+        logger.info(f'[LOGIN] 予期しないURL: {mask_sensitive_url(current_url)}')
         if retries > 0:
             QTimer.singleShot(2000, lambda: self.check_login_redirect(retries - 1))
 
@@ -431,43 +432,43 @@ class LoginManager:
             return
         
         logger.info(f"[TOKEN] Bearerトークン取得開始: host={host}, retries={retries}")
-        print(f"[TOKEN-DEBUG] トークン取得開始: host={host}")
+        logger.debug("トークン取得開始: host=%s", host)
         
         # v1.20.3: PySide6対応 - sessionStorageとlocalStorageの両方から取得
         js_code = load_js_template('extract_bearer_token_localStorage.js')
         
         def handle_token_list(token_list):
-            print(f"[TOKEN-DEBUG] JavaScript実行完了: result={type(token_list)}")
+            logger.debug("JavaScript実行完了: result=%s", type(token_list))
             
             # PySide6: runJavaScriptの結果が文字列の場合、JSONパースが必要
             if isinstance(token_list, str):
-                print(f"[TOKEN-DEBUG] 文字列結果を検出、長さ={len(token_list)}")
+                logger.debug("文字列結果を検出、長さ=%s", len(token_list))
                 if not token_list or token_list == '':
-                    print(f"[TOKEN-DEBUG] 空の文字列 - sessionStorageが空")
+                    logger.debug("空の文字列 - sessionStorageが空")
                     token_list = None
                 else:
                     try:
-                        print(f"[TOKEN-DEBUG] JSON文字列をパース試行: {token_list[:200]}...")
+                        logger.debug("JSON文字列をパース試行: %s...", token_list[:200])
                         token_list = json.loads(token_list)
-                        print(f"[TOKEN-DEBUG] JSONパース成功: {type(token_list)}, 要素数={len(token_list) if token_list else 0}")
+                        logger.debug("JSONパース成功: %s, 要素数=%s", type(token_list), len(token_list) if token_list else 0)
                     except (json.JSONDecodeError, TypeError) as e:
-                        print(f"[TOKEN-DEBUG] JSONパース失敗: {e}")
+                        logger.debug("JSONパース失敗: %s", e)
                         token_list = None
             
             logger.debug(f"[TOKEN] sessionStorage取得結果: {len(token_list) if token_list else 0}件")
             
             if not token_list:
                 logger.warning(f"[TOKEN] sessionStorageが空です ({host})")
-                print(f"[TOKEN-DEBUG] sessionStorageが空 - リトライ={retries}")
+                logger.debug("sessionStorageが空 - リトライ=%s", retries)
                 if retries > 0:
                     logger.warning(f"[TOKEN] トークン取得失敗 ({host})。リトライします... (残り{retries-1}回)")
                     QTimer.singleShot(2000, lambda: self.try_get_bearer_token(retries=retries - 1, host=host))
                 return
             
-            print(f"[TOKEN-DEBUG] sessionStorage内容:")
+            logger.debug("sessionStorage内容:")
             for i, item in enumerate(token_list):
                 if isinstance(item, dict):
-                    print(f"  [{i}] key={item.get('key', 'N/A')}, value_len={len(item.get('value', ''))}")
+                    logger.debug("  [%s] key=%s, value_len=%s", i, item.get('key', 'N/A'), len(item.get('value', '')))
             
             # AccessToken抽出
             access_token = None
@@ -485,7 +486,7 @@ class LoginManager:
                             access_token = data['secret']
                             
                             # トークンの内容をデコードして検証（デバッグ用）
-                            print(f"[TOKEN-DEBUG] AccessToken取得: {access_token[:50]}...")
+                            logger.debug("AccessToken取得: %s...", access_token[:50])
                             try:
                                 import base64
                                 # JWT形式: header.payload.signature
@@ -497,21 +498,21 @@ class LoginManager:
                                     payload_b64 += '=' * (4 - len(payload_b64) % 4)
                                     payload_json = base64.b64decode(payload_b64).decode('utf-8')
                                     payload_data = json.loads(payload_json)
-                                    print(f"[TOKEN-DEBUG] AccessTokenペイロード: aud={payload_data.get('aud')}, scp={payload_data.get('scp')}")
+                                    logger.debug("AccessTokenペイロード: aud=%s, scp=%s", payload_data.get('aud'), payload_data.get('scp'))
                                     
                                     # スコープを確認してトークンの種類を判定
                                     scopes = payload_data.get('scp', '')
                                     if 'materials' in scopes:
-                                        print(f"[TOKEN-DEBUG] [OK] Material API用トークンを検出")
+                                        logger.debug("[OK] Material API用トークンを検出")
                                     else:
-                                        print(f"[TOKEN-DEBUG] [OK] RDE API用トークンを検出")
+                                        logger.debug("[OK] RDE API用トークンを検出")
                             except Exception as decode_err:
-                                print(f"[TOKEN-DEBUG] トークンデコードエラー: {decode_err}")
+                                logger.debug("トークンデコードエラー: %s", decode_err)
                             
                             break  # AccessToken取得成功
                     except Exception as e:
                         logger.warning(f"[TOKEN] AccessToken JSONパース失敗: {e}")
-                        print(f"[TOKEN-DEBUG] AccessToken JSONパースエラー: {e}")
+                        logger.debug("AccessToken JSONパースエラー: %s", e)
             
             # RefreshToken抽出（v2.1.0: TokenManager対応）
             for item in token_list:
@@ -524,18 +525,18 @@ class LoginManager:
                         data = json.loads(item['value'])
                         if data.get('credentialType') == 'RefreshToken' and 'secret' in data:
                             refresh_token = data['secret']
-                            print(f"[TOKEN-DEBUG] RefreshToken取得: {refresh_token[:50]}...")
+                            logger.debug("RefreshToken取得: %s...", refresh_token[:50])
                             break  # RefreshToken取得成功
                     except Exception as e:
                         logger.warning(f"[TOKEN] RefreshToken JSONパース失敗: {e}")
-                        print(f"[TOKEN-DEBUG] RefreshToken JSONパースエラー: {e}")
+                        logger.debug("RefreshToken JSONパースエラー: %s", e)
             
             # トークン保存処理
             if access_token:
                 # 既存のAccessToken保存処理
                 self.browser.bearer_token = access_token
                 logger.info(f"[TOKEN] Bearerトークン自動取得成功 ({host}): {access_token[:40]}... (省略)")
-                print(f"[TOKEN-DEBUG] トークンを {host} として保存")
+                logger.debug("トークンを %s として保存", host)
                 
                 # ファイルにも保存（ホスト別）
                 self.save_bearer_token_to_file(access_token, host)
@@ -561,9 +562,9 @@ class LoginManager:
                                     import time
                                     current_time = int(time.time())
                                     expires_in = payload_data['exp'] - current_time
-                                    print(f"[TOKEN-DEBUG] JWT expiry: {expires_in}秒")
+                                    logger.debug("JWT expiry: %s秒", expires_in)
                         except Exception as exp_err:
-                            print(f"[TOKEN-DEBUG] JWT expiry解析エラー: {exp_err}")
+                            logger.debug("JWT expiry解析エラー: %s", exp_err)
                         
                         # TokenManagerに保存
                         token_manager = TokenManager.get_instance()
@@ -576,7 +577,7 @@ class LoginManager:
                         
                         if success:
                             logger.info(f"[TOKEN] RefreshToken保存成功 ({host})")
-                            print(f"[TOKEN-DEBUG] TokenManagerにRefreshToken保存完了")
+                            logger.debug("TokenManagerにRefreshToken保存完了")
                         else:
                             logger.warning(f"[TOKEN] RefreshToken保存失敗 ({host})")
                     except Exception as tm_err:
@@ -608,7 +609,7 @@ class LoginManager:
                 # v1.18.3: 無限ループ防止 - まだ取得していない場合のみ実行
                 if host == 'rde.nims.go.jp' and not self._material_token_fetched:
                     logger.info("[TOKEN] rde-material.nims.go.jpのトークン取得を開始します")
-                    print(f"[TOKEN-DEBUG] Material トークン取得プロセスを2秒後に開始")
+                    logger.debug("Material トークン取得プロセスを2秒後に開始")
                     # メッセージ更新: Materialトークン取得開始
                     self.browser.update_autologin_msg("🔄 Materialトークン取得中...")
                     QTimer.singleShot(2000, lambda: self.fetch_material_token())
@@ -617,9 +618,9 @@ class LoginManager:
                 return
             else:
                 logger.warning(f"[TOKEN] BearerトークンがsessionStorageから取得できませんでした ({host})")
-                print(f"[TOKEN-DEBUG] AccessToken形式のデータが見つかりませんでした")
+                logger.debug("AccessToken形式のデータが見つかりませんでした")
         
-        print(f"[TOKEN-DEBUG] JavaScript実行開始")
+        logger.debug("JavaScript実行開始")
         self.webview.page().runJavaScript(js_code, handle_token_list)
     
     def on_cookie_added(self, cookie):
@@ -637,10 +638,10 @@ class LoginManager:
             # 既存のCookieリストに追加
             self.browser.cookies.append((domain, name, value))
             
-            print(f"[COOKIE-DEBUG] Cookie追加: domain={domain}, name={name}, value_len={len(value)}")
+            logger.debug("[COOKIE-DEBUG] Cookie追加: domain=%s, name=%s, value_len=%s", domain, name, len(value))
             logger.debug(f"Cookie追加: domain={domain}, name={name}, value={value[:20]}...")
         except Exception as e:
-            print(f"[COOKIE-DEBUG] Cookie追加エラー: {e}")
+            logger.error("[COOKIE-DEBUG] Cookie追加エラー: %s", e)
             logger.error(f"Cookie追加エラー: {e}")
     
     def check_login_status(self, url_str):
@@ -683,10 +684,10 @@ class LoginManager:
             
         try:
             # 重要: rde-material.nims.go.jpのログインページに遷移してトークンを取得
-            # ルートパスではなく、/rde/samplesなど実際のアプリケーションパスに遷移
-            material_url = "https://rde-material.nims.go.jp/rde/samples"
-            logger.info(f"[TOKEN] rde-material.nims.go.jpへ遷移開始: {material_url}")
-            print(f"[TOKEN-DEBUG] Material URL遷移: {material_url}")
+            # 正しいURL: /samples/samples（/rde/samplesは存在しない）
+            material_url = "https://rde-material.nims.go.jp/samples/samples"
+            logger.info(f"[TOKEN] rde-material.nims.go.jpへ遷移開始: {mask_sensitive_url(material_url)}")
+            logger.debug("Material URL遷移: %s", mask_sensitive_url(material_url))
             
             # 認証完了を待つための状態管理
             self._material_auth_redirect_count = 0
@@ -696,91 +697,126 @@ class LoginManager:
             # URL変化を監視（認証リダイレクト検出用）
             def on_url_changed(url):
                 if self._material_auth_completed:
+                    logger.debug("[TOKEN] 認証完了済み、urlChangedをスキップ")
                     return
                     
                 url_str = url.toString()
-                logger.info(f"[TOKEN] URL変化検出: {url_str}")
-                print(f"[TOKEN-DEBUG] URL変化: {url_str}")
+                logger.info(f"[TOKEN] URL変化検出: {mask_sensitive_url(url_str)}")
+                logger.debug("URL変化: %s", mask_sensitive_url(url_str))
                 
-                # /rde/samples に到達し、エラーページでない場合は認証成功
-                if 'rde-material.nims.go.jp' in url_str and '/rde/samples' in url_str and '/error' not in url_str:
+                # /samples/samples に到達し、エラーページでない場合は認証成功
+                if 'rde-material.nims.go.jp' in url_str and '/samples/samples' in url_str and '/error' not in url_str:
                     logger.info("[TOKEN] ✅ URL変化で認証成功検出")
-                    print(f"[TOKEN-DEBUG] URL変化で認証成功")
+                    logger.debug("URL変化で認証成功")
                     self._material_auth_completed = True
-                    # メッセージ更新: Material認証完了
-                    self.browser.update_autologin_msg("✅ Material認証完了")
+                    # メッセージ更新: Materialトークン取得開始
+                    self.browser.update_autologin_msg("🔑 Materialトークン取得中...")
                     
                     # シグナルを切断
                     try:
                         self.webview.urlChanged.disconnect(on_url_changed)
                         logger.debug("[TOKEN] urlChangedシグナルを切断")
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug("[TOKEN] urlChanged切断済みまたはエラー: %s", e)
+                    
+                    try:
+                        self.webview.loadFinished.disconnect(on_load_finished)
+                        logger.debug("[TOKEN] loadFinishedシグナルを切断")
+                    except Exception as e:
+                        logger.debug("[TOKEN] loadFinished切断済みまたはエラー: %s", e)
+                    
+                    # トークン取得を試行（URL変化で検出した場合もここで実行）
+                    def after_token_fetch():
+                        logger.info("[TOKEN] rde-material.nims.go.jpのトークン取得を試行")
+                        logger.debug("Material トークン取得開始")
+                        self.try_get_bearer_token(retries=3, host='rde-material.nims.go.jp')
+                        # トークン取得完了後、元のrde.nims.go.jp/rde/datasetsに戻る
+                        QTimer.singleShot(2000, self.return_to_rde_datasets)
+                    
+                    # 待機時間を6秒に延長（sessionStorage更新待ち）
+                    self._material_token_fetch_timer = QTimer.singleShot(6000, after_token_fetch)
             
             # ページロード完了を待ってトークン取得
             def on_load_finished(ok):
+                # 既に認証完了している場合は何もしない（重複処理防止）
+                if self._material_auth_completed:
+                    logger.debug("[TOKEN] 認証完了済み、loadFinishedをスキップ")
+                    return
+                
                 if not ok:
                     logger.warning("[TOKEN] rde-material.nims.go.jp ページロード失敗")
-                    print(f"[TOKEN-DEBUG] Material ページロード失敗")
+                    logger.debug("Material ページロード失敗")
                     # シグナルを切断
                     try:
                         self.webview.loadFinished.disconnect(on_load_finished)
+                    except:
+                        pass
+                    try:
                         self.webview.urlChanged.disconnect(on_url_changed)
                     except:
                         pass
                     return
                 
                 current_url = self.webview.url().toString()
-                logger.info(f"[TOKEN] ページロード完了: {current_url}")
-                print(f"[TOKEN-DEBUG] Material loadFinished: {current_url}")
+                logger.info(f"[TOKEN] ページロード完了: {mask_sensitive_url(current_url)}")
+                logger.debug("Material loadFinished: %s", mask_sensitive_url(current_url))
                 
                 # エラーページへのリダイレクトを検出
                 if '/error' in current_url or '401' in current_url:
                     self._material_auth_redirect_count += 1
                     logger.info(f"[TOKEN] 401エラーページ検出 (リダイレクト回数: {self._material_auth_redirect_count}) - 認証リダイレクト待機中")
-                    print(f"[TOKEN-DEBUG] 401エラー検出、OAuth2リダイレクト待機中... (試行{self._material_auth_redirect_count}/3)")
+                    logger.debug("401エラー検出、OAuth2リダイレクト待機中... (試行%s/3)", self._material_auth_redirect_count)
                     
                     # 最大3回までリダイレクトを待つ
                     if self._material_auth_redirect_count >= 3:
                         logger.warning("[TOKEN] 認証リダイレクトがタイムアウト")
-                        print(f"[TOKEN-DEBUG] 認証タイムアウト")
+                        logger.debug("認証タイムアウト")
                         try:
                             self.webview.loadFinished.disconnect(on_load_finished)
+                        except:
+                            pass
+                        try:
                             self.webview.urlChanged.disconnect(on_url_changed)
                         except:
                             pass
                     return
                 
-                # /rde/samples への到達を確認（認証成功）
-                if 'rde-material.nims.go.jp' in current_url and '/rde/samples' in current_url and '/error' not in current_url:
-                    logger.info("[TOKEN] ✅ rde-material.nims.go.jp 認証成功 - /rde/samplesに到達")
-                    print(f"[TOKEN-DEBUG] Material 認証成功、トークン取得準備")
+                # /samples/samples への到達を確認（認証成功）
+                if 'rde-material.nims.go.jp' in current_url and '/samples/samples' in current_url and '/error' not in current_url:
+                    logger.info("[TOKEN] ✅ rde-material.nims.go.jp 認証成功 - /samples/samplesに到達")
+                    logger.debug("Material 認証成功、トークン取得準備")
                     self._material_auth_completed = True
                     # メッセージ更新: Materialトークン取得開始
                     self.browser.update_autologin_msg("🔑 Materialトークン取得中...")
                     
-                    # シグナルを切断（無限ループ防止）
+                    # シグナルを切断（無限ループ防止）- 順序に注意
                     try:
                         self.webview.loadFinished.disconnect(on_load_finished)
+                        logger.debug("[TOKEN] loadFinishedシグナルを切断")
+                    except Exception as e:
+                        logger.debug("[TOKEN] loadFinished切断済みまたはエラー: %s", e)
+                    
+                    try:
                         self.webview.urlChanged.disconnect(on_url_changed)
-                        logger.debug("[TOKEN] loadFinished/urlChangedシグナルを切断")
-                    except:
-                        pass
+                        logger.debug("[TOKEN] urlChangedシグナルを切断")
+                    except Exception as e:
+                        logger.debug("[TOKEN] urlChanged切断済みまたはエラー: %s", e)
                     
                     # トークン取得を試行（十分な待機時間を確保）
                     def after_token_fetch():
                         logger.info("[TOKEN] rde-material.nims.go.jpのトークン取得を試行")
-                        print(f"[TOKEN-DEBUG] Material トークン取得開始")
+                        logger.debug("Material トークン取得開始")
                         self.try_get_bearer_token(retries=3, host='rde-material.nims.go.jp')
-                        # トークン取得後、元のrde.nims.go.jp/rde/datasetsに戻る
-                        QTimer.singleShot(1000, self.return_to_rde_datasets)
+                        # トークン取得完了後、元のrde.nims.go.jp/rde/datasetsに戻る
+                        # 注意: try_get_bearer_token内で_notify_login_completeが呼ばれる
+                        QTimer.singleShot(2000, self.return_to_rde_datasets)
                     
-                    # 待機時間を5秒に延長（認証処理とsessionStorage更新を待つ）
-                    self._material_token_fetch_timer = QTimer.singleShot(5000, after_token_fetch)
+                    # 待機時間を6秒に延長（認証処理とsessionStorage更新を待つ）
+                    self._material_token_fetch_timer = QTimer.singleShot(6000, after_token_fetch)
                 else:
                     # まだ認証リダイレクト中
                     logger.info(f"[TOKEN] 認証リダイレクト中: {current_url}")
-                    print(f"[TOKEN-DEBUG] リダイレクト待機: {current_url}")
+                    logger.debug("リダイレクト待機: %s", current_url)
             
             # 一時的にシグナルに接続
             self.webview.loadFinished.connect(on_load_finished)
@@ -793,7 +829,7 @@ class LoginManager:
             
         except Exception as e:
             logger.error(f"[TOKEN] rde-material.nims.go.jpトークン取得エラー: {e}")
-            print(f"[TOKEN-DEBUG] Material トークン取得エラー: {e}")
+            logger.debug("Material トークン取得エラー: %s", e)
             # エラー時はフラグをリセット
             self._material_token_fetched = False
     
@@ -870,6 +906,13 @@ class LoginManager:
         else:
             logger.info("[TOKEN-ENSURE] マテリアルトークンは既に存在")
             self._material_token_acquired = True
+        
+        # 両トークンが既に存在する場合、ログイン完了通知を送信
+        if self._rde_token_acquired and self._material_token_acquired:
+            logger.info("[TOKEN-ENSURE] ✅ 両トークン既存 - ログイン完了通知を送信")
+            self._login_in_progress = False
+            self.browser.update_autologin_msg("✅ ログイン完了")
+            QTimer.singleShot(500, self._notify_login_complete)
     
     def is_login_complete(self) -> bool:
         """

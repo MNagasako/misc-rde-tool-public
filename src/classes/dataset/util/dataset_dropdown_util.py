@@ -37,7 +37,7 @@ def get_current_user_id():
         return self_data.get('data', {}).get('id')
         
     except Exception as e:
-        print(f"[ERROR] ユーザーID取得エラー: {e}")
+        logger.error("ユーザーID取得エラー: %s", e)
         return None
 
 def check_user_is_member(dataset_item, user_id):
@@ -77,7 +77,7 @@ def check_user_is_member(dataset_item, user_id):
         return False
         
     except Exception as e:
-        print(f"[ERROR] ユーザーメンバーシップ判定エラー: {e}")
+        logger.error("ユーザーメンバーシップ判定エラー: %s", e)
         return False
 
 def check_dataset_type_match(dataset_item, dataset_type_filter):
@@ -102,7 +102,7 @@ def check_dataset_type_match(dataset_item, dataset_type_filter):
         return dataset_type == dataset_type_filter
         
     except Exception as e:
-        print(f"[ERROR] データセットタイプ判定エラー: {e}")
+        logger.error("データセットタイプ判定エラー: %s", e)
         return False
 
 def check_grant_number_match(dataset_item, grant_number_filter):
@@ -131,7 +131,7 @@ def check_grant_number_match(dataset_item, grant_number_filter):
         return grant_number_filter.lower() in grant_number.lower()
         
     except Exception as e:
-        print(f"[ERROR] 課題番号判定エラー: {e}")
+        logger.error("課題番号判定エラー: %s", e)
         return False
 
 def get_dataset_type_display_map():
@@ -179,7 +179,7 @@ def get_unique_dataset_types(dataset_json_path):
         return sorted(list(dataset_types))
         
     except Exception as e:
-        print(f"[ERROR] データセットタイプ取得エラー: {e}")
+        logger.error("データセットタイプ取得エラー: %s", e)
         return []
 
 def create_dataset_dropdown_all(dataset_json_path, parent=None, global_share_filter="both", user_membership_filter="both", dataset_type_filter="all", grant_number_filter=""):
@@ -274,7 +274,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent=None, global_share_fil
                 else:
                     dataset_items = []
             except Exception as e:
-                print(f"[ERROR] dataset.jsonの読み込み・パースに失敗: {e}")
+                logger.error("dataset.jsonの読み込み・パースに失敗: %s", e)
                 dataset_items = []
 
         # 先頭に空欄を追加
@@ -344,7 +344,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent=None, global_share_fil
             try:
                 combo.setItemData(combo.count()-1, item, Qt.UserRole)
             except Exception as e:
-                print(f"[ERROR] combo.setItemData失敗: idx={combo.count()-1}, error={e}")
+                logger.error("combo.setItemData失敗: idx=%s, error=%s", combo.count()-1, e)
             display_list.append(display)
 
         combo.setCurrentIndex(0)
@@ -359,7 +359,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent=None, global_share_fil
         combo.setCompleter(completer)
 
         # フィルタ結果を表示
-        print(f"[INFO] フィルタ適用 - 広域シェア: {global_filter_type}, メンバーシップ: {membership_filter_type}, データタイプ: {dtype_filter}, 課題番号: '{grant_filter}', 表示数: {filtered_count}/{total_count}")
+        logger.info("フィルタ適用 - 広域シェア: %s, メンバーシップ: %s, データタイプ: %s, 課題番号: '%s', 表示数: %s/%s", global_filter_type, membership_filter_type, dtype_filter, grant_filter, filtered_count, total_count)
         return filtered_count, total_count
 
                                 # --- フィルタ適用・ドロップダウン更新関数 ---
@@ -427,7 +427,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent=None, global_share_fil
             try:
                 combo.setItemData(combo.count()-1, item, Qt.UserRole)
             except Exception as e:
-                print(f"[ERROR] combo.setItemData失敗: idx={combo.count()-1}, error={e}")
+                logger.error("combo.setItemData失敗: idx=%s, error=%s", combo.count()-1, e)
             display_list.append(display)
         
         combo.setCurrentIndex(0)
@@ -442,7 +442,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent=None, global_share_fil
         combo.setCompleter(completer)
         
         # フィルタ結果を表示
-        print(f"[INFO] フィルタ適用 - 広域シェア: {global_filter_type}, メンバーシップ: {membership_filter_type}, データタイプ: {dtype_filter}, 課題番号: '{grant_filter}', 表示数: {filtered_count}/{total_count}")
+        logger.info("フィルタ適用 - 広域シェア: %s, メンバーシップ: %s, データタイプ: %s, 課題番号: '%s', 表示数: %s/%s", global_filter_type, membership_filter_type, dtype_filter, grant_filter, filtered_count, total_count)
         
         return filtered_count, total_count
     
@@ -533,22 +533,22 @@ def load_dataset_and_user_list(dataset_json_path, info_json_path):
     """
     # データセット情報の取得
     if not os.path.exists(dataset_json_path):
-        print(f"[ERROR] dataset_json_pathが存在しません: {dataset_json_path}")
+        logger.error("dataset_json_pathが存在しません: %s", dataset_json_path)
         return []
     try:
         with open(dataset_json_path, 'r', encoding='utf-8') as f:
             dataset_data = json.load(f)
     except Exception as e:
-        print(f"[ERROR] dataset.jsonの読み込み・パースに失敗: {e}")
+        logger.error("dataset.jsonの読み込み・パースに失敗: %s", e)
         return []
     if isinstance(dataset_data, dict) and 'data' in dataset_data:
         dataset_items = dataset_data['data']
     elif isinstance(dataset_data, list):
         dataset_items = dataset_data
     else:
-        print(f"[ERROR] dataset.jsonの形式が不正: {type(dataset_data)}")
+        logger.error("dataset.jsonの形式が不正: %s", type(dataset_data))
         dataset_items = []
-    print(f"[INFO] dataset.json件数: {len(dataset_items)}")
+    logger.info("dataset.json件数: %s", len(dataset_items))
 
     # info.jsonの件数も表示
     if info_json_path and os.path.exists(info_json_path):
@@ -561,11 +561,11 @@ def load_dataset_and_user_list(dataset_json_path, info_json_path):
                 info_count = len(info_data)
             else:
                 info_count = 0
-            print(f"[INFO] info.json件数: {info_count}")
+            logger.info("info.json件数: %s", info_count)
         except Exception as e:
-            print(f"[ERROR] info.jsonの読み込み・パースに失敗: {e}")
+            logger.error("info.jsonの読み込み・パースに失敗: %s", e)
     else:
-        print(f"[WARNING] info.jsonが存在しません: {info_json_path}")
+        logger.warning("info.jsonが存在しません: %s", info_json_path)
 
     # self.jsonの存在確認
     self_json_path = os.path.join(os.path.dirname(dataset_json_path), 'self.json')
@@ -574,13 +574,13 @@ def load_dataset_and_user_list(dataset_json_path, info_json_path):
             with open(self_json_path, 'r', encoding='utf-8') as f:
                 self_data = json.load(f)
             if isinstance(self_data, dict):
-                print(f"[INFO] self.json: dataキー有無: {'data' in self_data}, id: {self_data.get('data', {}).get('id')}")
+                logger.info("self.json: dataキー有無: %s, id: %s", 'data' in self_data, self_data.get('data', {}).get('id'))
             else:
-                print(f"[INFO] self.json: dict型でない")
+                logger.info("self.json: dict型でない")
         except Exception as e:
-            print(f"[ERROR] self.jsonの読み込み・パースに失敗: {e}")
+            logger.error("self.jsonの読み込み・パースに失敗: %s", e)
     else:
-        print(f"[WARNING] self.jsonが存在しません: {self_json_path}")
+        logger.warning("self.jsonが存在しません: %s", self_json_path)
 
     # 自身のユーザーID取得
     self_json_path = os.path.join(os.path.dirname(dataset_json_path), 'self.json')
@@ -591,8 +591,8 @@ def load_dataset_and_user_list(dataset_json_path, info_json_path):
                 self_data = json.load(f)
             user_id = self_data.get('data', {}).get('id')
         except Exception as e:
-            print(f"[ERROR] self.jsonの読み込みに失敗: {e}")
-    print(f"[dataset_dropdown_util] フィルタ抽出に使うユーザーID: {user_id}")
+            logger.error("self.jsonの読み込みに失敗: %s", e)
+    logger.debug("[dataset_dropdown_util] フィルタ抽出に使うユーザーID: %s", user_id)
 
     # info.jsonは結合しない
     # user_map = {}  # info.jsonのusersマッピングは不要
@@ -634,11 +634,11 @@ def load_dataset_and_user_list(dataset_json_path, info_json_path):
             if attr.get('ownerId') == user_id or attr.get('userId') == user_id:
                 match = True
             
-            print(f"[DEBUG] dataset_id={dataset_id}, user_id={user_id}, match={match}")
+            logger.debug("dataset_id=%s, user_id=%s, match=%s", dataset_id, user_id, match)
         else:
             # user_idが取得できなければ全件表示（従来通り）
             match = True
-            print(f"[DEBUG] user_idなし、全件表示: dataset_id={dataset_id}")
+            logger.debug("user_idなし、全件表示: dataset_id=%s", dataset_id)
         
         if not match:
             continue
@@ -671,6 +671,11 @@ def load_dataset_and_user_list(dataset_json_path, info_json_path):
 from qt_compat.widgets import QComboBox, QSizePolicy, QCompleter
 from qt_compat.core import Qt
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 def create_dataset_dropdown_with_user(dataset_json_path, info_json_path, parent=None):
     """
     dataset.jsonとinfo.jsonを結合し、QComboBox（補完検索付き）を生成
@@ -698,12 +703,12 @@ def create_dataset_dropdown_with_user(dataset_json_path, info_json_path, parent=
     actual_dataset_json_path = dataset_json_path if dataset_json_path and os.path.exists(dataset_json_path) else DATASET_JSON_PATH
     actual_info_json_path = info_json_path if info_json_path and os.path.exists(info_json_path) else INFO_JSON_PATH
     
-    print(f"[DEBUG] パス解決結果:")
-    print(f"[DEBUG]   引数dataset_json_path: {dataset_json_path}")
-    print(f"[DEBUG]   引数info_json_path: {info_json_path}")
-    print(f"[DEBUG]   実際使用dataset_json_path: {actual_dataset_json_path}")
-    print(f"[DEBUG]   実際使用info_json_path: {actual_info_json_path}")
-    print(f"[DEBUG]   SELF_JSON_PATH: {SELF_JSON_PATH}")
+    logger.debug("パス解決結果:")
+    logger.debug("引数dataset_json_path: %s", dataset_json_path)
+    logger.debug("引数info_json_path: %s", info_json_path)
+    logger.debug("実際使用dataset_json_path: %s", actual_dataset_json_path)
+    logger.debug("実際使用info_json_path: %s", actual_info_json_path)
+    logger.debug("SELF_JSON_PATH: %s", SELF_JSON_PATH)
     
     if actual_dataset_json_path and os.path.exists(actual_dataset_json_path):
         try:
@@ -714,9 +719,9 @@ def create_dataset_dropdown_with_user(dataset_json_path, info_json_path, parent=
             elif isinstance(dataset_data, list):
                 dataset_count = len(dataset_data)
         except Exception as e:
-            print(f"[ERROR] dataset.json読み込みエラー: {e}")
+            logger.error("dataset.json読み込みエラー: %s", e)
     else:
-        print(f"[ERROR] dataset.jsonが存在しません: {actual_dataset_json_path}")
+        logger.error("dataset.jsonが存在しません: %s", actual_dataset_json_path)
     
     # self.jsonも静的パス管理を使用
     self_json_path = SELF_JSON_PATH
@@ -742,32 +747,32 @@ def create_dataset_dropdown_with_user(dataset_json_path, info_json_path, parent=
 
     # ドロップダウン生成
     dataset_list = load_dataset_and_user_list(actual_dataset_json_path, actual_info_json_path)
-    print(f"[DEBUG] dataset_list生成結果: {len(dataset_list)}件")
-    print(f"[DEBUG] 使用したdataset_json_path: {actual_dataset_json_path}")
-    print(f"[DEBUG] 使用したinfo_json_path: {actual_info_json_path}")
-    print(f"[DEBUG] dataset_json_pathの存在確認: {os.path.exists(actual_dataset_json_path) if actual_dataset_json_path else False}")
+    logger.debug("dataset_list生成結果: %s件", len(dataset_list))
+    logger.debug("使用したdataset_json_path: %s", actual_dataset_json_path)
+    logger.debug("使用したinfo_json_path: %s", actual_info_json_path)
+    logger.debug("dataset_json_pathの存在確認: %s", os.path.exists(actual_dataset_json_path) if actual_dataset_json_path else False)
     if not dataset_list:
-        print(f"[WARNING] データセットリストが空です。")
-        print(f"[WARNING] actual_dataset_json_path={actual_dataset_json_path}")
-        print(f"[WARNING] 元の引数dataset_json_path={dataset_json_path}")
-        print(f"[WARNING] actual_info_json_path={actual_info_json_path}")
-        print(f"[WARNING] 元の引数info_json_path={info_json_path}")
+        logger.warning("データセットリストが空です。")
+        logger.warning("actual_dataset_json_path=%s", actual_dataset_json_path)
+        logger.warning("元の引数dataset_json_path=%s", dataset_json_path)
+        logger.warning("actual_info_json_path=%s", actual_info_json_path)
+        logger.warning("元の引数info_json_path=%s", info_json_path)
     display_list = [display for display, _, _, _ in dataset_list]
     # 先頭に空欄を追加
     combo.addItem("", None)
     for idx, (display, dataset_id, is_grant_missing, item) in enumerate(dataset_list):
-        print(f"[DEBUG] addItem: idx={idx}, display={display}, dataset_id={dataset_id}")
+        logger.debug("addItem: idx=%s, display=%s, dataset_id=%s", idx, display, dataset_id)
         combo.addItem(display, dataset_id)
         # datasetのdictをUserRoleで保持
         try:
             combo.setItemData(idx+1, item, Qt.UserRole)  # +1: 空欄分ずらす
         except Exception as e:
-            print(f"[ERROR] combo.setItemData失敗: idx={idx}, error={e}")
+            logger.error("combo.setItemData失敗: idx=%s, error=%s", idx, e)
         if is_grant_missing:
             try:
                 combo.setItemData(idx+1, Qt.red, Qt.ForegroundRole)
             except Exception as e:
-                print(f"[ERROR] combo.setItemData(色)失敗: idx={idx}, error={e}")
+                logger.error("combo.setItemData(色)失敗: idx=%s, error=%s", idx, e)
     combo.setCurrentIndex(0)
 
     # QCompleterで補完・絞り込み
@@ -848,6 +853,6 @@ def load_dataset_list(json_path):
         return result
         
     except Exception as e:
-        print(f"[ERROR] load_dataset_list エラー: {e}")
+        logger.error("load_dataset_list エラー: %s", e)
         return []
 

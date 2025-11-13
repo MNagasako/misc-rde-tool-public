@@ -5,6 +5,7 @@
 
 import os
 import json
+import logging
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGridLayout, 
     QPushButton, QMessageBox, QScrollArea, QCheckBox, QRadioButton, 
@@ -12,6 +13,9 @@ from qt_compat.widgets import (
 )
 from config.common import SUBGROUP_JSON_PATH
 from qt_compat.core import Qt
+
+# ロガー設定
+logger = logging.getLogger(__name__)
 from ...dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
 from ..util.subgroup_ui_helpers import (
     SubjectInputValidator, SubgroupFormBuilder, 
@@ -92,16 +96,16 @@ class SubgroupEditHandler(SubgroupCreateHandler):
             "Accept": "application/vnd.api+json"
         }
         
-        print(f"[DEBUG] PATCH API URL: {api_url}")
-        print(f"[DEBUG] ペイロード: {json.dumps(payload, ensure_ascii=False, indent=2)}")
+        logger.debug("PATCH API URL: %s", api_url)
+        logger.debug("ペイロード: %s", json.dumps(payload, ensure_ascii=False, indent=2))
         
         # API送信（セッション管理されたPATCHリクエスト）
         try:
             from net.http_helpers import proxy_patch
             resp = proxy_patch(api_url, headers=headers, json=payload, timeout=15)
             
-            print(f"[DEBUG] レスポンス: {resp.status_code}")
-            print(f"[DEBUG] レスポンス内容: {resp.text}")
+            logger.debug("レスポンス: %s", resp.status_code)
+            logger.debug("レスポンス内容: %s", resp.text)
             
             if resp.status_code in (200, 201, 202):
                 QMessageBox.information(self.widget, "更新成功", f"サブグループ[{group_name}]の更新に成功しました。")
@@ -134,21 +138,21 @@ class SubgroupEditHandler(SubgroupCreateHandler):
                                 def send_notification():
                                     try:
                                         subgroup_notifier.notify_refresh()
-                                        print("[INFO] サブグループ更新通知を送信しました")
+                                        logger.info("サブグループ更新通知を送信しました")
                                     except Exception as e:
-                                        print(f"[WARNING] サブグループ更新通知送信に失敗: {e}")
+                                        logger.warning("サブグループ更新通知送信に失敗: %s", e)
                                 QTimer.singleShot(2000, send_notification)  # 2秒後に通知
                             except Exception as e:
-                                print(f"[WARNING] サブグループ更新通知の設定に失敗: {e}")
+                                logger.warning("サブグループ更新通知の設定に失敗: %s", e)
                             
                         except Exception as e:
-                            print(f"[ERROR] サブグループ情報自動更新でエラー: {e}")
+                            logger.error("サブグループ情報自動更新でエラー: %s", e)
                     
                     # 3秒後に自動更新実行
                     QTimer.singleShot(3000, auto_refresh)
                     
                 except Exception as e:
-                    print(f"[ERROR] 自動更新の設定でエラー: {e}")
+                    logger.error("自動更新の設定でエラー: %s", e)
                 
                 return True
             else:
@@ -226,7 +230,7 @@ class EditMemberManager:
             from core.bearer_token_manager import BearerTokenManager
             bearer_token = BearerTokenManager.get_valid_token()
         
-        print(f"[DEBUG] update_member_selection: Bearer token={'あり' if bearer_token else 'なし'}")
+        logger.debug("update_member_selection: Bearer token=%s", 'あり' if bearer_token else 'なし')
         
         # 新しいメンバーセレクターを作成（Bearer token付きでAPI補完有効化）
         new_member_selector = create_common_subgroup_member_selector_with_api_complement(
@@ -242,7 +246,7 @@ class EditMemberManager:
         
         # Bearer tokenが取得できていない場合、後で再実行を試行
         if not bearer_token:
-            print("[DEBUG] Bearer token未取得のため、後で再実行を予約")
+            logger.debug("Bearer token未取得のため、後で再実行を予約")
             from qt_compat.core import QTimer
             import weakref
             
@@ -257,7 +261,7 @@ class EditMemberManager:
                 if self_ref and parent_ref:
                     self_ref._retry_with_bearer_token(group_data, user_entries, parent_ref)
                 else:
-                    print("[DEBUG] 再実行時: オブジェクトが削除済みのためスキップ")
+                    logger.debug("再実行時: オブジェクトが削除済みのためスキップ")
             
             QTimer.singleShot(2000, safe_retry)
         
@@ -268,17 +272,17 @@ class EditMemberManager:
         target_parent = parent_widget or self.parent_widget
         
         if not target_parent:
-            print("[DEBUG] 親ウィジェットが無効のため再実行をスキップ")
+            logger.debug("親ウィジェットが無効のため再実行をスキップ")
             return
         
         from core.bearer_token_manager import BearerTokenManager
         bearer_token = BearerTokenManager.get_valid_token()
         
         if bearer_token:
-            print("[DEBUG] Bearer token取得完了 - メンバーセレクターを再作成")
+            logger.debug("Bearer token取得完了 - メンバーセレクターを再作成")
             self.update_member_selection(group_data, user_entries)
         else:
-            print("[DEBUG] Bearer token再取得失敗")
+            logger.debug("Bearer token再取得失敗")
     
     def get_current_selector(self):
         """現在のメンバーセレクターを取得"""
@@ -306,7 +310,7 @@ class SubgroupSelector:
         """既存サブグループの読み込み"""
         try:
             if not os.path.exists(SUBGROUP_JSON_PATH):
-                print(f"[INFO] サブグループファイルが見つかりません: {SUBGROUP_JSON_PATH}")
+                logger.info("サブグループファイルが見つかりません: %s", SUBGROUP_JSON_PATH)
                 self._set_empty_state("サブグループファイルが見つかりません")
                 return False
             
@@ -316,37 +320,55 @@ class SubgroupSelector:
             # データ処理
             groups = self._extract_groups_from_json(data)
             
-            print(f"[DEBUG] サブグループ抽出完了: {len(groups)}件")
+            logger.debug("サブグループ抽出完了: %s件", len(groups))
             self.groups_data = groups
             
             # 試料数の事前読み込み（バックグラウンドで実行）
-            print("[DEBUG] 関連試料数の事前読み込みを開始...")
+            logger.debug("関連試料数の事前読み込みを開始...")
             self._preload_sample_counts()
-            print("[DEBUG] 関連試料数の事前読み込み完了")
+            logger.debug("関連試料数の事前読み込み完了")
             
             self.apply_filter()
             return True
             
         except Exception as e:
-            print(f"[ERROR] サブグループ読み込みエラー: {e}")
+            logger.error("サブグループ読み込みエラー: %s", e)
             self._set_empty_state("読み込みエラー")
             return False
     
     def _extract_groups_from_json(self, data):
         """JSONデータからグループ情報を抽出"""
+        # データ型検証
+        if not isinstance(data, dict):
+            logger.error("JSONデータがdict型ではありません: %s", type(data))
+            return []
+        
         # ユーザー情報マップ作成
         user_map = {}
         included_items = data.get("included", [])
         
+        if not isinstance(included_items, list):
+            logger.error("included がlist型ではありません: %s", type(included_items))
+            return []
+        
         for item in included_items:
+            if not isinstance(item, dict):
+                logger.warning("included内のitemがdict型ではありません: %s", type(item))
+                continue
             if item.get("type") == "user":
                 user_map[item["id"]] = item.get("attributes", {})
         
         # サブグループデータ抽出
         groups = []
         for item in included_items:
+            if not isinstance(item, dict):
+                logger.warning("グループitemがdict型ではありません: %s", type(item))
+                continue
             if item.get("type") == "group":
                 attr = item.get("attributes", {})
+                if not isinstance(attr, dict):
+                    logger.warning("attributes がdict型ではありません: %s", type(attr))
+                    continue
                 if attr.get("groupType") == "TEAM":
                     members = self._build_member_list(attr.get("roles", []), user_map)
                     groups.append({
@@ -428,7 +450,7 @@ class SubgroupSelector:
                 data = json.load(f)
             return data.get("data", {}).get("id", "")
         except Exception as e:
-            print(f"[DEBUG] ユーザーID取得エラー: {e}")
+            logger.debug("ユーザーID取得エラー: %s", e)
             return ""
     
     def _update_combo_items(self):
@@ -479,7 +501,7 @@ class SubgroupSelector:
             return count
             
         except Exception as e:
-            print(f"[DEBUG] 試料数取得エラー (ID: {subgroup_id}): {e}")
+            logger.debug("試料数取得エラー (ID: %s): %s", subgroup_id, e)
             # エラーの場合もキャッシュに保存（再試行を避ける）
             self.sample_count_cache[subgroup_id] = -1
             return -1
@@ -503,7 +525,7 @@ class SubgroupSelector:
                         self._get_sample_count(subgroup_id)
         
         except Exception as e:
-            print(f"[DEBUG] 試料数事前読み込みエラー: {e}")
+            logger.debug("試料数事前読み込みエラー: %s", e)
     
     def _on_combo_selection_changed(self, text):
         """コンボボックス選択変更時の処理"""
@@ -570,7 +592,7 @@ def create_subgroup_edit_widget(parent, title, color, create_auto_resize_button)
         from ..core import subgroup_api_helper
         subgroup_api_helper.backup_and_clear_dynamic_users()
     except Exception as e:
-        print(f"[WARNING] 修正タブ作成時の動的ユーザー初期化エラー: {e}")
+        logger.warning("修正タブ作成時の動的ユーザー初期化エラー: %s", e)
     
     # 外部リフレッシュ用
     widget._refresh_subgroup_list = managers['selector'].load_existing_subgroups
@@ -735,14 +757,14 @@ def _initialize_managers(combo, filter_combo, scroll_area, form_builder, form_wi
         if not group_data:
             return
         
-        print(f"[INFO] 選択されたグループ: {group_data['name']}")
+        logger.info("選択されたグループ: %s", group_data['name'])
         
         # 修正タブでグループが選択された際に動的ユーザーを初期化
         try:
             from ..core import subgroup_api_helper
             subgroup_api_helper.backup_and_clear_dynamic_users()
         except Exception as e:
-            print(f"[WARNING] 動的ユーザー初期化エラー: {e}")
+            logger.warning("動的ユーザー初期化エラー: %s", e)
         
         # フォーム更新
         form_manager.populate_form_from_group(group_data)
@@ -823,7 +845,7 @@ def _setup_event_handlers(widget, parent, managers, button_section, form_widgets
         try:
             import webbrowser
             webbrowser.open(url)
-            print(f"[INFO] サブグループページをブラウザで開きました: {url}")
+            logger.info("サブグループページをブラウザで開きました: %s", url)
         except Exception as e:
             QMessageBox.warning(widget, "エラー", f"ブラウザでページを開けませんでした: {str(e)}")
     
@@ -888,6 +910,6 @@ def _execute_update(edit_handler, form_values, roles):
     success = edit_handler.send_update_request(payload, group_id, group_name)
     
     if success:
-        print(f"[INFO] サブグループ[{group_name}]の更新が完了しました")
+        logger.info("サブグループ[%s]の更新が完了しました", group_name)
     else:
-        print(f"[ERROR] サブグループ[{group_name}]の更新に失敗しました")
+        logger.error("サブグループ[%s]の更新に失敗しました", group_name)

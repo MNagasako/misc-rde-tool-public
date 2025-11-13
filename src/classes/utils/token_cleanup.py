@@ -86,8 +86,8 @@ def cleanup_on_startup():
     if debug_mode:
         logger.warning("[CLEANUP] デバッグモード起動 - トークン・認証情報をクリア")
         print("=" * 80)
-        print("[CLEANUP] デバッグモード起動検出")
-        print("[CLEANUP] 既存のトークン・認証情報をクリアします...")
+        logger.info("デバッグモード起動検出")
+        logger.info("既存のトークン・認証情報をクリアします...")
         print("=" * 80)
     else:
         logger.info("[CLEANUP] 起動時クリーンアップ - トークン・認証情報を削除")
@@ -95,7 +95,7 @@ def cleanup_on_startup():
     clear_private_directory()
     
     if debug_mode:
-        print("[CLEANUP] クリーンアップ完了")
+        logger.info("クリーンアップ完了")
         print("=" * 80)
 
 
@@ -111,8 +111,8 @@ def cleanup_on_exit():
     if debug_mode:
         logger.warning("[CLEANUP] デバッグモード終了 - トークン・認証情報をクリア")
         print("=" * 80)
-        print("[CLEANUP] アプリケーション終了 - デバッグモード")
-        print("[CLEANUP] トークン・認証情報をクリアします...")
+        logger.info("アプリケーション終了 - デバッグモード")
+        logger.info("トークン・認証情報をクリアします...")
         print("=" * 80)
     else:
         logger.info("[CLEANUP] 終了時クリーンアップ - トークン・認証情報を削除")
@@ -120,7 +120,7 @@ def cleanup_on_exit():
     clear_private_directory()
     
     if debug_mode:
-        print("[CLEANUP] クリーンアップ完了")
+        logger.info("クリーンアップ完了")
         print("=" * 80)
 
 

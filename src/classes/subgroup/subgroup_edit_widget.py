@@ -5,6 +5,7 @@
 
 import os
 import json
+import logging
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGridLayout, 
     QPushButton, QMessageBox, QScrollArea, QCheckBox, QRadioButton, 
@@ -13,6 +14,9 @@ from qt_compat.widgets import (
 from config.common import SUBGROUP_JSON_PATH
 from qt_compat.core import Qt
 from classes.dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
+
+# ロガー設定
+logger = logging.getLogger(__name__)
 from .util.subgroup_ui_helpers import (
     SubjectInputValidator, SubgroupFormBuilder, 
     SubgroupCreateHandler, MemberDataProcessor,
@@ -89,16 +93,16 @@ class SubgroupEditHandler(SubgroupCreateHandler):
             "Accept": "application/vnd.api+json"
         }
         
-        print(f"[DEBUG] PATCH API URL: {api_url}")
-        print(f"[DEBUG] ペイロード: {json.dumps(payload, ensure_ascii=False, indent=2)}")
+        logger.debug("PATCH API URL: %s", api_url)
+        logger.debug("ペイロード: %s", json.dumps(payload, ensure_ascii=False, indent=2))
         
         # API送信（セッション管理されたPATCHリクエスト）
         try:
             from net.http_helpers import proxy_patch
             resp = proxy_patch(api_url, headers=headers, json=payload, timeout=15)
             
-            print(f"[DEBUG] レスポンス: {resp.status_code}")
-            print(f"[DEBUG] レスポンス内容: {resp.text}")
+            logger.debug("レスポンス: %s", resp.status_code)
+            logger.debug("レスポンス内容: %s", resp.text)
             
             if resp.status_code in (200, 201, 202):
                 QMessageBox.information(self.widget, "更新成功", f"サブグループ[{group_name}]の更新に成功しました。")
@@ -123,13 +127,13 @@ class SubgroupEditHandler(SubgroupCreateHandler):
                             progress_dialog = show_progress_dialog(self.widget, "サブグループ情報自動更新", worker)
                             
                         except Exception as e:
-                            print(f"[ERROR] サブグループ情報自動更新でエラー: {e}")
+                            logger.error("サブグループ情報自動更新でエラー: %s", e)
                     
                     # 3秒後に自動更新実行
                     QTimer.singleShot(3000, auto_refresh)
                     
                 except Exception as e:
-                    print(f"[ERROR] 自動更新の設定でエラー: {e}")
+                    logger.error("自動更新の設定でエラー: %s", e)
                 
                 return True
             else:
@@ -237,7 +241,7 @@ class SubgroupSelector:
         """既存サブグループの読み込み"""
         try:
             if not os.path.exists(SUBGROUP_JSON_PATH):
-                print(f"[INFO] サブグループファイルが見つかりません: {SUBGROUP_JSON_PATH}")
+                logger.info("サブグループファイルが見つかりません: %s", SUBGROUP_JSON_PATH)
                 self._set_empty_state("サブグループファイルが見つかりません")
                 return False
             
@@ -247,13 +251,13 @@ class SubgroupSelector:
             # データ処理
             groups = self._extract_groups_from_json(data)
             
-            print(f"[DEBUG] サブグループ抽出完了: {len(groups)}件")
+            logger.debug("サブグループ抽出完了: %s件", len(groups))
             self.groups_data = groups
             self.apply_filter()
             return True
             
         except Exception as e:
-            print(f"[ERROR] サブグループ読み込みエラー: {e}")
+            logger.error("サブグループ読み込みエラー: %s", e)
             self._set_empty_state("読み込みエラー")
             return False
     
@@ -352,7 +356,7 @@ class SubgroupSelector:
                 data = json.load(f)
             return data.get("data", {}).get("id", "")
         except Exception as e:
-            print(f"[DEBUG] ユーザーID取得エラー: {e}")
+            logger.debug("ユーザーID取得エラー: %s", e)
             return ""
     
     def _update_combo_items(self):
@@ -578,7 +582,7 @@ def _initialize_managers(combo, filter_combo, scroll_area, form_builder, form_wi
         if not group_data:
             return
         
-        print(f"[INFO] 選択されたグループ: {group_data['name']}")
+        logger.info("選択されたグループ: %s", group_data['name'])
         
         # フォーム更新
         form_manager.populate_form_from_group(group_data)
@@ -685,6 +689,6 @@ def _execute_update(edit_handler, form_values, roles):
     success = edit_handler.send_update_request(payload, group_id, group_name)
     
     if success:
-        print(f"[INFO] サブグループ[{group_name}]の更新が完了しました")
+        logger.info("サブグループ[%s]の更新が完了しました", group_name)
     else:
-        print(f"[ERROR] サブグループ[{group_name}]の更新に失敗しました")
+        logger.error("サブグループ[%s]の更新に失敗しました", group_name)

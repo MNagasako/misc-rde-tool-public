@@ -115,7 +115,7 @@ def _continue_data_register_process(parent, bearer_token, dataset_info, form_val
         if not custom_values:
             # form_valuesからcustom_valuesキーを直接取得してみる
             custom_values = form_values.get('custom_values', {}) if form_values else {}
-            print(f"[DEBUG] プレビュー - customが空のためcustom_valuesを取得: {custom_values}")
+            logger.debug("プレビュー - customが空のためcustom_valuesを取得: %s", custom_values)
         preview_payload = {
             "data": {
                 "type": "entry",
@@ -191,7 +191,7 @@ def _continue_data_register_process(parent, bearer_token, dataset_info, form_val
 
     reply = msg_box.exec()
     if msg_box.clickedButton() != yes_btn:
-        print("[INFO] データ登録処理はユーザーによりキャンセルされました。")
+        logger.info("データ登録処理はユーザーによりキャンセルされました。")
         return
 
     # --- ここからアップロード処理（プログレスバー付き） ---
@@ -237,7 +237,7 @@ def _continue_data_register_process(parent, bearer_token, dataset_info, form_val
         progress.setValue(current_file_idx)
         QCoreApplication.processEvents()
         if progress.wasCanceled():
-            print("[INFO] アップロードがキャンセルされました。")
+            logger.info("アップロードがキャンセルされました。")
             return
     # 添付ファイルアップロード
     for path in temp_attachment_paths:
@@ -260,19 +260,19 @@ def _continue_data_register_process(parent, bearer_token, dataset_info, form_val
         progress.setValue(current_file_idx)
         QCoreApplication.processEvents()
         if progress.wasCanceled():
-            print("[INFO] アップロードがキャンセルされました。")
+            logger.info("アップロードがキャンセルされました。")
             return
     progress.setValue(total_files)
     progress.setLabelText("アップロード完了")
     QCoreApplication.processEvents()
-    print(f"[INFO] アップロード完了: {dataFiles}")
+    logger.info("アップロード完了: %s", dataFiles)
     if numberUploaded == 0 and not attachments:
-        print("[ERROR] アップロードされたファイルがありません。")
+        logger.error("アップロードされたファイルがありません。")
         return
     if not flagUploadSuccess:
-        print("[ERROR] アップロードに失敗したファイルがあります。")
-        print(f"失敗したファイル: {failedUploads}")
-        print("エントリー作成を中止します。")
+        logger.error("アップロードに失敗したファイルがあります。")
+        logger.debug("失敗したファイル: %s", failedUploads)
+        logger.debug("エントリー作成を中止します。")
         if parent:
             QMessageBox.critical(parent, "アップロード失敗", 
                                f"ファイルのアップロードに失敗しました。\n失敗したファイル:\n{chr(10).join(failedUploads)}")
@@ -379,7 +379,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
     if not custom_values:
         # form_valuesからcustom_valuesキーを直接取得してみる
         custom_values = form_values.get('custom_values', {}) if form_values else {}
-        print(f"[DEBUG] 正式登録 - customが空のためcustom_valuesを取得: {custom_values}")
+        logger.debug("正式登録 - customが空のためcustom_valuesを取得: %s", custom_values)
 
     if not sample_id:
         payload_detail_sample = {
@@ -477,9 +477,9 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
         if progress:
             progress.setLabelText(f"バリデーション応答: {resp_validation.status_code} {resp_validation.reason}")
             QCoreApplication.processEvents()
-        print(f"response validation:   {resp_validation.status_code} {resp_validation.reason} {resp_validation.text}")
+        logger.debug("response validation:   %s %s %s", resp_validation.status_code, resp_validation.reason, resp_validation.text)
         if resp_validation.status_code not in [200, 201, 202]:
-            print(f"[ERROR] バリデーションエラー: {resp_validation.text}")
+            logger.error("バリデーションエラー: %s", resp_validation.text)
             if progress:
                 progress.setLabelText("バリデーションエラー")
                 QCoreApplication.processEvents()
@@ -540,21 +540,21 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
         os.makedirs(output_dir, exist_ok=True)
         with open(os.path.join(output_dir, "create_entry.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        print(f"response:   {resp.status_code} {resp.reason}")
-        print("[INFO] (create_entry.json)の取得・保存に成功しました。")
+        logger.debug("response:   %s %s", resp.status_code, resp.reason)
+        logger.info("(create_entry.json)の取得・保存に成功しました。")
         
         # データ登録成功時にサンプル情報を自動取得
         try:
-            print("[INFO] データ登録成功。サンプル情報を自動取得中...")
+            logger.info("データ登録成功。サンプル情報を自動取得中...")
             from classes.basic.core.basic_info_logic import fetch_sample_info_for_dataset_only
             # bearer_token=Noneで自動選択（Material API用トークンが自動的に選ばれる）
             sample_result = fetch_sample_info_for_dataset_only(None, datasetId)
             if isinstance(sample_result, str) and "エラー" not in sample_result and "失敗" not in sample_result:
-                print(f"[INFO] サンプル情報の自動取得完了: {sample_result}")
+                logger.info("サンプル情報の自動取得完了: %s", sample_result)
             else:
-                print(f"[WARNING] サンプル情報の自動取得に問題: {sample_result}")
+                logger.warning("サンプル情報の自動取得に問題: %s", sample_result)
         except Exception as e:
-            print(f"[WARNING] サンプル情報の自動取得に失敗: {e}")
+            logger.warning("サンプル情報の自動取得に失敗: %s", e)
         
         if progress:
             progress.setLabelText("エントリー登録完了")
@@ -581,7 +581,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
         
         return {"success": True, "response": data}
     except Exception as e:
-        print(f"[ERROR] (create_entry.json)の取得・保存に失敗しました: {e}")
+        logger.error("(create_entry.json)の取得・保存に失敗しました: %s", e)
         if progress:
             progress.setLabelText(f"エラー: {e}")
             QCoreApplication.processEvents()
@@ -632,7 +632,7 @@ def upload_file(bearer_token,datasetId= "a74b58c0-9907-40e7-a261-a75519730d82",f
     データ登録APIへのファイルアップロードテスト
     """
     if not bearer_token:
-        print("[ERROR] Bearerトークンが取得できません。ログイン状態を確認してください。")
+        logger.error("Bearerトークンが取得できません。ログイン状態を確認してください。")
         return
 
     output_dir=os.path.join(OUTPUT_RDE_DIR, "data")
@@ -670,8 +670,8 @@ def upload_file(bearer_token,datasetId= "a74b58c0-9907-40e7-a261-a75519730d82",f
             "User-Agent": "PythonUploader/1.0",
         }
 
-        print(f"[INFO] アップロード開始: {filename}")
-        print(f"[DEBUG] X-File-Name: {encoded_filename}")
+        logger.info("アップロード開始: %s", filename)
+        logger.debug("X-File-Name: %s", encoded_filename)
 
         with open(file_path, 'rb') as f:
             binary_data = f.read()
@@ -690,13 +690,13 @@ def upload_file(bearer_token,datasetId= "a74b58c0-9907-40e7-a261-a75519730d82",f
             json.dump(data, outf, ensure_ascii=False, indent=2)
 
         upload_id = data.get("uploadId")
-        print(f"[SUCCESS] アップロード成功: uploadId = {upload_id}")
+        logger.info("[SUCCESS] アップロード成功: uploadId = %s", upload_id)
         return upload_id
 
     except Exception as e:
-        print(f"[ERROR] アップロードエラー: {e}")
+        logger.error("アップロードエラー: %s", e)
         if 'resp' in locals() and resp is not None:
-            print(f"[DEBUG] ステータス: {resp.status_code}")
-            print(f"[DEBUG] レスポンス: {resp.text}")
+            logger.debug("ステータス: %s", resp.status_code)
+            logger.debug("レスポンス: %s", resp.text)
 
     return None

@@ -8,6 +8,11 @@ import json
 import os
 from config.common import get_dynamic_file_path
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 
 class AIPromptManager:
     """AI分析プロンプトの構築と管理を担当"""
@@ -26,7 +31,7 @@ class AIPromptManager:
         if self.logger:
             self.logger.info(f"[{category}] {message}")
         else:
-            print(f"[{category}] {message}")
+            logger.debug("[%s] %s", category, message)
     
     def _debug_log_and_print(self, message, log_file=None, category="DEBUG"):
         """
@@ -45,7 +50,7 @@ class AIPromptManager:
                 with open(log_file, 'a', encoding='utf-8') as f:
                     f.write(formatted_message + '\n')
             except Exception as e:
-                print(f"ログファイル書き込みエラー: {e}")
+                logger.error("ログファイル書き込みエラー: %s", e)
         
         # ロガー出力（設定されている場合）
         if self.logger:

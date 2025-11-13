@@ -3,6 +3,11 @@ import os
 import sys
 from config.common import OUTPUT_LOG_DIR
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 import json
 from pathlib import Path
 
@@ -61,7 +66,7 @@ class ARIMAnonymizer:
                 if self.logger:
                     self.logger.info(f"[ARIM] スキップ: {json_file} (anonymized_ または diff_ ファイル)")
                 else:
-                    print(f"[ARIM] スキップ: {json_file} (anonymized_ または diff_ ファイル)")
+                    logger.info("スキップ: %s (anonymized_ または diff_ ファイル)", json_file)
                 continue
             try:
                 with open(json_file, encoding="utf-8") as f:
@@ -91,8 +96,8 @@ class ARIMAnonymizer:
                         self.logger.info(f"[ARIM] 差分: {diff_path}")
                         #self.logger.info(f"[ARIM] 匿名化済: anonymized_{os.path.basename(json_file)} 差分: diff_{os.path.basename(json_file)}.txt")
                     else:
-                        print(f"[ARIM] 匿名化済: {anonymized_path}")
-                        print(f"[ARIM] 差分: {diff_path}")
+                        logger.info("匿名化済: %s", anonymized_path)
+                        logger.info("差分: %s", diff_path)
                         #print(f"匿名化済: anonymized_{os.path.basename(json_file)} 差分: diff_{os.path.basename(json_file)}.txt")
                     found += 1
                     # 匿名化したファイルのディレクトリにログを出力（loggerに統一）
@@ -101,7 +106,7 @@ class ARIMAnonymizer:
                     if self.logger:
                         self.logger.info(f"[ARIM] 匿名化不要: {json_file}")
                     else:
-                        print(f"[ARIM] 匿名化不要: {json_file}")
+                        logger.info("匿名化不要: %s", json_file)
                 # ログファイルにも出力
                 if self.logger:
                     def _shorten_json(s, maxlen=300):
@@ -127,12 +132,12 @@ class ARIMAnonymizer:
                 if self.logger:
                     self.logger.error(f"[ARIM] 匿名化失敗: {json_file}: {e}")
                 else:
-                    print(f"[ARIM] 匿名化失敗: {json_file}: {e}")
+                    logger.info("匿名化失敗: %s: %s", json_file, e)
         if found == 0:
             if self.logger:
                 self.logger.info(f"[ARIM] 匿名化対象JSONが見つかりません（{dataset_path}以下）")
             else:
-                print(f"[ARIM] 匿名化対象JSONが見つかりません（{dataset_path}以下）")
+                logger.info("匿名化対象JSONが見つかりません（%s以下）", dataset_path)
         return True
 
     def anonymize_json(self, data, grant_number):

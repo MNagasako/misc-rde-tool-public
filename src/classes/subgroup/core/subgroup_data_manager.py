@@ -6,6 +6,11 @@ import os
 import json
 from config.common import SUBGROUP_JSON_PATH, OUTPUT_RDE_DIR, INPUT_DIR
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 
 class SubgroupDataManager:
     """サブグループデータの読み込み・管理を担当"""
@@ -23,7 +28,23 @@ class SubgroupDataManager:
         try:
             with open(SUBGROUP_JSON_PATH, encoding="utf-8") as f:
                 data = json.load(f)
-            return [item for item in data.get("included", []) if item.get("type") == "user"]
+            
+            # includedセクションからユーザーを取得し、sourceとsource_formatを追加
+            user_list = []
+            for item in data.get("included", []):
+                if item.get("type") == "user":
+                    # 既存のitem構造を保持しつつ、attributesにsource情報を追加
+                    user_entry = item.copy()
+                    if "attributes" not in user_entry:
+                        user_entry["attributes"] = {}
+                    
+                    # source情報を追加（フィルタ機能用）
+                    user_entry["source"] = "subGroup.json"
+                    user_entry["source_format"] = "included"
+                    
+                    user_list.append(user_entry)
+            
+            return user_list
         except Exception as e:
             return f"ユーザーリスト取得エラー: {e}"
     
@@ -229,7 +250,7 @@ class MemberDataProcessor:
                         user_id, name, email = parts[0], parts[1], parts[2]
                         member_info[user_id] = {"name": name, "email": email}
             except Exception as e:
-                print(f"[WARNING] メンバー情報読み込みエラー: {e}")
+                logger.warning("メンバー情報読み込みエラー: %s", e)
         return member_info
     
     @staticmethod

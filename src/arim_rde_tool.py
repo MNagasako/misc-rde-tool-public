@@ -41,6 +41,11 @@ v2.0.1機能:
 import sys
 import argparse
 import os
+
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
 # PyQt5 - WebEngine初期化問題の回避
 from qt_compat import initialize_webengine
 from qt_compat.core import Qt
@@ -122,26 +127,26 @@ class Browser(QWidget):
             self.token_manager.token_expired.connect(self._on_token_expired)
             
             logger.info("[TokenManager] 自動リフレッシュタイマー開始")
-            print(f"[INFO] TokenManager初期化完了 - 自動リフレッシュ有効")
+            logger.info("TokenManager初期化完了 - 自動リフレッシュ有効")
         except Exception as tm_err:
             logger.error(f"[TokenManager] 初期化エラー: {tm_err}", exc_info=True)
-            print(f"[ERROR] TokenManager初期化失敗: {tm_err}")
+            logger.error("TokenManager初期化失敗: %s", tm_err)
         
         # レガシーファイルが優先（互換性維持）、なければ新認証システムの値を使用
         if legacy_username or legacy_password:
             self.login_username = legacy_username
             self.login_password = legacy_password
             self.login_mode = legacy_mode
-            print(f"[INFO] レガシーログイン情報使用: {self.login_username}")
+            logger.info("レガシーログイン情報使用: %s", self.login_username)
         else:
             # 新認証システムから読み込まれた値を使用
             self.login_username = getattr(self.login_manager, 'login_username', None)
             self.login_password = getattr(self.login_manager, 'login_password', None)
             self.login_mode = getattr(self.login_manager, 'login_mode', None)
             if self.login_username:
-                print(f"[INFO] 新認証システムログイン情報使用: {self.login_username}")
+                logger.info("新認証システムログイン情報使用: %s", self.login_username)
             else:
-                print(f"[INFO] ログイン情報なし - 手動ログインが必要です")
+                logger.info("ログイン情報なし - 手動ログインが必要です")
 
         # BrowserControllerの初期化
         self.browser_controller = BrowserController(self)
@@ -318,13 +323,13 @@ class Browser(QWidget):
     def _on_token_refreshed(self, host):
         """トークン更新成功通知ハンドラ"""
         logger.info(f"[TokenManager] トークン自動更新成功: {host}")
-        print(f"[INFO] トークン更新成功: {host}")
+        logger.info("トークン更新成功: %s", host)
         # UI通知は不要（自動更新のため）
     
     def _on_token_refresh_failed(self, host, error):
         """トークン更新失敗通知ハンドラ"""
         logger.warning(f"[TokenManager] トークン自動更新失敗: {host} - {error}")
-        print(f"[WARNING] トークン更新失敗: {host} - {error}")
+        logger.warning("トークン更新失敗: %s - %s", host, error)
         # 必要に応じてUI通知を追加可能
     
     def _on_token_expired(self, host):
@@ -337,7 +342,7 @@ class Browser(QWidget):
             return
         
         logger.error(f"[TokenManager] RefreshToken期限切れ: {host} - 再ログインが必要です")
-        print(f"[ERROR] RefreshToken期限切れ: {host} - 再ログインしてください")
+        logger.error("RefreshToken期限切れ: %s - 再ログインしてください", host)
         
         # UI通知（ユーザーに再ログインを促す）
         from qt_compat.widgets import QMessageBox
@@ -382,6 +387,13 @@ class Browser(QWidget):
                 # UI有効化
                 if hasattr(self, 'ui_controller'):
                     self.ui_controller.set_buttons_enabled_except_login_settings(True)
+                
+                # ログイン完了通知を送信
+                if hasattr(self.login_manager, '_notify_login_complete'):
+                    self.login_manager._rde_token_acquired = True
+                    self.login_manager._material_token_acquired = True
+                    self.login_manager._login_in_progress = False
+                    QTimer.singleShot(500, self.login_manager._notify_login_complete)
             else:
                 # トークンが不足している場合
                 if not rde_exists and not material_exists:
@@ -441,7 +453,7 @@ class Browser(QWidget):
         self.stop_blinking_msg()
         if hasattr(self, 'display_manager') and self.display_manager:
             self.display_manager.stop_blinking_msg()
-        print('[TEST] 初期化テスト完了 - 早期終了')
+        logger.debug("初期化テスト完了 - 早期終了")
         QApplication.quit()
     
     def show_legacy_warning_banner(self):
@@ -781,33 +793,33 @@ def main():
                     version = f.readline().strip()
                 print(version)
             except Exception:
-                print('バージョン情報の取得に失敗しました')
+                logger.debug("バージョン情報の取得に失敗しました")
             sys.exit(0)
 
         if args.version_all:
-            print('--- バージョン情報一覧 ---')
+            logger.debug("--- バージョン情報一覧 ---")
             # VERSION.txt
             try:
                 with open(os.path.join(os.path.dirname(__file__), '../VERSION.txt'), encoding='utf-8') as f:
-                    print(f"VERSION.txt: {f.readline().strip()}")
+                    logger.debug("VERSION.txt: %s", f.readline().strip())
             except Exception:
-                print('VERSION.txt: 取得失敗')
+                logger.debug("VERSION.txt: 取得失敗")
             # config/common.py REVISION
             try:
                 from config.common import REVISION
-                print(f"config/common.py REVISION: {REVISION}")
+                logger.debug("config/common.py REVISION: %s", REVISION)
             except Exception:
-                print('config/common.py REVISION: 取得失敗')
+                logger.debug("config/common.py REVISION: 取得失敗")
             # arim_rde_tool.py ヘッダー
             try:
                 with open(__file__, encoding='utf-8') as f:
                     for i in range(10):
                         line = f.readline()
                         if 'ARIM RDE Tool v' in line:
-                            print(f"arim_rde_tool.py header: {line.strip()}")
+                            logger.debug("arim_rde_tool.py header: %s", line.strip())
                             break
             except Exception:
-                print('arim_rde_tool.py header: 取得失敗')
+                logger.debug("arim_rde_tool.py header: 取得失敗")
             # README.md
             try:
                 readme_path = os.path.join(os.path.dirname(__file__), '../README.md')
@@ -815,18 +827,18 @@ def main():
                     for i in range(10):
                         line = f.readline()
                         if 'ARIM RDE Tool v' in line:
-                            print(f"README.md: {line.strip()}")
+                            logger.debug("README.md: %s", line.strip())
                             break
             except Exception:
-                print('README.md: 取得失敗')
+                logger.debug("README.md: 取得失敗")
             # docs/ARCHITECTURE_FEATURE_MAP_v1.17.2.md
             try:
                 arch_path = os.path.join(os.path.dirname(__file__), '../docs/ARCHITECTURE_FEATURE_MAP_v1.17.2.md')
                 with open(arch_path, encoding='utf-8') as f:
                     line = f.readline()
-                    print(f"ARCHITECTURE_FEATURE_MAP_v1.17.2.md: {line.strip()}")
+                    logger.debug("ARCHITECTURE_FEATURE_MAP_v1.17.2.md: %s", line.strip())
             except Exception:
-                print('ARCHITECTURE_FEATURE_MAP_v1.17.2.md: 取得失敗')
+                logger.debug("ARCHITECTURE_FEATURE_MAP_v1.17.2.md: 取得失敗")
 
             # src配下の__version__定義
             import re
@@ -843,11 +855,11 @@ def main():
                 except Exception:
                     continue
             if version_matches:
-                print('src配下の__version__定義:')
+                logger.debug("src配下の__version__定義:")
                 for v in version_matches:
                     print('  ' + v)
             else:
-                print('src配下の__version__定義: なし')
+                logger.debug("src配下の__version__定義: なし")
             sys.exit(0)
         
         show_splash_screen()
@@ -863,5 +875,5 @@ if __name__ == '__main__':
         main()
     except Exception as e:
         logger.error(f"アプリケーション起動時にエラーが発生しました: {e}")
-        print(f"起動エラー: {e}")
+        logger.error("起動エラー: %s", e)
         sys.exit(1)

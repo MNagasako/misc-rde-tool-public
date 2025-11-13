@@ -2,6 +2,11 @@ import os
 import sys
 from config.common import get_static_resource_path, REVISION
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 from PIL import Image, ImageTk
 import tkinter as tk
 import time
@@ -60,7 +65,7 @@ def show_splash_screen():
         root.after(2000, root.destroy)
         root.mainloop()
     except Exception as e:
-        print(f"[WARN] スプラッシュ画面の表示に失敗: {e}")
+        logger.warning("スプラッシュ画面の表示に失敗: %s", e)
         # 失敗してもPyQt5起動を妨げない
 
 if __name__ == "__main__":

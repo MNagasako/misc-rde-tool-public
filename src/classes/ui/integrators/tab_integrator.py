@@ -193,7 +193,7 @@ class MainWindowTabIntegrator:
                 from qt_compat.widgets import QMessageBox
                 QMessageBox.warning(self.parent, "エラー", f"設定ダイアログの起動に失敗しました: {e}")
             except:
-                print(f"設定ダイアログエラー: {e}")
+                logger.error("設定ダイアログエラー: %s", e)
                 
     def update_current_mode(self, mode: str):
         """現在のモードを更新"""

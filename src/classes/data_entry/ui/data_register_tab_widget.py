@@ -6,6 +6,7 @@
 - 一括登録タブ: 将来の一括登録機能（現在はプレースホルダー）
 """
 
+import logging
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QTabWidget, QLabel, QScrollArea, QSizePolicy, QApplication
 )
@@ -13,6 +14,9 @@ from qt_compat.core import Qt
 from qt_compat.gui import QFont
 
 from .data_register_ui_creator import create_data_register_widget
+
+# ロガー設定
+logger = logging.getLogger(__name__)
 from classes.data_entry.conf.ui_constants import (
     DATA_REGISTER_TAB_STYLE,
     DATA_REGISTER_FORM_STYLE,
@@ -83,7 +87,7 @@ class DataRegisterTabWidget(QWidget):
     def _on_tab_changed(self, index):
         """データ登録タブ選択時のウインドウサイズ調整"""
         # デバッグ出力
-        print(f"[DEBUG] タブ変更: index={index}")
+        logger.debug("タブ変更: index=%s", index)
 
         top_level = self.window()
         screen = QApplication.primaryScreen()
@@ -94,20 +98,20 @@ class DataRegisterTabWidget(QWidget):
             win_class = type(top_level).__name__.lower()
             if any(x in win_title for x in ["ログイン", "login", "データ取得", "data fetch", "datafetch2", "data取得2"]) or \
                any(x in win_class for x in ["login", "datafetch", "datafetch2"]):
-                print(f"[DEBUG] ログイン・データ取得系ウインドウのためサイズ調整スキップ")
+                logger.debug("ログイン・データ取得系ウインドウのためサイズ調整スキップ")
                 return
 
         # 現在のウインドウサイズをデバッグ出力
         if top_level:
             current_size = top_level.size()
-            print(f"[DEBUG] 現在のウインドウサイズ: {current_size.width()}x{current_size.height()}")
-            print(f"[DEBUG] メインウィンドウ型: {type(top_level).__name__}")
-            print(f"[DEBUG] メインウィンドウタイトル: {top_level.windowTitle()}")
+            logger.debug("現在のウインドウサイズ: %sx%s", current_size.width(), current_size.height())
+            logger.debug("メインウィンドウ型: %s", type(top_level).__name__)
+            logger.debug("メインウィンドウタイトル: %s", top_level.windowTitle())
             # サイズ制約の確認
             min_size = top_level.minimumSize()
             max_size = top_level.maximumSize()
-            print(f"[DEBUG] 最小サイズ制約: {min_size.width()}x{min_size.height()}")
-            print(f"[DEBUG] 最大サイズ制約: {max_size.width()}x{max_size.height()}")
+            logger.debug("最小サイズ制約: %sx%s", min_size.width(), min_size.height())
+            logger.debug("最大サイズ制約: %sx%s", max_size.width(), max_size.height())
 
         if index == 0:  # 通常登録タブ
             # アスペクト比・横幅制限解除
@@ -125,39 +129,39 @@ class DataRegisterTabWidget(QWidget):
                 standard_width = 1200  # 通常登録タブの標準幅
                 target_height = int(screen_size.height() * 0.90)
 
-                print(f"[DEBUG] スクリーンサイズ: {screen_size.width()}x{screen_size.height()}")
-                print(f"[DEBUG] 通常登録ターゲットサイズ: {standard_width}x{target_height} (幅=標準, 高さ=95%)")
+                logger.debug("スクリーンサイズ: %sx%s", screen_size.width(), screen_size.height())
+                logger.debug("通常登録ターゲットサイズ: %sx%s (幅=標準, 高さ=95%)", standard_width, target_height)
                 
                 # サイズ制約をクリア
                 if hasattr(top_level, 'setMinimumSize'):
                     top_level.setMinimumSize(200, 200)
-                    print(f"[DEBUG] 最小サイズを200x200に設定")
+                    logger.debug("最小サイズを200x200に設定")
                 if hasattr(top_level, 'setMaximumSize'):
                     top_level.setMaximumSize(16777215, 16777215)
-                    print(f"[DEBUG] 最大サイズを制限解除")
+                    logger.debug("最大サイズを制限解除")
                 
                 # サイズポリシーを設定
                 if hasattr(top_level, 'setSizePolicy'):
                     top_level.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-                    print(f"[DEBUG] サイズポリシーをPreferredに設定")
+                    logger.debug("サイズポリシーをPreferredに設定")
                 
                 if hasattr(top_level, 'showNormal'):
                     top_level.showNormal()
-                    print(f"[DEBUG] showNormal()実行")
+                    logger.debug("showNormal()実行")
                 if hasattr(top_level, 'resize'):
                     top_level.resize(standard_width, target_height)
-                    print(f"[DEBUG] resize({standard_width}x{target_height})実行")
+                    logger.debug("resize(%sx%s)実行", standard_width, target_height)
                     # リサイズ直後のサイズを確認
                     actual_size = top_level.size()
-                    print(f"[DEBUG] リサイズ後の実際のサイズ: {actual_size.width()}x{actual_size.height()}")
+                    logger.debug("リサイズ後の実際のサイズ: %sx%s", actual_size.width(), actual_size.height())
                 if hasattr(top_level, 'show'):
                     top_level.show()
-                    print(f"[DEBUG] show()実行")
+                    logger.debug("show()実行")
                     
                 # 強制的にイベント処理を実行してからサイズを再確認
                 QApplication.processEvents()
                 final_size = top_level.size()
-                print(f"[DEBUG] 最終確認サイズ: {final_size.width()}x{final_size.height()}")
+                logger.debug("最終確認サイズ: %sx%s", final_size.width(), final_size.height())
                 
         elif index == 1:  # 一括登録タブ
             # アスペクト比・横幅制限解除
@@ -174,39 +178,39 @@ class DataRegisterTabWidget(QWidget):
                 target_width = int(screen_size.width() * 0.90)
                 target_height = int(screen_size.height() * 0.90)
                 
-                print(f"[DEBUG] スクリーンサイズ: {screen_size.width()}x{screen_size.height()}")
-                print(f"[DEBUG] ターゲットサイズ(95%): {target_width}x{target_height}")
+                logger.debug("スクリーンサイズ: %sx%s", screen_size.width(), screen_size.height())
+                logger.debug("ターゲットサイズ(95%): %sx%s", target_width, target_height)
                 
                 # サイズ制約をクリア
                 if hasattr(top_level, 'setMinimumSize'):
                     top_level.setMinimumSize(200, 200)
-                    print(f"[DEBUG] 最小サイズを200x200に設定")
+                    logger.debug("最小サイズを200x200に設定")
                 if hasattr(top_level, 'setMaximumSize'):
                     top_level.setMaximumSize(16777215, 16777215)
-                    print(f"[DEBUG] 最大サイズを制限解除")
+                    logger.debug("最大サイズを制限解除")
                 
                 # サイズポリシーを設定
                 if hasattr(top_level, 'setSizePolicy'):
                     top_level.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-                    print(f"[DEBUG] サイズポリシーをPreferredに設定")
+                    logger.debug("サイズポリシーをPreferredに設定")
                 
                 if hasattr(top_level, 'showNormal'):
                     top_level.showNormal()
-                    print(f"[DEBUG] showNormal()実行")
+                    logger.debug("showNormal()実行")
                 if hasattr(top_level, 'resize'):
                     top_level.resize(target_width, target_height)
-                    print(f"[DEBUG] resize({target_width}x{target_height})実行")
+                    logger.debug("resize(%sx%s)実行", target_width, target_height)
                     # リサイズ直後のサイズを確認
                     actual_size = top_level.size()
-                    print(f"[DEBUG] リサイズ後の実際のサイズ: {actual_size.width()}x{actual_size.height()}")
+                    logger.debug("リサイズ後の実際のサイズ: %sx%s", actual_size.width(), actual_size.height())
                 if hasattr(top_level, 'show'):
                     top_level.show()
-                    print(f"[DEBUG] show()実行")
+                    logger.debug("show()実行")
                     
                 # 強制的にイベント処理を実行してからサイズを再確認
                 QApplication.processEvents()
                 final_size = top_level.size()
-                print(f"[DEBUG] 最終確認サイズ: {final_size.width()}x{final_size.height()}")
+                logger.debug("最終確認サイズ: %sx%s", final_size.width(), final_size.height())
         else:
             # 通常登録タブや他メニュー: 横幅900+メニュー+余白で固定、アスペクト比も固定
             webview_width = getattr(top_level, '_webview_fixed_width', 900)

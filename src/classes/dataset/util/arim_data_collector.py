@@ -8,6 +8,11 @@ import json
 from typing import Dict, List, Optional, Any, Tuple
 from config.common import get_dynamic_file_path
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 
 class ARIMDataCollector:
     """ARIM課題データ収集クラス"""
@@ -52,7 +57,7 @@ class ARIMDataCollector:
             result['collection_status']['experiment_data_loaded'] = result['experiment_data_list'] is not None
             
         except Exception as e:
-            print(f"[WARNING] ARIM課題データ収集エラー: {e}")
+            logger.warning("ARIM課題データ収集エラー: %s", e)
             
         return result
         
@@ -78,7 +83,7 @@ class ARIMDataCollector:
             return dataset_info
             
         except Exception as e:
-            print(f"[WARNING] データセット既存情報取得エラー: {e}")
+            logger.warning("データセット既存情報取得エラー: %s", e)
             return None
             
     def _load_arim_extension_data(self, grant_number: str) -> Optional[Dict[str, Any]]:
@@ -94,32 +99,32 @@ class ARIMDataCollector:
             arim_file_path = os.path.join(INPUT_DIR, 'ai', 'arim', 'converted.xlsx')
             
             if not os.path.exists(arim_file_path):
-                print(f"[DEBUG] ARIM拡張ファイルが見つかりません: {arim_file_path}")
+                logger.debug("ARIM拡張ファイルが見つかりません: %s", arim_file_path)
                 return None
             
             # Excelファイルを読み込み（AIテスト機能と同じ）
             if self.arim_extension_data is None:
                 df = pd.read_excel(arim_file_path)
                 self.arim_extension_data = df.to_dict('records')
-                print(f"[INFO] ARIM拡張データ読み込み: {len(self.arim_extension_data)} 件")
+                logger.info("ARIM拡張データ読み込み: %s 件", len(self.arim_extension_data))
             
             # 課題番号でマッチングを検索（AIテスト機能と同じロジック）
             matching_record = self._find_matching_arim_record(grant_number, self.arim_extension_data)
             
             if matching_record:
-                print(f"[INFO] ARIM拡張データでマッチング成功: {grant_number}")
-                print(f"[DEBUG] 取得データ詳細: ARIMNO={matching_record.get('ARIMNO')}, タイトル={matching_record.get('利用課題名', 'N/A')[:50]}...")
+                logger.info("ARIM拡張データでマッチング成功: %s", grant_number)
+                logger.debug("取得データ詳細: ARIMNO=%s, タイトル=%s...", matching_record.get('ARIMNO'), matching_record.get('利用課題名', 'N/A')[:50])
                 return matching_record
             else:
-                print(f"[DEBUG] ARIM拡張データでマッチングなし: {grant_number}")
-                print(f"[DEBUG] 完全一致検索のみ実行 - 他の検索方式は無効化済み")
+                logger.debug("ARIM拡張データでマッチングなし: %s", grant_number)
+                logger.debug("完全一致検索のみ実行 - 他の検索方式は無効化済み")
                 return None
                 
         except ImportError:
-            print("[WARNING] pandas がインストールされていません。ARIM拡張情報をスキップします")
+            logger.warning("pandas がインストールされていません。ARIM拡張情報をスキップします")
             return None
         except Exception as e:
-            print(f"[WARNING] ARIM拡張情報の読み込みに失敗: {e}")
+            logger.warning("ARIM拡張情報の読み込みに失敗: %s", e)
             return None
             
     def _find_matching_arim_record(self, grant_number: str, arim_data: List[Dict]) -> Optional[Dict]:
@@ -136,18 +141,18 @@ class ARIMDataCollector:
         for record in arim_data:
             record_arimno = record.get('ARIMNO', '')
             if record_arimno and str(record_arimno) == grant_number:
-                print(f"[DEBUG] ARIMNO完全一致: {record_arimno}")
+                logger.debug("ARIMNO完全一致: %s", record_arimno)
                 return record
         
         # 2. 課題番号列での完全一致検索
         for record in arim_data:
             record_task = record.get('課題番号', '')
             if record_task and str(record_task) == grant_number:
-                print(f"[DEBUG] 課題番号完全一致: {record_task}")
+                logger.debug("課題番号完全一致: %s", record_task)
                 return record
         
         # 完全一致のみ - 末尾4桁検索は無効化
-        print(f"[DEBUG] 完全一致検索結果なし: {grant_number}")
+        logger.debug("完全一致検索結果なし: %s", grant_number)
         return None
         
     def _load_arim_experiment_data(self, grant_number: str) -> Optional[List[Dict[str, Any]]]:
@@ -160,29 +165,29 @@ class ARIMDataCollector:
             # ARIM実験データファイルを読み込み
             arim_exp_file_path = get_dynamic_file_path("input/ai/arim_exp.xlsx")
             if not os.path.exists(arim_exp_file_path):
-                print(f"[WARNING] ARIM実験データファイルが見つかりません: {arim_exp_file_path}")
+                logger.warning("ARIM実験データファイルが見つかりません: %s", arim_exp_file_path)
                 return None
             
             # Excelファイルを読み込み
             df = pd.read_excel(arim_exp_file_path)
-            print(f"[INFO] ARIM実験データ読み込み: {len(df)} 件")
+            logger.info("ARIM実験データ読み込み: %s 件", len(df))
             
             # 'ARIM ID'列で課題番号を検索
             if 'ARIM ID' not in df.columns:
-                print(f"[WARNING] ARIM実験データに'ARIM ID'列が見つかりません")
-                print(f"利用可能な列: {list(df.columns)}")
+                logger.warning("ARIM実験データに'ARIM ID'列が見つかりません")
+                logger.debug("利用可能な列: %s", list(df.columns))
                 return None
             
             # 課題番号に一致する実験データを抽出
             matching_experiments = df[df['ARIM ID'] == grant_number]
             
             if matching_experiments.empty:
-                print(f"[INFO] 課題番号 {grant_number} に対応するARIM実験データが見つかりません")
+                logger.info("課題番号 %s に対応するARIM実験データが見つかりません", grant_number)
                 return None
             
             # 複数実験データを辞書リストに変換
             experiments_list = matching_experiments.to_dict('records')
-            print(f"[INFO] 課題番号 {grant_number} の実験データ: {len(experiments_list)} 件")
+            logger.info("課題番号 %s の実験データ: %s 件", grant_number, len(experiments_list))
             
             # 各実験データに課題番号を追加（統一性のため）
             for exp in experiments_list:
@@ -193,7 +198,7 @@ class ARIMDataCollector:
             return experiments_list
             
         except Exception as e:
-            print(f"[WARNING] ARIM実験データ取得エラー: {e}")
+            logger.warning("ARIM実験データ取得エラー: %s", e)
             import traceback
             traceback.print_exc()
             return None
@@ -268,7 +273,7 @@ class ARIMDataCollector:
                                             f"実験データ: {'○' if status.get('experiment_data_loaded') else '×'} ({experiment_count}件)"
                                             
         except Exception as e:
-            print(f"[WARNING] ARIMデータフォーマットエラー: {e}")
+            logger.warning("ARIMデータフォーマットエラー: %s", e)
             # エラー時のフォールバック
             formatted['dataset_existing_info'] = "[フォーマットエラー]"
             formatted['arim_extension_data'] = "[フォーマットエラー]"
@@ -423,7 +428,7 @@ class ARIMDataCollector:
             return "\n".join(lines)
             
         except Exception as e:
-            print(f"[WARNING] ARIM実験データフォーマットエラー: {e}")
+            logger.warning("ARIM実験データフォーマットエラー: %s", e)
             return "[ARIM実験データフォーマットエラー]"
             
     def _get_experiment_count(self, grant_number: str) -> int:
@@ -442,7 +447,7 @@ class ARIMDataCollector:
                 ]
                 return len(matching_records)
         except Exception as e:
-            print(f"[WARNING] 実験データ件数取得エラー: {e}")
+            logger.warning("実験データ件数取得エラー: %s", e)
             
         return 0
         
@@ -467,7 +472,7 @@ class ARIMDataCollector:
                     ]
                     return len(matching_records)
         except Exception as e:
-            print(f"[WARNING] ARIMNO実験データ件数取得エラー: {e}")
+            logger.warning("ARIMNO実験データ件数取得エラー: %s", e)
             
         return 0
 
@@ -492,7 +497,7 @@ class ARIMDataCollector:
                 equipment_id_match = re.match(r'([A-Z]{1,3}-\d{3,4})', equipment_field)
                 if equipment_id_match:
                     equipment_ids.append(equipment_id_match.group(1))
-                    print(f"[INFO] 設備ID抽出成功（設備フィールド）: {equipment_id_match.group(1)} from {equipment_field}")
+                    logger.info("設備ID抽出成功（設備フィールド）: %s from %s", equipment_id_match.group(1), equipment_field)
             
             # 2. データセット実験データからも設備IDを抽出
             experiment_data = self._load_arim_experiment_data(grant_number)
@@ -504,7 +509,7 @@ class ARIMDataCollector:
                         for eq_id in extracted_ids:
                             if eq_id not in equipment_ids:
                                 equipment_ids.append(eq_id)
-                                print(f"[INFO] 設備ID抽出成功（データセット名）: {eq_id} from {dataset_name}")
+                                logger.info("設備ID抽出成功（データセット名）: %s from %s", eq_id, dataset_name)
             
             # 3. その他の設備情報フィールドからも抽出（将来の拡張用）
             # 利用した主な設備2, 設備情報 などがあれば同様に処理
@@ -512,7 +517,7 @@ class ARIMDataCollector:
             return equipment_ids
             
         except Exception as e:
-            print(f"[WARNING] 設備ID抽出エラー: {e}")
+            logger.warning("設備ID抽出エラー: %s", e)
             return []
     
     def _extract_equipment_from_dataset_name(self, dataset_name: str) -> List[str]:
@@ -563,14 +568,14 @@ class ARIMDataCollector:
             template_id = template_data.get('id', '')
             
             if template_id:
-                print(f"[INFO] データセットテンプレートID発見: {template_id}")
+                logger.info("データセットテンプレートID発見: %s", template_id)
                 
                 # テンプレートIDから設備IDを抽出
                 extracted_ids = self._extract_equipment_from_dataset_name(template_id)
                 equipment_ids.extend(extracted_ids)
                 
                 for eq_id in extracted_ids:
-                    print(f"[INFO] 設備ID抽出成功（テンプレートID）: {eq_id} from {template_id}")
+                    logger.info("設備ID抽出成功（テンプレートID）: %s from %s", eq_id, template_id)
             
             # データセット名からも抽出
             dataset_name = dataset_json_data.get('data', {}).get('attributes', {}).get('name', '')
@@ -579,10 +584,10 @@ class ARIMDataCollector:
                 for eq_id in name_equipment_ids:
                     if eq_id not in equipment_ids:
                         equipment_ids.append(eq_id)
-                        print(f"[INFO] 設備ID抽出成功（データセット名）: {eq_id} from {dataset_name}")
+                        logger.info("設備ID抽出成功（データセット名）: %s from %s", eq_id, dataset_name)
             
         except Exception as e:
-            print(f"[WARNING] データセットJSONからの設備ID抽出エラー: {e}")
+            logger.warning("データセットJSONからの設備ID抽出エラー: %s", e)
         
         return equipment_ids
 

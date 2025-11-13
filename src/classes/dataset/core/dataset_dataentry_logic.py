@@ -25,7 +25,7 @@ def fetch_dataset_dataentry(dataset_id, bearer_token=None, force_refresh=False):
     Returns:
         bool: 取得成功の場合True
     """
-    print(f"[DEBUG] fetch_dataset_dataentry called with dataset_id={dataset_id}, force_refresh={force_refresh}")
+    logger.debug("fetch_dataset_dataentry called with dataset_id=%s, force_refresh=%s", dataset_id, force_refresh)
     
     # Bearer Token統一管理システムで取得
     if not bearer_token:
@@ -75,7 +75,7 @@ def fetch_dataset_dataentry(dataset_id, bearer_token=None, force_refresh=False):
         }
         
         logger.info(f"データエントリー情報を取得開始: {dataset_id}")
-        print(f"[DEBUG] API URL: {api_url}")
+        logger.debug("API URL: %s", api_url)
         
         # 既存実装と同じapi_requestを使用
         response = api_request("GET", api_url, bearer_token=bearer_token, headers=headers, timeout=60)
@@ -95,13 +95,13 @@ def fetch_dataset_dataentry(dataset_id, bearer_token=None, force_refresh=False):
         
         entry_count = len(data.get('data', []))
         logger.info(f"データエントリー情報取得完了: {dataset_id} ({entry_count}件)")
-        print(f"[DEBUG] データエントリー取得成功: {entry_count}件")
+        logger.debug("データエントリー取得成功: %s件", entry_count)
         
         return True
     
     except Exception as e:
         logger.error(f"データエントリー取得処理エラー: {dataset_id}, エラー: {e}")
-        print(f"[ERROR] fetch_dataset_dataentry failed: {e}")
+        logger.error("fetch_dataset_dataentry failed: %s", e)
         return False
 
 def get_dataentry_info_from_cache(dataset_id):

@@ -5,6 +5,7 @@ AI提案ダイアログ
 
 import os
 import json
+import logging
 from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QListWidget, QListWidgetItem, QTextEdit, QProgressBar,
@@ -13,6 +14,9 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt, QThread, Signal, QTimer
 from classes.ai.core.ai_manager import AIManager
+
+# ロガー設定
+logger = logging.getLogger(__name__)
 from classes.ai.extensions import AIExtensionRegistry, DatasetDescriptionExtension
 from classes.dataset.util.dataset_context_collector import get_dataset_context_collector
 from classes.dataset.ui.prompt_template_edit_dialog import PromptTemplateEditDialog
@@ -58,8 +62,8 @@ class AIRequestThread(QThread):
             model = ai_config.get('providers', {}).get(provider, {}).get('default_model', 'gemini-2.0-flash')
             
             # デバッグ用ログ出力
-            print(f"[DEBUG] AI設定取得: provider={provider}, model={model}")
-            print(f"[DEBUG] AI設定内容: {ai_config}")
+            logger.debug("AI設定取得: provider=%s, model=%s", provider, model)
+            logger.debug("AI設定内容: %s", ai_config)
             
             if self._stop_requested:
                 return
@@ -151,7 +155,7 @@ class AISuggestionDialog(QDialog):
             self.tab_widget.addTab(extension_tab, "AI拡張")
             self.setup_extension_tab(extension_tab)
         except Exception as e:
-            print(f"[WARNING] AI拡張タブの初期化に失敗しました: {e}")
+            logger.warning("AI拡張タブの初期化に失敗しました: %s", e)
             # AI拡張タブが失敗しても他の機能は使用可能
         
         # プログレスバー
@@ -311,7 +315,7 @@ class AISuggestionDialog(QDialog):
     def generate_suggestions(self):
         """AI提案を生成"""
         if self.ai_thread and self.ai_thread.isRunning():
-            print("[DEBUG] 既にAIスレッドが実行中です")
+            logger.debug("既にAIスレッドが実行中です")
             return
         
         try:
@@ -340,19 +344,19 @@ class AISuggestionDialog(QDialog):
             self.ai_thread.start()
             
         except Exception as e:
-            print(f"[ERROR] AI提案生成エラー: {e}")
+            logger.error("AI提案生成エラー: %s", e)
             self.generate_button.stop_loading()
             self.progress_bar.setVisible(False)
         
     def update_detail_display(self, prompt):
         """詳細情報タブの表示を更新"""
-        print(f"[DEBUG] プロンプト表示更新: 全{len(prompt)}文字")
+        logger.debug("プロンプト表示更新: 全%s文字", len(prompt))
         
         # プロンプト内にファイル情報が含まれているか確認
         if 'ファイル構成' in prompt or 'ファイル統計' in prompt or 'タイル#' in prompt:
-            print("[DEBUG] [OK] プロンプトにファイル情報が含まれています")
+            logger.debug("[OK] プロンプトにファイル情報が含まれています")
         else:
-            print("[WARNING] [WARN] プロンプトにファイル情報が見つかりません")
+            logger.warning("プロンプトにファイル情報が見つかりません")
         
         # プロンプト表示（詳細情報タブ）
         self.prompt_display.setText(prompt)
@@ -400,7 +404,7 @@ class AISuggestionDialog(QDialog):
     def build_prompt(self):
         """AIリクエスト用プロンプトを構築"""
         try:
-            print(f"[DEBUG] プロンプト構築開始 - 入力コンテキスト: {self.context_data}")
+            logger.debug("プロンプト構築開始 - 入力コンテキスト: %s", self.context_data)
             
             # AI設定を取得してプロバイダー・モデル情報を追加
             from classes.config.ui.ai_settings_widget import get_ai_config
@@ -408,14 +412,14 @@ class AISuggestionDialog(QDialog):
             provider = ai_config.get('default_provider', 'gemini') if ai_config else 'gemini'
             model = ai_config.get('providers', {}).get(provider, {}).get('default_model', 'gemini-2.0-flash') if ai_config else 'gemini-2.0-flash'
             
-            print(f"[DEBUG] 使用予定AI: provider={provider}, model={model}")
+            logger.debug("使用予定AI: provider=%s, model=%s", provider, model)
             
             # データセットコンテキストコレクターを使用して完全なコンテキストを収集
             context_collector = get_dataset_context_collector()
             
             # データセットIDを取得（context_dataから）
             dataset_id = self.context_data.get('dataset_id')
-            print(f"[DEBUG] データセットID: {dataset_id}")
+            logger.debug("データセットID: %s", dataset_id)
             
             # context_dataからdataset_idを一時的に除外してから渡す
             context_data_without_id = {k: v for k, v in self.context_data.items() if k != 'dataset_id'}
@@ -426,12 +430,12 @@ class AISuggestionDialog(QDialog):
                 **context_data_without_id
             )
             
-            print(f"[DEBUG] コンテキストコレクター処理後: {list(full_context.keys())}")
+            logger.debug("コンテキストコレクター処理後: %s", list(full_context.keys()))
             
             # AI拡張機能からコンテキストデータを収集（既に統合されたfull_contextを使用）
             context = self.ai_extension.collect_context_data(**full_context)
             
-            print(f"[DEBUG] AI拡張機能処理後: {list(context.keys())}")
+            logger.debug("AI拡張機能処理後: %s", list(context.keys()))
             
             # プロバイダーとモデル情報をコンテキストに追加
             context['llm_provider'] = provider
@@ -439,30 +443,30 @@ class AISuggestionDialog(QDialog):
             context['llm_model_name'] = f"{provider}:{model}"  # プロンプトテンプレート用
             
             # 毎回外部テンプレートファイルを最新の状態で読み込み
-            print("[DEBUG] 外部テンプレートファイルを再読み込み中...")
+            logger.debug("外部テンプレートファイルを再読み込み中...")
             reload_success = self.ai_extension.reload_external_templates()
             if reload_success:
-                print("[DEBUG] 外部テンプレート再読み込み成功")
+                logger.debug("外部テンプレート再読み込み成功")
             else:
-                print("[WARNING] 外部テンプレート再読み込み失敗、既存テンプレートを使用")
+                logger.warning("外部テンプレート再読み込み失敗、既存テンプレートを使用")
             
             # デフォルトテンプレートを取得
             template = self.ai_extension.get_template("basic")
             if not template:
-                print("[WARNING] テンプレートが取得できませんでした")
+                logger.warning("テンプレートが取得できませんでした")
                 # フォールバック用の簡単なプロンプト
                 return f"データセット '{context.get('name', '未設定')}' の説明文を提案してください。"
             
             # プロンプトをレンダリング（contextを使用）
             prompt = template.render(context)
             
-            print(f"[DEBUG] 生成されたプロンプト長: {len(prompt)} 文字")
-            print(f"[DEBUG] ARIM関連情報含有: {'ARIM課題関連情報' in prompt}")
+            logger.debug("生成されたプロンプト長: %s 文字", len(prompt))
+            logger.debug("ARIM関連情報含有: %s", 'ARIM課題関連情報' in prompt)
             
             return prompt
             
         except Exception as e:
-            print(f"[ERROR] プロンプト構築エラー: {e}")
+            logger.error("プロンプト構築エラー: %s", e)
             import traceback
             traceback.print_exc()
             
@@ -502,7 +506,7 @@ class AISuggestionDialog(QDialog):
 注意: 各説明文は改行なしで1行で出力してください。
 """
             
-            print(f"[WARNING] フォールバックプロンプトを使用: {len(fallback_prompt)}文字")
+            logger.warning("フォールバックプロンプトを使用: %s文字", len(fallback_prompt))
             return fallback_prompt
         
     def on_ai_result(self, result):
@@ -530,7 +534,7 @@ class AISuggestionDialog(QDialog):
                 QMessageBox.warning(self, "警告", "AIからの応答が空です")
                 
         except Exception as e:
-            print(f"[ERROR] AI結果処理エラー: {e}")
+            logger.error("AI結果処理エラー: %s", e)
             QMessageBox.critical(self, "エラー", f"AI結果処理エラー: {str(e)}")
             
     def on_ai_error(self, error_message):
@@ -541,11 +545,11 @@ class AISuggestionDialog(QDialog):
             # スピナー停止
             self.generate_button.stop_loading()
             
-            print(f"[ERROR] AIエラー: {error_message}")
+            logger.error("AIエラー: %s", error_message)
             QMessageBox.critical(self, "AIエラー", error_message)
             
         except Exception as e:
-            print(f"[ERROR] AIエラー処理エラー: {e}")
+            logger.error("AIエラー処理エラー: %s", e)
         
     def parse_suggestions(self, response_text):
         """AI応答から提案候補を抽出"""
@@ -600,13 +604,13 @@ class AISuggestionDialog(QDialog):
             # 課題番号が存在する場合のみ自動生成
             grant_number = self.context_data.get('grant_number', '').strip()
             if grant_number and grant_number != '未設定':
-                print(f"[INFO] AI提案を自動生成開始: 課題番号 {grant_number}")
+                logger.info("AI提案を自動生成開始: 課題番号 %s", grant_number)
                 self.generate_suggestions()
             else:
-                print("[INFO] 課題番号が設定されていないため、手動でAI提案生成を行ってください")
+                logger.info("課題番号が設定されていないため、手動でAI提案生成を行ってください")
                 
         except Exception as e:
-            print(f"[WARNING] 自動AI提案生成エラー: {e}")
+            logger.warning("自動AI提案生成エラー: %s", e)
             # エラーが発生しても処理を続行（手動実行は可能）
             
     def on_suggestion_selected(self, current, previous):
@@ -953,7 +957,7 @@ class AISuggestionDialog(QDialog):
         try:
             self.load_extension_buttons()
         except Exception as e:
-            print(f"[WARNING] AI拡張ボタンの読み込みに失敗しました: {e}")
+            logger.warning("AI拡張ボタンの読み込みに失敗しました: %s", e)
             # エラーメッセージを表示
             error_label = QLabel(f"AI拡張機能の初期化に失敗しました。\n\n設定ファイルを確認してください:\ninput/ai/ai_ext_conf.json\n\nエラー: {str(e)}")
             error_label.setStyleSheet("color: red; padding: 20px; background-color: #fff8f8; border: 1px solid #ffcdd2; border-radius: 5px;")
@@ -1115,7 +1119,7 @@ class AISuggestionDialog(QDialog):
             button_id = button_config.get('id', 'unknown')
             label = button_config.get('label', 'Unknown')
             
-            print(f"[DEBUG] AI拡張ボタンクリック: {button_id} ({label})")
+            logger.debug("AI拡張ボタンクリック: %s (%s)", button_id, label)
             
             # senderからクリックされたボタンを取得
             clicked_button = self.sender()
@@ -1144,14 +1148,14 @@ class AISuggestionDialog(QDialog):
             prompt_file = button_config.get('prompt_file')
             prompt_template = button_config.get('prompt_template')
             
-            print(f"[DEBUG] プロンプト構築開始 - prompt_file: {prompt_file}, prompt_template: {bool(prompt_template)}")
+            logger.debug("プロンプト構築開始 - prompt_file: %s, prompt_template: %s", prompt_file, bool(prompt_template))
             
             if prompt_file:
                 # ファイルからプロンプトを読み込み
                 from classes.dataset.util.ai_extension_helper import load_prompt_file
                 template_content = load_prompt_file(prompt_file)
                 if not template_content:
-                    print(f"[WARNING] プロンプトファイルが読み込めません: {prompt_file}")
+                    logger.warning("プロンプトファイルが読み込めません: %s", prompt_file)
                     # フォールバック用のシンプルプロンプト
                     template_content = f"""データセットについて分析してください。
 
@@ -1164,9 +1168,9 @@ class AISuggestionDialog(QDialog):
             elif prompt_template:
                 # 直接指定されたテンプレートを使用
                 template_content = prompt_template
-                print("[DEBUG] 直接指定されたテンプレートを使用")
+                logger.debug("直接指定されたテンプレートを使用")
             else:
-                print("[WARNING] プロンプトファイルもテンプレートも指定されていません")
+                logger.warning("プロンプトファイルもテンプレートも指定されていません")
                 # デフォルトプロンプト
                 template_content = f"""データセットについて分析してください。
 
@@ -1179,17 +1183,17 @@ class AISuggestionDialog(QDialog):
             
             # コンテキストデータを準備
             context_data = self.prepare_extension_context()
-            print(f"[DEBUG] コンテキストデータ準備完了: {list(context_data.keys())}")
+            logger.debug("コンテキストデータ準備完了: %s", list(context_data.keys()))
             
             # プロンプトを置換
             from classes.dataset.util.ai_extension_helper import format_prompt_with_context
             formatted_prompt = format_prompt_with_context(template_content, context_data)
             
-            print(f"[DEBUG] プロンプト構築完了 - 長さ: {len(formatted_prompt)}文字")
+            logger.debug("プロンプト構築完了 - 長さ: %s文字", len(formatted_prompt))
             return formatted_prompt
             
         except Exception as e:
-            print(f"[ERROR] AI拡張プロンプト構築エラー: {e}")
+            logger.error("AI拡張プロンプト構築エラー: %s", e)
             import traceback
             traceback.print_exc()
             return None
@@ -1208,7 +1212,7 @@ class AISuggestionDialog(QDialog):
                     'dataset_type': getattr(self, 'type_combo', None).currentText() if hasattr(self, 'type_combo') and self.type_combo else "未設定",
                     'description': getattr(self, 'description_input', None).toPlainText() if hasattr(self, 'description_input') and self.description_input else "未設定"
                 }
-                print("[WARNING] context_dataが初期化されていません。フォールバックデータを使用します。")
+                logger.warning("context_dataが初期化されていません。フォールバックデータを使用します。")
             
             # データセット選択による更新があった場合は最新情報を使用
             if hasattr(self, 'extension_dataset_combo') and self.extension_dataset_combo.currentIndex() > 0:
@@ -1222,7 +1226,7 @@ class AISuggestionDialog(QDialog):
                         'description': attrs.get('description', context_data.get('description', '')),
                         'dataset_id': selected_dataset.get('id', '')
                     })
-                    print(f"[DEBUG] データセット選択による情報更新: {context_data['name']}")
+                    logger.debug("データセット選択による情報更新: %s", context_data['name'])
             
             # 追加のコンテキストデータを収集（可能な場合）
             try:
@@ -1242,13 +1246,13 @@ class AISuggestionDialog(QDialog):
                     
                     context_data.update(full_context)
             except Exception as context_error:
-                print(f"[WARNING] 拡張コンテキスト収集でエラー: {context_error}")
+                logger.warning("拡張コンテキスト収集でエラー: %s", context_error)
                 # エラーが発生してもbase contextで続行
             
             return context_data
             
         except Exception as e:
-            print(f"[ERROR] AI拡張コンテキスト準備エラー: {e}")
+            logger.error("AI拡張コンテキスト準備エラー: %s", e)
             # 最小限のフォールバックデータ
             return {
                 'name': "データセット名未設定",
@@ -1328,7 +1332,7 @@ class AISuggestionDialog(QDialog):
             return formatted_html
             
         except Exception as e:
-            print(f"[ERROR] AI拡張応答フォーマットエラー: {e}")
+            logger.error("AI拡張応答フォーマットエラー: %s", e)
             # フォールバック
             import html
             escaped_text = html.escape(response_text)
@@ -1419,7 +1423,7 @@ class AISuggestionDialog(QDialog):
             return html_text
             
         except Exception as e:
-            print(f"[WARNING] マークダウン変換エラー: {e}")
+            logger.warning("マークダウン変換エラー: %s", e)
             # エラー時はプレーンテキストをHTMLエスケープして返す
             import html
             return f"<pre>{html.escape(markdown_text)}</pre>"
@@ -1469,7 +1473,7 @@ class AISuggestionDialog(QDialog):
             return '\n'.join(result_lines)
             
         except Exception as e:
-            print(f"[WARNING] テーブル変換エラー: {e}")
+            logger.warning("テーブル変換エラー: %s", e)
             return text
     
     def build_html_table(self, table_lines):
@@ -1509,7 +1513,7 @@ class AISuggestionDialog(QDialog):
             return '\n'.join(html_parts)
             
         except Exception as e:
-            print(f"[WARNING] HTMLテーブル構築エラー: {e}")
+            logger.warning("HTMLテーブル構築エラー: %s", e)
             return '\n'.join(table_lines)
     
     def edit_extension_config(self):
@@ -1701,64 +1705,64 @@ class AISuggestionDialog(QDialog):
         try:
             # メインAIスレッドの停止
             if self.ai_thread and self.ai_thread.isRunning():
-                print("[DEBUG] メインAIスレッドを停止中...")
+                logger.debug("メインAIスレッドを停止中...")
                 self.ai_thread.stop()
                 self.ai_thread.wait(3000)  # 3秒まで待機
                 if self.ai_thread.isRunning():
-                    print("[WARNING] メインAIスレッドの強制終了")
+                    logger.warning("メインAIスレッドの強制終了")
                     self.ai_thread.terminate()
             
             # AI拡張スレッドの停止
             for thread in self.extension_ai_threads:
                 if thread and thread.isRunning():
-                    print("[DEBUG] AI拡張スレッドを停止中...")
+                    logger.debug("AI拡張スレッドを停止中...")
                     thread.stop()
                     thread.wait(3000)  # 3秒まで待機
                     if thread.isRunning():
-                        print("[WARNING] AI拡張スレッドの強制終了")
+                        logger.warning("AI拡張スレッドの強制終了")
                         thread.terminate()
             
             # スレッドリストをクリア
             self.extension_ai_threads.clear()
-            print("[DEBUG] すべてのスレッドのクリーンアップ完了")
+            logger.debug("すべてのスレッドのクリーンアップ完了")
             
         except Exception as e:
-            print(f"[ERROR] スレッドクリーンアップエラー: {e}")
+            logger.error("スレッドクリーンアップエラー: %s", e)
     
     def closeEvent(self, event):
         """ダイアログクローズ時の処理"""
         try:
-            print("[DEBUG] AISuggestionDialog終了処理開始")
+            logger.debug("AISuggestionDialog終了処理開始")
             self.cleanup_threads()
             event.accept()
         except Exception as e:
-            print(f"[ERROR] ダイアログクローズエラー: {e}")
+            logger.error("ダイアログクローズエラー: %s", e)
             event.accept()
     
     def reject(self):
         """キャンセル時の処理"""
         try:
-            print("[DEBUG] AISuggestionDialogキャンセル処理開始")
+            logger.debug("AISuggestionDialogキャンセル処理開始")
             self.cleanup_threads()
             super().reject()
         except Exception as e:
-            print(f"[ERROR] ダイアログキャンセルエラー: {e}")
+            logger.error("ダイアログキャンセルエラー: %s", e)
             super().reject()
     
     def accept(self):
         """OK時の処理"""
         try:
-            print("[DEBUG] AISuggestionDialog完了処理開始")
+            logger.debug("AISuggestionDialog完了処理開始")
             self.cleanup_threads()
             super().accept()
         except Exception as e:
-            print(f"[ERROR] ダイアログ完了エラー: {e}")
+            logger.error("ダイアログ完了エラー: %s", e)
             super().accept()
     
     def initialize_dataset_dropdown(self):
         """データセット選択ドロップダウンを初期化"""
         if not hasattr(self, 'extension_dataset_combo'):
-            print("[DEBUG] extension_dataset_combo が存在しません")
+            logger.debug("extension_dataset_combo が存在しません")
             return
             
         try:
@@ -1766,14 +1770,14 @@ class AISuggestionDialog(QDialog):
             from classes.dataset.util.dataset_dropdown_util import load_dataset_list
             import os
             
-            print("[DEBUG] データセット選択初期化を開始")
+            logger.debug("データセット選択初期化を開始")
             
             # dataset.jsonのパス
             dataset_json_path = get_dynamic_file_path('output/rde/data/dataset.json')
             info_json_path = get_dynamic_file_path('output/rde/data/info.json')
             
-            print(f"[DEBUG] dataset.jsonパス: {dataset_json_path}")
-            print(f"[DEBUG] ファイル存在確認: {os.path.exists(dataset_json_path)}")
+            logger.debug("dataset.jsonパス: %s", dataset_json_path)
+            logger.debug("ファイル存在確認: %s", os.path.exists(dataset_json_path))
             
             # データセット一覧を読み込み
             self.load_datasets_to_combo(dataset_json_path, info_json_path)
@@ -1781,10 +1785,10 @@ class AISuggestionDialog(QDialog):
             # 現在のコンテキストに基づいて選択
             self.select_current_dataset()
             
-            print("[DEBUG] データセット選択初期化完了")
+            logger.debug("データセット選択初期化完了")
             
         except Exception as e:
-            print(f"[ERROR] データセット選択初期化エラー: {e}")
+            logger.error("データセット選択初期化エラー: %s", e)
             import traceback
             traceback.print_exc()
     
@@ -1841,13 +1845,13 @@ class AISuggestionDialog(QDialog):
             # マウスクリック時の全件表示機能を追加（修正タブと同様）
             self.setup_mouse_click_handler()
             
-            print(f"[DEBUG] データセット {len(datasets)}件を読み込みました")
+            logger.debug("データセット %s件を読み込みました", len(datasets))
             
             # データセット選択変更のイベントハンドラを接続
             self.extension_dataset_combo.currentIndexChanged.connect(self.on_dataset_selection_changed)
             
         except Exception as e:
-            print(f"[ERROR] データセット読み込みエラー: {e}")
+            logger.error("データセット読み込みエラー: %s", e)
             import traceback
             traceback.print_exc()
     
@@ -1876,11 +1880,11 @@ class AISuggestionDialog(QDialog):
                         if (current_name and current_name == name) or \
                            (current_grant_number and current_grant_number == grant_number):
                             self.extension_dataset_combo.setCurrentIndex(i)
-                            print(f"[DEBUG] データセット自動選択: {text}")
+                            logger.debug("データセット自動選択: %s", text)
                             return
             
         except Exception as e:
-            print(f"[ERROR] データセット自動選択エラー: {e}")
+            logger.error("データセット自動選択エラー: %s", e)
     
     def on_dataset_selection_changed(self, text):
         """データセット選択変更時の処理"""
@@ -1903,10 +1907,10 @@ class AISuggestionDialog(QDialog):
             # データセット情報表示を更新
             self.update_dataset_info_display()
             
-            print(f"[DEBUG] データセット選択変更: {text}")
+            logger.debug("データセット選択変更: %s", text)
             
         except Exception as e:
-            print(f"[ERROR] データセット選択変更エラー: {e}")
+            logger.error("データセット選択変更エラー: %s", e)
             import traceback
             traceback.print_exc()
     
@@ -1936,10 +1940,10 @@ class AISuggestionDialog(QDialog):
             if 'contact' not in self.context_data:
                 self.context_data['contact'] = ''
             
-            print(f"[DEBUG] コンテキストデータ更新: dataset_id={self.context_data.get('dataset_id', '')}, name={self.context_data.get('name', '')}")
+            logger.debug("コンテキストデータ更新: dataset_id=%s, name=%s", self.context_data.get('dataset_id', ''), self.context_data.get('name', ''))
             
         except Exception as e:
-            print(f"[ERROR] コンテキストデータ更新エラー: {e}")
+            logger.error("コンテキストデータ更新エラー: %s", e)
             import traceback
             traceback.print_exc()
     
@@ -1984,7 +1988,7 @@ class AISuggestionDialog(QDialog):
                 self.dataset_info_label.setText(dataset_info_html)
             
         except Exception as e:
-            print(f"[ERROR] データセット情報表示更新エラー: {e}")
+            logger.error("データセット情報表示更新エラー: %s", e)
     
     def show_all_datasets(self):
         """全データセット表示（▼ボタン用）"""
@@ -1992,7 +1996,7 @@ class AISuggestionDialog(QDialog):
             if hasattr(self, 'extension_dataset_combo'):
                 self.extension_dataset_combo.showPopup()
         except Exception as e:
-            print(f"[ERROR] 全データセット表示エラー: {e}")
+            logger.error("全データセット表示エラー: %s", e)
     
     def setup_mouse_click_handler(self):
         """マウスクリック時の全件表示機能を設定（修正タブと同様）"""
@@ -2009,7 +2013,7 @@ class AISuggestionDialog(QDialog):
                         cached_datasets = getattr(self.extension_dataset_combo, '_datasets_cache', [])
                         cached_display_names = getattr(self.extension_dataset_combo, '_display_names_cache', [])
                         
-                        print(f"[DEBUG] AI拡張 - コンボボックス展開: {len(cached_datasets)}件のデータセット")
+                        logger.debug("AI拡張 - コンボボックス展開: %s件のデータセット", len(cached_datasets))
                         
                         # データセット一覧を再設定
                         if cached_datasets and cached_display_names:
@@ -2027,4 +2031,4 @@ class AISuggestionDialog(QDialog):
                 self.extension_dataset_combo._mouse_press_event_set = True
                 
         except Exception as e:
-            print(f"[ERROR] マウスクリックハンドラ設定エラー: {e}")
+            logger.error("マウスクリックハンドラ設定エラー: %s", e)

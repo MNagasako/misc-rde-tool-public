@@ -6,6 +6,11 @@ import re
 from qt_compat.widgets import QMessageBox
 from qt_compat.gui import QColor
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 
 class SubjectInputValidator:
     """課題入力のバリデーション機能を担当するクラス（更新版）"""
@@ -29,7 +34,7 @@ class SubjectInputValidator:
         
         if errors:
             # エラーがある場合の表示（今後必要に応じて実装）
-            print(f"[WARNING] 課題バリデーションエラー: {errors}")
+            logger.warning("課題バリデーションエラー: %s", errors)
         
         return len(errors) == 0, errors
     

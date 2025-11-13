@@ -8,6 +8,11 @@ import json
 from typing import Dict, List, Optional, Any
 from config.common import get_dynamic_file_path
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 
 class MaterialIndexLoader:
     """マテリアルインデックス(MI.json)の読み込み管理"""
@@ -23,16 +28,16 @@ class MaterialIndexLoader:
         try:
             mi_path = get_dynamic_file_path("input/ai/MI.json")
             if not os.path.exists(mi_path):
-                print(f"[WARNING] MI.jsonファイルが見つかりません: {mi_path}")
+                logger.warning("MI.jsonファイルが見つかりません: %s", mi_path)
                 return {}
                 
             with open(mi_path, 'r', encoding='utf-8') as f:
                 cls._cache = json.load(f)
-                print(f"[INFO] MI.json読み込み完了: {len(cls._cache)} カテゴリ")
+                logger.info("MI.json読み込み完了: %s カテゴリ", len(cls._cache))
                 return cls._cache
                 
         except Exception as e:
-            print(f"[ERROR] MI.json読み込みエラー: {e}")
+            logger.error("MI.json読み込みエラー: %s", e)
             return {}
     
     @classmethod
@@ -49,7 +54,7 @@ class MaterialIndexLoader:
             return json_str
             
         except Exception as e:
-            print(f"[ERROR] MI情報フォーマットエラー: {e}")
+            logger.error("MI情報フォーマットエラー: %s", e)
             return f"[MI情報フォーマットエラー: {e}]"
 
 
@@ -72,16 +77,16 @@ class EquipmentLoader:
                 equipment_path = get_dynamic_file_path("input/ai/EQUIPMENTS.json")
                 
             if not os.path.exists(equipment_path):
-                print(f"[WARNING] EQUIPMENTS.jsonファイルが見つかりません: {equipment_path}")
+                logger.warning("EQUIPMENTS.jsonファイルが見つかりません: %s", equipment_path)
                 return []
                 
             with open(equipment_path, 'r', encoding='utf-8') as f:
                 cls._cache = json.load(f)
-                print(f"[INFO] EQUIPMENTS.json読み込み完了: {len(cls._cache)} 装置")
+                logger.info("EQUIPMENTS.json読み込み完了: %s 装置", len(cls._cache))
                 return cls._cache
                 
         except Exception as e:
-            print(f"[ERROR] EQUIPMENTS.json読み込みエラー: {e}")
+            logger.error("EQUIPMENTS.json読み込みエラー: %s", e)
             return []
     
     @classmethod
@@ -98,7 +103,7 @@ class EquipmentLoader:
             if equipment_id in equipment_ids:
                 found_equipment.append(equipment)
                 
-        print(f"[INFO] 装置情報検索: {len(equipment_ids)} ID指定 → {len(found_equipment)} 件発見")
+        logger.info("装置情報検索: %s ID指定 → %s 件発見", len(equipment_ids), len(found_equipment))
         return found_equipment
     
     @classmethod
@@ -138,5 +143,5 @@ class EquipmentLoader:
             return "\n".join(formatted_lines)
             
         except Exception as e:
-            print(f"[ERROR] 装置情報フォーマットエラー: {e}")
+            logger.error("装置情報フォーマットエラー: %s", e)
             return f"[装置情報フォーマットエラー: {e}]"

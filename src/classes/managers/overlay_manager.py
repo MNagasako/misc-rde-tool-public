@@ -3,6 +3,11 @@ from qt_compat.core import Qt, QEvent
 from qt_compat.gui import QPixmap
 import os
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 class OverlayManager:
     """
     オーバーレイ（閲覧専用レイヤー）管理クラス
@@ -45,7 +50,7 @@ class OverlayManager:
         ]
         # デバッグ: パスと存在確認
         for p in image_paths:
-            print(f"[DEBUG] overlay image path: {p} exists: {os.path.exists(p)}")
+            logger.debug("overlay image path: %s exists: %s", p, os.path.exists(p))
         self._overlay_image_labels = []  # 画像ラベルを属性で保持
         positions = [
             (0, 0),

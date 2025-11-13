@@ -474,7 +474,7 @@ class SettingsTabWidget(QWidget):
     
     def setup_ai_tab_fallback(self):
         """AI設定タブ - フォールバック版"""
-        print("[settings_tab_widget] フォールバックAI設定タブを作成")
+        logger.debug("[settings_tab_widget] フォールバックAI設定タブを作成")
         
         fallback_widget = QWidget()
         layout = QVBoxLayout(fallback_widget)
@@ -599,33 +599,33 @@ class SettingsTabWidget(QWidget):
     def setup_autologin_tab(self):
         """自動ログインタブを設定"""
         try:
-            print("[settings_tab_widget] setup_autologin_tab: 開始")
+            logger.debug("[settings_tab_widget] setup_autologin_tab: 開始")
             
             # AutoLoginTabWidgetのインポートを試行
             try:
                 from classes.config.ui.autologin_tab_widget import AutoLoginTabWidget
-                print("[settings_tab_widget] AutoLoginTabWidgetのインポートを試行")
+                logger.debug("[settings_tab_widget] AutoLoginTabWidgetのインポートを試行")
                 
                 # 自動ログインタブウィジェットを作成
                 autologin_widget = AutoLoginTabWidget(self)
-                print("[settings_tab_widget] AutoLoginTabWidget作成成功")
+                logger.info("[settings_tab_widget] AutoLoginTabWidget作成成功")
                 
                 # タブに追加
                 tab_index = self.tab_widget.addTab(autologin_widget, "自動ログイン")
-                print(f"[settings_tab_widget] 自動ログインタブ追加完了: インデックス={tab_index}")
+                logger.info("[settings_tab_widget] 自動ログインタブ追加完了: インデックス=%s", tab_index)
                 
                 # ウィジェットへの参照を保存
                 self.autologin_widget = autologin_widget
                 
             except ImportError as e:
-                print(f"[settings_tab_widget] AutoLoginTabWidgetのインポートに失敗: {e}")
+                logger.debug("[settings_tab_widget] AutoLoginTabWidgetのインポートに失敗: %s", e)
                 self._create_fallback_autologin_tab()
             except Exception as e:
-                print(f"[settings_tab_widget] AutoLoginTabWidget作成エラー: {e}")
+                logger.error("[settings_tab_widget] AutoLoginTabWidget作成エラー: %s", e)
                 self._create_fallback_autologin_tab()
                 
         except Exception as e:
-            print(f"[settings_tab_widget] setup_autologin_tab全体エラー: {e}")
+            logger.error("[settings_tab_widget] setup_autologin_tab全体エラー: %s", e)
             logger.error(f"自動ログインタブ設定エラー: {e}")
     
     def setup_token_status_tab(self):
@@ -678,7 +678,7 @@ class SettingsTabWidget(QWidget):
 
     def _create_fallback_autologin_tab(self):
         """自動ログインタブ - フォールバック版"""
-        print("[settings_tab_widget] フォールバック自動ログインタブを作成")
+        logger.debug("[settings_tab_widget] フォールバック自動ログインタブを作成")
         
         fallback_widget = QWidget()
         layout = QVBoxLayout(fallback_widget)
@@ -704,7 +704,7 @@ class SettingsTabWidget(QWidget):
         
         # タブに追加
         tab_index = self.tab_widget.addTab(fallback_widget, "自動ログイン")
-        print(f"[settings_tab_widget] フォールバック自動ログインタブ追加完了: インデックス={tab_index}")
+        logger.info("[settings_tab_widget] フォールバック自動ログインタブ追加完了: インデックス=%s", tab_index)
 
 
 def create_settings_tab_widget(parent=None, bearer_token=None):

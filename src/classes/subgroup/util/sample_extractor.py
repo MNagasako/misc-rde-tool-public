@@ -5,6 +5,7 @@
 import os
 import json
 import webbrowser
+import logging
 from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, 
     QListWidgetItem, QPushButton, QMessageBox, QTextEdit, QComboBox, QCompleter,
@@ -12,6 +13,9 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt
 from config.common import get_samples_dir_path, SUBGROUP_JSON_PATH
+
+# ロガー設定
+logger = logging.getLogger(__name__)
 
 
 class RelatedSamplesDialog(QDialog):
@@ -288,7 +292,7 @@ class RelatedSamplesDialog(QDialog):
         url = self.generate_sample_url(sample_id)
         try:
             webbrowser.open(url)
-            print(f"[INFO] ブラウザでリンクを開きました: {url}")
+            logger.info("ブラウザでリンクを開きました: %s", url)
         except Exception as e:
             QMessageBox.warning(self, "エラー", f"ブラウザでリンクを開けませんでした: {str(e)}")
     
@@ -305,37 +309,51 @@ class RelatedSamplesDialog(QDialog):
     def load_subgroups(self):
         """サブグループリストの読み込み"""
         if not os.path.exists(SUBGROUP_JSON_PATH):
-            print(f"[WARNING] サブグループJSONファイルが見つかりません: {SUBGROUP_JSON_PATH}")
+            logger.warning("サブグループJSONファイルが見つかりません: %s", SUBGROUP_JSON_PATH)
             return
         
         try:
             with open(SUBGROUP_JSON_PATH, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
+            # データ型検証
+            if not isinstance(data, dict):
+                logger.error("サブグループJSONの最上位がdict型ではありません: %s", type(data))
+                self.all_subgroups = []
+                return
+            
             # subgroup.jsonの構造: data=親グループ(PROJECT), included=子サブグループ配列
             # 子サブグループのリストを取得
-            self.all_subgroups = data.get('included', [])
+            included = data.get('included', [])
+            
+            # included が list 型であることを確認
+            if not isinstance(included, list):
+                logger.error("サブグループ 'included' がlist型ではありません: %s", type(included))
+                self.all_subgroups = []
+                return
+            
+            self.all_subgroups = included
             
             # includedがない場合は空リスト
             if not self.all_subgroups:
-                print(f"[WARNING] サブグループ(included)が見つかりません")
+                logger.warning("サブグループ(included)が見つかりません")
                 self.all_subgroups = []
             else:
-                print(f"[INFO] サブグループを {len(self.all_subgroups)} 件読み込みました")
+                logger.info("サブグループを %s 件読み込みました", len(self.all_subgroups))
                 
                 # データ構造の確認（デバッグ用）
                 if len(self.all_subgroups) > 0:
                     first_item = self.all_subgroups[0]
                     if isinstance(first_item, dict):
-                        print(f"[DEBUG] サブグループの構造OK: type={first_item.get('type')}, name={first_item.get('attributes', {}).get('name', 'N/A')}")
+                        logger.debug("サブグループの構造OK: type=%s, name=%s", first_item.get('type'), first_item.get('attributes', {}).get('name', 'N/A'))
                     else:
-                        print(f"[WARNING] サブグループのデータ型が不正: {type(first_item)}")
+                        logger.warning("サブグループのデータ型が不正: %s (期待: dict)", type(first_item))
             
             # 初期フィルタリング実行
             self.on_filter_changed()
             
         except Exception as e:
-            print(f"[ERROR] サブグループ読み込みエラー: {str(e)}")
+            logger.error("サブグループ読み込みエラー: %s", str(e))
             import traceback
             traceback.print_exc()
             self.all_subgroups = []
@@ -357,14 +375,14 @@ class RelatedSamplesDialog(QDialog):
         
         current_user_id = self._get_current_user_id()
         if not current_user_id:
-            print("[WARNING] ユーザーIDを取得できませんでした。フィルタなしで表示します。")
+            logger.warning("ユーザーIDを取得できませんでした。フィルタなしで表示します。")
             return self.all_subgroups.copy()
         
         filtered = []
         for group in self.all_subgroups:
             # データ型チェック
             if not isinstance(group, dict):
-                print(f"[WARNING] グループデータが辞書ではありません: type={type(group)}, value={group}")
+                logger.warning("グループデータが辞書ではありません: type=%s, value=%s", type(group), group)
                 continue
             
             if self._should_include_group(group, filter_value, current_user_id):
@@ -376,7 +394,7 @@ class RelatedSamplesDialog(QDialog):
         """グループがフィルター条件に合致するかチェック（subgroup_edit_widget.pyと同等）"""
         attributes = group.get('attributes', {})
         if not isinstance(attributes, dict):
-            print(f"[WARNING] attributes が辞書ではありません: type={type(attributes)}")
+            logger.warning("attributes が辞書ではありません: type=%s", type(attributes))
             return False
         
         roles = attributes.get('roles', [])
@@ -408,16 +426,16 @@ class RelatedSamplesDialog(QDialog):
                 data = json.load(f)
             return data.get("data", {}).get("id", "")
         except Exception as e:
-            print(f"[DEBUG] ユーザーID取得エラー: {e}")
+            logger.debug("ユーザーID取得エラー: %s", e)
             return ""
     
     def _populate_subgroup_combo(self):
         """サブグループコンボボックスの更新（選択中サブグループを除外）"""
         self.subgroup_combo.clear()
         
-        # 選択中のサブグループIDを除外
+        # 選択中のサブグループIDを除外（型チェック付き）
         excluded_subgroups = [group for group in self.filtered_subgroups 
-                              if group.get('id') != self.subgroup_id]
+                              if isinstance(group, dict) and group.get('id') != self.subgroup_id]
         
         if not excluded_subgroups:
             self.subgroup_combo.addItem("該当するサブグループがありません", None)
@@ -428,13 +446,13 @@ class RelatedSamplesDialog(QDialog):
         for group in excluded_subgroups:
             # データ型チェック
             if not isinstance(group, dict):
-                print(f"[WARNING] populate_subgroup_combo: グループデータが辞書ではありません: {type(group)}")
+                logger.warning("populate_subgroup_combo: グループデータが辞書ではありません: %s", type(group))
                 continue
             
             group_id = group.get('id', '')
             attributes = group.get('attributes', {})
             if not isinstance(attributes, dict):
-                print(f"[WARNING] populate_subgroup_combo: attributes が辞書ではありません")
+                logger.warning("populate_subgroup_combo: attributes が辞書ではありません")
                 continue
             
             group_name = attributes.get('name', '名前なし')
@@ -463,7 +481,7 @@ class RelatedSamplesDialog(QDialog):
             sample_detail = api_client.get_sample_detail(sample_id)
             
             if not sample_detail:
-                print(f"[WARNING] 試料詳細の取得に失敗しました: {sample_id}")
+                logger.warning("試料詳細の取得に失敗しました: %s", sample_id)
                 self.delete_subgroup_combo.clear()
                 return
             
@@ -478,7 +496,7 @@ class RelatedSamplesDialog(QDialog):
             
             if not sharing_groups:
                 self.delete_subgroup_combo.addItem("共有グループなし", None)
-                print(f"[DEBUG] 試料 {sample_id} には共有グループが設定されていません")
+                logger.debug("試料 %s には共有グループが設定されていません", sample_id)
                 return
             
             for group in sharing_groups:
@@ -487,10 +505,10 @@ class RelatedSamplesDialog(QDialog):
                 display_text = f"{group_name} (ID: {group_id})"
                 self.delete_subgroup_combo.addItem(display_text, group)
             
-            print(f"[DEBUG] 試料 {sample_id} の共有グループ: {len(sharing_groups)}件")
+            logger.debug("試料 %s の共有グループ: %s件", sample_id, len(sharing_groups))
             
         except Exception as e:
-            print(f"[ERROR] 共有グループ情報取得エラー: {e}")
+            logger.error("共有グループ情報取得エラー: %s", e)
             self.delete_subgroup_combo.clear()
             self.delete_subgroup_combo.addItem("取得エラー", None)
     

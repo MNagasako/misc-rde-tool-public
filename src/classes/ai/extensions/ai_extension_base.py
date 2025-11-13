@@ -8,6 +8,11 @@ import json
 from typing import Dict, List, Optional, Any
 from abc import ABC, abstractmethod
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 
 class AIPromptTemplate:
     """AIプロンプトテンプレート管理クラス"""
@@ -37,14 +42,14 @@ class AIPromptTemplate:
             # デバッグ: file_tree の内容を確認
             if 'file_tree' in context_data:
                 file_tree_value = context_data['file_tree']
-                print(f"[DEBUG] テンプレートrender: file_tree キー存在")
-                print(f"[DEBUG] file_tree の型: {type(file_tree_value)}")
-                print(f"[DEBUG] file_tree の長さ: {len(file_tree_value) if file_tree_value else 0} 文字")
-                print(f"[DEBUG] file_tree が空: {not file_tree_value}")
+                logger.debug("テンプレートrender: file_tree キー存在")
+                logger.debug("file_tree の型: %s", type(file_tree_value))
+                logger.debug("file_tree の長さ: %s 文字", len(file_tree_value) if file_tree_value else 0)
+                logger.debug("file_tree が空: %s", not file_tree_value)
                 if file_tree_value:
-                    print(f"[DEBUG] file_tree の先頭100文字: {file_tree_value[:100]}")
+                    logger.debug("file_tree の先頭100文字: %s", file_tree_value[:100])
             else:
-                print(f"[DEBUG] [WARN]  context_data に file_tree キーが存在しません")
+                logger.debug("context_data に file_tree キーが存在しません")
             
             # 空値の場合のフォールバック処理
             safe_context = {}
@@ -59,7 +64,7 @@ class AIPromptTemplate:
             
             # デバッグ: safe_context の file_tree を確認
             if 'file_tree' in safe_context:
-                print(f"[DEBUG] safe_context['file_tree']: {safe_context['file_tree'][:100] if len(safe_context['file_tree']) > 100 else safe_context['file_tree']}")
+                logger.debug("safe_context['file_tree']: %s", safe_context['file_tree'][:100] if len(safe_context['file_tree']) > 100 else safe_context['file_tree'])
             
             return self.base_prompt.format(**safe_context)
             
@@ -148,7 +153,7 @@ class DatasetDescriptionExtension(AIExtensionBase):
         
         # 外部ファイルからテンプレートを読み込み
         if self._load_external_templates():
-            print("[INFO] 外部テンプレートファイルからの読み込み成功")
+            logger.info("外部テンプレートファイルからの読み込み成功")
             return
         
         # 保存されたテンプレートファイルを削除（新しいテンプレートを強制読み込み）
@@ -157,9 +162,9 @@ class DatasetDescriptionExtension(AIExtensionBase):
             config_path = get_dynamic_file_path("input/prompt_templates.json")
             if os.path.exists(config_path):
                 os.remove(config_path)
-                print(f"[DEBUG] 古いテンプレートファイルを削除: {config_path}")
+                logger.debug("古いテンプレートファイルを削除: %s", config_path)
         except Exception as e:
-            print(f"[WARNING] テンプレートファイル削除エラー: {e}")
+            logger.warning("テンプレートファイル削除エラー: %s", e)
         
         # 保存されたテンプレートを読み込み
         try:
@@ -182,10 +187,10 @@ class DatasetDescriptionExtension(AIExtensionBase):
                     return  # 保存されたテンプレートを使用
                     
         except Exception as e:
-            print(f"[WARNING] 保存されたテンプレート読み込みエラー: {e}")
+            logger.warning("保存されたテンプレート読み込みエラー: %s", e)
         
         # フォールバック: ハードコードされたデフォルトテンプレートを使用
-        print("[WARNING] 外部テンプレートが利用できません。ハードコードされたテンプレートを使用します。")
+        logger.warning("外部テンプレートが利用できません。ハードコードされたテンプレートを使用します。")
         self._register_fallback_templates()
 
     def _load_external_templates(self) -> bool:
@@ -201,7 +206,7 @@ class DatasetDescriptionExtension(AIExtensionBase):
             # テンプレート設定ファイルを読み込み
             config_path = get_dynamic_file_path("input/ai/prompts/template_config.json")
             if not os.path.exists(config_path):
-                print(f"[DEBUG] テンプレート設定ファイルが見つかりません: {config_path}")
+                logger.debug("テンプレート設定ファイルが見つかりません: %s", config_path)
                 return False
             
             with open(config_path, 'r', encoding='utf-8') as f:
@@ -210,7 +215,7 @@ class DatasetDescriptionExtension(AIExtensionBase):
             # dataset_explanation の設定を読み込み
             dataset_config = template_config.get("dataset_explanation", {})
             if not dataset_config:
-                print("[WARNING] dataset_explanation設定が見つかりません")
+                logger.warning("dataset_explanation設定が見つかりません")
                 return False
             
             # 各テンプレートファイルを読み込み
@@ -219,13 +224,13 @@ class DatasetDescriptionExtension(AIExtensionBase):
                 context_keys = template_info.get("context_keys", [])
                 
                 if not template_file:
-                    print(f"[WARNING] テンプレート '{template_name}' のファイルパスが設定されていません")
+                    logger.warning("テンプレート '%s' のファイルパスが設定されていません", template_name)
                     continue
                 
                 # テンプレートファイルを読み込み
                 template_path = get_dynamic_file_path(template_file)
                 if not os.path.exists(template_path):
-                    print(f"[WARNING] テンプレートファイルが見つかりません: {template_path}")
+                    logger.warning("テンプレートファイルが見つかりません: %s", template_path)
                     continue
                 
                 with open(template_path, 'r', encoding='utf-8') as f:
@@ -234,12 +239,12 @@ class DatasetDescriptionExtension(AIExtensionBase):
                 # テンプレートを登録
                 template = AIPromptTemplate(template_name, template_content, context_keys)
                 self.register_template(template)
-                print(f"[INFO] 外部テンプレート読み込み成功: {template_name} ({len(template_content)}文字)")
+                logger.info("外部テンプレート読み込み成功: %s (%s文字)", template_name, len(template_content))
             
             return True
             
         except Exception as e:
-            print(f"[ERROR] 外部テンプレート読み込みエラー: {e}")
+            logger.error("外部テンプレート読み込みエラー: %s", e)
             return False
     
     def _register_fallback_templates(self):
@@ -358,7 +363,7 @@ ARIM課題データ:
         )
         
         self.register_template(quick_template)
-        print("[INFO] フォールバックテンプレート登録完了: basic, detailed, quick")
+        logger.info("フォールバックテンプレート登録完了: basic, detailed, quick")
         
     def collect_context_data(self, **kwargs) -> Dict[str, Any]:
         """データセット関連のコンテキストデータを収集"""
@@ -382,7 +387,7 @@ ARIM課題データ:
             from .utils.data_loaders import MaterialIndexLoader
             context['material_index_data'] = MaterialIndexLoader.format_for_prompt()
         except Exception as e:
-            print(f"[WARNING] MI情報取得エラー: {e}")
+            logger.warning("MI情報取得エラー: %s", e)
             context['material_index_data'] = '[MI情報取得エラー]'
         
         # 装置情報を追加（設備IDが指定されている場合）
@@ -393,7 +398,7 @@ ARIM課題データ:
                 equipment_list = EquipmentLoader.find_equipment_by_ids(equipment_ids)
                 context['equipment_data'] = EquipmentLoader.format_equipment_for_prompt(equipment_list)
             except Exception as e:
-                print(f"[WARNING] 装置情報取得エラー: {e}")
+                logger.warning("装置情報取得エラー: %s", e)
                 context['equipment_data'] = '[装置情報取得エラー]'
         else:
             context['equipment_data'] = '[設備ID未指定]'
@@ -405,12 +410,12 @@ ARIM課題データ:
         context['related_datasets'] = kwargs.get('related_datasets', '')
         
         # デバッグ: file_tree の内容を確認
-        print(f"[DEBUG] collect_context_data: file_tree キー追加")
+        logger.debug("collect_context_data: file_tree キー追加")
         if context['file_tree']:
-            print(f"[DEBUG] file_tree の長さ: {len(context['file_tree'])} 文字")
-            print(f"[DEBUG] file_tree の先頭100文字: {context['file_tree'][:100]}")
+            logger.debug("file_tree の長さ: %s 文字", len(context['file_tree']))
+            logger.debug("file_tree の先頭100文字: %s", context['file_tree'][:100])
         else:
-            print(f"[DEBUG] [WARN]  file_tree が空です")
+            logger.debug("file_tree が空です")
         
         return context
         
@@ -484,7 +489,7 @@ ARIM課題データ:
                     })
                 
         except Exception as e:
-            print(f"[WARNING] AI応答解析エラー: {e}")
+            logger.warning("AI応答解析エラー: %s", e)
             # エラー時のフォールバック
             suggestions.append({
                 'title': 'AI提案（解析エラー）',

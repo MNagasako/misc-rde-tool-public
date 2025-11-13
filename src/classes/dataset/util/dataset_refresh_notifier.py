@@ -1,3 +1,8 @@
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 """
 データセット・サブグループ更新通知システム
 """
@@ -12,22 +17,22 @@ class DatasetRefreshNotifier:
         """リフレッシュコールバックを登録"""
         if callback not in self.callbacks:
             self.callbacks.append(callback)
-            print(f"[INFO] データセットリフレッシュコールバック登録: {len(self.callbacks)}件")
+            logger.info("データセットリフレッシュコールバック登録: %s件", len(self.callbacks))
     
     def unregister_callback(self, callback):
         """リフレッシュコールバックを登録解除"""
         if callback in self.callbacks:
             self.callbacks.remove(callback)
-            print(f"[INFO] データセットリフレッシュコールバック解除: {len(self.callbacks)}件")
+            logger.info("データセットリフレッシュコールバック解除: %s件", len(self.callbacks))
     
     def notify_refresh(self):
         """全ての登録されたコールバックに更新を通知"""
-        print(f"[INFO] データセット更新を{len(self.callbacks)}件のコールバックに通知")
+        logger.info("データセット更新を%s件のコールバックに通知", len(self.callbacks))
         for callback in self.callbacks:
             try:
                 callback()
             except Exception as e:
-                print(f"[ERROR] データセットリフレッシュコールバック実行エラー: {e}")
+                logger.error("データセットリフレッシュコールバック実行エラー: %s", e)
 
 
 class SubgroupRefreshNotifier:
@@ -40,22 +45,22 @@ class SubgroupRefreshNotifier:
         """リフレッシュコールバックを登録"""
         if callback not in self.callbacks:
             self.callbacks.append(callback)
-            print(f"[INFO] サブグループリフレッシュコールバック登録: {len(self.callbacks)}件")
+            logger.info("サブグループリフレッシュコールバック登録: %s件", len(self.callbacks))
     
     def unregister_callback(self, callback):
         """リフレッシュコールバックを登録解除"""
         if callback in self.callbacks:
             self.callbacks.remove(callback)
-            print(f"[INFO] サブグループリフレッシュコールバック解除: {len(self.callbacks)}件")
+            logger.info("サブグループリフレッシュコールバック解除: %s件", len(self.callbacks))
     
     def notify_refresh(self):
         """全ての登録されたコールバックに更新を通知"""
-        print(f"[INFO] サブグループ更新を{len(self.callbacks)}件のコールバックに通知")
+        logger.info("サブグループ更新を%s件のコールバックに通知", len(self.callbacks))
         for callback in self.callbacks:
             try:
                 callback()
             except Exception as e:
-                print(f"[ERROR] サブグループリフレッシュコールバック実行エラー: {e}")
+                logger.error("サブグループリフレッシュコールバック実行エラー: %s", e)
 
 
 # グローバルインスタンス

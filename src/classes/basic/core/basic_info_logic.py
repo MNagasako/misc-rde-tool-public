@@ -542,10 +542,10 @@ def fetch_all_dataset_info(bearer_token, output_dir="output/rde/data",onlySelf=F
     output_dir = os.path.normpath(output_dir)
     if onlySelf is True:
         if searchWords and len(searchWords) > 0 :
-            print(f"searchWords: {searchWords}")
+            logger.debug("searchWords: %s", searchWords)
             escapedUserName = searchWords.replace(" ", "%20").replace(",", "%2C")
         else:
-            print(f"UserName: {userName}")
+            logger.debug("UserName: %s", userName)
             escapedUserName = userName.replace(" ", "%20").replace(",", "%2C")
         url = f"https://rde-api.nims.go.jp/datasets?searchWords={escapedUserName}&sort=-modified&page%5Blimit%5D=5000&include=manager%2Creleases&fields%5Buser%5D=id%2CuserName%2CorganizationName%2CisDeleted&fields%5Brelease%5D=version%2CreleaseNumber"
     else:
@@ -592,10 +592,10 @@ def fetch_all_dataset_info(bearer_token, output_dir="output/rde/data",onlySelf=F
             if file_mtime is None or file_mtime < modified_dt:
                 fetch_dataset_info_respectively_from_api(bearer_token, ds_id)
             else:
-                print(f"[INFO] {ds_id}.jsonは最新です。再取得は行いません。")
+                logger.info("%s.jsonは最新です。再取得は行いません。", ds_id)
 
         except Exception as e:
-            print(f"[ERROR] ds_id={ds_id} の処理中にエラー: {e}")
+            logger.error("ds_id=%s の処理中にエラー: %s", ds_id, e)
 
 
 def fetch_instrument_type_info_from_api(bearer_token, save_path):
@@ -614,14 +614,14 @@ def fetch_instrument_type_info_from_api(bearer_token, save_path):
         # v1.18.4: bearer_token=Noneで自動選択させる
         resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
         if resp is None:
-            print("[ERROR] 装置タイプ情報の取得に失敗しました: リクエストエラー")
+            logger.error("装置タイプ情報の取得に失敗しました: リクエストエラー")
             return
         resp.raise_for_status()
         data = resp.json()
         save_json(data, *save_path)
-        print(f"[INFO] 装置タイプ情報の取得・保存に成功しました: {os.path.join(*save_path)}")
+        logger.info("装置タイプ情報の取得・保存に成功しました: %s", os.path.join(*save_path))
     except Exception as e:
-        print(f"[ERROR] 装置タイプ情報の取得・保存に失敗しました: {e}")
+        logger.error("装置タイプ情報の取得・保存に失敗しました: %s", e)
 
 def fetch_organization_info_from_api(bearer_token, save_path):
     """
@@ -639,14 +639,14 @@ def fetch_organization_info_from_api(bearer_token, save_path):
         # v1.18.4: bearer_token=Noneで自動選択させる
         resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
         if resp is None:
-            print("[ERROR] 組織情報の取得に失敗しました: リクエストエラー")
+            logger.error("組織情報の取得に失敗しました: リクエストエラー")
             return
         resp.raise_for_status()
         data = resp.json()
         save_json(data, *save_path)
-        print(f"[INFO] 組織情報の取得・保存に成功しました: {os.path.join(*save_path)}")
+        logger.info("組織情報の取得・保存に成功しました: %s", os.path.join(*save_path))
     except Exception as e:
-        print(f"[ERROR] 組織情報の取得・保存に失敗しました: {e}")
+        logger.error("組織情報の取得・保存に失敗しました: %s", e)
 
 
 def fetch_template_info_from_api(bearer_token, output_dir="output/rde/data"):
@@ -665,16 +665,16 @@ def fetch_template_info_from_api(bearer_token, output_dir="output/rde/data"):
         # v1.18.4: bearer_token=Noneで自動選択させる
         resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=30)  # datasetTemplates は重い処理のためタイムアウト延長
         if resp is None:
-            print("[ERROR] テンプレート情報の取得に失敗しました: リクエストエラー")
+            logger.error("テンプレート情報の取得に失敗しました: リクエストエラー")
             return
         resp.raise_for_status()
         data = resp.json()
         os.makedirs(output_dir, exist_ok=True)
         with open(os.path.join(output_dir, "template.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        print("[INFO] テンプレート(template.json)の取得・保存に成功しました。")
+        logger.info("テンプレート(template.json)の取得・保存に成功しました。")
     except Exception as e:
-        print(f"[ERROR] テンプレートの取得・保存に失敗しました: {e}")
+        logger.error("テンプレートの取得・保存に失敗しました: %s", e)
 
 def fetch_instruments_info_from_api(bearer_token, output_dir="output/rde/data"):
     """
@@ -692,16 +692,16 @@ def fetch_instruments_info_from_api(bearer_token, output_dir="output/rde/data"):
         # v1.18.4: bearer_token=Noneで自動選択させる
         resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
         if resp is None:
-            print("[ERROR] 装置情報の取得に失敗しました: リクエストエラー")
+            logger.error("装置情報の取得に失敗しました: リクエストエラー")
             return
         resp.raise_for_status()
         data = resp.json()
         os.makedirs(output_dir, exist_ok=True)
         with open(os.path.join(output_dir, "instruments.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        print("[INFO] 設備情報(instruments.json)の取得・保存に成功しました。")
+        logger.info("設備情報(instruments.json)の取得・保存に成功しました。")
     except Exception as e:
-        print(f"[ERROR] 設備情報の取得・保存に失敗しました: {e}")
+        logger.error("設備情報の取得・保存に失敗しました: %s", e)
 
 def fetch_licenses_info_from_api(bearer_token, output_dir="output/rde/data"):
     """
@@ -719,17 +719,17 @@ def fetch_licenses_info_from_api(bearer_token, output_dir="output/rde/data"):
         # v1.18.4: bearer_token=Noneで自動選択させる
         resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
         if resp is None:
-            print("[ERROR] 利用ライセンス情報の取得に失敗しました: リクエストエラー")
+            logger.error("利用ライセンス情報の取得に失敗しました: リクエストエラー")
             return
         resp.raise_for_status()
         data = resp.json()
         os.makedirs(output_dir, exist_ok=True)
         with open(os.path.join(output_dir, "licenses.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        print("[INFO] 利用ライセンス情報(licenses.json)の取得・保存に成功しました。")
+        logger.info("利用ライセンス情報(licenses.json)の取得・保存に成功しました。")
         logger.info(f"利用ライセンス情報取得完了: {len(data.get('data', []))}件のライセンス")
     except Exception as e:
-        print(f"[ERROR] 利用ライセンス情報の取得・保存に失敗しました: {e}")
+        logger.error("利用ライセンス情報の取得・保存に失敗しました: %s", e)
         logger.error(f"利用ライセンス情報取得失敗: {e}")
 
 
@@ -752,69 +752,69 @@ def parse_group_id_from_data(data):
 
 def move_webview_to_group(webview, project_group_id):
     import traceback
-    print(f"[DEBUG] move_webview_to_group: called with webview={webview}, project_group_id={project_group_id}")
-    print(f"[DEBUG] type(webview)={type(webview)}, type(project_group_id)={type(project_group_id)}")
-    print(f"[DEBUG] move_webview_to_group")
+    logger.debug("move_webview_to_group: called with webview=%s, project_group_id=%s", webview, project_group_id)
+    logger.debug("type(webview)=%s, type(project_group_id)=%s", type(webview), type(project_group_id))
+    logger.debug("move_webview_to_group")
     try:
-        print(f"[DEBUG] webview: {webview}")
-        print(f"[DEBUG] project_group_id: {project_group_id}")
+        logger.debug("webview: %s", webview)
+        logger.debug("project_group_id: %s", project_group_id)
         # webviewの型・状態を詳細に出力
-        print(f"[DEBUG] type(webview): {type(webview)}")
-        print(f"[DEBUG] dir(webview): {dir(webview)}")
-        print(f"[DEBUG] webview is None: {webview is None}")
+        logger.debug("type(webview): %s", type(webview))
+        logger.debug("dir(webview): %s", dir(webview))
+        logger.debug("webview is None: %s", webview is None)
         try:
-            print(f"[DEBUG] webview.isWidgetType: {getattr(webview, 'isWidgetType', lambda: 'N/A')()}")
+            logger.debug("webview.isWidgetType: %s", getattr(webview, 'isWidgetType', lambda: 'N/A')())
         except Exception as e:
-            print(f"[DEBUG] webview.isWidgetType error: {e}")
+            logger.debug("webview.isWidgetType error: %s", e)
         try:
-            print(f"[DEBUG] webview.isVisible: {getattr(webview, 'isVisible', lambda: 'N/A')()}")
+            logger.debug("webview.isVisible: %s", getattr(webview, 'isVisible', lambda: 'N/A')())
         except Exception as e:
-            print(f"[DEBUG] webview.isVisible error: {e}")
+            logger.debug("webview.isVisible error: %s", e)
         try:
-            print(f"[DEBUG] webview.isEnabled: {getattr(webview, 'isEnabled', lambda: 'N/A')()}")
+            logger.debug("webview.isEnabled: %s", getattr(webview, 'isEnabled', lambda: 'N/A')())
         except Exception as e:
-            print(f"[DEBUG] webview.isEnabled error: {e}")
+            logger.debug("webview.isEnabled error: %s", e)
         try:
-            print(f"[DEBUG] webview.metaObject: {getattr(webview, 'metaObject', lambda: 'N/A')()}")
+            logger.debug("webview.metaObject: %s", getattr(webview, 'metaObject', lambda: 'N/A')())
         except Exception as e:
-            print(f"[DEBUG] webview.metaObject error: {e}")
+            logger.debug("webview.metaObject error: %s", e)
         if webview is None:
-            print("[ERROR] webview is None")
+            logger.error("webview is None")
             return
         # setUrl前にwebviewを有効化
         try:
             if hasattr(webview, 'setEnabled'):
                 webview.setEnabled(True)
-                print(f"[DEBUG] setEnabled(True) 実行")
+                logger.debug("setEnabled(True) 実行")
         except Exception as e:
-            print(f"[ERROR] setEnabled例外: {e}")
+            logger.error("setEnabled例外: %s", e)
         # setUrlをUIスレッドで実行
         url = f"https://rde.nims.go.jp/rde/datasets/groups/{project_group_id}"
-        print(f"[DEBUG] setUrl前: {url}")
+        logger.debug("setUrl前: %s", url)
         try:
             from qt_compat.core import QTimer
             def do_set_url(wv, u):
                 try:
                     if wv is None:
-                        print(f"[ERROR] do_set_url: webview is None")
+                        logger.error("do_set_url: webview is None")
                         return
                     wv.setUrl(u)
-                    print(f"[DEBUG] setUrl後: 正常にsetUrl呼び出し完了")
+                    logger.debug("setUrl後: 正常にsetUrl呼び出し完了")
                 except Exception as e:
                     import traceback
-                    print(f"[ERROR] setUrl例外: {e}")
+                    logger.error("setUrl例外: %s", e)
                     traceback.print_exc()
             QTimer.singleShot(0, lambda: do_set_url(webview, url))
         except Exception as e:
             import traceback
-            print(f"[ERROR] setUrlラップ例外: {e}")
+            logger.error("setUrlラップ例外: %s", e)
             traceback.print_exc()
     except Exception as e:
         import traceback
-        print(f"[ERROR] move_webview_to_group例外: {e}")
+        logger.error("move_webview_to_group例外: %s", e)
         traceback.print_exc()
     else:
-        print("[ERROR] move_webview_to_group: webview is None")
+        logger.error("move_webview_to_group: webview is None")
 
 def extract_users_and_subgroups(sub_data):
     users = []
@@ -2234,7 +2234,7 @@ def fetch_dataset_list_only(bearer_token, output_dir="output/rde/data"):
     try:
         resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=10)  # refactored to use api_request_helper
         if resp is None:
-            print("[ERROR] データセット一覧の取得に失敗しました: リクエストエラー")
+            logger.error("データセット一覧の取得に失敗しました: リクエストエラー")
             return
         data = resp.json()
         os.makedirs(output_dir, exist_ok=True)
@@ -2246,16 +2246,16 @@ def fetch_dataset_list_only(bearer_token, output_dir="output/rde/data"):
             backup_path = save_path + ".backup"
             try:
                 shutil.copy2(save_path, backup_path)
-                print(f"[INFO] 既存ファイルのバックアップを作成: {backup_path}")
+                logger.info("既存ファイルのバックアップを作成: %s", backup_path)
             except Exception as backup_error:
-                print(f"[WARNING] バックアップ作成に失敗: {backup_error}")
+                logger.warning("バックアップ作成に失敗: %s", backup_error)
         
         # 新しいファイルを書き込み
         with open(save_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        print("[INFO] データセット一覧(dataset.json)の取得・保存に成功しました。")
+        logger.info("データセット一覧(dataset.json)の取得・保存に成功しました。")
     except Exception as e:
-        print(f"[ERROR] データセット一覧の取得・保存に失敗しました: {e} URL: {url}")
+        logger.error("データセット一覧の取得・保存に失敗しました: %s URL: %s", e, url)
 
 def get_json_status_info():
     """
@@ -2313,12 +2313,12 @@ def get_json_status_info():
 
 def write_summary_sheet(wb, parent):
     import json, os
-    print("[XLSX] write_summary_sheet called")
+    logger.debug("[XLSX] write_summary_sheet called")
 
     def load_json(path):
         abs_path = os.path.abspath(path)
         if not os.path.exists(abs_path):
-            print(f"[ERROR] {path}が存在しません: {abs_path}")
+            logger.error("%sが存在しません: %s", path, abs_path)
             return None
         with open(abs_path, "r", encoding="utf-8") as f:
             return json.load(f)

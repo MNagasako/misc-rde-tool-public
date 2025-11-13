@@ -7,6 +7,7 @@
 import json
 import os
 import urllib.parse
+import logging
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QLabel, QCheckBox, QPushButton, QHBoxLayout, 
     QMessageBox, QDialog, QTextEdit, QTableWidget, QTableWidgetItem, 
@@ -17,6 +18,9 @@ from qt_compat.gui import QColor
 from config.common import SUBGROUP_JSON_PATH
 from net.http_helpers import proxy_get
 
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 
 class CommonSubgroupMemberSelector(QWidget):
     """
@@ -24,16 +28,18 @@ class CommonSubgroupMemberSelector(QWidget):
     新規作成・修正タブ両方で使用可能
     """
     
-    def __init__(self, user_entries=None, initial_roles=None, prechecked_user_ids=None, subgroup_id=None):
+    def __init__(self, user_entries=None, initial_roles=None, prechecked_user_ids=None, subgroup_id=None, show_filter=True):
         """
         Args:
             user_entries: ユーザーリスト（Noneの場合は統合リストを自動読み込み）
             initial_roles: 初期ロール情報 (dict: user_id -> role)
             prechecked_user_ids: 初期選択ユーザーID (set)
             subgroup_id: 修正対象のサブグループID（新規作成時はNone）
+            show_filter: フィルタUIを表示するか（True=新規作成タブ、False=修正タブ）
         """
         super().__init__()
         self.subgroup_id = subgroup_id
+        self.show_filter = show_filter
         self.initial_roles = initial_roles or {}
         self.prechecked_user_ids = set(prechecked_user_ids or [])
         self.dynamic_users = []  # 動的に追加されたユーザーリスト
@@ -73,16 +79,16 @@ class CommonSubgroupMemberSelector(QWidget):
             )
             self.user_entries = unified_users
             self.member_info = member_info
-            print(f"[DEBUG] 統合メンバーリスト読み込み完了: {len(unified_users)}名（一時ファイル含む）")
+            logger.debug("統合メンバーリスト読み込み完了: %s名（一時ファイル含む）", len(unified_users))
         except Exception as e:
-            print(f"[ERROR] 統合メンバーリスト読み込みエラー: {e}")
+            logger.error("統合メンバーリスト読み込みエラー: %s", e)
             # フォールバック: 既存の方法を使用
             try:
                 from .subgroup_ui_helpers import load_user_entries
                 self.user_entries = load_user_entries()
                 self.member_info = {}
             except Exception as fallback_error:
-                print(f"[ERROR] フォールバック処理もエラー: {fallback_error}")
+                logger.error("フォールバック処理もエラー: %s", fallback_error)
                 self.user_entries = []
                 self.member_info = {}
     
@@ -92,6 +98,26 @@ class CommonSubgroupMemberSelector(QWidget):
         # 余白を最小限に設定
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(5)
+        
+        # フィルタUI（新規作成タブのみ表示）
+        if self.show_filter:
+            filter_layout = QHBoxLayout()
+            filter_layout.addWidget(QLabel("表示フィルタ:"))
+            
+            self.filter_institution_cb = QCheckBox("実施機関")
+            self.filter_institution_cb.setChecked(True)
+            self.filter_institution_cb.setToolTip("subGroup.json由来のメンバーを表示")
+            self.filter_institution_cb.toggled.connect(self.apply_filter)
+            filter_layout.addWidget(self.filter_institution_cb)
+            
+            self.filter_custom_cb = QCheckBox("カスタム")
+            self.filter_custom_cb.setChecked(True)
+            self.filter_custom_cb.setToolTip("rde-member.txt由来のメンバーを表示")
+            self.filter_custom_cb.toggled.connect(self.apply_filter)
+            filter_layout.addWidget(self.filter_custom_cb)
+            
+            filter_layout.addStretch()
+            layout.addLayout(filter_layout)
         
         # ユーザー動的追加UI
         add_user_layout = QHBoxLayout()
@@ -131,10 +157,10 @@ class CommonSubgroupMemberSelector(QWidget):
             
             def on_header_clicked(self, logical_index):
                 """ヘッダークリック時の処理"""
-                print(f"[DEBUG] ヘッダークリック: 列={logical_index}")
+                logger.debug("ヘッダークリック: 列=%s", logical_index)
 
                 if logical_index in [2, 3, 4, 5, 6]:  # OWNER/ASSISTANT/MEMBER/AGENT/VIEWER列
-                    print(f"[DEBUG] チェックボックス/ラジオボタン列のソート実行")
+                    logger.debug("チェックボックス/ラジオボタン列のソート実行")
                     
                     # 現在の列のソート状態を取得/切り替え
                     current_order = self.column_sort_order.get(logical_index, Qt.DescendingOrder)
@@ -146,14 +172,14 @@ class CommonSubgroupMemberSelector(QWidget):
                     # ソートインジケーターを設定
                     self.horizontalHeader().setSortIndicator(logical_index, new_order)
                     
-                    print(f"[DEBUG] ソート順序: {current_order} → {new_order}")
+                    logger.debug("ソート順序: %s → %s", current_order, new_order)
                     
                     # カスタムソート実行
                     self._sort_by_checkbox_state(logical_index, new_order)
                     return
                 
                 # 通常の列は標準ソート
-                print(f"[DEBUG] 通常列のソート実行")
+                logger.debug("通常列のソート実行")
                 current_order = self.column_sort_order.get(logical_index, Qt.DescendingOrder)
                 new_order = Qt.AscendingOrder if current_order == Qt.DescendingOrder else Qt.DescendingOrder
                 
@@ -163,17 +189,17 @@ class CommonSubgroupMemberSelector(QWidget):
                 # ソートインジケーターを設定
                 self.horizontalHeader().setSortIndicator(logical_index, new_order)
                 
-                print(f"[DEBUG] 通常列ソート順序: {current_order} → {new_order}")
+                logger.debug("通常列ソート順序: %s → %s", current_order, new_order)
                 
                 # 標準のソート処理を実行
                 super().sortByColumn(logical_index, new_order)
             
             def _sort_by_checkbox_state(self, column, order):
                 """チェックボックス/ラジオボタン状態によるソート"""
-                print(f"[DEBUG] チェックボックスソート開始: 列={column}, 順序={order}")
+                logger.debug("チェックボックスソート開始: 列=%s, 順序=%s", column, order)
                 
                 if self.rowCount() == 0:
-                    print("[DEBUG] 行が0件のためソートをスキップ")
+                    logger.debug("行が0件のためソートをスキップ")
                     return
                 
                 # 現在の行データを収集
@@ -206,20 +232,20 @@ class CommonSubgroupMemberSelector(QWidget):
                     }
                     rows_data.append(row_info)
                     
-                    print(f"[DEBUG] 行{i}: {row_info['member_name']}, チェック={checked}")
+                    logger.debug("行%s: %s, チェック=%s", i, row_info['member_name'], checked)
                 
                 # ソート実行
                 reverse_sort = (order == Qt.DescendingOrder)
                 rows_data.sort(key=lambda x: (not x['checked'], x['member_name']), reverse=reverse_sort)
                 
-                print(f"[DEBUG] ソート後順序: {len(rows_data)}行")
+                logger.debug("ソート後順序: %s行", len(rows_data))
                 
                 # テーブルを再構築
                 self._rebuild_table(rows_data)
             
             def _rebuild_table(self, sorted_rows_data):
                 """ソート後のテーブル再構築"""
-                print(f"[DEBUG] テーブル再構築開始: {len(sorted_rows_data)}行")
+                logger.debug("テーブル再構築開始: %s行", len(sorted_rows_data))
                 
                 # 必要なクラスをインポート
                 from qt_compat.widgets import QCheckBox, QRadioButton
@@ -330,10 +356,10 @@ class CommonSubgroupMemberSelector(QWidget):
 
                         self.parent_selector.update_row_background(new_row)
                     
-                    print(f"[DEBUG] 行{new_row}再構築完了: {row_data['member_name']}")
+                    logger.debug("行%s再構築完了: %s", new_row, row_data['member_name'])
                 
                 # user_rowsリストを再構築
-                print(f"[DEBUG] user_rows再構築開始: 元の長さ={len(self.parent_selector.user_rows)}")
+                logger.debug("user_rows再構築開始: 元の長さ=%s", len(self.parent_selector.user_rows))
                 self.parent_selector.user_rows.clear()
                 for row in range(self.rowCount()):
                     owner_radio = self.cellWidget(row, 2)
@@ -355,12 +381,12 @@ class CommonSubgroupMemberSelector(QWidget):
                             viewer_cb.user_id = user_id
                             viewer_cb.setChecked(False)
                         self.parent_selector.user_rows.append((user_id, owner_radio, assistant_cb, member_cb, agent_cb, viewer_cb))
-                        print(f"[DEBUG] 行{row}追加: user_id={user_id}")
+                        logger.debug("行%s追加: user_id=%s", row, user_id)
                 
-                print(f"[DEBUG] user_rows再構築完了: 新しい長さ={len(self.parent_selector.user_rows)}")
+                logger.debug("user_rows再構築完了: 新しい長さ=%s", len(self.parent_selector.user_rows))
                 # ソートを再有効化
                 self.setSortingEnabled(True)
-                print(f"[DEBUG] テーブル再構築完了 - user_rows更新: {len(self.parent_selector.user_rows)}行")
+                logger.debug("テーブル再構築完了 - user_rows更新: %s行", len(self.parent_selector.user_rows))
         
         table = CustomTableWidget(self)
         table.setColumnCount(7)
@@ -701,9 +727,9 @@ class CommonSubgroupMemberSelector(QWidget):
         
         # バリデーション結果はログ出力のみ（UIは変更しない）
         if owner_count == 1:
-            print("[DEBUG] OWNER選択数正常: 1人")
+            logger.debug("OWNER選択数正常: 1人")
         else:
-            print(f"[DEBUG] OWNER選択数異常: {owner_count}人")
+            logger.debug("OWNER選択数異常: %s人", owner_count)
     
     
     def add_user_by_email(self):
@@ -774,7 +800,7 @@ class CommonSubgroupMemberSelector(QWidget):
             # 動的ユーザーリストに追加
             if not any(u.get('id') == user_id for u in self.dynamic_users):
                 self.dynamic_users.append(user_data)
-                print(f"[DEBUG] 動的ユーザーをメモリに追加: {user_name}")
+                logger.debug("動的ユーザーをメモリに追加: %s", user_name)
             
             # テーブルに行を追加（add_user_to_table内で一時ファイル保存も実行される）
             self.add_user_to_table(user_name, user_email, user_id)
@@ -796,32 +822,50 @@ class CommonSubgroupMemberSelector(QWidget):
         name_item = QTableWidgetItem(name)
         name_item.setData(Qt.UserRole, user_id)      # ユーザーIDを格納
         name_item.setData(Qt.UserRole + 1, email)    # メールアドレスを格納
+        name_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
         self.table.setItem(row_count, 0, name_item)
         
         # メール列
         email_item = QTableWidgetItem(email)
+        email_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
         self.table.setItem(row_count, 1, email_item)
         
-        # OWNERラジオボタン
+        # OWNERラジオボタン（owner_radio_groupに追加）
         owner_radio = QRadioButton()
+        owner_radio.user_id = user_id
+        self.owner_radio_group.addButton(owner_radio)  # グループに追加して排他制御
         self.table.setCellWidget(row_count, 2, owner_radio)
         
         # ASSISTANTチェックボックス
         assistant_cb = QCheckBox()
+        assistant_cb.user_id = user_id
         self.table.setCellWidget(row_count, 3, assistant_cb)
         
         # MEMBERチェックボックス
         member_cb = QCheckBox()
+        member_cb.user_id = user_id
         member_cb.setChecked(True)  # デフォルトでMEMBER権限を付与
         self.table.setCellWidget(row_count, 4, member_cb)
         
         # AGENTチェックボックス
         agent_cb = QCheckBox()
+        agent_cb.user_id = user_id
         self.table.setCellWidget(row_count, 5, agent_cb)
         
         # VIEWERチェックボックス
         viewer_cb = QCheckBox()
+        viewer_cb.user_id = user_id
         self.table.setCellWidget(row_count, 6, viewer_cb)
+        
+        # 排他制御イベント接続
+        owner_radio.toggled.connect(lambda checked, r=row_count: self._on_owner_changed(r, checked))
+        assistant_cb.toggled.connect(lambda checked, r=row_count: self._on_assistant_changed(r, checked))
+        member_cb.toggled.connect(lambda checked, r=row_count: self._on_member_changed(r, checked))
+        agent_cb.toggled.connect(lambda checked, r=row_count: self._on_agent_changed(r, checked))
+        viewer_cb.toggled.connect(lambda checked, r=row_count: self._on_viewer_changed(r, checked))
+        
+        # 初期背景色設定
+        self.update_row_background(row_count)
         
         # user_rowsに追加（他のメソッドとの整合性のため）
         if hasattr(self, 'user_rows'):
@@ -842,7 +886,90 @@ class CommonSubgroupMemberSelector(QWidget):
                 subgroup_api_helper.add_dynamic_user_to_member_list(matching_user)
             
         except Exception as save_error:
-            print(f"[WARNING] 動的ユーザー一時保存エラー: {save_error}")
+            logger.warning("動的ユーザー一時保存エラー: %s", save_error)
+
+    def apply_filter(self):
+        """フィルタ設定に基づいて行の表示/非表示を切り替える"""
+        # フィルタUIがない場合（修正タブ）は全て表示
+        if not self.show_filter:
+            for row in range(self.table.rowCount()):
+                self.table.setRowHidden(row, False)
+            return
+        
+        show_institution = self.filter_institution_cb.isChecked()
+        show_custom = self.filter_custom_cb.isChecked()
+        
+        logger.debug("フィルタ適用開始: 実施機関=%s, カスタム=%s", show_institution, show_custom)
+        
+        visible_count = 0
+        institution_count = 0
+        custom_count = 0
+        dynamic_count = 0
+        unknown_count = 0
+        
+        for row in range(self.table.rowCount()):
+            # 各行のuser_idを取得（owner_radioのuser_id属性から）
+            owner_radio = self.table.cellWidget(row, 2)
+            if not owner_radio or not hasattr(owner_radio, 'user_id'):
+                # user_idがない場合は表示
+                self.table.setRowHidden(row, False)
+                visible_count += 1
+                unknown_count += 1
+                continue
+            
+            user_id = owner_radio.user_id
+            
+            # ユーザーのソースを判定
+            source = None
+            source_format = None
+            for entry in self.user_entries:
+                if entry.get('id') == user_id:
+                    # sourceとsource_formatの両方をチェック
+                    source = entry.get('source', '')
+                    source_format = entry.get('source_format', '')
+                    break
+            
+            # フィルタ判定
+            should_show = False
+            category = "unknown"
+            
+            # source_formatが優先（より具体的）
+            if source_format in ['csv', 'json']:
+                # カスタム（rde-member.txt由来）
+                should_show = show_custom
+                category = "custom"
+                custom_count += 1
+            elif source == 'rde-member.txt':
+                # カスタム（rde-member.txt由来）
+                should_show = show_custom
+                category = "custom"
+                custom_count += 1
+            elif source in ['subGroup.json', 'subGroup.json_included']:
+                # 実施機関（subGroup.json由来）
+                should_show = show_institution
+                category = "institution"
+                institution_count += 1
+            elif source == 'dynamic':
+                # メール追加は常に表示
+                should_show = True
+                category = "dynamic"
+                dynamic_count += 1
+            else:
+                # その他（sourceが不明な場合）は常に表示
+                should_show = True
+                category = "unknown"
+                unknown_count += 1
+                name_item = self.table.item(row, 0)
+                user_name = name_item.text() if name_item else "Unknown"
+                logger.debug("未知のソース: source='%s', source_format='%s', user=%s, user_id=%s...", source, source_format, user_name, user_id[:20] if user_id else 'None')
+            
+            # 行の表示/非表示を設定
+            self.table.setRowHidden(row, not should_show)
+            if should_show:
+                visible_count += 1
+        
+        logger.debug("フィルタ適用完了: 表示=%s行, 非表示=%s行", visible_count, self.table.rowCount() - visible_count)
+        logger.debug("カテゴリ内訳: 実施機関=%s, カスタム=%s, メール追加=%s, 不明=%s", institution_count, custom_count, dynamic_count, unknown_count)
 
     def get_selected_roles(self):
         """選択されたユーザーとロールを取得"""
@@ -871,28 +998,32 @@ class CommonSubgroupMemberSelector(QWidget):
         return selected_user_ids, roles, owner_id
 
 
-def create_common_subgroup_member_selector(initial_roles=None, prechecked_user_ids=None):
+def create_common_subgroup_member_selector(initial_roles=None, prechecked_user_ids=None, show_filter=True, user_entries=None):
     """
     共通サブグループメンバー選択ウィジェット作成
     Args:
         initial_roles (dict): user_id -> role のマッピング（修正時に使用）
         prechecked_user_ids (set): 初期選択ユーザーID（新規作成時に使用）
+        show_filter (bool): フィルタUIを表示するか（True=新規作成、False=修正）
+        user_entries (list): ユーザーエントリリスト（指定しない場合はload_user_entries()を使用）
     Returns:
         CommonSubgroupMemberSelector: メンバー選択ウィジェット
     """
-    from .subgroup_ui_helpers import load_user_entries
-    user_entries = load_user_entries()
-    return CommonSubgroupMemberSelector(user_entries, initial_roles, prechecked_user_ids)
+    if user_entries is None:
+        from .subgroup_ui_helpers import load_user_entries
+        user_entries = load_user_entries()
+    return CommonSubgroupMemberSelector(user_entries, initial_roles, prechecked_user_ids, show_filter=show_filter)
 
 
-def create_common_subgroup_member_selector_with_api_complement(initial_roles=None, prechecked_user_ids=None, subgroup_id=None, bearer_token=None):
+def create_common_subgroup_member_selector_with_api_complement(initial_roles=None, prechecked_user_ids=None, subgroup_id=None, bearer_token=None, show_filter=False):
     """
-    API補完機能付きの共通サブグループメンバー選択ウィジェット作成
+    API補完機能付きの共通サブグループメンバー選択ウィジェット作成（主に修正タブ用）
     Args:
         initial_roles (dict): user_id -> role のマッピング（修正時に使用）
         prechecked_user_ids (set): 初期選択ユーザーID（新規作成時に使用）
         subgroup_id (str): サブグループID（API補完用）
         bearer_token (str): 認証トークン（API補完用）
+        show_filter (bool): フィルタUIを表示するか（デフォルト: False=修正タブ）
     Returns:
         CommonSubgroupMemberSelector: メンバー選択ウィジェット
     """
@@ -902,7 +1033,7 @@ def create_common_subgroup_member_selector_with_api_complement(initial_roles=Non
         
         # Bearer tokenの補完
         if not bearer_token:
-            print("[WARNING] create_common_subgroup_member_selector_with_api_complement: bearer_tokenが提供されていません")
+            logger.warning("create_common_subgroup_member_selector_with_api_complement: bearer_tokenが提供されていません")
         
         # load_unified_member_listを呼び出し（内部でAPI補完が実行される）
         unified_users, member_info = subgroup_api_helper.load_unified_member_list(
@@ -911,22 +1042,23 @@ def create_common_subgroup_member_selector_with_api_complement(initial_roles=Non
             bearer_token=bearer_token
         )
         
-        print(f"[DEBUG] API補完付きメンバーセレクター作成: {len(unified_users)}名")
+        logger.debug("API補完付きメンバーセレクター作成: %s名", len(unified_users))
         
         # 統合されたユーザーリストでCommonSubgroupMemberSelectorを作成
         return CommonSubgroupMemberSelector(
             user_entries=unified_users,
             initial_roles=initial_roles,
             prechecked_user_ids=prechecked_user_ids,
-            subgroup_id=subgroup_id
+            subgroup_id=subgroup_id,
+            show_filter=show_filter
         )
         
     except Exception as e:
-        print(f"[ERROR] API補完付きメンバーセレクター作成エラー: {e}")
+        logger.error("API補完付きメンバーセレクター作成エラー: %s", e)
         
         # フォールバック: 通常のメンバーセレクターを作成
-        print("[DEBUG] フォールバック: 通常のメンバーセレクターを作成")
-        return create_common_subgroup_member_selector(initial_roles, prechecked_user_ids)
+        logger.debug("フォールバック: 通常のメンバーセレクターを作成")
+        return create_common_subgroup_member_selector(initial_roles, prechecked_user_ids, show_filter=show_filter)
 
 
 if __name__ == "__main__":
@@ -951,9 +1083,9 @@ if __name__ == "__main__":
     # 選択状態表示ボタン
     def show_selection():
         selected_ids, roles, owner_id = member_selector.get_selected_roles()
-        print(f"選択されたユーザー: {selected_ids}")
-        print(f"ロール情報: {roles}")
-        print(f"OWNER: {owner_id}")
+        logger.debug("選択されたユーザー: %s", selected_ids)
+        logger.debug("ロール情報: %s", roles)
+        logger.debug("OWNER: %s", owner_id)
     
     test_button = QPushButton("選択状態を表示")
     test_button.clicked.connect(show_selection)

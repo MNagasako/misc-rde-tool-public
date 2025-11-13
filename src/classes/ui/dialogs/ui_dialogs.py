@@ -2,12 +2,16 @@
 UI関連のダイアログクラス - ARIM RDE Tool v1.13.1
 UIControllerから分離したダイアログクラス群
 """
+import logging
 from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, 
     QLabel, QShortcut, QApplication
 )
 from qt_compat.core import Qt
 from qt_compat.gui import QFont, QKeySequence
+
+# ロガー設定
+logger = logging.getLogger(__name__)
 
 
 class TextAreaExpandDialog:
@@ -138,9 +142,9 @@ class TextAreaExpandDialog:
                     self.source_widget.setPlainText(content)
                 elif hasattr(self.source_widget, 'setText'):
                     self.source_widget.setText(content)
-                print(f"[DEBUG] ポップアップの編集内容を元のウィジェットに反映しました")
+                logger.debug("ポップアップの編集内容を元のウィジェットに反映しました")
             except Exception as e:
-                print(f"[DEBUG] 編集内容の反映中にエラー: {e}")
+                logger.debug("編集内容の反映中にエラー: %s", e)
     
     def show(self):
         """ダイアログを表示（ノンモーダル）"""

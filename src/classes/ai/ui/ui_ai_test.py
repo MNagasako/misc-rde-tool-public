@@ -2,6 +2,10 @@
 AIテスト機能のUI作成とロジック - ARIM RDE Tool v1.17.2
 UIControllerから分離したAIテスト機能専用モジュール（リファクタリング版）
 """
+import os
+import json
+import pandas as pd
+import logging
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, 
     QComboBox, QTextBrowser, QCompleter, QScrollArea, QCheckBox, 
@@ -10,9 +14,9 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import QTimer, Qt, QStringListModel
 from qt_compat.gui import QFont
-import os
-import json
-import pandas as pd
+
+# ロガー設定
+logger = logging.getLogger(__name__)
 import datetime
 
 # ダイアログクラスのインポート（リファクタリング後）
@@ -48,10 +52,10 @@ def safe_widget_operation(widget, operation, *args, **kwargs):
         if widget.parent() is not None:
             return operation(*args, **kwargs)
         else:
-            print(f"[DEBUG] ウィジェット {widget.__class__.__name__} は既に削除済みです")
+            logger.debug("ウィジェット %s は既に削除済みです", widget.__class__.__name__)
             return None
     except RuntimeError as e:
-        print(f"[DEBUG] ウィジェット操作時エラー（削除済み）: {e}")
+        logger.debug("ウィジェット操作時エラー（削除済み）: %s", e)
         return None
 
 
@@ -81,7 +85,7 @@ class AITestWidget:
         """デバッグ出力の有効/無効を切り替え"""
         self._debug_enabled = enabled
         if enabled:
-            print("[DEBUG] AIテスト機能のデバッグ出力が有効になりました")
+            logger.debug("AIテスト機能のデバッグ出力が有効になりました")
         
     def clear_cache(self):
         """キャッシュをクリア（パフォーマンステスト用）"""
@@ -93,7 +97,7 @@ class AITestWidget:
         self._data_source_cache = {}
         self._last_data_source = None
         if self._debug_enabled:
-            print("[DEBUG] AIテスト機能のキャッシュをクリアしました")
+            logger.debug("AIテスト機能のキャッシュをクリアしました")
     
     def clear_template_cache(self, template_file=None):
         """テンプレートキャッシュをクリア（テンプレート編集後の反映用）"""
@@ -120,7 +124,7 @@ class AITestWidget:
             result = func(*args, **kwargs)
             end_time = time.time()
             elapsed = end_time - start_time
-            print(f"[PERF] {func_name}: {elapsed:.3f}秒")
+            logger.debug("[PERF] %s: %.3f秒", func_name, elapsed)
             return result
         else:
             return func(*args, **kwargs)
@@ -720,7 +724,7 @@ class AITestWidget:
             self._debug_print("[DEBUG] MI分析（単体）が見つかりませんでした。利用可能な項目:")
             if self._debug_enabled:
                 for i in range(self.analysis_method_combo.count()):
-                    print(f"  [{i}] {self.analysis_method_combo.itemText(i)}")
+                    logger.debug("  [%s] %s", i, self.analysis_method_combo.itemText(i))
 
         # 説明ラベルを先に作成（デフォルト値で初期化）
         self.analysis_description_label = QLabel("一括でマテリアルインデックス分析を実行")
@@ -1122,12 +1126,12 @@ class AITestWidget:
             # ウィジェットの存在確認
             if not hasattr(self, 'task_id_combo'):
                 if self._debug_enabled:
-                    print("[ERROR] task_id_combo is not initialized")
+                    logger.error("task_id_combo is not initialized")
                 return
                 
             if not hasattr(self, 'experiment_combo'):
                 if self._debug_enabled:
-                    print("[ERROR] experiment_combo is not initialized")
+                    logger.error("experiment_combo is not initialized")
                 return
                 
             self._debug_print(f"[DEBUG] task_id_combo initialized: {self.task_id_combo is not None}")
@@ -1149,17 +1153,17 @@ class AITestWidget:
                             self._debug_print("[DEBUG] No datasource selected, defaulting to normal_exp_radio")
                             self.normal_exp_radio.setChecked(True)
                     else:
-                        print("[DEBUG] データソースラジオボタンが初期化されていません")
+                        logger.debug("データソースラジオボタンが初期化されていません")
                 else:
-                    print("[DEBUG] データソースラジオボタンが初期化されていません")
+                    logger.debug("データソースラジオボタンが初期化されていません")
             except RuntimeError as radio_error:
-                print(f"[DEBUG] データソースラジオボタン操作時エラー: {radio_error}")
+                logger.debug("データソースラジオボタン操作時エラー: %s", radio_error)
             
             # 課題番号リストを更新
             self.refresh_task_ids()
             
         except Exception as e:
-            print(f"[ERROR] _initialize_task_data failed: {e}")
+            logger.error("_initialize_task_data failed: %s", e)
             if self._debug_enabled:
                 import traceback
                 traceback.print_exc()
@@ -1172,7 +1176,7 @@ class AITestWidget:
             # コンボボックスの存在確認
             if not hasattr(self, 'ai_provider_combo') or not hasattr(self, 'ai_model_combo'):
                 if self._debug_enabled:
-                    print("[ERROR] AIコンボボックスが初期化されていません")
+                    logger.error("AIコンボボックスが初期化されていません")
                 # 遅延再実行
                 QTimer.singleShot(200, self._init_ai_settings)
                 return
@@ -1186,9 +1190,9 @@ class AITestWidget:
             # AI Managerが正常に動作するかをテスト
             try:
                 available_providers = self.ai_manager.get_available_providers()
-                print(f"[DEBUG] AI Manager正常動作確認: プロバイダー数={len(available_providers)}, プロバイダー={available_providers}")
+                logger.debug("AI Manager正常動作確認: プロバイダー数=%s, プロバイダー=%s", len(available_providers), available_providers)
             except Exception as am_error:
-                print(f"[ERROR] AI Manager動作エラー: {am_error}")
+                logger.error("AI Manager動作エラー: %s", am_error)
                 return
             
             # 親コントローラーにAIManagerを設定（重要）
@@ -1196,26 +1200,26 @@ class AITestWidget:
             
             # デバッグ情報（出力量を削減）
             if self._debug_enabled:
-                print(f"[DEBUG] AI設定読み込み完了")
-                print(f"[DEBUG] デフォルトプロバイダー: {self.ai_manager.get_default_provider()}")
-                print(f"[DEBUG] 利用可能プロバイダー: {self.ai_manager.get_available_providers()}")
+                logger.debug("AI設定読み込み完了")
+                logger.debug("デフォルトプロバイダー: %s", self.ai_manager.get_default_provider())
+                logger.debug("利用可能プロバイダー: %s", self.ai_manager.get_available_providers())
             
             # プロバイダー一覧を更新
-            print("[DEBUG] プロバイダー一覧更新を開始")
+            logger.debug("プロバイダー一覧更新を開始")
             try:
                 # ウィジェットが有効かチェック
                 if hasattr(self, 'ai_provider_combo') and self.ai_provider_combo is not None:
-                    print(f"[DEBUG] ai_provider_combo存在確認: True, オブジェクト={self.ai_provider_combo}")
+                    logger.debug("ai_provider_combo存在確認: True, オブジェクト=%s", self.ai_provider_combo)
                     # 安全な操作を実行
                     safe_widget_operation(self.ai_provider_combo, self.ai_provider_combo.clear)
                     # ウィジェットが利用可能かより柔軟にチェック
                     try:
                         # 簡単な操作でウィジェットの有効性をテスト
                         current_count = self.ai_provider_combo.count()
-                        print(f"[DEBUG] ai_provider_combo current count: {current_count}")
+                        logger.debug("ai_provider_combo current count: %s", current_count)
                         
                         providers = self.ai_manager.get_available_providers()
-                        print(f"[DEBUG] 取得したプロバイダー一覧: {providers}")
+                        logger.debug("取得したプロバイダー一覧: %s", providers)
                         
                         for provider_id in providers:
                             display_name = provider_id.capitalize()  # プロバイダー名を表示用にフォーマット
@@ -1231,15 +1235,15 @@ class AITestWidget:
                         except:
                             pass  # 接続がない場合は無視
                         self.ai_provider_combo.currentTextChanged.connect(self._on_provider_changed)
-                        print(f"[DEBUG] ai_provider_combo設定完了: {self.ai_provider_combo.count()}個のプロバイダー")
+                        logger.debug("ai_provider_combo設定完了: %s個のプロバイダー", self.ai_provider_combo.count())
                         
                     except RuntimeError as widget_error:
-                        print(f"[DEBUG] ai_provider_comboは無効です: {widget_error}")
+                        logger.debug("ai_provider_comboは無効です: %s", widget_error)
                         self.ai_provider_combo = None
                 else:
-                    print(f"[DEBUG] ai_provider_comboが存在しません: hasattr={hasattr(self, 'ai_provider_combo')}, is_not_none={getattr(self, 'ai_provider_combo', None) is not None}")
+                    logger.debug("ai_provider_comboが存在しません: hasattr=%s, is_not_none=%s", hasattr(self, 'ai_provider_combo'), getattr(self, 'ai_provider_combo', None) is not None)
             except RuntimeError as e:
-                print(f"[DEBUG] ai_provider_combo操作時エラー（削除済み）: {e}")
+                logger.debug("ai_provider_combo操作時エラー（削除済み）: %s", e)
                 self.ai_provider_combo = None
             
             # デフォルトプロバイダーを設定
@@ -1251,7 +1255,7 @@ class AITestWidget:
                 for i in range(self.ai_provider_combo.count()):
                     item_data = self.ai_provider_combo.itemData(i)
                     if self._debug_enabled:
-                        print(f"[DEBUG] コンボボックス項目 {i}: {self.ai_provider_combo.itemText(i)} (data: {item_data})")
+                        logger.debug("コンボボックス項目 %s: %s (data: %s)", i, self.ai_provider_combo.itemText(i), item_data)
                     if item_data == default_provider:
                         default_index = i
                         break
@@ -1273,19 +1277,19 @@ class AITestWidget:
                 self._update_model_list(current_provider)
                 
         except Exception as e:
-            print(f"[ERROR] AI設定初期化エラー: {e}")
+            logger.error("AI設定初期化エラー: %s", e)
             # エラーハンドリング：設定なしのみ追加
             try:
                 if hasattr(self, 'ai_provider_combo') and self.ai_provider_combo is not None:
                     try:
                         self.ai_provider_combo.clear()
                         self.ai_provider_combo.addItem("設定なし", None)
-                        print("[DEBUG] エラー処理でai_provider_comboに設定なしを追加")
+                        logger.debug("エラー処理でai_provider_comboに設定なしを追加")
                     except RuntimeError as widget_error:
-                        print(f"[DEBUG] ai_provider_combo（エラー処理）操作時エラー: {widget_error}")
+                        logger.debug("ai_provider_combo（エラー処理）操作時エラー: %s", widget_error)
                         self.ai_provider_combo = None
             except Exception as clear_error:
-                print(f"[DEBUG] ai_provider_comboエラー処理失敗: {clear_error}")
+                logger.debug("ai_provider_comboエラー処理失敗: %s", clear_error)
                 self.ai_provider_combo = None
     
     def _update_model_list(self, provider):
@@ -1296,7 +1300,7 @@ class AITestWidget:
                 try:
                     # 簡単な操作でウィジェットの有効性をテスト
                     current_count = self.ai_model_combo.count()
-                    print(f"[DEBUG] ai_model_combo current count: {current_count}")
+                    logger.debug("ai_model_combo current count: %s", current_count)
                     
                     self.ai_model_combo.clear()
                     if provider and provider != "設定なし":
@@ -1311,18 +1315,18 @@ class AITestWidget:
                             self.ai_model_combo.addItem("モデルなし")
                     else:
                         self.ai_model_combo.addItem("設定なし")
-                    print(f"[DEBUG] ai_model_combo更新完了: {self.ai_model_combo.count()}個のモデル")
+                    logger.debug("ai_model_combo更新完了: %s個のモデル", self.ai_model_combo.count())
                     
                 except RuntimeError as widget_error:
-                    print(f"[DEBUG] ai_model_comboは無効です: {widget_error}")
+                    logger.debug("ai_model_comboは無効です: %s", widget_error)
                     self.ai_model_combo = None
             else:
-                print("[DEBUG] ai_model_comboが存在しません")
+                logger.debug("ai_model_comboが存在しません")
         except Exception as e:
             if hasattr(self, 'ai_response_display'):
                 self.ai_response_display.append(f"モデル一覧の更新に失敗: {e}")
             else:
-                print(f"モデル一覧の更新に失敗: {e}")
+                logger.debug("モデル一覧の更新に失敗: %s", e)
     
     def _on_provider_changed(self, provider_name):
         """プロバイダー変更時のイベントハンドラー（パフォーマンス最適化版）"""
@@ -1336,7 +1340,7 @@ class AITestWidget:
             else:
                 self._debug_print(f"[DEBUG] プロバイダー変更: 無効なインデックス")
         except Exception as e:
-            print(f"[ERROR] プロバイダー変更エラー: {e}")
+            logger.error("プロバイダー変更エラー: %s", e)
     
     def _init_datasource_selection(self):
         """データソース選択の初期化（パフォーマンス最適化版）"""
@@ -1369,7 +1373,7 @@ class AITestWidget:
                     self.datasource_info_label.setText("📊 両方のデータファイルが利用可能です。ARIM実験データがデフォルトで選択されています。")
                     self._debug_print("[DEBUG] 両方のファイルが存在 - ARIM実験データを選択")
                 except RuntimeError as e:
-                    print(f"[DEBUG] RadioButton/Label操作エラー（両方存在）: {e}")
+                    logger.debug("RadioButton/Label操作エラー（両方存在）: %s", e)
             elif arim_exp_exists:
                 # arim_exp.xlsxのみ存在
                 try:
@@ -1379,7 +1383,7 @@ class AITestWidget:
                     self.datasource_info_label.setText("📊 ARIM実験データのみ利用可能です。")
                     self._debug_print("[DEBUG] ARIM実験データのみ存在")
                 except RuntimeError as e:
-                    print(f"[DEBUG] RadioButton/Label操作エラー（ARIM存在）: {e}")
+                    logger.debug("RadioButton/Label操作エラー（ARIM存在）: %s", e)
             elif normal_exp_exists:
                 # exp.xlsxのみ存在
                 try:
@@ -1389,7 +1393,7 @@ class AITestWidget:
                     self.datasource_info_label.setText("📊 標準実験データのみ利用可能です。")
                     self._debug_print("[DEBUG] 標準実験データのみ存在")
                 except RuntimeError as e:
-                    print(f"[DEBUG] RadioButton/Label操作エラー（標準存在）: {e}")
+                    logger.debug("RadioButton/Label操作エラー（標準存在）: %s", e)
             else:
                 # どちらも存在しない
                 try:
@@ -1398,19 +1402,19 @@ class AITestWidget:
                     self.datasource_info_label.setText("⚠️ 実験データファイルが見つかりません。")
                     self._debug_print("[DEBUG] 実験データファイルが存在しません")
                 except RuntimeError as e:
-                    print(f"[DEBUG] RadioButton/Label操作エラー（なし）: {e}")
+                    logger.debug("RadioButton/Label操作エラー（なし）: %s", e)
                 
         except Exception as e:
-            print(f"[ERROR] データソース初期化エラー: {e}")
+            logger.error("データソース初期化エラー: %s", e)
             # ウィジェットが有効かチェックしてからアクセス
             try:
                 if hasattr(self, 'datasource_info_label') and self.datasource_info_label is not None:
                     if self.datasource_info_label.parent() is not None:
                         self.datasource_info_label.setText(f"⚠️ データソース初期化エラー: {e}")
                     else:
-                        print("[DEBUG] datasource_info_labelは既に削除済みです")
+                        logger.debug("datasource_info_labelは既に削除済みです")
             except RuntimeError as label_error:
-                print(f"[DEBUG] datasource_info_label操作時エラー: {label_error}")
+                logger.debug("datasource_info_label操作時エラー: %s", label_error)
                 self.datasource_info_label = None
     
     def refresh_task_ids(self):
@@ -1664,9 +1668,9 @@ class AITestWidget:
                 print(error_msg)
             return None
             try:
-                print(f"[DEBUG] pandas読み込み開始: {exp_file_path}")
+                logger.debug("pandas読み込み開始: %s", exp_file_path)
                 df = pd.read_excel(exp_file_path)
-                print(f"[DEBUG] pandas読み込み成功: {df.shape}")
+                logger.debug("pandas読み込み成功: %s", df.shape)
             except pd.errors.EmptyDataError:
                 error_msg = f"[ERROR] {data_source_name}ファイルにデータがありません: {exp_file_path}"
                 print(error_msg)
@@ -1740,7 +1744,7 @@ class AITestWidget:
         if index >= 0 and hasattr(self, 'task_id_combo'):
             task_id = self.task_id_combo.itemData(index)
             if task_id:
-                print(f"[DEBUG] on_task_index_changed: task_id={task_id}")
+                logger.debug("on_task_index_changed: task_id=%s", task_id)
                 self._update_task_info_display(task_id)
             else:
                 # itemDataから取得できない場合は、テキストから抽出
@@ -1749,7 +1753,7 @@ class AITestWidget:
                 match = re.match(r'^([A-Z0-9]+)', text.strip())
                 if match:
                     task_id = match.group(1)
-                    print(f"[DEBUG] on_task_index_changed: extracted task_id={task_id}")
+                    logger.debug("on_task_index_changed: extracted task_id=%s", task_id)
                     self._update_task_info_display(task_id)
 
     def on_completer_activated(self, text):
@@ -1760,7 +1764,7 @@ class AITestWidget:
         match = re.match(r'^([A-Z0-9]+)', text.strip())
         if match:
             task_id = match.group(1)
-            print(f"[DEBUG] on_completer_activated: task_id={task_id}")
+            logger.debug("on_completer_activated: task_id=%s", task_id)
             self._update_task_info_display(task_id)
 
     def show_experiment_info_popup(self):
@@ -1781,36 +1785,36 @@ class AITestWidget:
     def _get_arim_data_for_task(self, task_id):
         """指定された課題番号に対応するARIM拡張データを取得"""
         try:
-            print(f"[DEBUG] _get_arim_data_for_task called for task_id: {task_id}")
+            logger.debug("_get_arim_data_for_task called for task_id: %s", task_id)
             
             if not task_id:
-                print("[DEBUG] task_id is empty")
+                logger.debug("task_id is empty")
                 return []
                 
             # ARIM拡張データを読み込み（キャッシュがあればそれを使用）
             arim_data = None
             if hasattr(self, 'current_arim_data') and self.current_arim_data:
                 arim_data = self.current_arim_data
-                print(f"[DEBUG] Using cached ARIM data: {len(arim_data)} records")
+                logger.debug("Using cached ARIM data: %s records", len(arim_data))
             else:
                 arim_data = self._load_arim_extension_data()
-                print(f"[DEBUG] Loaded fresh ARIM data: {len(arim_data) if arim_data else 0} records")
+                logger.debug("Loaded fresh ARIM data: %s records", len(arim_data) if arim_data else 0)
             
             if not arim_data:
-                print("[DEBUG] No ARIM data available")
+                logger.debug("No ARIM data available")
                 return []
             
             matching_records = []
             
             # デバッグ: 最初の数件のレコード構造を確認
-            print(f"[DEBUG] Sample ARIM record columns: {list(arim_data[0].keys()) if arim_data else []}")
+            logger.debug("Sample ARIM record columns: %s", list(arim_data[0].keys()) if arim_data else [])
             
             # 1. 課題番号での完全一致検索（最優先）
             for record in arim_data:
                 kadai_no = record.get('課題番号', '')
                 if kadai_no and str(kadai_no) == str(task_id):
                     matching_records.append(record)
-                    print(f"[DEBUG] Found exact task number match: {kadai_no}")
+                    logger.debug("Found exact task number match: %s", kadai_no)
             
             # 2. ARIMNO列での完全一致検索
             if not matching_records:
@@ -1818,12 +1822,12 @@ class AITestWidget:
                     arimno = record.get('ARIMNO', '')
                     if arimno and str(arimno) == str(task_id):
                         matching_records.append(record)
-                        print(f"[DEBUG] Found exact ARIMNO match: {arimno}")
+                        logger.debug("Found exact ARIMNO match: %s", arimno)
             
             # 3. 課題番号での部分一致検索（末尾4桁一致など）
             if not matching_records and len(task_id) >= 4:
                 task_suffix = task_id[-4:]  # 末尾4桁を取得
-                print(f"[DEBUG] Trying suffix search with: {task_suffix}")
+                logger.debug("Trying suffix search with: %s", task_suffix)
                 
                 for record in arim_data:
                     # 課題番号列での部分一致チェック
@@ -1833,11 +1837,11 @@ class AITestWidget:
                         # 末尾一致
                         if kadai_str.endswith(task_suffix):
                             matching_records.append(record)
-                            print(f"[DEBUG] Found task number suffix match: {kadai_no} (suffix: {task_suffix})")
+                            logger.debug("Found task number suffix match: %s (suffix: %s)", kadai_no, task_suffix)
                         # 部分一致（含む）
                         elif task_suffix in kadai_str:
                             matching_records.append(record)
-                            print(f"[DEBUG] Found task number partial match: {kadai_no} (contains: {task_suffix})")
+                            logger.debug("Found task number partial match: %s (contains: %s)", kadai_no, task_suffix)
                     
                     # ARIMNO列での部分一致チェック
                     arimno = record.get('ARIMNO', '')
@@ -1845,14 +1849,14 @@ class AITestWidget:
                         arimno_str = str(arimno)
                         if arimno_str.endswith(task_suffix) and record not in matching_records:
                             matching_records.append(record)
-                            print(f"[DEBUG] Found ARIMNO suffix match: {arimno} (suffix: {task_suffix})")
+                            logger.debug("Found ARIMNO suffix match: %s (suffix: %s)", arimno, task_suffix)
                         elif task_suffix in arimno_str and record not in matching_records:
                             matching_records.append(record)
-                            print(f"[DEBUG] Found ARIMNO partial match: {arimno} (contains: {task_suffix})")
+                            logger.debug("Found ARIMNO partial match: %s (contains: %s)", arimno, task_suffix)
             
             # 4. より緩い検索：課題番号の一部分での検索
             if not matching_records:
-                print(f"[DEBUG] No matches found with standard methods, trying looser search...")
+                logger.debug("No matches found with standard methods, trying looser search...")
                 
                 # 課題番号から数字部分を抽出して検索
                 import re
@@ -1860,7 +1864,7 @@ class AITestWidget:
                 if task_numbers:
                     for num in task_numbers:
                         if len(num) >= 4:  # 4桁以上の数字のみ
-                            print(f"[DEBUG] Searching for number pattern: {num}")
+                            logger.debug("Searching for number pattern: %s", num)
                             for record in arim_data:
                                 kadai_no = record.get('課題番号', '')
                                 arimno = record.get('ARIMNO', '')
@@ -1868,27 +1872,27 @@ class AITestWidget:
                                 if kadai_no and num in str(kadai_no):
                                     if record not in matching_records:
                                         matching_records.append(record)
-                                        print(f"[DEBUG] Found number pattern match in task number: {kadai_no} (pattern: {num})")
+                                        logger.debug("Found number pattern match in task number: %s (pattern: %s)", kadai_no, num)
                                 
                                 if arimno and num in str(arimno):
                                     if record not in matching_records:
                                         matching_records.append(record)
-                                        print(f"[DEBUG] Found number pattern match in ARIMNO: {arimno} (pattern: {num})")
+                                        logger.debug("Found number pattern match in ARIMNO: %s (pattern: %s)", arimno, num)
             
-            print(f"[DEBUG] Found {len(matching_records)} matching ARIM records for task_id: {task_id}")
+            logger.debug("Found %s matching ARIM records for task_id: %s", len(matching_records), task_id)
             
             # マッチした記録の詳細をログ出力
             for i, record in enumerate(matching_records[:3]):  # 最初の3件のみ
                 kadai = record.get('課題番号', 'N/A')
                 arimno = record.get('ARIMNO', 'N/A')
-                print(f"[DEBUG] Match {i+1}: 課題番号={repr(kadai)}, ARIMNO={repr(arimno)}")
+                logger.debug("Match %s: 課題番号=%s, ARIMNO=%s", i+1, repr(kadai), repr(arimno))
             
             return matching_records
             
         except Exception as e:
-            print(f"[ERROR] _get_arim_data_for_task failed: {e}")
+            logger.error("_get_arim_data_for_task failed: %s", e)
             import traceback
-            print(f"[ERROR] Traceback: {traceback.format_exc()}")
+            logger.error("Traceback: %s", traceback.format_exc())
             return []
     
     def show_task_info_popup(self):
@@ -1934,11 +1938,11 @@ class AITestWidget:
                         self.analysis_description_label.setText(f"{extended_description}\n⚠️ 単体の実験データを選択してください")
                     
                     # デバッグ情報出力
-                    print(f"[DEBUG] 分析方法変更: {self.analysis_method_combo.itemText(index)}")
-                    print(f"[DEBUG] 説明更新: {description}")
+                    logger.debug("分析方法変更: %s", self.analysis_method_combo.itemText(index))
+                    logger.debug("説明更新: %s", description)
                         
         except Exception as e:
-            print(f"分析方法変更処理エラー: {e}")
+            logger.error("分析方法変更処理エラー: %s", e)
             if hasattr(self, 'analysis_description_label'):
                 self.analysis_description_label.setText(f"エラー: {e}")
     
@@ -1960,23 +1964,23 @@ class AITestWidget:
                 self.ai_response_display.append(f"[DEBUG] Traceback: {traceback.format_exc()}")
             except RuntimeError:
                 # UIコンポーネントが削除されている場合はコンソールに出力
-                print(f"[ERROR] AI分析実行中にエラーが発生: {e}")
+                logger.error("AI分析実行中にエラーが発生: %s", e)
                 import traceback
-                print(f"[DEBUG] Traceback: {traceback.format_exc()}")
+                logger.debug("Traceback: %s", traceback.format_exc())
     
     def on_task_id_changed(self, text):
         """課題番号が変更された時の処理（簡略版）これは使われてる。"""
         try:
-            print(f"[DEBUG] on_task_id_changed called with text: '{text}'")
+            logger.debug("on_task_id_changed called with text: '%s'", text)
             
             # 重複呼び出し防止のためのフラグチェック
             if hasattr(self, '_updating_task_info') and self._updating_task_info:
-                print("[DEBUG] Already updating task info, skipping duplicate call")
+                logger.debug("Already updating task info, skipping duplicate call")
                 return
                 
             # 必要なコンポーネントの安全な存在確認
             if not hasattr(self, 'task_id_combo') or not self.task_id_combo:
-                print("[DEBUG] task_id_combo does not exist")
+                logger.debug("task_id_combo does not exist")
                 return
                 
             self._updating_task_info = True
@@ -1984,12 +1988,12 @@ class AITestWidget:
             try:
                 # 現在選択されている課題番号の詳細情報を取得
                 current_index = self.task_id_combo.currentIndex()
-                print(f"[DEBUG] current_index: {current_index}")
+                logger.debug("current_index: %s", current_index)
                 
                 task_id = None
                 if current_index >= 0:
                     task_id = self.task_id_combo.itemData(current_index)
-                    print(f"[DEBUG] task_id from itemData: '{task_id}'")
+                    logger.debug("task_id from itemData: '%s'", task_id)
                 
                 # itemDataから取得できない場合は、テキストから課題番号を抽出
                 if not task_id and text:
@@ -1998,7 +2002,7 @@ class AITestWidget:
                     match = re.match(r'^([A-Z0-9]+)', text.strip())
                     if match:
                         task_id = match.group(1)
-                        print(f"[DEBUG] task_id extracted from text: '{task_id}'")
+                        logger.debug("task_id extracted from text: '%s'", task_id)
                 
                 if task_id and hasattr(self, 'task_info_label'):
                     # 課題詳細情報を表示
@@ -2007,7 +2011,7 @@ class AITestWidget:
                     # 実験データリストを更新
                     self._update_experiment_list(task_id)
                 else:
-                    print(f"[DEBUG] task_id is empty or task_info_label not found")
+                    logger.debug("task_id is empty or task_info_label not found")
                     if hasattr(self, 'task_info_label'):
                         self.task_info_label.setText("課題番号を選択してください")
                     
@@ -2017,7 +2021,7 @@ class AITestWidget:
                 self._updating_task_info = False
                 
         except Exception as e:
-            print(f"[ERROR] on_task_id_changed failed: {e}")
+            logger.error("on_task_id_changed failed: %s", e)
             # エラー時もフラグをリセット
             if hasattr(self, '_updating_task_info'):
                 self._updating_task_info = False
@@ -2025,14 +2029,14 @@ class AITestWidget:
     def _update_task_info_display(self, task_id):
         """課題情報表示を更新"""
         try:
-            print(f"[DEBUG] Updating task info for: {task_id}")
+            logger.debug("Updating task info for: %s", task_id)
             
             exp_data = self._load_experiment_data_for_task_list()
-            print(f"[DEBUG] exp_data loaded: {len(exp_data) if exp_data else 0} records")
+            logger.debug("exp_data loaded: %s records", len(exp_data) if exp_data else 0)
             
             if exp_data:
                 matching_experiments = [exp for exp in exp_data if exp.get("課題番号") == task_id]
-                print(f"[DEBUG] matching_experiments for '{task_id}': {len(matching_experiments)} records")
+                logger.debug("matching_experiments for '%s': %s records", task_id, len(matching_experiments))
                 
                 if matching_experiments:
                     sample_exp = matching_experiments[0]
@@ -2093,7 +2097,7 @@ class AITestWidget:
                     info_text = "\n".join(info_lines)
                     if hasattr(self, 'task_info_label') and self.task_info_label:
                         self.task_info_label.setText(info_text)
-                        print(f"[DEBUG] Task info updated: {info_text}")
+                        logger.debug("Task info updated: %s", info_text)
                         
                 else:
                     self._clear_task_info_display()
@@ -2101,7 +2105,7 @@ class AITestWidget:
                 self._clear_task_info_display()
                 
         except Exception as e:
-            print(f"[ERROR] _update_task_info_display failed: {e}")
+            logger.error("_update_task_info_display failed: %s", e)
             self._clear_task_info_display()
 
     def _clear_task_info_display(self):
@@ -2110,7 +2114,7 @@ class AITestWidget:
             if hasattr(self, 'task_info_label') and self.task_info_label:
                 self.task_info_label.setText("課題を選択してください")
         except Exception as e:
-            print(f"[ERROR] _clear_task_info_display failed: {e}")
+            logger.error("_clear_task_info_display failed: %s", e)
 
     def _is_nan_value(self, value):
         """pandas NaN値かどうかを判定"""
@@ -2123,11 +2127,11 @@ class AITestWidget:
     def _update_experiment_list(self, task_id):
         """実験データリストを更新"""
         try:
-            print(f"[DEBUG] _update_experiment_list called for task: {task_id}")
+            logger.debug("_update_experiment_list called for task: %s", task_id)
             import pandas as pd
             
             if not hasattr(self, 'experiment_combo') or not self.experiment_combo:
-                print("[DEBUG] experiment_combo is not available")
+                logger.debug("experiment_combo is not available")
                 return
                 
             # 実験データリストをクリア
@@ -2194,7 +2198,7 @@ class AITestWidget:
                 }
                 self.experiment_combo.addItem(no_data_text, no_data_dict)
                 
-                print(f"[DEBUG] Added {len(exp_data)} experiments ({valid_experiments_count} valid) + 1 no-data option")
+                logger.debug("Added %s experiments (%s valid) + 1 no-data option", len(exp_data), valid_experiments_count)
             else:
                 # 実験データが存在しない場合
                 no_data_text = "実験データなし（課題のみ）"
@@ -2205,7 +2209,7 @@ class AITestWidget:
                     "_has_valid_content": False
                 }
                 self.experiment_combo.addItem(no_data_text, no_data_dict)
-                print("[DEBUG] No experiment data found, added no-data option only")
+                logger.debug("No experiment data found, added no-data option only")
             
             # 最初の項目を選択（実験データありを優先）
             if self.experiment_combo.count() > 0:
@@ -2220,10 +2224,10 @@ class AITestWidget:
                         break
                 
                 self.experiment_combo.setCurrentIndex(selected_index)
-                print(f"[DEBUG] Selected experiment index: {selected_index}")
+                logger.debug("Selected experiment index: %s", selected_index)
                 
         except Exception as e:
-            print(f"[ERROR] _update_experiment_list failed: {e}")
+            logger.error("_update_experiment_list failed: %s", e)
             import traceback
             traceback.print_exc()
             
@@ -2260,7 +2264,7 @@ class AITestWidget:
     
     def on_datasource_changed(self, button):
         """データソースが変更された時の処理"""
-        print(f"[DEBUG] Datasource changed to: {button.text()}")
+        logger.debug("Datasource changed to: %s", button.text())
         
         try:
             # データソース情報を更新
@@ -2275,17 +2279,17 @@ class AITestWidget:
             # 課題番号リストを再読み込み
             if hasattr(self, 'refresh_task_ids'):
                 self.refresh_task_ids()
-                print("[DEBUG] Task IDs refreshed after datasource change")
+                logger.debug("Task IDs refreshed after datasource change")
                 
         except Exception as e:
-            print(f"[ERROR] データソース変更処理エラー: {e}")
+            logger.error("データソース変更処理エラー: %s", e)
             if hasattr(self, 'datasource_info_label'):
                 self.datasource_info_label.setText(f"❌ データソース変更エラー: {e}")
     
     def on_experiment_changed(self, index):
         """実験データが変更された時の処理"""
         try:
-            print(f"[DEBUG] Experiment changed to index: {index}")
+            logger.debug("Experiment changed to index: %s", index)
             
             if not hasattr(self, 'experiment_combo') or not self.experiment_combo:
                 return
@@ -2302,20 +2306,20 @@ class AITestWidget:
                     self.experiment_info_label.setText("")
                     
         except Exception as e:
-            print(f"実験変更処理エラー: {e}")
+            logger.error("実験変更処理エラー: %s", e)
             if hasattr(self, 'experiment_info_label'):
                 self.experiment_info_label.setText(f"エラー: {e}")
     
     def on_ai_provider_changed(self, provider_text):
         """AIプロバイダーが変更された時の処理"""
         try:
-            print(f"[DEBUG] AI provider changed to: {provider_text}")
+            logger.debug("AI provider changed to: %s", provider_text)
             
             # コンボボックスからプロバイダーIDを取得
             current_index = self.ai_provider_combo.currentIndex()
             if current_index >= 0:
                 provider_id = self.ai_provider_combo.itemData(current_index)
-                print(f"[DEBUG] Provider ID: {provider_id}")
+                logger.debug("Provider ID: %s", provider_id)
                 
                 # モデル一覧を更新
                 self._update_model_list(provider_id)
@@ -2325,7 +2329,7 @@ class AITestWidget:
                     self.ai_response_display.append(f"[INFO] AIプロバイダーを {provider_text} に変更しました")
             
         except Exception as e:
-            print(f"[ERROR] AIプロバイダー変更処理エラー: {e}")
+            logger.error("AIプロバイダー変更処理エラー: %s", e)
             if hasattr(self, 'ai_response_display'):
                 self.ai_response_display.append(f"[ERROR] プロバイダー変更エラー: {e}")
     
@@ -2511,7 +2515,7 @@ class AITestWidget:
             self.experiment_info_label.setText(info_text)
             
         except Exception as e:
-            print(f"実験情報更新エラー: {e}")
+            logger.error("実験情報更新エラー: %s", e)
             if hasattr(self, 'experiment_info_label'):
                 self.experiment_info_label.setText(f"情報取得エラー: {e}")
 
@@ -2639,7 +2643,7 @@ class AITestWidget:
             return experiment_data
             
         except Exception as e:
-            print(f"[ERROR] 実験データ取得エラー: {e}")
+            logger.error("実験データ取得エラー: %s", e)
             return None
     
     def _enhance_with_arim_data(self, experiment_data):
@@ -2668,7 +2672,7 @@ class AITestWidget:
             return experiment_data
             
         except Exception as e:
-            print(f"[ERROR] ARIM拡張データ結合エラー: {e}")
+            logger.error("ARIM拡張データ結合エラー: %s", e)
             return experiment_data
     
     def _load_static_file_data(self, static_files):
@@ -2717,7 +2721,7 @@ class AITestWidget:
             return static_data
             
         except Exception as e:
-            print(f"[ERROR] 静的データ読み込みエラー: {e}")
+            logger.error("静的データ読み込みエラー: %s", e)
             return {}
     
     def _build_dataset_explanation_prompt(self, experiment_data, static_data):
@@ -2794,7 +2798,7 @@ class AITestWidget:
             return prompt
             
         except Exception as e:
-            print(f"[ERROR] プロンプト構築エラー: {e}")
+            logger.error("プロンプト構築エラー: %s", e)
             return template
     
     def _build_material_index_prompt(self, experiment_data, material_index, static_data):
@@ -2835,7 +2839,7 @@ class AITestWidget:
             return prompt
             
         except Exception as e:
-            print(f"[ERROR] MI分析プロンプト構築エラー: {e}")
+            logger.error("MI分析プロンプト構築エラー: %s", e)
             # エラー時のフォールバックプロンプト
             return f"""実験データとマテリアルインデックスの分析を実行してください。
 

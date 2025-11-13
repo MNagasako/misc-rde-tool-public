@@ -6,6 +6,11 @@ import json
 import os
 from config.common import get_dynamic_file_path
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 def load_existing_samples(group_id):
     """
     指定されたグループIDの既存試料データを取得
@@ -16,10 +21,10 @@ def load_existing_samples(group_id):
     Returns:
         list: 既存試料データのリスト
     """
-    print(f"[SAMPLE_LOADER] 既存試料データ取得開始: group_id={group_id}")
+    logger.debug("[SAMPLE_LOADER] 既存試料データ取得開始: group_id=%s", group_id)
     
     if not group_id:
-        print("[SAMPLE_LOADER] グループIDが指定されていません")
+        logger.debug("[SAMPLE_LOADER] グループIDが指定されていません")
         return []
     
     try:
@@ -27,10 +32,10 @@ def load_existing_samples(group_id):
         sample_file_path = get_dynamic_file_path(f"output/rde/data/samples/{group_id}.json")
         
         if not os.path.exists(sample_file_path):
-            print(f"[SAMPLE_LOADER] サンプルファイルが見つかりません: {sample_file_path}")
+            logger.debug("[SAMPLE_LOADER] サンプルファイルが見つかりません: %s", sample_file_path)
             return []
         
-        print(f"[SAMPLE_LOADER] サンプルファイル読み込み: {sample_file_path}")
+        logger.debug("[SAMPLE_LOADER] サンプルファイル読み込み: %s", sample_file_path)
         
         with open(sample_file_path, "r", encoding="utf-8") as f:
             sample_data = json.load(f)
@@ -64,16 +69,16 @@ def load_existing_samples(group_id):
             
             samples.append(sample_info)
         
-        print(f"[SAMPLE_LOADER] 既存試料データ取得完了: {len(samples)}件")
+        logger.info("[SAMPLE_LOADER] 既存試料データ取得完了: %s件", len(samples))
         
         # デバッグ用に最初の数件を表示
         for i, sample in enumerate(samples[:3]):
-            print(f"[SAMPLE_LOADER] サンプル{i+1}: {sample['name'][:30]}...")
+            logger.debug("[SAMPLE_LOADER] サンプル%s: %s...", i+1, sample['name'][:30])
         
         return samples
         
     except Exception as e:
-        print(f"[SAMPLE_LOADER] 既存試料データ取得エラー: {e}")
+        logger.error("[SAMPLE_LOADER] 既存試料データ取得エラー: %s", e)
         import traceback
         traceback.print_exc()
         return []

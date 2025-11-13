@@ -8,6 +8,11 @@ from net.http_helpers import proxy_get, proxy_post
 from bs4 import BeautifulSoup
 from config.common import get_base_dir
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 
 class ARIMReportFetcher:
     """ARIM利用報告書取得クラス"""
@@ -32,7 +37,7 @@ class ARIMReportFetcher:
                 # プリフィックスがない場合はそのまま返す
                 return grant_number
         except Exception as e:
-            print(f"[WARNING] 課題番号抽出エラー: {e}")
+            logger.warning("課題番号抽出エラー: %s", e)
             return grant_number
     
     def search_report(self, project_number):
@@ -43,7 +48,7 @@ class ARIMReportFetcher:
                 'keyword': project_number
             }
             
-            print(f"[DEBUG] ARIM報告書検索: {project_number}")
+            logger.debug("ARIM報告書検索: %s", project_number)
             
             response = proxy_post(self.BASE_URL, data=search_data, headers=self.headers)
             response.raise_for_status()
@@ -54,7 +59,7 @@ class ARIMReportFetcher:
             # 検索結果を解析
             report_list = soup.find('div', class_='reportList')
             if not report_list:
-                print(f"[INFO] 報告書が見つかりませんでした: {project_number}")
+                logger.info("報告書が見つかりませんでした: %s", project_number)
                 return None
             
             # 詳細リンクを抽出
@@ -67,7 +72,7 @@ class ARIMReportFetcher:
                     break
             
             if not detail_link:
-                print(f"[WARNING] 詳細リンクが見つかりませんでした: {project_number}")
+                logger.warning("詳細リンクが見つかりませんでした: %s", project_number)
                 return None
             
             # 完全URLに変換
@@ -76,17 +81,17 @@ class ARIMReportFetcher:
             else:
                 detail_url = detail_link
             
-            print(f"[DEBUG] 詳細URL: {detail_url}")
+            logger.debug("詳細URL: %s", detail_url)
             return detail_url
             
         except Exception as e:
-            print(f"[ERROR] ARIM報告書検索エラー: {e}")
+            logger.error("ARIM報告書検索エラー: %s", e)
             return None
     
     def fetch_report_detail(self, detail_url):
         """報告書詳細データを取得"""
         try:
-            print(f"[DEBUG] 報告書詳細取得: {detail_url}")
+            logger.debug("報告書詳細取得: %s", detail_url)
             
             response = proxy_get(detail_url, timeout=30, headers=self.headers)
             response.raise_for_status()
@@ -97,21 +102,21 @@ class ARIMReportFetcher:
             # 報告書データを抽出
             report_data = self.parse_report_content(soup)
             
-            print(f"[DEBUG] 報告書データ取得完了: {len(report_data)}項目")
+            logger.debug("報告書データ取得完了: %s項目", len(report_data))
             
             # デバッグ: 取得したデータの概要を表示
             for key, value in report_data.items():
                 preview = str(value)[:50] + "..." if len(str(value)) > 50 else str(value)
-                print(f"[DEBUG] {key}: {preview}")
+                logger.debug("%s: %s", key, preview)
             
             return report_data
             
         except Exception as e:
             # HTTP通信エラーも含めて一般的な例外処理で対応
             if "ConnectionError" in str(type(e)) or "timeout" in str(e).lower() or "http" in str(e).lower():
-                print(f"[ERROR] HTTP通信エラー: {e}")
+                logger.error("HTTP通信エラー: %s", e)
             else:
-                print(f"[ERROR] 報告書詳細取得エラー: {e}")
+                logger.error("報告書詳細取得エラー: %s", e)
             return {}
     
     def parse_report_content(self, soup):
@@ -125,7 +130,7 @@ class ARIMReportFetcher:
                 contents = soup.find('div', id='contents')
             
             if not contents:
-                print("[WARNING] コンテンツセクションが見つかりません")
+                logger.warning("コンテンツセクションが見つかりません")
                 return report_data
             
             # h5タグとその次のpタグの組み合わせでデータを抽出
@@ -152,10 +157,10 @@ class ARIMReportFetcher:
                                     value_text = value_text.replace('</p>', '').strip()
                             
                             report_data[key] = value_text
-                            print(f"[DEBUG] データ抽出: {key} = {value_text[:50]}...")
+                            logger.debug("データ抽出: %s = %s...", key, value_text[:50])
                     
                 except Exception as e:
-                    print(f"[WARNING] 要素解析エラー: {e}")
+                    logger.warning("要素解析エラー: %s", e)
                     continue
             
             # wysiwygクラスの特別処理
@@ -170,15 +175,15 @@ class ARIMReportFetcher:
                         if key:
                             value_text = element.get_text(strip=True)
                             report_data[key] = value_text
-                            print(f"[DEBUG] WYSIWYG データ抽出: {key} = {value_text[:50]}...")
+                            logger.debug("WYSIWYG データ抽出: %s = %s...", key, value_text[:50])
                 except Exception as e:
-                    print(f"[WARNING] WYSIWYG要素解析エラー: {e}")
+                    logger.warning("WYSIWYG要素解析エラー: %s", e)
                     continue
             
             return report_data
             
         except Exception as e:
-            print(f"[ERROR] 報告書コンテンツ解析エラー: {e}")
+            logger.error("報告書コンテンツ解析エラー: %s", e)
             return {}
     
     def map_header_to_key(self, header_text):
@@ -236,7 +241,7 @@ class ARIMReportFetcher:
             return report_data
             
         except Exception as e:
-            print(f"[ERROR] ARIM報告書取得エラー: {e}")
+            logger.error("ARIM報告書取得エラー: %s", e)
             return {}
 
 
@@ -251,5 +256,5 @@ def fetch_arim_report_data(grant_number):
         fetcher = get_arim_report_fetcher()
         return fetcher.fetch_report_by_grant_number(grant_number)
     except Exception as e:
-        print(f"[ERROR] ARIM報告書データ取得エラー: {e}")
+        logger.error("ARIM報告書データ取得エラー: %s", e)
         return {}

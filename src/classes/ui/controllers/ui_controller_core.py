@@ -55,18 +55,18 @@ class UIControllerCore:
         try:
             from classes.ai.core.ai_data_manager import AIDataManager
             self.ai_data_manager = AIDataManager(logger=getattr(parent_widget, 'logger', None))
-            print("[UI_CORE] AIDataManager初期化完了")
+            logger.debug("AIDataManager初期化完了")
         except Exception as e:
-            print(f"[UI_CORE] AIDataManager初期化エラー: {e}")
+            logger.debug("AIDataManager初期化エラー: %s", e)
             self.ai_data_manager = None
         
         # AIPromptManager初期化 
         try:
             from classes.ai.util.ai_prompt_manager import AIPromptManager
             self.ai_prompt_manager = AIPromptManager(logger=getattr(parent_widget, 'logger', None))
-            print("[UI_CORE] AIPromptManager初期化完了")
+            logger.debug("AIPromptManager初期化完了")
         except Exception as e:
-            print(f"[UI_CORE] AIPromptManager初期化エラー: {e}")
+            logger.debug("AIPromptManager初期化エラー: %s", e)
             self.ai_prompt_manager = None
         
         # ログ設定
@@ -229,7 +229,7 @@ class UIControllerCore:
                 window_geometry.moveCenter(center_point)
                 self.parent.move(window_geometry.topLeft())
         except Exception as e:
-            print(f"ウィンドウ中央移動エラー: {e}")
+            logger.error("ウィンドウ中央移動エラー: %s", e)
     
     def show_grant_number_form(self):
         """
@@ -303,7 +303,7 @@ class UIControllerCore:
             wait_for_form_and_click_button(self.parent, 'grant_input', 'grant_btn', timeout=10, interval=0.5, test_mode=self.parent.test_mode)
             
         except Exception as e:
-            print(f"課題番号フォーム表示エラー: {e}")
+            logger.error("課題番号フォーム表示エラー: %s", e)
     
     def setup_main_layout(self):
         """
@@ -423,7 +423,7 @@ class UIControllerCore:
             self._integrate_settings_tab()
             
         except Exception as e:
-            print(f"メインレイアウト設定エラー: {e}")
+            logger.error("メインレイアウト設定エラー: %s", e)
             
     def _integrate_settings_tab(self):
         """設定タブをメインウィンドウに統合"""
@@ -434,14 +434,14 @@ class UIControllerCore:
             integrator = integrate_settings_into_main_window(self.parent)
             
             if integrator:
-                print("設定タブがメインウィンドウに統合されました")
+                logger.debug("設定タブがメインウィンドウに統合されました")
             else:
-                print("設定タブの統合に失敗しました（従来の設定ダイアログを使用）")
+                logger.debug("設定タブの統合に失敗しました（従来の設定ダイアログを使用）")
                 
         except ImportError as e:
-            print(f"タブ統合機能のインポートに失敗: {e}")
+            logger.debug("タブ統合機能のインポートに失敗: %s", e)
         except Exception as e:
-            print(f"設定タブ統合エラー: {e}")
+            logger.error("設定タブ統合エラー: %s", e)
     
     def finalize_window_setup(self):
         """
@@ -473,7 +473,7 @@ class UIControllerCore:
                 with open(info_path, 'w', encoding='utf-8') as infof:
                     infof.write(f"{login_info}\n")
             except Exception as e:
-                print(f"info.txt書き込み失敗: {e}")
+                logger.debug("info.txt書き込み失敗: %s", e)
 
             self.parent.autologin_status = 'init'
             self.parent.update_autologin_msg('ブラウザ初期化完了')
@@ -488,4 +488,4 @@ class UIControllerCore:
                 self.parent.update_autologin_msg('[TEST] テストモード - 自動ログイン処理をスキップ')
                 
         except Exception as e:
-            print(f"ウィンドウ最終設定エラー: {e}")
+            logger.error("ウィンドウ最終設定エラー: %s", e)

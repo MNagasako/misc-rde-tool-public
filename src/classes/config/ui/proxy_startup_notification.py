@@ -10,6 +10,11 @@
 import sys
 import os
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 # パス設定
 try:
     from qt_compat.widgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox
@@ -205,7 +210,7 @@ class ProxyStartupNotificationDialog(QDialog):
                 subprocess.Popen([sys.executable, script_path])
                 
         except Exception as e:
-            print(f"プロキシ設定開くエラー: {e}")
+            logger.error("プロキシ設定開くエラー: %s", e)
             
         self.accept()
         
@@ -238,7 +243,7 @@ class ProxyStartupNotificationDialog(QDialog):
                              allow_unicode=True, sort_keys=False)
                              
         except Exception as e:
-            print(f"通知設定保存エラー: {e}")
+            logger.error("通知設定保存エラー: %s", e)
 
 def should_show_startup_notification() -> bool:
     """起動時通知を表示すべきかどうかを判定"""
@@ -255,7 +260,7 @@ def should_show_startup_notification() -> bool:
         return data.get('ui', {}).get('show_startup_proxy_notification', True)
         
     except Exception as e:
-        print(f"通知設定読み込みエラー: {e}")
+        logger.error("通知設定読み込みエラー: %s", e)
         return True  # エラー時は表示
 
 def show_proxy_startup_notification(proxy_config, parent=None):
@@ -291,4 +296,4 @@ if __name__ == "__main__":
         
         sys.exit(app.exec())
     else:
-        print("PyQt5が利用できません")
+        logger.debug("PyQt5が利用できません")

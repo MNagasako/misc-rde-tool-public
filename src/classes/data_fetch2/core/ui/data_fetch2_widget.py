@@ -338,7 +338,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
             
             # dataset.jsonからデータを読み込み
             if not os.path.exists(dataset_json_path):
-                print(f"[WARNING] dataset.json が見つかりません: {dataset_json_path}")
+                logger.warning("dataset.json が見つかりません: %s", dataset_json_path)
                 combo.clear()
                 combo.addItem("-- データセット情報がありません --", None)
                 count_label.setText("表示中: 0/0 件")
@@ -437,10 +437,10 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
             filtered_count = len(filtered_datasets)
             count_label.setText(f"表示中: {filtered_count}/{total_count} 件")
             
-            print(f"[INFO] データセットフィルタリング完了: 広域シェア={share_filter_type}, メンバー={member_filter_type}, タイプ={dtype_filter}, 課題番号='{grant_filter}', 結果={filtered_count}/{total_count}件")
+            logger.info("データセットフィルタリング完了: 広域シェア=%s, メンバー=%s, タイプ=%s, 課題番号='%s', 結果=%s/%s件", share_filter_type, member_filter_type, dtype_filter, grant_filter, filtered_count, total_count)
             
         except Exception as e:
-            print(f"[ERROR] データセット読み込みエラー: {e}")
+            logger.error("データセット読み込みエラー: %s", e)
             combo.clear()
             combo.addItem("-- データセット読み込みエラー --", None)
             count_label.setText("表示中: 0/0 件")

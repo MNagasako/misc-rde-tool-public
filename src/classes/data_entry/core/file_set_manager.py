@@ -13,6 +13,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 
 class PathOrganizeMethod(Enum):
     """パス整理方法の列挙"""
@@ -154,7 +159,7 @@ class FileSetManager:
         """メタデータディレクトリが存在することを確認（なければ作成）"""
         if not os.path.exists(self.metadata_dir):
             os.makedirs(self.metadata_dir, exist_ok=True)
-            print(f"[INFO] ファイルセットメタデータディレクトリを作成: {self.metadata_dir}")
+            logger.info("ファイルセットメタデータディレクトリを作成: %s", self.metadata_dir)
     
     def save_fileset_metadata(self, file_set: FileSet):
         """ファイルセットのメタデータをJSONファイルに保存"""
@@ -183,10 +188,10 @@ class FileSetManager:
             with open(metadata_file, 'w', encoding='utf-8') as f:
                 json.dump(metadata, f, ensure_ascii=False, indent=2)
             
-            print(f"[INFO] ファイルセットメタデータを保存: {metadata_file}")
+            logger.info("ファイルセットメタデータを保存: %s", metadata_file)
             
         except Exception as e:
-            print(f"[ERROR] メタデータ保存エラー: {e}")
+            logger.error("メタデータ保存エラー: %s", e)
     
     def load_fileset_metadata(self, fileset_uuid: str) -> Optional[Dict]:
         """UUIDからファイルセットのメタデータを読み込み"""
@@ -198,7 +203,7 @@ class FileSetManager:
                 return metadata
             return None
         except Exception as e:
-            print(f"[ERROR] メタデータ読み込みエラー: {e}")
+            logger.error("メタデータ読み込みエラー: %s", e)
             return None
     
     def cleanup_fileset_metadata(self, fileset_uuid: str):
@@ -207,9 +212,9 @@ class FileSetManager:
             metadata_file = os.path.join(self.metadata_dir, f"{fileset_uuid}.json")
             if os.path.exists(metadata_file):
                 os.remove(metadata_file)
-                print(f"[INFO] ファイルセットメタデータを削除: {metadata_file}")
+                logger.info("ファイルセットメタデータを削除: %s", metadata_file)
         except Exception as e:
-            print(f"[ERROR] メタデータ削除エラー: {e}")
+            logger.error("メタデータ削除エラー: %s", e)
     
     def get_all_fileset_metadata(self) -> List[Dict]:
         """全ファイルセットのメタデータ一覧を取得"""
@@ -227,7 +232,7 @@ class FileSetManager:
             metadata_list.sort(key=lambda x: x.get('created_at', ''), reverse=True)
             
         except Exception as e:
-            print(f"[ERROR] 全メタデータ取得エラー: {e}")
+            logger.error("全メタデータ取得エラー: %s", e)
         
         return metadata_list
     
@@ -514,9 +519,9 @@ class FileSetManager:
                     try:
                         import shutil
                         shutil.rmtree(file_set.temp_folder_path)
-                        print(f"[INFO] ファイルセット削除時に一時フォルダを削除: {file_set.temp_folder_path}")
+                        logger.info("ファイルセット削除時に一時フォルダを削除: %s", file_set.temp_folder_path)
                     except Exception as e:
-                        print(f"[WARNING] 一時フォルダ削除失敗: {e}")
+                        logger.warning("一時フォルダ削除失敗: %s", e)
                 
                 # ファイルセットを削除
                 del self.file_sets[i]
@@ -525,7 +530,7 @@ class FileSetManager:
     
     def clear_all_filesets(self):
         """全ファイルセットを削除（関連データも削除）"""
-        print(f"[DEBUG] clear_all_filesets: {len(self.file_sets)}個のファイルセットを削除")
+        logger.debug("clear_all_filesets: %s個のファイルセットを削除", len(self.file_sets))
         
         # 全ファイルセットを削除（逆順で安全に削除）
         for file_set in reversed(self.file_sets[:]):
@@ -537,13 +542,13 @@ class FileSetManager:
                 try:
                     import shutil
                     shutil.rmtree(file_set.temp_folder_path)
-                    print(f"[INFO] 全削除時に一時フォルダを削除: {file_set.temp_folder_path}")
+                    logger.info("全削除時に一時フォルダを削除: %s", file_set.temp_folder_path)
                 except Exception as e:
-                    print(f"[WARNING] 一時フォルダ削除失敗: {e}")
+                    logger.warning("一時フォルダ削除失敗: %s", e)
         
         # リストをクリア
         self.file_sets.clear()
-        print(f"[DEBUG] clear_all_filesets: 削除完了")
+        logger.debug("clear_all_filesets: 削除完了")
     
     def get_fileset_by_id(self, fileset_id: int) -> Optional[FileSet]:
         """IDでファイルセットを取得"""

@@ -8,6 +8,11 @@ from qt_compat.core import QDate, QTimer, Qt
 from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
 from core.bearer_token_manager import BearerTokenManager
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 
 def create_dataset_update_payload(selected_dataset, edit_dataset_name_edit, edit_grant_number_combo, 
                                 edit_description_edit, edit_embargo_edit, edit_contact_edit,
@@ -20,8 +25,8 @@ def create_dataset_update_payload(selected_dataset, edit_dataset_name_edit, edit
     original_attrs = selected_dataset.get("attributes", {})
     original_relationships = selected_dataset.get("relationships", {})
     
-    print(f"[DEBUG] 編集対象データセットID: {original_dataset_id}")
-    print(f"[DEBUG] 編集対象データセット名: {original_attrs.get('name', '不明')}")
+    logger.debug("編集対象データセットID: %s", original_dataset_id)
+    logger.debug("編集対象データセット名: %s", original_attrs.get('name', '不明'))
     
     # フォームから値を取得
     dataset_name = edit_dataset_name_edit.text().strip()
@@ -61,7 +66,7 @@ def create_dataset_update_payload(selected_dataset, edit_dataset_name_edit, edit
     # 関連情報（新しい書式に対応）
     related_links_text = edit_related_links_edit.toPlainText().strip()
     related_links = []
-    print(f"[DEBUG] 関連情報テキスト: '{related_links_text}'")
+    logger.debug("関連情報テキスト: '%s'", related_links_text)
     
     if related_links_text:
         # コンマ区切りで分割
@@ -84,30 +89,30 @@ def create_dataset_update_payload(selected_dataset, edit_dataset_name_edit, edit
                             "url": url
                         }
                         related_links.append(link_obj)
-                        print(f"[DEBUG] 関連情報追加 (項目{line_num}): {link_obj}")
+                        logger.debug("関連情報追加 (項目%s): %s", line_num, link_obj)
                     else:
-                        print(f"[WARNING] 項目{line_num}: タイトルまたはURLが空です - スキップ")
+                        logger.warning("項目%s: タイトルまたはURLが空です - スキップ", line_num)
                 except Exception as e:
-                    print(f"[WARNING] 項目{line_num}: 解析エラー - スキップ ('{item}') - {e}")
+                    logger.warning("項目%s: 解析エラー - スキップ ('%s') - %s", line_num, item, e)
             else:
-                print(f"[WARNING] 項目{line_num}: 不正な書式 - スキップ ('{item}')")
+                logger.warning("項目%s: 不正な書式 - スキップ ('%s')", line_num, item)
     
     # TAGフィールド（テキストボックスに変更）
     tags_text = edit_tags_edit.text().strip()
     tags = []
-    print(f"[DEBUG] TAGテキスト: '{tags_text}'")
+    logger.debug("TAGテキスト: '%s'", tags_text)
     
     if tags_text:
         tags = [tag.strip() for tag in tags_text.split(",") if tag.strip()]
-        print(f"[DEBUG] 解析されたTAG: {tags}")
+        logger.debug("解析されたTAG: %s", tags)
     
     # データセット引用の書式
     citation_format = edit_citation_format_edit.toPlainText().strip()
-    print(f"[DEBUG] 引用書式: '{citation_format}'")
+    logger.debug("引用書式: '%s'", citation_format)
     
-    print(f"[DEBUG] 最終的な関連情報リスト: {related_links}")
-    print(f"[DEBUG] 最終的なTAGリスト: {tags}")
-    print(f"[DEBUG] 最終的な引用書式: '{citation_format}'")
+    logger.debug("最終的な関連情報リスト: %s", related_links)
+    logger.debug("最終的なTAGリスト: %s", tags)
+    logger.debug("最終的な引用書式: '%s'", citation_format)
     
     # 関連データセット
     related_datasets = []
@@ -119,16 +124,16 @@ def create_dataset_update_payload(selected_dataset, edit_dataset_name_edit, edit
                 "type": "dataset",
                 "id": related_dataset_id
             })
-    print(f"[DEBUG] 関連データセット: {len(related_datasets)}件")
+    logger.debug("関連データセット: %s件", len(related_datasets))
     for idx, rel_ds in enumerate(related_datasets):
-        print(f"[DEBUG] 関連データセット{idx+1}: ID={rel_ds['id']}")
+        logger.debug("関連データセット%s: ID=%s", idx+1, rel_ds['id'])
         # 自分自身をチェック
         if rel_ds['id'] == original_dataset_id:
-            print(f"[WARNING] 自分自身が関連データセットに含まれています: {rel_ds['id']}")
+            logger.warning("自分自身が関連データセットに含まれています: %s", rel_ds['id'])
     
     # メインデータセットIDチェック
-    print(f"[DEBUG] メインデータセットID: {original_dataset_id}")
-    print(f"[DEBUG] メインデータセット名: {dataset_name}")
+    logger.debug("メインデータセットID: %s", original_dataset_id)
+    logger.debug("メインデータセット名: %s", dataset_name)
     
     # チェックボックス
     is_anonymized = edit_anonymize_checkbox.isChecked()
@@ -141,10 +146,10 @@ def create_dataset_update_payload(selected_dataset, edit_dataset_name_edit, edit
         data_listing_type = "TREE"
     else:
         data_listing_type = "GALLERY"  # デフォルト
-    print(f"[DEBUG] データ一覧表示タイプ: {data_listing_type}")
+    logger.debug("データ一覧表示タイプ: %s", data_listing_type)
     
     # データ登録及び削除を禁止するオプション
-    print(f"[DEBUG] データ登録及び削除を禁止する: {is_data_entry_delete_prohibited}")
+    logger.debug("データ登録及び削除を禁止する: %s", is_data_entry_delete_prohibited)
     
     # 共有ポリシー（既存のものを保持しつつ、RDE全体共有のみ更新）
     sharing_policies = original_attrs.get("sharingPolicies", []).copy()
@@ -191,7 +196,7 @@ def create_dataset_update_payload(selected_dataset, edit_dataset_name_edit, edit
     for rel_name in important_relationships:
         if rel_name in original_relationships:
             relationships[rel_name] = original_relationships[rel_name]
-            print(f"[DEBUG] リレーションシップ保持: {rel_name}")
+            logger.debug("リレーションシップ保持: %s", rel_name)
     
     # ライセンス情報をリレーションシップに追加（成功時のペイロード構造に合わせる）
     if license_id and license_id.strip():
@@ -201,13 +206,13 @@ def create_dataset_update_payload(selected_dataset, edit_dataset_name_edit, edit
                 "id": license_id
             }
         }
-        print(f"[DEBUG] ライセンスリレーションシップ追加: {license_id}")
+        logger.debug("ライセンスリレーションシップ追加: %s", license_id)
     else:
         # ライセンスが選択されていない場合は、dataをnullに設定
         relationships["license"] = {
             "data": None
         }
-        print(f"[DEBUG] ライセンス未選択 - data: null で設定")
+        logger.debug("ライセンス未選択 - data: null で設定")
     
     # ペイロード作成
     payload = {
@@ -234,13 +239,13 @@ def create_dataset_update_payload(selected_dataset, edit_dataset_name_edit, edit
     }
     
     # ペイロードの詳細デバッグ情報
-    print(f"[DEBUG] === ペイロード最終確認 ===")
-    print(f"[DEBUG] データセットID: {payload['data']['id']}")
-    print(f"[DEBUG] データセット名: {payload['data']['attributes']['name']}")
-    print(f"[DEBUG] 関連データセット数: {len(payload['data']['relationships']['relatedDatasets']['data'])}")
+    logger.debug("=== ペイロード最終確認 ===")
+    logger.debug("データセットID: %s", payload['data']['id'])
+    logger.debug("データセット名: %s", payload['data']['attributes']['name'])
+    logger.debug("関連データセット数: %s", len(payload['data']['relationships']['relatedDatasets']['data']))
     for idx, rel_ds in enumerate(payload['data']['relationships']['relatedDatasets']['data']):
-        print(f"[DEBUG] 関連データセット{idx+1}: {rel_ds['id']}")
-    print(f"[DEBUG] === ペイロード確認終了 ===")
+        logger.debug("関連データセット%s: %s", idx+1, rel_ds['id'])
+    logger.debug("=== ペイロード確認終了 ===")
     
     return payload
 
@@ -355,31 +360,31 @@ def send_dataset_update_request(widget, parent, selected_dataset,
         from classes.utils.api_request_helper import api_request  # セッション管理ベースのプロキシ対応
         try:
             # デバッグ出力
-            print(f"[DEBUG] API URL: {api_url}")
-            print(f"[DEBUG] Payload ID: {payload['data']['id']}")
-            print(f"[DEBUG] Dataset ID from selected_dataset: {dataset_id}")
-            print(f"[DEBUG] ID 一致確認: {payload['data']['id'] == dataset_id}")
-            print(f"[DEBUG] HTTPメソッド: PATCH")
+            logger.debug("API URL: %s", api_url)
+            logger.debug("Payload ID: %s", payload['data']['id'])
+            logger.debug("Dataset ID from selected_dataset: %s", dataset_id)
+            logger.debug("ID 一致確認: %s", payload['data']['id'] == dataset_id)
+            logger.debug("HTTPメソッド: PATCH")
             
             # ペイロードの主要部分をログ出力
             attrs = payload['data']['attributes']
             rels = payload['data']['relationships']
-            print(f"[DEBUG] ペイロード主要情報:")
-            print(f"  - データセット名: {attrs.get('name')}")
-            print(f"  - 課題番号: {attrs.get('grantNumber')}")
-            print(f"  - 関連リンク数: {len(attrs.get('relatedLinks', []))}")
-            print(f"  - 関連データセット数: {len(rels.get('relatedDatasets', {}).get('data', []))}")
-            print(f"  - リレーションシップ: {list(rels.keys())}")
+            logger.debug("ペイロード主要情報:")
+            logger.debug("  - データセット名: %s", attrs.get('name'))
+            logger.debug("  - 課題番号: %s", attrs.get('grantNumber'))
+            logger.debug("  - 関連リンク数: %s", len(attrs.get('relatedLinks', [])))
+            logger.debug("  - 関連データセット数: %s).get('data', []))}", len(rels.get('relatedDatasets', {)
+            logger.debug("  - リレーションシップ: %s", list(rels.keys()))
             
             # リレーションシップの詳細
             for rel_name, rel_data in rels.items():
                 if rel_name == "relatedDatasets":
                     rel_count = len(rel_data.get('data', []))
-                    print(f"    * {rel_name}: {rel_count}件")
+                    logger.debug("    * %s: %s件", rel_name, rel_count)
                     for i, ds in enumerate(rel_data.get('data', [])):
-                        print(f"      - [{i+1}] {ds.get('type')}: {ds.get('id')}")
+                        logger.debug("      - [%s] %s: %s", i+1, ds.get('type'), ds.get('id'))
                 else:
-                    print(f"    * {rel_name}: {type(rel_data)}")
+                    logger.debug("    * %s: %s", rel_name, type(rel_data))
             
             response = api_request('PATCH', api_url, headers=headers, json_data=payload, timeout=15)
             if response.status_code in (200, 201):
@@ -407,7 +412,7 @@ def send_dataset_update_request(widget, parent, selected_dataset,
                                 progress_dialog = show_progress_dialog(widget, "データセット一覧自動更新", worker)
                                 
                         except Exception as e:
-                            print(f"[ERROR] データセット一覧自動更新でエラー: {e}")
+                            logger.error("データセット一覧自動更新でエラー: %s", e)
                     
                     # 少し遅延してから自動更新実行（安全性向上のため遅延を増加）
                     QTimer.singleShot(2000, auto_refresh)  # 1秒 → 2秒に変更
@@ -422,12 +427,12 @@ def send_dataset_update_request(widget, parent, selected_dataset,
                             notifier = get_dataset_refresh_notifier()
                             notifier.notify_refresh()
                         except Exception as e:
-                            print(f"[ERROR] グローバルリフレッシュ通知エラー: {e}")
+                            logger.error("グローバルリフレッシュ通知エラー: %s", e)
                     
                     QTimer.singleShot(5000, notify_global_refresh)  # 3秒 → 5秒に変更
                     
                 except Exception as e:
-                    print(f"[WARNING] データセット一覧自動更新の設定に失敗: {e}")
+                    logger.warning("データセット一覧自動更新の設定に失敗: %s", e)
                     # 自動更新が失敗してもUIリフレッシュは実行
                     if ui_refresh_callback:
                         QTimer.singleShot(1000, ui_refresh_callback)
@@ -438,7 +443,7 @@ def send_dataset_update_request(widget, parent, selected_dataset,
         except Exception as e:
             QMessageBox.warning(widget, "APIエラー", f"API送信中にエラーが発生しました: {e}")
     else:
-        print("[INFO] データセット更新処理はユーザーによりキャンセルされました。")
+        logger.info("データセット更新処理はユーザーによりキャンセルされました。")
 
 
 def show_response_dialog(parent, title, message, response_text):

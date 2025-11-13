@@ -6,8 +6,12 @@
 
 import os
 import json
+import logging
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
+
+# ロガー設定
+logger = logging.getLogger(__name__)
 
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton, 
@@ -234,7 +238,7 @@ class FileTreeWidget(QTreeWidget):
         """ファイル種類変更ハンドラ"""
         if checked:
             file_item.item_type = item_type
-            print(f"[DEBUG] ファイル '{file_item.name}' の種類を {item_type.value} に変更")
+            logger.debug("ファイル '%s' の種類を %s に変更", file_item.name, item_type.value)
     
     def _create_parent_dirs(self, path: str, dir_items: dict, file_items: List[FileItem]):
         """親ディレクトリを再帰的に作成"""
@@ -316,7 +320,7 @@ class FileTreeWidget(QTreeWidget):
             self.items_selected.emit(selected_items)
             
         except Exception as e:
-            print(f"[ERROR] チェックボックス変更エラー: {e}")
+            logger.error("チェックボックス変更エラー: %s", e)
     
     def find_tree_item_by_file_item(self, target_file_item: 'FileItem') -> Optional[QTreeWidgetItem]:
         """FileItemに対応するQTreeWidgetItemを検索"""
@@ -408,7 +412,7 @@ class FileTreeWidget(QTreeWidget):
             tree_item.setForeground(0, QColor(0, 0, 0))    # 通常の色に戻す
             tree_item.setText(0, file_item.name)
         
-        print(f"[DEBUG] ZIP化フラグ設定: {file_item.name} -> {is_zip}")
+        logger.debug("ZIP化フラグ設定: %s -> %s", file_item.name, is_zip)
     
     def add_to_fileset(self, tree_item: QTreeWidgetItem, include_subdirs: bool):
         """選択したフォルダをファイルセットに追加"""
@@ -429,17 +433,17 @@ class FileTreeWidget(QTreeWidget):
                 QMessageBox.warning(self, "エラー", "ファイルセットマネージャーが見つかりません")
                 return
             
-            print(f"[DEBUG] add_to_fileset: フォルダ={file_item.name}, include_subdirs={include_subdirs}")
+            logger.debug("add_to_fileset: フォルダ=%s, include_subdirs=%s", file_item.name, include_subdirs)
             
             # チェック済みアイテムを収集（ファイルのみ）
             all_checked_items = parent_widget._get_checked_items_from_tree()
             checked_files = [item for item in all_checked_items if item.file_type == FileType.FILE]
-            print(f"[DEBUG] add_to_fileset: 全チェック済みファイル数={len(checked_files)}")
+            logger.debug("add_to_fileset: 全チェック済みファイル数=%s", len(checked_files))
             
             if include_subdirs:
                 # 配下全フォルダの場合：選択したフォルダ以下のファイルのみ
                 target_path = file_item.relative_path
-                print(f"[DEBUG] add_to_fileset（配下全て）: target_path={target_path}")
+                logger.debug("add_to_fileset（配下全て）: target_path=%s", target_path)
                 filtered_items = []
                 for item in checked_files:
                     # パス区切り文字を統一してチェック
@@ -453,13 +457,13 @@ class FileTreeWidget(QTreeWidget):
                     item_parent = os.path.dirname(item.relative_path)
                     is_direct = item_parent == target_path
                     
-                    print(f"[DEBUG] add_to_fileset（配下全て）: ファイル={item.relative_path}, parent={item_parent}, is_subdir={is_subdir}, is_direct={is_direct}")
+                    logger.debug("add_to_fileset（配下全て）: ファイル=%s, parent=%s, is_subdir=%s, is_direct=%s", item.relative_path, item_parent, is_subdir, is_direct)
                     
                     if is_subdir or is_direct:
                         filtered_items.append(item)
-                        print(f"[DEBUG] add_to_fileset（配下全て）: 含める -> {item.relative_path}")
+                        logger.debug("add_to_fileset（配下全て）: 含める -> %s", item.relative_path)
                     else:
-                        print(f"[DEBUG] add_to_fileset（配下全て）: 除外 -> {item.relative_path}")
+                        logger.debug("add_to_fileset（配下全て）: 除外 -> %s", item.relative_path)
                 checked_items = filtered_items
             else:
                 # このフォルダのみの場合：選択したフォルダの直下のファイルのみ
@@ -472,17 +476,17 @@ class FileTreeWidget(QTreeWidget):
                     if parent_path == target_path:
                         # 直下のファイルのみを含める
                         filtered_items.append(item)
-                        print(f"[DEBUG] add_to_fileset（このフォルダのみ）: 直下ファイル含める -> {item.relative_path}")
+                        logger.debug("add_to_fileset（このフォルダのみ）: 直下ファイル含める -> %s", item.relative_path)
                     else:
                         # サブフォルダ内のファイルは除外
-                        print(f"[DEBUG] add_to_fileset（このフォルダのみ）: サブフォルダ内ファイル除外 -> {item.relative_path}")
+                        logger.debug("add_to_fileset（このフォルダのみ）: サブフォルダ内ファイル除外 -> %s", item.relative_path)
                 checked_items = filtered_items
             
             if not checked_items:
                 QMessageBox.information(self, "情報", "選択したフォルダ範囲に「含む」にチェックされたファイルがありません")
                 return
             
-            print(f"[DEBUG] add_to_fileset: フィルタ後のファイル数={len(checked_items)}")
+            logger.debug("add_to_fileset: フィルタ後のファイル数=%s", len(checked_items))
             
             # 既存ファイルセットとの重複チェック
             conflicts = []
@@ -518,16 +522,16 @@ class FileTreeWidget(QTreeWidget):
             fileset_name = file_item.name  # フォルダ名のみ
             
             # デバッグ情報：作成前のファイル数
-            print(f"[DEBUG] ファイルセット作成前: checked_items={len(checked_items)}個")
+            logger.debug("ファイルセット作成前: checked_items=%s個", len(checked_items))
             for i, item in enumerate(checked_items):
-                print(f"[DEBUG]   {i+1}: {item.name} ({item.file_type.name}) -> {item.relative_path}")
+                logger.debug("%s: %s (%s) -> %s", i+1, item.name, item.file_type.name, item.relative_path)
             
             # ZIP化指定されたディレクトリがあるか確認し、ファイルリストにディレクトリ情報を追加
             items_to_add = list(checked_items)  # ファイルリストをコピー
             
             # ZIP化指定されたディレクトリ情報を追加
             if getattr(file_item, 'is_zip', False) and file_item.file_type == FileType.DIRECTORY:
-                print(f"[DEBUG] ZIP化ディレクトリを追加: {file_item.name}")
+                logger.debug("ZIP化ディレクトリを追加: %s", file_item.name)
                 # ディレクトリ情報をアイテムリストに追加（ZIP化フラグ付き）
                 zip_dir_item = FileItem(
                     path=file_item.path,
@@ -537,7 +541,7 @@ class FileTreeWidget(QTreeWidget):
                     is_zip=True
                 )
                 items_to_add.append(zip_dir_item)
-                print(f"[DEBUG] ZIP化ディレクトリ追加完了: {zip_dir_item.name}, is_zip={zip_dir_item.is_zip}")
+                logger.debug("ZIP化ディレクトリ追加完了: %s, is_zip=%s", zip_dir_item.name, zip_dir_item.is_zip)
             
             new_fileset = parent_widget.file_set_manager.create_manual_fileset(
                 fileset_name, items_to_add)
@@ -546,9 +550,9 @@ class FileTreeWidget(QTreeWidget):
             parent_widget._create_temp_folder_and_mapping(new_fileset)
             
             # デバッグ情報：作成後のファイル数
-            print(f"[DEBUG] ファイルセット作成後: items={len(new_fileset.items)}個")
+            logger.debug("ファイルセット作成後: items=%s個", len(new_fileset.items))
             for i, item in enumerate(new_fileset.items):
-                print(f"[DEBUG]   {i+1}: {item.name} ({item.file_type.name}) -> {item.relative_path}")
+                logger.debug("%s: %s (%s) -> %s", i+1, item.name, item.file_type.name, item.relative_path)
             
             # ファイルセットテーブル更新
             parent_widget.refresh_fileset_display()
@@ -562,7 +566,7 @@ class FileTreeWidget(QTreeWidget):
                 f"ファイル数: {file_count}個")
             
         except Exception as e:
-            print(f"[ERROR] add_to_fileset: {e}")
+            logger.error("add_to_fileset: %s", e)
             import traceback
             traceback.print_exc()
             QMessageBox.warning(self, "エラー", f"ファイルセット作成に失敗しました: {str(e)}")
@@ -647,7 +651,7 @@ class FileTreeWidget(QTreeWidget):
             self._update_item_style(tree_item, file_item)
             
         except Exception as e:
-            print(f"[WARNING] 含むチェックボックス変更エラー: {e}")
+            logger.warning("含むチェックボックス変更エラー: %s", e)
     
     def on_zip_checkbox_changed(self, state, tree_item, file_item):
         """ZIPチェックボックス変更時の処理"""
@@ -657,15 +661,15 @@ class FileTreeWidget(QTreeWidget):
             if not hasattr(file_item, 'is_zip'):
                 file_item.is_zip = False
             file_item.is_zip = is_checked
-            print(f"[DEBUG] ZIP状態変更: {file_item.name} -> {is_checked}")
+            logger.debug("ZIP状態変更: %s -> %s", file_item.name, is_checked)
             
             # ZIPにチェックが入った場合、配下の全フォルダのZIPチェックを外す
             if is_checked:
                 self._clear_child_zip_flags(tree_item)
-                print(f"[INFO] フォルダ '{file_item.name}' をZIP化設定。配下フォルダのZIP設定を解除しました。")
+                logger.info("フォルダ '%s' をZIP化設定。配下フォルダのZIP設定を解除しました。", file_item.name)
             
         except Exception as e:
-            print(f"[WARNING] ZIPチェックボックス変更エラー: {e}")
+            logger.warning("ZIPチェックボックス変更エラー: %s", e)
     
     def _clear_child_zip_flags(self, tree_item):
         """子フォルダのZIP設定を再帰的に解除"""
@@ -887,27 +891,27 @@ class FileSetTableWidget(QTableWidget):
     
     def set_file_set_manager(self, file_set_manager):
         """file_set_managerへの参照を設定"""
-        print(f"[DEBUG] FileSetTableWidget.set_file_set_manager: 設定開始")
-        print(f"[DEBUG] set_file_set_manager: file_set_manager={file_set_manager}")
+        logger.debug("FileSetTableWidget.set_file_set_manager: 設定開始")
+        logger.debug("set_file_set_manager: file_set_manager=%s", file_set_manager)
         if file_set_manager:
-            print(f"[DEBUG] set_file_set_manager: file_sets count={len(getattr(file_set_manager, 'file_sets', []))}")
+            logger.debug("set_file_set_manager: file_sets count=%s", len(getattr(file_set_manager, 'file_sets', [])))
         self.file_set_manager = file_set_manager
-        print(f"[DEBUG] FileSetTableWidget.set_file_set_manager: 設定完了")
+        logger.debug("FileSetTableWidget.set_file_set_manager: 設定完了")
     
     def load_file_sets(self, file_sets: List[FileSet]):
         """ファイルセット一覧をロード"""
         import traceback
-        print(f"[DEBUG] FileSetTableWidget.load_file_sets: 受信 {len(file_sets)} ファイルセット")
-        print(f"[DEBUG] load_file_sets 呼び出し元:")
+        logger.debug("FileSetTableWidget.load_file_sets: 受信 %s ファイルセット", len(file_sets))
+        logger.debug("load_file_sets 呼び出し元:")
         for line in traceback.format_stack()[-3:-1]:
-            print(f"  {line.strip()}")
+            logger.debug("  %s", line.strip())
         
         self.file_sets = file_sets
         self.setRowCount(len(file_sets))
-        print(f"[DEBUG] FileSetTableWidget.load_file_sets: テーブル行数を {len(file_sets)} に設定")
+        logger.debug("FileSetTableWidget.load_file_sets: テーブル行数を %s に設定", len(file_sets))
         
         for row, file_set in enumerate(file_sets):
-            print(f"[DEBUG] FileSetTableWidget: 行{row} 処理中: {file_set.name}")
+            logger.debug("FileSetTableWidget: 行%s 処理中: %s", row, file_set.name)
             
             # ファイルセット名（アイコン付きのクリック可能ウィジェット）
             name_widget = self._create_name_widget_with_icon(file_set)
@@ -1032,9 +1036,9 @@ class FileSetTableWidget(QTableWidget):
                 file_set.organize_method = PathOrganizeMethod.ZIP
             else:
                 file_set.organize_method = PathOrganizeMethod.FLATTEN
-            print(f"[DEBUG] ファイルセット '{file_set.name}' の整理方法を '{method_text}' に変更")
+            logger.debug("ファイルセット '%s' の整理方法を '%s' に変更", file_set.name, method_text)
         except Exception as e:
-            print(f"[ERROR] 整理方法変更エラー: {e}")
+            logger.error("整理方法変更エラー: %s", e)
 
     def _get_sample_info_text(self, file_set) -> str:
         """試料情報テキストを取得"""
@@ -1065,7 +1069,7 @@ class FileSetTableWidget(QTableWidget):
             
             return "未設定"
         except Exception as e:
-            print(f"[ERROR] 試料情報取得エラー: {e}")
+            logger.error("試料情報取得エラー: %s", e)
             return "未設定"
     
     def _get_dataset_name(self, file_set) -> str:
@@ -1103,7 +1107,7 @@ class FileSetTableWidget(QTableWidget):
             return f"ID: {dataset_id[:8]}..." if len(dataset_id) > 8 else dataset_id
             
         except Exception as e:
-            print(f"[ERROR] データセット名取得エラー: {e}")
+            logger.error("データセット名取得エラー: %s", e)
             return "未設定"
     
     def on_selection_changed(self):
@@ -1147,7 +1151,7 @@ class FileSetTableWidget(QTableWidget):
             dialog.exec()
             
         except Exception as e:
-            print(f"[ERROR] register_single_fileset エラー: {e}")
+            logger.error("register_single_fileset エラー: %s", e)
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "エラー", f"データ登録処理でエラーが発生しました:\n{str(e)}")
@@ -1161,21 +1165,21 @@ class FileSetTableWidget(QTableWidget):
     
     def refresh_data(self):
         """テーブルデータを再読み込み"""
-        print(f"[DEBUG] FileSetTableWidget.refresh_data: 呼び出された")
+        logger.debug("FileSetTableWidget.refresh_data: 呼び出された")
         try:
             # file_set_managerから最新のデータを取得
             if self.file_set_manager and hasattr(self.file_set_manager, 'file_sets'):
                 latest_file_sets = self.file_set_manager.file_sets
-                print(f"[DEBUG] refresh_data: file_set_managerから{len(latest_file_sets)}個のファイルセットを取得")
+                logger.debug("refresh_data: file_set_managerから%s個のファイルセットを取得", len(latest_file_sets))
                 self.load_file_sets(latest_file_sets)
             elif hasattr(self, 'file_sets') and self.file_sets:
-                print(f"[DEBUG] refresh_data: 内部file_setsから{len(self.file_sets)}個のファイルセットで再読み込み")
+                logger.debug("refresh_data: 内部file_setsから%s個のファイルセットで再読み込み", len(self.file_sets))
                 self.load_file_sets(self.file_sets)
             else:
-                print(f"[DEBUG] refresh_data: ファイルセットが存在しません")
+                logger.debug("refresh_data: ファイルセットが存在しません")
                 self.setRowCount(0)
         except Exception as e:
-            print(f"[ERROR] refresh_data: {e}")
+            logger.error("refresh_data: %s", e)
             import traceback
             traceback.print_exc()
     
@@ -1191,7 +1195,7 @@ class FileSetTableWidget(QTableWidget):
                 if parent_widget:
                     parent_widget.show_data_tree_dialog(fileset)
         except Exception as e:
-            print(f"[ERROR] on_double_clicked: {e}")
+            logger.error("on_double_clicked: %s", e)
             import traceback
             traceback.print_exc()
     
@@ -1401,7 +1405,7 @@ class FileSetTableWidget(QTableWidget):
                     f"パス: {dest_folder}")
                 
         except Exception as e:
-            print(f"[ERROR] フォルダ書き出しエラー: {e}")
+            logger.error("フォルダ書き出しエラー: %s", e)
             QMessageBox.warning(self, "エラー", f"フォルダ書き出しに失敗しました: {str(e)}")
     
     def _show_fileset_content_dialog(self, file_set):
@@ -1410,7 +1414,7 @@ class FileSetTableWidget(QTableWidget):
             # 専用ダイアログが存在しない場合は、簡易版を使用
             self._show_simple_fileset_content_dialog(file_set)
         except Exception as e:
-            print(f"[ERROR] ファイルセット内容ダイアログエラー: {e}")
+            logger.error("ファイルセット内容ダイアログエラー: %s", e)
             QMessageBox.warning(self, "エラー", f"ファイルセット内容の表示に失敗しました: {str(e)}")
     
     def _show_simple_fileset_content_dialog(self, file_set):
@@ -1504,7 +1508,7 @@ class FileSetTableWidget(QTableWidget):
                                 zip_checkbox = file_tree.itemWidget(child, 6)  # ZIP列
                                 if zip_checkbox and isinstance(zip_checkbox, QCheckBox):
                                     file_item.is_zip = zip_checkbox.isChecked()
-                                    print(f"[DEBUG] ファイルセット変更適用 - ZIP設定: {file_item.name} -> {file_item.is_zip}")
+                                    logger.debug("ファイルセット変更適用 - ZIP設定: %s -> %s", file_item.name, file_item.is_zip)
                             
                             updated_items.append(file_item)
                     collect_checked_items(child)
@@ -1546,7 +1550,7 @@ class FileSetTableWidget(QTableWidget):
             try:
                 self._update_mapping_file(file_set)
             except Exception as e:
-                print(f"[WARNING] マッピングファイル自動更新エラー: {e}")
+                logger.warning("マッピングファイル自動更新エラー: %s", e)
             
             # ダイアログを閉じる
             dialog.accept()
@@ -1556,7 +1560,7 @@ class FileSetTableWidget(QTableWidget):
                 f"選択ファイル数: {len(updated_items)}個")
                 
         except Exception as e:
-            print(f"[ERROR] ファイルセット変更適用エラー: {e}")
+            logger.error("ファイルセット変更適用エラー: %s", e)
             import traceback
             traceback.print_exc()
             QMessageBox.warning(self, "エラー", f"ファイルセットの更新に失敗しました: {str(e)}")
@@ -1597,7 +1601,7 @@ class FileSetTableWidget(QTableWidget):
                                 if hasattr(original_item, 'is_zip'):
                                     zip_checkbox.setChecked(original_item.is_zip)
                                     file_tree.file_items[id(child)].is_zip = original_item.is_zip
-                                    print(f"[DEBUG] ZIP設定復元: {file_item.name} -> {original_item.is_zip}")
+                                    logger.debug("ZIP設定復元: %s -> %s", file_item.name, original_item.is_zip)
                                 
                 set_checkbox_recursive(child)
         
@@ -1628,7 +1632,7 @@ class FileSetTableWidget(QTableWidget):
                 if os.path.exists(stable_path):
                     return stable_path
             except Exception as e:
-                print(f"[WARNING] TempFolderManagerアクセスエラー: {e}")
+                logger.warning("TempFolderManagerアクセスエラー: %s", e)
         
         # 後方互換性：extended_configから取得を試行
         if hasattr(file_set, 'extended_config') and file_set.extended_config:
@@ -1648,7 +1652,7 @@ class FileSetTableWidget(QTableWidget):
                 temp_manager = TempFolderManager()
                 return temp_manager.get_stable_mapping_file_path(file_set)
             except Exception as e:
-                print(f"[WARNING] TempFolderManagerフォールバックエラー: {e}")
+                logger.warning("TempFolderManagerフォールバックエラー: %s", e)
         
         return None
     
@@ -1707,7 +1711,7 @@ class FileSetTableWidget(QTableWidget):
                 f"パス: {mapping_file}")
             
         except Exception as e:
-            print(f"[ERROR] マッピングファイル更新エラー: {e}")
+            logger.error("マッピングファイル更新エラー: %s", e)
             import traceback
             traceback.print_exc()
             QMessageBox.warning(self, "エラー", f"マッピングファイルの更新に失敗しました: {str(e)}")
@@ -1748,10 +1752,10 @@ class DataTreeDialog(QDialog):
         
         # ファイルツリーにデータをロード
         if self.file_items:
-            print(f"[DEBUG] DataTreeDialog: {len(self.file_items)}個のファイルアイテムをロード")
+            logger.debug("DataTreeDialog: %s個のファイルアイテムをロード", len(self.file_items))
             self.file_tree.load_file_tree(self.file_items)
         else:
-            print("[WARNING] DataTreeDialog: ファイルアイテムが空です")
+            logger.warning("DataTreeDialog: ファイルアイテムが空です")
         
         # 選択情報
         self.selection_info = QLabel("選択されたアイテム: 0個")
@@ -1798,7 +1802,7 @@ class DataTreeDialog(QDialog):
             else:
                 QMessageBox.information(self, "情報", "ファイルセット更新機能は現在利用できません。")
         except Exception as e:
-            print(f"[ERROR] ダイアログからのファイルセット更新エラー: {e}")
+            logger.error("ダイアログからのファイルセット更新エラー: %s", e)
             QMessageBox.warning(self, "エラー", f"ファイルセット更新に失敗しました: {e}")
 
 
@@ -1807,7 +1811,7 @@ class BatchRegisterWidget(QWidget):
     
     def __init__(self, parent_controller, parent=None):
         super().__init__(parent)
-        print("[DEBUG] BatchRegisterWidget初期化開始")
+        logger.debug("BatchRegisterWidget初期化開始")
         self.parent_controller = parent_controller
         self.file_set_manager = None
         self.batch_logic = BatchRegisterLogic(self)
@@ -1821,7 +1825,7 @@ class BatchRegisterWidget(QWidget):
         self.bearer_token = None
         if hasattr(parent_controller, 'bearer_token'):
             self.bearer_token = parent_controller.bearer_token
-            print(f"[DEBUG] BatchRegisterWidget: parent_controllerからトークンを設定")
+            logger.debug("BatchRegisterWidget: parent_controllerからトークンを設定")
         
         # 既存の一時フォルダをクリーンアップ
         self.cleanup_temp_folders_on_init()
@@ -1830,7 +1834,7 @@ class BatchRegisterWidget(QWidget):
         self.connect_signals()
         self.load_initial_data()
         self.adjust_window_size()
-        print("[DEBUG] BatchRegisterWidget初期化完了")
+        logger.debug("BatchRegisterWidget初期化完了")
         
     def setup_ui(self):
         """UIセットアップ"""
@@ -2147,7 +2151,7 @@ class BatchRegisterWidget(QWidget):
                 self.dataset_combo.lineEdit().setPlaceholderText("リストから選択、またはキーワードで検索して選択してください")
                 dataset_layout.addWidget(self.dataset_combo)
         except Exception as e:
-            print(f"[WARNING] データセット選択ウィジェット作成失敗: {e}")
+            logger.warning("データセット選択ウィジェット作成失敗: %s", e)
             # フォールバック: 通常のコンボボックス
             self.dataset_combo = QComboBox()
             self.dataset_combo.setEditable(True)
@@ -2366,7 +2370,7 @@ class BatchRegisterWidget(QWidget):
         # 1. 自分のプロパティから取得を試行
         if hasattr(self, 'bearer_token') and self.bearer_token:
             bearer_token = self.bearer_token
-            print(f"[DEBUG] _get_bearer_token: 自分のプロパティから取得")
+            logger.debug("_get_bearer_token: 自分のプロパティから取得")
         
         # 2. 親ウィジェットから取得を試行
         if not bearer_token:
@@ -2374,7 +2378,7 @@ class BatchRegisterWidget(QWidget):
             while parent_widget:
                 if hasattr(parent_widget, 'bearer_token') and parent_widget.bearer_token:
                     bearer_token = parent_widget.bearer_token
-                    print(f"[DEBUG] _get_bearer_token: 親ウィジェット {type(parent_widget).__name__} から取得")
+                    logger.debug("_get_bearer_token: 親ウィジェット %s から取得", type(parent_widget).__name__)
                     break
                 parent_widget = parent_widget.parent()
         
@@ -2385,33 +2389,33 @@ class BatchRegisterWidget(QWidget):
                 app_config = get_config_manager()
                 bearer_token = app_config.get('bearer_token')
                 if bearer_token:
-                    print(f"[DEBUG] _get_bearer_token: AppConfigManagerから取得")
+                    logger.debug("_get_bearer_token: AppConfigManagerから取得")
             except Exception as e:
-                print(f"[WARNING] _get_bearer_token: AppConfigManagerからの取得に失敗: {e}")
+                logger.warning("_get_bearer_token: AppConfigManagerからの取得に失敗: %s", e)
         
         # 4. 親コントローラから取得を試行
         if not bearer_token and hasattr(self, 'parent_controller'):
             if hasattr(self.parent_controller, 'bearer_token') and self.parent_controller.bearer_token:
                 bearer_token = self.parent_controller.bearer_token
-                print(f"[DEBUG] _get_bearer_token: parent_controllerから取得")
+                logger.debug("_get_bearer_token: parent_controllerから取得")
         
         if not bearer_token:
-            print(f"[WARNING] _get_bearer_token: ベアラートークンが見つかりませんでした")
+            logger.warning("_get_bearer_token: ベアラートークンが見つかりませんでした")
         else:
-            print(f"[DEBUG] _get_bearer_token: トークン取得成功 (長さ: {len(bearer_token)})")
+            logger.debug("_get_bearer_token: トークン取得成功 (長さ: %s)", len(bearer_token))
         
         return bearer_token
     
     def set_bearer_token(self, token: str):
         """ベアラートークンを設定"""
         self.bearer_token = token
-        print(f"[DEBUG] BatchRegisterWidget: ベアラートークンを設定 (長さ: {len(token) if token else 0})")
+        logger.debug("BatchRegisterWidget: ベアラートークンを設定 (長さ: %s)", len(token) if token else 0)
     
     def update_bearer_token_from_parent(self):
         """親コントローラからベアラートークンを更新"""
         if hasattr(self.parent_controller, 'bearer_token'):
             self.bearer_token = self.parent_controller.bearer_token
-            print(f"[DEBUG] BatchRegisterWidget: parent_controllerからトークンを更新")
+            logger.debug("BatchRegisterWidget: parent_controllerからトークンを更新")
             
     def _ensure_temp_folder_and_mapping_continue(self, file_set):
         """ファイルセットの一時フォルダとマッピングファイルが存在することを確認・作成（続き）"""
@@ -2431,19 +2435,19 @@ class BatchRegisterWidget(QWidget):
             )
             
             if needs_creation:
-                print(f"[INFO] ファイルセット '{file_set.name}' の一時フォルダ・マッピングファイルを作成/更新")
+                logger.info("ファイルセット '%s' の一時フォルダ・マッピングファイルを作成/更新", file_set.name)
                 self._create_temp_folder_and_mapping(file_set)
             else:
-                print(f"[INFO] ファイルセット '{file_set.name}' の一時フォルダ・マッピングファイルは既に存在")
+                logger.info("ファイルセット '%s' の一時フォルダ・マッピングファイルは既に存在", file_set.name)
                 
         except Exception as e:
-            print(f"[ERROR] 一時フォルダ・マッピングファイル確認エラー: {e}")
+            logger.error("一時フォルダ・マッピングファイル確認エラー: %s", e)
     
     def _create_temp_folder_and_mapping(self, file_set):
         """ファイルセットの一時フォルダとマッピングファイルを作成（UUID対応版）"""
         try:
             if not file_set or not file_set.items:
-                print(f"[WARNING] ファイルセットが空のため、一時フォルダ作成をスキップ: {file_set.name if file_set else 'None'}")
+                logger.warning("ファイルセットが空のため、一時フォルダ作成をスキップ: %s", file_set.name if file_set else 'None')
                 return
             
             from ..core.temp_folder_manager import TempFolderManager
@@ -2453,10 +2457,10 @@ class BatchRegisterWidget(QWidget):
             
             # UUID固定版では、ファイルセットオブジェクト内に直接パスが設定される
             # （temp_folder_path と mapping_file_path）
-            print(f"[INFO] ファイルセット '{file_set.name}' の一時フォルダとマッピングファイルを作成")
-            print(f"[INFO]   ファイルセットUUID: {file_set.uuid}")
-            print(f"[INFO]   一時フォルダ: {temp_folder}")
-            print(f"[INFO]   マッピングファイル: {mapping_file}")
+            logger.info("ファイルセット '%s' の一時フォルダとマッピングファイルを作成", file_set.name)
+            logger.info("ファイルセットUUID: %s", file_set.uuid)
+            logger.info("一時フォルダ: %s", temp_folder)
+            logger.info("マッピングファイル: %s", mapping_file)
             
             # 後方互換性のため extended_config も設定
             if not hasattr(file_set, 'extended_config'):
@@ -2471,7 +2475,7 @@ class BatchRegisterWidget(QWidget):
                 self.file_set_manager.save_fileset_metadata(file_set)
             
         except Exception as e:
-            print(f"[ERROR] 一時フォルダ・マッピングファイル作成エラー: {e}")
+            logger.error("一時フォルダ・マッピングファイル作成エラー: %s", e)
             # エラーが発生してもファイルセット作成は続行
     
     def cleanup_temp_folders(self):
@@ -2529,7 +2533,7 @@ class BatchRegisterWidget(QWidget):
             )
                 
         except Exception as e:
-            print(f"[ERROR] 一時フォルダ削除エラー: {e}")
+            logger.error("一時フォルダ削除エラー: %s", e)
             QMessageBox.warning(self, "エラー", f"一時フォルダ削除に失敗しました: {str(e)}")
     
     def connect_signals(self):
@@ -2543,13 +2547,13 @@ class BatchRegisterWidget(QWidget):
         
         # データセット選択（通常登録と同等のイベント処理）
         if hasattr(self, 'dataset_combo') and self.dataset_combo:
-            print(f"[DEBUG] データセットコンボボックスイベント接続: {type(self.dataset_combo)}")
+            logger.debug("データセットコンボボックスイベント接続: %s", type(self.dataset_combo))
             self.dataset_combo.currentIndexChanged.connect(self.on_dataset_changed)
             
             # 追加のイベント処理（即座の反応を確保）
             self.dataset_combo.activated.connect(self.on_dataset_changed)
             
-            print(f"[DEBUG] データセット選択イベント接続完了")
+            logger.debug("データセット選択イベント接続完了")
             
             # フォーカス外れ時の処理を追加
             original_focus_out = self.dataset_combo.focusOutEvent
@@ -2606,7 +2610,7 @@ class BatchRegisterWidget(QWidget):
             self.refresh_fileset_display()
             
         except Exception as e:
-            print(f"[ERROR] ファイルセット更新エラー: {e}")
+            logger.error("ファイルセット更新エラー: %s", e)
             QMessageBox.warning(self, "エラー", f"ファイルセットの更新に失敗しました: {e}")
     
     def _find_tree_item_recursive(self, parent_item, target_id):
@@ -2677,10 +2681,10 @@ class BatchRegisterWidget(QWidget):
                     fileset.metadata = {}
                 fileset.metadata['organize_method'] = organize_method
                 
-                print(f"[INFO] ファイルセット '{fileset.name}' の整理方法を '{organize_method}' に設定")
+                logger.info("ファイルセット '%s' の整理方法を '%s' に設定", fileset.name, organize_method)
                 
         except Exception as e:
-            print(f"[ERROR] 整理方法変更エラー: {e}")
+            logger.error("整理方法変更エラー: %s", e)
     
     def copy_fileset_row(self, row):
         """ファイルセット行をコピー"""
@@ -2702,7 +2706,7 @@ class BatchRegisterWidget(QWidget):
                 QMessageBox.information(self, "完了", f"ファイルセット '{new_fileset.name}' をコピーしました。")
                 
         except Exception as e:
-            print(f"[ERROR] ファイルセットコピーエラー: {e}")
+            logger.error("ファイルセットコピーエラー: %s", e)
             QMessageBox.warning(self, "エラー", f"ファイルセットのコピーに失敗しました: {e}")
     
     def delete_fileset_row(self, row):
@@ -2732,34 +2736,34 @@ class BatchRegisterWidget(QWidget):
                     QMessageBox.information(self, "完了", f"ファイルセット '{fileset.name}' を削除しました。")
                 
         except Exception as e:
-            print(f"[ERROR] ファイルセット削除エラー: {e}")
+            logger.error("ファイルセット削除エラー: %s", e)
             QMessageBox.warning(self, "エラー", f"ファイルセットの削除に失敗しました: {e}")
     
     def refresh_fileset_display(self):
         """ファイルセット表示を更新"""
-        print(f"[DEBUG] refresh_fileset_display: 呼び出された")
+        logger.debug("refresh_fileset_display: 呼び出された")
         try:
-            print(f"[DEBUG] refresh_fileset_display: file_set_manager={self.file_set_manager}")
+            logger.debug("refresh_fileset_display: file_set_manager=%s", self.file_set_manager)
             if self.file_set_manager:
-                print(f"[DEBUG] refresh_fileset_display: file_sets count={len(self.file_set_manager.file_sets)}")
+                logger.debug("refresh_fileset_display: file_sets count=%s", len(self.file_set_manager.file_sets))
                 for i, fs in enumerate(self.file_set_manager.file_sets):
-                    print(f"[DEBUG] FileSet {i}: id={fs.id}, name={fs.name}, items={len(fs.items)}")
+                    logger.debug("FileSet %s: id=%s, name=%s, items=%s", i, fs.id, fs.name, len(fs.items))
             
             if self.file_set_manager and self.file_set_manager.file_sets:
                 # ファイルセットテーブルを更新
-                print(f"[DEBUG] refresh_fileset_display: テーブル更新開始")
+                logger.debug("refresh_fileset_display: テーブル更新開始")
                 self.fileset_table.load_file_sets(self.file_set_manager.file_sets)
-                print(f"[DEBUG] refresh_fileset_display: テーブル更新完了")
+                logger.debug("refresh_fileset_display: テーブル更新完了")
             else:
                 # ファイルセットがない場合はクリア
-                print(f"[DEBUG] refresh_fileset_display: テーブルクリア")
+                logger.debug("refresh_fileset_display: テーブルクリア")
                 self.fileset_table.setRowCount(0)
             
             # ファイルセット選択コンボボックスも更新
             self.update_target_fileset_combo()
                 
         except Exception as e:
-            print(f"[ERROR] ファイルセット表示更新エラー: {e}")
+            logger.error("ファイルセット表示更新エラー: %s", e)
             import traceback
             traceback.print_exc()
     
@@ -2790,7 +2794,7 @@ class BatchRegisterWidget(QWidget):
                 self.refresh_fileset_display()
             
         except Exception as e:
-            print(f"[ERROR] 全ファイルセット適用エラー: {e}")
+            logger.error("全ファイルセット適用エラー: %s", e)
             QMessageBox.warning(self, "エラー", f"設定の適用に失敗しました: {e}")
     
     def apply_to_target_fileset(self):
@@ -2831,7 +2835,7 @@ class BatchRegisterWidget(QWidget):
                 self.refresh_fileset_display()
             
         except Exception as e:
-            print(f"[ERROR] ターゲットファイルセット適用エラー: {e}")
+            logger.error("ターゲットファイルセット適用エラー: %s", e)
             QMessageBox.warning(self, "エラー", f"設定の適用に失敗しました: {e}")
     
     def get_current_settings(self):
@@ -2859,7 +2863,7 @@ class BatchRegisterWidget(QWidget):
                         settings['dataset_id'] = current_data['id']
                         settings['dataset_name'] = current_data.get('name', '')
                         settings['selected_dataset'] = current_data  # 完全なデータセット情報を保存
-                        print(f"[DEBUG] get_current_settings - データセット情報: {current_data}")
+                        logger.debug("get_current_settings - データセット情報: %s", current_data)
                     else:
                         settings['dataset_id'] = str(current_data)
                         settings['dataset_name'] = self.dataset_combo.currentText()
@@ -2878,15 +2882,15 @@ class BatchRegisterWidget(QWidget):
                         # 既存試料選択の場合：UUIDを保存
                         settings['sample_mode'] = 'existing'
                         settings['sample_id'] = selected_sample_data['id']
-                        print(f"[DEBUG] save_fileset_config - 既存試料選択: {selected_sample_data['id']}")
+                        logger.debug("save_fileset_config - 既存試料選択: %s", selected_sample_data['id'])
                     else:
                         # UUIDが取得できない場合は新規として扱う
                         settings['sample_mode'] = 'new'
-                        print("[WARNING] 既存試料が選択されているがUUIDが取得できませんでした")
+                        logger.warning("既存試料が選択されているがUUIDが取得できませんでした")
                 else:
                     # 新規作成の場合
                     settings['sample_mode'] = 'new'
-                    print("[DEBUG] save_fileset_config - 新規試料作成")
+                    logger.debug("save_fileset_config - 新規試料作成")
             if hasattr(self, 'sample_name_edit'):
                 sample_name = self.sample_name_edit.text().strip()
                 if sample_name:  # 空でない場合のみ保存
@@ -2911,9 +2915,9 @@ class BatchRegisterWidget(QWidget):
                     schema_custom_values = get_schema_form_all_fields(self.invoice_schema_form)
                     if schema_custom_values is not None:  # Noneでない場合はマージ
                         custom_values.update(schema_custom_values)
-                        print(f"[DEBUG] get_current_settings - インボイススキーマから取得(空値含む): {schema_custom_values}")
+                        logger.debug("get_current_settings - インボイススキーマから取得(空値含む): %s", schema_custom_values)
                 except Exception as e:
-                    print(f"[WARNING] インボイススキーマフォームからの取得エラー: {e}")
+                    logger.warning("インボイススキーマフォームからの取得エラー: %s", e)
             
             # 従来のカスタムフィールドウィジェットからも取得（空値も含む）
             if hasattr(self, 'custom_field_widgets'):
@@ -2934,18 +2938,18 @@ class BatchRegisterWidget(QWidget):
                             custom_values[field_name] = value if value else ""
                         
                     except Exception as e:
-                        print(f"[WARNING] カスタムフィールド '{field_name}' の取得エラー: {e}")
+                        logger.warning("カスタムフィールド '%s' の取得エラー: %s", field_name, e)
                         
             settings['custom_values'] = custom_values
             
-            print(f"[DEBUG] get_current_settings - 固有情報取得完了: {len(custom_values)}個の項目")
+            logger.debug("get_current_settings - 固有情報取得完了: %s個の項目", len(custom_values))
             for key, value in custom_values.items():
-                print(f"[DEBUG]   - {key}: {value}")
+                logger.debug("- %s: %s", key, value)
             
-            print(f"[DEBUG] get_current_settings: {settings}")
+            logger.debug("get_current_settings: %s", settings)
             
         except Exception as e:
-            print(f"[ERROR] 設定取得エラー: {e}")
+            logger.error("設定取得エラー: %s", e)
             import traceback
             traceback.print_exc()
             settings = {}
@@ -2970,26 +2974,26 @@ class BatchRegisterWidget(QWidget):
             # データセット設定の適用
             if 'dataset_id' in settings:
                 fileset.dataset_id = settings['dataset_id']
-                print(f"[DEBUG] データセットIDを fileset.dataset_id に設定: {settings['dataset_id']}")
+                logger.debug("データセットIDを fileset.dataset_id に設定: %s", settings['dataset_id'])
                 
                 # dataset_infoも同時に設定
                 if not hasattr(fileset, 'dataset_info') or not fileset.dataset_info:
                     fileset.dataset_info = {}
                 fileset.dataset_info['id'] = settings['dataset_id']
-                print(f"[DEBUG] データセットIDを fileset.dataset_info['id'] に設定: {settings['dataset_id']}")
+                logger.debug("データセットIDを fileset.dataset_info['id'] に設定: %s", settings['dataset_id'])
                 
             if 'dataset_name' in settings:
                 if not hasattr(fileset, 'dataset_info') or not fileset.dataset_info:
                     fileset.dataset_info = {}
                 fileset.dataset_info['name'] = settings['dataset_name']
-                print(f"[DEBUG] データセット名を fileset.dataset_info['name'] に設定: {settings['dataset_name']}")
+                logger.debug("データセット名を fileset.dataset_info['name'] に設定: %s", settings['dataset_name'])
                 
             # extended_configにも保存（フォールバック用）
             if 'selected_dataset' in settings:
                 if not hasattr(fileset, 'extended_config'):
                     fileset.extended_config = {}
                 fileset.extended_config['selected_dataset'] = settings['selected_dataset']
-                print(f"[DEBUG] データセット情報を extended_config に保存: {settings['selected_dataset']}")
+                logger.debug("データセット情報を extended_config に保存: %s", settings['selected_dataset'])
             
             # 試料設定の適用
             if 'sample_mode' in settings:
@@ -3021,11 +3025,11 @@ class BatchRegisterWidget(QWidget):
                 # 新しいカスタム値を設定（null値も含む）
                 if settings['custom_values']:
                     fileset.custom_values.update(settings['custom_values'])
-                    print(f"[DEBUG] カスタム値をファイルセットに適用: {len(settings['custom_values'])}個")
+                    logger.debug("カスタム値をファイルセットに適用: %s個", len(settings['custom_values']))
                     for key, value in settings['custom_values'].items():
-                        print(f"[DEBUG]   - {key}: {value}")
+                        logger.debug("- %s: %s", key, value)
                 else:
-                    print(f"[DEBUG] カスタム値は空ですが、フィールドをクリアしました")
+                    logger.debug("カスタム値は空ですが、フィールドをクリアしました")
             
             # 拡張設定に保存（バックアップとして、ただし内部データは除外）
             if not hasattr(fileset, 'extended_config'):
@@ -3036,13 +3040,13 @@ class BatchRegisterWidget(QWidget):
                                if k not in {'selected_dataset'}}
             fileset.extended_config.update(filtered_settings)
             
-            print(f"[INFO] ファイルセット '{fileset.name}' に設定を適用しました")
-            print(f"[DEBUG] 適用後のfileset.data_name: {getattr(fileset, 'data_name', None)}")
-            print(f"[DEBUG] 適用後のfileset.dataset_id: {getattr(fileset, 'dataset_id', None)}")
-            print(f"[DEBUG] 適用後のfileset.sample_mode: {getattr(fileset, 'sample_mode', None)}")
+            logger.info("ファイルセット '%s' に設定を適用しました", fileset.name)
+            logger.debug("適用後のfileset.data_name: %s", getattr(fileset, 'data_name', None))
+            logger.debug("適用後のfileset.dataset_id: %s", getattr(fileset, 'dataset_id', None))
+            logger.debug("適用後のfileset.sample_mode: %s", getattr(fileset, 'sample_mode', None))
             
         except Exception as e:
-            print(f"[ERROR] ファイルセット設定適用エラー: {e}")
+            logger.error("ファイルセット設定適用エラー: %s", e)
             import traceback
             traceback.print_exc()
             raise
@@ -3068,7 +3072,7 @@ class BatchRegisterWidget(QWidget):
                     self.target_fileset_combo.setCurrentIndex(index)
             
         except Exception as e:
-            print(f"[ERROR] ターゲットファイルセットコンボボックス更新エラー: {e}")
+            logger.error("ターゲットファイルセットコンボボックス更新エラー: %s", e)
     
     # 実装完了：バッチ登録タブの包括的拡張
     # - 選択ファイル設定ペインのボタン再編成
@@ -3098,11 +3102,11 @@ class BatchRegisterWidget(QWidget):
         """ディレクトリをロード（自動ツリー展開付き）"""
         try:
             self.file_set_manager = FileSetManager(directory)
-            print(f"[DEBUG] load_directory: FileSetManager作成完了 {directory}")
+            logger.debug("load_directory: FileSetManager作成完了 %s", directory)
             
             # FileSetTableWidgetにfile_set_managerを再設定
             if hasattr(self, 'fileset_table') and self.fileset_table:
-                print(f"[DEBUG] load_directory: FileSetTableWidgetにfile_set_manager再設定")
+                logger.debug("load_directory: FileSetTableWidgetにfile_set_manager再設定")
                 self.fileset_table.set_file_set_manager(self.file_set_manager)
             
             file_items = self.file_set_manager.build_file_tree()
@@ -3129,7 +3133,7 @@ class BatchRegisterWidget(QWidget):
                     config = json.load(f)
                     return config.get('last_directory')
         except Exception as e:
-            print(f"[WARNING] 設定ファイル読み込みエラー: {e}")
+            logger.warning("設定ファイル読み込みエラー: %s", e)
         return None
     
     def _save_last_directory(self, directory: str):
@@ -3152,7 +3156,7 @@ class BatchRegisterWidget(QWidget):
                 json.dump(config, f, ensure_ascii=False, indent=2)
                 
         except Exception as e:
-            print(f"[WARNING] 設定ファイル保存エラー: {e}")
+            logger.warning("設定ファイル保存エラー: %s", e)
     
     def _get_config_path(self) -> str:
         """設定ファイルパスを取得"""
@@ -3185,7 +3189,7 @@ class BatchRegisterWidget(QWidget):
             
         except Exception as e:
             # 展開エラーは警告のみ（メイン機能には影響しない）
-            print(f"Tree expansion warning: {e}")
+            logger.warning("Tree expansion warning: %s", e)
     
     def refresh_file_tree(self):
         """ファイルツリー更新"""
@@ -3218,7 +3222,7 @@ class BatchRegisterWidget(QWidget):
             root = self.file_tree.invisibleRootItem()
             self._set_all_items_checked(root, True)
         except Exception as e:
-            print(f"[ERROR] 全選択エラー: {e}")
+            logger.error("全選択エラー: %s", e)
     
     def deselect_all_files(self):
         """ファイルツリーの全てのファイルの選択を解除"""
@@ -3227,7 +3231,7 @@ class BatchRegisterWidget(QWidget):
             root = self.file_tree.invisibleRootItem()
             self._set_all_items_checked(root, False)
         except Exception as e:
-            print(f"[ERROR] 全解除エラー: {e}")
+            logger.error("全解除エラー: %s", e)
     
     def _set_all_items_checked(self, parent_item, checked):
         """再帰的に全アイテムのチェック状態を設定"""
@@ -3261,33 +3265,33 @@ class BatchRegisterWidget(QWidget):
                         is_checked = checkbox.isChecked()
                         # FileItemの状態を同期
                         file_item.is_excluded = not is_checked
-                        print(f"[DEBUG] {indent}チェックボックス状態確認: {file_item.name} -> checked={is_checked}")
+                        logger.debug("%sチェックボックス状態確認: %s -> checked=%s", indent, file_item.name, is_checked)
                     else:
                         # チェックボックスがない場合はFileItemの状態を参照
                         is_checked = not getattr(file_item, 'is_excluded', False)
-                        print(f"[DEBUG] {indent}FileItem状態参照: {file_item.name} -> excluded={getattr(file_item, 'is_excluded', False)} -> checked={is_checked}")
+                        logger.debug("%sFileItem状態参照: %s -> excluded=%s -> checked=%s", indent, file_item.name, getattr(file_item, 'is_excluded', False), is_checked)
                     
                     # チェック済みの場合は追加
                     if is_checked:
                         checked_items.append(file_item)
-                        print(f"[DEBUG] {indent}[OK] チェック済みアイテム追加: {file_item.name} ({file_item.file_type.name}) - Path: {file_item.relative_path}")
+                        logger.debug("%s[OK] チェック済みアイテム追加: %s (%s) - Path: %s", indent, file_item.name, file_item.file_type.name, file_item.relative_path)
                     else:
-                        print(f"[DEBUG] {indent}[X] チェックなしアイテム除外: {file_item.name} ({file_item.file_type.name})")
+                        logger.debug("%s[X] チェックなしアイテム除外: %s (%s)", indent, file_item.name, file_item.file_type.name)
                 else:
-                    print(f"[DEBUG] {indent}[WARN] FileItemが見つからない: tree_item_id={id(child)}")
+                    logger.debug("%sFileItemが見つからない: tree_item_id=%s", indent, id(child))
                 
                 # 子アイテムも再帰的に処理
                 collect_checked_items(child, depth + 1)
         
-        print(f"[DEBUG] _get_checked_items_from_tree: 開始")
+        logger.debug("_get_checked_items_from_tree: 開始")
         root = self.file_tree.invisibleRootItem()
         collect_checked_items(root)
         
-        print(f"[DEBUG] _get_checked_items_from_tree: 合計チェック済みアイテム数={len(checked_items)}")
+        logger.debug("_get_checked_items_from_tree: 合計チェック済みアイテム数=%s", len(checked_items))
         
         # 収集されたアイテムのパス一覧を表示
         for item in checked_items:
-            print(f"[DEBUG] 最終収集: {item.name} -> {item.relative_path}")
+            logger.debug("最終収集: %s -> %s", item.name, item.relative_path)
             
         return checked_items
     
@@ -3440,7 +3444,7 @@ class BatchRegisterWidget(QWidget):
     
     def auto_assign_all_as_one(self):
         """全体で1つのファイルセット作成"""
-        print(f"[DEBUG] auto_assign_all_as_one: 開始")
+        logger.debug("auto_assign_all_as_one: 開始")
         if not self.file_set_manager:
             QMessageBox.warning(self, "エラー", "ベースディレクトリを選択してください")
             return
@@ -3448,12 +3452,12 @@ class BatchRegisterWidget(QWidget):
         try:
             # 既存のファイルセットをクリア
             self.file_set_manager.clear_all_filesets()
-            print(f"[DEBUG] auto_assign_all_as_one: 既存ファイルセットをクリア")
+            logger.debug("auto_assign_all_as_one: 既存ファイルセットをクリア")
             
             # 「含む」チェックボックスがオンのファイルのみを取得
             all_checked_items = self._get_checked_items_from_tree()
             selected_files = [item for item in all_checked_items if item.file_type == FileType.FILE]
-            print(f"[DEBUG] auto_assign_all_as_one: チェック済みファイル数={len(selected_files)}")
+            logger.debug("auto_assign_all_as_one: チェック済みファイル数=%s", len(selected_files))
             
             if not selected_files:
                 QMessageBox.information(self, "情報", "「含む」にチェックされたファイルがありません。")
@@ -3471,19 +3475,19 @@ class BatchRegisterWidget(QWidget):
                 file_sets = self._resolve_zip_hierarchy_conflicts(file_sets)
                 self.file_set_manager.file_sets = file_sets
             
-            print(f"[DEBUG] auto_assign_all_as_one: 最終ファイルセット数={len(file_sets) if file_sets else 0}")
-            print(f"[DEBUG] auto_assign_all_as_one: refresh_fileset_display() 呼び出し直前")
+            logger.debug("auto_assign_all_as_one: 最終ファイルセット数=%s", len(file_sets) if file_sets else 0)
+            logger.debug("auto_assign_all_as_one: refresh_fileset_display() 呼び出し直前")
             self.refresh_fileset_display()
-            print(f"[DEBUG] auto_assign_all_as_one: refresh_fileset_display() 呼び出し完了")
+            logger.debug("auto_assign_all_as_one: refresh_fileset_display() 呼び出し完了")
             self.update_summary()
         except Exception as e:
-            print(f"[ERROR] auto_assign_all_as_one: エラー発生: {e}")
+            logger.error("auto_assign_all_as_one: エラー発生: %s", e)
             import traceback
             traceback.print_exc()
     
     def auto_assign_by_top_dirs(self):
         """最上位フォルダごとにファイルセット作成"""
-        print(f"[DEBUG] auto_assign_by_top_dirs: 開始")
+        logger.debug("auto_assign_by_top_dirs: 開始")
         if not self.file_set_manager:
             QMessageBox.warning(self, "エラー", "ベースディレクトリを選択してください")
             return
@@ -3491,12 +3495,12 @@ class BatchRegisterWidget(QWidget):
         try:
             # 既存のファイルセットをクリア
             self.file_set_manager.clear_all_filesets()
-            print(f"[DEBUG] auto_assign_by_top_dirs: 既存ファイルセットをクリア")
+            logger.debug("auto_assign_by_top_dirs: 既存ファイルセットをクリア")
             
             # 「含む」チェックボックスがオンのファイルのみを取得
             all_checked_items = self._get_checked_items_from_tree()
             selected_files = [item for item in all_checked_items if item.file_type == FileType.FILE]
-            print(f"[DEBUG] auto_assign_by_top_dirs: チェック済みファイル数={len(selected_files)}")
+            logger.debug("auto_assign_by_top_dirs: チェック済みファイル数=%s", len(selected_files))
             
             if not selected_files:
                 QMessageBox.information(self, "情報", "「含む」にチェックされたファイルがありません。")
@@ -3513,19 +3517,19 @@ class BatchRegisterWidget(QWidget):
                 file_sets = self._resolve_zip_hierarchy_conflicts(file_sets)
                 self.file_set_manager.file_sets = file_sets
             
-            print(f"[DEBUG] auto_assign_by_top_dirs: 最終ファイルセット数={len(file_sets) if file_sets else 0}")
-            print(f"[DEBUG] auto_assign_by_top_dirs: refresh_fileset_display() 呼び出し直前")
+            logger.debug("auto_assign_by_top_dirs: 最終ファイルセット数=%s", len(file_sets) if file_sets else 0)
+            logger.debug("auto_assign_by_top_dirs: refresh_fileset_display() 呼び出し直前")
             self.refresh_fileset_display()
-            print(f"[DEBUG] auto_assign_by_top_dirs: refresh_fileset_display() 呼び出し完了")
+            logger.debug("auto_assign_by_top_dirs: refresh_fileset_display() 呼び出し完了")
             self.update_summary()
         except Exception as e:
-            print(f"[ERROR] auto_assign_by_top_dirs: エラー発生: {e}")
+            logger.error("auto_assign_by_top_dirs: エラー発生: %s", e)
             import traceback
             traceback.print_exc()
     
     def auto_assign_all_dirs(self):
         """全フォルダを個別ファイルセット作成"""
-        print(f"[DEBUG] auto_assign_all_dirs: 開始")
+        logger.debug("auto_assign_all_dirs: 開始")
         if not self.file_set_manager:
             QMessageBox.warning(self, "エラー", "ベースディレクトリを選択してください")
             return
@@ -3533,12 +3537,12 @@ class BatchRegisterWidget(QWidget):
         try:
             # 既存のファイルセットをクリア
             self.file_set_manager.clear_all_filesets()
-            print(f"[DEBUG] auto_assign_all_dirs: 既存ファイルセットをクリア")
+            logger.debug("auto_assign_all_dirs: 既存ファイルセットをクリア")
             
             # 「含む」チェックボックスがオンのファイルのみを取得
             all_checked_items = self._get_checked_items_from_tree()
             selected_files = [item for item in all_checked_items if item.file_type == FileType.FILE]
-            print(f"[DEBUG] auto_assign_all_dirs: チェック済みファイル数={len(selected_files)}")
+            logger.debug("auto_assign_all_dirs: チェック済みファイル数=%s", len(selected_files))
             
             if not selected_files:
                 QMessageBox.information(self, "情報", "「含む」にチェックされたファイルがありません。")
@@ -3555,13 +3559,13 @@ class BatchRegisterWidget(QWidget):
                 file_sets = self._resolve_zip_hierarchy_conflicts(file_sets)
                 self.file_set_manager.file_sets = file_sets
             
-            print(f"[DEBUG] auto_assign_all_dirs: 最終ファイルセット数={len(file_sets) if file_sets else 0}")
-            print(f"[DEBUG] auto_assign_all_dirs: refresh_fileset_display() 呼び出し直前")
+            logger.debug("auto_assign_all_dirs: 最終ファイルセット数=%s", len(file_sets) if file_sets else 0)
+            logger.debug("auto_assign_all_dirs: refresh_fileset_display() 呼び出し直前")
             self.refresh_fileset_display()
-            print(f"[DEBUG] auto_assign_all_dirs: refresh_fileset_display() 呼び出し完了")
+            logger.debug("auto_assign_all_dirs: refresh_fileset_display() 呼び出し完了")
             self.update_summary()
         except Exception as e:
-            print(f"[ERROR] auto_assign_all_dirs: エラー発生: {e}")
+            logger.error("auto_assign_all_dirs: エラー発生: %s", e)
             import traceback
             traceback.print_exc()
     
@@ -3598,7 +3602,7 @@ class BatchRegisterWidget(QWidget):
                         self.update_summary()
                 
         except Exception as e:
-            print(f"[ERROR] 手動ファイルセット作成エラー: {e}")
+            logger.error("手動ファイルセット作成エラー: %s", e)
             QMessageBox.warning(self, "エラー", f"手動ファイルセット作成に失敗しました:\n{str(e)}")
     
     def clear_all_filesets(self):
@@ -3634,7 +3638,7 @@ class BatchRegisterWidget(QWidget):
             
             # データセットコンボボックス設定
             if file_set.dataset_id:
-                print(f"[DEBUG] ファイルセット選択: データセットID={file_set.dataset_id}を設定中")
+                logger.debug("ファイルセット選択: データセットID=%sを設定中", file_set.dataset_id)
                 # データセットIDで検索してコンボボックスを設定
                 found = False
                 for i in range(self.dataset_combo.count()):
@@ -3647,20 +3651,20 @@ class BatchRegisterWidget(QWidget):
                         dataset_id = item_data
                     
                     if dataset_id == file_set.dataset_id:
-                        print(f"[DEBUG] データセットコンボボックス: インデックス{i}を選択")
+                        logger.debug("データセットコンボボックス: インデックス%sを選択", i)
                         self.dataset_combo.setCurrentIndex(i)
                         found = True
                         # データセット選択変更イベントを手動で発火
-                        print(f"[DEBUG] 復元時on_dataset_changed呼び出し前: invoice_schema_form={getattr(self, 'invoice_schema_form', None)}")
+                        logger.debug("復元時on_dataset_changed呼び出し前: invoice_schema_form=%s", getattr(self, 'invoice_schema_form', None))
                         self.on_dataset_changed(i)
-                        print(f"[DEBUG] 復元時on_dataset_changed呼び出し後: invoice_schema_form={getattr(self, 'invoice_schema_form', None)}")
+                        logger.debug("復元時on_dataset_changed呼び出し後: invoice_schema_form=%s", getattr(self, 'invoice_schema_form', None))
                         break
                 if not found:
-                    print(f"[WARNING] データセットID {file_set.dataset_id} がコンボボックスに見つかりません")
+                    logger.warning("データセットID %s がコンボボックスに見つかりません", file_set.dataset_id)
                     # データセット未選択状態にする（有効な最初のアイテムを選択）
                     self.dataset_combo.setCurrentIndex(-1)
             else:
-                print("[DEBUG] ファイルセット選択: データセット未設定")
+                logger.debug("ファイルセット選択: データセット未設定")
                 # 未設定の場合は最初のアイテム（選択なし）を選択
                 self.dataset_combo.setCurrentIndex(0)
             
@@ -3698,7 +3702,7 @@ class BatchRegisterWidget(QWidget):
                         extended_config = getattr(file_set, 'extended_config', {})
                         if 'custom_values' in extended_config and extended_config['custom_values']:
                             custom_values = extended_config['custom_values']
-                            print(f"[DEBUG] extended_configからカスタム値を復元: {len(custom_values)}個")
+                            logger.debug("extended_configからカスタム値を復元: %s個", len(custom_values))
                         else:
                             # インボイススキーマ項目を直接チェック
                             schema_fields = [
@@ -3709,46 +3713,46 @@ class BatchRegisterWidget(QWidget):
                                 if field in extended_config and extended_config[field]:
                                     custom_values[field] = extended_config[field]
                     
-                    print(f"[DEBUG] ファイルセット選択時のカスタム値復元: {len(custom_values)}個の項目")
+                    logger.debug("ファイルセット選択時のカスタム値復元: %s個の項目", len(custom_values))
                     for key, value in custom_values.items():
-                        print(f"[DEBUG]   復元: {key} = {value}")
+                        logger.debug("復元: %s = %s", key, value)
                     
                     # フォーム型をチェックして適切なメソッドを呼び出す
                     if hasattr(self.invoice_schema_form, 'set_form_data'):
                         if custom_values:
                             self.invoice_schema_form.set_form_data(custom_values)
-                            print(f"[DEBUG] インボイススキーマフォームにカスタム値を設定完了")
+                            logger.debug("インボイススキーマフォームにカスタム値を設定完了")
                         else:
                             self.invoice_schema_form.clear_form()
-                            print(f"[DEBUG] カスタム値が空のため、フォームをクリア")
+                            logger.debug("カスタム値が空のため、フォームをクリア")
                     else:
-                        print(f"[DEBUG] invoice_schema_form ({type(self.invoice_schema_form)}) はset_form_dataメソッドを持っていません")
+                        logger.debug("invoice_schema_form (%s) はset_form_dataメソッドを持っていません", type(self.invoice_schema_form))
                         # フォーム参照をクリアして再作成を促す
-                        print(f"[DEBUG] 現在のデータセット情報で再作成を試行...")
+                        logger.debug("現在のデータセット情報で再作成を試行...")
                         
                         # 現在選択されているデータセット情報を取得
                         current_dataset_data = self.dataset_combo.currentData()
                         if current_dataset_data and isinstance(current_dataset_data, dict):
-                            print(f"[DEBUG] データセット情報を使用してスキーマフォーム再作成: {current_dataset_data.get('id')}")
+                            logger.debug("データセット情報を使用してスキーマフォーム再作成: %s", current_dataset_data.get('id'))
                             # フォーム再作成を試行
                             self.update_schema_form(current_dataset_data, force_clear=False)
                             
                             # フォーム再作成後、カスタム値を再設定
                             if hasattr(self.invoice_schema_form, 'set_form_data') and custom_values:
-                                print(f"[DEBUG] 再作成後にカスタム値を設定")
+                                logger.debug("再作成後にカスタム値を設定")
                                 self.invoice_schema_form.set_form_data(custom_values)
-                                print(f"[DEBUG] 再設定完了")
+                                logger.debug("再設定完了")
                             else:
-                                print(f"[DEBUG] 再作成後もset_form_dataメソッドが利用できません")
+                                logger.debug("再作成後もset_form_dataメソッドが利用できません")
                         
                         # フォーム参照のクリアは不要（update_schema_formで更新済み）
                         
                 except Exception as e:
-                    print(f"[WARNING] カスタム値復元エラー: {e}")
+                    logger.warning("カスタム値復元エラー: %s", e)
                     import traceback
                     traceback.print_exc()
             else:
-                print("[DEBUG] インボイススキーマフォームが存在しないため、カスタム値復元をスキップ")
+                logger.debug("インボイススキーマフォームが存在しないため、カスタム値復元をスキップ")
             
             # 現在のファイルセットを記録
             self.current_fileset = file_set
@@ -3763,7 +3767,7 @@ class BatchRegisterWidget(QWidget):
         finally:
             # ファイルセット復元処理完了フラグをリセット
             self._restoring_fileset = False
-            print("[DEBUG] ファイルセット復元処理完了 - 自動設定適用を再有効化")
+            logger.debug("ファイルセット復元処理完了 - 自動設定適用を再有効化")
     
     def update_same_as_previous_option(self):
         """「前回と同じ」オプションの有効性をチェックして制御"""
@@ -3800,24 +3804,24 @@ class BatchRegisterWidget(QWidget):
                             extended_config.get('sample_name') or 
                             extended_config.get('sample_mode') in ['既存試料使用', '新規作成']):
                             should_enable_same_as_previous = True
-                            print(f"[DEBUG] 前回と同じオプション有効: 上位エントリー({previous_fileset.name})に試料情報あり")
+                            logger.debug("前回と同じオプション有効: 上位エントリー(%s)に試料情報あり", previous_fileset.name)
                         else:
-                            print(f"[DEBUG] 前回と同じオプション無効: 上位エントリー({previous_fileset.name})に試料情報なし")
+                            logger.debug("前回と同じオプション無効: 上位エントリー(%s)に試料情報なし", previous_fileset.name)
                     else:
-                        print("[DEBUG] 前回と同じオプション無効: 上位エントリーなし")
+                        logger.debug("前回と同じオプション無効: 上位エントリーなし")
                 else:
-                    print("[DEBUG] 前回と同じオプション無効: ファイルセット未選択")
+                    logger.debug("前回と同じオプション無効: ファイルセット未選択")
             else:
                 if self.file_set_manager:
-                    print(f"[DEBUG] 前回と同じオプション無効: ファイルセット数={len(self.file_set_manager.file_sets)}")
+                    logger.debug("前回と同じオプション無効: ファイルセット数=%s", len(self.file_set_manager.file_sets))
                 else:
-                    print("[DEBUG] 前回と同じオプション無効: ファイルセットマネージャー未初期化")
+                    logger.debug("前回と同じオプション無効: ファイルセットマネージャー未初期化")
             
             # オプションの追加/削除を制御
             if should_enable_same_as_previous and not has_same_as_previous:
                 # 「前回と同じ」オプションを追加
                 self.sample_mode_combo.addItem("前回と同じ")
-                print("[INFO] 「前回と同じ」オプションを追加")
+                logger.info("「前回と同じ」オプションを追加")
             elif not should_enable_same_as_previous and has_same_as_previous:
                 # 「前回と同じ」オプションを削除
                 for i in range(self.sample_mode_combo.count()):
@@ -3826,11 +3830,11 @@ class BatchRegisterWidget(QWidget):
                         if self.sample_mode_combo.currentIndex() == i:
                             self.sample_mode_combo.setCurrentIndex(0)  # 「新規作成」に変更
                         self.sample_mode_combo.removeItem(i)
-                        print("[INFO] 「前回と同じ」オプションを削除")
+                        logger.info("「前回と同じ」オプションを削除")
                         break
                         
         except Exception as e:
-            print(f"[WARNING] 前回と同じオプション制御エラー: {e}")
+            logger.warning("前回と同じオプション制御エラー: %s", e)
             import traceback
             traceback.print_exc()
 
@@ -3880,12 +3884,12 @@ class BatchRegisterWidget(QWidget):
         # 試料情報を直接属性として保存
         sample_mode_text = self.sample_mode_combo.currentText()
         sample_mode_index = self.sample_mode_combo.currentIndex()
-        print(f"[DEBUG] 試料モード状態確認:")
-        print(f"[DEBUG] - currentText(): '{sample_mode_text}'")
-        print(f"[DEBUG] - currentIndex(): {sample_mode_index}")
-        print(f"[DEBUG] - count(): {self.sample_mode_combo.count()}")
+        logger.debug("試料モード状態確認:")
+        logger.debug("- currentText(): '%s'", sample_mode_text)
+        logger.debug("- currentIndex(): %s", sample_mode_index)
+        logger.debug("- count(): %s", self.sample_mode_combo.count())
         for i in range(self.sample_mode_combo.count()):
-            print(f"[DEBUG] - itemText({i}): '{self.sample_mode_combo.itemText(i)}'")
+            logger.debug("- itemText(%s): '%s'", i, self.sample_mode_combo.itemText(i))
         
         # 試料モード判定：index=0は新規作成、それ以外は既存試料選択
         if sample_mode_index == 0 or sample_mode_text == "新規作成":
@@ -3894,59 +3898,59 @@ class BatchRegisterWidget(QWidget):
             selected_fileset.sample_name = self.sample_name_edit.text()
             selected_fileset.sample_description = self.sample_description_edit.toPlainText()
             selected_fileset.sample_composition = self.sample_composition_edit.text()
-            print(f"[DEBUG] 試料モード設定: new")
-            print(f"[DEBUG] - sample_name: {selected_fileset.sample_name}")
-            print(f"[DEBUG] - sample_description: {selected_fileset.sample_description}")
-            print(f"[DEBUG] - sample_composition: {selected_fileset.sample_composition}")
+            logger.debug("試料モード設定: new")
+            logger.debug("- sample_name: %s", selected_fileset.sample_name)
+            logger.debug("- sample_description: %s", selected_fileset.sample_description)
+            logger.debug("- sample_composition: %s", selected_fileset.sample_composition)
         elif sample_mode_text == "前回と同じ":
             # 前回と同じモード
             selected_fileset.sample_mode = "same_as_previous"
-            print(f"[DEBUG] 試料モード設定: same_as_previous")
+            logger.debug("試料モード設定: same_as_previous")
         else:
             # 既存試料選択モード（index > 0 かつ "前回と同じ"以外）
             selected_fileset.sample_mode = "existing"
             
             # 統合コンボボックスの場合、sample_mode_comboのcurrentData()からUUIDを取得
             sample_data = self.sample_mode_combo.currentData()
-            print(f"[DEBUG] 既存試料選択状態:")
-            print(f"[DEBUG] - sample_mode_combo.currentText(): '{sample_mode_text}'")
-            print(f"[DEBUG] - sample_mode_combo.currentData(): {sample_data}")
-            print(f"[DEBUG] - sample_data type: {type(sample_data)}")
+            logger.debug("既存試料選択状態:")
+            logger.debug("- sample_mode_combo.currentText(): '%s'", sample_mode_text)
+            logger.debug("- sample_mode_combo.currentData(): %s", sample_data)
+            logger.debug("- sample_data type: %s", type(sample_data))
             
             # sample_mode_comboの全データ内容も確認
-            print(f"[DEBUG] - sample_mode_combo全項目データ確認:")
+            logger.debug("- sample_mode_combo全項目データ確認:")
             for idx in range(self.sample_mode_combo.count()):
                 item_text = self.sample_mode_combo.itemText(idx)
                 item_data = self.sample_mode_combo.itemData(idx)
-                print(f"[DEBUG]   [{idx}] '{item_text}' -> {item_data}")
+                logger.debug("[%s] '%s' -> %s", idx, item_text, item_data)
             
             if sample_data and isinstance(sample_data, dict) and 'id' in sample_data:
                 selected_fileset.sample_id = sample_data['id']
-                print(f"[DEBUG] 既存試料ID保存成功（統合コンボボックス）: {sample_data['id']}")
+                logger.debug("既存試料ID保存成功（統合コンボボックス）: %s", sample_data['id'])
             else:
                 # フォールバック：sample_id_comboがある場合はそちらを確認
                 if hasattr(self, 'sample_id_combo'):
                     fallback_data = self.sample_id_combo.currentData()
                     if fallback_data and isinstance(fallback_data, dict) and 'id' in fallback_data:
                         selected_fileset.sample_id = fallback_data['id']
-                        print(f"[DEBUG] 既存試料ID保存成功（フォールバック）: {fallback_data['id']}")
+                        logger.debug("既存試料ID保存成功（フォールバック）: %s", fallback_data['id'])
                     else:
                         selected_fileset.sample_id = self.sample_mode_combo.currentText()
-                        print(f"[WARNING] 既存試料IDの取得に失敗、テキストを使用: {selected_fileset.sample_id}")
-                        print(f"[WARNING] - sample_data: {sample_data}")
-                        print(f"[WARNING] - fallback_data: {fallback_data if hasattr(self, 'sample_id_combo') else 'No sample_id_combo'}")
+                        logger.warning("既存試料IDの取得に失敗、テキストを使用: %s", selected_fileset.sample_id)
+                        logger.warning("- sample_data: %s", sample_data)
+                        logger.warning("- fallback_data: %s", fallback_data if hasattr(self, 'sample_id_combo') else 'No sample_id_combo')
                 else:
                     selected_fileset.sample_id = self.sample_mode_combo.currentText()
-                    print(f"[WARNING] 既存試料IDの取得に失敗（sample_id_combo無し）、テキストを使用: {selected_fileset.sample_id}")
-                    print(f"[WARNING] - sample_data: {sample_data}")
-            print(f"[DEBUG] 試料モード設定: existing")
+                    logger.warning("既存試料IDの取得に失敗（sample_id_combo無し）、テキストを使用: %s", selected_fileset.sample_id)
+                    logger.warning("- sample_data: %s", sample_data)
+            logger.debug("試料モード設定: existing")
         
         # カスタム値を取得（インボイススキーマフォーム）
-        print(f"[DEBUG] インボイススキーマフォーム状態確認:")
-        print(f"[DEBUG] - hasattr(self, 'invoice_schema_form'): {hasattr(self, 'invoice_schema_form')}")
+        logger.debug("インボイススキーマフォーム状態確認:")
+        logger.debug("- hasattr(self, 'invoice_schema_form'): %s", hasattr(self, 'invoice_schema_form'))
         if hasattr(self, 'invoice_schema_form'):
-            print(f"[DEBUG] - self.invoice_schema_form: {self.invoice_schema_form}")
-            print(f"[DEBUG] - invoice_schema_form is not None: {self.invoice_schema_form is not None}")
+            logger.debug("- self.invoice_schema_form: %s", self.invoice_schema_form)
+            logger.debug("- invoice_schema_form is not None: %s", self.invoice_schema_form is not None)
             
         if hasattr(self, 'invoice_schema_form') and self.invoice_schema_form:
             try:
@@ -3954,22 +3958,22 @@ class BatchRegisterWidget(QWidget):
                 from classes.utils.schema_form_util import get_schema_form_values
                 custom_values = get_schema_form_values(self.invoice_schema_form)
                 selected_fileset.custom_values = custom_values
-                print(f"[DEBUG] カスタム値を保存: {len(custom_values)}個の項目")
+                logger.debug("カスタム値を保存: %s個の項目", len(custom_values))
                 for key, value in custom_values.items():
-                    print(f"[DEBUG]   {key}: {value}")
+                    logger.debug("%s: %s", key, value)
             except Exception as e:
-                print(f"[WARNING] カスタム値取得エラー: {e}")
+                logger.warning("カスタム値取得エラー: %s", e)
                 import traceback
                 traceback.print_exc()
                 selected_fileset.custom_values = {}
         else:
-            print("[DEBUG] インボイススキーマフォームが存在しません")
+            logger.debug("インボイススキーマフォームが存在しません")
             # フォールバック: 既存のcustom_values属性を維持
             if hasattr(selected_fileset, 'custom_values'):
-                print(f"[DEBUG] 既存のcustom_values属性を維持: {selected_fileset.custom_values}")
+                logger.debug("既存のcustom_values属性を維持: %s", selected_fileset.custom_values)
             else:
                 selected_fileset.custom_values = {}
-                print("[DEBUG] 空のcustom_valuesを設定")
+                logger.debug("空のcustom_valuesを設定")
         
         # 拡張フィールドを辞書に保存（下位互換性のため）
         selected_fileset.extended_config = {
@@ -3990,10 +3994,10 @@ class BatchRegisterWidget(QWidget):
             sample_data = self.sample_id_combo.currentData()
             if sample_data and isinstance(sample_data, dict) and 'id' in sample_data:
                 selected_fileset.extended_config['sample_id'] = sample_data['id']
-                print(f"[DEBUG] 既存試料IDをextended_configに保存: {sample_data['id']}")
+                logger.debug("既存試料IDをextended_configに保存: %s", sample_data['id'])
             else:
                 selected_fileset.extended_config['sample_id'] = self.sample_id_combo.currentText()
-                print(f"[WARNING] 既存試料IDの取得に失敗、extended_configにテキストを保存: {self.sample_id_combo.currentText()}")
+                logger.warning("既存試料IDの取得に失敗、extended_configにテキストを保存: %s", self.sample_id_combo.currentText())
         else:
             # 新規作成または前回と同じの場合
             selected_fileset.extended_config['sample_name'] = self.sample_name_edit.text()
@@ -4003,7 +4007,7 @@ class BatchRegisterWidget(QWidget):
         # カスタム値もextended_configに保存（データ登録時のフォーム値構築で利用）
         if hasattr(selected_fileset, 'custom_values') and selected_fileset.custom_values:
             selected_fileset.extended_config['custom_values'] = selected_fileset.custom_values
-            print(f"[DEBUG] カスタム値もextended_configに保存: {len(selected_fileset.custom_values)}個")
+            logger.debug("カスタム値もextended_configに保存: %s個", len(selected_fileset.custom_values))
         else:
             selected_fileset.extended_config['custom_values'] = {}
         
@@ -4014,12 +4018,12 @@ class BatchRegisterWidget(QWidget):
         self.update_same_as_previous_option()
         
         # 最終確認：extended_configの内容をログ出力
-        print(f"[DEBUG] save_fileset_config完了 - extended_config内容:")
+        logger.debug("save_fileset_config完了 - extended_config内容:")
         for key, value in selected_fileset.extended_config.items():
-            print(f"[DEBUG]   - {key}: {value}")
-        print(f"[DEBUG] save_fileset_config完了 - 直接属性:")
-        print(f"[DEBUG]   - sample_mode: {getattr(selected_fileset, 'sample_mode', 'None')}")
-        print(f"[DEBUG]   - sample_id: {getattr(selected_fileset, 'sample_id', 'None')}")
+            logger.debug("- %s: %s", key, value)
+        logger.debug("save_fileset_config完了 - 直接属性:")
+        logger.debug("- sample_mode: %s", getattr(selected_fileset, 'sample_mode', 'None'))
+        logger.debug("- sample_id: %s", getattr(selected_fileset, 'sample_id', 'None'))
         
         # 成功メッセージ
         config_items = len([v for v in selected_fileset.extended_config.values() if v])
@@ -4109,7 +4113,7 @@ class BatchRegisterWidget(QWidget):
         
         except Exception as e:
             QMessageBox.critical(self, "エラー", f"プレビュー処理中にエラーが発生しました:\n{e}")
-            print(f"[ERROR] プレビューエラー: {e}")
+            logger.error("プレビューエラー: %s", e)
             import traceback
             traceback.print_exc()
     
@@ -4170,7 +4174,7 @@ class BatchRegisterWidget(QWidget):
                 self.on_batch_register_finished(batch_dialog.batch_result)
             
         except Exception as e:
-            print(f"[ERROR] 一括登録実行エラー: {e}")
+            logger.error("一括登録実行エラー: %s", e)
             import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "エラー", f"一括登録処理でエラーが発生しました:\n{str(e)}")
@@ -4233,7 +4237,7 @@ class BatchRegisterWidget(QWidget):
             self.datasets = get_filtered_datasets(['OWNER', 'ASSISTANT', 'MEMBER', 'AGENT'])
             self.update_dataset_combo()
         except Exception as e:
-            print(f"[WARNING] データセット更新エラー: {e}")
+            logger.warning("データセット更新エラー: %s", e)
             # エラーダイアログは表示しない（起動時の遅延を防ぐため）
     
     def update_dataset_combo(self):
@@ -4265,11 +4269,11 @@ class BatchRegisterWidget(QWidget):
         current_text = self.dataset_combo.currentText()
         current_data = self.dataset_combo.currentData()
         
-        print(f"[DEBUG] get_selected_dataset_id: currentIndex={current_index}, currentText='{current_text}'")
+        logger.debug("get_selected_dataset_id: currentIndex=%s, currentText='%s'", current_index, current_text)
         
         # インデックス-1は選択なし状態
         if current_index < 0:
-            print(f"[DEBUG] get_selected_dataset_id: インデックス{current_index}は選択なし状態")
+            logger.debug("get_selected_dataset_id: インデックス%sは選択なし状態", current_index)
             return None
         
         # currentDataからデータセットIDを取得
@@ -4277,11 +4281,11 @@ class BatchRegisterWidget(QWidget):
             # 辞書オブジェクトの場合、'id'キーを取得
             if isinstance(current_data, dict) and 'id' in current_data:
                 dataset_id = current_data['id']
-                print(f"[DEBUG] get_selected_dataset_id: 辞書からID取得={dataset_id}")
+                logger.debug("get_selected_dataset_id: 辞書からID取得=%s", dataset_id)
                 return dataset_id
             # 文字列の場合はそのまま返す
             elif isinstance(current_data, str):
-                print(f"[DEBUG] get_selected_dataset_id: 文字列ID取得={current_data}")
+                logger.debug("get_selected_dataset_id: 文字列ID取得=%s", current_data)
                 return current_data
         
         # currentDataが取得できない場合の代替手段
@@ -4296,15 +4300,15 @@ class BatchRegisterWidget(QWidget):
                         id_prefix = id_part.replace("...", "")
                         for dataset in self.datasets:
                             if dataset.get('id', '').startswith(id_prefix):
-                                print(f"[DEBUG] get_selected_dataset_id: テキストから推定={dataset.get('id')}")
+                                logger.debug("get_selected_dataset_id: テキストから推定=%s", dataset.get('id'))
                                 return dataset.get('id')
                     else:
-                        print(f"[DEBUG] get_selected_dataset_id: テキストから抽出={id_part}")
+                        logger.debug("get_selected_dataset_id: テキストから抽出=%s", id_part)
                         return id_part
                 except Exception as e:
-                    print(f"[DEBUG] get_selected_dataset_id: テキスト解析エラー={e}")
+                    logger.debug("get_selected_dataset_id: テキスト解析エラー=%s", e)
         
-        print("[DEBUG] get_selected_dataset_id: データセットIDを取得できませんでした")
+        logger.debug("get_selected_dataset_id: データセットIDを取得できませんでした")
         return None
     
     def adjust_window_size(self):
@@ -4329,13 +4333,13 @@ class BatchRegisterWidget(QWidget):
             target_width = min(target_width, screen_width - 40)
             target_height = min(target_height, screen_height - 80)
             
-            print(f"[DEBUG] 画面サイズ: {screen_width}x{screen_height}")
-            print(f"[DEBUG] 目標サイズ: {target_width}x{target_height}")
+            logger.debug("画面サイズ: %sx%s", screen_width, screen_height)
+            logger.debug("目標サイズ: %sx%s", target_width, target_height)
             
             # 親ウィンドウを取得して調整
             top_level = self.window()
             if top_level and top_level != self:
-                print(f"[INFO] ウィンドウサイズ調整開始: 現在={top_level.size()}, 目標={target_width}x{target_height}")
+                logger.info("ウィンドウサイズ調整開始: 現在=%s, 目標=%sx%s", top_level.size(), target_width, target_height)
                 
                 # 既存の固定サイズ設定をクリア（通常登録と同等処理）
                 try:
@@ -4354,7 +4358,7 @@ class BatchRegisterWidget(QWidget):
                 
                 # ウィンドウサイズを調整
                 if (current_width != target_width or current_height != target_height):
-                    print(f"[DEBUG] リサイズ実行中: {current_width}x{current_height} → {target_width}x{target_height}")
+                    logger.debug("リサイズ実行中: %sx%s → %sx%s", current_width, current_height, target_width, target_height)
                     top_level.resize(target_width, target_height)
                     
                     # 画面中央に配置
@@ -4368,9 +4372,9 @@ class BatchRegisterWidget(QWidget):
                     
                     # 結果確認
                     new_size = top_level.size()
-                    print(f"[INFO] ウィンドウサイズ調整完了: 結果={new_size.width()}x{new_size.height()}")
+                    logger.info("ウィンドウサイズ調整完了: 結果=%sx%s", new_size.width(), new_size.height())
                 else:
-                    print(f"[INFO] ウィンドウサイズは既に適切です: {current_width}x{current_height}")
+                    logger.info("ウィンドウサイズは既に適切です: %sx%s", current_width, current_height)
                 
                 # フレキシブルなサイズ設定（通常登録と同等）
                 top_level.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -4381,7 +4385,7 @@ class BatchRegisterWidget(QWidget):
                     top_level.setWindowTitle(f"{original_title} - 一括登録モード")
                 
         except Exception as e:
-            print(f"[WARNING] ウィンドウサイズ調整に失敗: {e}")
+            logger.warning("ウィンドウサイズ調整に失敗: %s", e)
             import traceback
             traceback.print_exc()
     
@@ -4395,9 +4399,9 @@ class BatchRegisterWidget(QWidget):
                 screen_width = screen.geometry().width()
                 window.setMinimumWidth(1800)
                 window.setMaximumWidth(screen_width)
-            print(f"[INFO] 固定幅制限を解除しました - リサイズ可能になりました")
+            logger.info("固定幅制限を解除しました - リサイズ可能になりました")
         except Exception as e:
-            print(f"[WARNING] 固定幅クリアに失敗: {e}")
+            logger.warning("固定幅クリアに失敗: %s", e)
 
     def _on_capacity_enable_toggled(self, enabled: bool):
         """容量制限有効/無効の切り替え"""
@@ -4406,12 +4410,12 @@ class BatchRegisterWidget(QWidget):
             self.capacity_unit_combo.setEnabled(enabled)
             
             if enabled:
-                print("[INFO] 容量制限が有効になりました")
+                logger.info("容量制限が有効になりました")
             else:
-                print("[INFO] 容量制限が無効になりました")
+                logger.info("容量制限が無効になりました")
                 
         except Exception as e:
-            print(f"[ERROR] 容量制限切り替えエラー: {e}")
+            logger.error("容量制限切り替えエラー: %s", e)
     
     def _on_capacity_unit_changed(self, unit: str):
         """容量制限単位変更処理"""
@@ -4433,10 +4437,10 @@ class BatchRegisterWidget(QWidget):
                     self.capacity_spinbox.setMaximum(100.0)
                 self.capacity_spinbox.setSuffix(" GB")
                 
-            print(f"[INFO] 容量制限単位を {unit} に変更")
+            logger.info("容量制限単位を %s に変更", unit)
             
         except Exception as e:
-            print(f"[ERROR] 容量制限単位変更エラー: {e}")
+            logger.error("容量制限単位変更エラー: %s", e)
     
     def _get_capacity_limit_bytes(self) -> Optional[int]:
         """現在の容量制限をバイト単位で取得"""
@@ -4453,13 +4457,13 @@ class BatchRegisterWidget(QWidget):
                 return int(value * 1024 * 1024)
                 
         except Exception as e:
-            print(f"[ERROR] 容量制限取得エラー: {e}")
+            logger.error("容量制限取得エラー: %s", e)
             return None
     
     def _apply_capacity_limit_to_filesets(self, file_sets: List[FileSet], capacity_limit: int) -> List[FileSet]:
         """容量制限をファイルセットに適用して分割"""
         try:
-            print(f"[INFO] 容量制限適用開始: {self._format_file_size(capacity_limit)} 以下に分割")
+            logger.info("容量制限適用開始: %s 以下に分割", self._format_file_size(capacity_limit))
             
             # まずZIP階層競合を解決
             file_sets = self._resolve_zip_hierarchy_conflicts(file_sets)
@@ -4469,7 +4473,7 @@ class BatchRegisterWidget(QWidget):
             for file_set in file_sets:
                 # ファイルセットの総サイズを計算
                 total_size = self._calculate_fileset_size(file_set)
-                print(f"[DEBUG] ファイルセット '{file_set.name}': {self._format_file_size(total_size)}")
+                logger.debug("ファイルセット '%s': %s", file_set.name, self._format_file_size(total_size))
                 
                 if total_size <= capacity_limit:
                     # 制限内なのでそのまま追加
@@ -4479,7 +4483,7 @@ class BatchRegisterWidget(QWidget):
                     split_sets = self._split_fileset_by_capacity(file_set, capacity_limit)
                     new_file_sets.extend(split_sets)
             
-            print(f"[INFO] 容量制限適用完了: {len(file_sets)} → {len(new_file_sets)} ファイルセット")
+            logger.info("容量制限適用完了: %s → %s ファイルセット", len(file_sets), len(new_file_sets))
             
             # 分割後のファイルセットをマネージャーに設定
             self.file_set_manager.file_sets = new_file_sets
@@ -4487,7 +4491,7 @@ class BatchRegisterWidget(QWidget):
             return new_file_sets
             
         except Exception as e:
-            print(f"[ERROR] 容量制限適用エラー: {e}")
+            logger.error("容量制限適用エラー: %s", e)
             import traceback
             traceback.print_exc()
             return file_sets  # エラー時は元のファイルセットを返す
@@ -4506,13 +4510,13 @@ class BatchRegisterWidget(QWidget):
                         pass
             return total_size
         except Exception as e:
-            print(f"[ERROR] ファイルセットサイズ計算エラー: {e}")
+            logger.error("ファイルセットサイズ計算エラー: %s", e)
             return 0
     
     def _split_fileset_by_capacity(self, file_set: FileSet, capacity_limit: int) -> List[FileSet]:
         """ファイルセットを容量制限で分割"""
         try:
-            print(f"[INFO] ファイルセット '{file_set.name}' を分割中...")
+            logger.info("ファイルセット '%s' を分割中...", file_set.name)
             
             # ファイルを容量順にソート（大きいファイルから優先）
             files_with_size = []
@@ -4560,7 +4564,7 @@ class BatchRegisterWidget(QWidget):
                     split_sets.append(large_set)
                     set_counter += 1
                     
-                    print(f"[WARNING] 大容量ファイル ({self._format_file_size(size)}) を独立セットに分離: {item.name}")
+                    logger.warning("大容量ファイル (%s) を独立セットに分離: %s", self._format_file_size(size), item.name)
                     continue
                 
                 # 現在のセットに追加できるかチェック
@@ -4595,12 +4599,12 @@ class BatchRegisterWidget(QWidget):
                 new_set.organize_method = file_set.organize_method
                 split_sets.append(new_set)
             
-            print(f"[INFO] 分割完了: {len(split_sets)} 個のファイルセットに分割")
+            logger.info("分割完了: %s 個のファイルセットに分割", len(split_sets))
             
             return split_sets
             
         except Exception as e:
-            print(f"[ERROR] ファイルセット分割エラー: {e}")
+            logger.error("ファイルセット分割エラー: %s", e)
             import traceback
             traceback.print_exc()
             return [file_set]  # エラー時は元のファイルセットを返す
@@ -4608,7 +4612,7 @@ class BatchRegisterWidget(QWidget):
     def _resolve_zip_hierarchy_conflicts(self, file_sets: List[FileSet]) -> List[FileSet]:
         """ZIP階層の競合を解決"""
         try:
-            print(f"[INFO] ZIP階層競合チェック開始: {len(file_sets)} ファイルセット")
+            logger.info("ZIP階層競合チェック開始: %s ファイルセット", len(file_sets))
             
             # ZIP設定されているパスを収集
             zip_paths = set()
@@ -4664,7 +4668,7 @@ class BatchRegisterWidget(QWidget):
                 # アイテムを更新
                 if items_removed:
                     file_set.items = items_to_keep
-                    print(f"[INFO] ファイルセット '{file_set.name}': ZIP競合により {len(items_removed)} 個のアイテムを除外")
+                    logger.info("ファイルセット '%s': ZIP競合により %s 個のアイテムを除外", file_set.name, len(items_removed))
             
             # 空のファイルセットを除去
             non_empty_sets = [fs for fs in file_sets if fs.items]
@@ -4676,7 +4680,7 @@ class BatchRegisterWidget(QWidget):
             return non_empty_sets
             
         except Exception as e:
-            print(f"[ERROR] ZIP階層競合解決エラー: {e}")
+            logger.error("ZIP階層競合解決エラー: %s", e)
             import traceback
             traceback.print_exc()
             return file_sets  # エラー時は元のファイルセットを返す
@@ -4709,16 +4713,16 @@ class BatchRegisterWidget(QWidget):
                 
                 if found_index >= 0 and found_index != self.dataset_combo.currentIndex():
                     self.dataset_combo.setCurrentIndex(found_index)
-                    print(f"[INFO] データセット選択確定: {current_text}")
+                    logger.info("データセット選択確定: %s", current_text)
                     
         except Exception as e:
-            print(f"[WARNING] データセットフォーカス外れ処理エラー: {e}")
+            logger.warning("データセットフォーカス外れ処理エラー: %s", e)
     
     def on_dataset_changed(self, index):
         """データセット選択変更時の処理"""
         try:
-            print(f"[DEBUG] データセット選択変更: index={index}")
-            print(f"[DEBUG] コンボボックス状態: currentText='{self.dataset_combo.currentText()}', totalItems={self.dataset_combo.count()}")
+            logger.debug("データセット選択変更: index=%s", index)
+            logger.debug("コンボボックス状態: currentText='%s', totalItems=%s", self.dataset_combo.currentText(), self.dataset_combo.count())
             
             # 選択されたデータセット情報を取得
             dataset_id = None
@@ -4726,39 +4730,39 @@ class BatchRegisterWidget(QWidget):
             
             # index < 0 は選択なし状態のみ除外
             if index < 0:
-                print("[DEBUG] データセット未選択（index < 0）")
+                logger.debug("データセット未選択（index < 0）")
                 self.clear_dynamic_fields()
                 return
             
             # currentDataから取得
             try:
                 current_data = self.dataset_combo.currentData()
-                print(f"[DEBUG] currentDataから取得したデータ: {type(current_data)}")
+                logger.debug("currentDataから取得したデータ: %s", type(current_data))
                 
                 if current_data:
                     # 辞書オブジェクトの場合、それがデータセット情報そのもの
                     if isinstance(current_data, dict) and 'id' in current_data:
                         dataset_id = current_data['id']
                         dataset_data = current_data
-                        print(f"[DEBUG] 辞書からデータセット情報を取得: ID={dataset_id}")
+                        logger.debug("辞書からデータセット情報を取得: ID=%s", dataset_id)
                     # 文字列の場合、IDとして扱ってself.datasetsから検索
                     elif isinstance(current_data, str):
                         dataset_id = current_data
                         for dataset in self.datasets:
                             if dataset.get('id') == dataset_id:
                                 dataset_data = dataset
-                                print(f"[DEBUG] IDからデータセット情報を特定: {dataset.get('attributes', {}).get('title', 'タイトルなし')}")
+                                logger.debug("IDからデータセット情報を特定: %s", dataset.get('attributes', {}).get('title', 'タイトルなし'))
                                 break
                     
                     if not dataset_data:
-                        print(f"[WARNING] データセットID {dataset_id} に対応するデータセット情報が見つかりません")
+                        logger.warning("データセットID %s に対応するデータセット情報が見つかりません", dataset_id)
                         return
             except Exception as e:
-                print(f"[ERROR] データセット取得に失敗: {e}")
+                logger.error("データセット取得に失敗: %s", e)
                 return
             
             if dataset_id and dataset_data:
-                print(f"[INFO] データセット選択確定: {dataset_id}")
+                logger.info("データセット選択確定: %s", dataset_id)
                 
                 # サンプル一覧を更新
                 self.update_sample_list(dataset_id)
@@ -4767,9 +4771,9 @@ class BatchRegisterWidget(QWidget):
                 self.update_experiment_list(dataset_id)
                 
                 # インボイススキーマフォームを更新
-                print(f"[DEBUG] update_schema_form呼び出し前: dataset_data={dataset_data}")
+                logger.debug("update_schema_form呼び出し前: dataset_data=%s", dataset_data)
                 self.update_schema_form(dataset_data)
-                print(f"[DEBUG] update_schema_form呼び出し後")
+                logger.debug("update_schema_form呼び出し後")
                 
                 # 選択された旨を表示
                 QTimer.singleShot(500, lambda: print(f"[INFO] データセット反映完了: {dataset_id}"))
@@ -4778,18 +4782,18 @@ class BatchRegisterWidget(QWidget):
                 self.auto_apply_settings_to_selected()
             else:
                 # データセット未選択時はクリア
-                print("[DEBUG] データセット未選択 - フィールドをクリア")
+                logger.debug("データセット未選択 - フィールドをクリア")
                 self.clear_dynamic_fields()
                 
         except Exception as e:
-            print(f"[WARNING] データセット変更処理エラー: {e}")
+            logger.warning("データセット変更処理エラー: %s", e)
             import traceback
             traceback.print_exc()
     
     def on_sample_mode_changed(self, mode):
         """試料選択変更時の処理（統合フォーム対応）"""
         try:
-            print(f"[DEBUG] 試料選択変更: {mode}")
+            logger.debug("試料選択変更: %s", mode)
             
             if mode == "新規作成":
                 # 新規作成時は入力フィールドを有効化
@@ -4800,7 +4804,7 @@ class BatchRegisterWidget(QWidget):
                 self.sample_name_edit.clear()
                 self.sample_description_edit.clear()
                 self.sample_composition_edit.clear()
-                print("[DEBUG] 新規作成モード: 入力フィールドを有効化")
+                logger.debug("新規作成モード: 入力フィールドを有効化")
                 
             
             elif mode == "既存試料を選択してください":
@@ -4812,10 +4816,10 @@ class BatchRegisterWidget(QWidget):
                 # 現在選択されているデータセットの試料リストを更新
                 selected_dataset_id = self.get_selected_dataset_id()
                 if selected_dataset_id:
-                    print(f"[DEBUG] 既存試料選択モード: 試料リスト更新開始")
+                    logger.debug("既存試料選択モード: 試料リスト更新開始")
                     self.update_sample_list(selected_dataset_id)
                 else:
-                    print("[WARNING] 既存試料選択モード: データセットが選択されていません")
+                    logger.warning("既存試料選択モード: データセットが選択されていません")
                     
             elif mode == "前回と同じ":
                 # 前回と同じ時は入力フィールドを無効化
@@ -4825,7 +4829,7 @@ class BatchRegisterWidget(QWidget):
                 
                 # 前のファイルセットから試料情報を取得
                 self._load_previous_sample_info()
-                print("[DEBUG] 前回と同じモード: 前回の試料情報を読み込み")
+                logger.debug("前回と同じモード: 前回の試料情報を読み込み")
                 
             else:
                 # 既存試料が選択された場合の処理
@@ -4839,10 +4843,10 @@ class BatchRegisterWidget(QWidget):
                     self.sample_name_edit.setEnabled(False)
                     self.sample_description_edit.setEnabled(False)
                     self.sample_composition_edit.setEnabled(False)
-                    print(f"[DEBUG] 既存試料選択: {current_data.get('name', '')}")
+                    logger.debug("既存試料選択: %s", current_data.get('name', ''))
                 
         except Exception as e:
-            print(f"[WARNING] 試料選択変更処理エラー: {e}")
+            logger.warning("試料選択変更処理エラー: %s", e)
             import traceback
             traceback.print_exc()
     
@@ -4880,14 +4884,14 @@ class BatchRegisterWidget(QWidget):
             self.sample_description_edit.setText(prev_sample_desc)
             self.sample_composition_edit.setText(prev_sample_comp)
             
-            print(f"[DEBUG] 前回の試料情報を読み込み: {prev_sample_name}")
+            logger.debug("前回の試料情報を読み込み: %s", prev_sample_name)
             
         except Exception as e:
-            print(f"[WARNING] 前回試料情報読み込みエラー: {e}")
+            logger.warning("前回試料情報読み込みエラー: %s", e)
             self.sample_name_edit.setText("前回の情報読み込みに失敗しました")
                 
         except Exception as e:
-            print(f"[WARNING] 試料モード変更処理エラー: {e}")
+            logger.warning("試料モード変更処理エラー: %s", e)
             import traceback
             traceback.print_exc()
     
@@ -4897,7 +4901,7 @@ class BatchRegisterWidget(QWidget):
             current_text = self.sample_mode_combo.currentText()
             current_data = self.sample_mode_combo.currentData()
             
-            print(f"[DEBUG] 試料選択インデックス変更: index={index}, text='{current_text}'")
+            logger.debug("試料選択インデックス変更: index=%s, text='%s'", index, current_text)
             
             # 既存試料が選択された場合（データが辞書の場合）
             if current_data and isinstance(current_data, dict):
@@ -4914,17 +4918,17 @@ class BatchRegisterWidget(QWidget):
                 self.sample_description_edit.setEnabled(False)
                 self.sample_composition_edit.setEnabled(False)
                 
-                print(f"[INFO] 既存試料情報を表示: {sample_name}")
+                logger.info("既存試料情報を表示: %s", sample_name)
             
         except Exception as e:
-            print(f"[WARNING] 試料選択インデックス変更エラー: {e}")
+            logger.warning("試料選択インデックス変更エラー: %s", e)
             import traceback
             traceback.print_exc()
     
     def update_sample_list(self, dataset_id):
         """選択されたデータセットのサンプル一覧を更新（統合コンボボックス対応）"""
         try:
-            print(f"[DEBUG] サンプル一覧更新開始: dataset_id={dataset_id}")
+            logger.debug("サンプル一覧更新開始: dataset_id=%s", dataset_id)
             
             # 統合コンボボックスの既存項目を記録
             default_items = ["新規作成", "前回と同じ"]
@@ -4949,7 +4953,7 @@ class BatchRegisterWidget(QWidget):
                             break
                     
                     if target_dataset:
-                        print(f"[DEBUG] 対象データセット取得成功: {target_dataset.get('attributes', {}).get('name', '')}")
+                        logger.debug("対象データセット取得成功: %s", target_dataset.get('attributes', {}).get('name', ''))
                         
                         # データセットに紐づくグループIDを取得（通常登録と同じ方法）
                         group_id = None
@@ -4962,7 +4966,7 @@ class BatchRegisterWidget(QWidget):
                                 from config.common import get_dynamic_file_path
                                 
                                 dataset_json_path = get_dynamic_file_path(f'output/rde/data/datasets/{dataset_id}.json')
-                                print(f"[DEBUG] データセットファイル確認: {dataset_json_path}")
+                                logger.debug("データセットファイル確認: %s", dataset_json_path)
                                 
                                 if os.path.exists(dataset_json_path):
                                     import json
@@ -4971,9 +4975,9 @@ class BatchRegisterWidget(QWidget):
                                         relationships = dataset_data.get("data", {}).get('relationships', {})
                                         group = relationships.get('group', {}).get('data', {})
                                         group_id = group.get('id', '')
-                                        print(f"[DEBUG] データセットファイルからグループID取得: {group_id}")
+                                        logger.debug("データセットファイルからグループID取得: %s", group_id)
                                 else:
-                                    print(f"[DEBUG] データセットファイルが存在しません: {dataset_json_path}")
+                                    logger.debug("データセットファイルが存在しません: %s", dataset_json_path)
                             
                             # 方法2: フォールバック - APIレスポンスから直接取得
                             if not group_id:
@@ -4984,85 +4988,85 @@ class BatchRegisterWidget(QWidget):
                                 
                                 if group_data and group_data.get('id'):
                                     group_id = group_data.get('id')
-                                    print(f"[DEBUG] APIレスポンスからグループID取得: {group_id}")
+                                    logger.debug("APIレスポンスからグループID取得: %s", group_id)
                             
                             if group_id:
-                                print(f"[DEBUG] 最終決定グループID: {group_id}")
+                                logger.debug("最終決定グループID: %s", group_id)
                             else:
-                                print("[WARNING] 全ての方法でグループID取得失敗")
+                                logger.warning("全ての方法でグループID取得失敗")
                                 
                         except Exception as e:
-                            print(f"[WARNING] グループID取得エラー: {e}")
+                            logger.warning("グループID取得エラー: %s", e)
                             import traceback
                             traceback.print_exc()
                         
                         if group_id:
-                            print(f"[DEBUG] 最終決定グループID: {group_id}")
+                            logger.debug("最終決定グループID: %s", group_id)
                             
                             # 通常登録のsample_loaderを使用
                             from classes.data_entry.util.sample_loader import load_existing_samples, format_sample_display_name
                             
                             existing_samples = load_existing_samples(group_id)
-                            print(f"[DEBUG] 既存試料データ取得: {len(existing_samples)}件")
+                            logger.debug("既存試料データ取得: %s件", len(existing_samples))
                             
                             if existing_samples:
                                 for sample in existing_samples:
                                     display_name = format_sample_display_name(sample)
                                     self.sample_mode_combo.addItem(display_name, sample)
-                                    print(f"[DEBUG] 既存試料追加: {display_name}")
+                                    logger.debug("既存試料追加: %s", display_name)
                                 
-                                print(f"[INFO] 既存試料を統合コンボボックスに追加完了: {len(existing_samples)}件")
+                                logger.info("既存試料を統合コンボボックスに追加完了: %s件", len(existing_samples))
                             else:
-                                print("[DEBUG] 既存試料データなし")
+                                logger.debug("既存試料データなし")
                         else:
-                            print("[WARNING] グループID/サブグループIDが取得できません")
+                            logger.warning("グループID/サブグループIDが取得できません")
                     else:
-                        print(f"[WARNING] 対象データセットが見つかりません: {dataset_id}")
+                        logger.warning("対象データセットが見つかりません: %s", dataset_id)
                     
                 except Exception as e:
-                    print(f"[WARNING] サンプル情報取得失敗: {e}")
+                    logger.warning("サンプル情報取得失敗: %s", e)
                     import traceback
                     traceback.print_exc()
             else:
-                print("[DEBUG] データセットIDが無効")
+                logger.debug("データセットIDが無効")
             
-            print(f"[DEBUG] サンプル一覧更新完了: {self.sample_mode_combo.count()}個の選択肢")
+            logger.debug("サンプル一覧更新完了: %s個の選択肢", self.sample_mode_combo.count())
             
         except Exception as e:
-            print(f"[WARNING] サンプル一覧更新エラー: {e}")
+            logger.warning("サンプル一覧更新エラー: %s", e)
             import traceback
             traceback.print_exc()
     
     def update_experiment_list(self, dataset_id):
         """選択されたデータセットの実験ID一覧を更新（入力フィールドなので何もしない）"""
         try:
-            print(f"[DEBUG] 実験ID一覧更新開始: dataset_id={dataset_id}")
+            logger.debug("実験ID一覧更新開始: dataset_id=%s", dataset_id)
             
             # 実験IDは入力フィールドになったため、リスト更新は不要
-            print(f"[DEBUG] 実験ID一覧更新完了: 入力フィールドのため処理なし")
+            logger.debug("実験ID一覧更新完了: 入力フィールドのため処理なし")
             
         except Exception as e:
-            print(f"[WARNING] 実験ID一覧更新エラー: {e}")
+            logger.warning("実験ID一覧更新エラー: %s", e)
             import traceback
             traceback.print_exc()
     
     def update_schema_form(self, dataset_data, force_clear=True):
         """インボイススキーマに基づく固有情報フォームを更新（通常登録と同等機能）"""
         try:
-            print(f"[DEBUG] スキーマフォーム更新開始: {dataset_data}")
+            logger.debug("スキーマフォーム更新開始: %s", dataset_data)
             
             # フォーム重複を防ぐため、常に既存フォームをクリア
             # 復元モードでも既存フォームが存在すれば必ずクリアする
             if force_clear:
-                print(f"[DEBUG] 既存フォームをクリア中...")
+                logger.debug("既存フォームをクリア中...")
                 self.clear_schema_form()
             else:
                 # 復元モードでも重複を防ぐため、既存フォームが存在すればクリアする
                 if hasattr(self, 'invoice_schema_form') and self.invoice_schema_form is not None:
-                    print(f"[DEBUG] 復元モードですが既存フォームをクリア中（重複防止）...")
+                    logger.debug("復元モードですが既存フォームをクリア中（重複防止）...")
                     self.clear_schema_form()
                 else:
-                    print(f"[DEBUG] 復元モード：既存フォームなし、クリアをスキップ")
+                    logger.debug("復元モード：既存フォームなし、クリアをスキップ")
 
             # データセットのスキーマ情報を取得
             dataset_id = dataset_data.get('id', '')
@@ -5071,14 +5075,14 @@ class BatchRegisterWidget(QWidget):
             relationships = dataset_data.get('relationships', {})
 
             if dataset_id:
-                print(f"[INFO] スキーマフォーム生成: {dataset_name} ({dataset_id})")
+                logger.info("スキーマフォーム生成: %s (%s)", dataset_name, dataset_id)
                 try:
                     # 通常登録と同じ方法でテンプレートIDを取得
                     template_id = ''
                     template = relationships.get('template', {}).get('data', {})
                     if isinstance(template, dict):
                         template_id = template.get('id', '')
-                    print(f"[DEBUG] テンプレートID: {template_id}")
+                    logger.debug("テンプレートID: %s", template_id)
                     if template_id:
                         # 通常登録と同じパスでinvoiceSchemaを確認
                         from config.common import get_dynamic_file_path
@@ -5086,17 +5090,17 @@ class BatchRegisterWidget(QWidget):
                         
                         invoice_schema_path = get_dynamic_file_path(f'output/rde/data/invoiceSchemas/{template_id}.json')
                         
-                        print(f"[DEBUG] invoiceSchemaファイル確認: {invoice_schema_path}")
+                        logger.debug("invoiceSchemaファイル確認: %s", invoice_schema_path)
                         
                         import os
                         if os.path.exists(invoice_schema_path):
-                            print(f"[INFO] invoiceSchemaファイル発見: {invoice_schema_path}")
+                            logger.info("invoiceSchemaファイル発見: %s", invoice_schema_path)
                             
                             # フォーム生成時に適切な親ウィジェットを指定（スクロール領域内に配置）
                             schema_form = create_schema_form_from_path(invoice_schema_path, self.scroll_widget)
                             
                             if schema_form:
-                                print("[INFO] インボイススキーマフォーム生成成功")
+                                logger.info("インボイススキーマフォーム生成成功")
                                 
                                 # フォームの親ウィジェットを明示的に設定
                                 schema_form.setParent(self.scroll_widget)
@@ -5109,15 +5113,15 @@ class BatchRegisterWidget(QWidget):
                                 # 表示関連メソッドを抑制
                                 schema_form.setVisible(False)  # いったん非表示
                                 
-                                print(f"[DEBUG] フォーム親ウィジェット設定完了: {type(self.scroll_widget)}")
-                                print(f"[DEBUG] フォームフラグ設定: {schema_form.windowFlags()}")
-                                print(f"[DEBUG] フォーム可視性制御: visible={schema_form.isVisible()}")
-                                print(f"[DEBUG] scroll_widget object id: {id(self.scroll_widget)}")
-                                print(f"[DEBUG] schema_form object id: {id(schema_form)}")
+                                logger.debug("フォーム親ウィジェット設定完了: %s", type(self.scroll_widget))
+                                logger.debug("フォームフラグ設定: %s", schema_form.windowFlags())
+                                logger.debug("フォーム可視性制御: visible=%s", schema_form.isVisible())
+                                logger.debug("scroll_widget object id: %s", id(self.scroll_widget))
+                                logger.debug("schema_form object id: %s", id(schema_form))
                                 
                                 # レイアウト重複確認
                                 widget_count_before = self.schema_form_layout.count()
-                                print(f"[DEBUG] フォーム追加前のレイアウト項目数: {widget_count_before}")
+                                logger.debug("フォーム追加前のレイアウト項目数: %s", widget_count_before)
                                 
                                 # プレースホルダーを非表示
                                 self.schema_placeholder_label.hide()
@@ -5131,33 +5135,33 @@ class BatchRegisterWidget(QWidget):
                                 schema_form.setVisible(True)  # レイアウト内でのみ表示
                                 
                                 widget_count_after = self.schema_form_layout.count()
-                                print(f"[DEBUG] フォーム追加後のレイアウト項目数: {widget_count_after}")
-                                print(f"[DEBUG] レイアウト追加後の可視性: {schema_form.isVisible()}")
-                                print(f"[DEBUG] レイアウト追加後の親: {type(schema_form.parent())}")
+                                logger.debug("フォーム追加後のレイアウト項目数: %s", widget_count_after)
+                                logger.debug("レイアウト追加後の可視性: %s", schema_form.isVisible())
+                                logger.debug("レイアウト追加後の親: %s", type(schema_form.parent()))
                                 
-                                print(f"[DEBUG] invoice_schema_form 設定完了: {type(schema_form)}")
-                                print("[INFO] インボイススキーマフォーム表示完了")
+                                logger.debug("invoice_schema_form 設定完了: %s", type(schema_form))
+                                logger.info("インボイススキーマフォーム表示完了")
                             else:
-                                print("[WARNING] スキーマフォーム生成失敗")
+                                logger.warning("スキーマフォーム生成失敗")
                                 # フォーム生成失敗時のみ空フォームを作成
                                 self._create_empty_schema_form()
                                 self.schema_placeholder_label.setText(f"データセット '{dataset_name}' のスキーマフォーム生成に失敗しました")
                                 self.schema_placeholder_label.show()
                         else:
-                            print(f"[INFO] invoiceSchemaファイル未発見: {invoice_schema_path}")
+                            logger.info("invoiceSchemaファイル未発見: %s", invoice_schema_path)
                             # インボイススキーマファイルがない場合のみ空フォームを作成
                             self._create_empty_schema_form()
                             self.schema_placeholder_label.setText(f"データセット '{dataset_name}' にはカスタム固有情報がありません")
                             self.schema_placeholder_label.show()
                     else:
-                        print("[DEBUG] テンプレートIDが無効")
+                        logger.debug("テンプレートIDが無効")
                         # テンプレートIDがない場合でも空フォームを作成
                         self._create_empty_schema_form()
                         self.schema_placeholder_label.setText(f"データセット '{dataset_name}' にテンプレートIDがありません")
                         self.schema_placeholder_label.show()
                     
                 except Exception as e:
-                    print(f"[WARNING] スキーマ処理失敗: {e}")
+                    logger.warning("スキーマ処理失敗: %s", e)
                     import traceback
                     traceback.print_exc()
                     
@@ -5166,16 +5170,16 @@ class BatchRegisterWidget(QWidget):
                     self.schema_placeholder_label.setText(f"データセット '{dataset_name}' のスキーマ処理でエラーが発生しました")
                     self.schema_placeholder_label.show()
             else:
-                print("[DEBUG] データセットIDが無効")
+                logger.debug("データセットIDが無効")
                 # データセットIDがない場合でも空フォームを作成
                 self._create_empty_schema_form()
                 self.schema_placeholder_label.setText("データセットを選択してください")
                 self.schema_placeholder_label.show()
             
-            print("[DEBUG] スキーマフォーム更新完了")
+            logger.debug("スキーマフォーム更新完了")
             
         except Exception as e:
-            print(f"[WARNING] スキーマフォーム更新エラー: {e}")
+            logger.warning("スキーマフォーム更新エラー: %s", e)
             import traceback
             traceback.print_exc()
             
@@ -5194,40 +5198,40 @@ class BatchRegisterWidget(QWidget):
             self.clear_schema_form()
             
         except Exception as e:
-            print(f"[WARNING] 動的フィールドクリアエラー: {e}")
+            logger.warning("動的フィールドクリアエラー: %s", e)
     
     def clear_schema_form(self):
         """スキーマフォームをクリア"""
         try:
             widget_count_before = self.schema_form_layout.count()
-            print(f"[DEBUG] フォームクリア開始：現在のレイアウト項目数={widget_count_before}")
+            logger.debug("フォームクリア開始：現在のレイアウト項目数=%s", widget_count_before)
             
             # 現在のフォーム参照状況をログ出力
-            print(f"[DEBUG] 現在のフォーム参照: schema_form={getattr(self, 'schema_form', None)}, invoice_schema_form={getattr(self, 'invoice_schema_form', None)}")
+            logger.debug("現在のフォーム参照: schema_form=%s, invoice_schema_form=%s", getattr(self, 'schema_form', None), getattr(self, 'invoice_schema_form', None))
             
             # 動的に生成されたフォーム要素を削除
             removed_count = 0
             for i in reversed(range(self.schema_form_layout.count())):
                 child = self.schema_form_layout.itemAt(i).widget()
                 if child and child != self.schema_placeholder_label:
-                    print(f"[DEBUG] ウィジェットを削除: {type(child).__name__}")
+                    logger.debug("ウィジェットを削除: %s", type(child).__name__)
                     child.setParent(None)
                     removed_count += 1
             
-            print(f"[DEBUG] 削除されたウィジェット数: {removed_count}")
+            logger.debug("削除されたウィジェット数: %s", removed_count)
             
             # フォーム参照をクリア
             self.schema_form = None
             self.invoice_schema_form = None
             
-            print(f"[DEBUG] フォーム参照クリア完了: schema_form={self.schema_form}, invoice_schema_form={self.invoice_schema_form}")
+            logger.debug("フォーム参照クリア完了: schema_form=%s, invoice_schema_form=%s", self.schema_form, self.invoice_schema_form)
             
             # プレースホルダーを表示
             self.schema_placeholder_label.setText("データセット選択後に固有情報入力フォームが表示されます")
             self.schema_placeholder_label.show()
             
         except Exception as e:
-            print(f"[WARNING] スキーマフォームクリアエラー: {e}")
+            logger.warning("スキーマフォームクリアエラー: %s", e)
     
     def _create_empty_schema_form(self):
         """空のインボイススキーマフォームを作成（参照確保用）"""
@@ -5262,10 +5266,10 @@ class BatchRegisterWidget(QWidget):
             self.schema_form = empty_form
             self.invoice_schema_form = empty_form
             
-            print(f"[DEBUG] 空のinvoice_schema_form作成完了: {type(empty_form)}")
+            logger.debug("空のinvoice_schema_form作成完了: %s", type(empty_form))
             
         except Exception as e:
-            print(f"[ERROR] 空フォーム作成エラー: {e}")
+            logger.error("空フォーム作成エラー: %s", e)
             # フォールバック: 最低限のオブジェクトを作成
             class EmptyForm:
                 def get_form_data(self):
@@ -5276,7 +5280,7 @@ class BatchRegisterWidget(QWidget):
                     pass
             
             self.invoice_schema_form = EmptyForm()
-            print(f"[DEBUG] フォールバック空フォーム作成: {type(self.invoice_schema_form)}")
+            logger.debug("フォールバック空フォーム作成: %s", type(self.invoice_schema_form))
 
     def apply_to_all_filesets(self):
         """現在の設定を全てのファイルセットに適用"""
@@ -5339,23 +5343,23 @@ class BatchRegisterWidget(QWidget):
     
     def refresh_fileset_display(self):
         """ファイルセット表示を更新"""
-        print(f"[DEBUG] refresh_fileset_display (2nd method): 呼び出された")
+        logger.debug("refresh_fileset_display (2nd method): 呼び出された")
         try:
-            print(f"[DEBUG] refresh_fileset_display (2nd method): fileset_table存在確認")
+            logger.debug("refresh_fileset_display (2nd method): fileset_table存在確認")
             if hasattr(self, 'fileset_table'):
-                print(f"[DEBUG] refresh_fileset_display (2nd method): fileset_table.refresh_data() 呼び出し")
+                logger.debug("refresh_fileset_display (2nd method): fileset_table.refresh_data() 呼び出し")
                 self.fileset_table.refresh_data()
-                print(f"[DEBUG] refresh_fileset_display (2nd method): fileset_table.refresh_data() 完了")
+                logger.debug("refresh_fileset_display (2nd method): fileset_table.refresh_data() 完了")
             else:
-                print(f"[DEBUG] refresh_fileset_display (2nd method): fileset_table 未存在")
+                logger.debug("refresh_fileset_display (2nd method): fileset_table 未存在")
             
             # ターゲットファイルセットコンボボックスを更新
             if hasattr(self, 'target_fileset_combo'):
-                print(f"[DEBUG] refresh_fileset_display (2nd method): target_fileset_combo 更新開始")
+                logger.debug("refresh_fileset_display (2nd method): target_fileset_combo 更新開始")
                 self.update_target_fileset_combo()
-                print(f"[DEBUG] refresh_fileset_display (2nd method): target_fileset_combo 更新完了")
+                logger.debug("refresh_fileset_display (2nd method): target_fileset_combo 更新完了")
         except Exception as e:
-            print(f"[ERROR] refresh_fileset_display (2nd method): {e}")
+            logger.error("refresh_fileset_display (2nd method): %s", e)
             import traceback
             traceback.print_exc()
     
@@ -5383,36 +5387,36 @@ class BatchRegisterWidget(QWidget):
             from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
             dataset_notifier = get_dataset_refresh_notifier()
             dataset_notifier.register_callback(self.refresh_dataset_list)
-            print("[INFO] 一括登録ウィジェット: データセット更新通知に登録完了")
+            logger.info("一括登録ウィジェット: データセット更新通知に登録完了")
             
             # ウィジェット破棄時の通知解除用
             def cleanup_callback():
                 dataset_notifier.unregister_callback(self.refresh_dataset_list)
-                print("[INFO] 一括登録ウィジェット: データセット更新通知を解除")
+                logger.info("一括登録ウィジェット: データセット更新通知を解除")
             
             self._cleanup_dataset_callback = cleanup_callback
             
         except Exception as e:
-            print(f"[WARNING] データセット更新通知への登録に失敗: {e}")
+            logger.warning("データセット更新通知への登録に失敗: %s", e)
     
     def refresh_dataset_list(self):
         """データセットリストを更新"""
         try:
             # dataset_dropdown_widgetがある場合は、それを使用して更新
             if hasattr(self, 'dataset_dropdown_widget') and self.dataset_dropdown_widget:
-                print("[INFO] 一括登録: dataset_dropdown_widget経由でデータセットリスト更新開始")
+                logger.info("一括登録: dataset_dropdown_widget経由でデータセットリスト更新開始")
                 # dataset_dropdown_widgetのrefresh機能を呼び出し
                 if hasattr(self.dataset_dropdown_widget, 'refresh_datasets'):
                     self.dataset_dropdown_widget.refresh_datasets()
-                    print("[INFO] 一括登録: dataset_dropdown_widget更新完了")
+                    logger.info("一括登録: dataset_dropdown_widget更新完了")
                 return
             
             # 代替手段：dataset_comboが存在する場合の処理
             if not hasattr(self, 'dataset_combo') or not self.dataset_combo or self.dataset_combo.parent() is None:
-                print("[DEBUG] データセットコンボボックスが破棄されているため更新をスキップ")
+                logger.debug("データセットコンボボックスが破棄されているため更新をスキップ")
                 return
             
-            print("[INFO] 一括登録: dataset_combo経由でデータセットリスト更新開始")
+            logger.info("一括登録: dataset_combo経由でデータセットリスト更新開始")
             
             # 現在選択されているアイテムのIDを保存
             current_dataset_id = None
@@ -5431,13 +5435,13 @@ class BatchRegisterWidget(QWidget):
                     item_data = self.dataset_combo.itemData(i)
                     if item_data and item_data.get("id") == current_dataset_id:
                         self.dataset_combo.setCurrentIndex(i)
-                        print(f"[INFO] 一括登録: データセット選択を復元: {current_dataset_id}")
+                        logger.info("一括登録: データセット選択を復元: %s", current_dataset_id)
                         break
             
-            print("[INFO] 一括登録: データセットリスト更新完了")
+            logger.info("一括登録: データセットリスト更新完了")
             
         except Exception as e:
-            print(f"[ERROR] 一括登録: データセットリスト更新に失敗: {e}")
+            logger.error("一括登録: データセットリスト更新に失敗: %s", e)
     
     def closeEvent(self, event):
         """ウィジェット終了時の処理"""
@@ -5445,7 +5449,7 @@ class BatchRegisterWidget(QWidget):
             if hasattr(self, '_cleanup_dataset_callback'):
                 self._cleanup_dataset_callback()
         except Exception as e:
-            print(f"[WARNING] データセット更新通知の解除に失敗: {e}")
+            logger.warning("データセット更新通知の解除に失敗: %s", e)
         super().closeEvent(event)
 
 
@@ -5629,12 +5633,12 @@ class FilesetConfigDialog(QDialog):
         # データセット選択・試料選択イベント接続（メインウィンドウと同様）
         if hasattr(self, 'dataset_combo'):
             self.dataset_combo.currentIndexChanged.connect(self.on_dialog_dataset_changed)
-            print("[DEBUG] ダイアログ: データセット選択イベント接続完了")
+            logger.debug("ダイアログ: データセット選択イベント接続完了")
         
         # 試料モード・試料選択イベント接続
         self.sample_mode_combo.currentTextChanged.connect(self.on_dialog_sample_mode_changed)
         self.sample_id_combo.currentIndexChanged.connect(self.on_dialog_sample_selected)
-        print("[DEBUG] ダイアログ: 試料関連イベント接続完了")
+        logger.debug("ダイアログ: 試料関連イベント接続完了")
         
     def on_dataset_focus_out(self, event):
         """データセット選択フォーカス外れ時の処理"""
@@ -5654,18 +5658,18 @@ class FilesetConfigDialog(QDialog):
                 
                 if found_index >= 0:
                     self.dataset_combo.setCurrentIndex(found_index)
-                    print(f"[INFO] データセット選択確定: {current_text}")
+                    logger.info("データセット選択確定: %s", current_text)
                     
         except Exception as e:
-            print(f"[WARNING] データセットフォーカス外れ処理エラー: {e}")
+            logger.warning("データセットフォーカス外れ処理エラー: %s", e)
     
     def on_dialog_dataset_changed(self, index):
         """ダイアログでのデータセット選択変更処理"""
         try:
-            print(f"[DEBUG] ダイアログ: データセット選択変更 index={index}")
+            logger.debug("ダイアログ: データセット選択変更 index=%s", index)
             
             if index < 0:
-                print("[DEBUG] ダイアログ: 無効なインデックス")
+                logger.debug("ダイアログ: 無効なインデックス")
                 return
             
             # 選択されたデータセット情報を取得
@@ -5675,13 +5679,13 @@ class FilesetConfigDialog(QDialog):
             if current_data:
                 if isinstance(current_data, dict) and 'id' in current_data:
                     dataset_id = current_data['id']
-                    print(f"[DEBUG] ダイアログ: 辞書からデータセットID取得: {dataset_id}")
+                    logger.debug("ダイアログ: 辞書からデータセットID取得: %s", dataset_id)
                 elif isinstance(current_data, str):
                     dataset_id = current_data
-                    print(f"[DEBUG] ダイアログ: 文字列データセットID: {dataset_id}")
+                    logger.debug("ダイアログ: 文字列データセットID: %s", dataset_id)
             
             if dataset_id:
-                print(f"[INFO] ダイアログ: データセット選択確定: {dataset_id}")
+                logger.info("ダイアログ: データセット選択確定: %s", dataset_id)
                 
                 # 試料リストを更新（メインウィンドウと同じ処理）
                 self.update_dialog_sample_list(dataset_id)
@@ -5690,17 +5694,17 @@ class FilesetConfigDialog(QDialog):
                 self.update_dialog_schema_form()
                 
             else:
-                print("[DEBUG] ダイアログ: データセットIDなし")
+                logger.debug("ダイアログ: データセットIDなし")
                 
         except Exception as e:
-            print(f"[WARNING] ダイアログ: データセット選択変更エラー: {e}")
+            logger.warning("ダイアログ: データセット選択変更エラー: %s", e)
             import traceback
             traceback.print_exc()
     
     def update_dialog_sample_list(self, dataset_id):
         """ダイアログ用のサンプル一覧更新"""
         try:
-            print(f"[DEBUG] ダイアログ: サンプル一覧更新開始: dataset_id={dataset_id}")
+            logger.debug("ダイアログ: サンプル一覧更新開始: dataset_id=%s", dataset_id)
             
             # サンプルコンボボックスをクリア
             self.sample_id_combo.clear()
@@ -5721,7 +5725,7 @@ class FilesetConfigDialog(QDialog):
                             break
                     
                     if target_dataset:
-                        print(f"[DEBUG] ダイアログ: 対象データセット取得成功: {target_dataset.get('attributes', {}).get('name', '')}")
+                        logger.debug("ダイアログ: 対象データセット取得成功: %s", target_dataset.get('attributes', {}).get('name', ''))
                         
                         # メインウィンドウと同じサブグループID取得ロジック
                         group_id = None
@@ -5735,7 +5739,7 @@ class FilesetConfigDialog(QDialog):
                                 from config.common import get_dynamic_file_path
                                 
                                 dataset_json_path = get_dynamic_file_path(f'output/rde/data/datasets/{dataset_id_for_file}.json')
-                                print(f"[DEBUG] ダイアログ: データセットファイル確認: {dataset_json_path}")
+                                logger.debug("ダイアログ: データセットファイル確認: %s", dataset_json_path)
                                 
                                 if os.path.exists(dataset_json_path):
                                     import json
@@ -5744,9 +5748,9 @@ class FilesetConfigDialog(QDialog):
                                         relationships = dataset_data.get("data", {}).get('relationships', {})
                                         group = relationships.get('group', {}).get('data', {})
                                         group_id = group.get('id', '')
-                                        print(f"[DEBUG] ダイアログ: データセットファイルからグループID取得: {group_id}")
+                                        logger.debug("ダイアログ: データセットファイルからグループID取得: %s", group_id)
                                 else:
-                                    print(f"[DEBUG] ダイアログ: データセットファイルが存在しません: {dataset_json_path}")
+                                    logger.debug("ダイアログ: データセットファイルが存在しません: %s", dataset_json_path)
                             
                             # 方法2: フォールバック - APIレスポンスから直接取得
                             if not group_id:
@@ -5757,57 +5761,57 @@ class FilesetConfigDialog(QDialog):
                                 
                                 if group_data and group_data.get('id'):
                                     group_id = group_data.get('id')
-                                    print(f"[DEBUG] ダイアログ: APIレスポンスからグループID取得: {group_id}")
+                                    logger.debug("ダイアログ: APIレスポンスからグループID取得: %s", group_id)
                             
                         except Exception as e:
-                            print(f"[WARNING] ダイアログ: グループID取得エラー: {e}")
+                            logger.warning("ダイアログ: グループID取得エラー: %s", e)
                             import traceback
                             traceback.print_exc()
                         
                         if group_id:
-                            print(f"[DEBUG] ダイアログ: 最終決定グループID: {group_id}")
+                            logger.debug("ダイアログ: 最終決定グループID: %s", group_id)
                             
                             # 通常登録のsample_loaderを使用
                             from classes.data_entry.util.sample_loader import load_existing_samples, format_sample_display_name
                             
                             existing_samples = load_existing_samples(group_id)
-                            print(f"[DEBUG] ダイアログ: 既存試料データ取得: {len(existing_samples)}件")
+                            logger.debug("ダイアログ: 既存試料データ取得: %s件", len(existing_samples))
                             
                             if existing_samples:
                                 for sample in existing_samples:
                                     display_name = format_sample_display_name(sample)
                                     self.sample_id_combo.addItem(display_name, sample)
-                                    print(f"[DEBUG] ダイアログ: 既存試料追加: {display_name}")
+                                    logger.debug("ダイアログ: 既存試料追加: %s", display_name)
                                 
-                                print(f"[INFO] ダイアログ: 既存試料をコンボボックスに追加完了: {len(existing_samples)}件")
+                                logger.info("ダイアログ: 既存試料をコンボボックスに追加完了: %s件", len(existing_samples))
                             else:
-                                print("[DEBUG] ダイアログ: 既存試料データなし")
+                                logger.debug("ダイアログ: 既存試料データなし")
                                 self.sample_id_combo.addItem("（既存試料なし）", None)
                         else:
-                            print("[WARNING] ダイアログ: グループID/サブグループIDが取得できません")
+                            logger.warning("ダイアログ: グループID/サブグループIDが取得できません")
                             self.sample_id_combo.addItem("（グループ情報取得失敗）", None)
                     else:
-                        print(f"[WARNING] ダイアログ: 対象データセットが見つかりません: {dataset_id}")
+                        logger.warning("ダイアログ: 対象データセットが見つかりません: %s", dataset_id)
                     
                 except Exception as e:
-                    print(f"[WARNING] ダイアログ: サンプル情報取得失敗: {e}")
+                    logger.warning("ダイアログ: サンプル情報取得失敗: %s", e)
                     import traceback
                     traceback.print_exc()
                     self.sample_id_combo.addItem("（サンプル取得失敗）", None)
             else:
-                print("[DEBUG] ダイアログ: データセットIDが無効")
+                logger.debug("ダイアログ: データセットIDが無効")
             
-            print(f"[DEBUG] ダイアログ: サンプル一覧更新完了: {self.sample_id_combo.count()}個の選択肢")
+            logger.debug("ダイアログ: サンプル一覧更新完了: %s個の選択肢", self.sample_id_combo.count())
             
         except Exception as e:
-            print(f"[WARNING] ダイアログ: サンプル一覧更新エラー: {e}")
+            logger.warning("ダイアログ: サンプル一覧更新エラー: %s", e)
             import traceback
             traceback.print_exc()
     
     def on_dialog_sample_mode_changed(self, mode):
         """ダイアログ: 試料モード変更時の処理"""
         try:
-            print(f"[DEBUG] ダイアログ: 試料モード変更: {mode}")
+            logger.debug("ダイアログ: 試料モード変更: %s", mode)
             
             if mode == "既存試料を使用":
                 # 既存試料コンボボックスを有効化し、試料リストを更新
@@ -5815,7 +5819,7 @@ class FilesetConfigDialog(QDialog):
                 self.sample_name_edit.setEnabled(False)
                 self.sample_description_edit.setEnabled(False)
                 self.sample_composition_edit.setEnabled(False)
-                print("[DEBUG] ダイアログ: 既存試料使用モード")
+                logger.debug("ダイアログ: 既存試料使用モード")
                 
                 # 現在選択されているデータセットの試料リストを再取得
                 current_data = self.dataset_combo.currentData()
@@ -5826,7 +5830,7 @@ class FilesetConfigDialog(QDialog):
                     dataset_id = current_data
                 
                 if dataset_id:
-                    print(f"[DEBUG] ダイアログ: 既存試料使用モード - 試料リスト更新")
+                    logger.debug("ダイアログ: 既存試料使用モード - 試料リスト更新")
                     self.update_dialog_sample_list(dataset_id)
                 
             elif mode == "新規試料を作成":
@@ -5839,20 +5843,20 @@ class FilesetConfigDialog(QDialog):
                 self.sample_name_edit.clear()
                 self.sample_description_edit.clear()
                 self.sample_composition_edit.clear()
-                print("[DEBUG] ダイアログ: 新規作成モード")
+                logger.debug("ダイアログ: 新規作成モード")
                 
         except Exception as e:
-            print(f"[WARNING] ダイアログ: 試料モード変更エラー: {e}")
+            logger.warning("ダイアログ: 試料モード変更エラー: %s", e)
             import traceback
             traceback.print_exc()
     
     def on_dialog_sample_selected(self, index):
         """ダイアログ: 既存試料選択時の処理"""
         try:
-            print(f"[DEBUG] ダイアログ: 既存試料選択: index={index}")
+            logger.debug("ダイアログ: 既存試料選択: index=%s", index)
             
             if index <= 0:  # 最初のアイテム（プレースホルダー）の場合
-                print("[DEBUG] ダイアログ: プレースホルダー選択 - フィールドをクリア")
+                logger.debug("ダイアログ: プレースホルダー選択 - フィールドをクリア")
                 self.sample_name_edit.clear()
                 self.sample_description_edit.clear()
                 self.sample_composition_edit.clear()
@@ -5861,7 +5865,7 @@ class FilesetConfigDialog(QDialog):
             # 選択された試料データを取得
             current_data = self.sample_id_combo.currentData()
             if current_data and isinstance(current_data, dict):
-                print(f"[DEBUG] ダイアログ: 既存試料データ取得成功: {current_data.get('name', '')}")
+                logger.debug("ダイアログ: 既存試料データ取得成功: %s", current_data.get('name', ''))
                 
                 # 既存試料情報を入力フィールドに表示
                 sample_name = current_data.get('name', '')
@@ -5878,19 +5882,19 @@ class FilesetConfigDialog(QDialog):
                 self.sample_composition_edit.setText(sample_composition)
                 self.sample_composition_edit.setEnabled(False)
                 
-                print(f"[INFO] ダイアログ: 既存試料情報を表示: {sample_name}")
+                logger.info("ダイアログ: 既存試料情報を表示: %s", sample_name)
             else:
-                print("[WARNING] ダイアログ: 既存試料データが取得できません")
+                logger.warning("ダイアログ: 既存試料データが取得できません")
                 
         except Exception as e:
-            print(f"[WARNING] ダイアログ: 既存試料選択エラー: {e}")
+            logger.warning("ダイアログ: 既存試料選択エラー: %s", e)
             import traceback
             traceback.print_exc()
     
     def update_dialog_schema_form(self):
         """ダイアログ用スキーマフォーム更新"""
         try:
-            print("[DEBUG] ダイアログ: スキーマフォーム更新開始")
+            logger.debug("ダイアログ: スキーマフォーム更新開始")
             # 既存のスキーマフォームを完全クリア（多重表示防止）
             if hasattr(self, 'dialog_schema_form_layout'):
                 for i in reversed(range(self.dialog_schema_form_layout.count())):
@@ -5898,7 +5902,7 @@ class FilesetConfigDialog(QDialog):
                     if child and child != getattr(self, 'dialog_schema_placeholder_label', None):
                         child.setParent(None)
             self.dialog_schema_form = None
-            print("[DEBUG] ダイアログ: 既存スキーマフォーム完全クリア")
+            logger.debug("ダイアログ: 既存スキーマフォーム完全クリア")
 
             # プレースホルダーを非表示
             if hasattr(self, 'dialog_schema_placeholder_label'):
@@ -5908,7 +5912,7 @@ class FilesetConfigDialog(QDialog):
             current_data = self.dataset_combo.currentData()
 
             if not current_data or not isinstance(current_data, dict):
-                print("[DEBUG] ダイアログ: データセット情報なし")
+                logger.debug("ダイアログ: データセット情報なし")
                 if hasattr(self, 'dialog_schema_placeholder_label'):
                     self.dialog_schema_placeholder_label.setText("データセットを選択してください")
                     self.dialog_schema_placeholder_label.show()
@@ -5921,7 +5925,7 @@ class FilesetConfigDialog(QDialog):
             relationships = current_data.get('relationships', {})
             
             if dataset_id:
-                print(f"[INFO] ダイアログ: スキーマフォーム生成: {dataset_name} ({dataset_id})")
+                logger.info("ダイアログ: スキーマフォーム生成: %s (%s)", dataset_name, dataset_id)
                 
                 try:
                     # 通常登録と同じ方法でテンプレートIDを取得
@@ -5930,7 +5934,7 @@ class FilesetConfigDialog(QDialog):
                     if isinstance(template, dict):
                         template_id = template.get('id', '')
                     
-                    print(f"[DEBUG] ダイアログ: テンプレートID: {template_id}")
+                    logger.debug("ダイアログ: テンプレートID: %s", template_id)
                     
                     if template_id:
                         # 通常登録と同じパスでinvoiceSchemaを確認
@@ -5939,41 +5943,41 @@ class FilesetConfigDialog(QDialog):
                         
                         invoice_schema_path = get_dynamic_file_path(f'output/rde/data/invoiceSchemas/{template_id}.json')
                         
-                        print(f"[DEBUG] ダイアログ: invoiceSchemaファイル確認: {invoice_schema_path}")
+                        logger.debug("ダイアログ: invoiceSchemaファイル確認: %s", invoice_schema_path)
                         
                         import os
                         if os.path.exists(invoice_schema_path):
-                            print(f"[INFO] ダイアログ: invoiceSchemaファイル発見: {invoice_schema_path}")
+                            logger.info("ダイアログ: invoiceSchemaファイル発見: %s", invoice_schema_path)
                             
                             # 通常登録と同じ方法でフォーム生成
                             schema_form = create_schema_form_from_path(invoice_schema_path, self)
                             
                             if schema_form:
-                                print("[INFO] ダイアログ: インボイススキーマフォーム生成成功")
+                                logger.info("ダイアログ: インボイススキーマフォーム生成成功")
                                 
                                 # 動的生成フォームを追加
                                 self.dialog_schema_form_layout.addWidget(schema_form)
                                 self.dialog_schema_form = schema_form  # 保存（後で値取得で使用）
                                 
-                                print("[INFO] ダイアログ: インボイススキーマフォーム表示完了")
+                                logger.info("ダイアログ: インボイススキーマフォーム表示完了")
                             else:
-                                print("[WARNING] ダイアログ: スキーマフォーム生成失敗")
+                                logger.warning("ダイアログ: スキーマフォーム生成失敗")
                                 if hasattr(self, 'dialog_schema_placeholder_label'):
                                     self.dialog_schema_placeholder_label.setText(f"データセット '{dataset_name}' のスキーマフォーム生成に失敗しました")
                                     self.dialog_schema_placeholder_label.show()
                         else:
-                            print(f"[WARNING] ダイアログ: invoiceSchemaファイルが存在しません: {invoice_schema_path}")
+                            logger.warning("ダイアログ: invoiceSchemaファイルが存在しません: %s", invoice_schema_path)
                             if hasattr(self, 'dialog_schema_placeholder_label'):
                                 self.dialog_schema_placeholder_label.setText(f"データセット '{dataset_name}' のスキーマファイルが見つかりません")
                                 self.dialog_schema_placeholder_label.show()
                     else:
-                        print("[WARNING] ダイアログ: テンプレートIDなし")
+                        logger.warning("ダイアログ: テンプレートIDなし")
                         if hasattr(self, 'dialog_schema_placeholder_label'):
                             self.dialog_schema_placeholder_label.setText(f"データセット '{dataset_name}' にテンプレート情報がありません")
                             self.dialog_schema_placeholder_label.show()
                         
                 except Exception as e:
-                    print(f"[WARNING] ダイアログ: スキーマフォーム処理エラー: {e}")
+                    logger.warning("ダイアログ: スキーマフォーム処理エラー: %s", e)
                     import traceback
                     traceback.print_exc()
                     if hasattr(self, 'dialog_schema_placeholder_label'):
@@ -5981,7 +5985,7 @@ class FilesetConfigDialog(QDialog):
                         self.dialog_schema_placeholder_label.show()
                         
         except Exception as e:
-            print(f"[WARNING] ダイアログ: スキーマフォーム更新エラー: {e}")
+            logger.warning("ダイアログ: スキーマフォーム更新エラー: %s", e)
             import traceback
             traceback.print_exc()
     
@@ -6000,7 +6004,7 @@ class FilesetConfigDialog(QDialog):
             
             # データセット設定（メインウィンドウと同じ処理）
             if hasattr(self.fileset, 'dataset_id') and self.fileset.dataset_id:
-                print(f"[DEBUG] ダイアログ: データセットID={self.fileset.dataset_id}を設定中")
+                logger.debug("ダイアログ: データセットID=%sを設定中", self.fileset.dataset_id)
                 # データセットIDで検索してコンボボックスを設定
                 found = False
                 for i in range(self.dataset_combo.count()):
@@ -6013,15 +6017,15 @@ class FilesetConfigDialog(QDialog):
                         dataset_id = item_data
                     
                     if dataset_id == self.fileset.dataset_id:
-                        print(f"[DEBUG] ダイアログ: データセットコンボボックス インデックス{i}を選択")
+                        logger.debug("ダイアログ: データセットコンボボックス インデックス%sを選択", i)
                         self.dataset_combo.setCurrentIndex(i)
                         found = True
                         break
                 if not found:
-                    print(f"[WARNING] ダイアログ: データセットID {self.fileset.dataset_id} がコンボボックスに見つかりません")
+                    logger.warning("ダイアログ: データセットID %s がコンボボックスに見つかりません", self.fileset.dataset_id)
                     self.dataset_combo.setCurrentIndex(-1)
             else:
-                print("[DEBUG] ダイアログ: データセット未設定")
+                logger.debug("ダイアログ: データセット未設定")
                 self.dataset_combo.setCurrentIndex(-1)
             
             # 拡張設定
@@ -6040,7 +6044,7 @@ class FilesetConfigDialog(QDialog):
                 self.sample_composition_edit.setText(config.get('sample_composition', ''))
                 
         except Exception as e:
-            print(f"[WARNING] ファイルセットデータ読み込みエラー: {e}")
+            logger.warning("ファイルセットデータ読み込みエラー: %s", e)
     
     def accept_changes(self):
         """変更を適用してダイアログを閉じる"""
@@ -6090,14 +6094,14 @@ class FilesetConfigDialog(QDialog):
             
         except Exception as e:
             QMessageBox.critical(self, "エラー", f"設定の保存に失敗しました:\n{e}")
-            print(f"[ERROR] accept_changes: {e}")
+            logger.error("accept_changes: %s", e)
 
 
 # BatchRegisterWidget に一時フォルダ管理メソッドを追加
 def _prepare_temp_folders(self):
     """一時フォルダ準備（フラット化・ZIP化対応）"""
     try:
-        print("[INFO] 一時フォルダ準備を開始")
+        logger.info("一時フォルダ準備を開始")
         
         if not self.file_set_manager or not self.file_set_manager.file_sets:
             return
@@ -6118,23 +6122,23 @@ def _prepare_temp_folders(self):
                         'temp_created': True
                     })
                     
-                    print(f"[INFO] ファイルセット '{file_set.name}' の一時フォルダを作成: {temp_dir}")
+                    logger.info("ファイルセット '%s' の一時フォルダを作成: %s", file_set.name, temp_dir)
                     
                 except Exception as e:
-                    print(f"[ERROR] ファイルセット '{file_set.name}' の一時フォルダ作成エラー: {e}")
+                    logger.error("ファイルセット '%s' の一時フォルダ作成エラー: %s", file_set.name, e)
                     # エラーがあっても処理を続行
                     continue
         
-        print("[INFO] 一時フォルダ準備完了")
+        logger.info("一時フォルダ準備完了")
         
     except Exception as e:
-        print(f"[ERROR] 一時フォルダ準備処理エラー: {e}")
+        logger.error("一時フォルダ準備処理エラー: %s", e)
         raise
 
 def cleanup_temp_folders_on_init(self):
     """初期化時に既存の一時フォルダをクリーンアップ（UUID対応版）"""
     try:
-        print("[INFO] 既存一時フォルダのクリーンアップを開始")
+        logger.info("既存一時フォルダのクリーンアップを開始")
         
         # 新しいUUID管理方式で全てクリーンアップ
         self.temp_folder_manager.cleanup_all_temp_folders()
@@ -6142,16 +6146,16 @@ def cleanup_temp_folders_on_init(self):
         # 孤立したフォルダも削除（file_setsは初期化時は空なのですべて孤立扱い）
         orphaned_count = self.temp_folder_manager.cleanup_orphaned_temp_folders([])
         
-        print(f"[INFO] 既存一時フォルダのクリーンアップ完了（孤立フォルダ {orphaned_count} 個削除）")
+        logger.info("既存一時フォルダのクリーンアップ完了（孤立フォルダ %s 個削除）", orphaned_count)
     except Exception as e:
-        print(f"[WARNING] 一時フォルダクリーンアップエラー: {e}")
+        logger.warning("一時フォルダクリーンアップエラー: %s", e)
 
 def auto_apply_settings_to_selected(self):
     """選択されたファイルセットに現在の設定を自動適用"""
     try:
         # ファイルセット復元処理中の場合は自動適用をスキップ
         if getattr(self, '_restoring_fileset', False):
-            print("[DEBUG] ファイルセット復元中のため自動設定適用をスキップ")
+            logger.debug("ファイルセット復元中のため自動設定適用をスキップ")
             return
             
         # ターゲットファイルセットコンボボックスが存在し、選択されている場合のみ
@@ -6172,11 +6176,11 @@ def auto_apply_settings_to_selected(self):
                     if settings:
                         # 新しい方式の適用メソッドを使用（2つの引数）
                         self._apply_settings_to_fileset(target_fileset, settings)
-                        print(f"[INFO] 設定をファイルセット '{target_name}' に自動適用しました")
+                        logger.info("設定をファイルセット '%s' に自動適用しました", target_name)
                         # テーブル表示を更新
                         QTimer.singleShot(100, self.refresh_fileset_display)
     except Exception as e:
-        print(f"[WARNING] 設定自動適用エラー: {e}")
+        logger.warning("設定自動適用エラー: %s", e)
 
     def show_data_tree_dialog(self, fileset: FileSet):
         """データツリー選択ダイアログを表示"""
@@ -6192,7 +6196,7 @@ def auto_apply_settings_to_selected(self):
                         f"ファイルセット '{fileset.name}' を更新しました。\n"
                         f"選択ファイル数: {len(selected_files)}個")
         except Exception as e:
-            print(f"[ERROR] show_data_tree_dialog: {e}")
+            logger.error("show_data_tree_dialog: %s", e)
             QMessageBox.warning(self, "エラー", f"データツリーダイアログの表示に失敗しました: {str(e)}")
     
     def _create_mapping_file(self, file_set):
@@ -6241,7 +6245,7 @@ def auto_apply_settings_to_selected(self):
                 file_set.items.append(mapping_file_item)
             
         except Exception as e:
-            print(f"[ERROR] _create_mapping_file: {e}")
+            logger.error("_create_mapping_file: %s", e)
             raise e
     
     def _get_mapping_file_path_for_fileset(self, file_set):

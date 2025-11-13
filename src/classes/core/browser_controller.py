@@ -7,6 +7,7 @@ WebView管理・URL変更・ページナビゲーション・JavaScript実行機
 
 import os
 import logging
+import re
 from qt_compat.core import QTimer, QUrl
 from qt_compat.webengine import QWebEngineView
 from config.common import get_dynamic_file_path
@@ -15,6 +16,25 @@ from functions.common_funcs import load_js_template
 from classes.utils.debug_log import debug_log
 
 logger = logging.getLogger(__name__)
+
+
+def mask_sensitive_url(url: str) -> str:
+    """
+    URL中の機密情報（#以降のstate, code, tokenなど）をマスクする
+    
+    Args:
+        url: マスク対象のURL文字列
+        
+    Returns:
+        機密情報がマスクされたURL文字列
+    """
+    # #より後ろがある場合、機密情報としてマスク
+    if '#' in url:
+        base_url, fragment = url.split('#', 1)
+        # fragmentが存在する場合はマスク
+        if fragment:
+            return f"{base_url}#[MASKED]"
+    return url
 
 class BrowserController:
     """ブラウザ制御機能を管理するクラス"""
@@ -67,7 +87,8 @@ class BrowserController:
         current_url = self.parent.webview.url().toString()
         
         if ok:
-            self.logger.info(f"[LOAD] ✅ ページロード完了: {current_url}")
+            # 機密情報をマスクしてログ出力
+            self.logger.info(f"[LOAD] ✅ ページロード完了: {mask_sensitive_url(current_url)}")
             
             # v1.20.3: エラーページ検出
             self._check_error_page(current_url)

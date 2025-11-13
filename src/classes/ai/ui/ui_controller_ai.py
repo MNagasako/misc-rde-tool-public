@@ -7,6 +7,9 @@ import os
 import json
 import datetime
 
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 class UIControllerAI:
     """UIコントローラーのAI機能専門クラス"""
     
@@ -35,7 +38,9 @@ class UIControllerAI:
             self.ai_data_manager = AIDataManager(self.logger)
             self._force_log("AIDataManager初期化完了", "init")
         except Exception as e:
+            import traceback
             self.logger.error(f"AIDataManager初期化失敗: {e}")
+            traceback.print_exc()
             self.ai_data_manager = None
             self._force_log(f"AIDataManager初期化失敗: {e}", "init")
         
@@ -74,7 +79,7 @@ class UIControllerAI:
                     widget.isVisible()
                     return widget
                 except RuntimeError:
-                    print(f"[WARNING] {attr_name} (self) が削除されています")
+                    logger.warning("%s (self) が削除されています", attr_name)
         
         # 2. 親の表示オブジェクトがあればそれを使用
         if hasattr(self.parent, attr_name):
@@ -85,7 +90,7 @@ class UIControllerAI:
                     widget.isVisible()
                     return widget
                 except RuntimeError:
-                    print(f"[WARNING] {attr_name} (parent) が削除されています")
+                    logger.warning("%s (parent) が削除されています", attr_name)
         
         # 3. フォールバック: ダミーオブジェクトを返す
         return self._get_dummy_display(display_type)
@@ -105,10 +110,10 @@ class UIControllerAI:
                 self.type_name = type_name.upper()
                 
             def append(self, text):
-                print(f"[AI_{self.type_name}] {text}")
+                logger.debug("[AI_%s] %s", self.type_name, text)
                 
             def clear(self):
-                print(f"[AI_{self.type_name}] Cleared")
+                logger.debug("[AI_%s] Cleared", self.type_name)
                 
         return DummyDisplay(display_type)
     
@@ -125,14 +130,14 @@ class UIControllerAI:
                 f.write(log_entry)
             
             # コンソールログ
-            print(f"[FORCE_LOG] {log_entry.strip()}")
+            logger.debug("[FORCE_LOG] %s", log_entry.strip())
             
             # UI表示ログ（利用可能な場合）
             if hasattr(self.parent, 'ai_response_display') and self.parent.ai_response_display:
                 self.parent.ai_response_display.append(f"[FORCE_LOG] {message}")
                 
         except Exception as e:
-            print(f"[FORCE_LOG_ERROR] ログ書き込みエラー: {e}")
+            logger.error("[FORCE_LOG_ERROR] ログ書き込みエラー: %s", e)
     
     
     def execute_ai_analysis(self):
@@ -816,7 +821,7 @@ class UIControllerAI:
             try:
                 self.parent.hide_progress()
             except RuntimeError as re:
-                print(f"[WARNING] hide_progress failed (Widget deleted): {re}")
+                logger.warning("hide_progress failed (Widget deleted): %s", re)
                 
         except Exception as e:
             try:
@@ -832,7 +837,7 @@ class UIControllerAI:
             try:
                 self.parent.hide_progress()
             except RuntimeError as re:
-                print(f"[WARNING] hide_progress failed (Widget deleted): {re}")
+                logger.warning("hide_progress failed (Widget deleted): %s", re)
 
     def _load_static_file(self, file_name):
         """静的ファイルを読み込み"""
@@ -893,9 +898,9 @@ class UIControllerAI:
                 ai_test_widget.arim_exp_radio):
                 use_arim_data = (ai_test_widget.arim_exp_radio.isChecked() and 
                                ai_test_widget.arim_exp_radio.isEnabled())
-                print(f"[DEBUG] AIテストウィジェットからデータソース状態取得: use_arim_data={use_arim_data}")
+                logger.debug("AIテストウィジェットからデータソース状態取得: use_arim_data=%s", use_arim_data)
             else:
-                print("[DEBUG] AIテストウィジェット状態が取得できません、標準データを使用")
+                logger.debug("AIテストウィジェット状態が取得できません、標準データを使用")
             
             # AIDataManagerを使用して実験データを取得
             if hasattr(self.parent_controller, 'ai_data_manager') and self.parent_controller.ai_data_manager:
@@ -1287,7 +1292,7 @@ class UIControllerAI:
             import datetime
             self.parent.last_request_content = prompt
             self.parent.last_request_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            print(f"[DEBUG] send_ai_prompt: リクエスト保存完了 - 長さ: {len(prompt)} 文字")
+            logger.debug("send_ai_prompt: リクエスト保存完了 - 長さ: %s 文字", len(prompt))
             
             # ログ表示（ログ・DEBUG・JSON用）
             try:
@@ -1417,7 +1422,7 @@ class UIControllerAI:
                     response_display.append(f"[ERROR] プロンプト送信中にエラーが発生: {e}")
             except:
                 pass
-            print(f"[DEBUG] send_ai_prompt Exception: {e}")
+            logger.debug("send_ai_prompt Exception: %s", e)
             import traceback
             traceback.print_exc()
             
@@ -1714,7 +1719,7 @@ class UIControllerAI:
             elif hasattr(self.parent, 'force_log'):
                 self.parent.force_log(f"AIプロバイダー: {provider}, AIモデル: {model}", "DEBUG")
             else:
-                print(f"[DEBUG] AIプロバイダー: {provider}, AIモデル: {model}")
+                logger.debug("AIプロバイダー: %s, AIモデル: %s", provider, model)
         except:
             pass
         

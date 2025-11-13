@@ -28,8 +28,8 @@ import os
 # 1. ドキュメント: VERSION.txt, README.md, RELEASE_NOTES_v*.md
 # 2. 各クラスファイル: ヘッダーコメント内のバージョン番号
 # 3. このREVISION変数（マスター管理）
-# 2025-11-12: v2.0.5 - truststore統合SSL検証強化・APIログ機能・プロキシ再起動プロンプト実装
-REVISION = "2.0.5"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+# 2025-11-13: v2.0.6 - バージョン管理統一・ドキュメント更新・品質改善継続
+REVISION = "2.0.6"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
 # 2025-11-11: v2.0.3 - ログインUI完全簡素化・手動ログイン実行機能・トークン管理2ホスト固定
 # 2025-11-08: v2.0.0 - PyQt5→PySide6完全移行（破壊的変更）・blob画像取得修復・JavaScript連携改善
 # 2025-11-07: v1.20.0 - データポータル統合機能完全実装・JSON/画像アップロード・修正機能・ステータス管理
@@ -291,37 +291,37 @@ def save_bearer_token(token, host: str = 'rde.nims.go.jp') -> bool:
         
         # 既存のトークンを読み込み
         logger.debug(f"[TOKEN-SAVE] 既存トークンを読み込み: {BEARER_TOKENS_FILE}")
-        print(f"[TOKEN-SAVE] 保存開始 - host={host}, token={token_preview}...")
+        logger.debug("保存開始 - host=%s, token=%s...", host, token_preview)
         tokens = load_all_bearer_tokens()
-        print(f"[TOKEN-SAVE] 既存トークン数: {len(tokens)}, ホスト: {list(tokens.keys())}")
+        logger.debug("既存トークン数: %s, ホスト: %s", len(tokens), list(tokens.keys()))
         
         # 新しいトークンを追加
         tokens[host] = token
         logger.info(f"[TOKEN-SAVE] トークンを追加: host={host}, token={token_preview}...")
-        print(f"[TOKEN-SAVE] 追加後トークン数: {len(tokens)}, ホスト: {list(tokens.keys())}")
+        logger.debug("追加後トークン数: %s, ホスト: %s", len(tokens), list(tokens.keys()))
         
         # JSON形式で保存
         logger.debug(f"[TOKEN-SAVE] JSON形式で保存: {BEARER_TOKENS_FILE}")
         with open(BEARER_TOKENS_FILE, 'w', encoding='utf-8') as f:
             _json.dump(tokens, f, indent=2, ensure_ascii=False)
         logger.info(f"[TOKEN-SAVE] JSON保存完了: {len(tokens)}個のトークン")
-        print(f"[TOKEN-SAVE] JSON保存完了: {BEARER_TOKENS_FILE}")
+        logger.debug("JSON保存完了: %s", BEARER_TOKENS_FILE)
         
         # 保存後の確認
         saved_tokens = load_all_bearer_tokens()
-        print(f"[TOKEN-SAVE] 保存確認 - ホスト数: {len(saved_tokens)}, ホスト: {list(saved_tokens.keys())}")
+        logger.debug("保存確認 - ホスト数: %s, ホスト: %s", len(saved_tokens), list(saved_tokens.keys()))
         for saved_host, saved_token in saved_tokens.items():
             if isinstance(saved_token, dict):
                 token_str = saved_token.get('access_token', '')
-                print(f"[TOKEN-SAVE]   {saved_host}: {token_str[:20]}... (TokenManager形式)")
+                logger.debug("%s: %s... (TokenManager形式)", saved_host, token_str[:20])
             else:
-                print(f"[TOKEN-SAVE]   {saved_host}: {saved_token[:20]}...")
+                logger.debug("%s: %s...", saved_host, saved_token[:20])
         
         # v2.0.3: レガシーファイル（bearer_token.txt）への保存は廃止
         
         return True
     except Exception as e:
-        print(f"[TOKEN-SAVE] Bearer Token保存エラー ({host}): {e}")
+        logger.debug("Bearer Token保存エラー (%s): %s", host, e)
         logger.error(f"Bearer Token保存エラー ({host}): {e}")
         return False
 
@@ -342,16 +342,16 @@ def load_bearer_token(host: str = 'rde.nims.go.jp') -> Optional[str]:
         import logging
         logger = logging.getLogger(__name__)
         
-        print(f"[TOKEN-LOAD] トークン読み込み開始 - host={host}")
+        logger.debug("トークン読み込み開始 - host=%s", host)
         logger.debug(f"[TOKEN-LOAD] トークン読み込み開始: host={host}")
         
         # 新形式のJSONファイルから読み込み
         if os.path.exists(BEARER_TOKENS_FILE):
             logger.debug(f"[TOKEN-LOAD] JSON形式トークンファイル読み込み: {BEARER_TOKENS_FILE}")
-            print(f"[TOKEN-LOAD] JSONファイルから読み込み中...")
+            logger.debug("JSONファイルから読み込み中...")
             with open(BEARER_TOKENS_FILE, 'r', encoding='utf-8') as f:
                 tokens = _json.load(f)
-                print(f"[TOKEN-LOAD] ファイル内のホスト数: {len(tokens)}, ホスト: {list(tokens.keys())}")
+                logger.debug("ファイル内のホスト数: %s, ホスト: %s", len(tokens), list(tokens.keys()))
                 if host in tokens:
                     token_data = tokens[host]
                     
@@ -360,30 +360,30 @@ def load_bearer_token(host: str = 'rde.nims.go.jp') -> Optional[str]:
                         access_token = token_data.get('access_token', '')
                         if access_token:
                             logger.info(f"[TOKEN-LOAD] トークン読み込み成功 ({host}): {access_token[:20]}... (TokenManager形式)")
-                            print(f"[TOKEN-LOAD] トークン取得成功 (TokenManager形式) - host={host}, token={access_token[:20]}...")
+                            logger.debug("トークン取得成功 (TokenManager形式) - host=%s, token=%s...", host, access_token[:20])
                             return access_token
                         else:
                             logger.warning(f"[TOKEN-LOAD] TokenManager形式だがaccess_tokenが空 ({host})")
-                            print(f"[TOKEN-LOAD] access_token欠落")
+                            logger.debug("access_token欠落")
                     else:
                         # 従来形式（文字列）
                         logger.info(f"[TOKEN-LOAD] トークン読み込み成功 ({host}): {token_data[:20]}... (従来形式)")
-                        print(f"[TOKEN-LOAD] トークン取得成功 (従来形式) - host={host}, token={token_data[:20]}...")
+                        logger.debug("トークン取得成功 (従来形式) - host=%s, token=%s...", host, token_data[:20])
                         return token_data
                 else:
                     logger.warning(f"[TOKEN-LOAD] ホスト {host} のトークンが見つかりません")
-                    print(f"[TOKEN-LOAD] 指定ホストのトークンなし - host={host}")
+                    logger.debug("指定ホストのトークンなし - host=%s", host)
         else:
             logger.debug(f"[TOKEN-LOAD] JSON形式トークンファイルが存在しません: {BEARER_TOKENS_FILE}")
-            print(f"[TOKEN-LOAD] JSONファイルが存在しません")
+            logger.debug("JSONファイルが存在しません")
         
         # v2.0.3: レガシーファイル（bearer_token.txt）からの読み込みは廃止
         
         logger.warning(f"[TOKEN-LOAD] トークンが見つかりません ({host})")
-        print(f"[TOKEN-LOAD] トークンが見つかりませんでした - host={host}")
+        logger.debug("トークンが見つかりませんでした - host=%s", host)
         return None
     except Exception as e:
-        print(f"[TOKEN-LOAD] Bearer Token読み込みエラー ({host}): {e}")
+        logger.debug("Bearer Token読み込みエラー (%s): %s", host, e)
         logger.error(f"Bearer Token読み込みエラー ({host}): {e}")
         return None
 
@@ -400,7 +400,7 @@ def load_all_bearer_tokens() -> Dict[str, str]:
                 return _json.load(f)
         return {}
     except Exception as e:
-        print(f"Bearer Token一括読み込みエラー: {e}")
+        logger.error("Bearer Token一括読み込みエラー: %s", e)
         return {}
 
 def get_bearer_token_for_url(url: str) -> Optional[str]:
@@ -430,11 +430,11 @@ def get_bearer_token_for_url(url: str) -> Optional[str]:
             token = load_bearer_token('rde-material.nims.go.jp')
             if token:
                 logger.debug(f"[TOKEN-SELECT] Material token selected for: {url[:50]}...")
-                print(f"[TOKEN-SELECT] Material token for {host}")
+                logger.debug("Material token for %s", host)
                 return token
             else:
                 logger.warning(f"[TOKEN-SELECT] Material token not found, falling back to RDE token")
-                print(f"[TOKEN-SELECT] Material token not found, using RDE token")
+                logger.debug("Material token not found, using RDE token")
     
     # 2. rde.nims.go.jp関連の派生ホスト（RDEメイントークン）
     # 注意: rde-entry-api-arim, rde-instrument-apiもRDEメイントークンを使用
@@ -451,12 +451,12 @@ def get_bearer_token_for_url(url: str) -> Optional[str]:
             token = load_bearer_token('rde.nims.go.jp')
             if token:
                 logger.debug(f"[TOKEN-SELECT] RDE token selected for: {url[:50]}...")
-                print(f"[TOKEN-SELECT] RDE token for {host}")
+                logger.debug("RDE token for %s", host)
                 return token
     
     # 3. デフォルトはrde.nims.go.jpのトークン
     logger.warning(f"[TOKEN-SELECT] No specific host matched, using default RDE token for: {url[:50]}...")
-    print(f"[TOKEN-SELECT] Default RDE token for: {url[:50]}...")
+    logger.debug("Default RDE token for: %s...", url[:50])
     return load_bearer_token('rde.nims.go.jp')
 
 # =============================================================================
@@ -559,9 +559,9 @@ ui:
             import json
             with open(network_json_path, 'w', encoding='utf-8') as f:
                 json.dump(network_json_content, f, indent=2, ensure_ascii=False)
-            print(f"デフォルトconfig作成: {network_json_path}")
+            logger.debug("デフォルトconfig作成: %s", network_json_path)
         except Exception as e:
-            print(f"network.json作成失敗: {e}")
+            logger.debug("network.json作成失敗: %s", e)
     
     # network.yaml の作成
     network_yaml_path = os.path.join(CONFIG_DIR, 'network.yaml')
@@ -569,9 +569,9 @@ ui:
         try:
             with open(network_yaml_path, 'w', encoding='utf-8') as f:
                 f.write(network_yaml_content)
-            print(f"デフォルトconfig作成: {network_yaml_path}")
+            logger.debug("デフォルトconfig作成: %s", network_yaml_path)
         except Exception as e:
-            print(f"network.yaml作成失敗: {e}")
+            logger.debug("network.yaml作成失敗: %s", e)
 
 # 起動時に設定ファイルを自動作成
 create_default_config_files()

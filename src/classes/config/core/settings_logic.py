@@ -41,7 +41,7 @@ def run_settings_logic(parent=None, bearer_token=None):
                 "プロキシ設定は config/network.json を直接編集してください。"
             )
         except:
-            print(f"[ERROR] 設定画面起動失敗: {e}")
+            logger.error("設定画面起動失敗: %s", e)
             
     except Exception as e:
         logger.error(f"設定ロジック実行エラー: {e}")
@@ -49,7 +49,7 @@ def run_settings_logic(parent=None, bearer_token=None):
             from qt_compat.widgets import QMessageBox
             QMessageBox.critical(parent, "予期しないエラー", f"設定処理中にエラーが発生しました: {e}")
         except:
-            print(f"[ERROR] 設定処理エラー: {e}")
+            logger.error("設定処理エラー: %s", e)
 
 
 def get_application_settings() -> dict:

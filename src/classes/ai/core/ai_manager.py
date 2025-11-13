@@ -93,7 +93,7 @@ class AIManager:
                 # プロンプトを切り詰める
                 truncated_prompt = prompt[:max_prompt_length]
                 truncated_prompt += "\n\n[注意: プロンプトが長すぎるため切り詰められました]"
-                print(f"[DEBUG] プロンプトが長すぎます。元の長さ: {len(prompt)}, 切り詰め後: {len(truncated_prompt)}")
+                logger.debug("プロンプトが長すぎます。元の長さ: %s, 切り詰め後: %s", len(prompt), len(truncated_prompt))
                 prompt = truncated_prompt
             
             if provider == "openai":
@@ -155,24 +155,24 @@ class AIManager:
         
         if response.status_code == 200:
             result = response.json()
-            print(f"[DEBUG] OpenAI API レスポンス構造: {list(result.keys())}")
+            logger.debug("OpenAI API レスポンス構造: %s", list(result.keys()))
             if "choices" in result and len(result["choices"]) > 0:
                 choice = result["choices"][0]
-                print(f"[DEBUG] OpenAI API choice構造: {list(choice.keys())}")
+                logger.debug("OpenAI API choice構造: %s", list(choice.keys()))
                 
                 message = choice.get("message", {})
-                print(f"[DEBUG] OpenAI API message構造: {list(message.keys())}")
+                logger.debug("OpenAI API message構造: %s", list(message.keys()))
                 
                 content = message.get("content")
                 
                 # GPT-5系では、finish_reasonを確認
                 finish_reason = choice.get("finish_reason")
-                print(f"[DEBUG] OpenAI API finish_reason: {finish_reason}")
+                logger.debug("OpenAI API finish_reason: %s", finish_reason)
                 
                 if content is None or content == "":
                     # contentが空の場合の詳細ログ
-                    print(f"[DEBUG] OpenAI API content is None/empty")
-                    print(f"[DEBUG] OpenAI API full choice: {choice}")
+                    logger.debug("OpenAI API content is None/empty")
+                    logger.debug("OpenAI API full choice: %s", choice)
                     
                     # finish_reasonがlengthの場合、トークン制限に達している
                     if finish_reason == "length":
@@ -181,14 +181,14 @@ class AIManager:
                     
                     # GPT-5系でcontentが空の場合、他の場所にデータがある可能性
                     if "delta" in choice:
-                        print(f"[DEBUG] OpenAI API delta found: {choice['delta']}")
+                        logger.debug("OpenAI API delta found: %s", choice['delta'])
                         content = choice["delta"].get("content", "")
                     
                     if not content:
                         return {"success": False, "error": f"OpenAI APIから空の応答を受信しました。finish_reason: {finish_reason}"}
                 
-                print(f"[DEBUG] OpenAI API 応答内容長: {len(content) if content else 0}")
-                print(f"[DEBUG] OpenAI API 応答内容（最初の100文字）: {content[:100] if content else 'None'}")
+                logger.debug("OpenAI API 応答内容長: %s", len(content) if content else 0)
+                logger.debug("OpenAI API 応答内容（最初の100文字）: %s", content[:100] if content else 'None')
                 
                 return {
                     "success": True, 
@@ -200,7 +200,7 @@ class AIManager:
                     "response_time": response_time
                 }
             else:
-                print(f"[DEBUG] OpenAI API choices が空またはなし: {result}")
+                logger.debug("OpenAI API choices が空またはなし: %s", result)
                 return {
                     "success": False, 
                     "error": "OpenAI APIからの応答が空です",

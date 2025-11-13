@@ -144,7 +144,7 @@ def fetch_basic_info_self(controller):
         
         # 確認ダイアログをメインスレッドで表示
         if not show_fetch_confirmation_dialog(controller.parent, onlySelf=True, searchWords=searchWords):
-            print("[INFO] 基本情報取得処理はユーザーによりキャンセルされました。")
+            logger.info("基本情報取得処理はユーザーによりキャンセルされました。")
             return
         
         # プログレス表示付きワーカーを作成
@@ -198,8 +198,8 @@ def summary_basic_info_to_Xlsx(controller):
         
         webview = getattr(controller.parent, 'webview', controller.parent)
         
-        # プログレス表示付きワーカーを作成
-        worker = SimpleProgressWorker(
+        # プログレス表示付きワーカーを作成（詳細プログレス対応）
+        worker = ProgressWorker(
             task_func=summary_basic_info_to_Xlsx_logic,
             task_kwargs={
                 'bearer_token': bearer_token,
@@ -341,7 +341,7 @@ def fetch_sample_info_only(controller):
     )
     
     if reply != QMessageBox.Yes:
-        print("[INFO] サンプル情報強制取得処理はユーザーによりキャンセルされました。")
+        logger.info("サンプル情報強制取得処理はユーザーによりキャンセルされました。")
         return
     
     # プログレス表示付きワーカーを作成
@@ -395,7 +395,7 @@ def fetch_common_info_only(controller):
     )
     
     if reply != QMessageBox.Yes:
-        print("[INFO] 共通情報取得処理はユーザーによりキャンセルされました。")
+        logger.info("共通情報取得処理はユーザーによりキャンセルされました。")
         return
     
     # プログレス表示付きワーカーを作成

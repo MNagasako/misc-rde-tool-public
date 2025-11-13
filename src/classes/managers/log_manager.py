@@ -52,7 +52,7 @@ class LogManager:
         try:
             os.makedirs(OUTPUT_LOG_DIR, exist_ok=True)
         except Exception as e:
-            print(f"ログディレクトリ作成失敗: {OUTPUT_LOG_DIR}, error: {e}")
+            logger.error("ログディレクトリ作成失敗: %s, error: %s", OUTPUT_LOG_DIR, e)
     
     def _initialize_logging(self):
         """ログの基本設定初期化"""
@@ -223,10 +223,10 @@ class LogManager:
                     file_mtime = os.path.getmtime(file_path)
                     if file_mtime < cutoff_time:
                         os.remove(file_path)
-                        print(f"古いログファイル削除: {filename}")
+                        logger.debug("古いログファイル削除: %s", filename)
         
         except Exception as e:
-            print(f"ログクリーンアップ失敗: {e}")
+            logger.debug("ログクリーンアップ失敗: %s", e)
     
     def get_log_statistics(self) -> Dict[str, Any]:
         """

@@ -15,10 +15,10 @@ def load_json(path):
     import json
     abs_path = os.path.abspath(path)
     if not os.path.exists(abs_path):
-        print(f"[ERROR] {path}が存在しません: {abs_path}")
+        logger.error("%sが存在しません: %s", path, abs_path)
         return None
     with open(abs_path, "r", encoding="utf-8") as f:
-        print(f"[XLSX] JSONロード成功: {abs_path}")
+        logger.info("[XLSX] JSONロード成功: %s", abs_path)
         return json.load(f)
 def apply_basic_info_to_Xlsx_logic(bearer_token, parent=None, webview=None, ui_callback=None):
     """
@@ -34,7 +34,7 @@ def apply_basic_info_to_Xlsx_logic(bearer_token, parent=None, webview=None, ui_c
         wb = openpyxl.load_workbook(abs_xlsx, keep_vba=True)
         # ... ここに各種JSONを読み込んでシートに反映する処理 ...
         wb.save(abs_xlsx)
-        print(f"[INFO] XLSX書き出しに成功: {abs_xlsx}")
+        logger.info("XLSX書き出しに成功: %s", abs_xlsx)
     except PermissionError:
         msg = (
             f"Excelファイルが他で開かれているため書き込みできません。\n"
@@ -66,7 +66,7 @@ def summary_basic_info_to_Xlsx_logic(bearer_token, parent=None, webview=None, ui
     from qt_compat.widgets import QMessageBox
     
     if progress_callback:
-        if not progress_callback(0, 100, "XLSX書き出しを開始しています..."):
+        if not progress_callback(0, 1, "XLSX書き出しを開始しています..."):
             return "キャンセルされました"
     
     XLSX_PATH = os.path.join(OUTPUT_DIR, "summary.xlsx")
@@ -77,7 +77,7 @@ def summary_basic_info_to_Xlsx_logic(bearer_token, parent=None, webview=None, ui
         method(*args, **kwargs)
         
     if progress_callback:
-        if not progress_callback(5, 100, "XLSXファイル準備中..."):
+        if not progress_callback(0, 1, "XLSXファイル準備中..."):
             return "キャンセルされました"
             
     if not os.path.exists(abs_xlsx):
@@ -95,7 +95,7 @@ def summary_basic_info_to_Xlsx_logic(bearer_token, parent=None, webview=None, ui
         #show_messagebox(QMessageBox.information, parent, "新規作成", msg)
         
     if progress_callback:
-        if not progress_callback(10, 100, "ファイルアクセス権限チェック中..."):
+        if not progress_callback(0, 1, "ファイルアクセス権限チェック中..."):
             return "キャンセルされました"
     from qt_compat.widgets import QMessageBox
     import time
@@ -126,64 +126,64 @@ def summary_basic_info_to_Xlsx_logic(bearer_token, parent=None, webview=None, ui
             return 'retry'
 
     try:
-        print(f"[XLSX] 書き込み処理開始: {abs_xlsx}")
+        logger.debug("[XLSX] 書き込み処理開始: %s", abs_xlsx)
         while True:
             if not os.path.exists(abs_xlsx) or is_xlsx_writable(abs_xlsx):
-                print(f"[XLSX] 書き込み可能: {abs_xlsx}")
+                logger.debug("[XLSX] 書き込み可能: %s", abs_xlsx)
                 # 書き込み可能になったら本処理へ
                 try:
-                    print(f"[XLSX] openpyxlでワークブック読込: {abs_xlsx}")
+                    logger.debug("[XLSX] openpyxlでワークブック読込: %s", abs_xlsx)
                     wb = openpyxl.load_workbook(abs_xlsx)
                     # 各種JSON→シート出力
-                    print(f"[XLSX] write_summary_sheet 実行")
+                    logger.debug("[XLSX] write_summary_sheet 実行")
                     write_summary_sheet(wb, parent, False, progress_callback)  # 概要シートの書き込み
 
                     if progress_callback:
-                        if not progress_callback(90, 100, "各シートの書き出しを実行中..."):
+                        if not progress_callback(0, 1, "各シートの書き出しを実行中..."):
                             return "キャンセルされました"
                     
-                    print(f"[XLSX] write_members_sheet 実行")
+                    logger.debug("[XLSX] write_members_sheet 実行")
                     write_members_sheet(wb, parent)
-                    print(f"[XLSX] write_organization_sheet 実行")
+                    logger.debug("[XLSX] write_organization_sheet 実行")
                     write_organization_sheet(wb, parent)
-                    print(f"[XLSX] write_instrumentType_sheet 実行")
+                    logger.debug("[XLSX] write_instrumentType_sheet 実行")
                     write_instrumentType_sheet(wb, parent)
-                    print(f"[XLSX] write_datasets_sheet 実行")
+                    logger.debug("[XLSX] write_datasets_sheet 実行")
                     write_datasets_sheet(wb, parent)
-                    print(f"[XLSX] write_subgroups_sheet 実行")
+                    logger.debug("[XLSX] write_subgroups_sheet 実行")
                     write_subgroups_sheet(wb, parent)
-                    print(f"[XLSX] write_groupDetail_sheet 実行")
+                    logger.debug("[XLSX] write_groupDetail_sheet 実行")
                     write_groupDetail_sheet(wb, parent)
 
-                    print(f"[XLSX] write_templates_sheet 実行")
+                    logger.debug("[XLSX] write_templates_sheet 実行")
                     write_templates_sheet(wb, parent)
-                    print(f"[XLSX] write_instruments_sheet 実行")
+                    logger.debug("[XLSX] write_instruments_sheet 実行")
                     write_instruments_sheet(wb, parent)
-                    print(f"[XLSX] write_licenses_sheet 実行")
+                    logger.debug("[XLSX] write_licenses_sheet 実行")
                     write_licenses_sheet(wb, parent)
-                    print(f"[XLSX] write_entries_sheet 実行")
+                    logger.debug("[XLSX] write_entries_sheet 実行")
                     write_entries_sheet(wb, parent)
 
                     if progress_callback:
-                        if not progress_callback(95, 100, "ファイル保存中..."):
+                        if not progress_callback(0, 1, "ファイル保存中..."):
                             return "キャンセルされました"
 
-                    print(f"[XLSX] wb.save 実行: {abs_xlsx}")
+                    logger.debug("[XLSX] wb.save 実行: %s", abs_xlsx)
                     wb.save(abs_xlsx)
                     
                     if progress_callback:
-                        if not progress_callback(100, 100, "XLSX書き出し完了"):
+                        if not progress_callback(1, 1, "XLSX書き出し完了"):
                             return "キャンセルされました"
                     
                     # 完了メッセージはUI層で表示するためここでは出さない
-                    print(f"[XLSX] summary_basic_info_to_Xlsx_logic: 正常終了")
+                    logger.debug("[XLSX] summary_basic_info_to_Xlsx_logic: 正常終了")
                     return True
                 except PermissionError:
-                    print(f"[XLSX] PermissionError: ファイルが開かれている {abs_xlsx}")
+                    logger.error("[XLSX] PermissionError: ファイルが開かれている %s", abs_xlsx)
                     msg = f"Excelファイルが他で開かれているため書き込みできません。\nExcelを閉じてから再実行してください。\n対象: {abs_xlsx}"
                     show_messagebox(QMessageBox.critical, parent, "書き込みエラー", msg)
                 except Exception as e:
-                    print(f"[XLSX] 予期せぬエラー: {e}")
+                    logger.error("[XLSX] 予期せぬエラー: %s", e)
                     import traceback
                     tb = traceback.format_exc()
                     msg = f"XLSX書き込み時に予期せぬエラーが発生しました:\n{e}\n{tb}"
@@ -191,14 +191,14 @@ def summary_basic_info_to_Xlsx_logic(bearer_token, parent=None, webview=None, ui
                     return False
                 break
             # 開かれている場合はアラート
-            print(f"[XLSX] ファイルが開かれているためリトライダイアログ表示: {abs_xlsx}")
+            logger.debug("[XLSX] ファイルが開かれているためリトライダイアログ表示: %s", abs_xlsx)
             result = show_retry_dialog_sync()
             if result == 'cancel':
-                print(f"[XLSX] ユーザーがキャンセルを選択: {abs_xlsx}")
+                logger.debug("[XLSX] ユーザーがキャンセルを選択: %s", abs_xlsx)
                 show_messagebox(QMessageBox.critical, parent, "書き込みエラー", "書き込みを中止しました。")
                 return False
     except Exception as e:
-        print(f"[XLSX] 致命的エラー: {e}")
+        logger.error("[XLSX] 致命的エラー: %s", e)
         import traceback
         tb = traceback.format_exc()
         msg = f"まとめXLSX処理で致命的なエラーが発生しました:\n{e}\n{tb}"
@@ -212,7 +212,7 @@ def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callbac
     load_data_entry_json=False
     
     if progress_callback:
-        if not progress_callback(15, 100, "JSONファイル読み込み中..."):
+        if not progress_callback(0, 1, "JSONファイル読み込み中..."):
             return False
     def to_ymd(date_str):
         if not date_str:
@@ -268,7 +268,7 @@ def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callbac
                 id_to_col[id_] = col
 
     import json, os
-    print("[XLSX] write_summary_sheet called progress")
+    logger.debug("[XLSX] write_summary_sheet called progress")
 
     # ワークシート取得
     ws = wb[wb.sheetnames[1]] if len(wb.sheetnames) > 1 else wb.active
@@ -369,7 +369,7 @@ def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callbac
             entry_total_count += entry_count
         else:
             entry_total_count += 1
-    print(f"[PROGRESS] 全データセット: {len(dataset_data)}、dataEntry JSONファイル: {len(entry_json_files)}、エントリ総数: {entry_total_count}")
+    logger.debug("[PROGRESS] 全データセット: %s、dataEntry JSONファイル: %s、エントリ総数: %s", len(dataset_data), len(entry_json_files), entry_total_count)
     processed_entries = 0
     start_time = time.time()
     for subGroup in subGroup_included:
@@ -396,11 +396,11 @@ def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callbac
                 dataEntry_data = []
                 dataEntry_included = []
                 if load_data_entry_json == True:
-                    print(f"[XLSX] dataEntry JSONロード for subGroup: {ds_info['id']}")
+                    logger.debug("[XLSX] dataEntry JSONロード for subGroup: %s", ds_info['id'])
                     dataEntry_path = os.path.join(OUTPUT_RDE_DIR, "data", "dataEntry", f"{ds_info['id']}.json")
                     dataEntry_json = load_json(dataEntry_path)
                     if not dataEntry_json:
-                        print(f"[ERROR] dataEntry JSONが存在しません: {dataEntry_path} for dataset_id={ds_info['id']}")
+                        logger.error("dataEntry JSONが存在しません: %s for dataset_id=%s", dataEntry_path, ds_info['id'])
                         continue
                     dataEntry_data = dataEntry_json.get("data", [])
                     dataEntry_included = dataEntry_json.get("included", [])
@@ -461,44 +461,34 @@ def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callbac
                             avg_time = elapsed / processed_entries if processed_entries else 0
                             remaining = entry_total_count - processed_entries
                             est_remaining = avg_time * remaining
-                            print(f"[PROGRESS] {processed_entries}/{entry_total_count} entries processed ({elapsed:.1f}s elapsed, 残り推定 {est_remaining:.1f}s)")
-                            # プログレスバー更新
-                            ui_callback_func = None
-                            if callable(locals().get('ui_callback', None)):
-                                ui_callback_func = locals()['ui_callback']
-                            elif hasattr(parent, 'ui_callback') and callable(parent.ui_callback):
-                                ui_callback_func = parent.ui_callback
-                            if ui_callback_func:
-                                ui_callback_func(progress=processed_entries, total=entry_total_count, elapsed=elapsed, finished=False)
-    print(f"[PROGRESS] 完了: {processed_entries}/{entry_total_count} entries ({time.time()-start_time:.1f}s)")
+                            logger.debug("[PROGRESS] %s/%s entries processed (%.1fs elapsed, 残り推定 %.1fs)", processed_entries, entry_total_count, elapsed, est_remaining)
+                            # プログレスバー更新（ProgressWorker対応：3引数形式）
+                            if progress_callback:
+                                message = f"処理中: {processed_entries}/{entry_total_count} エントリ (残り推定: {est_remaining:.1f}秒)"
+                                if not progress_callback(processed_entries, entry_total_count, message):
+                                    logger.info("XLSX書き出し処理がキャンセルされました")
+                                    return "キャンセルされました"
+    logger.info("[PROGRESS] 完了: %s/%s entries (%.1fs)", processed_entries, entry_total_count, time.time()-start_time)
     # 完了時にプログレスバーを100%に
     elapsed = time.time() - start_time
-    ui_callback_func = None
-    if callable(locals().get('ui_callback', None)):
-        ui_callback_func = locals()['ui_callback']
-    elif hasattr(parent, 'ui_callback') and callable(parent.ui_callback):
-        ui_callback_func = parent.ui_callback
-    if ui_callback_func:
-        ui_callback_func(progress=entry_total_count, total=entry_total_count, elapsed=elapsed, finished=True)
-    
     if progress_callback:
-        if not progress_callback(95, 100, "XLSX書き出し完了"):
-            return "キャンセルされました"
+        message = f"完了: {processed_entries}/{entry_total_count} エントリ処理完了 (経過時間: {elapsed:.1f}秒)"
+        progress_callback(entry_total_count, entry_total_count, message)
     
     #logger.info("XLSX書き出し処理完了")
     #return "書き出し完了"
 
 # --- 各シート出力関数 ---
     import json, os
-    print("[XLSX] write_summary_sheet called")
+    logger.debug("[XLSX] write_summary_sheet called")
 
     def load_json(path):
         abs_path = os.path.abspath(path)
         if not os.path.exists(abs_path):
-            print(f"[ERROR] {path}が存在しません: {abs_path}")
+            logger.error("%sが存在しません: %s", path, abs_path)
             return None
         with open(abs_path, "r", encoding="utf-8") as f:
-            print(f"[XLSX] JSONロード成功: {abs_path}")
+            logger.info("[XLSX] JSONロード成功: %s", abs_path)
             return json.load(f)
 
     # 各種JSONロード（静的定数を使用）
@@ -555,7 +545,7 @@ def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callbac
         {"id": "filetype_total_size", "label": "ファイル総サイズ"},
     ]
     # instrument_local_id列にはinstruments.jsonのattributes.programs[].localIdを出力
-    print("[XLSX] instruments_dataからinstrument_id_to_localidを作成")
+    logger.debug("[XLSX] instruments_dataからinstrument_id_to_localidを作成")
     instrument_id_to_localid = {}
     for inst in instruments_data:
         inst_id = inst.get("id")
@@ -565,18 +555,18 @@ def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callbac
         if inst_id and local_ids:
             instrument_id_to_localid[inst_id] = ",".join(local_ids)
     SHEET_NAME = "summary"
-    print(f"[XLSX] シート名: {SHEET_NAME}")
+    logger.debug("[XLSX] シート名: %s", SHEET_NAME)
     
     if SHEET_NAME in wb.sheetnames:
-        print(f"[XLSX] シートが既に存在: {SHEET_NAME}")
+        logger.debug("[XLSX] シートが既に存在: %s", SHEET_NAME)
         ws = wb[SHEET_NAME]
         # 既存ヘッダー行（1行目）を取得
         existing_id_row = [cell.value for cell in ws[1]] if ws.max_row >= 1 else []
     else:
-        print(f"[XLSX] シートが存在しないため新規作成: {SHEET_NAME}")
+        logger.debug("[XLSX] シートが存在しないため新規作成: %s", SHEET_NAME)
         ws = wb.create_sheet(SHEET_NAME)
         existing_id_row = []
-    print(f"[XLSX] 既存ヘッダー行: {existing_id_row}")
+    logger.debug("[XLSX] 既存ヘッダー行: %s", existing_id_row)
     # 既存ID列の順番を優先し、なければHEADER_DEF順で追加（空文字列やNoneは除外）
     header_ids = []
     id_to_label = {coldef["id"]: coldef["label"] for coldef in HEADER_DEF}
@@ -598,7 +588,7 @@ def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callbac
         if id_ not in (None, "") and str(id_).strip() != "":
             ws.cell(row=2, column=col_idx, value=id_to_label.get(id_, id_))
     id_to_col = {id_: idx+1 for idx, id_ in enumerate(header_ids) if id_ not in (None, "") and str(id_).strip() != ""}
-    print(f"[XLSX] ヘッダーID: {header_ids}")   
+    logger.debug("[XLSX] ヘッダーID: %s", header_ids)   
     # 既存データの保存（3行目以降）
     # datasetId, dataEntryId をキーに、手動列（HEADER_DEFにない列）の値を保存
     manual_col_ids = [id_ for id_ in header_ids if id_ not in [coldef["id"] for coldef in HEADER_DEF] and id_ not in (None, "") and str(id_).strip() != ""]
@@ -615,7 +605,7 @@ def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callbac
     # 既存データを一旦全削除（3行目以降）
     if ws.max_row >= 3:
         ws.delete_rows(3, ws.max_row - 2)
-    print(f"[XLSX] 既存データを削除: 3行目以降")
+    logger.debug("[XLSX] 既存データを削除: 3行目以降")
     # ユーザーID→名前辞書
     user_id_to_name = {user.get("id"): user.get("attributes", {}).get("userName", "") for user in subGroup_included if user.get("type") == "user"}
     instrument_id_to_name = {inst.get("id"): inst.get("attributes", {}).get("nameJa", "") for inst in instruments_data}
@@ -670,7 +660,7 @@ def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callbac
             estimated_total += len(dataset_data)
     
     if progress_callback:
-        if not progress_callback(20, 100, f"データ行処理開始 (推定処理数: {estimated_total})"):
+        if not progress_callback(0, estimated_total if estimated_total > 0 else 1, f"データ行処理開始 (推定処理数: {estimated_total})"):
             return False
     
     subgroup_idx = 0
@@ -691,9 +681,8 @@ def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callbac
             
             # プログレス更新
             if progress_callback:
-                progress_percent = 20 + int((processed_items / max(estimated_total, 1)) * 70)
                 message = f"処理中... サブグループ {subgroup_idx}/{total_subgroups}, 課題 {subject_idx}, 行 {row_idx - 2}"
-                if not progress_callback(progress_percent, 100, message):
+                if not progress_callback(processed_items, estimated_total if estimated_total > 0 else 1, message):
                     return False
             
             for dataset in dataset_data:
@@ -712,7 +701,7 @@ def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callbac
                 dataEntry_path = os.path.join(OUTPUT_RDE_DIR, "data", "dataEntry", f"{ds_info['id']}.json")
                 
                 dataEntry_json = load_json(dataEntry_path)
-                print(f"[XLSX] dataEntry JSONロード for dataset: {ds_info['id']}")
+                logger.debug("[XLSX] dataEntry JSONロード for dataset: %s", ds_info['id'])
 
                 if not dataEntry_json:
                     print(f"[ERROR] dataEntry JSONが存在しません: {dataEntry_path} for dataset_id={ds_info['id']}" )
@@ -929,7 +918,7 @@ def write_datasets_sheet(wb, parent):
     import json, os
     JSON_PATH = os.path.join(OUTPUT_RDE_DIR, "data", "dataset.json")
     abs_json = os.path.abspath(JSON_PATH)
-    print(f"[DEBUG] write_datasets_sheet: JSON_PATH={JSON_PATH}, abs_json={abs_json}")
+    logger.debug("write_datasets_sheet: JSON_PATH=%s, abs_json=%s", JSON_PATH, abs_json)
     if not os.path.exists(abs_json):
         return
     with open(abs_json, "r", encoding="utf-8") as f:
@@ -1017,7 +1006,7 @@ def write_datasets_sheet(wb, parent):
             ]
             ws.append(row)
         except Exception as e:
-            print(f"[ERROR] datasetsシート出力時エラー: id={ds.get('id','')} : {e}")
+            logger.error("datasetsシート出力時エラー: id=%s : %s", ds.get('id',''), e)
             ws.append(["" for _ in range(len(HEADER_ROW))])
 def write_templates_sheet(wb, parent):
     import json, os

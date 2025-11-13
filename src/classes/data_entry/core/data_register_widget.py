@@ -3,6 +3,7 @@
 """
 import os
 import json
+import logging
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QPushButton, 
     QTextEdit, QLineEdit, QFileDialog, QFrame, QScrollArea, QMessageBox
@@ -10,6 +11,9 @@ from qt_compat.widgets import (
 from qt_compat.core import Qt, Signal
 from qt_compat.gui import QFont
 from config.common import get_dynamic_file_path
+
+# ロガー設定
+logger = logging.getLogger(__name__)
 
 
 class DataRegisterWidget(QWidget):
@@ -176,16 +180,16 @@ class DataRegisterWidget(QWidget):
             # イベント接続
             self.dataset_dropdown.currentIndexChanged.connect(self.on_dataset_changed)
             
-            print("[INFO] チェックボックス形式フィルタ付きドロップダウンを設定しました")
+            logger.info("チェックボックス形式フィルタ付きドロップダウンを設定しました")
             
         except ImportError as e:
-            print(f"[ERROR] チェックボックスフィルタのインポートに失敗: {e}")
+            logger.error("チェックボックスフィルタのインポートに失敗: %s", e)
             self.setup_fallback_dropdown()
         except Exception as e:
-            print(f"[ERROR] チェックボックスフィルタのセットアップに失敗: {e}")
+            logger.error("チェックボックスフィルタのセットアップに失敗: %s", e)
             self.setup_fallback_dropdown()
         except Exception as e:
-            print(f"[ERROR] フィルタ付きドロップダウンの設定に失敗: {e}")
+            logger.error("フィルタ付きドロップダウンの設定に失敗: %s", e)
             self.setup_fallback_dropdown()
     
     def setup_fallback_dropdown(self):
@@ -228,7 +232,7 @@ class DataRegisterWidget(QWidget):
                 self.dataset_dropdown.addItem(f"{dataset_name} ({dataset_id[:8]}...)", dataset)
                 
         except Exception as e:
-            print(f"[ERROR] データセット読み込み失敗: {e}")
+            logger.error("データセット読み込み失敗: %s", e)
             self.dataset_dropdown.addItem("データセット読み込みエラー")
             
     def on_dataset_changed(self):
@@ -270,7 +274,7 @@ class DataRegisterWidget(QWidget):
             self.dataset_summary_text.setPlainText(summary_text)
             
         except Exception as e:
-            print(f"[ERROR] データセット概要表示失敗: {e}")
+            logger.error("データセット概要表示失敗: %s", e)
             self.dataset_summary_text.setPlainText("概要の取得に失敗しました")
             
     def select_files(self):
@@ -401,7 +405,7 @@ class DataRegisterWidget(QWidget):
     def get_sample_form_data(self):
         """試料フォームのデータを取得"""
         if not hasattr(self, 'sample_input_widgets'):
-            print("[DEBUG] 試料フォームの参照がありません")
+            logger.debug("試料フォームの参照がありません")
             return None
             
         try:
@@ -415,7 +419,7 @@ class DataRegisterWidget(QWidget):
             if selected_sample_data:
                 # 既存試料選択の場合：試料IDを使用
                 sample_id = selected_sample_data.get('id')
-                print(f"[DEBUG] 既存試料選択: sample_id={sample_id}")
+                logger.debug("既存試料選択: sample_id=%s", sample_id)
                 
                 if not sample_id:
                     QMessageBox.warning(self, "選択エラー", "選択された試料のIDが取得できませんでした。")
@@ -433,7 +437,7 @@ class DataRegisterWidget(QWidget):
                 sample_description = self.sample_input_widgets["description"].toPlainText().strip()
                 sample_composition = self.sample_input_widgets["composition"].text().strip()
                 
-                print(f"[DEBUG] 新規試料作成: name='{sample_name}', desc='{sample_description}', comp='{sample_composition}'")
+                logger.debug("新規試料作成: name='%s', desc='%s', comp='%s'", sample_name, sample_description, sample_composition)
                 
                 # 試料名のバリデーション
                 if not sample_name:
@@ -446,7 +450,7 @@ class DataRegisterWidget(QWidget):
                     'sampleComposition': sample_composition
                 }
         except Exception as e:
-            print(f"[ERROR] 試料フォームデータ取得エラー: {e}")
+            logger.error("試料フォームデータ取得エラー: %s", e)
             QMessageBox.critical(self, "フォームエラー", f"試料フォームのデータを取得できませんでした:\n{e}")
             return None
     
@@ -456,27 +460,27 @@ class DataRegisterWidget(QWidget):
             from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
             dataset_notifier = get_dataset_refresh_notifier()
             dataset_notifier.register_callback(self.refresh_dataset_list)
-            print("[INFO] データ登録ウィジェット: データセット更新通知に登録完了")
+            logger.info("データ登録ウィジェット: データセット更新通知に登録完了")
             
             # ウィジェット破棄時の通知解除用
             def cleanup_callback():
                 dataset_notifier.unregister_callback(self.refresh_dataset_list)
-                print("[INFO] データ登録ウィジェット: データセット更新通知を解除")
+                logger.info("データ登録ウィジェット: データセット更新通知を解除")
             
             self._cleanup_dataset_callback = cleanup_callback
             
         except Exception as e:
-            print(f"[WARNING] データセット更新通知への登録に失敗: {e}")
+            logger.warning("データセット更新通知への登録に失敗: %s", e)
     
     def refresh_dataset_list(self):
         """データセットリストを更新"""
         try:
             # ウィジェットが破棄されていないかチェック
             if not self.dataset_dropdown or self.dataset_dropdown.parent() is None:
-                print("[DEBUG] データセットコンボボックスが破棄されているため更新をスキップ")
+                logger.debug("データセットコンボボックスが破棄されているため更新をスキップ")
                 return
             
-            print("[INFO] データセットリスト更新開始")
+            logger.info("データセットリスト更新開始")
             
             # 現在選択されているアイテムのIDを保存
             current_dataset_id = None
@@ -495,13 +499,13 @@ class DataRegisterWidget(QWidget):
                     item_data = self.dataset_dropdown.itemData(i)
                     if item_data and item_data.get("id") == current_dataset_id:
                         self.dataset_dropdown.setCurrentIndex(i)
-                        print(f"[INFO] データセット選択を復元: {current_dataset_id}")
+                        logger.info("データセット選択を復元: %s", current_dataset_id)
                         break
             
-            print("[INFO] データセットリスト更新完了")
+            logger.info("データセットリスト更新完了")
             
         except Exception as e:
-            print(f"[ERROR] データセットリスト更新に失敗: {e}")
+            logger.error("データセットリスト更新に失敗: %s", e)
     
     def closeEvent(self, event):
         """ウィジェット終了時の処理"""
@@ -509,5 +513,5 @@ class DataRegisterWidget(QWidget):
             if hasattr(self, '_cleanup_dataset_callback'):
                 self._cleanup_dataset_callback()
         except Exception as e:
-            print(f"[WARNING] データセット更新通知の解除に失敗: {e}")
+            logger.warning("データセット更新通知の解除に失敗: %s", e)
         super().closeEvent(event)

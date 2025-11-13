@@ -10,6 +10,8 @@ import logging
 
 from classes.ui.dialogs.ui_dialogs import TextAreaExpandDialog, PopupDialog
 
+logger = logging.getLogger(__name__)
+
 
 class UIController(QObject):
     """統合UIコントローラー - 各機能UIの基本クラス"""
@@ -115,7 +117,7 @@ class UIController(QObject):
             if hasattr(self.main_window, 'resize'):
                 # デフォルトサイズを設定
                 self.main_window.resize(1200, 800)
-                print(f"[DEBUG] ウィンドウ初期化: 1200x800")
+                logger.debug("ウィンドウ初期化: 1200x800")
                 
             # ウィンドウを中央に配置
             if hasattr(self.main_window, 'center'):
@@ -163,12 +165,12 @@ class UIController(QObject):
         
     def switch_mode(self, mode: str):
         """モード切り替え"""
-        print(f"[DEBUG] モード切り替え: {mode}")
+        logger.debug("モード切り替え: %s", mode)
         
         # ウインドウサイズをデバッグ出力
         if self.main_window:
             window_size = self.main_window.size()
-            print(f"[DEBUG] 現在のウインドウサイズ: {window_size.width()}x{window_size.height()}")
+            logger.debug("現在のウインドウサイズ: %sx%s", window_size.width(), window_size.height())
             
             # スクリーンサイズとの比較
             from qt_compat.widgets import QApplication
@@ -177,7 +179,7 @@ class UIController(QObject):
                 screen_size = screen.size()
                 width_ratio = (window_size.width() / screen_size.width()) * 100
                 height_ratio = (window_size.height() / screen_size.height()) * 100
-                print(f"[DEBUG] スクリーン比率: 幅{width_ratio:.1f}% 高さ{height_ratio:.1f}%")
+                logger.debug("スクリーン比率: 幅%.1f%% 高さ%.1f%%", width_ratio, height_ratio)
         
         self.current_mode = mode
         # 具体的な実装は各機能モジュールで

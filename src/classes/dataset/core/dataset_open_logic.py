@@ -6,6 +6,11 @@ from qt_compat.widgets import QComboBox, QLabel, QVBoxLayout, QHBoxLayout, QWidg
 from classes.utils.api_request_helper import api_request  # refactored to use api_request_helper
 from core.bearer_token_manager import BearerTokenManager
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 
 def filter_groups_by_role(groups, filter_type="member", user_id=None):
     """グループを役割でフィルタリング"""
@@ -45,8 +50,8 @@ def filter_groups_by_role(groups, filter_type="member", user_id=None):
 
 # 事前に選択されたグループ情報を引数で受け取る形に変更
 def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, dataset_name=None, embargo_date_str=None, template_id=None, dataset_type=None, share_core_scope=False, anonymize=False):
-    print(f"[DEBUG] run_dataset_open_logic: dataset_name={dataset_name}, embargo_date_str={embargo_date_str}, template_id={template_id}, dataset_type={dataset_type}, bearer_token={'[PRESENT]' if bearer_token else '[NONE]'}, group_info={group_info}")
-    print(f"[DEBUG] share_core_scope={share_core_scope}, anonymize={anonymize}")
+    logger.debug("run_dataset_open_logic: dataset_name=%s, embargo_date_str=%s, template_id=%s, dataset_type=%s, bearer_token=%s, group_info=%s", dataset_name, embargo_date_str, template_id, dataset_type, '[PRESENT]' if bearer_token else '[NONE]', group_info)
+    logger.debug("share_core_scope=%s, anonymize=%s", share_core_scope, anonymize)
     
     # Bearer Token統一管理システムで取得
     if not bearer_token:
@@ -54,7 +59,7 @@ def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, data
         if not bearer_token:
             QMessageBox.warning(parent, "認証エラー", "Bearer Tokenが取得できません。ログインを確認してください。")
             return
-        print(f"[DEBUG] Bearer Token obtained from BearerTokenManager")
+        logger.debug("Bearer Token obtained from BearerTokenManager")
     if group_info is None:
         QMessageBox.warning(parent, "グループ情報エラー", "グループが選択されていません。")
         return
@@ -108,8 +113,8 @@ def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, data
         }
     }
     payload_str = json.dumps(payload, ensure_ascii=False, indent=2)
-    print(f"[DEBUG] payload sharingPolicies: {payload['data']['attributes']['sharingPolicies']}")
-    print(f"[DEBUG] payload isAnonymized: {payload['data']['attributes']['isAnonymized']}")
+    logger.debug("payload sharingPolicies: %s", payload['data']['attributes']['sharingPolicies'])
+    logger.debug("payload isAnonymized: %s", payload['data']['attributes']['isAnonymized'])
 
     # 簡易表示用テキスト
     attr = payload['data']['attributes']
@@ -159,9 +164,9 @@ def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, data
                 from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
                 dataset_notifier = get_dataset_refresh_notifier()
                 dataset_notifier.notify_refresh()
-                print("[INFO] データセット開設成功: 更新通知を発火")
+                logger.info("データセット開設成功: 更新通知を発火")
             except Exception as e:
-                print(f"[WARNING] データセット更新通知の発火に失敗: {e}")
+                logger.warning("データセット更新通知の発火に失敗: %s", e)
             
             # 成功時にdataset.jsonを自動再取得
             try:
@@ -189,25 +194,25 @@ def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, data
                                     from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
                                     dataset_notifier = get_dataset_refresh_notifier()
                                     dataset_notifier.notify_refresh()
-                                    print("[INFO] dataset.json更新完了: 再通知を発火")
+                                    logger.info("dataset.json更新完了: 再通知を発火")
                                 except Exception as e:
-                                    print(f"[WARNING] dataset.json更新後の通知発火に失敗: {e}")
+                                    logger.warning("dataset.json更新後の通知発火に失敗: %s", e)
                             
                             QTimer.singleShot(3000, notify_after_json_update)  # 3秒後に再通知
                             
                     except Exception as e:
-                        print(f"[ERROR] データセット一覧自動更新でエラー: {e}")
+                        logger.error("データセット一覧自動更新でエラー: %s", e)
                 
                 # 少し遅延してから自動更新実行
                 QTimer.singleShot(1000, auto_refresh)
                 
             except Exception as e:
-                print(f"[WARNING] データセット一覧自動更新の設定に失敗: {e}")
+                logger.warning("データセット一覧自動更新の設定に失敗: %s", e)
         else:
             QMessageBox.critical(parent, "データセット開設エラー", f"データセットの開設に失敗しました。\n{result}")
         update_dataset(bearer_token)
     else:
-        print("[INFO] データセット開設処理はユーザーによりキャンセルされました。")
+        logger.info("データセット開設処理はユーザーによりキャンセルされました。")
 
 # グループ選択UIを事前に表示する関数
 def create_group_select_widget(parent=None):
@@ -224,7 +229,7 @@ def create_group_select_widget(parent=None):
     import datetime
     from config.common import SUBGROUP_JSON_PATH, TEMPLATE_JSON_PATH, SELF_JSON_PATH, ORGANIZATION_JSON_PATH, INSTRUMENTS_JSON_PATH
     
-    print(f"[DEBUG] データセット開設機能：パス確認完了")
+    logger.debug("データセット開設機能：パス確認完了")
     
     team_groups_raw = []
     try:
@@ -233,7 +238,7 @@ def create_group_select_widget(parent=None):
             self_data = json.load(f)
         user_id = self_data.get("data", {}).get("id", None)
         if not user_id:
-            print("[ERROR] self.jsonからユーザーIDが取得できませんでした。")
+            logger.error("self.jsonからユーザーIDが取得できませんでした。")
         with open(SUBGROUP_JSON_PATH, encoding="utf-8") as f:
             sub_group_data = json.load(f)
         
@@ -246,7 +251,7 @@ def create_group_select_widget(parent=None):
         # デフォルトフィルタを適用
         team_groups_raw = filter_groups_by_role(all_team_groups, "owner_assistant", user_id)
     except Exception as e:
-        print(f"[ERROR] subGroup.json/self.jsonの読み込み・フィルタに失敗: {e}")
+        logger.error("subGroup.json/self.jsonの読み込み・フィルタに失敗: %s", e)
         # ファイルが見つからない場合の詳細情報
         if "No such file or directory" in str(e) or "FileNotFoundError" in str(type(e).__name__):
             error_widget = QWidget(parent)
@@ -343,9 +348,9 @@ def create_group_select_widget(parent=None):
         # Completer も更新（重要！）
         try:
             group_completer.setModel(group_completer.model().__class__(group_names_new, group_completer))
-            print(f"[DEBUG] Completer更新完了: {len(group_names_new)}件")
+            logger.debug("Completer更新完了: %s件", len(group_names_new))
         except Exception as e:
-            print(f"[WARNING] Completer更新に失敗: {e}")
+            logger.warning("Completer更新に失敗: %s", e)
         
         # 課題番号コンボボックスをクリア
         grant_combo.clear()
@@ -373,9 +378,9 @@ def create_group_select_widget(parent=None):
     # フィルタ変更時のイベントハンドラ
     def on_filter_changed():
         filter_type = filter_combo.currentData()
-        print(f"[DEBUG] Filter changed to: {filter_type}")
+        logger.debug("Filter changed to: %s", filter_type)
         update_group_list(filter_type)  # update_group_list内でCompleterも更新される
-        print(f"[DEBUG] Groups after filter: {len(team_groups)} groups")
+        logger.debug("Groups after filter: %s groups", len(team_groups))
         
     filter_combo.currentTextChanged.connect(on_filter_changed)
     
@@ -388,7 +393,7 @@ def create_group_select_widget(parent=None):
         if not combo.lineEdit().text():
             combo.clear()
             combo.addItems(group_names)
-            print("[DEBUG] group combo: added all items")
+            logger.debug("group combo: added all items")
         print("[DEBUG] combo.count after=", combo.count())
         combo.showPopup()
         orig_mouse_press(event)
@@ -397,7 +402,7 @@ def create_group_select_widget(parent=None):
     # グループ選択時に課題番号リストを更新
     def on_group_changed():
         current_text = combo.lineEdit().text()
-        print(f"[DEBUG] Group selection changed: {current_text}")
+        logger.debug("Group selection changed: %s", current_text)
         
         # 課題番号コンボボックスをクリア
         grant_combo.clear()
@@ -439,7 +444,7 @@ def create_group_select_widget(parent=None):
                     # 課題番号コンボボックスのクリックイベント
                     orig_grant_mouse_press = grant_combo.mousePressEvent
                     def grant_combo_mouse_press_event(event):
-                        print("[DEBUG] grant combo click")
+                        logger.debug("grant combo click")
                         if not grant_combo.lineEdit().text():
                             grant_combo.clear()
                             for subject in subjects:
@@ -458,7 +463,7 @@ def create_group_select_widget(parent=None):
                     else:
                         grant_combo.setCurrentIndex(-1)
                         
-                print(f"[DEBUG] Added {len(grant_items)} grant numbers to combo")
+                logger.debug("Added %s grant numbers to combo", len(grant_items))
             else:
                 grant_combo.lineEdit().setPlaceholderText("このグループには課題が登録されていません")
     
@@ -499,7 +504,7 @@ def create_group_select_widget(parent=None):
             self_data = json.load(f)
         org_name = self_data.get("data", {}).get("attributes", {}).get("organizationName")
     except Exception as e:
-        print(f"[ERROR] self.jsonの読み込みに失敗: {e}")
+        logger.error("self.jsonの読み込みに失敗: %s", e)
     # --- 組織ID取得 ---
     org_id = None
     try:
@@ -510,7 +515,7 @@ def create_group_select_widget(parent=None):
                 org_id = org.get("id")
                 break
     except Exception as e:
-        print(f"[ERROR] organization.jsonの読み込みに失敗: {e}")
+        logger.error("organization.jsonの読み込みに失敗: %s", e)
     # --- instrument IDリスト取得 ---
     instrument_ids = set()
     instrument_map = {}
@@ -531,7 +536,7 @@ def create_group_select_widget(parent=None):
             if attr.get("organizationId") == org_id:
                 instrument_ids.add(inst_id)
     except Exception as e:
-        print(f"[ERROR] instruments.jsonの読み込みに失敗: {e}")
+        logger.error("instruments.jsonの読み込みに失敗: %s", e)
     # --- テンプレート抽出 ---
     try:
         with open(TEMPLATE_JSON_PATH, encoding="utf-8") as f:
@@ -566,7 +571,7 @@ def create_group_select_widget(parent=None):
             template_items.append(label)
             template_combo.addItem(label, tid)
     except Exception as e:
-        print(f"[ERROR] template.jsonの読み込みに失敗: {e}")
+        logger.error("template.jsonの読み込みに失敗: %s", e)
     template_combo.setMinimumWidth(260)
     template_completer = QCompleter(template_items, template_combo)
     template_completer.setCaseSensitivity(Qt.CaseInsensitive)  # PySide6: 列挙型が必要
@@ -692,7 +697,7 @@ def create_group_select_widget(parent=None):
             QMessageBox.warning(parent, "認証エラー", "Bearer Tokenが取得できません。ログインを確認してください。")
             return
         
-        print(f"[DEBUG] on_open: group={group_info.get('attributes', {}).get('name')}, grant_number={selected_grant_number}, dataset_name={dataset_name}, embargo_str={embargo_str}, template_id={template_id}, dataset_type={dataset_type}, bearer_token={'[PRESENT]' if bearer_token else '[NONE]'}, share_core_scope={share_core_scope}, anonymize={anonymize}")
+        logger.debug("on_open: group=%s, grant_number=%s, dataset_name=%s, embargo_str=%s, template_id=%s, dataset_type=%s, bearer_token=%s, share_core_scope=%s, anonymize=%s", group_info.get('attributes', {}).get('name'), selected_grant_number, dataset_name, embargo_str, template_id, dataset_type, '[PRESENT]' if bearer_token else '[NONE]', share_core_scope, anonymize)
         run_dataset_open_logic(parent, bearer_token, group_info, dataset_name, embargo_str, template_id, dataset_type, share_core_scope, anonymize)
     open_btn.clicked.connect(on_open)
 
@@ -702,7 +707,7 @@ def create_group_select_widget(parent=None):
         try:
             # ウィジェットが破棄されていないかチェック
             if not combo or combo.parent() is None:
-                print("[DEBUG] コンボボックスが破棄されているため更新をスキップ")
+                logger.debug("コンボボックスが破棄されているため更新をスキップ")
                 return
                 
             # subGroup.jsonから最新データを読み込み
@@ -745,27 +750,27 @@ def create_group_select_widget(parent=None):
                 combo.update()
                 combo.repaint()
             
-            print(f"[INFO] サブグループ情報更新完了: {len(new_all_team_groups)}件のグループ, 表示: {len(group_names)}件")
+            logger.info("サブグループ情報更新完了: %s件のグループ, 表示: %s件", len(new_all_team_groups), len(group_names))
             
         except Exception as e:
-            print(f"[ERROR] サブグループ情報更新に失敗: {e}")
+            logger.error("サブグループ情報更新に失敗: %s", e)
     
     # サブグループ更新通知システムに登録
     try:
         from classes.dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
         subgroup_notifier = get_subgroup_refresh_notifier()
         subgroup_notifier.register_callback(refresh_subgroup_data)
-        print("[INFO] データセット開設タブ: サブグループ更新通知に登録完了")
+        logger.info("データセット開設タブ: サブグループ更新通知に登録完了")
         
         # ウィジェット破棄時の通知解除用
         def cleanup_callback():
             subgroup_notifier.unregister_callback(refresh_subgroup_data)
-            print("[INFO] データセット開設タブ: サブグループ更新通知を解除")
+            logger.info("データセット開設タブ: サブグループ更新通知を解除")
         
         container._cleanup_subgroup_callback = cleanup_callback
         
     except Exception as e:
-        print(f"[WARNING] サブグループ更新通知への登録に失敗: {e}")
+        logger.warning("サブグループ更新通知への登録に失敗: %s", e)
 
     # 外部から呼び出し可能にする
     container._refresh_subgroup_data = refresh_subgroup_data
@@ -778,14 +783,14 @@ def create_dataset(bearer_token, payload, output_dir="output/rde/data"):
     Bearer Token統一管理システム対応済み
     """
     if not bearer_token:
-        print("[ERROR] Bearer Tokenが指定されていません。")
+        logger.error("Bearer Tokenが指定されていません。")
         return False, "Bearer Token required"
     url = "https://rde-api.nims.go.jp/datasets"
 
     if 'payload' in locals():
         pass  # payloadは引数で受け取る
     else:
-        print("[ERROR] payloadが指定されていません。")
+        logger.error("payloadが指定されていません。")
         return
 
     headers = {
@@ -809,31 +814,31 @@ def create_dataset(bearer_token, payload, output_dir="output/rde/data"):
     try:
         resp = api_request("POST", url, bearer_token=bearer_token, headers=headers, json_data=payload, timeout=15)  # refactored to use api_request_helper
         if resp is None:
-            print("[ERROR] データセット開設API リクエスト失敗")
+            logger.error("データセット開設API リクエスト失敗")
             return False, None
         resp.raise_for_status()
         data = resp.json()
         os.makedirs(output_dir, exist_ok=True)
         with open(os.path.join(output_dir, "create_dataset.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-        print("[INFO] 設備情報(create_dataset.json)の取得・保存に成功しました。")
+        logger.info("設備情報(create_dataset.json)の取得・保存に成功しました。")
         
         # データセット開設成功時に個別データセット情報を自動取得
         try:
             dataset_id = data.get("data", {}).get("id")
             if dataset_id:
-                print(f"[INFO] データセット開設成功。個別データセット情報を自動取得中: {dataset_id}")
+                logger.info("データセット開設成功。個別データセット情報を自動取得中: %s", dataset_id)
                 from classes.basic.core.basic_info_logic import fetch_dataset_info_respectively_from_api
                 fetch_dataset_info_respectively_from_api(bearer_token, dataset_id)
-                print(f"[INFO] 個別データセット情報({dataset_id}.json)の自動取得完了")
+                logger.info("個別データセット情報(%s.json)の自動取得完了", dataset_id)
             else:
-                print("[WARNING] データセット開設レスポンスにIDが含まれていません")
+                logger.warning("データセット開設レスポンスにIDが含まれていません")
         except Exception as e:
-            print(f"[WARNING] 個別データセット情報の自動取得に失敗: {e}")
+            logger.warning("個別データセット情報の自動取得に失敗: %s", e)
         
         return True, data
     except Exception as e:
-        print(f"[ERROR] 設備情報の取得・保存に失敗しました: {e}")
+        logger.error("設備情報の取得・保存に失敗しました: %s", e)
         return False, str(e)
 
 
@@ -844,7 +849,7 @@ def update_dataset(bearer_token, output_dir="output/rde/data"):
     データセット更新処理（Bearer Token統一管理システム対応済み）
     """
     if not bearer_token:
-        print("[ERROR] Bearer Tokenが取得できません。ログイン状態を確認してください。")
+        logger.error("Bearer Tokenが取得できません。ログイン状態を確認してください。")
         return
     #url = "https://rde-api.nims.go.jp/datasetTemplates?programId=4bbf62be-f270-4a46-9682-38cd064607ba&teamId=22398c55-8620-430e-afa5-2405c57dd03c&sort=id&page[limit]=10000&page[offset]=0&include=instruments&fields[instrument]=nameJa%2CnameEn"
     url = "https://rde-api.nims.go.jp/datasets/5bfd6602-41c2-423a-8652-e9cbab71a172"

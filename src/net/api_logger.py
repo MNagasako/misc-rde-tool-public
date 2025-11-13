@@ -47,9 +47,9 @@ def _cleanup_old_logs():
             
             if date_str != today:
                 log_file.unlink()
-                print(f"古いAPIログ削除: {log_file.name}")
+                logger.debug("古いAPIログ削除: %s", log_file.name)
     except Exception as e:
-        print(f"APIログクリーンアップエラー: {e}")
+        logger.error("APIログクリーンアップエラー: %s", e)
 
 
 def _init_logger():

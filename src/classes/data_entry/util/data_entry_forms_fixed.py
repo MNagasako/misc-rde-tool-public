@@ -11,13 +11,18 @@ try:
     )
     from qt_compat.core import Qt
 except ImportError as e:
-    print(f"[ERROR] PyQt5インポートエラー: {e}")
+    logger.error("PyQt5インポートエラー: %s", e)
     # フォールバック用の空実装
     class QFrame: pass
     class QVBoxLayout: pass
 
 
 from .sample_loader import load_existing_samples, format_sample_display_name
+
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
 # 共通スタイル定数をインポート
 from classes.data_entry.conf.ui_constants import DATA_REGISTER_FORM_STYLE, ROW_STYLE_QSS
 
@@ -25,7 +30,7 @@ def create_sample_form(parent_widget, group_id=None, parent_controller=None):
     """
     試料フォームを作成 (正しい3項目構造・既存試料選択・入力制御機能付き)
     """
-    print(f"[FIXED] 試料フォーム作成開始: group_id={group_id}")
+    logger.debug("[FIXED] 試料フォーム作成開始: group_id=%s", group_id)
 
     # QGroupBox単体を返すことで二重枠を防ぐ
     input_group, input_widgets = _create_sample_input_area(group_id)
@@ -45,7 +50,7 @@ def create_sample_form(parent_widget, group_id=None, parent_controller=None):
         parent_controller.sample_input_widgets = input_widgets
         parent_controller.sample_combo = input_widgets["sample_combo"]
 
-    print(f"[FIXED] 試料フォーム作成完了")
+    logger.info("[FIXED] 試料フォーム作成完了")
     return input_group
 
 def _create_sample_input_area(group_id=None):
@@ -53,7 +58,7 @@ def _create_sample_input_area(group_id=None):
     試料入力エリア作成（新規/選択エリアを含む・正しい3項目構造・入力制御機能付き）
     固有情報エリアと同じ横並びレイアウト・スタイルを適用
     """
-    print("[FIXED] 試料入力エリア作成開始")
+    logger.debug("[FIXED] 試料入力エリア作成開始")
     
     input_group = QGroupBox("試料情報")
     # 共通フォームスタイルを適用
@@ -75,19 +80,19 @@ def _create_sample_input_area(group_id=None):
     if group_id:
         try:
             existing_samples = load_existing_samples(group_id)
-            print(f"[FIXED] 既存試料取得結果: {len(existing_samples)}件")
+            logger.debug("[FIXED] 既存試料取得結果: %s件", len(existing_samples))
             for sample in existing_samples:
                 display_name = format_sample_display_name(sample)
                 sample_combo.addItem(display_name, sample)
             if existing_samples:
-                print(f"[FIXED] 既存試料をコンボボックスに追加: {len(existing_samples)}件")
+                logger.debug("[FIXED] 既存試料をコンボボックスに追加: %s件", len(existing_samples))
             else:
-                print("[FIXED] 既存試料データなし")
+                logger.debug("[FIXED] 既存試料データなし")
         except Exception as e:
-            print(f"[FIXED] 既存試料取得エラー: {e}")
+            logger.error("[FIXED] 既存試料取得エラー: %s", e)
             sample_combo.addItem("既存試料取得エラー", None)
     else:
-        print("[FIXED] グループIDなし - 既存試料取得をスキップ")
+        logger.debug("[FIXED] グループIDなし - 既存試料取得をスキップ")
     select_row.addWidget(select_label)
     select_row.addWidget(sample_combo)
     input_layout.addLayout(select_row)
@@ -146,7 +151,7 @@ def _create_sample_input_area(group_id=None):
         "save_button": save_button
     }
     
-    print("[FIXED] 試料入力エリア作成完了（新規/選択エリア含む3項目構造）")
+    logger.info("[FIXED] 試料入力エリア作成完了（新規/選択エリア含む3項目構造）")
     return input_group, input_widgets
 
 def _handle_sample_selection(selected_data, input_widgets):
@@ -157,11 +162,11 @@ def _handle_sample_selection(selected_data, input_widgets):
         selected_data: 選択された試料データ（Noneなら新規作成）
         input_widgets: 入力ウィジェットの辞書
     """
-    print(f"[FIXED] 試料選択変更: selected_data={selected_data}")
+    logger.debug("[FIXED] 試料選択変更: selected_data=%s", selected_data)
     
     if selected_data is None:
         # 新規作成の場合：入力フィールドを有効化・クリア
-        print("[FIXED] 新規作成モード：入力フィールド有効化")
+        logger.debug("[FIXED] 新規作成モード：入力フィールド有効化")
         
         input_widgets["name"].setEnabled(True)
         input_widgets["description"].setEnabled(True)
@@ -180,7 +185,7 @@ def _handle_sample_selection(selected_data, input_widgets):
         
     else:
         # 既存試料選択の場合：入力フィールドを無効化・データ表示
-        print("[FIXED] 既存試料選択モード：入力フィールド無効化・データ表示")
+        logger.debug("[FIXED] 既存試料選択モード：入力フィールド無効化・データ表示")
         
         input_widgets["name"].setEnabled(False)
         input_widgets["description"].setEnabled(False)
@@ -202,5 +207,5 @@ def _build_sample_form_content(*args, **kwargs):
     """
     旧関数 - 無効化済み
     """
-    print("[FIXED] 旧_build_sample_form_content関数は無効化されました")
+    logger.debug("[FIXED] 旧_build_sample_form_content関数は無効化されました")
     pass

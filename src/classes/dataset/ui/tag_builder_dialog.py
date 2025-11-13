@@ -9,6 +9,7 @@ TAGビルダーダイアログ
 
 import json
 import os
+import logging
 from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QLabel, 
     QListWidget, QListWidgetItem, QTextEdit, QGroupBox, QCheckBox,
@@ -17,6 +18,9 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt, Signal
 from qt_compat.gui import QFont
+
+# ロガー設定
+logger = logging.getLogger(__name__)
 
 
 class TagBuilderDialog(QDialog):
@@ -44,22 +48,22 @@ class TagBuilderDialog(QDialog):
             mi_json_path = os.path.join(INPUT_DIR, "ai", "MI.json")
             
             if os.path.exists(mi_json_path):
-                print(f"[DEBUG] MI.jsonを読み込み: {mi_json_path}")
+                logger.debug("MI.jsonを読み込み: %s", mi_json_path)
                 
                 with open(mi_json_path, 'r', encoding='utf-8') as f:
                     self.preset_data = json.load(f)
                 
-                print(f"[DEBUG] プリセットデータ読み込み完了: {len(self.preset_data)}カテゴリ")
+                logger.debug("プリセットデータ読み込み完了: %sカテゴリ", len(self.preset_data))
                 for category, subcategories in self.preset_data.items():
                     if isinstance(subcategories, dict):
                         total_items = sum(len(items) for items in subcategories.values() if isinstance(items, list))
-                        print(f"[DEBUG] - {category}: {total_items}項目")
+                        logger.debug("- %s: %s項目", category, total_items)
             else:
-                print(f"[WARNING] MI.jsonが見つかりません: {mi_json_path}")
+                logger.warning("MI.jsonが見つかりません: %s", mi_json_path)
                 self.set_default_preset_data()
                     
         except Exception as e:
-            print(f"[ERROR] MI.json読み込みエラー: {e}")
+            logger.error("MI.json読み込みエラー: %s", e)
             self.set_default_preset_data()
     
     def set_default_preset_data(self):
@@ -445,7 +449,7 @@ class TagBuilderDialog(QDialog):
         # プリセットのチェックボックスを更新
         self.update_preset_checkboxes()
         
-        print(f"[DEBUG] 現在のタグを解析: {tags}")
+        logger.debug("現在のタグを解析: %s", tags)
     
     def update_preview(self):
         """プレビューを更新"""
@@ -497,13 +501,13 @@ def test_tag_builder():
     dialog = TagBuilderDialog(current_tags=current_tags)
     
     def on_tags_changed(tags):
-        print(f"タグが変更されました: {tags}")
+        logger.debug("タグが変更されました: %s", tags)
     
     dialog.tags_changed.connect(on_tags_changed)
     
     if dialog.exec() == QDialog.Accepted:
         result = dialog.get_tags_string()
-        print(f"最終結果: {result}")
+        logger.debug("最終結果: %s", result)
     
     sys.exit(app.exec())
 

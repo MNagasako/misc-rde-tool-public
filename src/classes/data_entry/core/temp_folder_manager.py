@@ -14,6 +14,11 @@ from pathlib import Path
 import pandas as pd
 from dataclasses import dataclass
 
+import logging
+
+# ロガー設定
+logger = logging.getLogger(__name__)
+
 from classes.data_entry.core.file_set_manager import FileSet, FileItem, FileType, PathOrganizeMethod, FileItemType
 
 
@@ -47,7 +52,7 @@ class TempFolderManager:
         # ベースディレクトリが存在することを確認
         if not os.path.exists(self.base_temp_dir):
             os.makedirs(self.base_temp_dir, exist_ok=True)
-            print(f"[INFO] 一時フォルダベースディレクトリを作成: {self.base_temp_dir}")
+            logger.info("一時フォルダベースディレクトリを作成: %s", self.base_temp_dir)
         
         # 後方互換性のため残しておく（UUID管理に移行中）
         self.temp_folders: Dict[int, str] = {}  # file_set_id -> temp_folder_path
@@ -80,10 +85,10 @@ class TempFolderManager:
             # 既存フォルダをクリーンアップして再作成
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
-                print(f"[INFO] 既存の一時フォルダをクリーンアップ: {temp_dir}")
+                logger.info("既存の一時フォルダをクリーンアップ: %s", temp_dir)
             
             os.makedirs(temp_dir, exist_ok=True)
-            print(f"[INFO] 一時フォルダを作成: {temp_dir}")
+            logger.info("一時フォルダを作成: %s", temp_dir)
             
             # ファイルセットに固定パスを設定
             file_set.temp_folder_path = temp_dir
@@ -103,11 +108,11 @@ class TempFolderManager:
             # ファイルセットのマッピングファイルパスを更新
             file_set.mapping_file_path = mapping_xlsx
             
-            print(f"[INFO] ファイルセット {file_set.name} (UUID: {file_set.uuid}) の一時フォルダを作成: {temp_dir}")
+            logger.info("ファイルセット %s (UUID: %s) の一時フォルダを作成: %s", file_set.name, file_set.uuid, temp_dir)
             return temp_dir, mapping_xlsx
             
         except Exception as e:
-            print(f"[ERROR] 一時フォルダ作成エラー: {e}")
+            logger.error("一時フォルダ作成エラー: %s", e)
             raise
     
     def _create_flatten_structure(self, file_set: FileSet, temp_dir: str) -> str:
@@ -131,7 +136,7 @@ class TempFolderManager:
         for item in valid_items:
             if item.file_type == FileType.DIRECTORY and hasattr(item, 'is_zip') and item.is_zip:
                 zip_directories.add(item.relative_path)
-                print(f"[DEBUG] フラット化でもZIP化対象ディレクトリ: {item.relative_path}")
+                logger.debug("フラット化でもZIP化対象ディレクトリ: %s", item.relative_path)
         
         # ZIP化対象ディレクトリを処理
         for zip_dir in zip_directories:
@@ -159,7 +164,7 @@ class TempFolderManager:
                             zip_internal_path = zip_internal_path[len(zip_dir):].lstrip('/\\')
                         
                         zipf.write(file_item.path, zip_internal_path)
-                        print(f"[DEBUG] フラット化ZIP内に追加: {file_item.path} -> {zip_internal_path}")
+                        logger.debug("フラット化ZIP内に追加: %s -> %s", file_item.path, zip_internal_path)
                 
                 # ZIPファイルのマッピング情報を記録
                 zip_size = os.path.getsize(zip_file_path)
@@ -172,7 +177,7 @@ class TempFolderManager:
                     relative_path=zip_dir
                 )
                 mappings.append(mapping)
-                print(f"[INFO] フラット化でZIP化完了: {zip_file_path} ({len(zip_files)}ファイル)")
+                logger.info("フラット化でZIP化完了: %s (%sファイル)", zip_file_path, len(zip_files))
         
         # 通常のファイル（ZIP化対象外）を処理
         for file_item in [item for item in valid_items if item.file_type == FileType.FILE]:
@@ -188,7 +193,7 @@ class TempFolderManager:
                 continue  # ZIP化済みなのでスキップ
             
             if not os.path.exists(file_item.path):
-                print(f"[WARNING] ファイルが存在しません: {file_item.path}")
+                logger.warning("ファイルが存在しません: %s", file_item.path)
                 continue
             
             # 相対パスを基準にしたフラット化ファイル名を決定
@@ -252,11 +257,11 @@ class TempFolderManager:
         for item in valid_items:
             if item.file_type == FileType.DIRECTORY and getattr(item, 'is_zip', False):
                 zip_directories.add(item.relative_path)
-                print(f"[DEBUG] ZIP化対象ディレクトリ: {item.relative_path} (is_zip={item.is_zip})")
+                logger.debug("ZIP化対象ディレクトリ: %s (is_zip=%s)", item.relative_path, item.is_zip)
         
-        print(f"[DEBUG] ZIP化対象ディレクトリ総数: {len(zip_directories)}")
+        logger.debug("ZIP化対象ディレクトリ総数: %s", len(zip_directories))
         for zip_dir in zip_directories:
-            print(f"[DEBUG]   - {zip_dir}")
+            logger.debug("- %s", zip_dir)
         # ディレクトリごとにファイルを整理（ZIP化を考慮）
         root_files = []
         directories = {}
@@ -322,13 +327,13 @@ class TempFolderManager:
             if should_zip:
                 # ZIPファイルとして作成
                 zip_file_path = os.path.join(temp_dir, f"{Path(dir_name).name}.zip")
-                print(f"[DEBUG] ZIP作成開始: {zip_file_path}")
-                print(f"[DEBUG] ZIP対象ファイル数: {len(files)}")
+                logger.debug("ZIP作成開始: %s", zip_file_path)
+                logger.debug("ZIP対象ファイル数: %s", len(files))
                 
                 with zipfile.ZipFile(zip_file_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                     for file_item in files:
                         if not os.path.exists(file_item.path):
-                            print(f"[WARNING] ファイルが存在しません: {file_item.path}")
+                            logger.warning("ファイルが存在しません: %s", file_item.path)
                             continue
                         
                         # ZIP内での相対パス（ディレクトリ構造を保持）
@@ -337,16 +342,16 @@ class TempFolderManager:
                             # ディレクトリプレフィックスを削除
                             zip_internal_path = zip_internal_path[len(dir_name):].lstrip('/\\')
                         
-                        print(f"[DEBUG] ZIP内に追加:")
-                        print(f"[DEBUG]   元ファイル: {file_item.path}")
-                        print(f"[DEBUG]   相対パス: {file_item.relative_path}")
-                        print(f"[DEBUG]   ZIP内パス: {zip_internal_path}")
+                        logger.debug("ZIP内に追加:")
+                        logger.debug("元ファイル: %s", file_item.path)
+                        logger.debug("相対パス: %s", file_item.relative_path)
+                        logger.debug("ZIP内パス: %s", zip_internal_path)
                         
                         zipf.write(file_item.path, zip_internal_path)
                 
                 # ZIPファイル全体のマッピング情報を記録
                 zip_size = os.path.getsize(zip_file_path)
-                print(f"[DEBUG] ZIP作成完了: {zip_file_path} ({zip_size} bytes)")
+                logger.debug("ZIP作成完了: %s (%s bytes)", zip_file_path, zip_size)
                 
                 mapping = FileMapping(
                     original_path=f"ディレクトリ: {dir_name} ({len(files)}ファイル)",
@@ -357,7 +362,7 @@ class TempFolderManager:
                     relative_path=dir_name
                 )
                 mappings.append(mapping)
-                print(f"[INFO] ZIP化完了: {zip_file_path} ({len(files)}ファイル)")
+                logger.info("ZIP化完了: %s (%sファイル)", zip_file_path, len(files))
             else:
                 # 通常のファイルコピー
                 for file_item in files:
@@ -415,12 +420,12 @@ class TempFolderManager:
         with pd.ExcelWriter(xlsx_path, engine='openpyxl') as writer:
             # filemapシートのみ出力
             df.to_excel(writer, sheet_name='filemap', index=False)
-        print(f"[INFO] マッピングExcelファイルを作成: {xlsx_path}")
+        logger.info("マッピングExcelファイルを作成: %s", xlsx_path)
         # ファイル作成確認
         if os.path.exists(xlsx_path):
-            print(f"[INFO] マッピングファイル作成確認: {xlsx_path}")
+            logger.info("マッピングファイル作成確認: %s", xlsx_path)
         else:
-            print(f"[WARNING] マッピングファイル作成失敗: {xlsx_path}")
+            logger.warning("マッピングファイル作成失敗: %s", xlsx_path)
         
         return xlsx_path
     
@@ -447,7 +452,7 @@ class TempFolderManager:
             temp_dir = self.temp_folders.get(file_set_id)
             if temp_dir and os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
-                print(f"[INFO] 一時フォルダを削除: {temp_dir}")
+                logger.info("一時フォルダを削除: %s", temp_dir)
                 
             # 管理データをクリア
             if file_set_id in self.temp_folders:
@@ -457,7 +462,7 @@ class TempFolderManager:
                 
             return True
         except Exception as e:
-            print(f"[ERROR] 一時フォルダ削除エラー: {e}")
+            logger.error("一時フォルダ削除エラー: %s", e)
             return False
     
     def cleanup_temp_folder_by_uuid(self, fileset_uuid: str) -> bool:
@@ -468,14 +473,14 @@ class TempFolderManager:
             
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
-                print(f"[INFO] UUID {fileset_uuid} の一時フォルダを削除: {temp_dir}")
+                logger.info("UUID %s の一時フォルダを削除: %s", fileset_uuid, temp_dir)
                 return True
             else:
-                print(f"[INFO] UUID {fileset_uuid} の一時フォルダは存在しません: {temp_dir}")
+                logger.info("UUID %s の一時フォルダは存在しません: %s", fileset_uuid, temp_dir)
                 return False
                 
         except Exception as e:
-            print(f"[ERROR] UUID {fileset_uuid} の一時フォルダ削除エラー: {e}")
+            logger.error("UUID %s の一時フォルダ削除エラー: %s", fileset_uuid, e)
             return False
     
     def cleanup_all_temp_folders(self):
@@ -486,14 +491,14 @@ class TempFolderManager:
                     item_path = os.path.join(self.base_temp_dir, item)
                     if os.path.isdir(item_path) and item.startswith('fileset_'):
                         shutil.rmtree(item_path)
-                        print(f"[INFO] 一時フォルダを削除: {item_path}")
+                        logger.info("一時フォルダを削除: %s", item_path)
             
             # 後方互換性用の管理データもクリア
             self.temp_folders.clear()
             self.file_mappings.clear()
             
         except Exception as e:
-            print(f"[ERROR] 全一時フォルダ削除エラー: {e}")
+            logger.error("全一時フォルダ削除エラー: %s", e)
     
     def get_orphaned_temp_folders(self, active_filesets: List[FileSet]) -> List[str]:
         """孤立した一時フォルダを検索"""
@@ -515,7 +520,7 @@ class TempFolderManager:
                         orphaned.append(item_path)
         
         except Exception as e:
-            print(f"[ERROR] 孤立フォルダ検索エラー: {e}")
+            logger.error("孤立フォルダ検索エラー: %s", e)
         
         return orphaned
     
@@ -527,10 +532,10 @@ class TempFolderManager:
         for folder_path in orphaned:
             try:
                 shutil.rmtree(folder_path)
-                print(f"[INFO] 孤立した一時フォルダを削除: {folder_path}")
+                logger.info("孤立した一時フォルダを削除: %s", folder_path)
                 cleaned_count += 1
             except Exception as e:
-                print(f"[ERROR] 孤立フォルダ削除エラー ({folder_path}): {e}")
+                logger.error("孤立フォルダ削除エラー (%s): %s", folder_path, e)
         
         return cleaned_count
     
