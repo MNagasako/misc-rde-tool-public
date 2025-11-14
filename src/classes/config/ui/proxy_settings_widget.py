@@ -72,7 +72,11 @@ class ProxyTestWorker(QThread):
         except:
             pass
         
-        # 重要: truststoreはテスト3の直前で有効化
+        # UI設定からtruststore使用フラグを取得
+        cert_config = self.proxy_config.get('cert', {})
+        use_truststore = cert_config.get('enterprise_ca', {}).get('enable_truststore', False)
+        
+        # 重要: truststore使用が有効な場合のみ、テスト3の直前で有効化
         # テスト1とテスト2では意図的にWindows証明書ストアを使用しない
         self._truststore_enabled = False
         
@@ -95,17 +99,18 @@ class ProxyTestWorker(QThread):
         # テスト間で待機
         time.sleep(1.0)
         
-        # ここでtruststoreを有効化（テスト3のみで使用）
-        try:
-            import truststore
-            truststore.inject_into_ssl()
-            self._truststore_enabled = True
-        except ImportError:
-            pass  # truststoreがインストールされていない
-        except Exception:
-            pass  # その他のエラーは無視
+        # ここでtruststoreを有効化（テスト3のみで使用、かつUI設定で有効な場合のみ）
+        if use_truststore:
+            try:
+                import truststore
+                truststore.inject_into_ssl()
+                self._truststore_enabled = True
+            except ImportError:
+                pass  # truststoreがインストールされていない
+            except Exception:
+                pass  # その他のエラーは無視
         
-        # 3. プロキシ（CA証明書あり）テスト（truststore有効）
+        # 3. プロキシ（CA証明書あり）テスト（truststore有効化済み、またはカスタムCA使用）
         results['proxy_with_ca'] = self._test_proxy_with_ca()
         
         # 全体の成功判定（いずれか1つでも成功すればOK）
@@ -255,14 +260,61 @@ class ProxyTestWorker(QThread):
             test_url = "https://rde.nims.go.jp/"
             start_time = time.time()
 
-            # プロキシ設定を明示的に構築（コンストラクタで渡されたproxy_configを使用）
-            proxy_host = self.proxy_config.get('host', '127.0.0.1')
-            proxy_port = self.proxy_config.get('port', 8888)
-            proxies = {
-                'http': f'http://{proxy_host}:{proxy_port}',
-                'https': f'http://{proxy_host}:{proxy_port}'
-            }
-            proxy_info = f"Proxy: http://{proxy_host}:{proxy_port}"
+            # UI設定からプロキシ設定を取得
+            mode = self.proxy_config.get('mode', 'DIRECT').upper()
+            
+            if mode == 'HTTP':
+                # 手動プロキシ設定
+                http_proxy = self.proxy_config.get('http_proxy', '')
+                https_proxy = self.proxy_config.get('https_proxy', http_proxy)
+                
+                if not http_proxy:
+                    return {
+                        'success': False,
+                        'message': 'プロキシ未設定',
+                        'details': '❌ HTTPプロキシが設定されていません',
+                        'time': 0
+                    }
+                
+                proxies = {
+                    'http': http_proxy,
+                    'https': https_proxy
+                }
+                proxy_info = f"Proxy: HTTP={http_proxy}, HTTPS={https_proxy}"
+                
+            elif mode == 'SYSTEM':
+                # システムプロキシ使用
+                from urllib.request import getproxies
+                system_proxies = getproxies()
+                http_proxy = system_proxies.get('http', '')
+                https_proxy = system_proxies.get('https', http_proxy)
+                
+                if not http_proxy:
+                    return {
+                        'success': False,
+                        'message': 'システムプロキシなし',
+                        'details': '❌ システムプロキシが設定されていません',
+                        'time': 0
+                    }
+                
+                proxies = {
+                    'http': http_proxy,
+                    'https': https_proxy
+                }
+                proxy_info = f"Proxy (SYSTEM): HTTP={http_proxy}, HTTPS={https_proxy}"
+                
+            elif mode == 'DIRECT':
+                # 直接接続モードの場合はこのテストをスキップ
+                return {
+                    'success': False,
+                    'message': 'DIRECTモード',
+                    'details': '⏹️ DIRECTモードではプロキシテストをスキップします',
+                    'time': 0
+                }
+            else:
+                # その他のモード（PAC等）
+                proxies = {}
+                proxy_info = f"Mode: {mode}"
 
             # サブテスト1: SSL検証有効 (verify=True)
             sub_start = time.time()
@@ -425,28 +477,86 @@ class ProxyTestWorker(QThread):
             test_url = "https://rde.nims.go.jp/"
             start_time = time.time()
             
+            # truststore設定を確認
+            cert_config = self.proxy_config.get('cert', {})
+            use_truststore = cert_config.get('enterprise_ca', {}).get('enable_truststore', False)
+            custom_ca = cert_config.get('enterprise_ca', {}).get('custom_ca_bundle', '')
+            
             # truststoreの有効化状態をチェック（run()で既に実行済み）
-            if hasattr(self, '_truststore_enabled') and self._truststore_enabled:
-                ca_info = "truststore (Windows証明書ストア)"
+            if use_truststore and hasattr(self, '_truststore_enabled') and self._truststore_enabled:
+                ca_info = "truststore (Windows証明書ストア) - 有効"
+            elif custom_ca:
+                ca_info = f"カスタムCA: {custom_ca}"
             else:
-                ca_info = "デフォルトCA証明書のみ（truststore未インストール）"
+                ca_info = "デフォルトCA証明書のみ"
             
             # 新規セッション作成（明示的なプロキシ設定）
             session = requests.Session()
             
-            # プロキシ設定を明示的に構築（コンストラクタで渡されたproxy_configを使用）
-            proxy_host = self.proxy_config.get('host', '127.0.0.1')
-            proxy_port = self.proxy_config.get('port', 8888)
-            session.proxies = {
-                'http': f'http://{proxy_host}:{proxy_port}',
-                'https': f'http://{proxy_host}:{proxy_port}'
-            }
+            # UI設定からプロキシ設定を取得
+            mode = self.proxy_config.get('mode', 'DIRECT').upper()
+            
+            if mode == 'HTTP':
+                # 手動プロキシ設定
+                http_proxy = self.proxy_config.get('http_proxy', '')
+                https_proxy = self.proxy_config.get('https_proxy', http_proxy)
+                
+                if not http_proxy:
+                    return {
+                        'success': False,
+                        'message': 'プロキシ未設定',
+                        'details': '❌ HTTPプロキシが設定されていません',
+                        'time': 0
+                    }
+                
+                session.proxies = {
+                    'http': http_proxy,
+                    'https': https_proxy
+                }
+                proxy_info = f"Proxy: HTTP={http_proxy}, HTTPS={https_proxy}"
+                
+            elif mode == 'SYSTEM':
+                # システムプロキシ使用
+                from urllib.request import getproxies
+                system_proxies = getproxies()
+                http_proxy = system_proxies.get('http', '')
+                https_proxy = system_proxies.get('https', http_proxy)
+                
+                if not http_proxy:
+                    return {
+                        'success': False,
+                        'message': 'システムプロキシなし',
+                        'details': '❌ システムプロキシが設定されていません',
+                        'time': 0
+                    }
+                
+                session.proxies = {
+                    'http': http_proxy,
+                    'https': https_proxy
+                }
+                proxy_info = f"Proxy (SYSTEM): HTTP={http_proxy}, HTTPS={https_proxy}"
+                
+            elif mode == 'DIRECT':
+                # 直接接続モードの場合はこのテストをスキップ
+                return {
+                    'success': False,
+                    'message': 'DIRECTモード',
+                    'details': '⏹️ DIRECTモードではプロキシテストをスキップします',
+                    'time': 0
+                }
+            else:
+                # その他のモード（PAC等）
+                session.proxies = {}
+                proxy_info = f"Mode: {mode}"
+            
             session.trust_env = False  # 環境変数を無視
-            proxy_info = f"Proxy: http://{proxy_host}:{proxy_port}"
             
             # SSL検証を有効化（CA証明書チェック）
             # truststore.inject_into_ssl() により Windows証明書ストアを使用（run()で実行済み）
-            session.verify = True
+            if custom_ca:
+                session.verify = custom_ca  # カスタムCA証明書を使用
+            else:
+                session.verify = True  # デフォルトまたはtruststore
             
             # アダプターを完全に新規作成（接続再利用を防ぐ）
             from requests.adapters import HTTPAdapter
@@ -744,38 +854,70 @@ class ProxySettingsWidget(QWidget):
         layout.addWidget(quick_group)
         
     def setup_status_section(self, layout):
-        """現在の状態表示セクション"""
+        """現在の状態表示セクション - OS設定とアプリ設定を区別して表示"""
         status_group = QGroupBox("現在のプロキシ状態")
         status_layout = QGridLayout(status_group)
         
+        # ========== アプリケーション設定セクション ==========
+        app_header = QLabel("【アプリケーション設定】")
+        app_header.setStyleSheet("font-weight: bold; color: #2E7D32; font-size: 12px;")
+        status_layout.addWidget(app_header, 0, 0, 1, 2)
+        
         # 現在のモード
-        status_layout.addWidget(QLabel("プロキシモード:"), 0, 0)
+        status_layout.addWidget(QLabel("プロキシモード:"), 1, 0)
         self.current_mode_label = QLabel("読み込み中...")
         self.current_mode_label.setStyleSheet("font-weight: bold; color: blue;")
-        status_layout.addWidget(self.current_mode_label, 0, 1)
+        status_layout.addWidget(self.current_mode_label, 1, 1)
         
         # 現在のプロキシ
-        status_layout.addWidget(QLabel("HTTPプロキシ:"), 1, 0)
+        status_layout.addWidget(QLabel("HTTPプロキシ:"), 2, 0)
         self.current_http_proxy_label = QLabel("読み込み中...")
-        status_layout.addWidget(self.current_http_proxy_label, 1, 1)
+        status_layout.addWidget(self.current_http_proxy_label, 2, 1)
         
-        status_layout.addWidget(QLabel("HTTPSプロキシ:"), 2, 0)
+        status_layout.addWidget(QLabel("HTTPSプロキシ:"), 3, 0)
         self.current_https_proxy_label = QLabel("読み込み中...")
-        status_layout.addWidget(self.current_https_proxy_label, 2, 1)
+        status_layout.addWidget(self.current_https_proxy_label, 3, 1)
         
         # SSL証明書の状態
-        status_layout.addWidget(QLabel("SSL証明書検証:"), 3, 0)
+        status_layout.addWidget(QLabel("SSL証明書検証:"), 4, 0)
         self.current_ssl_verify_label = QLabel("読み込み中...")
-        status_layout.addWidget(self.current_ssl_verify_label, 3, 1)
+        status_layout.addWidget(self.current_ssl_verify_label, 4, 1)
         
-        status_layout.addWidget(QLabel("証明書ストア:"), 4, 0)
+        status_layout.addWidget(QLabel("証明書ストア:"), 5, 0)
         self.current_cert_store_label = QLabel("読み込み中...")
-        status_layout.addWidget(self.current_cert_store_label, 4, 1)
+        status_layout.addWidget(self.current_cert_store_label, 5, 1)
         
         # 環境変数信頼設定
-        status_layout.addWidget(QLabel("環境変数信頼:"), 5, 0)
+        status_layout.addWidget(QLabel("環境変数信頼:"), 6, 0)
         self.current_trust_env_label = QLabel("読み込み中...")
-        status_layout.addWidget(self.current_trust_env_label, 5, 1)
+        status_layout.addWidget(self.current_trust_env_label, 6, 1)
+        
+        # ========== OS/システム設定セクション ==========
+        os_header = QLabel("【OS/システム設定】")
+        os_header.setStyleSheet("font-weight: bold; color: #1976D2; font-size: 12px; margin-top: 10px;")
+        status_layout.addWidget(os_header, 7, 0, 1, 2)
+        
+        # OSプロキシ設定
+        status_layout.addWidget(QLabel("OS HTTPプロキシ:"), 8, 0)
+        self.os_http_proxy_label = QLabel("取得中...")
+        self.os_http_proxy_label.setStyleSheet("color: #666;")
+        status_layout.addWidget(self.os_http_proxy_label, 8, 1)
+        
+        status_layout.addWidget(QLabel("OS HTTPSプロキシ:"), 9, 0)
+        self.os_https_proxy_label = QLabel("取得中...")
+        self.os_https_proxy_label.setStyleSheet("color: #666;")
+        status_layout.addWidget(self.os_https_proxy_label, 9, 1)
+        
+        # 環境変数プロキシ設定
+        status_layout.addWidget(QLabel("環境変数 HTTP_PROXY:"), 10, 0)
+        self.env_http_proxy_label = QLabel("取得中...")
+        self.env_http_proxy_label.setStyleSheet("color: #666;")
+        status_layout.addWidget(self.env_http_proxy_label, 10, 1)
+        
+        status_layout.addWidget(QLabel("環境変数 HTTPS_PROXY:"), 11, 0)
+        self.env_https_proxy_label = QLabel("取得中...")
+        self.env_https_proxy_label.setStyleSheet("color: #666;")
+        status_layout.addWidget(self.env_https_proxy_label, 11, 1)
         
         # ボタン行
         button_layout = QHBoxLayout()
@@ -791,7 +933,7 @@ class ProxySettingsWidget(QWidget):
         show_active_btn.clicked.connect(self.show_active_proxy_status)
         button_layout.addWidget(show_active_btn)
         
-        status_layout.addLayout(button_layout, 6, 0, 1, 2)
+        status_layout.addLayout(button_layout, 12, 0, 1, 2)
         
         layout.addWidget(status_group)
         
@@ -1543,79 +1685,133 @@ class ProxySettingsWidget(QWidget):
                 QMessageBox.warning(self, "エラー", formatted_error)
                 
     def run_connection_test(self):
-        """Requests接続テスト実行（3パターン）"""
+        """Requests接続テスト実行（UIのプロキシ設定を反映）"""
         if self.test_worker and self.test_worker.isRunning():
             return
         
-        # プロキシ設定をHTTPプロキシフィールドから読み取る
-        http_proxy_url = self.http_proxy_edit.text().strip()
+        # 現在のUI設定を取得
+        config = self.get_current_ui_config()
+        mode = config.get('mode', 'DIRECT').upper()
         
-        # URLをパース（http://host:port 形式を想定）
-        if http_proxy_url:
-            # 簡易パース: http://host:port から host と port を抽出
-            import re
-            match = re.match(r'https?://([^:]+):(\d+)', http_proxy_url)
-            if match:
-                proxy_host = match.group(1)
-                proxy_port = int(match.group(2))
-            else:
-                # パースに失敗した場合はデフォルト値
-                proxy_host = "127.0.0.1"
-                proxy_port = 8888
-                self.add_log(f"⚠️ プロキシURLのパースに失敗、デフォルト値を使用: {proxy_host}:{proxy_port}")
+        # プロキシ情報を取得
+        if mode == 'HTTP':
+            # 手動プロキシ設定
+            http_proxy = config.get('http_proxy', '')
+            https_proxy = config.get('https_proxy', http_proxy)
+            
+            if not http_proxy:
+                self.add_log("⚠️ HTTPプロキシが未設定です")
+                QMessageBox.warning(self, "設定不足", "HTTPプロキシを設定してください")
+                return
+            
+            proxy_display = f"HTTP: {http_proxy}, HTTPS: {https_proxy}"
+            
+        elif mode == 'SYSTEM':
+            # システムプロキシ使用
+            try:
+                from urllib.request import getproxies
+                system_proxies = getproxies()
+                http_proxy = system_proxies.get('http', '')
+                https_proxy = system_proxies.get('https', http_proxy)
+                proxy_display = f"システムプロキシ - HTTP: {http_proxy or 'なし'}, HTTPS: {https_proxy or 'なし'}"
+            except Exception as e:
+                self.add_log(f"❌ システムプロキシ取得エラー: {e}")
+                return
+                
+        elif mode == 'DIRECT':
+            # 直接接続
+            proxy_display = "プロキシなし（直接接続）"
         else:
-            # プロキシ設定が空の場合はデフォルト値（Fiddler）
-            proxy_host = "127.0.0.1"
-            proxy_port = 8888
-            self.add_log(f"ℹ️ プロキシ未設定、デフォルト値を使用: {proxy_host}:{proxy_port}")
+            proxy_display = f"モード: {mode}"
         
-        # テスト用の設定を明示的に構築
-        config = {
-            'host': proxy_host,
-            'port': proxy_port,
-            'mode': 'HTTP'  # テストではHTTPプロキシとして扱う
-        }
+        # CA証明書設定を取得
+        cert_config = config.get('cert', {})
+        use_truststore = cert_config.get('enterprise_ca', {}).get('enable_truststore', False)
+        custom_ca = cert_config.get('enterprise_ca', {}).get('custom_ca_bundle', '')
         
         self.test_button.setEnabled(False)
         self.test_webview_button.setEnabled(False)
         self.test_progress.setVisible(True)
         self.test_progress.setRange(0, 0)  # 不定期間プログレスバー
+        
         self.test_result_text.setPlainText(
             "🔄 Requests接続テスト実行中（3パターン）...\n\n"
-            f"テスト対象プロキシ: http://{proxy_host}:{proxy_port}\n"
+            f"【設定情報】\n"
+            f"プロキシモード: {mode}\n"
+            f"プロキシ詳細: {proxy_display}\n"
+            f"truststore使用: {'有効' if use_truststore else '無効'}\n"
+            f"カスタムCA: {custom_ca if custom_ca else 'なし'}\n"
             f"テストURL: https://rde.nims.go.jp/\n\n"
+            "【テストパターン】\n"
             "1. 直接接続（プロキシなし）\n"
             "2. プロキシ接続（CA証明書なし・SSL検証ON/OFF）\n"
             "3. プロキシ接続（CA証明書あり・SSL検証ON）\n"
         )
         
+        # テストワーカーに完全な設定を渡す
         self.test_worker = ProxyTestWorker(config)
         self.test_worker.test_completed.connect(self.on_test_completed)
         self.test_worker.start()
         
-        self.add_log(f"Requests接続テスト開始: http://{proxy_host}:{proxy_port}")
+        self.add_log(f"Requests接続テスト開始: {proxy_display}")
+
     
     def run_webview_test(self):
-        """WebView接続テスト実行（3パターン）"""
+        """WebView接続テスト実行（システムプロキシ設定を使用）"""
         try:
             from qt_compat.webengine import QWebEngineView, QWebEnginePage
             from qt_compat.core import QUrl
             import platform
             
+            # 現在のUI設定を取得
+            config = self.get_current_ui_config()
+            mode = config.get('mode', 'DIRECT').upper()
+            
             # 現在のシステムプロキシ状態を検出
             system_proxy_info = self._detect_system_proxy()
+            
+            # モードに応じた警告メッセージ
+            mode_warning = ""
+            if mode == 'HTTP':
+                http_proxy = config.get('http_proxy', '')
+                https_proxy = config.get('https_proxy', http_proxy)
+                mode_warning = (
+                    f"\n⚠️ 重要な注意:\n"
+                    f"アプリ設定: HTTPモード ({http_proxy})\n"
+                    f"しかし、WebViewはOSのシステムプロキシ設定を使用します。\n"
+                    f"現在のシステムプロキシ: {system_proxy_info}\n\n"
+                    f"HTTPモードで指定したプロキシを使用するには、\n"
+                    f"OSのシステムプロキシ設定を同じ値に変更してください。\n"
+                )
+            elif mode == 'DIRECT':
+                mode_warning = (
+                    f"\n⚠️ 重要な注意:\n"
+                    f"アプリ設定: DIRECTモード（プロキシなし）\n"
+                    f"しかし、WebViewはOSのシステムプロキシ設定を使用します。\n"
+                    f"現在のシステムプロキシ: {system_proxy_info}\n\n"
+                    f"DIRECTモードでテストするには、\n"
+                    f"OSのシステムプロキシ設定を無効にしてください。\n"
+                )
+            elif mode == 'SYSTEM':
+                mode_warning = (
+                    f"\n✅ SYSTEMモード:\n"
+                    f"WebViewはOSのシステムプロキシ設定を使用します。\n"
+                    f"現在のシステムプロキシ: {system_proxy_info}\n"
+                )
             
             # テストウィンドウを作成（モーダルではなく情報表示のみ）
             self.test_result_text.setPlainText(
                 "🔄 WebView接続テスト実行中...\n\n"
-                f"現在のシステムプロキシ: {system_proxy_info}\n"
-                "https://rde.nims.go.jp/ にアクセスしています...\n\n"
-                "💡 WebViewテストは以下の3パターンで実行します:\n"
-                "1. システムプロキシ OFF でテスト（直接接続）\n"
-                "2. システムプロキシ ON + CA証明書なしでテスト\n"
-                "3. システムプロキシ ON + CA証明書ありでテスト\n\n"
-                "⚠️ 注意: WebViewはOSのシステムプロキシ設定を使用するため、\n"
-                "全パターンをテストするにはシステムプロキシ設定を手動で変更する必要があります。"
+                f"【アプリ設定】\n"
+                f"プロキシモード: {mode}\n"
+                f"{mode_warning}\n"
+                "【テスト情報】\n"
+                f"テストURL: https://rde.nims.go.jp/\n\n"
+                "💡 WebView制限事項:\n"
+                "WebViewはQtWebEngineコンポーネントのため、\n"
+                "常にOSのシステムプロキシ設定を使用します。\n"
+                "アプリのプロキシ設定（HTTP/DIRECTモード）を反映するには、\n"
+                "OSのシステムプロキシ設定を手動で変更する必要があります。"
             )
             
             # 3パターンのテスト結果を保存
@@ -1887,19 +2083,29 @@ class ProxySettingsWidget(QWidget):
         """テスト用WebViewのクリーンアップ"""
         try:
             if hasattr(self, '_test_webview') and self._test_webview:
-                # シグナルを切断
+                # シグナルを切断（引数なしdisconnectは全スロット切断を試みるが、
+                # 接続されていない場合に警告が出るため、try-exceptで無視）
                 try:
+                    # loadFinishedシグナルの全接続を切断
                     self._test_webview.loadFinished.disconnect()
+                except (TypeError, RuntimeError):
+                    # 接続されていない、または既に切断済みの場合は無視
+                    pass
+                    
+                try:
+                    self._test_webview.stop()
                 except:
                     pass
                     
-                self._test_webview.stop()
                 self._test_webview.deleteLater()
                 self._test_webview = None
                 
             # タイムアウトタイマーもクリーンアップ
             if hasattr(self, '_test_timeout_timer') and self._test_timeout_timer:
-                self._test_timeout_timer.stop()
+                try:
+                    self._test_timeout_timer.stop()
+                except:
+                    pass
                 self._test_timeout_timer.deleteLater()
                 self._test_timeout_timer = None
                 
@@ -2230,11 +2436,11 @@ class ProxySettingsWidget(QWidget):
             self.add_log(f"企業CA UI更新エラー: {e}")
             
     def update_current_status_display(self):
-        """現在の状態表示のみを更新（入力フィールドは変更しない）"""
+        """現在の状態表示のみを更新（入力フィールドは変更しない）- OS設定も更新"""
         try:
             mode = self.current_config.get('mode', 'DIRECT').upper()
             
-            # 現在の状態表示を更新
+            # ========== アプリケーション設定の表示を更新 ==========
             self.current_mode_label.setText(mode)
             
             # プロキシ情報表示
@@ -2274,9 +2480,63 @@ class ProxySettingsWidget(QWidget):
             self.update_ssl_certificate_status()
             self.update_ssl_certificate_details()
             
+            # ========== OS/システム設定の表示を更新 ==========
+            self._update_os_proxy_status()
+            
         except Exception as e:
             self.add_log(f"状態表示更新エラー: {e}")
             logger.error(f"状態表示更新エラー: {e}")
+    
+    def _update_os_proxy_status(self):
+        """OS/システムのプロキシ設定を取得して表示"""
+        try:
+            # OSのシステムプロキシ設定を取得
+            from urllib.request import getproxies
+            system_proxies = getproxies()
+            
+            os_http = system_proxies.get('http', 'なし')
+            os_https = system_proxies.get('https', 'なし')
+            
+            self.os_http_proxy_label.setText(os_http)
+            self.os_https_proxy_label.setText(os_https)
+            
+            # 環境変数から取得
+            import os as os_module
+            env_http = os_module.environ.get('HTTP_PROXY') or os_module.environ.get('http_proxy', 'なし')
+            env_https = os_module.environ.get('HTTPS_PROXY') or os_module.environ.get('https_proxy', 'なし')
+            
+            self.env_http_proxy_label.setText(env_http)
+            self.env_https_proxy_label.setText(env_https)
+            
+            # アプリ設定とOS設定が異なる場合に警告表示
+            app_mode = self.current_config.get('mode', 'DIRECT').upper()
+            
+            if app_mode == 'DIRECT' and (os_http != 'なし' or env_http != 'なし'):
+                # DIRECTモードだがOS/環境変数にプロキシ設定あり
+                self.os_http_proxy_label.setStyleSheet("color: orange; font-weight: bold;")
+                self.os_http_proxy_label.setToolTip(
+                    "⚠️ アプリは DIRECT モードですが、OSにプロキシ設定があります。\n"
+                    "アプリはこの設定を無視して直接接続します。"
+                )
+            elif app_mode == 'SYSTEM':
+                # SYSTEMモード - OS設定を使用することを明示
+                self.os_http_proxy_label.setStyleSheet("color: green; font-weight: bold;")
+                self.os_http_proxy_label.setToolTip("✅ アプリはこのOS設定を使用しています。")
+                self.os_https_proxy_label.setStyleSheet("color: green; font-weight: bold;")
+                self.os_https_proxy_label.setToolTip("✅ アプリはこのOS設定を使用しています。")
+            else:
+                # 通常表示
+                self.os_http_proxy_label.setStyleSheet("color: #666;")
+                self.os_http_proxy_label.setToolTip("")
+                self.os_https_proxy_label.setStyleSheet("color: #666;")
+                self.os_https_proxy_label.setToolTip("")
+            
+        except Exception as e:
+            self.os_http_proxy_label.setText(f"取得エラー: {e}")
+            self.os_https_proxy_label.setText(f"取得エラー: {e}")
+            self.env_http_proxy_label.setText(f"取得エラー: {e}")
+            self.env_https_proxy_label.setText(f"取得エラー: {e}")
+            logger.error(f"OS/システムプロキシ取得エラー: {e}")
             
     def get_current_ui_config(self):
         """現在のUI設定から設定辞書を取得 (企業CA設定含む)"""
@@ -2459,7 +2719,7 @@ class ProxySettingsWidget(QWidget):
             manager = ProxySessionManager()
             manager.configure(config)
             
-            # 設定ファイルにも保存
+            # 設定ファイルに完全に保存（network セクションとトップレベル両方）
             from config.common import get_dynamic_file_path
             import yaml
             
@@ -2470,18 +2730,60 @@ class ProxySettingsWidget(QWidget):
                 with open(yaml_path, 'r', encoding='utf-8') as f:
                     data = yaml.safe_load(f) or {}
             
-            # メイン設定を更新
-            data['mode'] = config.get('mode', 'DIRECT')
-            if 'http_proxy' in config:
-                data['http_proxy'] = config['http_proxy']
-                self.add_log(f"💾 ファイル保存 - HTTP: {config['http_proxy']}")
-            if 'https_proxy' in config:
-                data['https_proxy'] = config['https_proxy']
-                self.add_log(f"💾 ファイル保存 - HTTPS: {config['https_proxy']}")
+            # network セクションが存在しなければ作成
+            if 'network' not in data:
+                data['network'] = {}
+            
+            # network セクション内のプロキシ設定を更新
+            data['network']['mode'] = config.get('mode', 'DIRECT')
+            
+            # プロキシ詳細設定を保存
+            if 'proxies' not in data['network']:
+                data['network']['proxies'] = {}
                 
+            if mode == 'HTTP':
+                http_proxy = config.get('http_proxy', '')
+                https_proxy = config.get('https_proxy', '')
+                data['network']['proxies']['http'] = http_proxy
+                data['network']['proxies']['https'] = https_proxy
+                self.add_log(f"💾 ファイル保存 (network.proxies) - HTTP: {http_proxy}")
+                self.add_log(f"💾 ファイル保存 (network.proxies) - HTTPS: {https_proxy}")
+            elif mode == 'SYSTEM':
+                # SYSTEM モードの場合は proxies を空にする
+                data['network']['proxies'] = {}
+                self.add_log(f"💾 ファイル保存 - システムプロキシを使用")
+            elif mode == 'DIRECT':
+                # DIRECT モードの場合は proxies を空にする
+                data['network']['proxies'] = {}
+                self.add_log(f"💾 ファイル保存 - プロキシなし（直接接続）")
+            
+            # no_proxy設定
+            if 'no_proxy' in config:
+                data['network']['proxies']['no_proxy'] = config['no_proxy']
+            
+            # 企業CA設定を保存
+            if 'cert' in config:
+                data['network']['cert'] = config['cert']
+            
+            if 'pac' in config:
+                data['network']['pac'] = config['pac']
+            
+            # トップレベルの設定も同期（後方互換性のため）
+            data['mode'] = config.get('mode', 'DIRECT')
+            if mode == 'HTTP' and 'http_proxy' in config:
+                data['http_proxy'] = config['http_proxy']
+                data['https_proxy'] = config.get('https_proxy', config['http_proxy'])
+            else:
+                # DIRECT/SYSTEM モードではトップレベルのプロキシ設定をクリア
+                data.pop('http_proxy', None)
+                data.pop('https_proxy', None)
+                
+            # YAMLファイルに保存
             with open(yaml_path, 'w', encoding='utf-8') as f:
                 yaml.safe_dump(data, f, default_flow_style=False, 
                              allow_unicode=True, sort_keys=False)
+            
+            self.add_log(f"✅ 設定ファイルを保存しました: {yaml_path}")
             
             # 現在の設定を保存済みの設定で更新（UIは保持）
             self.current_config = config.copy()

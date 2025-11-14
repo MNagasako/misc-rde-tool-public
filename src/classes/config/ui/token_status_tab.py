@@ -346,7 +346,7 @@ class TokenStatusTab(QWidget):
     
     def toggle_auto_refresh(self, state):
         """自動リフレッシュON/OFF切替"""
-        if state == Qt.Checked:
+        if state == 2:  # Qt.CheckState.Checked.value
             self.token_manager.start_auto_refresh()
             logger.info("自動リフレッシュ有効化")
         else:
