@@ -674,7 +674,7 @@ class LoginManager:
             retry_count: 現在のリトライ回数（内部使用）
             max_retries: 最大リトライ回数（デフォルト: 3）
         """
-        # v2.0.7: リトライロジック追加 - 最大試行回数チェック
+        # v2.0.6: リトライロジック追加 - 最大試行回数チェック
         if retry_count >= max_retries:
             logger.error(f"[TOKEN] マテリアルトークン取得が{max_retries}回失敗しました")
             self.browser.update_autologin_msg(f"❌ マテリアルトークン取得失敗（{max_retries}回試行）")
@@ -708,7 +708,7 @@ class LoginManager:
             self._material_token_fetch_timer = None
             self._material_auth_completed = False
             
-            # v2.0.7: タイムアウト監視タイマー（10秒）- ハング防止機能
+            # タイムアウト監視タイマー（10秒）
             def on_timeout():
                 if not self._material_auth_completed:
                     logger.warning(f"[TOKEN] マテリアルトークン取得がタイムアウト（10秒経過） - リトライします (retry={retry_count})")
@@ -809,7 +809,7 @@ class LoginManager:
                     except:
                         pass
                     
-                    # v2.0.7: ページロード失敗時のリトライ
+                    # v2.0.6: ページロード失敗時のリトライ
                     if retry_count < max_retries - 1:
                         logger.info(f"[TOKEN] Material認証失敗 - {2000}ms後にリトライします")
                         QTimer.singleShot(2000, lambda: self.fetch_material_token(retry_count + 1, max_retries))
@@ -841,7 +841,7 @@ class LoginManager:
                         except:
                             pass
                         
-                        # v2.0.7: 認証タイムアウト時のリトライ
+                        # v2.0.6: 認証タイムアウト時のリトライ
                         if retry_count < max_retries - 1:
                             logger.info(f"[TOKEN] リダイレクトタイムアウト - {3000}ms後にリトライします")
                             QTimer.singleShot(3000, lambda: self.fetch_material_token(retry_count + 1, max_retries))
@@ -909,7 +909,7 @@ class LoginManager:
             logger.error(f"[TOKEN] rde-material.nims.go.jpトークン取得エラー: {e}")
             logger.debug("Material トークン取得エラー: %s", e)
             
-            # v2.0.7: 例外発生時のリトライ
+            # v2.0.6: 例外発生時のリトライ
             if retry_count < max_retries - 1:
                 logger.info(f"[TOKEN] 例外発生 - {3000}ms後にリトライします: {e}")
                 QTimer.singleShot(3000, lambda: self.fetch_material_token(retry_count + 1, max_retries))

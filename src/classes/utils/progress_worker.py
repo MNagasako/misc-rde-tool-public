@@ -29,9 +29,17 @@ class ProgressWorker(QObject):
             def progress_callback(current, total, message="処理中"):
                 if self.is_cancelled:
                     return False
-                progress_percent = min(int((current / total) * 100), 100) if total > 0 else 0
-                self.progress.emit(progress_percent, f"{message} ({current}/{total})")
-                time.sleep(0.01)  # UI更新のための短時間待機
+                # currentとtotalの型をチェック
+                # parallel_download()は(progress_percent, 100, message)形式で呼ぶ
+                # 他の関数は(current_count, total_count, message)形式で呼ぶ
+                if total == 100 and current <= 100:
+                    # 既にパーセント値の場合（parallel_download()から）
+                    progress_percent = int(current)
+                else:
+                    # カウント値の場合
+                    progress_percent = min(int((current / total) * 100), 100) if total > 0 else 0
+                
+                self.progress.emit(progress_percent, message)
                 return True
                 
             # task_kwargsにprogress_callbackを追加

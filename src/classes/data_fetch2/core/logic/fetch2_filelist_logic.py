@@ -342,6 +342,7 @@ def show_all_data_ids_from_json(json_path, parent=None):
 
 
 import shutil
+
 def anonymize_json(data, grant_number):
         # attributes内のdatasetTypeがANALYSISなら特別処理
         if isinstance(data, dict):
@@ -373,6 +374,158 @@ def anonymize_json(data, grant_number):
         elif isinstance(data, list):
             return [anonymize_json(v, grant_number) for v in data]
         return data
+
+def _process_data_entry_for_parallel(bearer_token, data_entry, save_dir_base, grantNumber, dataset_name, file_filter_config, parent=None, file_progress_callback=None):
+    """
+    並列処理用ワーカー関数: 単一data_entryのfiles API呼び出しとファイルダウンロード
+    
+    Args:
+        bearer_token: 認証トークン
+        data_entry: データエントリオブジェクト
+        save_dir_base: 保存ディレクトリベース
+        grantNumber: グラント番号
+        dataset_name: データセット名
+        file_filter_config: ファイルフィルタ設定
+        parent: 親ウィジェット（エラーメッセージ用）
+        file_progress_callback: ファイル単位のプログレスコールバック (file_name) -> None
+        
+    Returns:
+        dict: {"status": "success"/"failed"/"skipped", "downloaded_count": int, "error": str}
+    """
+    try:
+        data_id = data_entry.get('id')
+        attributes = data_entry.get('attributes', {})
+        tile_name = attributes.get("name", "")
+        tile_number = attributes.get("dataNumber", "")
+        
+        if not data_id:
+            logger.warning(f"データIDが空のエントリをスキップ: {data_entry}")
+            return {"status": "skipped", "downloaded_count": 0}
+        
+        # 1. files API (json)を従来通り保存
+        files_dir = os.path.normpath(os.path.join(OUTPUT_DIR, f'rde/data/dataFiles/sub'))
+        os.makedirs(files_dir, exist_ok=True)
+        
+        files_url = (
+            f"https://rde-api.nims.go.jp/data/{data_id}/files"
+            "?page%5Blimit%5D=100"
+            "&page%5Boffset%5D=0"
+            "&filter%5BfileType%5D%5B%5D=META"
+            "&filter%5BfileType%5D%5B%5D=MAIN_IMAGE"
+            "&filter%5BfileType%5D%5B%5D=OTHER_IMAGE"
+            "&filter%5BfileType%5D%5B%5D=NONSHARED_RAW"
+            "&filter%5BfileType%5D%5B%5D=RAW"
+            "&filter%5BfileType%5D%5B%5D=STRUCTURED"
+            "&fileTypeOrder=RAW%2CNONSHARED_RAW%2CMETA%2CSTRUCTURED%2CMAIN_IMAGE%2COTHER_IMAGE"
+        )
+        headers = {
+            "Accept": "application/vnd.api+json",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+            "Authorization": f"Bearer {bearer_token}",
+            "Connection": "keep-alive",
+            "Host": "rde-api.nims.go.jp",
+            "Origin": "https://rde.nims.go.jp",
+            "Referer": "https://rde.nims.go.jp/",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+            "sec-ch-ua": '"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"',
+            "sec-ch-ua-mobile": "?0",
+            "sec-ch-ua-platform": '"Windows"',
+        }
+        
+        resp = api_request("GET", files_url, headers=headers)  # Bearer Token統一管理システム対応
+        
+        if resp is None:
+            logger.error(f"リクエスト失敗 (data_id: {data_id}): {files_url}")
+            return {"status": "failed", "downloaded_count": 0, "error": "API request failed"}
+            
+        if resp.status_code == 404:
+            logger.warning(f"データが見つかりません (data_id: {data_id}): 404エラー")
+            return {"status": "skipped", "downloaded_count": 0}
+            
+        if resp.status_code != 200:
+            logger.error(f"HTTP {resp.status_code}エラー (data_id: {data_id}): {files_url}")
+            return {"status": "failed", "downloaded_count": 0, "error": f"HTTP {resp.status_code}"}
+            
+        resp.raise_for_status()
+        files_data = resp.json()
+        save_path = os.path.join(files_dir, f"{data_id}.json")
+        
+        with open(save_path, "w", encoding="utf-8") as outf:
+            logger.info(f"ファイルデータ保存: {save_path}")
+            json.dump(files_data, outf, ensure_ascii=False, indent=2)
+        
+        # 2. ファイル本体も取得して保存
+        save_dir_base_full = os.path.join(os.path.join(OUTPUT_DIR,"rde","data","dataFiles"))
+        logger.debug(f"save_path: {save_path}, data_id: {data_id}")
+        
+        # files_dataはdict型のはずなのでdataキーを直接参照
+        data_entries_files = files_data.get("data", [])
+        
+        # フィルタ処理を適用
+        try:
+            from classes.data_fetch2.util.file_filter_util import filter_file_list
+            filtered_files = filter_file_list(data_entries_files, file_filter_config)
+            logger.debug(f"フィルタ適用: {len(data_entries_files)}件 → {len(filtered_files)}件")
+        except ImportError:
+            # フォールバック: 従来のMAIN_IMAGEフィルタのみ
+            logger.warning("フィルタユーティリティがインポートできません。従来フィルタを使用します。")
+            filtered_files = [entry for entry in data_entries_files 
+                            if entry.get("attributes", {}).get("fileType") == "MAIN_IMAGE"]
+        
+        download_count = 0
+        max_download = file_filter_config.get("max_download_count", 0)
+        
+        for dataentry in filtered_files:
+            # ダウンロード数上限チェック
+            if max_download > 0 and download_count >= max_download:
+                logger.info(f"ダウンロード数上限に達しました: {max_download}件")
+                break
+                
+            logger.debug(f"データエントリ処理中: {dataentry}")
+            
+            if not isinstance(dataentry, dict):
+                logger.warning(f"辞書型でないエントリをスキップ: {dataentry}")
+                continue
+                
+            if dataentry.get("type") != "file":
+                logger.warning(f"ファイル型でないエントリをスキップ: {dataentry}")
+                continue
+                
+            attributes_file = dataentry.get("attributes", {})
+            fileType = attributes_file.get("fileType", "")
+            logger.debug(f"fileType: {fileType} for data_id: {data_id}")
+            
+            # idを取得
+            entry_data_id = dataentry.get("id")
+            if not entry_data_id:
+                logger.warning(f"IDが無いエントリをスキップ: {dataentry}")
+                continue
+                
+            # attributes.fileNameを参照
+            file_name = attributes_file.get('fileName', '')
+            if not file_name:
+                logger.warning(f"ファイル名が無いエントリをスキップ: data_id={entry_data_id}")
+                continue
+                
+            # ファイル本体をダウンロード
+            download_success = download_file_for_data_id(entry_data_id, bearer_token, save_dir_base_full, file_name, grantNumber, dataset_name, tile_name, tile_number, parent)
+            if download_success:
+                download_count += 1
+                
+            # ファイル単位のプログレス通知
+            if file_progress_callback:
+                file_progress_callback(file_name)
+        
+        logger.info(f"データエントリ処理完了: data_id={data_id}, ファイル数: {download_count}")
+        return {"status": "success", "downloaded_count": download_count}
+        
+    except Exception as e:
+        error_msg = f"データエントリ処理中にエラー (data_id: {data_id}): {e}"
+        logger.error(error_msg)
+        import traceback
+        traceback.print_exc()
+        return {"status": "failed", "downloaded_count": 0, "error": str(e)}
 
 def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_dir=None, progress_callback=None, file_filter_config=None):
     
@@ -603,175 +756,149 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
             # データなしの場合でも処理を継続する場合があるため、特別な戻り値を返す
             return "no_data"
 
-        # 2. 各dataエントリのidごとにfiles APIを呼び、dataFiles/{id}.jsonに保存
+        # 2. 各dataエントリのidごとにfiles APIを呼び、dataFiles/{id}.jsonに保存（並列化対応）
+        # v2.1.1: 並列ダウンロード対応（50件以上で自動並列化）
+        # v2.1.3: ファイル単位プログレス表示対応
+        from net.http_helpers import parallel_download
+        import threading
+        
         files_dir = os.path.normpath(os.path.join(OUTPUT_DIR, f'rde/data/dataFiles/sub'))
         os.makedirs(files_dir, exist_ok=True)
         
         # プログレス管理変数
         total_entries = len(data_entries)
-        processed_entries = 0
-        processed_files = 0
-        total_files = 0  # 動的にカウント
         
         # プログレス更新（処理開始）
         if progress_callback:
-            if not progress_callback(0, 1, f"ファイル取得開始... ({len(data_entries)}エントリ)"):
+            if not progress_callback(0, 1, f"ファイル取得開始... ({total_entries}エントリ)"):
                 return None
         
-        for data_entry in data_entries:
-            try:
-                data_id = data_entry.get('id')
-                attributes = data_entry.get('attributes', {})
-                tile_name = attributes.get("name", "")
-                tile_number = attributes.get("dataNumber", "")
-                
-                if not data_id:
-                    logger.warning(f"データIDが空のエントリをスキップ: {data_entry}")
-                    processed_entries += 1
-                    continue
-                
-                # 1. files API (json)を従来通り保存
-                files_url = (
-                    f"https://rde-api.nims.go.jp/data/{data_id}/files"
-                    "?page%5Blimit%5D=100"
-                    "&page%5Boffset%5D=0"
-                    "&filter%5BfileType%5D%5B%5D=META"
-                    "&filter%5BfileType%5D%5B%5D=MAIN_IMAGE"
-                    "&filter%5BfileType%5D%5B%5D=OTHER_IMAGE"
-                    "&filter%5BfileType%5D%5B%5D=NONSHARED_RAW"
-                    "&filter%5BfileType%5D%5B%5D=RAW"
-                    "&filter%5BfileType%5D%5B%5D=STRUCTURED"
-                    "&fileTypeOrder=RAW%2CNONSHARED_RAW%2CMETA%2CSTRUCTURED%2CMAIN_IMAGE%2COTHER_IMAGE"
-                )
-                headers = {
-                    "Accept": "application/vnd.api+json",
-                    "Accept-Encoding": "gzip, deflate, br, zstd",
-                    "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-                    "Authorization": f"Bearer {bearer_token}",
-                    "Connection": "keep-alive",
-                    "Host": "rde-api.nims.go.jp",
-                    "Origin": "https://rde.nims.go.jp",
-                    "Referer": "https://rde.nims.go.jp/",
-                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
-                    "sec-ch-ua": '"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"',
-                    "sec-ch-ua-mobile": "?0",
-                    "sec-ch-ua-platform": '"Windows"',
-                }
-                
-                resp = api_request("GET", files_url, headers=headers)  # Bearer Token統一管理システム対応
-                
-                if resp is None:
-                    logger.error(f"リクエスト失敗 (data_id: {data_id}): {files_url}")
-                    processed_entries += 1
-                    continue
-                    
-                if resp.status_code == 404:
-                    logger.warning(f"データが見つかりません (data_id: {data_id}): 404エラー")
-                    processed_entries += 1
-                    continue
-                    
-                if resp.status_code != 200:
-                    logger.error(f"HTTP {resp.status_code}エラー (data_id: {data_id}): {files_url}")
-                    processed_entries += 1
-                    continue
-                    
-                resp.raise_for_status()
-                files_data = resp.json()
-                save_path = os.path.join(files_dir, f"{data_id}.json")
-                
-                with open(save_path, "w", encoding="utf-8") as outf:
-                    logger.info(f"ファイルデータ保存: {save_path}")
-                    json.dump(files_data, outf, ensure_ascii=False, indent=2)
-                
-                # 2. ファイル本体も取得して保存
-                save_dir_base = os.path.join(os.path.join(OUTPUT_DIR,"rde","data","dataFiles"))
-                logger.debug(f"save_path: {save_path}, data_id: {data_id}")
-                
-                # files_dataはdict型のはずなのでdataキーを直接参照
-                data_entries_files = files_data.get("data", [])
-                
-                # フィルタ処理を適用
-                try:
-                    from classes.data_fetch2.util.file_filter_util import filter_file_list
-                    filtered_files = filter_file_list(data_entries_files, file_filter_config)
-                    logger.info(f"フィルタ適用: {len(data_entries_files)}件 → {len(filtered_files)}件")
-                except ImportError:
-                    # フォールバック: 従来のMAIN_IMAGEフィルタのみ
-                    logger.warning("フィルタユーティリティがインポートできません。従来フィルタを使用します。")
-                    filtered_files = [entry for entry in data_entries_files 
-                                    if entry.get("attributes", {}).get("fileType") == "MAIN_IMAGE"]
-                
-                # 総ファイル数を累積
-                total_files += len(filtered_files)
-                
-                download_count = 0
-                max_download = file_filter_config.get("max_download_count", 0)
-                
-                for dataentry in filtered_files:
-                    # ダウンロード数上限チェック
-                    if max_download > 0 and download_count >= max_download:
-                        logger.info(f"ダウンロード数上限に達しました: {max_download}件")
-                        break
-                        
-                    logger.debug(f"データエントリ処理中: {dataentry}")
-                    
-                    if not isinstance(dataentry, dict):
-                        logger.warning(f"辞書型でないエントリをスキップ: {dataentry}")
-                        continue
-                        
-                    if dataentry.get("type") != "file":
-                        logger.warning(f"ファイル型でないエントリをスキップ: {dataentry}")
-                        continue
-                        
-                    attributes_file = dataentry.get("attributes", {})
-                    fileType = attributes_file.get("fileType", "")
-                    logger.debug(f"fileType: {fileType} for data_id: {data_id}")
-                    
-                    # idを取得
-                    entry_data_id = dataentry.get("id")
-                    if not entry_data_id:
-                        logger.warning(f"IDが無いエントリをスキップ: {dataentry}")
-                        continue
-                        
-                    # attributes.fileNameを参照
-                    file_name = attributes_file.get('fileName', '')
-                    if not file_name:
-                        logger.warning(f"ファイル名が無いエントリをスキップ: data_id={entry_data_id}")
-                        continue
-                        
-                    # ファイル本体をダウンロード
-                    download_success = download_file_for_data_id(entry_data_id, bearer_token, save_dir_base, file_name, grantNumber, dataset_name, tile_name, tile_number, parent)
-                    if download_success:
-                        download_count += 1
-                    
-                    # ファイル単位でプログレス更新
-                    processed_files += 1
-                    if progress_callback:
-                        if total_files > processed_files:
-                            remaining = total_files - processed_files
-                            progress_callback(processed_files, total_files,
-                                            f"ダウンロード中: {processed_files}/{total_files}ファイル (残り: {remaining}件)")
-                        else:
-                            # 総数が未確定または同数の場合
-                            progress_callback(processed_files, max(processed_files, total_files),
-                                            f"ダウンロード中: {processed_files}ファイル処理済み")
-                    
-                logger.info(f"データエントリ処理完了: data_id={data_id}, ファイル数: {download_count}")
-                processed_entries += 1
-                
-            except Exception as e:
-                logger.error(f"データエントリ処理中にエラー (data_id: {data_id}): {e}")
-                import traceback
-                traceback.print_exc()
-                processed_entries += 1
+        # ステップ1: 全エントリのファイルリストを取得して総ファイル数を算出
+        logger.info("ステップ1: 全エントリのファイル情報取得中...")
+        total_files = 0
+        entry_file_counts = {}  # {data_entry_id: ファイル数}
+        
+        for idx, entry in enumerate(data_entries):
+            data_id = entry.get('id')
+            if not data_id:
                 continue
-
+            
+            # プログレス更新（ファイルリスト取得中）
+            if progress_callback:
+                progress_pct = int((idx + 1) / total_entries * 100)
+                if not progress_callback(progress_pct, 100, f"ファイルリスト取得中... ({idx+1}/{total_entries}エントリ)"):
+                    return None
+            
+            # files API呼び出し（ファイル情報のみ取得）
+            files_url = (
+                f"https://rde-api.nims.go.jp/data/{data_id}/files"
+                "?page%5Blimit%5D=100"
+                "&page%5Boffset%5D=0"
+                "&filter%5BfileType%5D%5B%5D=META"
+                "&filter%5BfileType%5D%5B%5D=MAIN_IMAGE"
+                "&filter%5BfileType%5D%5B%5D=OTHER_IMAGE"
+                "&filter%5BfileType%5D%5B%5D=NONSHARED_RAW"
+                "&filter%5BfileType%5D%5B%5D=RAW"
+                "&filter%5BfileType%5D%5B%5D=STRUCTURED"
+                "&fileTypeOrder=RAW%2CNONSHARED_RAW%2CMETA%2CSTRUCTURED%2CMAIN_IMAGE%2COTHER_IMAGE"
+            )
+            headers = {
+                "Accept": "application/vnd.api+json",
+                "Authorization": f"Bearer {bearer_token}",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            }
+            
+            try:
+                resp = api_request("GET", files_url, headers=headers)
+                if resp and resp.status_code == 200:
+                    files_data = resp.json()
+                    data_entries_files = files_data.get("data", [])
+                    
+                    # フィルタ適用
+                    try:
+                        from classes.data_fetch2.util.file_filter_util import filter_file_list
+                        filtered_files = filter_file_list(data_entries_files, file_filter_config)
+                    except ImportError:
+                        filtered_files = [e for e in data_entries_files 
+                                        if e.get("attributes", {}).get("fileType") == "MAIN_IMAGE"]
+                    
+                    # ダウンロード数上限チェック
+                    max_download = file_filter_config.get("max_download_count", 0)
+                    file_count = len(filtered_files)
+                    if max_download > 0 and file_count > max_download:
+                        file_count = max_download
+                    
+                    entry_file_counts[data_id] = file_count
+                    total_files += file_count
+                    logger.debug(f"エントリ {data_id}: {file_count}ファイル")
+            except Exception as e:
+                logger.warning(f"エントリ {data_id} のファイルリスト取得失敗: {e}")
+                entry_file_counts[data_id] = 0
+        
+        logger.info(f"総ファイル数: {total_files}ファイル ({total_entries}エントリ)")
+        
+        # ステップ2: ファイルダウンロード実行（並列処理）
+        logger.info("ステップ2: ファイルダウンロード開始...")
+        
+        # スレッドセーフなファイルカウンター
+        file_counter_lock = threading.Lock()
+        downloaded_file_count = [0]  # リストでラップしてスレッド間共有
+        
+        def file_progress_callback(file_name):
+            """ファイルダウンロード完了時のコールバック"""
+            with file_counter_lock:
+                downloaded_file_count[0] += 1
+                current = downloaded_file_count[0]
+            
+            if progress_callback:
+                progress_pct = int((current / max(total_files, 1)) * 100)
+                progress_callback(progress_pct, 100, 
+                                f"ファイルダウンロード中... ({current}/{total_files}) - {file_name}")
+        
+        # 並列化用タスクリスト作成
+        tasks = [
+            (bearer_token, entry, os.path.join(OUTPUT_DIR, "rde", "data", "dataFiles"), 
+             grantNumber, dataset_name, file_filter_config, parent, file_progress_callback)
+            for entry in data_entries
+        ]
+        
+        # プログレスコールバックラッパー（エントリ単位は使用しない）
+        def entry_progress_callback(current, total, message):
+            """エントリ処理進捗（ダミー - ファイル単位で更新するため）"""
+            return True
+        
+        # 並列ダウンロード実行（50件以上で自動並列化、最大10並列）
+        result = parallel_download(
+            tasks=tasks,
+            worker_function=_process_data_entry_for_parallel,
+            max_workers=10,
+            progress_callback=entry_progress_callback,
+            threshold=50  # 50エントリ以上で並列化
+        )
+        
+        # 結果の集計
+        success_count = result.get("success_count", 0)
+        failed_count = result.get("failed_count", 0)
+        skipped_count = result.get("skipped_count", 0)
+        cancelled = result.get("cancelled", False)
+        errors = result.get("errors", [])
+        
+        if cancelled:
+            logger.warning(f"処理がキャンセルされました: {success_count}件成功, {failed_count}件失敗, {skipped_count}件スキップ")
+            return "キャンセルされました"
+        
+        # エラーログ出力
+        if errors:
+            logger.error(f"エラーが{len(errors)}件発生しました:")
+            for err in errors[:10]:  # 最初の10件のみログ出力
+                logger.error(f"  - {err}")
+        
         # プログレス完了
         if progress_callback:
-            progress_callback(processed_files, processed_files, 
-                            f"処理完了: {processed_files}ファイルダウンロード完了")
+            progress_callback(1.0, 1.0, 
+                            f"処理完了: {success_count}エントリ成功, {failed_count}エントリ失敗, {skipped_count}エントリスキップ")
 
-        success_msg = f"dataEntry/{dataset_id}.json内の各data idについてdataFiles/に保存しました。処理済みファイル数: {processed_files}"
+        success_msg = f"dataEntry/{dataset_id}.json内の各data idについてdataFiles/に保存しました。成功: {success_count}件, 失敗: {failed_count}件, スキップ: {skipped_count}件"
         logger.info(success_msg)
         return success_msg
 

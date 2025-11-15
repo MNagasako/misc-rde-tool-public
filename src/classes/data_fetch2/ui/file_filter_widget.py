@@ -399,7 +399,7 @@ class FileFilterWidget(QWidget):
         
     def on_limit_checkbox_changed(self, state):
         """ダウンロード上限チェックボックス変更時"""
-        enabled = state == Qt.Checked
+        enabled = state == 2  # Qt.CheckState.Checked.value
         self.limit_spinbox.setEnabled(enabled)
         self.on_filter_changed()
         

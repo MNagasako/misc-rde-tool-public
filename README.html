@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ARIM RDE Tool v2.1.3 - README</title>
+    <style>
+        body {
+            font-family: "Yu Gothic", "游ゴシック", "Hiragino Kaku Gothic ProN", "メイリオ", sans-serif;
+            line-height: 1.6;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #34495e;
+            border-bottom: 2px solid #95a5a6;
+            padding-bottom: 8px;
+            margin-top: 30px;
+        }
+        h3 {
+            color: #555;
+            margin-top: 20px;
+        }
+        .warning {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .info {
+            background-color: #d1ecf1;
+            border-left: 4px solid #17a2b8;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .license-box {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        ul {
+            margin: 10px 0;
+            padding-left: 25px;
+        }
+        li {
+            margin: 8px 0;
+        }
+        a {
+            color: #3498db;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        code {
+            background-color: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: "Consolas", "Monaco", monospace;
+            font-size: 0.9em;
+        }
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+            text-align: center;
+            color: #777;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+    <h1>ARIM RDE Tool v2.1.3</h1>
+        
+        <p>ARIM事業 DICE/RDEシステムからARIMデータポータルへのデータ移行を支援するツールです。</p>
+
+        <h2>📖 使用方法・詳細情報</h2>
+        <div class="info">
+            <p><strong>使用方法、機能詳細、最新情報については、以下の公式配布サイトをご覧ください：</strong></p>
+            <p>🔗 <a href="https://github.com/MNagasako/misc-rde-tool-public" target="_blank">https://github.com/MNagasako/misc-rde-tool-public</a></p>
+        </div>
+
+        <h2>⚠️ 注意事項・免責</h2>
+        <div class="warning">
+            <ul>
+                <li><strong>本ツールは個人が便利のために作成したもので、無保証です。</strong></li>
+                <li><strong>いかなる損害・不具合についても一切責任を負いません。</strong></li>
+                <li><strong>再配布・転載は禁止します。必ず公式サイトから最新版をダウンロードしてください。</strong></li>
+                <li>初回実行時にWindows Defenderの警告が表示される場合がありますが、安全なファイルです。</li>
+                <li>ご質問・不具合報告は配布サイトのIssueをご利用ください。</li>
+            </ul>
+        </div>
+
+        <h2>📦 同梱ソフトウェアとライセンス</h2>
+        
+        <p>本アプリケーションは、Python および各種第三者ライブラリを利用して構築されています。</p>
+
+        <h3>📁 ライセンスファイルの格納場所</h3>
+        <div class="license-box">
+            <p>本アプリケーションに含まれる第三者ライブラリのライセンス情報は、以下のフォルダに格納されています：</p>
+            <p><code>LICENSES/</code></p>
+            <ul>
+                <li><code>THIRD_PARTY_LICENSES_SUMMARY.txt</code> - パッケージ一覧とライセンス種別のサマリ</li>
+                <li><code>README_LICENSES.txt</code> - ライセンス情報の検出ロジックと注意事項</li>
+                <li>各パッケージのライセンス全文（<code>パッケージ名-バージョン-LICENSE.txt</code>形式）</li>
+            </ul>
+        </div>
+
+        <h3>🔍 ライセンス情報の確認方法</h3>
+        <ol>
+            <li><code>LICENSES/THIRD_PARTY_LICENSES_SUMMARY.txt</code> を開いて、利用しているパッケージとライセンス種別を確認してください。</li>
+            <li>詳細なライセンス全文は、<code>LICENSES/</code> フォルダ内の各ファイルを参照してください。</li>
+            <li>ライセンス情報の検出方法や注意事項は、<code>LICENSES/README_LICENSES.txt</code> をご覧ください。</li>
+        </ol>
+
+        <h3>📋 主要な第三者パッケージ</h3>
+        <div class="license-box">
+            <p>本アプリケーションは、以下のような第三者Pythonパッケージを利用しています：</p>
+            <ul>
+                <li><strong>PySide6</strong> (LGPL-3.0-only 他) - Qt for Python GUIフレームワーク</li>
+                <li><strong>requests</strong> (Apache-2.0) - HTTPライブラリ</li>
+                <li><strong>pandas</strong> (BSD 3-Clause) - データ解析ライブラリ</li>
+                <li><strong>numpy</strong> - 数値計算ライブラリ</li>
+                <li><strong>openpyxl</strong> (MIT) - Excelファイル操作</li>
+                <li><strong>pillow</strong> (MIT-CMU License) - 画像処理ライブラリ</li>
+                <li><strong>PyYAML</strong> (MIT) - YAML解析</li>
+                <li><strong>truststore</strong> (MIT) - SSL証明書管理</li>
+                <li>その他多数のサポートライブラリ</li>
+            </ul>
+            <p><strong>※ 完全なリストとライセンス全文は <code>LICENSES/</code> フォルダをご参照ください。</strong></p>
+        </div>
+
+        <h3>⚖️ ライセンスに関する重要事項</h3>
+        <ul>
+            <li><strong>PySide6 (Qt for Python)</strong> は LGPL-3.0-only, GPL-2.0-only, GPL-3.0-only のいずれかで提供されています。</li>
+            <li>本アプリケーションは、各第三者ライブラリのライセンス条項に従って配布されています。</li>
+            <li>Python本体、Qt/PySide6、その他のネイティブライブラリについては、それぞれの公式ライセンスが適用されます。</li>
+            <li><code>LICENSES/</code> フォルダに含まれる情報は、src/ 配下で実際に import されているモジュールのみを対象としています。</li>
+            <li>追加のコンポーネントや依存関係がある場合は、それぞれのライセンスを確認してください。</li>
+        </ul>
+
+        <h2>🔧 技術情報</h2>
+        <ul>
+            <li><strong>開発言語：</strong> Python 3.13.5</li>
+            <li><strong>GUIフレームワーク：</strong> PySide6 (Qt for Python)</li>
+            <li><strong>対象OS：</strong> Windows 10/11</li>
+            <li><strong>ビルド環境：</strong> PyInstaller</li>
+        </ul>
+
+
+        <div class="footer">
+            <p>ARIM RDE Tool v2.1.3</p>
+            <p>© 2025 MNagasako（無保証・非商用）</p>
+            <p>配布サイト: <a href="https://github.com/MNagasako/misc-rde-tool-public" target="_blank">GitHub</a></p>
+        </div>
+    </div>
+</body>
+</html>

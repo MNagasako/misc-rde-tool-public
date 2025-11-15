@@ -168,7 +168,15 @@ class ProxySessionManager:
         return status
     
     def _load_proxy_config(self) -> Dict[str, Any]:
-        """設定ファイルからプロキシ設定を読み込み（YAML優先、次にJSON）"""
+        """
+        設定ファイルからプロキシ設定を読み込み（YAML優先、次にJSON）
+        
+        優先順位:
+        1. network.yaml の network セクション（推奨）
+        2. network.yaml のトップレベル（後方互換性）
+        3. network.json の network セクション
+        4. network.json のトップレベル（後方互換性）
+        """
         try:
             from config.common import get_dynamic_file_path
             
@@ -180,19 +188,39 @@ class ProxySessionManager:
                     with open(config_path, 'r', encoding='utf-8') as f:
                         config_data = yaml.safe_load(f) or {}
                         
-                        # networkセクションから設定を取得、なければトップレベルから
-                        proxy_config = config_data.get('network', {})
+                        # networkセクションを最優先で使用
+                        network_section = config_data.get('network', {})
                         
-                        # トップレベルのmode設定も確認
+                        if network_section and 'mode' in network_section:
+                            # networkセクションから設定を取得
+                            proxy_config = network_section.copy()
+                            
+                            # proxiesサブセクションをトップレベルに展開
+                            proxies = proxy_config.get('proxies', {})
+                            if 'http' in proxies:
+                                proxy_config['http_proxy'] = proxies['http']
+                            if 'https' in proxies:
+                                proxy_config['https_proxy'] = proxies['https']
+                            if 'no_proxy' in proxies:
+                                proxy_config['no_proxy'] = proxies['no_proxy']
+                            
+                            logger.info(f"設定ファイル読み込み(YAML network): mode={proxy_config.get('mode')}")
+                            return proxy_config
+                        
+                        # フォールバック: トップレベルのmode設定を確認
                         if 'mode' in config_data:
-                            proxy_config['mode'] = config_data['mode']
+                            proxy_config = {
+                                'mode': config_data['mode'],
+                                'http_proxy': config_data.get('http_proxy', ''),
+                                'https_proxy': config_data.get('https_proxy', ''),
+                                'no_proxy': config_data.get('no_proxy', '')
+                            }
+                            logger.info(f"設定ファイル読み込み(YAML toplevel): mode={proxy_config.get('mode')}")
+                            return proxy_config
                         
-                        # modeが設定されていない場合はDIRECTをデフォルトに
-                        if 'mode' not in proxy_config:
-                            proxy_config['mode'] = 'DIRECT'
-                        
-                        logger.info(f"設定ファイル読み込み(YAML): {proxy_config}")
-                        return proxy_config
+                        # どちらもない場合はDIRECT
+                        logger.warning("YAML設定にmodeが見つからない、DIRECT モード使用")
+                        return {"mode": "DIRECT"}
             
             # 2. JSON を試行
             config_path = get_dynamic_file_path("config/network.json")
@@ -200,19 +228,38 @@ class ProxySessionManager:
                 with open(config_path, 'r', encoding='utf-8') as f:
                     config_data = json.load(f)
                     
-                    # networkセクションから設定を取得、なければトップレベルから
-                    proxy_config = config_data.get('network', {})
+                    # networkセクションを最優先で使用
+                    network_section = config_data.get('network', {})
                     
-                    # トップレベルのmode設定も確認
+                    if network_section and 'mode' in network_section:
+                        proxy_config = network_section.copy()
+                        
+                        # proxiesサブセクションをトップレベルに展開
+                        proxies = proxy_config.get('proxies', {})
+                        if 'http' in proxies:
+                            proxy_config['http_proxy'] = proxies['http']
+                        if 'https' in proxies:
+                            proxy_config['https_proxy'] = proxies['https']
+                        if 'no_proxy' in proxies:
+                            proxy_config['no_proxy'] = proxies['no_proxy']
+                        
+                        logger.info(f"設定ファイル読み込み(JSON network): mode={proxy_config.get('mode')}")
+                        return proxy_config
+                    
+                    # フォールバック: トップレベルのmode設定を確認
                     if 'mode' in config_data:
-                        proxy_config['mode'] = config_data['mode']
+                        proxy_config = {
+                            'mode': config_data['mode'],
+                            'http_proxy': config_data.get('http_proxy', ''),
+                            'https_proxy': config_data.get('https_proxy', ''),
+                            'no_proxy': config_data.get('no_proxy', '')
+                        }
+                        logger.info(f"設定ファイル読み込み(JSON toplevel): mode={proxy_config.get('mode')}")
+                        return proxy_config
                     
-                    # modeが設定されていない場合はDIRECTをデフォルトに
-                    if 'mode' not in proxy_config:
-                        proxy_config['mode'] = 'DIRECT'
-                    
-                    logger.info(f"設定ファイル読み込み(JSON): {proxy_config}")
-                    return proxy_config
+                    # どちらもない場合はDIRECT
+                    logger.warning("JSON設定にmodeが見つからない、DIRECT モード使用")
+                    return {"mode": "DIRECT"}
             
             logger.info("設定ファイル未発見、DIRECT モード使用")
             return {"mode": "DIRECT"}

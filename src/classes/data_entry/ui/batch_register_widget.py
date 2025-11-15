@@ -302,7 +302,7 @@ class FileTreeWidget(QTreeWidget):
     def on_checkbox_changed(self, state, tree_item, file_item):
         """チェックボックス状態変更処理"""
         try:
-            is_checked = (state == Qt.Checked)
+            is_checked = (state == 2)  # Qt.CheckState.Checked.value
             file_item.is_excluded = not is_checked
             
             # 視覚的フィードバック
@@ -637,7 +637,7 @@ class FileTreeWidget(QTreeWidget):
     def on_include_checkbox_changed(self, state, tree_item, file_item):
         """含むチェックボックス変更時の処理"""
         try:
-            is_checked = state == Qt.Checked
+            is_checked = state == 2  # Qt.CheckState.Checked.value
             file_item.is_excluded = not is_checked
             
             # フォルダの場合は配下の全アイテムも連動
@@ -656,7 +656,7 @@ class FileTreeWidget(QTreeWidget):
     def on_zip_checkbox_changed(self, state, tree_item, file_item):
         """ZIPチェックボックス変更時の処理"""
         try:
-            is_checked = state == Qt.Checked
+            is_checked = state == 2  # Qt.CheckState.Checked.value
             # ZIP状態をfile_itemの拡張属性に保存
             if not hasattr(file_item, 'is_zip'):
                 file_item.is_zip = False
@@ -785,7 +785,7 @@ class FileTreeWidget(QTreeWidget):
         
         # 表示更新
         tree_item.setText(3, "除外" if exclude else "含む")
-        tree_item.setCheckState(0, Qt.Unchecked if exclude else Qt.Checked)
+        tree_item.setCheckState(0, Qt.CheckState.Unchecked if exclude else Qt.CheckState.Checked)
         
         # スタイル更新
         if exclude:

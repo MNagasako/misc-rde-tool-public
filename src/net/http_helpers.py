@@ -274,3 +274,212 @@ def create_json_headers(additional_headers: Optional[Dict[str, str]] = None) -> 
         headers.update(additional_headers)
     
     return headers
+
+# ============================================================================
+# 並列ダウンロード機能
+# ============================================================================
+
+def parallel_download(
+    tasks: list,
+    worker_function: callable,
+    max_workers: int = 10,
+    progress_callback: Optional[callable] = None,
+    threshold: int = 50
+) -> Dict[str, Any]:
+    """
+    並列ダウンロードを実行
+    
+    Args:
+        tasks: タスクリスト（各タスクはworker_functionに渡される引数のタプル）
+        worker_function: 各タスクを処理する関数
+        max_workers: 最大並列数（デフォルト: 10）
+        progress_callback: プログレスコールバック (current, total, message) -> bool
+        threshold: 並列化を行う最小タスク数（デフォルト: 50）
+        
+    Returns:
+        Dict[str, Any]: 実行結果
+            - success_count: 成功数
+            - failed_count: 失敗数
+            - skipped_count: スキップ数
+            - total: 総タスク数
+            - cancelled: キャンセルされたかどうか
+            - errors: エラーリスト
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading
+    
+    total_tasks = len(tasks)
+    
+    # タスク数が閾値未満の場合は同期実行
+    if total_tasks < threshold:
+        return _sequential_download(tasks, worker_function, progress_callback)
+    
+    # 並列ダウンロード実行
+    success_count = 0
+    failed_count = 0
+    skipped_count = 0
+    completed_count = 0
+    cancelled = False
+    errors = []
+    
+    # スレッドセーフなカウンタ
+    lock = threading.Lock()
+    
+    def update_progress():
+        """プログレス更新"""
+        nonlocal completed_count
+        with lock:
+            completed_count += 1
+            if progress_callback:
+                # 0-100%に正規化
+                progress_percent = int((completed_count / total_tasks) * 100)
+                message = f"並列ダウンロード中... ({completed_count}/{total_tasks})"
+                if not progress_callback(progress_percent, 100, message):
+                    return False
+        return True
+    
+    try:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 全タスクを投入
+            future_to_task = {
+                executor.submit(worker_function, *task): task 
+                for task in tasks
+            }
+            
+            # 完了したタスクから処理
+            for future in as_completed(future_to_task):
+                task = future_to_task[future]
+                
+                try:
+                    result = future.result()
+                    
+                    # 結果の解釈
+                    if isinstance(result, str):
+                        if "skipped" in result.lower():
+                            with lock:
+                                skipped_count += 1
+                        elif "success" in result.lower():
+                            with lock:
+                                success_count += 1
+                        elif "failed" in result.lower() or "error" in result.lower():
+                            with lock:
+                                failed_count += 1
+                            errors.append({"task": task, "error": result})
+                        else:
+                            with lock:
+                                success_count += 1
+                    elif isinstance(result, dict):
+                        # 辞書形式の結果を解釈
+                        status = result.get("status", "unknown")
+                        if status == "success":
+                            with lock:
+                                success_count += 1
+                        elif status == "skipped":
+                            with lock:
+                                skipped_count += 1
+                        elif status == "failed":
+                            with lock:
+                                failed_count += 1
+                            errors.append({"task": task, "error": result.get("error")})
+                    else:
+                        # その他の結果は成功とみなす
+                        with lock:
+                            success_count += 1
+                    
+                except Exception as e:
+                    with lock:
+                        failed_count += 1
+                    errors.append({"task": task, "error": str(e)})
+                
+                # プログレス更新
+                if not update_progress():
+                    cancelled = True
+                    # 残りのタスクをキャンセル
+                    for f in future_to_task:
+                        f.cancel()
+                    break
+        
+    except Exception as e:
+        errors.append({"error": f"並列実行エラー: {e}"})
+    
+    return {
+        "success_count": success_count,
+        "failed_count": failed_count,
+        "skipped_count": skipped_count,
+        "total": total_tasks,
+        "cancelled": cancelled,
+        "errors": errors
+    }
+
+def _sequential_download(
+    tasks: list,
+    worker_function: callable,
+    progress_callback: Optional[callable] = None
+) -> Dict[str, Any]:
+    """
+    同期ダウンロードを実行（並列化の閾値未満の場合）
+    
+    Args:
+        tasks: タスクリスト
+        worker_function: 各タスクを処理する関数
+        progress_callback: プログレスコールバック
+        
+    Returns:
+        Dict[str, Any]: 実行結果
+    """
+    success_count = 0
+    failed_count = 0
+    skipped_count = 0
+    completed_count = 0
+    cancelled = False
+    errors = []
+    total_tasks = len(tasks)
+    
+    for idx, task in enumerate(tasks):
+        try:
+            result = worker_function(*task)
+            
+            # 結果の解釈
+            if isinstance(result, str):
+                if "skipped" in result.lower():
+                    skipped_count += 1
+                elif "success" in result.lower():
+                    success_count += 1
+                elif "failed" in result.lower() or "error" in result.lower():
+                    failed_count += 1
+                    errors.append({"task": task, "error": result})
+                else:
+                    success_count += 1
+            elif isinstance(result, dict):
+                status = result.get("status", "unknown")
+                if status == "success":
+                    success_count += 1
+                elif status == "skipped":
+                    skipped_count += 1
+                elif status == "failed":
+                    failed_count += 1
+                    errors.append({"task": task, "error": result.get("error")})
+            else:
+                success_count += 1
+            
+        except Exception as e:
+            failed_count += 1
+            errors.append({"task": task, "error": str(e)})
+        
+        # プログレス更新
+        completed_count = idx + 1
+        if progress_callback:
+            progress_percent = int((completed_count / total_tasks) * 100)
+            message = f"同期ダウンロード中... ({completed_count}/{total_tasks})"
+            if not progress_callback(progress_percent, 100, message):
+                cancelled = True
+                break
+    
+    return {
+        "success_count": success_count,
+        "failed_count": failed_count,
+        "skipped_count": skipped_count,
+        "total": total_tasks,
+        "cancelled": cancelled,
+        "errors": errors
+    }

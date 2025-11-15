@@ -642,11 +642,12 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
                     
                     # プログレス更新の接続
                     def update_progress(value, message):
-                        def set_progress():
-                            if progress_dialog and not progress_dialog.wasCanceled():
-                                progress_dialog.setValue(value)
-                                progress_dialog.setLabelText(message)
-                        QTimer.singleShot(0, set_progress)
+                        """プログレス更新（メインスレッドで実行）"""
+                        if progress_dialog and not progress_dialog.wasCanceled():
+                            progress_dialog.setValue(value)
+                            progress_dialog.setLabelText(message)
+                            # repaint()を呼び出してUI更新を即座に反映
+                            progress_dialog.repaint()
                     
                     # 完了時の処理
                     def on_finished(success, message):

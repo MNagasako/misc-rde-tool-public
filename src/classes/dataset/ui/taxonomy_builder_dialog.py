@@ -323,7 +323,8 @@ class TaxonomyBuilderDialog(QDialog):
         sender = self.sender()
         key = sender.objectName()
         
-        if state == Qt.Checked:
+        # PySide6のstateChangedシグナルは整数値を渡す（Checked=2, Unchecked=0）
+        if state == 2:  # Qt.CheckState.Checked.value
             if key not in self.selected_keys:
                 self.selected_keys.append(key)
                 # リストウィジェットにも追加

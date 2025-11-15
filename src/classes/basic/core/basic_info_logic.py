@@ -98,8 +98,13 @@ def _make_headers(bearer_token, host, origin, referer):
     }
 
 def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
-    """template.jsonの全テンプレートIDについてinvoiceSchemasを取得し保存する"""
+    """
+    template.jsonの全テンプレートIDについてinvoiceSchemasを取得し保存する
+    v2.1.0: 並列ダウンロード対応（50件以上で自動並列化）
+    """
     try:
+        from net.http_helpers import parallel_download
+        
         if progress_callback:
             if not progress_callback(0, 100, "invoiceSchemas取得を開始しています..."):
                 return "キャンセルされました"
@@ -133,22 +138,36 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
         else:
             summary = {"success": [], "failed": {}}
 
-        skipped_count = 0
-        skipped_ids = []
         total_templates = len(template_ids)
         
-        for idx, template_id in enumerate(template_ids):
-            if progress_callback:
-                progress_percent = 10 + int((idx / total_templates) * 85)
-                message = f"invoiceSchema取得中... ({idx + 1}/{total_templates}): {template_id}"
-                if not progress_callback(progress_percent, 100, message):
-                    return "キャンセルされました"
-                    
+        # タスクリストを作成（並列実行用）
+        tasks = [(bearer_token, template_id, output_dir, summary, log_path, summary_path) 
+                for template_id in template_ids]
+        
+        # 並列ダウンロード実行（50件以上で自動並列化）
+        def worker(token, template_id, out_dir, summ, log_p, summ_p):
+            """ワーカー関数"""
             try:
-                fetch_invoice_schema_from_api(bearer_token, template_id, output_dir, summary, log_path, summary_path)
+                return fetch_invoice_schema_from_api(token, template_id, out_dir, summ, log_p, summ_p)
             except Exception as e:
                 logger.error(f"invoiceSchema取得失敗 (template_id: {template_id}): {e}")
-                summary.setdefault("failed", {})[template_id] = str(e)
+                summ.setdefault("failed", {})[template_id] = str(e)
+                return f"failed: {e}"
+        
+        # プログレスコールバックを調整（10-95%の範囲にマッピング）
+        def adjusted_progress_callback(current, total, message):
+            if progress_callback:
+                progress_percent = 10 + int((current / 100) * 85)  # 10-95%
+                return progress_callback(progress_percent, 100, message)
+            return True
+        
+        result = parallel_download(
+            tasks=tasks,
+            worker_function=worker,
+            max_workers=10,
+            progress_callback=adjusted_progress_callback,
+            threshold=50
+        )
 
         # 最終保存
         with open(summary_path, "w", encoding="utf-8") as f:
@@ -161,6 +180,10 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
         failed_count = len(summary.get("failed", {}))
         result_msg = f"invoiceSchema取得完了: 成功={success_count}, 失敗={failed_count}, 総数={total_templates}"
         logger.info(result_msg)
+        
+        if result['cancelled']:
+            return "キャンセルされました"
+        
         return result_msg
         
     except Exception as e:
@@ -262,6 +285,7 @@ def fetch_all_data_entrys_info(bearer_token, output_dir="output/rde/data", progr
     dataset.json内の全データセットIDでfetch_data_entry_info_from_apiを呼び出す
     
     改善版: データセット総数を事前計算し、プログレス更新頻度を向上
+    v2.1.0: 並列ダウンロード対応（50件以上で自動並列化）
     
     Args:
         bearer_token: 認証トークン
@@ -269,6 +293,8 @@ def fetch_all_data_entrys_info(bearer_token, output_dir="output/rde/data", progr
         progress_callback: プログレスコールバック関数 (current, total, message) -> bool
     """
     try:
+        from net.http_helpers import parallel_download
+        
         os.makedirs(output_dir, exist_ok=True)
         dataset_json = os.path.join(output_dir, "dataset.json")
         
@@ -291,31 +317,46 @@ def fetch_all_data_entrys_info(bearer_token, output_dir="output/rde/data", progr
             if not progress_callback(5, 100, f"データセット総数: {total_datasets}件"):
                 return "キャンセルされました"
         
-        processed_count = 0
-        error_count = 0
+        # タスクリストを作成（並列実行用）
+        tasks = [(bearer_token, ds.get("id")) for ds in datasets if ds.get("id")]
         
-        for idx, ds in enumerate(datasets):
-            ds_id = ds.get("id")
-            if ds_id:
-                # プログレス更新（5-95%の範囲）
-                if progress_callback:
-                    progress_percent = 5 + int((idx / total_datasets) * 90)
-                    msg = f"データエントリ取得中 ({idx + 1}/{total_datasets}): {ds_id}"
-                    if not progress_callback(progress_percent, 100, msg):
-                        return "キャンセルされました"
-                
-                try:
-                    fetch_data_entry_info_from_api(bearer_token, ds_id)
-                    processed_count += 1
-                except Exception as e:
-                    logger.error(f"データエントリ処理失敗: ds_id={ds_id}, error={e}")
-                    error_count += 1
+        # 並列ダウンロード実行（50件以上で自動並列化）
+        def worker(token, ds_id):
+            """ワーカー関数"""
+            try:
+                fetch_data_entry_info_from_api(token, ds_id)
+                return "success"
+            except Exception as e:
+                logger.error(f"データエントリ処理失敗: ds_id={ds_id}, error={e}")
+                return f"failed: {e}"
         
-        result_msg = f"データエントリ情報取得完了: 処理={processed_count}/{total_datasets}, エラー={error_count}"
+        # プログレスコールバックを調整（5-95%の範囲にマッピング）
+        def adjusted_progress_callback(current, total, message):
+            if progress_callback:
+                progress_percent = 5 + int((current / 100) * 90)  # 5-95%
+                return progress_callback(progress_percent, 100, message)
+            return True
+        
+        result = parallel_download(
+            tasks=tasks,
+            worker_function=worker,
+            max_workers=10,
+            progress_callback=adjusted_progress_callback,
+            threshold=50
+        )
+        
+        result_msg = (f"データエントリ情報取得完了: "
+                     f"成功={result['success_count']}, "
+                     f"失敗={result['failed_count']}, "
+                     f"スキップ={result['skipped_count']}, "
+                     f"総数={result['total']}")
         logger.info(result_msg)
         
         if progress_callback:
             progress_callback(100, 100, result_msg)
+        
+        if result['cancelled']:
+            return "キャンセルされました"
         
         return result_msg
         
@@ -406,6 +447,7 @@ def fetch_all_invoices_info(bearer_token, output_dir="output/rde/data", progress
     
     改善版: データセット数とタイル数から総予定取得数を事前計算し、
     プログレス更新頻度を大幅に向上させて処理の進行状況を明確化
+    v2.1.0: 並列ダウンロード対応（50件以上で自動並列化）
     
     Args:
         bearer_token: 認証トークン
@@ -413,6 +455,8 @@ def fetch_all_invoices_info(bearer_token, output_dir="output/rde/data", progress
         progress_callback: プログレスコールバック関数 (current, total, message) -> bool
     """
     try:
+        from net.http_helpers import parallel_download
+        
         dataentry_dir = os.path.join(output_dir, "dataEntry")
         invoice_dir = os.path.join(output_dir, "invoice")
         
@@ -427,14 +471,8 @@ def fetch_all_invoices_info(bearer_token, output_dir="output/rde/data", progress
         
         dataentry_files = glob.glob(os.path.join(dataentry_dir, "*.json"))
         
-        # 既存のインボイスファイルをカウント（スキップ予定）
-        existing_invoices = set()
-        if os.path.exists(invoice_dir):
-            existing_invoices = set(os.listdir(invoice_dir))
-        
         # 全データエントリファイルを読み込み、総エントリ数を計算
-        total_entries = 0
-        entry_list = []  # [(file_path, entry_id), ...]
+        entry_list = []  # [entry_id, ...]
         
         logger.info(f"インボイス情報取得開始: {len(dataentry_files)}件のデータエントリファイルを解析中")
         
@@ -447,52 +485,60 @@ def fetch_all_invoices_info(bearer_token, output_dir="output/rde/data", progress
                 for entry in entries:
                     entry_id = entry.get("id")
                     if entry_id:
-                        entry_list.append((file_path, entry_id))
-                        total_entries += 1
+                        entry_list.append(entry_id)
                         
             except Exception as e:
                 logger.error(f"データエントリファイル読み込み失敗: file={file_path}, error={e}")
         
-        # 既存ファイルを除外した新規取得予定数
-        new_entries = [e for e in entry_list if f"{e[1]}.json" not in existing_invoices]
-        new_count = len(new_entries)
-        skip_count = len(entry_list) - new_count
-        
-        logger.info(f"インボイス取得計画: 総数={total_entries}, 新規取得={new_count}, スキップ={skip_count}")
+        total_entries = len(entry_list)
+        logger.info(f"インボイス取得計画: 総数={total_entries}件")
         
         if progress_callback:
-            msg = f"インボイス取得開始 (データセット: {len(dataentry_files)}件, タイル総数: {total_entries}件, 新規: {new_count}件)"
+            msg = f"インボイス取得開始 (データセット: {len(dataentry_files)}件, タイル総数: {total_entries}件)"
             if not progress_callback(5, 100, msg):
                 return "キャンセルされました"
         
-        # === メイン処理：インボイス取得 ===
-        processed_count = 0
-        success_count = 0
-        error_count = 0
+        # タスクリストを作成（並列実行用）
+        tasks = [(bearer_token, entry_id) for entry_id in entry_list]
         
-        for idx, (file_path, entry_id) in enumerate(entry_list):
-            # プログレス更新（5-95%の範囲で更新）
-            if progress_callback:
-                progress_percent = 5 + int((idx / total_entries) * 90)
-                msg = f"インボイス取得中 ({idx + 1}/{total_entries}): {entry_id}"
-                if not progress_callback(progress_percent, 100, msg):
-                    return "キャンセルされました"
-            
+        # 並列ダウンロード実行（50件以上で自動並列化）
+        def worker(token, entry_id):
+            """ワーカー関数"""
             try:
-                fetch_invoice_info_from_api(bearer_token, entry_id, invoice_dir)
-                success_count += 1
+                fetch_invoice_info_from_api(token, entry_id, invoice_dir)
+                return "success"
             except Exception as e:
                 logger.error(f"インボイス処理失敗: entry_id={entry_id}, error={e}")
-                error_count += 1
-            
-            processed_count += 1
+                return f"failed: {e}"
+        
+        # プログレスコールバックを調整（5-95%の範囲にマッピング）
+        def adjusted_progress_callback(current, total, message):
+            if progress_callback:
+                progress_percent = 5 + int((current / 100) * 90)  # 5-95%
+                return progress_callback(progress_percent, 100, message)
+            return True
+        
+        result = parallel_download(
+            tasks=tasks,
+            worker_function=worker,
+            max_workers=10,
+            progress_callback=adjusted_progress_callback,
+            threshold=50
+        )
         
         # === 完了処理 ===
-        result_msg = f"インボイス情報取得完了: 処理={processed_count}/{total_entries}, 成功={success_count}, エラー={error_count}"
+        result_msg = (f"インボイス情報取得完了: "
+                     f"成功={result['success_count']}, "
+                     f"失敗={result['failed_count']}, "
+                     f"スキップ={result['skipped_count']}, "
+                     f"総数={result['total']}")
         logger.info(result_msg)
         
         if progress_callback:
             progress_callback(100, 100, result_msg)
+        
+        if result['cancelled']:
+            return "キャンセルされました"
         
         return result_msg
         
@@ -1038,7 +1084,10 @@ def fetch_organization_stage(bearer_token, progress_callback=None):
 
 @stage_error_handler("サンプル情報取得")
 def fetch_sample_info_stage(bearer_token, progress_callback=None):
-    """段階4: サンプル情報取得"""
+    """
+    段階4: サンプル情報取得
+    v2.1.1: 並列ダウンロード対応（50件以上で自動並列化）
+    """
     if progress_callback:
         if not progress_callback(10, 100, "サブグループ情報確認中..."):
             return "キャンセルされました"
@@ -1055,45 +1104,124 @@ def fetch_sample_info_stage(bearer_token, progress_callback=None):
         os.makedirs(sample_dir, exist_ok=True)
         
         total_samples = len(sub_group_included)
-        processed_samples = 0
         
-        for idx, included in enumerate(sub_group_included):
-            sample_progress = 20 + int((idx / total_samples) * 70) if total_samples > 0 else 90
-            group_id_sample = included.get("id", "")
-            
+        if progress_callback:
+            if not progress_callback(15, 100, f"サンプル情報取得準備中... ({total_samples}件)"):
+                return "キャンセルされました"
+        
+        # Material API用のトークンを明示的に取得
+        from config.common import load_bearer_token
+        material_token = load_bearer_token('rde-material.nims.go.jp')
+        
+        # 並列化用タスクリスト作成
+        tasks = [
+            (material_token, included.get("id", ""), sample_dir)
+            for included in sub_group_included
+            if included.get("id")
+        ]
+        
+        # プログレスコールバックラッパー
+        def sample_progress_callback(current, total, message):
+            """サンプル取得進捗を通知（20-90%にマッピング）"""
             if progress_callback:
-                if not progress_callback(sample_progress, 100, f"サンプル情報取得中 ({idx + 1}/{total_samples})"):
-                    return "キャンセルされました"
-            
-            sample_json_path = os.path.join(sample_dir, f"{group_id_sample}.json")
-            
-            # 既存ファイルがある場合はスキップ
-            if os.path.exists(sample_json_path):
-                continue
-            
-            url = f"https://rde-material-api.nims.go.jp/samples?groupId={group_id_sample}&page%5Blimit%5D=1000&page%5Boffset%5D=0&fields%5Bsample%5D=names%2Cdescription%2Ccomposition"
-            try:
-                # Material API用のトークンを明示的に取得
-                from config.common import load_bearer_token
-                material_token = load_bearer_token('rde-material.nims.go.jp')
-                headers_sample = _make_headers(material_token, host="rde-material-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
-                resp = api_request("GET", url, bearer_token=material_token, headers=headers_sample, timeout=10)
-                if resp is None:
-                    continue
-                resp.raise_for_status()
-                data = resp.json()
-                with open(sample_json_path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                processed_samples += 1
-            except Exception as e:
-                logger.error(f"サンプル情報({group_id_sample})の取得に失敗: {e}")
+                # parallel_download()からは(progress_percent, 100, message)で呼ばれる
+                # currentは0-100のパーセント値なので、20-90%範囲にマッピング
+                mapped_percent = 20 + int((current / 100.0) * 70)
+                return progress_callback(mapped_percent, 100, message)
+            return True
         
+        # 並列ダウンロード実行（50件以上で自動並列化）
+        from net.http_helpers import parallel_download
+        
+        result = parallel_download(
+            tasks=tasks,
+            worker_function=_fetch_single_sample_worker,
+            max_workers=10,
+            progress_callback=sample_progress_callback,
+            threshold=50  # 50サンプル以上で並列化
+        )
+        
+        # 結果の集計
+        success_count = result.get("success_count", 0)
+        skipped_count = result.get("skipped_count", 0)
+        failed_count = result.get("failed_count", 0)
+        cancelled = result.get("cancelled", False)
+        errors = result.get("errors", [])
+        
+        if cancelled:
+            logger.warning(f"サンプル情報取得がキャンセルされました: {success_count}件成功, {skipped_count}件スキップ")
+            return "キャンセルされました"
+        
+        # エラーログ出力
+        if errors:
+            logger.error(f"サンプル情報取得でエラーが{len(errors)}件発生:")
+            for err in errors[:10]:  # 最初の10件のみ
+                logger.error(f"  - {err}")
     
     if progress_callback:
         if not progress_callback(100, 100, "サンプル情報取得完了"):
             return "キャンセルされました"
     
-    return f"サンプル情報取得が完了しました。処理済み: {processed_samples}件"
+    return f"サンプル情報取得が完了しました。成功: {success_count}件, スキップ: {skipped_count}件, 失敗: {failed_count}件"
+
+def _fetch_single_sample_worker(material_token, group_id_sample, sample_dir):
+    """
+    並列処理用ワーカー関数: 単一サンプル情報の取得
+    
+    Args:
+        material_token: Material API認証トークン
+        group_id_sample: サンプルグループID
+        sample_dir: 保存先ディレクトリ
+        
+    Returns:
+        str: "success"/"skipped"/"failed"
+    """
+    try:
+        if not group_id_sample:
+            return "skipped"
+        
+        sample_json_path = os.path.join(sample_dir, f"{group_id_sample}.json")
+        
+        # 既存ファイルがある場合はスキップ
+        if os.path.exists(sample_json_path):
+            logger.debug(f"既存ファイルをスキップ: {sample_json_path}")
+            return "skipped"
+        
+        url = f"https://rde-material-api.nims.go.jp/samples?groupId={group_id_sample}&page%5Blimit%5D=1000&page%5Boffset%5D=0&fields%5Bsample%5D=names%2Cdescription%2Ccomposition"
+        
+        headers_sample = _make_headers(
+            material_token, 
+            host="rde-material-api.nims.go.jp", 
+            origin="https://rde-entry-arim.nims.go.jp", 
+            referer="https://rde-entry-arim.nims.go.jp/"
+        )
+        
+        resp = api_request("GET", url, bearer_token=material_token, headers=headers_sample, timeout=10)
+        
+        if resp is None:
+            logger.warning(f"サンプル情報取得失敗 (リクエスト失敗): {group_id_sample}")
+            return "failed"
+        
+        if resp.status_code == 404:
+            logger.debug(f"サンプル情報が見つかりません: {group_id_sample}")
+            return "skipped"
+            
+        if resp.status_code != 200:
+            logger.warning(f"サンプル情報取得失敗 (HTTP {resp.status_code}): {group_id_sample}")
+            return "failed"
+        
+        resp.raise_for_status()
+        data = resp.json()
+        
+        with open(sample_json_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"サンプル情報保存完了: {sample_json_path}")
+        return "success"
+        
+    except Exception as e:
+        logger.error(f"サンプル情報({group_id_sample})の取得に失敗: {e}")
+        return "failed"
 
 @stage_error_handler("データセット情報取得")
 def fetch_dataset_info_stage(bearer_token, onlySelf=False, searchWords=None, progress_callback=None):
@@ -1720,7 +1848,10 @@ def fetch_basic_info_logic(bearer_token, parent=None, webview=None, onlySelf=Fal
 def fetch_sample_info_only(bearer_token, output_dir="output/rde/data", progress_callback=None):
     """
     サンプル情報のみを強制取得・保存（既存ファイルも上書き）
+    v2.1.0: 並列ダウンロード対応（50件以上で自動並列化）
     """
+    from net.http_helpers import parallel_download
+    
     if not bearer_token:
         error_msg = "Bearerトークンが取得できません。ログイン状態を確認してください。"
         logger.error(error_msg)
@@ -1757,34 +1888,29 @@ def fetch_sample_info_only(bearer_token, output_dir="output/rde/data", progress_
         os.makedirs(sample_dir, exist_ok=True)
         
         total_samples = len(sub_group_included)
-        processed_samples = 0
-        failed_samples = 0
         
-        for idx, included in enumerate(sub_group_included):
-            sample_progress = 10 + int((idx / total_samples) * 80) if total_samples > 0 else 90
+        # タスクリストを作成（並列実行用）
+        tasks = []
+        for included in sub_group_included:
             group_id_sample = included.get("id", "")
-            
-            if not group_id_sample:
-                logger.warning(f"グループID が空のため、サンプル{idx + 1}をスキップしました")
-                continue
-                
-            if progress_callback:
-                if not progress_callback(sample_progress, 100, f"サンプル情報取得中 ({idx + 1}/{total_samples}) - ID: {group_id_sample}"):
-                    return "キャンセルされました"
-                    
-            url = f"https://rde-material-api.nims.go.jp/samples?groupId={group_id_sample}&page%5Blimit%5D=1000&page%5Boffset%5D=0&fields%5Bsample%5D=names%2Cdescription%2Ccomposition"
-            sample_json_path = os.path.join(sample_dir, f"{group_id_sample}.json")
-            
+            if group_id_sample:
+                tasks.append((bearer_token, group_id_sample, sample_dir))
+        
+        # 並列ダウンロード実行（50件以上で自動並列化）
+        def worker(token, group_id, samp_dir):
+            """ワーカー関数"""
             try:
+                url = f"https://rde-material-api.nims.go.jp/samples?groupId={group_id}&page%5Blimit%5D=1000&page%5Boffset%5D=0&fields%5Bsample%5D=names%2Cdescription%2Ccomposition"
+                sample_json_path = os.path.join(samp_dir, f"{group_id}.json")
+                
                 # Material API用のトークンを明示的に取得
                 from config.common import load_bearer_token
                 material_token = load_bearer_token('rde-material.nims.go.jp')
                 headers_sample = _make_headers(material_token, host="rde-material-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
                 resp = api_request("GET", url, bearer_token=material_token, headers=headers_sample, timeout=10)
                 if resp is None:
-                    failed_samples += 1
-                    logger.error(f"サンプル情報({group_id_sample})の取得に失敗しました: リクエストエラー")
-                    continue
+                    logger.error(f"サンプル情報({group_id})の取得に失敗しました: リクエストエラー")
+                    return "failed: request error"
                 
                 resp.raise_for_status()
                 data = resp.json()
@@ -1793,24 +1919,45 @@ def fetch_sample_info_only(bearer_token, output_dir="output/rde/data", progress_
                 with open(sample_json_path, "w", encoding="utf-8") as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
                     
-                processed_samples += 1
-                logger.info(f"サンプル情報({group_id_sample})の強制取得・保存に成功しました: {sample_json_path}")
+                logger.info(f"サンプル情報({group_id})の強制取得・保存に成功しました: {sample_json_path}")
+                return "success"
                 
             except Exception as e:
-                failed_samples += 1
-                logger.error(f"サンプル情報({group_id_sample})の取得・保存に失敗しました: {e}")
-                
+                logger.error(f"サンプル情報({group_id})の取得・保存に失敗しました: {e}")
+                return f"failed: {e}"
+        
+        # プログレスコールバックを調整（10-95%の範囲にマッピング）
+        def adjusted_progress_callback(current, total, message):
+            if progress_callback:
+                progress_percent = 10 + int((current / 100) * 85)  # 10-95%
+                return progress_callback(progress_percent, 100, message)
+            return True
+        
+        result = parallel_download(
+            tasks=tasks,
+            worker_function=worker,
+            max_workers=10,
+            progress_callback=adjusted_progress_callback,
+            threshold=50
+        )
+        
         if progress_callback:
             if not progress_callback(95, 100, "サンプル情報取得完了処理中..."):
                 return "キャンセルされました"
                 
-        result_msg = f"サンプル情報強制取得が完了しました。成功: {processed_samples}件, 失敗: {failed_samples}件, 総数: {total_samples}件"
+        result_msg = (f"サンプル情報強制取得が完了しました。"
+                     f"成功: {result['success_count']}件, "
+                     f"失敗: {result['failed_count']}件, "
+                     f"総数: {result['total']}件")
         logger.info(result_msg)
         
         if progress_callback:
             if not progress_callback(100, 100, "完了"):
                 return "キャンセルされました"
-                
+        
+        if result['cancelled']:
+            return "キャンセルされました"
+        
         return result_msg
         
     except Exception as e:

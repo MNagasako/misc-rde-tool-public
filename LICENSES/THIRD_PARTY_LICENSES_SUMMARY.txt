@@ -1,0 +1,70 @@
+Third-party packages and their (declared) licenses
+------------------------------------------------------------
+- certifi (2025.10.5)
+  License: MPL-2.0
+  File: certifi-2025.10.5-LICENSE.txt
+
+- keyring (25.6.0)
+  License: MIT; PSF
+  File: keyring-25.6.0-LICENSE.txt
+
+- openpyxl (3.1.5)
+  License: MIT
+  File: openpyxl-3.1.5-LICENSE.txt
+
+- pandas (2.3.3)
+  License: BSD 3-Clause License
+  File: pandas-2.3.3-LICENSE.txt
+
+- pillow (12.0.0)
+  License: MIT-CMU License
+  File: pillow-12.0.0-LICENSE.txt
+
+- pycryptodomex (3.23.0)
+  License: BSD, Public Domain
+  File: pycryptodomex-3.23.0-LICENSE.txt
+
+- PyPAC (0.17.2)
+  License: Apache-2.0
+  File: PyPAC-0.17.2-LICENSE.txt
+
+- PySide6 (6.10.0)
+  License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+  File: PySide6-6.10.0-LICENSE.txt
+
+- PySide6_Addons (6.10.0)
+  License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+  File: PySide6_Addons-6.10.0-LICENSE.txt
+
+- PySide6_Essentials (6.10.0)
+  License: LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
+  File: PySide6_Essentials-6.10.0-LICENSE.txt
+
+- python-dateutil (2.9.0.post0)
+  License: Dual License
+  File: python-dateutil-2.9.0.post0-LICENSE.txt
+
+- pywin32 (311)
+  License: PSF
+  File: pywin32-311-LICENSE.txt
+
+- PyYAML (6.0.3)
+  License: MIT
+  File: PyYAML-6.0.3-LICENSE.txt
+
+- requests (2.32.5)
+  License: Apache-2.0
+  File: requests-2.32.5-LICENSE.txt
+
+- truststore (0.10.4)
+  License: MIT
+  File: truststore-0.10.4-LICENSE.txt
+
+- urllib3 (2.5.0)
+  License: MIT
+  File: urllib3-2.5.0-LICENSE.txt
+
+- wincertstore (0.2.1)
+  License: PSFL
+  File: wincertstore-0.2.1-LICENSE.txt
+

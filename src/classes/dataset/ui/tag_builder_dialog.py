@@ -370,9 +370,9 @@ class TagBuilderDialog(QDialog):
         # 全ての項目（大項目、中項目、小項目）をチェック
         tag_text = item.text(0)
         if tag_text in self.selected_tags:
-            item.setCheckState(0, Qt.Checked)
+            item.setCheckState(0, Qt.CheckState.Checked)
         else:
-            item.setCheckState(0, Qt.Unchecked)
+            item.setCheckState(0, Qt.CheckState.Unchecked)
         
         # 子アイテムも再帰的にチェック
         for i in range(item.childCount()):
@@ -383,7 +383,8 @@ class TagBuilderDialog(QDialog):
         """プリセット項目の選択変更時の処理"""
         tag_text = item.text(0)
         
-        if item.checkState(0) == Qt.Checked:
+        # checkState()はenumを返すが、整数値比較の方が安全
+        if item.checkState(0).value == 2:  # Qt.CheckState.Checked.value
             if tag_text not in self.selected_tags:
                 self.selected_tags.append(tag_text)
         else:
@@ -399,10 +400,10 @@ class TagBuilderDialog(QDialog):
         # ダブルクリックで選択状態を切り替え
         if tag_text in self.selected_tags:
             self.selected_tags.remove(tag_text)
-            item.setCheckState(0, Qt.Unchecked)
+            item.setCheckState(0, Qt.CheckState.Unchecked)
         else:
             self.selected_tags.append(tag_text)
-            item.setCheckState(0, Qt.Checked)
+            item.setCheckState(0, Qt.CheckState.Checked)
         
         self.update_preview()
     
