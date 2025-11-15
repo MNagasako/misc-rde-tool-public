@@ -1,16 +1,16 @@
 ### 配布関連
 
-* `arim_rde_tool.exe` — メイン実行ファイル（onefile形式）
-* `arim_rde_tool/` — フォルダ展開型（onedir形式、`dist/arim_rde_tool/`）
-* `arim_rde_tool_setup.exe` — インストーラー形式（セットアップウィザード対応）
+* `arim_rde_tool.exe` — メイン実行ファイル（onefile形式、EXE単体）
+* `arim_rde_tool.zip` — フォルダ展開型（onedir形式、ZIPファイル）
+* `arim_rde_tool_setup.exe` — インストーラー形式（セットアップウィザード対応、EXE）
 * `input-sample/` — サンプル入力ファイル群
 ## インストール
 
 1. [Releases](https://github.com/MNagasako/misc-rde-tool-public/releases) から最新版 ZIP をダウンロード
 2. 配布形態に応じて以下の手順で展開・実行
-   - **onefile形式**：ZIPを展開し、`arim_rde_tool.exe` を直接実行
-   - **onedir形式**：ZIPを展開し、`arim_rde_tool/` フォルダ内の `arim_rde_tool.exe` を実行
-   - **インストーラー形式**：`arim_rde_tool_setup.exe` を実行し、ウィザードに従ってインストール
+   - **onefile形式（EXE）**：`arim_rde_tool.exe` を直接実行
+   - **onedir形式（ZIP）**：`arim_rde_tool.zip` を展開し、フォルダ内の `arim_rde_tool.exe` を実行
+   - **インストーラー形式（EXE）**：`arim_rde_tool_setup.exe` を実行し、ウィザードに従ってインストール
 3. `input/` フォルダに設定ファイルやデータを配置
 4. GUI 画面から各種操作を実施
 
