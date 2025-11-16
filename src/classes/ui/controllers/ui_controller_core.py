@@ -216,7 +216,8 @@ class UIControllerCore:
 
     def center_window(self):
         """
-        ウィンドウを画面中央に移動
+        ウィンドウを画面中央（横）、最上部（縦）に移動
+        v2.1.3: 縦位置を画面最上部に変更
         """
         try:
             from qt_compat.widgets import QApplication
@@ -225,11 +226,17 @@ class UIControllerCore:
             if screen:
                 screen_geometry = screen.availableGeometry()
                 window_geometry = self.parent.frameGeometry()
+                
+                # 横位置は中央に配置
                 center_point = screen_geometry.center()
                 window_geometry.moveCenter(center_point)
-                self.parent.move(window_geometry.topLeft())
+                
+                # 縦位置は最上部に設定（Y座標を0に）
+                x = window_geometry.x()
+                self.parent.move(x, 0)
+                
         except Exception as e:
-            logger.error("ウィンドウ中央移動エラー: %s", e)
+            logger.error("ウィンドウ位置調整エラー: %s", e)
     
     def show_grant_number_form(self):
         """
@@ -323,8 +330,11 @@ class UIControllerCore:
             
             # メニューボタンを取得
             menu_buttons = self.init_mode_widgets()
-            for button in menu_buttons:
-                menu_layout.addWidget(button)
+            
+            # ヘルプボタン以外のボタンを追加
+            for button_key, button in self.menu_buttons.items():
+                if button_key != 'help':
+                    menu_layout.addWidget(button)
             
             # 初期モード設定
             self.parent.current_mode = "login"
@@ -335,8 +345,14 @@ class UIControllerCore:
             self.parent.menu_btn3 = self.menu_buttons['data_register']
             self.parent.menu_btn4 = self.menu_buttons['settings']
             
-            # 閉じるボタンを最下段に配置
+            # スペースを追加（閉じるボタンとヘルプボタンを下部に配置）
             menu_layout.addStretch(1)
+            
+            # ヘルプボタンを閉じるボタンの上に配置
+            if 'help' in self.menu_buttons:
+                menu_layout.addWidget(self.menu_buttons['help'])
+            
+            # 閉じるボタンを最下段に配置
             self.parent.close_btn = self.create_auto_resize_button(
                 '閉じる', 120, 32, 'background-color: #f44336; color: white; font-weight: bold; border-radius: 6px; margin: 2px;'
             )
@@ -397,6 +413,10 @@ class UIControllerCore:
             # 待機メッセージラベル（目立つ位置）
             message_layout.addWidget(self.parent.autologin_msg_label)
             message_layout.addWidget(self.parent.webview_msg_label)
+            
+            # v2.1.3: ログイン処理説明ラベル（WebView下部に配置）
+            if hasattr(self.parent, 'login_help_label'):
+                message_layout.addWidget(self.parent.login_help_label)
             
             message_frame.setLayout(message_layout)
             vbox.addWidget(message_frame)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-ARIM RDE Tool v2.0.5 - PySide6によるRDE→ARIMデータポータル移行ツール
+ARIM RDE Tool v2.1.4 - PySide6によるRDE→ARIMデータポータル移行ツール
 
 主要機能:
 - RDEシステムへの自動ログイン・データセット一括取得・画像保存
@@ -9,7 +9,17 @@ ARIM RDE Tool v2.0.5 - PySide6によるRDE→ARIMデータポータル移行ツ�
 - ARIM匿名化・HTMLログ出力・統合API処理・AI分析機能
 - OAuth2 RefreshToken対応トークン管理システム（TokenManager）
 
-v2.0.5新機能:
+v2.1.4新機能:
+- コードベース全体のレビューとリビジョンアップ
+- バージョン管理の統一とドキュメント更新
+- 品質改善と保守性向上の継続
+
+v2.1.3機能:
+- データ取得2機能のファイル単位プログレス表示改善
+- 並列ダウンロード対応とスレッドセーフなカウンター実装
+- 2段階プログレス表示（ファイルリスト取得→ダウンロード）
+
+v2.0.5機能:
 - truststore統合によるSSL検証強化（Windows証明書ストア対応）
 - APIアクセスログ機能実装（daily rotation・自動クリーンアップ）
 - プロキシ設定変更時の自動再起動プロンプト実装
@@ -251,6 +261,23 @@ class Browser(QWidget):
         
         self.webview_msg_label = QLabel('')
         self.webview_msg_label.setStyleSheet('color: #d2691e; font-size: 13px; padding: 2px;')
+        
+        # v2.1.3: ログイン処理説明ラベル（停止時の対処説明）
+        self.login_help_label = QLabel(
+            "💡 ログイン処理が途中で止まった場合は、「ログイン実行」ボタンでやり直してください。"
+        )
+        self.login_help_label.setStyleSheet("""
+            QLabel {
+                background-color: #e3f2fd;
+                color: #1976d2;
+                padding: 8px;
+                border-radius: 4px;
+                border: 1px solid #90caf9;
+                font-size: 9pt;
+            }
+        """)
+        self.login_help_label.setWordWrap(True)
+        self.login_help_label.setVisible(False)  # 初期は非表示
         
         # v1.16: レガシー警告バナー用ウィジェット
         self.legacy_warning_banner = None

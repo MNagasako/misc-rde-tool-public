@@ -36,6 +36,12 @@ class DisplayManager:
         self.blinking_state = False
         self.blinking_timer = None
         self._blinking_msg_text = None
+        
+        # ログイン処理監視用
+        self._last_login_message = None
+        self._login_message_start_time = None
+        self._login_stall_timer = None
+        self._login_stall_warning_shown = False
 
     def set_message(self, msg):
         """
@@ -47,9 +53,108 @@ class DisplayManager:
     def set_autologin_message(self, msg):
         """
         自動ログイン用メッセージラベルの内容を更新。
+        ログイン処理の停止を監視します。
         """
         if self.autologin_msg_label:
             self.autologin_msg_label.setText(msg)
+            
+            # ログイン処理監視の開始・更新
+            self._monitor_login_message(msg)
+    
+    def _monitor_login_message(self, msg):
+        """
+        ログインメッセージを監視し、10秒間同じメッセージの場合は警告を表示
+        """
+        import time
+        from qt_compat.core import QTimer
+        
+        current_time = time.time()
+        
+        # メッセージが変わった場合
+        if msg != self._last_login_message:
+            self._last_login_message = msg
+            self._login_message_start_time = current_time
+            self._login_stall_warning_shown = False
+            
+            # 既存のタイマーをクリア
+            if self._login_stall_timer:
+                self._login_stall_timer.stop()
+                self._login_stall_timer = None
+            
+            # ログイン関連のメッセージの場合のみ監視開始とヘルプラベル表示
+            if msg and ("ログイン" in msg or "トークン" in msg or "認証" in msg or "取得中" in msg):
+                # login_help_labelを表示
+                self._show_login_help_label()
+                
+                # 10秒後に警告表示をチェック
+                if hasattr(self.autologin_msg_label, 'parent'):
+                    parent = self.autologin_msg_label.parent()
+                    if parent:
+                        self._login_stall_timer = QTimer(parent)
+                        self._login_stall_timer.setSingleShot(True)
+                        self._login_stall_timer.timeout.connect(self._check_login_stall)
+                        self._login_stall_timer.start(10000)  # 10秒
+        
+        # ログイン完了メッセージの場合は監視停止とヘルプラベル非表示
+        if ("完了" in msg or "成功" in msg or "ログイン済み" in msg or 
+            "両トークン取得済み" in msg or "全機能が利用可能" in msg):
+            if self._login_stall_timer:
+                self._login_stall_timer.stop()
+                self._login_stall_timer = None
+            self._login_stall_warning_shown = False
+            # login_help_labelを非表示
+            self._hide_login_help_label()
+    
+    def _check_login_stall(self):
+        """
+        ログイン処理が停止している可能性がある場合に警告を表示
+        """
+        import time
+        
+        if self._login_stall_warning_shown:
+            return
+        
+        current_time = time.time()
+        
+        # 10秒以上同じメッセージが表示されている場合
+        if self._login_message_start_time and (current_time - self._login_message_start_time) >= 10:
+            self._login_stall_warning_shown = True
+            
+            # 警告メッセージを追加（autologin_msg_labelに）
+            if self.autologin_msg_label:
+                current_text = self.autologin_msg_label.text()
+                warning_text = f"{current_text}\n\n⚠️ ログイン処理が停止している可能性があります。"
+                self.autologin_msg_label.setText(warning_text)
+                self.autologin_msg_label.setStyleSheet(
+                    "background-color: #fff3cd; color: #856404; "
+                    "border: 2px solid #ffc107; padding: 10px; "
+                    "border-radius: 5px; font-weight: bold;"
+                )
+                
+                logger.warning("ログイン処理が10秒間停止しています: %s", self._last_login_message)
+            
+            # login_help_labelを表示（存在する場合）
+            self._show_login_help_label()
+    
+    def _show_login_help_label(self):
+        """ログイン情報ラベルを表示"""
+        if hasattr(self.autologin_msg_label, 'parent'):
+            parent = self.autologin_msg_label.parent()
+            while parent:
+                if hasattr(parent, 'login_help_label'):
+                    parent.login_help_label.setVisible(True)
+                    break
+                parent = parent.parent() if hasattr(parent, 'parent') else None
+    
+    def _hide_login_help_label(self):
+        """ログイン情報ラベルを非表示"""
+        if hasattr(self.autologin_msg_label, 'parent'):
+            parent = self.autologin_msg_label.parent()
+            while parent:
+                if hasattr(parent, 'login_help_label'):
+                    parent.login_help_label.setVisible(False)
+                    break
+                parent = parent.parent() if hasattr(parent, 'parent') else None
 
     # --- 追加: 自動ログインメッセージ点滅制御 ---
     def start_blinking_msg(self, parent):

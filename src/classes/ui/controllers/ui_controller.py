@@ -748,6 +748,15 @@ class UIController(UIControllerCore):
         self.menu_buttons['data_portal'].clicked.connect(
             lambda: self.switch_mode("data_portal")
         )
+        
+        # ヘルプボタン（閉じるボタンの上に表示）
+        self.menu_buttons['help'] = self.create_auto_resize_button(
+            'ℹ️ ヘルプ', button_width, button_height, base_inactive_style
+        )
+        self.menu_buttons['help'].clicked.connect(
+            lambda: self.open_help_dialog()
+        )
+        
         return list(self.menu_buttons.values())
     
     def switch_mode(self, mode):
@@ -867,7 +876,7 @@ class UIController(UIControllerCore):
                 self.parent.login_control_widget.setVisible(True)
                 self.parent.login_control_widget.update_autologin_button_state()
                 
-        elif mode in ["subgroup_create", "basic_info", "dataset_open", "data_register", "settings", "ai_test", "data_fetch2", "data_portal"]:
+        elif mode in ["subgroup_create", "basic_info", "dataset_open", "data_register", "settings", "ai_test", "data_fetch2", "data_portal", "help"]:
             # WebView本体を非表示
             if hasattr(self.parent, 'webview'):
                 self.parent.webview.setVisible(False)
@@ -885,7 +894,7 @@ class UIController(UIControllerCore):
                 self.parent.overlay_manager.hide_overlay()
 
             # サブグループ・データセット・基本情報・設定モードは初期高さをディスプレイの90%に設定（後から変更可）
-            if mode in ["subgroup_create", "basic_info", "dataset_open", "data_register", "settings", "ai_test", "data_fetch2", "data_portal"]:
+            if mode in ["subgroup_create", "basic_info", "dataset_open", "data_register", "settings", "ai_test", "data_fetch2", "data_portal", "help"]:
                 try:
                     from qt_compat.widgets import QApplication
                     screen = QApplication.primaryScreen()
@@ -1459,6 +1468,18 @@ class UIController(UIControllerCore):
                     traceback.print_exc()
                     self.data_portal_widget = self._create_widget("データポータル", "#ff9800")
             return self.data_portal_widget
+        elif mode == "help":
+            if not hasattr(self, 'help_widget') or self.help_widget is None:
+                try:
+                    from classes.help.ui.help_widget import create_help_widget
+                    self.help_widget = create_help_widget(self.parent)
+                    if self.help_widget is None:
+                        # フォールバック：エラーメッセージ
+                        self.help_widget = self._create_widget("ヘルプ", "#607d8b")
+                except Exception as e:
+                    logger.error("ヘルプウィジェット作成エラー: %s", e)
+                    self.help_widget = self._create_widget("ヘルプ", "#607d8b")
+            return self.help_widget
         else:
             return None
         return None
@@ -4001,6 +4022,20 @@ class UIController(UIControllerCore):
             traceback.print_exc()
             from qt_compat.widgets import QMessageBox
             QMessageBox.critical(None, "エラー", f"AI拡張機能の起動に失敗しました: {str(e)}")
+    
+    def open_help_dialog(self):
+        """メニューからヘルプを開く（メインウィンドウ内に表示）"""
+        try:
+            logger.debug("ヘルプモードに切り替え")
+            self.switch_mode("help")
+            
+        except Exception as e:
+            logger.error("ヘルプ表示エラー: %s", e)
+            import traceback
+            traceback.print_exc()
+            from qt_compat.widgets import QMessageBox
+            QMessageBox.critical(None, "エラー", f"ヘルプの表示に失敗しました: {str(e)}")
+
     
     def _launch_ai_extension_dialog_direct(self):
         """AI拡張ダイアログを直接起動（簡素化版）"""

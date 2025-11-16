@@ -187,11 +187,16 @@ class TokenStatusTab(QWidget):
         host_item = QTableWidgetItem(host)
         self.token_table.setItem(row, 0, host_item)
         
-        # 有効期限
+        # 有効期限（OSタイムゾーンに変換）
         try:
             expires_dt = datetime.fromisoformat(token_data.expires_at.replace('Z', '+00:00'))
-            expires_str = expires_dt.strftime('%Y-%m-%d %H:%M:%S')
-        except Exception:
+            # UTCからローカルタイムゾーンに変換
+            expires_local = expires_dt.astimezone()
+            # タイムゾーン略称を取得（例: JST）
+            tz_name = expires_local.strftime('%Z')
+            expires_str = expires_local.strftime(f'%Y-%m-%d %H:%M:%S {tz_name}')
+        except Exception as e:
+            logger.warning(f"有効期限の変換エラー ({host}): {e}")
             expires_str = token_data.expires_at
         
         expires_item = QTableWidgetItem(expires_str)
@@ -200,11 +205,16 @@ class TokenStatusTab(QWidget):
         # 残り時間（プログレスバー）
         self.set_remaining_time_cell(row, 2, token_data)
         
-        # 最終更新
+        # 最終更新（OSタイムゾーンに変換）
         try:
             updated_dt = datetime.fromisoformat(token_data.updated_at.replace('Z', '+00:00'))
-            updated_str = updated_dt.strftime('%Y-%m-%d %H:%M:%S')
-        except Exception:
+            # UTCからローカルタイムゾーンに変換
+            updated_local = updated_dt.astimezone()
+            # タイムゾーン略称を取得（例: JST）
+            tz_name = updated_local.strftime('%Z')
+            updated_str = updated_local.strftime(f'%Y-%m-%d %H:%M:%S {tz_name}')
+        except Exception as e:
+            logger.warning(f"最終更新日時の変換エラー ({host}): {e}")
             updated_str = token_data.updated_at
         
         updated_item = QTableWidgetItem(updated_str)
@@ -246,6 +256,7 @@ class TokenStatusTab(QWidget):
         """残り時間セル設定（プログレスバー）"""
         try:
             expires_dt = datetime.fromisoformat(token_data.expires_at.replace('Z', '+00:00'))
+            # 現在時刻もUTC aware datetimeで取得
             now = datetime.now(timezone.utc)
             remaining = expires_dt - now
             

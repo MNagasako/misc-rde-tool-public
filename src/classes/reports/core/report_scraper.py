@@ -1,0 +1,427 @@
+"""
+報告書機能 - スクレイピングエンジン
+
+報告書サイトからデータを取得し、HTML解析を行います。
+
+Version: 2.1.0
+"""
+
+import re
+import logging
+from typing import Dict, List, Optional
+from urllib.parse import urlparse, parse_qs
+from bs4 import BeautifulSoup
+
+# HTTPヘルパー（本アプリの統一されたrequests機能）
+from net.http_helpers import proxy_get
+
+# 報告書機能の設定とユーティリティ
+from ..conf.field_definitions import (
+    EXCEL_COLUMNS,
+    BASE_URL,
+    REPORT_LIST_URL,
+    REPORT_DETAIL_URL,
+    PAGINATION_SELECTOR,
+)
+from ..util.html_parser import (
+    safe_extract_text,
+    safe_find_tag,
+    extract_links_from_next_p,
+    extract_list_items,
+    clean_html_text,
+)
+
+
+class ReportScraper:
+    """
+    報告書スクレイピングエンジン
+    
+    報告書サイトへのアクセス、HTML解析、データ抽出を担当します。
+    """
+    
+    def __init__(self):
+        """初期化"""
+        self.logger = logging.getLogger(__name__)
+        self.base_url = BASE_URL
+        self.list_url = REPORT_LIST_URL
+        self.detail_url_template = REPORT_DETAIL_URL
+    
+    def get_report_list(
+        self,
+        max_pages: Optional[int] = None,
+        start_page: int = 1
+    ) -> List[Dict[str, str]]:
+        """
+        報告書一覧を取得
+        
+        Args:
+            max_pages: 取得する最大ページ数（Noneの場合は全ページ）
+            start_page: 開始ページ番号
+        
+        Returns:
+            報告書リンク情報のリスト
+            [{"code": "...", "key": "...", "url": "...", "title": "..."}, ...]
+        
+        Raises:
+            Exception: HTTPエラーやパースエラー
+        """
+        self.logger.info(f"報告書一覧取得開始: start_page={start_page}, max_pages={max_pages}")
+        
+        # 最終ページ数を取得
+        final_page = self._get_final_page_number()
+        if final_page is None:
+            self.logger.warning("最終ページ数の取得に失敗しました")
+            final_page = 1
+        
+        # max_pagesが指定されている場合は制限
+        if max_pages:
+            end_page = min(start_page + max_pages - 1, final_page)
+        else:
+            end_page = final_page
+        
+        self.logger.info(f"ページ範囲: {start_page} - {end_page} (最終: {final_page})")
+        
+        # 各ページから報告書リンクを取得
+        all_links = []
+        for page_num in range(start_page, end_page + 1):
+            try:
+                links = self._get_links_from_page(page_num)
+                all_links.extend(links)
+                self.logger.info(f"ページ {page_num}: {len(links)} 件取得")
+            except Exception as e:
+                self.logger.error(f"ページ {page_num} の取得失敗: {e}")
+                continue
+        
+        self.logger.info(f"報告書一覧取得完了: 合計 {len(all_links)} 件")
+        return all_links
+    
+    def fetch_report(self, report_url: str) -> Optional[Dict]:
+        """
+        単一報告書の詳細を取得
+        
+        Args:
+            report_url: 報告書の詳細ページURL
+        
+        Returns:
+            報告書データ（辞書形式）、エラー時はNone
+        
+        Examples:
+            >>> scraper = ReportScraper()
+            >>> data = scraper.fetch_report("https://nanonet.go.jp/report.php?mode=detail&code=XXX&key=YYY")
+            >>> print(data['課題番号 / Project Issue Number'])
+        """
+        self.logger.info(f"報告書取得: {report_url}")
+        
+        try:
+            # URLからcode/keyを抽出
+            parsed_url = urlparse(report_url)
+            params = parse_qs(parsed_url.query)
+            code = params.get('code', [None])[0]
+            key = params.get('key', [None])[0]
+            
+            # HTMLを取得（http_helpers経由）
+            response = proxy_get(report_url)
+            response.encoding = 'utf-8'
+            
+            if response.status_code != 200:
+                self.logger.warning(f"HTTPエラー: {response.status_code}")
+                return None
+            
+            # HTMLからフィールドを抽出
+            report_data = self.extract_report_fields(response.text)
+            
+            # code/keyを追加
+            report_data['code'] = code if code else ''
+            report_data['key'] = key if key else ''
+            
+            self.logger.info(f"報告書取得成功: code={code}")
+            return report_data
+            
+        except Exception as e:
+            self.logger.error(f"報告書取得エラー ({report_url}): {e}", exc_info=True)
+            return None
+    
+    def extract_report_fields(self, html_content: str) -> Dict:
+        """
+        HTMLから報告書フィールドを抽出
+        
+        Args:
+            html_content: 報告書ページのHTML
+        
+        Returns:
+            抽出されたフィールドデータ（辞書形式）
+        
+        Note:
+            EXCEL_COLUMNSに定義された全フィールドを抽出します。
+            見つからないフィールドは空文字列になります。
+        """
+        soup = BeautifulSoup(html_content, 'html.parser')
+        extracted_data = {}
+        
+        # 基本フィールドの抽出
+        basic_fields = [
+            "課題番号 / Project Issue Number",
+            "利用課題名 / Title",
+            "利用した実施機関 / Support Institute",
+            "機関外・機関内の利用 / External or Internal Use",
+        ]
+        
+        for field_name in basic_fields:
+            tag = safe_find_tag(soup, 'h5', field_name)
+            extracted_data[field_name] = safe_extract_text(tag)
+        
+        # 技術領域の抽出（横断技術領域・重要技術領域）
+        self._extract_technology_areas(soup, extracted_data)
+        
+        # キーワードの抽出
+        extracted_data['キーワード / Keywords'] = self._extract_keywords(soup, html_content)
+        
+        # 利用者情報の抽出
+        user_fields = [
+            "利用者名（課題申請者）/ User Name (Project Applicant)",
+            "所属名 / Affiliation",
+        ]
+        
+        for field_name in user_fields:
+            tag = safe_find_tag(soup, 'h5', field_name)
+            extracted_data[field_name] = safe_extract_text(tag)
+        
+        # 共同利用者（特殊処理が必要）
+        self._extract_collaborators(soup, extracted_data)
+        
+        # ARIM支援担当者
+        field_name = "ARIM実施機関支援担当者 / Names of Collaborators in The Hub and Spoke Institutes"
+        tag = safe_find_tag(soup, 'h5', field_name)
+        extracted_data[field_name] = safe_extract_text(tag)
+        
+        # 利用形態の抽出
+        self._extract_support_types(soup, extracted_data)
+        
+        # 利用した主な設備（リンクリスト）
+        field_name = "利用した主な設備 / Equipment Used in This Project"
+        tag = safe_find_tag(soup, 'h2', field_name)
+        equipment_links = extract_links_from_next_p(tag)
+        extracted_data[field_name] = equipment_links if equipment_links else []
+        
+        # 大きなテキストフィールド
+        large_text_fields = [
+            "概要（目的・用途・実施内容）/ Abstract (Aim, Use Applications and Contents)",
+            "実験 / Experimental",
+            "結果と考察 / Results and Discussion",
+            "その他・特記事項（参考文献・謝辞等） / Remarks(References and Acknowledgements)",
+        ]
+        
+        for field_name in large_text_fields:
+            tag = safe_find_tag(soup, 'h5', field_name)
+            extracted_data[field_name] = safe_extract_text(tag)
+        
+        # 論文・発表のリスト
+        extracted_data['論文・プロシーディング（DOIのあるもの） / DOI (Publication and Proceedings)'] = \
+            extract_list_items(soup, '論文・プロシーディング（DOIのあるもの） / DOI (Publication and Proceedings)')
+        
+        extracted_data['口頭発表、ポスター発表および、その他の論文 / Oral Presentations etc.'] = \
+            extract_list_items(soup, '口頭発表、ポスター発表および、その他の論文 / Oral Presentations etc.')
+        
+        # 特許件数
+        self._extract_patent_counts(soup, extracted_data)
+        
+        return extracted_data
+    
+    # ========================================
+    # プライベートメソッド
+    # ========================================
+    
+    def _get_final_page_number(self) -> Optional[int]:
+        """最終ページ番号を取得"""
+        try:
+            self.logger.info("最終ページ番号取得中...")
+            response = proxy_get(self.list_url)
+            if response.status_code != 200:
+                self.logger.warning(f"最終ページ番号取得失敗: ステータス{response.status_code}")
+                return None
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            page_links = soup.select(PAGINATION_SELECTOR)
+            
+            if not page_links:
+                self.logger.info("ページネーションなし（1ページのみ）")
+                return 1  # ページネーションなし = 1ページのみ
+            
+            # 最終ページのリンクを取得（最後から2番目が最終ページ番号）
+            final_page_link = page_links[-2].get('href')
+            final_page_number = int(final_page_link.split('page=')[1].split('&')[0])
+            self.logger.info(f"最終ページ番号: {final_page_number}")
+            return final_page_number
+            
+        except Exception as e:
+            self.logger.error(f"最終ページ番号の取得エラー: {e}")
+            return None
+    
+    def _get_links_from_page(self, page_num: int) -> List[Dict[str, str]]:
+        """
+        指定ページから報告書リンクを取得
+        
+        Args:
+            page_num: ページ番号
+        
+        Returns:
+            報告書リンク情報のリスト
+            [{"code": "...", "key": "...", "url": "...", "title": "..."}, ...]
+        """
+        url = f"{self.list_url}?page={page_num}"
+        
+        try:
+            response = proxy_get(url)
+            response.encoding = 'utf-8'
+            
+            if response.status_code != 200:
+                raise Exception(f"HTTPエラー: {response.status_code}")
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # 報告書リンクを抽出
+            # 報告書一覧は通常<a>タグで、href="report.php?mode=detail&code=XXX&key=YYY"の形式
+            links = []
+            
+            # 詳細ページへのリンクを全て取得
+            for a_tag in soup.find_all('a', href=True):
+                href = a_tag.get('href', '')
+                
+                # hrefを文字列に変換
+                if not isinstance(href, str):
+                    continue
+                
+                # 報告書詳細ページのリンクをフィルタ（user_report.php に修正）
+                if 'user_report.php' in href and 'mode=detail' in href and 'code=' in href and 'key=' in href:
+                    # 絶対URLに変換
+                    if not href.startswith('http'):
+                        if href.startswith('/'):
+                            full_url = f"{self.base_url}{href}"
+                        else:
+                            full_url = f"{self.base_url}/{href}"
+                    else:
+                        full_url = href
+                    
+                    # URLからcode/keyを抽出
+                    try:
+                        parsed_url = urlparse(full_url)
+                        params = parse_qs(parsed_url.query)
+                        code = params.get('code', [None])[0]
+                        key = params.get('key', [None])[0]
+                        
+                        if code and key:
+                            # タイトルを取得（リンクテキストまたは近隣要素）
+                            title = a_tag.get_text(strip=True) or f"Report {code}"
+                            
+                            link_info = {
+                                'code': code,
+                                'key': key,
+                                'url': full_url,
+                                'title': title
+                            }
+                            
+                            # 重複チェック
+                            if not any(l['code'] == code and l['key'] == key for l in links):
+                                links.append(link_info)
+                    
+                    except Exception as e:
+                        self.logger.warning(f"リンク解析エラー ({href}): {e}")
+                        continue
+            
+            self.logger.debug(f"ページ {page_num}: {len(links)} 件のリンクを抽出")
+            return links
+            
+        except Exception as e:
+            self.logger.error(f"ページ {page_num} 取得エラー: {e}")
+            raise
+    
+    def _extract_technology_areas(self, soup: BeautifulSoup, data: Dict) -> None:
+        """技術領域（横断・重要）を抽出"""
+        tag_name = '技術領域 / Technology Area'
+        tag = safe_find_tag(soup, 'h5', tag_name)
+        
+        if tag is not None:
+            # 横断技術領域の処理
+            cross_tech_element = tag.find_next('p')
+            if cross_tech_element is not None:
+                cross_tech_text = cross_tech_element.text.strip()
+                # 「主: XXX、副: YYY」のようなパターンを解析
+                main_match = re.search(r'主[:：]\s*([^、]+)', cross_tech_text)
+                sub_match = re.search(r'副[:：]\s*(.+)', cross_tech_text)
+                
+                data["横断技術領域・主"] = main_match.group(1).strip() if main_match else ""
+                data["横断技術領域・副"] = sub_match.group(1).strip() if sub_match else ""
+            else:
+                data["横断技術領域・主"] = ""
+                data["横断技術領域・副"] = ""
+            
+            # 重要技術領域の処理（横断技術領域の次の<p>）
+            if cross_tech_element is not None:
+                important_tech_element = cross_tech_element.find_next('p')
+                if important_tech_element is not None:
+                    important_tech_text = important_tech_element.text.strip()
+                    main_match = re.search(r'主[:：]\s*([^、]+)', important_tech_text)
+                    sub_match = re.search(r'副[:：]\s*(.+)', important_tech_text)
+                    
+                    data["重要技術領域・主"] = main_match.group(1).strip() if main_match else ""
+                    data["重要技術領域・副"] = sub_match.group(1).strip() if sub_match else ""
+                else:
+                    data["重要技術領域・主"] = ""
+                    data["重要技術領域・副"] = ""
+        else:
+            data["横断技術領域・主"] = ""
+            data["横断技術領域・副"] = ""
+            data["重要技術領域・主"] = ""
+            data["重要技術領域・副"] = ""
+    
+    def _extract_keywords(self, soup: BeautifulSoup, html_content: str) -> str:
+        """キーワードを抽出"""
+        field_name = 'キーワード / Keywords'
+        tag = safe_find_tag(soup, 'h5', field_name)
+        return safe_extract_text(tag)
+    
+    def _extract_collaborators(self, soup: BeautifulSoup, data: Dict) -> None:
+        """共同利用者を抽出"""
+        field_name = '共同利用者氏名 / Names of Collaborators in Other Institutes Than Hub and Spoke Institutes'
+        tag = soup.find('h5', string=field_name)
+        
+        if tag is None:
+            data[field_name] = ''
+        else:
+            next_element = tag.find_next()
+            if next_element and next_element.name == 'p':
+                data[field_name] = next_element.text.strip()
+            else:
+                data[field_name] = ''
+    
+    def _extract_support_types(self, soup: BeautifulSoup, data: Dict) -> None:
+        """利用形態を抽出"""
+        field_name = '利用形態 / Support Type'
+        tag = safe_find_tag(soup, 'h5', field_name)
+        
+        if tag is not None:
+            support_element = tag.find_next('p')
+            if support_element is not None:
+                support_text = support_element.text.strip()
+                # 「主: XXX、副: YYY」のようなパターンを解析
+                main_match = re.search(r'主[:：]\s*([^、]+)', support_text)
+                sub_match = re.search(r'副[:：]\s*(.+)', support_text)
+                
+                data["利用形態・主"] = main_match.group(1).strip() if main_match else ""
+                data["利用形態・副"] = sub_match.group(1).strip() if sub_match else ""
+            else:
+                data["利用形態・主"] = ""
+                data["利用形態・副"] = ""
+        else:
+            data["利用形態・主"] = ""
+            data["利用形態・副"] = ""
+    
+    def _extract_patent_counts(self, soup: BeautifulSoup, data: Dict) -> None:
+        """特許件数を抽出"""
+        # 特許出願件数
+        tag = safe_find_tag(soup, 'h5', '特許出願件数')
+        data['特許出願件数'] = safe_extract_text(tag, default='0')
+        
+        # 特許登録件数
+        tag = safe_find_tag(soup, 'h5', '特許登録件数')
+        data['特許登録件数'] = safe_extract_text(tag, default='0')

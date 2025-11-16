@@ -77,6 +77,12 @@ class MainWindowTabIntegrator:
         # 設定タブを追加
         self._add_settings_tab()
         
+        # 報告書タブを追加（v2.1.0新機能）
+        self._add_reports_tab()
+        
+        # ヘルプタブを追加（v2.1.3新機能）
+        self._add_help_tab()
+        
         # タブウィジェットをメニューエリアに追加
         menu_area_layout.addWidget(self.tab_widget)
         
@@ -181,6 +187,51 @@ class MainWindowTabIntegrator:
         
         self.tab_widget.addTab(settings_tab, "設定")
         self.settings_tab = settings_tab
+    
+    def _add_reports_tab(self):
+        """報告書タブを追加（v2.1.0新機能）"""
+        try:
+            from classes.reports.ui.report_widget import ReportWidget
+            
+            # 報告書タブウィジェットを作成
+            self.reports_tab = ReportWidget()
+            
+            if self.reports_tab:
+                self.tab_widget.addTab(self.reports_tab, "📋 報告書")
+                logger.info("報告書タブが追加されました")
+            else:
+                logger.warning("報告書タブの作成に失敗しました")
+                
+        except ImportError as e:
+            logger.warning(f"報告書タブウィジェットのインポートに失敗: {e}")
+            self._create_fallback_reports_tab()
+        except Exception as e:
+            logger.error(f"報告書タブ追加エラー: {e}")
+            self._create_fallback_reports_tab()
+            
+    def _create_fallback_reports_tab(self):
+        """フォールバック用簡易報告書タブ"""
+        reports_tab = QWidget()
+        layout = QVBoxLayout(reports_tab)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # タイトル
+        title_label = QLabel("📋 報告書")
+        title_font = QFont()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
+        
+        # 説明
+        info_label = QLabel("報告書機能のインポートに失敗しました。")
+        info_label.setStyleSheet("color: red; font-weight: bold;")
+        layout.addWidget(info_label)
+        
+        layout.addStretch()
+        
+        self.tab_widget.addTab(reports_tab, "📋 報告書")
+        self.reports_tab = reports_tab
         
     def _open_legacy_settings_dialog(self):
         """従来の設定ダイアログを開く"""
@@ -194,6 +245,95 @@ class MainWindowTabIntegrator:
                 QMessageBox.warning(self.parent, "エラー", f"設定ダイアログの起動に失敗しました: {e}")
             except:
                 logger.error("設定ダイアログエラー: %s", e)
+    
+    def _add_help_tab(self):
+        """ヘルプタブを追加（v2.1.3新機能）"""
+        try:
+            # ヘルプタブウィジェットを作成
+            help_tab = self._create_help_tab_widget()
+            
+            if help_tab:
+                self.tab_widget.addTab(help_tab, "ヘルプ")
+                logger.info("ヘルプタブが追加されました")
+                self.help_tab = help_tab
+            else:
+                logger.warning("ヘルプタブの作成に失敗しました")
+                
+        except Exception as e:
+            logger.error(f"ヘルプタブ追加エラー: {e}")
+    
+    def _create_help_tab_widget(self):
+        """ヘルプタブウィジェットを作成"""
+        help_tab = QWidget()
+        layout = QVBoxLayout(help_tab)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(15)
+        
+        # タイトル
+        title_label = QLabel("ヘルプ")
+        title_font = QFont()
+        title_font.setPointSize(14)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
+        
+        # 説明
+        info_label = QLabel(
+            "アプリケーションの使用方法やライセンス情報を確認できます。"
+        )
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+        
+        # ヘルプダイアログを開くボタン
+        open_help_btn = QPushButton("ヘルプを開く")
+        open_help_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px 20px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        open_help_btn.clicked.connect(self._open_help_dialog)
+        layout.addWidget(open_help_btn)
+        
+        # クイックヘルプセクション
+        quick_help_label = QLabel("クイックヘルプ")
+        quick_help_label.setStyleSheet("font-weight: bold; margin-top: 15px;")
+        layout.addWidget(quick_help_label)
+        
+        quick_help_text = QLabel(
+            "• 左側のメニューから機能を選択してください\n"
+            "• 設定メニューからアプリケーション設定を変更できます\n"
+            "• トークン状態タブでBearer Tokenの有効期限を確認できます\n"
+            "• プロキシ設定はネットワーク設定タブで行います"
+        )
+        quick_help_text.setWordWrap(True)
+        quick_help_text.setStyleSheet("padding: 10px; background-color: #f0f0f0; border-radius: 5px;")
+        layout.addWidget(quick_help_text)
+        
+        layout.addStretch()
+        
+        return help_tab
+    
+    def _open_help_dialog(self):
+        """ヘルプダイアログを開く"""
+        try:
+            from classes.help.ui.help_dialog import show_help_dialog
+            show_help_dialog(self.parent)
+            logger.info("ヘルプダイアログを開きました")
+        except Exception as e:
+            logger.error(f"ヘルプダイアログ起動エラー: {e}")
+            try:
+                from qt_compat.widgets import QMessageBox
+                QMessageBox.warning(self.parent, "エラー", f"ヘルプダイアログの起動に失敗しました: {e}")
+            except:
+                logger.error("ヘルプダイアログエラー: %s", e)
                 
     def update_current_mode(self, mode: str):
         """現在のモードを更新"""

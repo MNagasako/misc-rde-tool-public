@@ -9,7 +9,7 @@ from typing import Optional
 try:
     from qt_compat.widgets import (
         QWidget, QVBoxLayout, QPushButton, 
-        QMessageBox, QGroupBox
+        QMessageBox, QGroupBox, QLabel
     )
     from qt_compat.core import QUrl
     PYQT5_AVAILABLE = True

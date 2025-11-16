@@ -99,10 +99,35 @@ class SettingsDialog(QDialog):
         self.setup_application_tab()
         logger.info("setup_ui: アプリケーション設定タブ作成完了")
         
+        # AI設定タブ
+        logger.info("setup_ui: AI設定タブ作成開始")
+        self.setup_ai_settings_tab()
+        logger.info("setup_ui: AI設定タブ作成完了")
+        
         # 自動ログインタブ
         logger.info("setup_ui: 自動ログインタブ作成開始")
         self.setup_autologin_tab()
         logger.info("setup_ui: 自動ログインタブ作成完了")
+        
+        # トークン状態タブ
+        logger.info("setup_ui: トークン状態タブ作成開始")
+        self.setup_token_status_tab()
+        logger.info("setup_ui: トークン状態タブ作成完了")
+        
+        # MISCタブ
+        logger.info("setup_ui: MISCタブ作成開始")
+        self.setup_misc_tab()
+        logger.info("setup_ui: MISCタブ作成完了")
+        
+        # 報告書タブ
+        logger.info("setup_ui: 報告書タブ作成開始")
+        self.setup_report_tab()
+        logger.info("setup_ui: 報告書タブ作成完了")
+        
+        # 設備タブ
+        logger.info("setup_ui: 設備タブ作成開始")
+        self.setup_equipment_tab()
+        logger.info("setup_ui: 設備タブ作成完了")
         
         # ボタンエリア
         button_layout = QHBoxLayout()
@@ -357,22 +382,220 @@ class SettingsDialog(QDialog):
             self.autologin_widget = autologin_widget
             self.tab_widget.addTab(autologin_scroll, "自動ログイン")
             logger.info("setup_autologin_tab: フォールバック自動ログインタブ追加成功")
+    
+    def setup_misc_tab(self):
+        """MISC（その他）タブ"""
+        logger.info("setup_misc_tab: 開始")
+        try:
+            logger.info("setup_misc_tab: MiscTabのインポートを試行")
+            from classes.config.ui.misc_tab import MiscTab
+            logger.info("setup_misc_tab: MiscTabインポート成功")
+            
+            logger.info("setup_misc_tab: MiscTabの作成を試行")
+            misc_widget = MiscTab(self)
+            logger.info("setup_misc_tab: MiscTab作成成功")
+            
+            # MISCウィジェットをスクロールエリアでラップ
+            logger.info("setup_misc_tab: スクロールエリアの作成を試行")
+            misc_scroll = QScrollArea()
+            misc_scroll.setWidgetResizable(True)
+            misc_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            misc_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            misc_scroll.setWidget(misc_widget)
+            logger.info("setup_misc_tab: スクロールエリア作成成功")
+            
+            self.misc_widget = misc_widget
+            self.tab_widget.addTab(misc_scroll, "その他")
+            logger.info("setup_misc_tab: MISCタブ追加成功")
+            
+        except ImportError as e:
+            logger.warning(f"MISCタブウィジェットのインポートに失敗: {e}")
+            # フォールバック用の簡易MISC設定
+            logger.info("setup_misc_tab: フォールバックウィジェット作成開始")
+            misc_widget = self.create_fallback_misc_widget()
+            
+            # フォールバック用もスクロールエリアでラップ
+            misc_scroll = QScrollArea()
+            misc_scroll.setWidgetResizable(True)
+            misc_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            misc_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            misc_scroll.setWidget(misc_widget)
+            
+            self.misc_widget = misc_widget
+            self.tab_widget.addTab(misc_scroll, "その他")
+            logger.info("setup_misc_tab: フォールバックMISCタブ追加成功")
+        except Exception as e:
+            logger.error(f"MISCタブ作成中にエラー: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def setup_report_tab(self):
+        """報告書タブ"""
+        logger.info("setup_report_tab: 開始")
+        try:
+            logger.info("setup_report_tab: ReportTabのインポートを試行")
+            from classes.config.ui.report_tab import ReportTab
+            logger.info("setup_report_tab: ReportTabインポート成功")
+            
+            logger.info("setup_report_tab: ReportTabの作成を試行")
+            report_widget = ReportTab(self)
+            logger.info("setup_report_tab: ReportTab作成成功")
+            
+            # 報告書ウィジェットをスクロールエリアでラップ
+            logger.info("setup_report_tab: スクロールエリアの作成を試行")
+            report_scroll = QScrollArea()
+            report_scroll.setWidgetResizable(True)
+            report_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            report_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            report_scroll.setWidget(report_widget)
+            logger.info("setup_report_tab: スクロールエリア作成成功")
+            
+            self.report_widget = report_widget
+            self.tab_widget.addTab(report_scroll, "報告書")
+            logger.info("setup_report_tab: 報告書タブ追加成功")
+            
+        except ImportError as e:
+            logger.warning(f"報告書タブウィジェットのインポートに失敗: {e}")
+            # フォールバック用の簡易報告書設定
+            logger.info("setup_report_tab: フォールバックウィジェット作成開始")
+            report_widget = self.create_fallback_report_widget()
+            
+            # フォールバック用もスクロールエリアでラップ
+            report_scroll = QScrollArea()
+            report_scroll.setWidgetResizable(True)
+            report_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            report_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            report_scroll.setWidget(report_widget)
+            
+            self.report_widget = report_widget
+            self.tab_widget.addTab(report_scroll, "報告書")
+            logger.info("setup_report_tab: フォールバック報告書タブ追加成功")
+    
+    def setup_equipment_tab(self):
+        """設備タブ"""
+        logger.info("setup_equipment_tab: 開始")
+        try:
+            logger.info("setup_equipment_tab: EquipmentTabのインポートを試行")
+            from classes.config.ui.equipment_tab import EquipmentTab
+            logger.info("setup_equipment_tab: EquipmentTabインポート成功")
+            
+            logger.info("setup_equipment_tab: EquipmentTabの作成を試行")
+            equipment_widget = EquipmentTab(self)
+            logger.info("setup_equipment_tab: EquipmentTab作成成功")
+            
+            # 設備ウィジェットをスクロールエリアでラップ
+            logger.info("setup_equipment_tab: スクロールエリアの作成を試行")
+            equipment_scroll = QScrollArea()
+            equipment_scroll.setWidgetResizable(True)
+            equipment_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            equipment_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            equipment_scroll.setWidget(equipment_widget)
+            logger.info("setup_equipment_tab: スクロールエリア作成成功")
+            
+            self.equipment_widget = equipment_widget
+            self.tab_widget.addTab(equipment_scroll, "設備")
+            logger.info("setup_equipment_tab: 設備タブ追加成功")
+            
+        except ImportError as e:
+            logger.warning(f"設備タブウィジェットのインポートに失敗: {e}")
+            # フォールバック用の簡易設備設定
+            logger.info("setup_equipment_tab: フォールバックウィジェット作成開始")
+            equipment_widget = self.create_fallback_equipment_widget()
+            
+            # フォールバック用もスクロールエリアでラップ
+            equipment_scroll = QScrollArea()
+            equipment_scroll.setWidgetResizable(True)
+            equipment_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            equipment_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            equipment_scroll.setWidget(equipment_widget)
+            
+            self.equipment_widget = equipment_widget
+            self.tab_widget.addTab(equipment_scroll, "設備")
+            logger.info("setup_equipment_tab: フォールバック設備タブ追加成功")
+    
+    def setup_ai_settings_tab(self):
+        """AI設定タブ"""
+        logger.info("setup_ai_settings_tab: 開始")
+        try:
+            logger.info("setup_ai_settings_tab: AISettingsWidgetのインポートを試行")
+            from classes.config.ui.ai_settings_widget import AISettingsWidget
+            logger.info("setup_ai_settings_tab: AISettingsWidgetインポート成功")
+            
+            logger.info("setup_ai_settings_tab: AISettingsWidgetの作成を試行")
+            ai_widget = AISettingsWidget(self)
+            logger.info("setup_ai_settings_tab: AISettingsWidget作成成功")
+            
+            # AI設定ウィジェットをスクロールエリアでラップ
+            logger.info("setup_ai_settings_tab: スクロールエリアの作成を試行")
+            ai_scroll = QScrollArea()
+            ai_scroll.setWidgetResizable(True)
+            ai_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            ai_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            ai_scroll.setWidget(ai_widget)
+            logger.info("setup_ai_settings_tab: スクロールエリア作成成功")
+            
+            self.ai_settings_widget = ai_widget
+            self.tab_widget.addTab(ai_scroll, "AI設定")
+            logger.info("setup_ai_settings_tab: AI設定タブ追加成功")
             
         except Exception as e:
-            logger.error(f"自動ログインタブ作成エラー: {e}")
-            import traceback
-            logger.error(f"自動ログインタブ作成エラー詳細: {traceback.format_exc()}")
+            logger.warning(f"AI設定タブウィジェットの作成に失敗: {e}")
+            # フォールバック用の簡易AI設定
+            logger.info("setup_ai_settings_tab: フォールバックウィジェット作成開始")
+            ai_widget = self.create_fallback_ai_settings_widget()
             
-            # エラー表示のみのタブ
-            error_widget = QWidget()
-            error_layout = QVBoxLayout(error_widget)
-            error_label = QLabel(f"自動ログインタブの作成に失敗しました: {e}")
-            error_label.setStyleSheet("color: red; padding: 20px;")
-            error_layout.addWidget(error_label)
-            error_layout.addStretch()
+            # フォールバック用もスクロールエリアでラップ
+            ai_scroll = QScrollArea()
+            ai_scroll.setWidgetResizable(True)
+            ai_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            ai_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            ai_scroll.setWidget(ai_widget)
             
-            self.tab_widget.addTab(error_widget, "自動ログイン")
-            logger.error("setup_autologin_tab: エラー表示タブ追加完了")
+            self.ai_settings_widget = ai_widget
+            self.tab_widget.addTab(ai_scroll, "AI設定")
+            logger.info("setup_ai_settings_tab: フォールバックAI設定タブ追加成功")
+    
+    def setup_token_status_tab(self):
+        """トークン状態タブ"""
+        logger.info("setup_token_status_tab: 開始")
+        try:
+            logger.info("setup_token_status_tab: TokenStatusTabのインポートを試行")
+            from classes.config.ui.token_status_tab import TokenStatusTab
+            logger.info("setup_token_status_tab: TokenStatusTabインポート成功")
+            
+            logger.info("setup_token_status_tab: TokenStatusTabの作成を試行")
+            token_widget = TokenStatusTab(self)
+            logger.info("setup_token_status_tab: TokenStatusTab作成成功")
+            
+            # トークン状態ウィジェットをスクロールエリアでラップ
+            logger.info("setup_token_status_tab: スクロールエリアの作成を試行")
+            token_scroll = QScrollArea()
+            token_scroll.setWidgetResizable(True)
+            token_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            token_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            token_scroll.setWidget(token_widget)
+            logger.info("setup_token_status_tab: スクロールエリア作成成功")
+            
+            self.token_status_widget = token_widget
+            self.tab_widget.addTab(token_scroll, "トークン状態")
+            logger.info("setup_token_status_tab: トークン状態タブ追加成功")
+            
+        except Exception as e:
+            logger.warning(f"トークン状態タブウィジェットの作成に失敗: {e}")
+            # フォールバック用の簡易トークン状態
+            logger.info("setup_token_status_tab: フォールバックウィジェット作成開始")
+            token_widget = self.create_fallback_token_status_widget()
+            
+            # フォールバック用もスクロールエリアでラップ
+            token_scroll = QScrollArea()
+            token_scroll.setWidgetResizable(True)
+            token_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            token_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            token_scroll.setWidget(token_widget)
+            
+            self.token_status_widget = token_widget
+            self.tab_widget.addTab(token_scroll, "トークン状態")
+            logger.info("setup_token_status_tab: フォールバックトークン状態タブ追加成功")
             
     def create_fallback_autologin_widget(self):
         """フォールバック用簡易自動ログイン設定ウィジェット"""
@@ -421,6 +644,126 @@ class SettingsDialog(QDialog):
         
         layout.addStretch()
         
+        return widget
+    
+    def create_fallback_misc_widget(self):
+        """フォールバック用簡易MISC設定ウィジェット"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # タイトル
+        title_label = QLabel("その他の便利機能")
+        title_font = QFont()
+        title_font.setPointSize(12)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
+        
+        # 説明
+        info_label = QLabel(
+            "MISC機能の詳細設定はライブラリ依存関係の問題により利用できません。\n"
+            "基本的なディレクトリ操作機能は正常に動作します。"
+        )
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+        
+        layout.addStretch()
+        return widget
+    
+    def create_fallback_report_widget(self):
+        """フォールバック用簡易報告書設定ウィジェット"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # タイトル
+        title_label = QLabel("報告書データ取得")
+        title_font = QFont()
+        title_font.setPointSize(12)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
+        
+        # 説明
+        info_label = QLabel(
+            "報告書データ取得機能の詳細設定はライブラリ依存関係の問題により利用できません。\n"
+            "この機能は現在開発中です。"
+        )
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+        
+        layout.addStretch()
+        return widget
+    
+    def create_fallback_equipment_widget(self):
+        """フォールバック用簡易設備設定ウィジェット"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # タイトル
+        title_label = QLabel("設備データ取得")
+        title_font = QFont()
+        title_font.setPointSize(12)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
+        
+        # 説明
+        info_label = QLabel(
+            "設備データ取得機能の詳細設定はライブラリ依存関係の問題により利用できません。\n"
+            "この機能は現在開発中です。"
+        )
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+        
+        layout.addStretch()
+        return widget
+    
+    def create_fallback_ai_settings_widget(self):
+        """フォールバック用簡易AI設定ウィジェット"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # タイトル
+        title_label = QLabel("AI設定")
+        title_font = QFont()
+        title_font.setPointSize(12)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
+        
+        # 説明
+        info_label = QLabel(
+            "AI設定機能の詳細設定はライブラリ依存関係の問題により利用できません。\n"
+            "AI機能を使用するには、別途AI設定画面をご利用ください。"
+        )
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+        
+        layout.addStretch()
+        return widget
+    
+    def create_fallback_token_status_widget(self):
+        """フォールバック用簡易トークン状態ウィジェット"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # タイトル
+        title_label = QLabel("トークン状態")
+        title_font = QFont()
+        title_font.setPointSize(12)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
+        
+        # 説明
+        info_label = QLabel(
+            "トークン状態確認機能の詳細設定はライブラリ依存関係の問題により利用できません。\n"
+            "トークン情報を確認するには、別途トークン状態画面をご利用ください。"
+        )
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+        
+        layout.addStretch()
         return widget
         
     def apply_settings(self):

@@ -1,0 +1,54 @@
+"""
+設備タブWidget
+
+ARIM設備データの並列取得・処理・出力機能を提供するUIです。
+"""
+
+import logging
+from config.common import OUTPUT_DIR
+
+logger = logging.getLogger(__name__)
+
+try:
+    from qt_compat.widgets import QWidget, QVBoxLayout, QTabWidget
+    PYSIDE6_AVAILABLE = True
+except ImportError as e:
+    PYSIDE6_AVAILABLE = False
+    # Qt非対応時はエラー
+    logger.error(f"Qt互換モジュールのインポートエラー: {e}")
+    raise ImportError(f"Qt互換モジュールが必要です: {e}")
+
+
+class EquipmentWidget(QWidget):
+    """設備タブWidget
+    
+    データ取得、カタログ変換、データマージの3つのタブを提供するコンテナ
+    """
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        self.setup_ui()
+    
+    def setup_ui(self):
+        """UI構築"""
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # タブウィジェット作成
+        self.tab_widget = QTabWidget()
+        
+        # 各タブ追加
+        from classes.equipment.ui.fetch_tab import FetchTab
+        from classes.equipment.ui.convert_tab import ConvertTab
+        from classes.equipment.ui.merge_tab import MergeTab
+        
+        self.fetch_tab = FetchTab(self)
+        self.convert_tab = ConvertTab(self)
+        self.merge_tab = MergeTab(self)
+        
+        self.tab_widget.addTab(self.fetch_tab, "📊 データ取得")
+        self.tab_widget.addTab(self.convert_tab, "🔄 カタログ変換")
+        self.tab_widget.addTab(self.merge_tab, "🔗 データマージ")
+        
+        main_layout.addWidget(self.tab_widget)

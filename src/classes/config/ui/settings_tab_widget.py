@@ -74,6 +74,12 @@ class SettingsTabWidget(QWidget):
 
         # インポートタブ（ダミー）
         self.setup_import_tab_dummy()
+        
+        # 報告書タブ
+        self.setup_report_tab()
+        
+        # 設備タブ
+        self.setup_equipment_tab()
             
         # ボタンエリア
         button_layout = QHBoxLayout()
@@ -705,6 +711,84 @@ class SettingsTabWidget(QWidget):
         # タブに追加
         tab_index = self.tab_widget.addTab(fallback_widget, "自動ログイン")
         logger.info("[settings_tab_widget] フォールバック自動ログインタブ追加完了: インデックス=%s", tab_index)
+    
+    def setup_report_tab(self):
+        """報告書タブ"""
+        logger.info("[settings_tab_widget] 報告書タブ作成開始")
+        try:
+            from classes.config.ui.report_tab import ReportTab
+            report_widget = ReportTab(self)
+            
+            # スクロールエリアでラップ
+            report_scroll = QScrollArea()
+            report_scroll.setWidgetResizable(True)
+            report_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            report_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            report_scroll.setWidget(report_widget)
+            
+            self.report_widget = report_widget
+            tab_index = self.tab_widget.addTab(report_scroll, "報告書")
+            logger.info("[settings_tab_widget] 報告書タブ追加成功: インデックス=%s", tab_index)
+            
+        except Exception as e:
+            logger.warning(f"[settings_tab_widget] 報告書タブ作成失敗: {e}")
+            # フォールバック
+            widget = QWidget()
+            layout = QVBoxLayout(widget)
+            layout.setContentsMargins(20, 20, 20, 20)
+            
+            title_label = QLabel("報告書データ取得")
+            title_font = QFont()
+            title_font.setPointSize(14)
+            title_font.setBold(True)
+            title_label.setFont(title_font)
+            layout.addWidget(title_label)
+            
+            info_label = QLabel("報告書データ取得機能は現在開発中です。")
+            info_label.setWordWrap(True)
+            layout.addWidget(info_label)
+            
+            layout.addStretch()
+            self.tab_widget.addTab(widget, "報告書")
+    
+    def setup_equipment_tab(self):
+        """設備タブ"""
+        logger.info("[settings_tab_widget] 設備タブ作成開始")
+        try:
+            from classes.config.ui.equipment_tab import EquipmentTab
+            equipment_widget = EquipmentTab(self)
+            
+            # スクロールエリアでラップ
+            equipment_scroll = QScrollArea()
+            equipment_scroll.setWidgetResizable(True)
+            equipment_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            equipment_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            equipment_scroll.setWidget(equipment_widget)
+            
+            self.equipment_widget = equipment_widget
+            tab_index = self.tab_widget.addTab(equipment_scroll, "設備")
+            logger.info("[settings_tab_widget] 設備タブ追加成功: インデックス=%s", tab_index)
+            
+        except Exception as e:
+            logger.warning(f"[settings_tab_widget] 設備タブ作成失敗: {e}")
+            # フォールバック
+            widget = QWidget()
+            layout = QVBoxLayout(widget)
+            layout.setContentsMargins(20, 20, 20, 20)
+            
+            title_label = QLabel("設備データ取得")
+            title_font = QFont()
+            title_font.setPointSize(14)
+            title_font.setBold(True)
+            title_label.setFont(title_font)
+            layout.addWidget(title_label)
+            
+            info_label = QLabel("設備データ取得機能は現在開発中です。")
+            info_label.setWordWrap(True)
+            layout.addWidget(info_label)
+            
+            layout.addStretch()
+            self.tab_widget.addTab(widget, "設備")
 
 
 def create_settings_tab_widget(parent=None, bearer_token=None):
