@@ -3019,29 +3019,69 @@ class DatasetUploadTab(QWidget):
                     'options': [{'value': cb.get('value', ''), 'label': self._extract_label(cb, soup)} for cb in cross_area_checkboxes]
                 }
             
-            # 設備分類 (t_eqp_code_array) - チェックボックス
-            equipment_checkboxes = soup.find_all('input', {'type': 'checkbox', 'name': 't_eqp_code_array[]'})
+            # 設備分類 (mec_code_array) - 編集ページから取得またはキャッシュから読み込み
+            equipment_checkboxes = soup.find_all('input', {'type': 'checkbox', 'name': 'mec_code_array[]'})
             if equipment_checkboxes:
-                metadata['t_eqp_code_array[]'] = {
+                metadata['mec_code_array[]'] = {
                     'type': 'checkbox',
                     'options': [{'value': cb.get('value', ''), 'label': self._extract_label(cb, soup)} for cb in equipment_checkboxes]
                 }
+                logger.info(f"[THEME_META] 設備分類をHTMLから取得: {len(equipment_checkboxes)}項目")
+            else:
+                # HTMLから取得できない場合、編集ページから取得
+                logger.info("[THEME_META] 設備分類を編集ページから取得")
+                from classes.data_portal.core.master_data import MasterDataManager
+                master_manager = MasterDataManager(self.portal_client)
+                success, eqp_data = master_manager.fetch_equipment_master_from_edit_page()
+                
+                if success and eqp_data:
+                    metadata['mec_code_array[]'] = {
+                        'type': 'checkbox',
+                        'options': [{'value': code, 'label': name} for code, name in eqp_data.items()]
+                    }
+                    logger.info(f"[THEME_META] 設備分類: {len(eqp_data)}項目")
             
-            # マテリアルインデックス (mi_code_array) - チェックボックス
-            material_checkboxes = soup.find_all('input', {'type': 'checkbox', 'name': 'mi_code_array[]'})
-            if material_checkboxes:
-                metadata['mi_code_array[]'] = {
+            # マテリアルインデックス (mmi_code_array) - マスターデータから取得
+            if not soup.find_all('input', {'type': 'checkbox', 'name': 'mmi_code_array[]'}):
+                logger.info("[THEME_META] マテリアルインデックスをマスターデータから取得")
+                from classes.data_portal.core.master_data import MasterDataManager
+                master_manager = MasterDataManager(self.portal_client)
+                success, mi_data = master_manager.load_material_index_master()
+                
+                if success and mi_data:
+                    metadata['mmi_code_array[]'] = {
+                        'type': 'checkbox',
+                        'options': [{'value': code, 'label': name} for code, name in mi_data.items()]
+                    }
+                    logger.info(f"[THEME_META] マテリアルインデックス: {len(mi_data)}項目")
+            else:
+                material_checkboxes = soup.find_all('input', {'type': 'checkbox', 'name': 'mmi_code_array[]'})
+                metadata['mmi_code_array[]'] = {
                     'type': 'checkbox',
                     'options': [{'value': cb.get('value', ''), 'label': self._extract_label(cb, soup)} for cb in material_checkboxes]
                 }
+                logger.info(f"[THEME_META] マテリアルインデックスをHTMLから取得: {len(material_checkboxes)}項目")
             
-            # タグ (tag_code_array) - チェックボックス
-            tag_checkboxes = soup.find_all('input', {'type': 'checkbox', 'name': 'tag_code_array[]'})
-            if tag_checkboxes:
-                metadata['tag_code_array[]'] = {
+            # タグ (mt_code_array) - マスターデータから取得
+            if not soup.find_all('input', {'type': 'checkbox', 'name': 'mt_code_array[]'}):
+                logger.info("[THEME_META] タグをマスターデータから取得")
+                from classes.data_portal.core.master_data import MasterDataManager
+                master_manager = MasterDataManager(self.portal_client)
+                success, tag_data = master_manager.load_tag_master()
+                
+                if success and tag_data:
+                    metadata['mt_code_array[]'] = {
+                        'type': 'checkbox',
+                        'options': [{'value': code, 'label': name} for code, name in tag_data.items()]
+                    }
+                    logger.info(f"[THEME_META] タグ: {len(tag_data)}項目")
+            else:
+                tag_checkboxes = soup.find_all('input', {'type': 'checkbox', 'name': 'mt_code_array[]'})
+                metadata['mt_code_array[]'] = {
                     'type': 'checkbox',
                     'options': [{'value': cb.get('value', ''), 'label': self._extract_label(cb, soup)} for cb in tag_checkboxes]
                 }
+                logger.info(f"[THEME_META] タグをHTMLから取得: {len(tag_checkboxes)}項目")
             
             logger.info(f"[THEME_META] メタデータ取得完了: {len(metadata)}項目")
             return metadata

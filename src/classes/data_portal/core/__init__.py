@@ -2,4 +2,4 @@
 データポータル コア機能モジュール
 """
 
-__all__ = ['AuthManager', 'PortalClient', 'Uploader']
+__all__ = ['AuthManager', 'PortalClient', 'Uploader', 'MasterDataManager']

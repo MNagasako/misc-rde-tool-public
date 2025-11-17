@@ -52,7 +52,7 @@ class AboutTab(QWidget):
             )
         except ImportError:
             APP_NAME = "ARIM RDE Tool"
-            APP_VERSION = "v2.1.3"
+            APP_VERSION = "v2.1.5"
             APP_DESCRIPTION = "データ移行ツール"
             APP_AUTHOR = "ARIM事業"
             APP_COPYRIGHT = "Copyright © 2024-2025 ARIM"

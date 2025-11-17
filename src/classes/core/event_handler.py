@@ -266,7 +266,8 @@ class EventHandler:
             
             # 自動クローズが有効な場合のみタイマーを設定
             if self.auto_close:
-                QTimer.singleShot(1000, lambda: __import__('PyQt5.QtWidgets').QtWidgets.QApplication.quit())
+                from qt_compat.widgets import QApplication
+                QTimer.singleShot(1000, lambda: QApplication.quit())
     
     def on_url_changed(self, url):
         """

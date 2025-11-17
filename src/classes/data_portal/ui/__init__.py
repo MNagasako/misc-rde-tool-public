@@ -2,4 +2,4 @@
 データポータル UI モジュール
 """
 
-__all__ = ['DataPortalWidget', 'LoginSettingsTab', 'DatasetUploadTab']
+__all__ = ['DataPortalWidget', 'LoginSettingsTab', 'MasterDataTab', 'DatasetUploadTab']

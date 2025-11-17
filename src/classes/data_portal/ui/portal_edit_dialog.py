@@ -9,11 +9,13 @@ from typing import Dict, Any, Optional
 from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QComboBox, QTextEdit, QPushButton,
-    QGroupBox, QMessageBox, QProgressDialog, QApplication, QScrollArea, QWidget, QCheckBox, QRadioButton, QButtonGroup
+    QGroupBox, QMessageBox, QProgressDialog, QApplication, QScrollArea, QWidget, QCheckBox, QRadioButton, QButtonGroup, QListWidget, QAbstractItemView,
+    QTableWidget, QTableWidgetItem, QHeaderView
 )
 from qt_compat.core import Qt
 
 from classes.managers.log_manager import get_logger
+from classes.data_portal.ui.widgets import FilterableCheckboxTable
 
 logger = get_logger("DataPortal.PortalEditDialog")
 
@@ -108,6 +110,7 @@ class PortalEditDialog(QDialog):
         if 't_mi_code' in self.form_data and self.form_data['t_mi_code']['type'] == 'select':
             field_data = self.form_data['t_mi_code']
             combo = QComboBox()
+            combo.setMaximumWidth(600)  # 最大幅を設定
             for opt in field_data['options']:
                 combo.addItem(opt['text'], opt['value'])
                 if opt['selected']:
@@ -119,6 +122,7 @@ class PortalEditDialog(QDialog):
         if 't_license_level' in self.form_data and self.form_data['t_license_level']['type'] == 'select':
             field_data = self.form_data['t_license_level']
             combo = QComboBox()
+            combo.setMaximumWidth(600)  # 最大幅を設定
             for opt in field_data['options']:
                 combo.addItem(opt['text'], opt['value'])
                 if opt['selected']:
@@ -153,6 +157,48 @@ class PortalEditDialog(QDialog):
         
         group.setLayout(layout)
         return group
+    
+    def _create_editable_list_table(self, field_prefix: str, label: str, max_rows: int = 20, visible_rows: int = 5) -> 'QTableWidget':
+        """
+        編集可能なリストテーブルを作成（装置・プロセス、論文・プロシーディング用）
+        
+        Args:
+            field_prefix: フィールドのプレフィックス（例: 't_equip_process', 't_paper_proceed'）
+            label: ラベル
+            max_rows: 最大行数（デフォルト20）
+            visible_rows: 表示行数（デフォルト5）
+        
+        Returns:
+            QTableWidget: テーブルウィジェット
+        """
+        table = QTableWidget()
+        table.setColumnCount(1)
+        table.setHorizontalHeaderLabels([label])
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        table.setRowCount(max_rows)
+        
+        # 行の高さを設定
+        table.verticalHeader().setDefaultSectionSize(25)
+        # 表示行数分の高さに設定
+        table_height = visible_rows * 25 + table.horizontalHeader().height() + 2
+        table.setMaximumHeight(table_height)
+        table.setMinimumHeight(table_height)
+        
+        # 既存データを読み込み
+        for i in range(1, max_rows + 1):
+            field_name = f"{field_prefix}{i}"
+            if field_name in self.form_data:
+                value = self.form_data[field_name].get('value', '')
+                if value:
+                    item = QTableWidgetItem(value)
+                    table.setItem(i - 1, 0, item)
+        
+        # 空のセルを追加
+        for i in range(table.rowCount()):
+            if table.item(i, 0) is None:
+                table.setItem(i, 0, QTableWidgetItem(""))
+        
+        return table
     
     def _create_checkbox_group(self, field_name: str, label: str, max_selections: int = None) -> QWidget:
         """
@@ -236,55 +282,157 @@ class PortalEditDialog(QDialog):
         # 主要項目以外のフィールドを追加
         main_fields = {'t_mi_code', 't_license_level', 't_a_code', 't_code', 'mode', 'mode2', 'mode3', 'keyword', 'search_inst', 'search_license_level', 'search_status', 'page'}
         
-        # ライセンス (t_license) - ラジオボタン → メタデータから選択肢を使用
+        # ライセンス (t_license) - ドロップダウン
         if 't_license' in self.metadata:
-            radio_container = QWidget()
-            radio_layout = QHBoxLayout(radio_container)
-            radio_layout.setContentsMargins(0, 0, 0, 0)
-            
-            button_group = QButtonGroup()
+            combo = QComboBox()
+            combo.setMaximumWidth(400)
             current_value = self.form_data.get('t_license', {}).get('value', '')
             
-            for i, opt in enumerate(self.metadata['t_license']['options']):
-                radio_btn = QRadioButton(opt['label'] or opt['value'])
-                radio_btn.setProperty('value', opt['value'])
+            for opt in self.metadata['t_license']['options']:
+                combo.addItem(opt['label'] or opt['value'], opt['value'])
                 if opt['value'] == current_value:
-                    radio_btn.setChecked(True)
-                button_group.addButton(radio_btn, i)
-                radio_layout.addWidget(radio_btn)
+                    combo.setCurrentText(opt['label'] or opt['value'])
             
-            self.field_widgets['t_license'] = button_group
-            layout.addRow("ライセンス:", radio_container)
+            self.field_widgets['t_license'] = combo
+            layout.addRow("ライセンス:", combo)
         
-        # 重要技術領域（主） (main_mita_code_array[]) - チェックボックス（最大1つ）
+        # 重要技術領域（主） (main_mita_code_array[]) - ドロップダウン（複数選択不可）
         if 'main_mita_code_array[]' in self.metadata:
-            checkbox_group = self._create_checkbox_group('main_mita_code_array[]', '重要技術領域（主）', max_selections=1)
-            layout.addRow("重要技術領域（主）:", checkbox_group)
+            combo = QComboBox()
+            combo.setMaximumWidth(400)
+            combo.addItem("（選択なし）", "")
+            
+            # 既存の選択値を取得
+            selected_values = []
+            if 'main_mita_code_array[]' in self.form_data and self.form_data['main_mita_code_array[]']['type'] == 'checkbox_array':
+                selected_values = [item['value'] for item in self.form_data['main_mita_code_array[]']['values'] if item['checked']]
+            
+            for opt in self.metadata['main_mita_code_array[]']['options']:
+                combo.addItem(opt['label'], opt['value'])
+                if opt['value'] in selected_values:
+                    combo.setCurrentText(opt['label'])
+            
+            self.field_widgets['main_mita_code_array[]'] = combo
+            layout.addRow("重要技術領域（主）:", combo)
         
-        # 重要技術領域（副） (sub_mita_code_array[]) - チェックボックス（最大1つ）
+        # 重要技術領域（副） (sub_mita_code_array[]) - ドロップダウン（複数選択不可）
         if 'sub_mita_code_array[]' in self.metadata:
-            checkbox_group = self._create_checkbox_group('sub_mita_code_array[]', '重要技術領域（副）', max_selections=1)
-            layout.addRow("重要技術領域（副）:", checkbox_group)
+            combo = QComboBox()
+            combo.setMaximumWidth(400)
+            combo.addItem("（選択なし）", "")
+            
+            # 既存の選択値を取得
+            selected_values = []
+            if 'sub_mita_code_array[]' in self.form_data and self.form_data['sub_mita_code_array[]']['type'] == 'checkbox_array':
+                selected_values = [item['value'] for item in self.form_data['sub_mita_code_array[]']['values'] if item['checked']]
+            
+            for opt in self.metadata['sub_mita_code_array[]']['options']:
+                combo.addItem(opt['label'], opt['value'])
+                if opt['value'] in selected_values:
+                    combo.setCurrentText(opt['label'])
+            
+            self.field_widgets['sub_mita_code_array[]'] = combo
+            layout.addRow("重要技術領域（副）:", combo)
         
-        # 横断技術領域 (mcta_code_array[]) - チェックボックス
+        # 横断技術領域 (mcta_code_array[]) - チェックボックスグループ（複数選択可）
         if 'mcta_code_array[]' in self.metadata:
-            checkbox_group = self._create_checkbox_group('mcta_code_array[]', '横断技術領域')
-            layout.addRow("横断技術領域:", checkbox_group)
+            container = QWidget()
+            layout_mcta = QVBoxLayout(container)
+            layout_mcta.setContentsMargins(0, 0, 0, 0)
+            
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setMaximumHeight(120)
+            scroll.setMinimumHeight(120)
+            
+            scroll_content = QWidget()
+            scroll_layout = QVBoxLayout(scroll_content)
+            scroll_layout.setContentsMargins(5, 5, 5, 5)
+            
+            # 既存の選択値を取得
+            selected_values = []
+            if 'mcta_code_array[]' in self.form_data and self.form_data['mcta_code_array[]']['type'] == 'checkbox_array':
+                selected_values = [item['value'] for item in self.form_data['mcta_code_array[]']['values'] if item['checked']]
+            
+            checkboxes = []
+            for opt in self.metadata['mcta_code_array[]']['options']:
+                checkbox = QCheckBox(opt['label'])
+                checkbox.setProperty('value', opt['value'])
+                if opt['value'] in selected_values:
+                    checkbox.setChecked(True)
+                checkboxes.append(checkbox)
+                scroll_layout.addWidget(checkbox)
+            
+            scroll_layout.addStretch()
+            scroll.setWidget(scroll_content)
+            layout_mcta.addWidget(scroll)
+            
+            self.field_widgets['mcta_code_array[]'] = checkboxes
+            layout.addRow("横断技術領域:", container)
         
-        # 設備分類 (t_eqp_code_array[]) - チェックボックス
-        if 't_eqp_code_array[]' in self.metadata:
-            checkbox_group = self._create_checkbox_group('t_eqp_code_array[]', '設備分類')
-            layout.addRow("設備分類:", checkbox_group)
+        # 設備分類 (mec_code_array[]) - フィルタ可能チェックボックステーブル
+        if 'mec_code_array[]' in self.metadata:
+            options = self.metadata['mec_code_array[]']['options']
+            # 既存のform_dataから選択済み値を取得
+            selected_values = []
+            if 'mec_code_array[]' in self.form_data and self.form_data['mec_code_array[]']['type'] == 'checkbox_array':
+                selected_values = [item['value'] for item in self.form_data['mec_code_array[]']['values'] if item['checked']]
+            
+            table_widget = FilterableCheckboxTable(
+                field_name='mec_code_array[]',
+                label='設備分類',
+                options=options,
+                selected_values=selected_values,
+                max_height=150  # 5行分の高さ
+            )
+            self.field_widgets['mec_code_array[]'] = table_widget
+            layout.addRow("設備分類:", table_widget)
         
-        # マテリアルインデックス (mi_code_array[]) - チェックボックス
-        if 'mi_code_array[]' in self.metadata:
-            checkbox_group = self._create_checkbox_group('mi_code_array[]', 'マテリアルインデックス')
-            layout.addRow("マテリアルインデックス:", checkbox_group)
+        # マテリアルインデックス (mmi_code_array[]) - フィルタ可能チェックボックステーブル
+        if 'mmi_code_array[]' in self.metadata:
+            options = self.metadata['mmi_code_array[]']['options']
+            # 既存のform_dataから選択済み値を取得
+            selected_values = []
+            if 'mmi_code_array[]' in self.form_data and self.form_data['mmi_code_array[]']['type'] == 'checkbox_array':
+                selected_values = [item['value'] for item in self.form_data['mmi_code_array[]']['values'] if item['checked']]
+            
+            table_widget = FilterableCheckboxTable(
+                field_name='mmi_code_array[]',
+                label='マテリアルインデックス',
+                options=options,
+                selected_values=selected_values,
+                max_height=150  # 5行分の高さ
+            )
+            self.field_widgets['mmi_code_array[]'] = table_widget
+            layout.addRow("マテリアルインデックス:", table_widget)
         
-        # タグ (tag_code_array[]) - チェックボックス
-        if 'tag_code_array[]' in self.metadata:
-            checkbox_group = self._create_checkbox_group('tag_code_array[]', 'タグ')
-            layout.addRow("タグ:", checkbox_group)
+        # タグ (mt_code_array[]) - フィルタ可能チェックボックステーブル
+        if 'mt_code_array[]' in self.metadata:
+            options = self.metadata['mt_code_array[]']['options']
+            # 既存のform_dataから選択済み値を取得
+            selected_values = []
+            if 'mt_code_array[]' in self.form_data and self.form_data['mt_code_array[]']['type'] == 'checkbox_array':
+                selected_values = [item['value'] for item in self.form_data['mt_code_array[]']['values'] if item['checked']]
+            
+            table_widget = FilterableCheckboxTable(
+                field_name='mt_code_array[]',
+                label='タグ',
+                options=options,
+                selected_values=selected_values,
+                max_height=150  # 5行分の高さ
+            )
+            self.field_widgets['mt_code_array[]'] = table_widget
+            layout.addRow("タグ:", table_widget)
+        
+        # 装置・プロセス - テーブル表示（5行表示、最大5行）
+        equip_process_table = self._create_editable_list_table('t_equip_process', '装置・プロセス', max_rows=5, visible_rows=5)
+        self.field_widgets['t_equip_process'] = equip_process_table
+        layout.addRow("装置・プロセス:", equip_process_table)
+        
+        # 論文・プロシーディング - テーブル表示（5行表示、最大20行）
+        paper_proceed_table = self._create_editable_list_table('t_paper_proceed', '論文・プロシーディング', max_rows=20, visible_rows=5)
+        self.field_widgets['t_paper_proceed'] = paper_proceed_table
+        layout.addRow("論文・プロシーディング:", paper_proceed_table)
         
         # その他のフィールド
         for key, field_data in self.form_data.items():
@@ -294,6 +442,10 @@ class PortalEditDialog(QDialog):
             
             # 上記で処理済みのフィールドをスキップ
             if key in ['t_license', 'main_mita_code_array[]', 'sub_mita_code_array[]', 'mcta_code_array[]', 't_eqp_code_array[]', 'mi_code_array[]', 'tag_code_array[]']:
+                continue
+            
+            # 装置・プロセスと論文・プロシーディングのフィールドもスキップ
+            if key.startswith('t_equip_process') or key.startswith('t_paper_proceed'):
                 continue
             
             label = field_data.get('label', key)
@@ -444,10 +596,34 @@ class PortalEditDialog(QDialog):
         
         # 編集可能フィールド
         for key, widget in self.field_widgets.items():
-            if isinstance(widget, QComboBox):
+            if isinstance(widget, FilterableCheckboxTable):
+                # FilterableCheckboxTableからデータ取得
+                checked = widget.get_selected_values()
+                if checked:
+                    post_data[key] = checked
+                # 空の場合も空配列として送信（フォームクリア用）
+                elif key in ['mmi_code_array[]', 'mt_code_array[]', 'mec_code_array[]']:
+                    post_data[key] = []
+            elif key in ['t_equip_process', 't_paper_proceed']:
+                # QTableWidget（装置・プロセス、論文・プロシーディング）
+                if isinstance(widget, QTableWidget):
+                    # 全ての行について、空値でもキーを含める
+                    for row in range(widget.rowCount()):
+                        field_name = f"{key}{row + 1}"
+                        item = widget.item(row, 0)
+                        if item and item.text().strip():
+                            post_data[field_name] = item.text().strip()
+                        else:
+                            # 空値の場合も空文字列として送信
+                            post_data[field_name] = ""
+            elif isinstance(widget, QComboBox):
                 value = widget.currentData()
-                if value is not None:
-                    post_data[key] = value
+                if value is not None and value != "":  # 空文字列は送信しない
+                    # 配列フィールド（[]付き）の場合はリストとして送信
+                    if key.endswith('[]'):
+                        post_data[key] = [value]
+                    else:
+                        post_data[key] = value
             elif isinstance(widget, QLineEdit):
                 post_data[key] = widget.text()
             elif isinstance(widget, QTextEdit):
@@ -458,7 +634,7 @@ class PortalEditDialog(QDialog):
                 if checked_button:
                     post_data[key] = checked_button.property('value')
             elif isinstance(widget, list):
-                # チェックボックスリスト
+                # チェックボックスリスト（横断技術領域など）
                 checked = []
                 for cb in widget:
                     if cb.isChecked():

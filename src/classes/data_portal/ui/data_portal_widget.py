@@ -11,6 +11,7 @@ from qt_compat.core import Signal
 
 from classes.managers.log_manager import get_logger
 from .login_settings_tab import LoginSettingsTab
+from .master_data_tab import MasterDataTab
 from .dataset_upload_tab import DatasetUploadTab
 
 logger = get_logger("DataPortal.Widget")
@@ -22,12 +23,14 @@ class DataPortalWidget(QWidget):
     
     タブ構成:
     1. ログイン設定タブ - 認証情報管理
-    2. データセットJSONタブ - JSONアップロード
+    2. マスタタブ - マスタデータ管理
+    3. データセットタブ - JSONアップロード
     """
     
     # シグナル定義
     login_test_completed = Signal(bool, str)  # ログインテスト完了
     upload_completed = Signal(bool, str)  # アップロード完了
+    master_fetched = Signal(str, bool)  # マスタ取得完了
     
     def __init__(self, parent=None):
         """初期化"""
@@ -49,9 +52,13 @@ class DataPortalWidget(QWidget):
         self.login_settings_tab = LoginSettingsTab(self)
         self.tab_widget.addTab(self.login_settings_tab, "🔐 ログイン設定")
         
+        # マスタデータタブ
+        self.master_data_tab = MasterDataTab(self)
+        self.tab_widget.addTab(self.master_data_tab, "📋 マスタ")
+        
         # データセットJSONアップロードタブ
         self.dataset_upload_tab = DatasetUploadTab(self)
-        self.tab_widget.addTab(self.dataset_upload_tab, "📤 データセットJSON")
+        self.tab_widget.addTab(self.dataset_upload_tab, "📤 データセット")
         
         layout.addWidget(self.tab_widget)
     
@@ -59,7 +66,7 @@ class DataPortalWidget(QWidget):
         """シグナル接続"""
         # ログインテスト完了シグナルを転送
         self.login_settings_tab.login_test_completed.connect(
-            self.login_test_completed.emit
+            self._on_login_test_completed
         )
         
         # アップロード完了シグナルを転送
@@ -67,10 +74,27 @@ class DataPortalWidget(QWidget):
             self.upload_completed.emit
         )
         
+        # マスタ取得完了シグナルを転送
+        self.master_data_tab.master_fetched.connect(
+            self.master_fetched.emit
+        )
+        
         # 認証情報保存後にアップロードタブを有効化
         self.login_settings_tab.credentials_saved.connect(
             self._on_credentials_saved
         )
+    
+    def _on_login_test_completed(self, success: bool, message: str):
+        """ログインテスト完了時の処理"""
+        # シグナルを転送
+        self.login_test_completed.emit(success, message)
+        
+        # 成功時にPortalClientをマスタタブに設定
+        if success and hasattr(self.login_settings_tab, 'portal_client'):
+            portal_client = self.login_settings_tab.portal_client
+            if portal_client:
+                self.master_data_tab.set_portal_client(portal_client)
+                logger.info("マスタタブにPortalClientを設定しました")
     
     def _on_credentials_saved(self, environment: str):
         """認証情報保存後の処理"""
@@ -81,6 +105,10 @@ class DataPortalWidget(QWidget):
         """ログイン設定タブに切り替え"""
         self.tab_widget.setCurrentIndex(0)
     
-    def switch_to_upload_tab(self):
-        """データセットJSONタブに切り替え"""
+    def switch_to_master_tab(self):
+        """マスタタブに切り替え"""
         self.tab_widget.setCurrentIndex(1)
+    
+    def switch_to_upload_tab(self):
+        """データセットタブに切り替え"""
+        self.tab_widget.setCurrentIndex(2)

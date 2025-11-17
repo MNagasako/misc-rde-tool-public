@@ -360,15 +360,19 @@ class LoginSettingsTab(QWidget):
             success, message = client.test_connection()
             
             if success:
+                # 成功時にクライアントを保持
+                self.portal_client = client
                 self._log_status(f"✅ 接続テスト成功: {message}")
                 self._show_info(f"接続テスト成功\n{message}")
                 self.login_test_completed.emit(True, message)
             else:
+                self.portal_client = None
                 self._log_status(f"❌ 接続テスト失敗: {message}", error=True)
                 self._show_error(f"接続テスト失敗\n{message}")
                 self.login_test_completed.emit(False, message)
                 
         except Exception as e:
+            self.portal_client = None
             error_msg = f"接続テストエラー: {e}"
             self._log_status(f"❌ {error_msg}", error=True)
             self._show_error(error_msg)

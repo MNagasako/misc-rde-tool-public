@@ -5,7 +5,11 @@ a = Analysis(
     ['src\\arim_rde_tool.py'],
     pathex=[],
     binaries=[],
-    datas=[('src/image', 'image'), ('config', 'config'), ('src/js_templates', 'js_templates')],
+    datas=[
+        ('src/image', 'image'),
+        ('config', 'config'),
+        ('src/js_templates', 'js_templates'),
+    ],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
@@ -17,7 +21,7 @@ a = Analysis(
         'matplotlib', 'IPython', 'scipy', 'numexpr', 'numba',
         'traitlets', 'jupyter', 'notebook',
         # 未使用のExcel/DB関連（削減効果大）
-        'xlrd',  'pyxlsb', 'odf', 'python_calamine',
+        'xlrd','pyxlsb', 'odf', 'python_calamine',
         # 未使用のデータフォーマット（削減効果大）
         'lxml', 'html5lib', 'defusedxml',
         'pyarrow', 'fastparquet', 'fsspec',
@@ -37,14 +41,15 @@ a = Analysis(
     noarchive=False,
     optimize=1,
 )
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
-    [],
+    [],          # ★ ここを空にする
+    [],          # ★ データも渡さない
+    exclude_binaries=True,   # ★ onedir の肝
     name='arim_rde_tool',
     debug=False,
     bootloader_ignore_signals=False,
@@ -59,4 +64,15 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=['src\\image\\icon\\icon1.ico'],
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,   # ★ こっちでまとめる
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='arim_rde_tool',
 )

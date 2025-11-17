@@ -1,10 +1,10 @@
 """
-ライセンス情報定義 - ARIM RDE Tool v2.1.3
+ライセンス情報定義 - ARIM RDE Tool v2.1.5
 """
 
 # アプリケーション情報
 APP_NAME = "ARIM RDE Tool"
-APP_VERSION = "v2.1.3"
+APP_VERSION = "v2.1.5"
 APP_DESCRIPTION = "DICE/RDEシステムからARIMデータポータルへのデータ移行ツール"
 APP_AUTHOR = "ARIM事業"
 APP_COPYRIGHT = "Copyright © 2024-2025 ARIM"
