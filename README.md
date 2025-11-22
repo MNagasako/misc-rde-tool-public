@@ -1,9 +1,8 @@
-## インストール
+## インストール方法
 
-1. [Releases](https://github.com/MNagasako/misc-rde-tool-public/releases) から最新版をダウンロード
-2. 配布形態に応じて以下の手順で展開・実行
-   - **onefile形式（EXE単体）**: `arim_rde_tool.exe` を直接実行　(廃止)
-   - **onedir形式（ZIP展開型）**: `arim_rde_tool.zip` を展開し、フォルダ内の `arim_rde_tool.exe` を実行　(廃止)
+1. setupファイルのみでインストール可能です。
+
+（ZIP展開や仮想環境・依存パッケージのインストールは不要です）
    - **インストーラー形式（EXE）**: `arim_rde_tool_setup.exe` を実行し、ウィザードに従ってインストール
 3. `input/`　`config/` フォルダに設定ファイルやデータを配置
 4. GUI画面から各種操作を実施
