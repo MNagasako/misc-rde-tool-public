@@ -11,6 +11,8 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt, Signal
 
+from classes.theme import get_color, ThemeKey
+
 from classes.managers.log_manager import get_logger
 from ..core.auth_manager import get_auth_manager, PortalCredentials, AuthManager
 from ..core.portal_client import PortalClient
@@ -67,10 +69,36 @@ class LoginSettingsTab(QWidget):
         self.status_text.setReadOnly(True)
         self.status_text.setMaximumHeight(150)
         self.status_text.setPlaceholderText("操作ログがここに表示されます...")
+        self.status_text.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                color: {get_color(ThemeKey.INPUT_TEXT)};
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                border-radius: 4px;
+                padding: 8px;
+            }}
+        """)
         layout.addWidget(QLabel("ステータス:"))
         layout.addWidget(self.status_text)
         
         layout.addStretch()
+    
+    def _apply_status_style(self):
+        """ステータステキストスタイルを適用"""
+        self.status_text.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                color: {get_color(ThemeKey.INPUT_TEXT)};
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                border-radius: 4px;
+                padding: 8px;
+            }}
+        """)
+    
+    def refresh_theme(self):
+        """テーマ変更時のスタイル更新"""
+        self._apply_status_style()
+        self.update()
     
     def _create_environment_selector(self) -> QGroupBox:
         """環境選択セクション作成"""
@@ -84,7 +112,7 @@ class LoginSettingsTab(QWidget):
         
         # URL表示（読み取り専用）
         self.url_label = QLabel("")
-        self.url_label.setStyleSheet("color: #666; font-size: 10px;")
+        self.url_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 10px;")
         self.url_label.setWordWrap(True)
         layout.addRow("URL:", self.url_label)
         
@@ -137,39 +165,39 @@ class LoginSettingsTab(QWidget):
         # 保存ボタン
         self.save_btn = QPushButton("💾 認証情報を保存")
         self.save_btn.clicked.connect(self._on_save_credentials)
-        self.save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
+        self.save_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                 padding: 8px 16px;
                 border: none;
                 border-radius: 4px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            }}
         """)
         layout.addWidget(self.save_btn)
         
         # 読込ボタン
         self.load_btn = QPushButton("📂 認証情報を読込")
         self.load_btn.clicked.connect(self._on_load_credentials)
-        self.load_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
+        self.load_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
                 padding: 8px 16px;
                 border: none;
                 border-radius: 4px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #0b7dda;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+            }}
         """)
         layout.addWidget(self.load_btn)
         
@@ -183,18 +211,18 @@ class LoginSettingsTab(QWidget):
         # テストログインボタン
         self.test_login_btn = QPushButton("🔌 接続テスト")
         self.test_login_btn.clicked.connect(self._on_test_login)
-        self.test_login_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #FF9800;
-                color: white;
+        self.test_login_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
                 padding: 8px 16px;
                 border: none;
                 border-radius: 4px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #e68900;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
+            }}
         """)
         layout.addWidget(self.test_login_btn)
         
@@ -386,7 +414,7 @@ class LoginSettingsTab(QWidget):
         if error:
             style = "color: red;"
         else:
-            style = "color: black;"
+            style = f"color: {get_color(ThemeKey.INPUT_TEXT)};"
         
         self.status_text.append(f'<span style="{style}">{message}</span>')
         logger.info(message)

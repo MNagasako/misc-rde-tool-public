@@ -244,7 +244,7 @@ class TagBuilderDialog(QDialog):
         
         stats_text = f"利用可能: {total_categories}カテゴリ, {total_items}項目"
         self.stats_label.setText(stats_text)
-        self.stats_label.setStyleSheet("color: #666; font-size: 11px;")
+        self.stats_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 11px;")
     
     def populate_preset_data(self):
         """プリセットデータをツリーに表示"""

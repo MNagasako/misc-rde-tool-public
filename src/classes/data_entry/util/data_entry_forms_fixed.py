@@ -18,6 +18,8 @@ except ImportError as e:
 
 
 from .sample_loader import load_existing_samples, format_sample_display_name
+from classes.theme.theme_keys import ThemeKey
+from classes.theme.theme_manager import get_color
 
 import logging
 
@@ -72,7 +74,9 @@ def _create_sample_input_area(group_id=None):
     # 新規/選択エリア（横並び）
     select_row = QHBoxLayout()
     select_label = QLabel("新規/選択")
-    select_label.setStyleSheet("font-weight: bold; min-width: 120px; color: #495057;")
+    from classes.utils.label_style import apply_label_style
+    apply_label_style(select_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
+    select_label.setMinimumWidth(120)
     sample_combo = QComboBox()
     sample_combo.setMinimumHeight(24)
     sample_combo.setStyleSheet(row_style)
@@ -100,7 +104,9 @@ def _create_sample_input_area(group_id=None):
     # 1. 試料名
     name_row = QHBoxLayout()
     name_label = QLabel("試料名 *")
-    name_label.setStyleSheet("font-weight: bold; min-width: 120px; color: #d32f2f;")
+    from classes.utils.label_style import apply_label_style
+    apply_label_style(name_label, get_color(ThemeKey.TEXT_ERROR), bold=True)
+    name_label.setMinimumWidth(120)
     name_input = QLineEdit()
     name_input.setPlaceholderText("試料名を入力してください")
     name_input.setMinimumHeight(24)
@@ -112,7 +118,9 @@ def _create_sample_input_area(group_id=None):
     # 2. 試料の説明（横並び）
     desc_row = QHBoxLayout()
     desc_label = QLabel("試料の説明")
-    desc_label.setStyleSheet("font-weight: bold; min-width: 120px; color: #495057;")
+    from classes.utils.label_style import apply_label_style
+    apply_label_style(desc_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
+    desc_label.setMinimumWidth(120)
     desc_input = QTextEdit()
     desc_input.setMinimumHeight(32)
     desc_input.setMaximumHeight(48)
@@ -125,7 +133,9 @@ def _create_sample_input_area(group_id=None):
     # 3. 化学式・組成式・分子式
     formula_row = QHBoxLayout()
     formula_label = QLabel("化学式・組成式・分子式")
-    formula_label.setStyleSheet("font-weight: bold; min-width: 120px; color: #495057;")
+    from classes.utils.label_style import apply_label_style
+    apply_label_style(formula_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
+    formula_label.setMinimumWidth(120)
     formula_input = QLineEdit()
     formula_input.setPlaceholderText("化学式、組成式、または分子式を入力")
     formula_input.setMinimumHeight(24)

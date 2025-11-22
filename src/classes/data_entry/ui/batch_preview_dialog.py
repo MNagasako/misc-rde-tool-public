@@ -2565,8 +2565,10 @@ API情報:
         
         # 実行・キャンセルボタン
         execute_btn = QPushButton("データ登録実行")
-        execute_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        # グローバルQSSのボタンvariantを使用
+        execute_btn.setProperty("variant", "success")
         cancel_btn = QPushButton("キャンセル")
+        cancel_btn.setProperty("variant", "secondary")
         
         execute_btn.clicked.connect(dialog.accept)
         cancel_btn.clicked.connect(dialog.reject)

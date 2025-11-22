@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-ARIM RDE Tool v2.1.4 - PySide6によるRDE→ARIMデータポータル移行ツール
+ARIM RDE Tool v2.1.7 - PySide6によるRDE→ARIMデータポータル移行ツール
 
 主要機能:
 - RDEシステムへの自動ログイン・データセット一括取得・画像保存
@@ -9,10 +9,12 @@ ARIM RDE Tool v2.1.4 - PySide6によるRDE→ARIMデータポータル移行ツ�
 - ARIM匿名化・HTMLログ出力・統合API処理・AI分析機能
 - OAuth2 RefreshToken対応トークン管理システム（TokenManager）
 
-v2.1.4新機能:
-- コードベース全体のレビューとリビジョンアップ
-- バージョン管理の統一とドキュメント更新
-- 品質改善と保守性向上の継続
+v2.1.7新機能:
+- テーマ切替最適化完了（不要な再処理を完全除去）
+- refresh_theme()で配色のみ更新・ファイルIO/API呼出し/再構築を回避
+- QMenu/QToolTip/QHeaderView/QProgressBar のグローバルスタイル追加
+- パレット強制適用強化（OS/アプリテーマ不一致対応完全解決）
+- テーマウィジェット監査完了・検証スクリプト実装
 
 v2.1.3機能:
 - データ取得2機能のファイル単位プログレス表示改善
@@ -70,6 +72,9 @@ from qt_compat.gui import QIcon
 # 設定・関数モジュール
 from config.common import REVISION, OUTPUT_DIR, DYNAMIC_IMAGE_DIR, get_static_resource_path
 from functions.common_funcs import read_login_info
+# テーマ管理
+from classes.theme import get_color, ThemeKey, ThemeManager, ThemeMode
+from classes.utils.button_styles import get_button_style
 # クラス群
 from classes.core import AppInitializer
 from classes.core import ImageInterceptor
@@ -109,6 +114,12 @@ class Browser(QWidget):
     def __init__(self, auto_close=False, test_mode=False):
         """Browserクラス初期化（WebView設定・ログイン情報読み込み）"""
         super().__init__()
+        
+        # テーマ管理の初期化（最優先）
+        theme_manager = ThemeManager.instance()
+        theme_manager.set_mode(ThemeMode.AUTO)  # OS設定に従う
+        logger.info(f"[Theme] 初期テーマモード: AUTO (検出: {theme_manager.detect_system_theme().value})")
+        
         # 基本属性の初期化
         self._init_basic_attributes(auto_close, test_mode)
         # UI要素の初期化
@@ -243,38 +254,38 @@ class Browser(QWidget):
         # v2.0.2: 待機メッセージ専用ラベル（目立つスタイル）
         from qt_compat.core import Qt
         self.autologin_msg_label = QLabel('準備中...')
-        self.autologin_msg_label.setStyleSheet('''
-            QLabel {
-                background-color: #e3f2fd;
-                color: #1976d2;
+        self.autologin_msg_label.setStyleSheet(f'''
+            QLabel {{
+                background-color: {get_color(ThemeKey.PANEL_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.PANEL_INFO_TEXT)};
                 font-size: 14px;
                 font-weight: bold;
                 padding: 12px;
-                border: 2px solid #1976d2;
+                border: 2px solid {get_color(ThemeKey.PANEL_INFO_BORDER)};
                 border-radius: 6px;
                 margin: 5px;
-            }
+            }}
         ''')
         self.autologin_msg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.autologin_msg_label.setMinimumHeight(50)
         self.autologin_msg_label.setText('自動ログインは現在無効です')
         
         self.webview_msg_label = QLabel('')
-        self.webview_msg_label.setStyleSheet('color: #d2691e; font-size: 13px; padding: 2px;')
+        self.webview_msg_label.setStyleSheet(f'color: {get_color(ThemeKey.TEXT_WARNING)}; font-size: 13px; padding: 2px;')
         
         # v2.1.3: ログイン処理説明ラベル（停止時の対処説明）
         self.login_help_label = QLabel(
             "💡 ログイン処理が途中で止まった場合は、「ログイン実行」ボタンでやり直してください。"
         )
-        self.login_help_label.setStyleSheet("""
-            QLabel {
-                background-color: #e3f2fd;
-                color: #1976d2;
+        self.login_help_label.setStyleSheet(f"""
+            QLabel {{
+                background-color: {get_color(ThemeKey.PANEL_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.PANEL_INFO_TEXT)};
                 padding: 8px;
                 border-radius: 4px;
-                border: 1px solid #90caf9;
+                border: 1px solid {get_color(ThemeKey.PANEL_INFO_BORDER)};
                 font-size: 9pt;
-            }
+            }}
         """)
         self.login_help_label.setWordWrap(True)
         self.login_help_label.setVisible(False)  # 初期は非表示
@@ -496,7 +507,8 @@ class Browser(QWidget):
             # 警告バナーウィジェット作成
             self.legacy_warning_banner = QFrame()
             self.legacy_warning_banner.setStyleSheet(
-                "background-color: #fff3cd; border: 1px solid #ffeaa7; "
+                f"background-color: {get_color(ThemeKey.NOTIFICATION_WARNING_BACKGROUND)}; "
+                f"border: 1px solid {get_color(ThemeKey.NOTIFICATION_WARNING_BORDER)}; "
                 "border-radius: 4px; margin: 5px; padding: 10px;"
             )
             
@@ -511,26 +523,20 @@ class Browser(QWidget):
                 "旧 input/login.txt を使用しています（平文保存のため非推奨）。"
                 "設定 > 自動ログイン から安全な保存先へ移行してください。"
             )
-            warning_message.setStyleSheet("color: #856404; font-weight: bold;")
+            warning_message.setStyleSheet(f"color: {get_color(ThemeKey.NOTIFICATION_WARNING_TEXT)}; font-weight: bold;")
             warning_message.setWordWrap(True)
             banner_layout.addWidget(warning_message, 1)
             
             # 設定ボタン
             settings_button = QPushButton("設定を開く")
-            settings_button.setStyleSheet(
-                "background-color: #ffc107; color: #212529; border: none; "
-                "padding: 5px 10px; border-radius: 3px;"
-            )
+            settings_button.setStyleSheet(get_button_style('warning'))
             settings_button.clicked.connect(self._open_autologin_settings)
             banner_layout.addWidget(settings_button)
             
             # 閉じるボタン
             close_button = QPushButton("×")
             close_button.setFixedSize(25, 25)
-            close_button.setStyleSheet(
-                "background-color: transparent; border: none; "
-                "color: #856404; font-weight: bold; font-size: 16px;"
-            )
+            close_button.setStyleSheet(get_button_style('close'))
             close_button.clicked.connect(self._hide_legacy_warning_banner)
             banner_layout.addWidget(close_button)
             
@@ -629,59 +635,59 @@ class Browser(QWidget):
         if hasattr(self, 'autologin_msg_label'):
             if "✅" in msg or "完了" in msg or "ログイン済み" in msg:
                 # 成功スタイル（緑）
-                self.autologin_msg_label.setStyleSheet('''
-                    QLabel {
-                        background-color: #e8f5e9;
-                        color: #2e7d32;
+                self.autologin_msg_label.setStyleSheet(f'''
+                    QLabel {{
+                        background-color: {get_color(ThemeKey.NOTIFICATION_SUCCESS_BACKGROUND)};
+                        color: {get_color(ThemeKey.NOTIFICATION_SUCCESS_TEXT)};
                         font-size: 14px;
                         font-weight: bold;
                         padding: 12px;
-                        border: 2px solid #4caf50;
+                        border: 2px solid {get_color(ThemeKey.NOTIFICATION_SUCCESS_BORDER)};
                         border-radius: 6px;
                         margin: 5px;
-                    }
+                    }}
                 ''')
             elif "⚠️" in msg or "エラー" in msg or "失敗" in msg:
                 # 警告スタイル（オレンジ/赤）
-                self.autologin_msg_label.setStyleSheet('''
-                    QLabel {
-                        background-color: #fff3e0;
-                        color: #e65100;
+                self.autologin_msg_label.setStyleSheet(f'''
+                    QLabel {{
+                        background-color: {get_color(ThemeKey.NOTIFICATION_ERROR_BACKGROUND)};
+                        color: {get_color(ThemeKey.NOTIFICATION_ERROR_TEXT)};
                         font-size: 14px;
                         font-weight: bold;
                         padding: 12px;
-                        border: 2px solid #ff9800;
+                        border: 2px solid {get_color(ThemeKey.NOTIFICATION_ERROR_BORDER)};
                         border-radius: 6px;
                         margin: 5px;
-                    }
+                    }}
                 ''')
             elif "🔄" in msg or "処理中" in msg or "ログイン中" in msg:
                 # 処理中スタイル（青）
-                self.autologin_msg_label.setStyleSheet('''
-                    QLabel {
-                        background-color: #e3f2fd;
-                        color: #1976d2;
+                self.autologin_msg_label.setStyleSheet(f'''
+                    QLabel {{
+                        background-color: {get_color(ThemeKey.PANEL_INFO_BACKGROUND)};
+                        color: {get_color(ThemeKey.PANEL_INFO_TEXT)};
                         font-size: 14px;
                         font-weight: bold;
                         padding: 12px;
-                        border: 2px solid #1976d2;
+                        border: 2px solid {get_color(ThemeKey.PANEL_INFO_BORDER)};
                         border-radius: 6px;
                         margin: 5px;
-                    }
+                    }}
                 ''')
             else:
                 # デフォルトスタイル（グレー）
-                self.autologin_msg_label.setStyleSheet('''
-                    QLabel {
-                        background-color: #f5f5f5;
-                        color: #616161;
+                self.autologin_msg_label.setStyleSheet(f'''
+                    QLabel {{
+                        background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)};
+                        color: {get_color(ThemeKey.PANEL_NEUTRAL_TEXT)};
                         font-size: 14px;
                         font-weight: bold;
                         padding: 12px;
-                        border: 2px solid #9e9e9e;
+                        border: 2px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                         border-radius: 6px;
                         margin: 5px;
-                    }
+                    }}
                 ''')
         
         # 点滅中はラベルを必ず表示

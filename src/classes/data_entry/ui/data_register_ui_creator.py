@@ -10,7 +10,9 @@ import logging
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QLabel, QLineEdit, QHBoxLayout, QTextEdit, QGroupBox, QComboBox, QSizePolicy, QMessageBox
 )
-from classes.data_entry.conf.ui_constants import DATA_REGISTER_FORM_STYLE
+from classes.data_entry.conf.ui_constants import get_data_register_form_style, TAB_HEIGHT_RATIO
+from classes.theme.theme_keys import ThemeKey
+from classes.theme.theme_manager import get_color
 from qt_compat.gui import QFont
 from qt_compat.core import QTimer, Qt
 from config.common import get_dynamic_file_path
@@ -320,43 +322,26 @@ def create_basic_info_group():
     フィールドセット(QGroupBox)＋LEGEND(タイトル)付きでグルーピングし、固有情報と同様の横並びスタイルで返す
     """
     group_box = QGroupBox("基本情報")
-    group_box.setStyleSheet(DATA_REGISTER_FORM_STYLE)
+    # 個別スタイルは付与せず、親フォームウィジェットのスタイル(QGroupBoxルール)を継承させる
+    # これによりテーマ変更時に親側の再スタイルのみで反映される
+    group_box.setStyleSheet("")
     layout = QVBoxLayout(group_box)
     layout.setContentsMargins(12, 12, 12, 12)
     layout.setSpacing(10)
 
-    row_style = """
-        QLabel {
-            font-weight: 600;
-            min-width: 120px;
-            color: #495057;
-            padding: 2px 0;
-        }
-        QLineEdit, QTextEdit {
-            border: 2px solid #e9ecef;
-            border-radius: 3px;
-            padding: 2px 3px;
-            font-size: 10pt;
-            background-color: white;
-        }
-        QLineEdit:focus, QTextEdit:focus {
-            border-color: #2196f3;
-            outline: none;
-        }
-        QLineEdit::placeholder, QTextEdit::placeholder {
-            color: #28a745;
-            font-style: italic;
-        }
-    """
+    # 個別スタイル設定は行わず、親フォームの get_data_register_form_style から継承
+    # これによりテーマ変更時に自動的に正しい色が適用される
 
     # データ名
     name_row = QHBoxLayout()
     name_label = QLabel("データ名 *")
-    name_label.setStyleSheet("font-weight: bold; min-width: 120px; color: #d32f2f;")
+    # ラベルも個別スタイル不要（親で定義済み）
+    name_label.setStyleSheet("")
     name_input = QLineEdit()
     name_input.setPlaceholderText("データ名（必須）")
     name_input.setMinimumHeight(24)
-    name_input.setStyleSheet(row_style)
+    # 個別スタイル不要（親のQLineEditルールを継承）
+    name_input.setStyleSheet("")
     name_row.addWidget(name_label)
     name_row.addWidget(name_input)
     layout.addLayout(name_row)
@@ -364,12 +349,12 @@ def create_basic_info_group():
     # データ説明
     desc_row = QHBoxLayout()
     desc_label = QLabel("データ説明")
-    desc_label.setStyleSheet("font-weight: bold; min-width: 120px; color: #495057;")
+    desc_label.setStyleSheet("")
     desc_input = QTextEdit()
     desc_input.setMinimumHeight(32)
     desc_input.setMaximumHeight(48)
     desc_input.setPlaceholderText("データ説明")
-    desc_input.setStyleSheet(row_style)
+    desc_input.setStyleSheet("")
     desc_row.addWidget(desc_label)
     desc_row.addWidget(desc_input)
     layout.addLayout(desc_row)
@@ -377,11 +362,11 @@ def create_basic_info_group():
     # 実験ID
     expid_row = QHBoxLayout()
     expid_label = QLabel("実験ID")
-    expid_label.setStyleSheet("font-weight: bold; min-width: 120px; color: #495057;")
+    expid_label.setStyleSheet("")
     expid_input = QLineEdit()
     expid_input.setPlaceholderText("実験ID（半角英数記号のみ）")
     expid_input.setMinimumHeight(24)
-    expid_input.setStyleSheet(row_style)
+    expid_input.setStyleSheet("")
     expid_row.addWidget(expid_label)
     expid_row.addWidget(expid_input)
     layout.addLayout(expid_row)
@@ -389,11 +374,11 @@ def create_basic_info_group():
     # 参考URL
     url_row = QHBoxLayout()
     url_label = QLabel("参考URL")
-    url_label.setStyleSheet("font-weight: bold; min-width: 120px; color: #495057;")
+    url_label.setStyleSheet("")
     url_input = QLineEdit()
     url_input.setPlaceholderText("参考URL")
     url_input.setMinimumHeight(24)
-    url_input.setStyleSheet(row_style)
+    url_input.setStyleSheet("")
     url_row.addWidget(url_label)
     url_row.addWidget(url_input)
     layout.addLayout(url_row)
@@ -401,11 +386,11 @@ def create_basic_info_group():
     # タグ
     tag_row = QHBoxLayout()
     tag_label = QLabel("タグ(カンマ区切り)")
-    tag_label.setStyleSheet("font-weight: bold; min-width: 120px; color: #495057;")
+    tag_label.setStyleSheet("")
     tag_input = QLineEdit()
     tag_input.setPlaceholderText("タグ(カンマ区切り)")
     tag_input.setMinimumHeight(24)
-    tag_input.setStyleSheet(row_style)
+    tag_input.setStyleSheet("")
     tag_row.addWidget(tag_label)
     tag_row.addWidget(tag_input)
     layout.addLayout(tag_row)

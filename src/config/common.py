@@ -30,12 +30,13 @@ logger = logging.getLogger(__name__)
 # 1. ドキュメント: VERSION.txt, README.md, RELEASE_NOTES_v*.md
 # 2. 各クラスファイル: ヘッダーコメント内のバージョン番号
 # 3. このREVISION変数（マスター管理）
+# 2025-11-22: v2.1.8 - AI拡張機能強化（ファイルテキスト抽出設定UI・使用プロンプト表示・設定永続化）
+# 2025-11-22: v2.1.7 - テーマ切替最適化完了・不要再処理除去・配色のみ更新・監査完了
 # 2025-11-16: v2.1.4 - コードベース全体レビュー・リビジョンアップ・品質改善継続
 # 2025-11-15: v2.1.3 - データ取得2機能ファイル単位プログレス表示・粒度改善・スレッドセーフ実装
 # 2025-11-15: v2.1.2 - プログレス表示随時更新修正・スレッド安全性向上・repaint実装
 # 2025-11-14: v2.0.8 - プロキシ設定完全修正・接続テストUI設定反映・truststore/CA設定統合
-# 2025-11-13: v2.0.6 - バージョン管理統一・ドキュメント更新・品質改善継続
-REVISION = "2.1.4"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+REVISION = "2.1.8"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
 # 2025-11-11: v2.0.3 - ログインUI完全簡素化・手動ログイン実行機能・トークン管理2ホスト固定
 # 2025-11-08: v2.0.0 - PyQt5→PySide6完全移行（破壊的変更）・blob画像取得修復・JavaScript連携改善
 # 2025-11-07: v1.20.0 - データポータル統合機能完全実装・JSON/画像アップロード・修正機能・ステータス管理
@@ -98,7 +99,7 @@ def get_base_dir():
 def get_static_resource_path(relative_path):
     """
     静的リソースファイルのパスを取得
-    - ソース実行時: src/相対パスで参照
+    - ソース実行時: src/相対パスで参照（testsは例外でproject_root/testsを参照）
     - バイナリ実行時: _MEIPASS/相対パスで参照
     
     Args:
@@ -114,10 +115,18 @@ def get_static_resource_path(relative_path):
         # バイナリ実行時: _MEIPASS配下から取得
         return os.path.join(sys._MEIPASS, *path_parts)
     else:
-        # ソース実行時: src/相対パスで取得
-        current_file_dir = os.path.dirname(os.path.abspath(__file__))  # src/config
-        src_dir = os.path.dirname(current_file_dir)  # src
-        return os.path.join(src_dir, *path_parts)
+        # ソース実行時
+        # testsディレクトリは特別扱い（project_root直下）
+        if path_parts[0] == 'tests':
+            current_file_dir = os.path.dirname(os.path.abspath(__file__))  # src/config
+            src_dir = os.path.dirname(current_file_dir)  # src
+            project_root = os.path.dirname(src_dir)  # project_root
+            return os.path.join(project_root, *path_parts)
+        else:
+            # その他のリソースはsrc配下
+            current_file_dir = os.path.dirname(os.path.abspath(__file__))  # src/config
+            src_dir = os.path.dirname(current_file_dir)  # src
+            return os.path.join(src_dir, *path_parts)
 
 def get_dynamic_file_path(relative_path):
     """

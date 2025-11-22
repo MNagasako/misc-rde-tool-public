@@ -16,6 +16,7 @@ try:
         QLabel, QPushButton, QMessageBox
     )
     from qt_compat.core import Qt
+    from classes.theme import get_color, ThemeKey
     PYQT5_AVAILABLE = True
 except ImportError:
     PYQT5_AVAILABLE = False
@@ -39,7 +40,7 @@ class MiscTab(QWidget):
         
         # タイトル
         title_label = QLabel("その他の便利機能")
-        title_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #1976d2;")
+        title_label.setStyleSheet(f"font-size: 14pt; font-weight: bold; color: {get_color(ThemeKey.TEXT_PRIMARY)};")
         layout.addWidget(title_label)
         
         # ディレクトリ操作グループ
@@ -52,19 +53,19 @@ class MiscTab(QWidget):
     def create_directory_group(self):
         """ディレクトリ操作グループ"""
         group = QGroupBox("ディレクトリ操作")
-        group.setStyleSheet("""
-            QGroupBox {
+        group.setStyleSheet(f"""
+            QGroupBox {{
                 font-weight: bold;
-                border: 2px solid #e0e0e0;
+                border: 2px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                 border-radius: 5px;
                 margin-top: 10px;
                 padding-top: 10px;
-            }
-            QGroupBox::title {
+            }}
+            QGroupBox::title {{
                 subcontrol-origin: margin;
                 left: 10px;
                 padding: 0 5px;
-            }
+            }}
         """)
         
         layout = QVBoxLayout(group)
@@ -80,21 +81,21 @@ class MiscTab(QWidget):
         open_install_dir_btn = QPushButton("📁 インストールディレクトリを開く")
         open_install_dir_btn.setToolTip("アプリケーションがインストールされているディレクトリをエクスプローラーで開きます")
         open_install_dir_btn.clicked.connect(self.open_install_directory)
-        open_install_dir_btn.setStyleSheet("""
-            QPushButton {
+        open_install_dir_btn.setStyleSheet(f"""
+            QPushButton {{
                 padding: 8px 15px;
-                background-color: #4caf50;
-                color: white;
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                 border: none;
                 border-radius: 4px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:pressed {
-                background-color: #3d8b40;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_PRESSED)};
+            }}
         """)
         install_dir_layout.addWidget(open_install_dir_btn)
         install_dir_layout.addStretch()
@@ -106,7 +107,7 @@ class MiscTab(QWidget):
             "インストールディレクトリには、アプリケーションの実行ファイル、\n"
             "設定ファイル、ログファイルなどが保存されています。"
         )
-        info_label.setStyleSheet("color: #666666; font-size: 9pt; font-weight: normal;")
+        info_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 9pt; font-weight: normal;")
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
         

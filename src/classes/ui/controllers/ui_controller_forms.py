@@ -7,6 +7,7 @@ from qt_compat.widgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QFrame,
     QComboBox, QLineEdit, QTextEdit, QMessageBox, QWidget
 )
+from classes.theme import get_color, ThemeKey
 
 class UIControllerForms:
     """UIコントローラーのフォーム機能専門クラス"""
@@ -37,22 +38,22 @@ class UIControllerForms:
         try:
             expand_btn = QPushButton("🔍")
             expand_btn.setToolTip("拡大表示")
-            expand_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #e3f2fd;
-                    border: 1px solid #2196f3;
+            expand_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND)};
+                    border: 1px solid {get_color(ThemeKey.BUTTON_EXPAND_BORDER)};
                     border-radius: 12px;
                     width: 24px;
                     height: 24px;
                     font-size: 12px;
-                    color: #1976d2;
-                }
-                QPushButton:hover {
-                    background-color: #bbdefb;
-                }
-                QPushButton:pressed {
-                    background-color: #90caf9;
-                }
+                    color: {get_color(ThemeKey.BUTTON_EXPAND_TEXT)};
+                }}
+                QPushButton:hover {{
+                    background-color: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND_HOVER)};
+                }}
+                QPushButton:pressed {{
+                    background-color: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND_PRESSED)};
+                }}
             """)
             expand_btn.setMaximumSize(24, 24)
             expand_btn.setMinimumSize(24, 24)
@@ -118,7 +119,7 @@ class UIControllerForms:
                 if hasattr(self.ui_controller, 'show_error'):
                     self.ui_controller.show_error(f"テキストエリア拡大表示エラー: {e}")
                 else:
-                    logger.error("テキストエリア拡大表示エラー: %s", e)
+                    self.logger.error("テキストエリア拡大表示エラー: %s", e)
     
     def update_sample_form(self, group_id, widget, layout):
         """
@@ -143,14 +144,14 @@ class UIControllerForms:
             # 試料フォーム全体のコンテナ作成
             self.ui_controller.sample_form_widget = QFrame()
             self.ui_controller.sample_form_widget.setFrameStyle(QFrame.Box)
-            self.ui_controller.sample_form_widget.setStyleSheet("""
-                QFrame {
-                    border: 1px solid #c0c0c0;
+            self.ui_controller.sample_form_widget.setStyleSheet(f"""
+                QFrame {{
+                    border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                     border-radius: 4px;
-                    background-color: #f8f8f8;
+                    background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)};
                     margin: 5px;
                     padding: 10px;
-                }
+                }}
             """)
             
             sample_form_layout = QVBoxLayout()
@@ -178,12 +179,7 @@ class UIControllerForms:
         try:
             # タイトルラベル（コンパクト化）
             title_label = QLabel("🧪 試料情報")
-            title_label.setStyleSheet("""
-                font-weight: bold; 
-                color: #2196F3; 
-                margin: 2px 0 2px 0; 
-                font-size: 11pt;
-            """)
+            self._apply_label_style(target=title_label, color_key=ThemeKey.TEXT_PRIMARY, bold=True, point_size=11, margin_top=2, margin_bottom=2)
             layout.addWidget(title_label)
             
             # 既存試料データを確認し、選択機能を実装
@@ -237,25 +233,25 @@ class UIControllerForms:
             # ラベル
             combo_label = QLabel("試料選択:")
             combo_label.setFixedWidth(120)  # 他のラベルと幅を合わせる
-            combo_label.setStyleSheet("color: #424242; font-weight: bold; font-size: 10pt;border:0")
+            self._apply_label_style(target=combo_label, color_key=ThemeKey.TEXT_PRIMARY, bold=True, point_size=10)
             combo_layout.addWidget(combo_label)
             
             # コンボボックス
             from qt_compat.widgets import QComboBox
             self.ui_controller.sample_select_combo = QComboBox()
-            self.ui_controller.sample_select_combo.setStyleSheet("""
-                QComboBox {
+            self.ui_controller.sample_select_combo.setStyleSheet(f"""
+                QComboBox {{
                     padding: 4px 6px;
-                    border: 1px solid #cccccc;
+                    border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                     border-radius: 3px;
                     background-color: white;
                     font-size: 10pt;
                     min-height: 24px;
-                }
-                QComboBox::drop-down {
+                }}
+                QComboBox::drop-down {{
                     border: none;
-                    background: #e3f2fd;
-                }
+                    background: {get_color(ThemeKey.PANEL_INFO_BACKGROUND)};
+                }}
             """)
             
             # "新規入力"オプションを最初に追加
@@ -289,7 +285,7 @@ class UIControllerForms:
             
             # 説明テキスト（シンプル化）
             info_text = QLabel("既存試料を選択するか、「新規入力」のまま下記に入力")
-            info_text.setStyleSheet("color: #666666; font-size: 9pt; margin: 2px 0 5px 0;")
+            self._apply_label_style(target=info_text, color_key=ThemeKey.TEXT_MUTED, bold=False, point_size=9, margin_top=2, margin_bottom=5)
             layout.addWidget(info_text)
             
         except Exception as e:
@@ -339,9 +335,9 @@ class UIControllerForms:
             label = QLabel(label_text + ("(必須)" if is_required else ""))
             label.setFixedWidth(120)  # ラベル幅を拡張（化学式等の長いラベル対応）
             if is_required:
-                label.setStyleSheet("color: #d32f2f; font-weight: bold; font-size: 10pt;border:0")
+                self._apply_label_style(target=label, color_key=ThemeKey.TEXT_ERROR, bold=True, point_size=10)
             else:
-                label.setStyleSheet("color: #424242; font-size: 10pt;border:0")
+                self._apply_label_style(target=label, color_key=ThemeKey.TEXT_PRIMARY, bold=False, point_size=10)
 
             row_layout.addWidget(label)
             
@@ -357,21 +353,21 @@ class UIControllerForms:
                 input_widget.setMinimumHeight(24)  # 小さく
             
             # スタイルを統一（シンプル化）
-            input_widget.setStyleSheet("""
-                QLineEdit, QTextEdit {
+            input_widget.setStyleSheet(f"""
+                QLineEdit, QTextEdit {{
                     padding: 3px 6px;
-                    border: 1px solid #cccccc;
+                    border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
                     border-radius: 3px;
-                    background-color: white;
+                    background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
                     font-size: 10pt;
-                }
-                QLineEdit:focus, QTextEdit:focus {
-                    border: 2px solid #2196F3;
-                }
-                QLineEdit:disabled, QTextEdit:disabled {
-                    background-color: #f5f5f5;
-                    color: #666666;
-                }
+                }}
+                QLineEdit:focus, QTextEdit:focus {{
+                    border: 2px solid {get_color(ThemeKey.INPUT_BORDER_FOCUS)};
+                }}
+                QLineEdit:disabled, QTextEdit:disabled {{
+                    background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)};
+                    color: {get_color(ThemeKey.INPUT_TEXT_DISABLED)};
+                }}
             """)
             
             row_layout.addWidget(input_widget)
@@ -402,7 +398,7 @@ class UIControllerForms:
         """
         try:
             info_label = QLabel("※ 試料名*は必須項目です。")
-            info_label.setStyleSheet("color: #666666; font-size: 9pt; margin: 2px 0 0 0;")
+            self._apply_label_style(target=info_label, color_key=ThemeKey.TEXT_MUTED, bold=False, point_size=9, margin_top=2, margin_bottom=0)
             # layout.addWidget(info_label)
 
         except Exception as e:
@@ -489,8 +485,8 @@ class UIControllerForms:
             enabled: Trueで編集可能、Falseで編集不可
         """
         try:
-            style_enabled = "background-color: white; color: black;"
-            style_disabled = "background-color: #f0f0f0; color: #888888;"
+            style_enabled = f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)};"
+            style_disabled = f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)}; color: {get_color(ThemeKey.INPUT_TEXT_DISABLED)};"
             
             style = style_enabled if enabled else style_disabled
             
@@ -519,6 +515,44 @@ class UIControllerForms:
         except Exception as e:
             self.logger.error(f"試料入力欄状態変更エラー: {e}")
             self.ui_controller.show_error(f"試料入力欄状態変更エラー: {e}")
+
+    # =============================
+    # ラベルスタイル適用ヘルパー (QSS削減)
+    # =============================
+    def _apply_label_style(self, target: QLabel, color_key: ThemeKey, bold: bool = False, point_size: int = 10,
+                           margin_top: int = 0, margin_bottom: int = 0) -> None:
+        """QLabelへフォント/パレットベースのスタイルを適用 (QSSを使わない)
+
+        Args:
+            target: 対象 QLabel
+            color_key: テキストカラー用 ThemeKey
+            bold: 太字指定
+            point_size: フォントサイズ (pt)
+            margin_top: 上マージン (レイアウト余白用)
+            margin_bottom: 下マージン (レイアウト余白用)
+        """
+        try:
+            from PySide6.QtGui import QFont, QColor
+            from PySide6.QtWidgets import QWidget
+            # フォント設定
+            font = target.font() if isinstance(target.font(), QFont) else QFont()
+            font.setPointSize(point_size)
+            font.setBold(bold)
+            target.setFont(font)
+            # パレット設定
+            pal = target.palette()
+            pal.setColor(target.foregroundRole(), QColor(get_color(color_key)))
+            target.setPalette(pal)
+            # QWidget の周辺余白はレイアウト側で扱うのが理想だが暫定的に property 付与
+            # レイアウト余白は親レイアウトが margin を持つため、ここでは objectName に情報のみ保存（将来調整用）
+            target.setProperty("_logical_margin_top", margin_top)
+            target.setProperty("_logical_margin_bottom", margin_bottom)
+        except Exception as _lab_err:  # pragma: no cover
+            # フォールバック: 最低限カラーのみQSSで適用
+            try:
+                target.setStyleSheet(f"color: {get_color(color_key)};")
+            except Exception:
+                self.logger.debug(f"_apply_label_style fallback failed: {_lab_err}")
     
     def create_image_limit_dropdown(self):
         """
@@ -536,20 +570,19 @@ class UIControllerForms:
             dropdown = QComboBox()
             dropdown.addItems(["制限なし", "1枚まで", "3枚まで", "5枚まで", "10枚まで", "20枚まで"])
             dropdown.setCurrentText("3枚まで")  # デフォルト値
-            dropdown.setStyleSheet("""
-                QComboBox {
-                    border: 1px solid #c0c0c0;
+            dropdown.setStyleSheet(f"""
+                QComboBox {{
+                    border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                     border-radius: 4px;
                     padding: 5px;
-                    background-color: white;
-                }
-                QComboBox::drop-down {
+                }}
+                QComboBox::drop-down {{
                     border: none;
-                }
-                QComboBox::down-arrow {
+                }}
+                QComboBox::down-arrow {{
                     width: 12px;
                     height: 12px;
-                }
+                }}
             """)
             
             limit_layout.addWidget(dropdown)

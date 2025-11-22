@@ -12,6 +12,8 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt
 
+from classes.theme import get_color, ThemeKey
+
 from classes.managers.log_manager import get_logger
 
 logger = get_logger("DataPortal.DynamicListWidget")
@@ -134,7 +136,7 @@ class DynamicListWidget(QWidget):
         
         delete_btn = QPushButton("🗑️ この項目を削除")
         delete_btn.clicked.connect(lambda: self._on_delete_item(index))
-        delete_btn.setStyleSheet("color: #f44336;")
+        delete_btn.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)};")
         btn_layout.addWidget(delete_btn)
         
         layout.addLayout(btn_layout)

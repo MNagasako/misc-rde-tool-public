@@ -1,5 +1,5 @@
 """
-サブグループ修正ウィジェット（リファクタリング版）
+サブグループ修正ウィジェット(リファクタリング版)
 責務分離により保守性を向上
 """
 
@@ -13,6 +13,8 @@ from qt_compat.widgets import (
 )
 from config.common import SUBGROUP_JSON_PATH
 from qt_compat.core import Qt
+from classes.theme import get_color, ThemeKey
+from classes.utils.label_style import apply_label_style
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -548,7 +550,7 @@ def create_subgroup_edit_widget(parent, title, color, create_auto_resize_button)
     
     # タイトル
     title_label = QLabel(f"{title}機能")
-    title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #1976d2; padding: 10px;")
+    apply_label_style(title_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True, point_size=16)
     #layout.addWidget(title_label)
     
     button_style = f"background-color: {color}; color: white; font-weight: bold; border-radius: 6px;"
@@ -666,7 +668,6 @@ def _create_member_section(layout):
             border: none;
             margin: 0px;
             padding: 0px;
-            background-color: transparent;
         }
     """)
     
@@ -694,7 +695,7 @@ def _create_member_section(layout):
     member_layout.setSpacing(2)  # ラベルとテーブル間のスペースを最小化
     
     member_label = QLabel("グループメンバー選択（複数可）:")
-    member_label.setStyleSheet("font-weight: bold; margin: 0px; padding: 2px 0px;")
+    apply_label_style(member_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
     member_layout.addWidget(member_label)
     member_layout.addWidget(scroll)
     
@@ -809,7 +810,8 @@ def _setup_event_handlers(widget, parent, managers, button_section, form_widgets
         """選択ユーザー確認"""
         current_selector = member_manager.get_current_selector()
         if current_selector and current_selector.user_rows:
-            user_entries = load_user_entries()
+            # セレクター内のuser_entriesを使用（統合メンバーリスト）
+            user_entries = current_selector.user_entries if hasattr(current_selector, 'user_entries') else []
             show_selected_user_ids(widget, current_selector.user_rows, user_entries)
     
     def on_extract_samples():

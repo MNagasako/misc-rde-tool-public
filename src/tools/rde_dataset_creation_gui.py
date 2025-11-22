@@ -19,6 +19,7 @@ from qt_compat.widgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QDialog, QDialogButtonBox)
 from qt_compat.core import Qt, QTimer
 from qt_compat.gui import QFont, QTextCursor
+from classes.theme import get_color, ThemeKey
 
 # パス設定（上記で一元化）
 
@@ -72,6 +73,23 @@ class RDEDatasetCreationGUI(QMainWindow):
         
         # Bearerトークンファイルの初期チェック
         self.check_initial_auth_status()
+    
+    def _style_label(self, label: QLabel, color_str: str, bold: bool = False, point_size: int | None = None):
+        """QLabelへフォント+パレットでスタイル適用 (QSS削減)"""
+        try:
+            font = label.font()
+            if point_size is not None:
+                font.setPointSize(point_size)
+            font.setBold(bold)
+            label.setFont(font)
+            pal = label.palette()
+            pal.setColor(label.foregroundRole(), QColor(color_str))
+            label.setPalette(pal)
+        except Exception:
+            try:
+                label.setStyleSheet(f"color: {color_str};")
+            except Exception:
+                pass
     
     def setup_dynamic_sizing(self):
         """画面解像度に応じて動的にサイズとフォントを調整"""
@@ -310,7 +328,7 @@ class RDEDatasetCreationGUI(QMainWindow):
         auth_row = QHBoxLayout()
         auth_row.addWidget(QLabel("認証ステータス:"))
         self.auth_status_label = QLabel("未設定")
-        self.auth_status_label.setStyleSheet("color: #ff5722; font-weight: bold;")
+        self._style_label(self.auth_status_label, get_color(ThemeKey.STATUS_ERROR), bold=True)
         auth_row.addWidget(self.auth_status_label)
         self.refresh_auth_button = self.create_styled_button("認証情報更新", "default")
         self.refresh_auth_button.clicked.connect(self.refresh_auth_headers)
@@ -388,7 +406,7 @@ class RDEDatasetCreationGUI(QMainWindow):
         # レスポンス表示エリア
         response_header_row = QHBoxLayout()
         self.response_status_label = QLabel("ステータス: 未実行")
-        self.response_status_label.setStyleSheet("font-weight: bold; color: #666;")
+        self._style_label(self.response_status_label, get_color(ThemeKey.TEXT_MUTED), bold=True)
         self.response_time_label = QLabel("実行時間: -")
         self.response_size_label = QLabel("サイズ: -")
         response_header_row.addWidget(self.response_status_label)
@@ -504,7 +522,7 @@ class RDEDatasetCreationGUI(QMainWindow):
         try:
             self.response_display.clear()
             self.response_status_label.setText("ステータス: 未実行")
-            self.response_status_label.setStyleSheet("font-weight: bold; color: #666;")
+            self._style_label(self.response_status_label, get_color(ThemeKey.TEXT_MUTED), bold=True)
             self.response_time_label.setText("実行時間: -")
             self.response_size_label.setText("サイズ: -")
             
@@ -979,11 +997,11 @@ class RDEDatasetCreationGUI(QMainWindow):
                 self.auth_status_label.setText(status)
                 
                 if "完了" in status:
-                    self.auth_status_label.setStyleSheet("color: #4caf50; font-weight: bold;")
+                    self._style_label(self.auth_status_label, get_color(ThemeKey.STATUS_SUCCESS), bold=True)
                 elif "エラー" in status or "なし" in status:
-                    self.auth_status_label.setStyleSheet("color: #ff5722; font-weight: bold;")
+                    self._style_label(self.auth_status_label, get_color(ThemeKey.STATUS_ERROR), bold=True)
                 else:
-                    self.auth_status_label.setStyleSheet("color: #ff9800; font-weight: bold;")
+                    self._style_label(self.auth_status_label, get_color(ThemeKey.STATUS_WARNING), bold=True)
                     
         except Exception as e:
             self.log_message(f"認証ステータス更新エラー: {e}")
@@ -1031,7 +1049,7 @@ class RDEDatasetCreationGUI(QMainWindow):
             # レスポンス表示エリアをクリア
             self.clear_response_display()
             self.response_status_label.setText("ステータス: 実行中...")
-            self.response_status_label.setStyleSheet("font-weight: bold; color: #ff9800;")
+            self._style_label(self.response_status_label, get_color(ThemeKey.STATUS_WARNING), bold=True)
             
             # WebViewのセッション状態をログ出力
             self.log_webview_session_info()
@@ -1073,7 +1091,7 @@ class RDEDatasetCreationGUI(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "エラー", f"リクエスト実行エラー: {e}")
             self.response_status_label.setText("ステータス: エラー")
-            self.response_status_label.setStyleSheet("font-weight: bold; color: #f44336;")
+            self._style_label(self.response_status_label, get_color(ThemeKey.STATUS_ERROR), bold=True)
     
     def update_webview_to_url(self, target_url):
         """WebViewを指定URLに移動（同じインスタンスで通信確保）"""
@@ -1176,22 +1194,22 @@ class RDEDatasetCreationGUI(QMainWindow):
                 # ステータスコードに応じて色分け
                 if isinstance(status_code, int):
                     if 200 <= status_code < 300:
-                        status_color = "#4caf50"  # 成功 (緑)
+                        status_color = get_color(ThemeKey.STATUS_SUCCESS)  # 成功 (緑)
                     elif 300 <= status_code < 400:
-                        status_color = "#ff9800"  # リダイレクト (オレンジ)
+                        status_color = get_color(ThemeKey.STATUS_WARNING)  # リダイレクト (オレンジ)
                     elif 400 <= status_code < 500:
-                        status_color = "#ff5722"  # クライアントエラー (赤)
+                        status_color = get_color(ThemeKey.STATUS_ERROR)  # クライアントエラー (赤)
                     else:
-                        status_color = "#f44336"  # サーバーエラー (濃い赤)
+                        status_color = get_color(ThemeKey.STATUS_ERROR)  # サーバーエラー (濃い赤)
                 else:
-                    status_color = "#666"
+                    status_color = get_color(ThemeKey.TEXT_MUTED)
                 
                 status_display = f"{status_code}"
                 if status_text:
                     status_display += f" {status_text}"
                 
                 self.response_status_label.setText(f"ステータス: {status_display}")
-                self.response_status_label.setStyleSheet(f"font-weight: bold; color: {status_color};")
+                self._style_label(self.response_status_label, status_color, bold=True)
                 
                 # レスポンスサイズ計算
                 body = response_info.get('body', '')
@@ -1209,7 +1227,7 @@ class RDEDatasetCreationGUI(QMainWindow):
                 
             else:
                 self.response_status_label.setText("ステータス: エラー (レスポンスなし)")
-                self.response_status_label.setStyleSheet("font-weight: bold; color: #f44336;")
+                self._style_label(self.response_status_label, get_color(ThemeKey.STATUS_ERROR), bold=True)
                 self.response_size_label.setText("サイズ: -")
             
             # レスポンス内容表示（フル表示・整形済み）
@@ -1586,7 +1604,7 @@ class RDEDatasetCreationGUI(QMainWindow):
 
         # 説明ラベル
         desc_label = QLabel("WebViewでの画面遷移を自動記録")
-        desc_label.setStyleSheet("font-weight: bold; color: #1976d2; margin-bottom: 10px;")
+        self._style_label(desc_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
         layout.addWidget(desc_label)
 
         # ナビゲーション履歴テーブル

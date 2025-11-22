@@ -26,6 +26,8 @@ except ImportError as e:
     logger.error(f"Qt互換モジュールのインポートエラー: {e}")
     raise ImportError(f"Qt互換モジュールが必要です: {e}")
 
+from classes.theme import get_color, ThemeKey
+
 
 class ReportConvertTab(QWidget):
     """Excel変換タブ
@@ -140,19 +142,19 @@ class ReportConvertTab(QWidget):
         self.convert_button = QPushButton("🔄 変換開始")
         self.convert_button.setMinimumHeight(40)
         self.convert_button.setEnabled(False)
-        self.convert_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
+        self.convert_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
                 font-weight: bold;
                 border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #0b7dda;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            }}
         """)
         layout.addWidget(self.convert_button)
         
@@ -167,6 +169,28 @@ class ReportConvertTab(QWidget):
         layout.addWidget(self.open_folder_button)
         
         return layout
+    
+    def _apply_button_styles(self):
+        """ボタンスタイルを適用"""
+        self.convert_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+                font-weight: bold;
+                border-radius: 5px;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            }}
+        """)
+    
+    def refresh_theme(self):
+        """テーマ変更時のスタイル更新"""
+        self._apply_button_styles()
+        self.update()
     
     def create_log_area(self) -> QGroupBox:
         """ログ表示エリア作成"""

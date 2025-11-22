@@ -13,6 +13,7 @@ from qt_compat.widgets import (
 from qt_compat.core import QTimer
 
 from config.common import INPUT_DIR, get_dynamic_file_path
+from classes.theme import get_color, ThemeKey
 
 # UIControllerCore をインポート
 from .ui_controller_core import UIControllerCore
@@ -668,8 +669,8 @@ class UIController(UIControllerCore):
         モード切り替え用のウィジェットを初期化
         """
         # ボタンスタイルの設定（統一サイズで重なりを防ぐ）
-        base_active_style = 'background-color: #1976d2; color: white; font-weight: bold; border-radius: 6px; margin: 2px;'
-        base_inactive_style = 'background-color: #757575; color: white; font-weight: bold; border-radius: 6px; margin: 2px;'
+        base_active_style = f'background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; font-weight: bold; border-radius: 6px; margin: 2px;'
+        base_inactive_style = f'background-color: {get_color(ThemeKey.MENU_BUTTON_INACTIVE_BACKGROUND)}; color: {get_color(ThemeKey.MENU_BUTTON_INACTIVE_TEXT)}; font-weight: bold; border-radius: 6px; margin: 2px;'
         button_width = 120  # ボタン幅を統一
         button_height = 32  # ボタン高さを統一
 
@@ -1047,11 +1048,11 @@ class UIController(UIControllerCore):
                     
                 if mode == active_mode:
                     button.setStyleSheet(
-                        'background-color: #1976d2; color: white; font-weight: bold; border-radius: 6px;'
+                        f'background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; font-weight: bold; border-radius: 6px;'
                     )
                 else:
                     button.setStyleSheet(
-                        'background-color: #757575; color: white; font-weight: bold; border-radius: 6px;'
+                        f'background-color: {get_color(ThemeKey.MENU_BUTTON_INACTIVE_BACKGROUND)}; color: {get_color(ThemeKey.MENU_BUTTON_INACTIVE_TEXT)}; font-weight: bold; border-radius: 6px;'
                     )
                 
                 # スタイル変更後にフォントサイズを再調整（安全性チェック付き）
@@ -1097,7 +1098,7 @@ class UIController(UIControllerCore):
         try:
             # RDE基本情報取得機能セクション
             data_fetch_label = QLabel("🔄 RDE基本情報取得機能:")
-            data_fetch_label.setStyleSheet("font-weight: bold; color: #2196F3; margin-bottom: 8px; font-size: 12pt;")
+            data_fetch_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)}; margin-bottom: 8px; font-size: 12pt;")
             layout.addWidget(data_fetch_label)
             
             # 横並びで3ボタン配置（1行目）
@@ -1124,23 +1125,23 @@ class UIController(UIControllerCore):
             # 検索用テキストボックスにラベルを追加
             search_layout = QVBoxLayout()
             search_label = QLabel("検索用キーワード (基本情報(検索)ボタン専用):")
-            search_label.setStyleSheet("font-weight: bold; color: #2196F3; margin-top: 10px;")
+            search_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)}; margin-top: 10px;")
             search_layout.addWidget(search_label)
             
             self.basic_info_input = QLineEdit()
             self.basic_info_input.setPlaceholderText("空欄の場合は自身が管理するデータセットが対象")
             self.basic_info_input.setFixedHeight(32)
-            self.basic_info_input.setStyleSheet("""
-                QLineEdit {
-                    border: 2px solid #2196F3;
+            self.basic_info_input.setStyleSheet(f"""
+                QLineEdit {{
+                    border: 2px solid {get_color(ThemeKey.BORDER_INFO)};
                     border-radius: 6px;
                     padding: 5px;
                     font-size: 11pt;
-                }
-                QLineEdit:focus {
-                    border-color: #1976D2;
-                    background-color: #E3F2FD;
-                }
+                }}
+                QLineEdit:focus {{
+                    border-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+                    background-color: {get_color(ThemeKey.PANEL_INFO_BACKGROUND)};
+                }}
             """)
             search_layout.addWidget(self.basic_info_input)
             layout.addLayout(search_layout)
@@ -1168,11 +1169,11 @@ class UIController(UIControllerCore):
         try:
             # XLSX関連機能セクション（データ取得機能と区別）
             xlsx_label = QLabel("📊 Excel関連機能:")
-            xlsx_label.setStyleSheet("font-weight: bold; color: #FF9800; margin-top: 5px; margin-bottom: 3px; font-size: 16pt;")
+            xlsx_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_WARNING)}; margin-top: 5px; margin-bottom: 3px; font-size: 16pt;")
             layout.addWidget(xlsx_label)
             
             # XLSX関連ボタン用のスタイル（橙色系）
-            xlsx_button_style = "background-color: #FF9800; color: white; font-weight: bold; border-radius: 4px; border: 2px solid #F57C00; padding: 3px;"
+            xlsx_button_style = f"background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)}; font-weight: bold; border-radius: 4px; border: 2px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)}; padding: 3px;"
             
             # 横並びで3ボタン配置（XLSX関連）
             btn_layout2 = QHBoxLayout()
@@ -1210,7 +1211,7 @@ class UIController(UIControllerCore):
         try:
             # 段階別実行機能セクション
             stage_label = QLabel("⚙️ 段階別実行機能:")
-            stage_label.setStyleSheet("font-weight: bold; color: #4CAF50; margin-top: 5px; margin-bottom: 3px; font-size: 10pt;")
+            stage_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_SUCCESS)}; margin-top: 5px; margin-bottom: 3px; font-size: 10pt;")
             layout.addWidget(stage_label)
             
             # 個別実行ウィジェットを追加
@@ -1228,7 +1229,7 @@ class UIController(UIControllerCore):
         try:
             # JSON状況表示セクション
             status_label = QLabel("📊 取得状況表示:")
-            status_label.setStyleSheet("font-weight: bold; color: #9C27B0; margin-top: 5px; margin-bottom: 3px; font-size: 10pt;")
+            status_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_SECONDARY)}; margin-top: 5px; margin-bottom: 3px; font-size: 10pt;")
             layout.addWidget(status_label)
             
             # JSON取得状況表示ウィジェットを追加
@@ -1254,16 +1255,18 @@ class UIController(UIControllerCore):
 
         self.basic_info_input.returnPressed.connect(show_input_popup)
 
-    def _create_widget(self, title, color):
+    def _create_widget(self, title, color_key=None):
         """
         ダミー機能用のウィジェットを作成
         Args:
             title: 機能名
-            color: ボタンの色
+            color_key: ThemeKey (任意)。未指定時はタイトルで動的決定
         Returns:
             QWidget: ダミーウィジェット
         """
         from qt_compat.widgets import QLabel, QPushButton
+        from classes.theme.theme_keys import ThemeKey
+        from classes.theme.theme_manager import get_color
         
         widget = QWidget()
         layout = QVBoxLayout()
@@ -1271,12 +1274,31 @@ class UIController(UIControllerCore):
         #label.setStyleSheet("font-size: 16px; font-weight: bold; color: #1976d2; padding: 10px;")
         #layout.addWidget(label)
 
-        button_style = f"background-color: {color}; color: white; font-weight: bold; border-radius: 6px;"
+        # タイトル→アクセント色マッピング（ThemeKey）
+        accent_map = {
+            "データ登録": "BUTTON_INFO_BACKGROUND",
+            "サブグループ": "BUTTON_SECONDARY_BACKGROUND",
+            "基本情報": "BUTTON_API_BACKGROUND",
+            "データ取得2": "BUTTON_WEB_BACKGROUND",
+            "データポータル": "BUTTON_WARNING_BACKGROUND",
+            "ヘルプ": "BUTTON_BLUEGREY_BACKGROUND",
+        }
+        if isinstance(color_key, str) and color_key.startswith('#'):
+            color_key = None
+        if color_key is None:
+            mapped = accent_map.get(title, "BUTTON_DEFAULT_BACKGROUND")
+            color_enum = getattr(ThemeKey, mapped, ThemeKey.BUTTON_DEFAULT_BACKGROUND)
+        else:
+            color_enum = color_key if isinstance(color_key, ThemeKey) else ThemeKey.BUTTON_DEFAULT_BACKGROUND
+        background = get_color(color_enum)
+        text_color = get_color(ThemeKey.BUTTON_DEFAULT_TEXT)
+
+        button_style = f"background-color: {background}; color: {text_color}; font-weight: bold; border-radius: 6px;"
 
         if title == "基本情報":
             self._create_basic_info_ui(layout, button_style)
         elif title == "サブグループ":
-            return self._create_subgroup_ui(layout, title, color)
+            return self._create_subgroup_ui(layout, title, background)
         elif title == "データセット":
             self._create_dataset_ui(layout, widget)
         elif title == "データ登録":
@@ -1395,7 +1417,6 @@ class UIController(UIControllerCore):
                     self.dataset_open_widget = create_dataset_open_widget(
                         parent=self.parent,
                         title="データセット",
-                        color="#4caf50",
                         create_auto_resize_button=self.create_auto_resize_button
                     )
                 return self.dataset_open_widget
@@ -1417,12 +1438,12 @@ class UIController(UIControllerCore):
                 try:
                     logger.debug("データ登録タブウィジェット作成開始")
                     from classes.data_entry.ui.data_register_tab_widget import create_data_register_tab_widget
-                    self.data_register_widget = create_data_register_tab_widget(self, "データ登録", "#2196f3")
+                    self.data_register_widget = create_data_register_tab_widget(self, "データ登録")
                     logger.debug("データ登録タブウィジェット作成結果: %s", type(self.data_register_widget))
                     if self.data_register_widget is None:
                         logger.debug("データ登録タブウィジェット作成失敗 - フォールバック使用")
                         # フォールバック：従来のダミーウィジェット
-                        self.data_register_widget = self._create_widget("データ登録", "#2196f3")
+                        self.data_register_widget = self._create_widget("データ登録")
                     else:
                         logger.debug("データ登録タブウィジェット作成成功")
                         
@@ -1433,7 +1454,7 @@ class UIController(UIControllerCore):
                     logger.error("データ登録ウィジェット作成エラー: %s", e)
                     import traceback
                     traceback.print_exc()
-                    self.data_register_widget = self._create_widget("データ登録", "#2196f3")
+                    self.data_register_widget = self._create_widget("データ登録")
             return self.data_register_widget
         elif mode == "request_analyzer":
             return self._create_request_analyzer_widget()
@@ -1450,11 +1471,11 @@ class UIController(UIControllerCore):
                     self.settings_widget = self._create_fallback_settings_widget()
             return self.settings_widget
         elif mode == "subgroup_create":
-            return self._create_widget("サブグループ", "#9c27b0")
+            return self._create_widget("サブグループ")
         elif mode == "basic_info":
-            return self._create_widget("基本情報", "#00bcd4")
+            return self._create_widget("基本情報")
         elif mode == "data_fetch2":
-            return self._create_widget("データ取得2", "#528086")
+            return self._create_widget("データ取得2")
         elif mode == "ai_test":
             return self._create_ai_test_widget()
         elif mode == "data_portal":
@@ -1466,7 +1487,7 @@ class UIController(UIControllerCore):
                     logger.error("データポータルウィジェット作成エラー: %s", e)
                     import traceback
                     traceback.print_exc()
-                    self.data_portal_widget = self._create_widget("データポータル", "#ff9800")
+                    self.data_portal_widget = self._create_widget("データポータル")
             return self.data_portal_widget
         elif mode == "help":
             if not hasattr(self, 'help_widget') or self.help_widget is None:
@@ -1475,10 +1496,10 @@ class UIController(UIControllerCore):
                     self.help_widget = create_help_widget(self.parent)
                     if self.help_widget is None:
                         # フォールバック：エラーメッセージ
-                        self.help_widget = self._create_widget("ヘルプ", "#607d8b")
+                        self.help_widget = self._create_widget("ヘルプ")
                 except Exception as e:
                     logger.error("ヘルプウィジェット作成エラー: %s", e)
-                    self.help_widget = self._create_widget("ヘルプ", "#607d8b")
+                    self.help_widget = self._create_widget("ヘルプ")
             return self.help_widget
         else:
             return None
@@ -1739,20 +1760,20 @@ class UIController(UIControllerCore):
         
         # タイトル
         title = QLabel("RDE HTTPリクエスト解析ツール")
-        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1976d2; padding: 10px;")
+        title.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {get_color(ThemeKey.TEXT_PRIMARY)}; padding: 10px;")
         layout.addWidget(title)
         
         # 説明
         desc = QLabel("データセット開設機能調査用のHTTPリクエスト・レスポンス解析ツール\n"
                      "メインアプリのWebViewログイン状態とCookieセッションを活用します")
-        desc.setStyleSheet("color: #555; padding: 5px 10px;")
+        desc.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_SECONDARY)}; padding: 5px 10px;")
         desc.setWordWrap(True)
         layout.addWidget(desc)
         
         # 起動ボタン
         button = self.create_auto_resize_button(
             "リクエスト解析GUI起動", 200, 40, 
-            "background-color: #ff5722; color: white; font-weight: bold; border-radius: 6px;"
+            f"background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)}; font-weight: bold; border-radius: 6px;"
         )
         button.clicked.connect(self.setup_request_analyzer_mode)
         layout.addWidget(button)
@@ -3941,28 +3962,28 @@ class UIController(UIControllerCore):
         # メッセージラベル
         message_label = QLabel("設定機能の読み込み中にエラーが発生しました。\n従来の設定画面を開いてください。")
         message_label.setAlignment(Qt.AlignCenter)
-        message_label.setStyleSheet("color: #666; font-size: 14px; padding: 20px;")
+        message_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 14px; padding: 20px;")
         layout.addWidget(message_label)
         
         # 設定ダイアログを開くボタン
         open_settings_button = QPushButton("設定画面を開く")
-        open_settings_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
+        open_settings_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
                 border: none;
                 padding: 12px 24px;
                 border-radius: 6px;
                 font-size: 14px;
                 font-weight: bold;
                 min-width: 120px;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-            QPushButton:pressed {
-                background-color: #0D47A1;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_PRESSED)};
+            }}
         """)
         
         def open_legacy_settings():

@@ -4,6 +4,8 @@
 import os
 from qt_compat.widgets import QWidget, QVBoxLayout, QLabel, QTabWidget
 from classes.dataset.core.dataset_open_logic import create_group_select_widget
+from classes.theme.theme_keys import ThemeKey
+from classes.theme.theme_manager import get_color
 
 import logging
 
@@ -11,7 +13,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def create_dataset_open_widget(parent, title, color, create_auto_resize_button):
+def create_dataset_open_widget(parent, title, create_auto_resize_button):
     """データセット開設・編集のタブ付きウィジェット"""
     # メインコンテナ
     main_widget = QWidget()
@@ -19,7 +21,7 @@ def create_dataset_open_widget(parent, title, color, create_auto_resize_button):
     
     # タイトル
     label = QLabel(f"{title}機能")
-    label.setStyleSheet("font-size: 16px; font-weight: bold; color: #1976d2; padding: 10px;")
+    label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)}; padding: 10px;")
     #main_layout.addWidget(label)
     
     # タブウィジェット
@@ -53,7 +55,7 @@ def create_dataset_open_widget(parent, title, color, create_auto_resize_button):
     # 編集タブ
     try:
         from classes.dataset.ui.dataset_edit_widget import create_dataset_edit_widget
-        edit_tab = create_dataset_edit_widget(parent, "データセット編集", color, create_auto_resize_button)
+        edit_tab = create_dataset_edit_widget(parent, "データセット編集", create_auto_resize_button)
         tab_widget.addTab(edit_tab, "修正")
         
     except Exception as e:
@@ -63,7 +65,7 @@ def create_dataset_open_widget(parent, title, color, create_auto_resize_button):
     # データエントリータブ（最小版）
     try:
         from classes.dataset.ui.dataset_dataentry_widget_minimal import create_dataset_dataentry_widget
-        dataentry_tab = create_dataset_dataentry_widget(parent, "データエントリー", color, create_auto_resize_button)
+        dataentry_tab = create_dataset_dataentry_widget(parent, "データエントリー", create_auto_resize_button)
         tab_widget.addTab(dataentry_tab, "タイル（データエントリー）")
         
     except Exception as e:
@@ -108,7 +110,7 @@ def create_dataset_open_widget(parent, title, color, create_auto_resize_button):
     return main_widget
 
 
-def create_original_dataset_open_widget(parent, title, color, create_auto_resize_button):
+def create_original_dataset_open_widget(parent, title, create_auto_resize_button):
     """元のデータセット開設ウィジェット（後方互換性のため）"""
     # create_group_select_widgetをラップ
     try:

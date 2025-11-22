@@ -19,12 +19,14 @@ from qt_compat.core import Qt, QTimer, QUrl
 from qt_compat.gui import QDesktopServices
 from config.common import get_dynamic_file_path
 from core.bearer_token_manager import BearerTokenManager
+from classes.theme.theme_keys import ThemeKey
+from classes.theme.theme_manager import get_color
 
 # ロガー設定
 logger = logging.getLogger(__name__)
 
 
-def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_button):
+def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     """データセット データエントリー専用ウィジェット（最小版）"""
     widget = QWidget()
     layout = QVBoxLayout()
@@ -113,13 +115,44 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
     control_layout.setContentsMargins(0, 0, 0, 0)
     
     fetch_button = QPushButton("データエントリー取得")
-    fetch_button.setStyleSheet(f"background-color: {color}; color: white; font-weight: bold; border-radius: 6px; padding: 8px 16px;")
-    
     refresh_dataset_button = QPushButton("データセット一覧更新")
-    refresh_dataset_button.setStyleSheet(f"background-color: {color}; color: white; font-weight: bold; border-radius: 6px; padding: 8px 16px;")
+    info_bg = get_color(ThemeKey.BUTTON_INFO_BACKGROUND)
+    info_text = get_color(ThemeKey.BUTTON_INFO_TEXT)
+    info_border = get_color(ThemeKey.BUTTON_INFO_BORDER)
+    info_hover = get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)
+    info_pressed = get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_PRESSED)
+    common_button_style = f"""
+        QPushButton {{
+            background-color: {info_bg};
+            color: {info_text};
+            font-weight: bold;
+            border-radius: 6px;
+            padding: 8px 16px;
+            border: 1px solid {info_border};
+        }}
+        QPushButton:hover {{
+            background-color: {info_hover};
+        }}
+        QPushButton:pressed {{
+            background-color: {info_pressed};
+        }}
+        QPushButton:disabled {{
+            background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+            border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+        }}
+    """.strip()
+    fetch_button.setStyleSheet(common_button_style)
+    refresh_dataset_button.setStyleSheet(common_button_style)
     
     show_all_entries_button = QPushButton("全エントリー表示")
-    show_all_entries_button.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold; border-radius: 6px; padding: 8px 16px;")
+    show_all_entries_button.setStyleSheet(f"""
+        background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
+        color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
+        font-weight: bold;
+        border-radius: 6px;
+        padding: 8px 16px;
+    """)
     
     control_layout.addWidget(fetch_button)
                     # サブグループフィルタ除去
@@ -129,10 +162,16 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
     
     # 強制更新チェックボックス
     force_refresh_checkbox = QCheckBox("強制更新（既存のキャッシュを無視）")
-    force_refresh_checkbox.setStyleSheet("color: #FF5722; font-weight: bold;")
+    force_refresh_checkbox.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_WARNING)}; font-weight: bold;")
     layout.addWidget(force_refresh_checkbox)
     fetch_button.setMaximumWidth(150)
-    fetch_button.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; border-radius: 4px; padding: 8px;")
+    fetch_button.setStyleSheet(f"""
+        background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+        color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+        font-weight: bold;
+        border-radius: 4px;
+        padding: 8px;
+    """)
     
     force_refresh_checkbox = QCheckBox("強制更新")
     force_refresh_checkbox.setToolTip("既存のJSONファイルが5分以内でも強制的に再取得します")
@@ -154,13 +193,13 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
     basic_info_layout.setContentsMargins(0, 0, 0, 0)
     
     dataset_info_label = QLabel("データセット: 未選択")
-    dataset_info_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #333; margin: 5px;")
+    dataset_info_label.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {get_color(ThemeKey.TEXT_PRIMARY)}; margin: 5px;")
     
     entry_count_label = QLabel("データエントリー件数: -")
-    entry_count_label.setStyleSheet("font-size: 12px; color: #666; margin: 5px;")
+    entry_count_label.setStyleSheet(f"font-size: 12px; color: {get_color(ThemeKey.TEXT_MUTED)}; margin: 5px;")
     
     last_updated_label = QLabel("最終取得: -")
-    last_updated_label.setStyleSheet("font-size: 12px; color: #666; margin: 5px;")
+    last_updated_label.setStyleSheet(f"font-size: 12px; color: {get_color(ThemeKey.TEXT_MUTED)}; margin: 5px;")
     
     basic_info_layout.addWidget(dataset_info_label)
     basic_info_layout.addWidget(entry_count_label)
@@ -623,10 +662,16 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
                 for i, ft in enumerate(FILE_TYPES):
                     item = QTableWidgetItem(str(filetype_counts[ft]))
                     entry_table.setItem(row, base_col_count + i, item)
-                # 「ブラウザ」列のみsetCellWidgetでボタン
+                # 「ブラウザ」列のみ setCellWidget でボタン
                 browser_col = base_col_count + len(FILE_TYPES)
                 link_button = QPushButton("開く")
-                link_button.setStyleSheet("background-color: #4CAF50; color: white; font-size: 10px; padding: 2px 6px; border-radius: 3px;")
+                link_button.setStyleSheet(f"""
+                    background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
+                    font-size: 10px;
+                    padding: 2px 6px;
+                    border-radius: 3px;
+                """)
                 def create_link_handler(entry_id):
                     def on_link_click():
                         url = f"https://rde.nims.go.jp/rde/datasets/data/{entry_id}"
@@ -766,10 +811,16 @@ def create_dataset_dataentry_widget(parent, title, color, create_auto_resize_but
                 for i, ft in enumerate(FILE_TYPES):
                     item = QTableWidgetItem(str(filetype_counts[ft]))
                     entry_table.setItem(row, base_col_count + i, item)
-                # 「ブラウザ」列のみsetCellWidgetでボタン
+                # 「ブラウザ」列のみ setCellWidget でボタン
                 browser_col = base_col_count + len(FILE_TYPES)
                 link_button = QPushButton("開く")
-                link_button.setStyleSheet("background-color: #4CAF50; color: white; font-size: 10px; padding: 2px 6px; border-radius: 3px;")
+                link_button.setStyleSheet(f"""
+                    background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
+                    font-size: 10px;
+                    padding: 2px 6px;
+                    border-radius: 3px;
+                """)
                 entry_id = entry.get('id', '')
                 def create_link_handler(entry_id):
                     def on_link_click():

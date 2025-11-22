@@ -16,6 +16,8 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt, QDate, QTimer
 from config.common import get_dynamic_file_path
+from classes.theme.theme_keys import ThemeKey
+from classes.theme.theme_manager import get_color
 from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
 from classes.dataset.ui.taxonomy_builder_dialog import TaxonomyBuilderDialog
 from classes.dataset.ui.ai_suggestion_dialog import AISuggestionDialog
@@ -280,14 +282,14 @@ def get_user_grant_numbers():
     return user_grant_numbers
 
 
-def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
+def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     """データセット編集専用ウィジェット"""
     widget = QWidget()
     layout = QVBoxLayout()
     
     # タイトル
     title_label = QLabel(f"{title}機能")
-    title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #1976d2; padding: 10px;")
+    title_label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)}; padding: 10px;")
     #layout.addWidget(title_label)
     
     # フィルタ設定エリア
@@ -334,7 +336,25 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
     # キャッシュ更新ボタンを追加
     cache_refresh_button = QPushButton("キャッシュ更新")
     cache_refresh_button.setMaximumWidth(100)
-    cache_refresh_button.setStyleSheet("background-color: #FF5722; color: white; font-weight: bold; border-radius: 4px; padding: 5px;")
+    # 警告系ボタンスタイルへ統一（ThemeKey）
+    cache_refresh_button.setStyleSheet(f"""
+        QPushButton {{
+            background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
+            color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
+            font-weight: bold;
+            border-radius: 4px;
+            padding: 5px;
+            border: 1px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)};
+        }}
+        QPushButton:hover {{
+            background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
+        }}
+        QPushButton:disabled {{
+            background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+            border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+        }}
+    """)
     cache_refresh_button.setToolTip("データセット一覧を強制的に再読み込みしてキャッシュを更新します\n大量データの場合はプログレス表示されます")
     
     grant_number_filter_layout.addWidget(grant_number_filter_label)
@@ -623,10 +643,32 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         update_button.setEnabled(is_default_filter)
         if not is_default_filter:
             update_button.setToolTip("デフォルト設定（ユーザー所属のみ、課題番号フィルタなし）でのみ更新可能です")
-            update_button.setStyleSheet("background-color: #CCCCCC; color: #666666; font-weight: bold; border-radius: 6px;")
+            update_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                    font-weight: bold;
+                    border-radius: 6px;
+                    border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+                }}
+            """)
         else:
             update_button.setToolTip("")
-            update_button.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold; border-radius: 6px;")
+            update_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
+                    font-weight: bold;
+                    border-radius: 6px;
+                    border: 1px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)};
+                }}
+                QPushButton:hover {{
+                    background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
+                }}
+                QPushButton:pressed {{
+                    background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_PRESSED)};
+                }}
+            """)
         
         # コンボボックスを完全にクリア（キャッシュも含む）
         existing_dataset_combo.clear()
@@ -1145,23 +1187,24 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         ai_suggest_button.setMinimumHeight(45)  # 高さを拡大
         ai_suggest_button.setMaximumHeight(50)
         ai_suggest_button.setToolTip("AIによる説明文の提案（ダイアログ表示）\n複数の候補から選択できます")
-        ai_suggest_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
+        ai_suggest_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                 font-size: 11px;
                 font-weight: bold;
-                border: none;
+                border: 1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)};
                 border-radius: 6px;
                 padding: 8px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:disabled {
-                background-color: #81C784;
-                color: #E8F5E9;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+            }}
         """)
         
         # クイックAIボタン（即座反映版）
@@ -1171,23 +1214,27 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         quick_ai_button.setMinimumHeight(45)  # 高さを拡大
         quick_ai_button.setMaximumHeight(50)
         quick_ai_button.setToolTip("AIによる説明文の即座生成（直接反映）\nワンクリックで自動入力されます")
-        quick_ai_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
+        quick_ai_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
                 font-size: 11px;
                 font-weight: bold;
-                border: none;
+                border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BORDER)};
                 border-radius: 6px;
                 padding: 8px;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-            QPushButton:disabled {
-                background-color: #64B5F6;
-                color: #E3F2FD;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_PRESSED)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+            }}
         """)
         
         ai_buttons_layout.addWidget(ai_suggest_button)
@@ -1362,7 +1409,8 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
         edit_template_display = QLineEdit()
         edit_template_display.setPlaceholderText("データセットテンプレート名（表示のみ）")
         edit_template_display.setReadOnly(True)
-        edit_template_display.setStyleSheet("background-color: #f0f0f0;")  # 読み取り専用の視覚的表示
+        # 読み取り専用視覚表示: 未定義キー INPUT_BACKGROUND_READONLY -> 既存 INPUT_BACKGROUND_DISABLED へ置換
+        edit_template_display.setStyleSheet(f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)}; color: {get_color(ThemeKey.TEXT_MUTED)};")
         form_layout.addWidget(edit_template_display, 4, 1)
         
         # 問い合わせ先
@@ -2055,13 +2103,15 @@ def create_dataset_edit_widget(parent, title, color, create_auto_resize_button):
     
     # データセットページ表示ボタン
     open_dataset_page_button = create_auto_resize_button(
-        "RDEデータセットページを開く", 200, 40, "background-color: #2196F3; color: white; font-weight: bold; border-radius: 6px;"
+        "RDEデータセットページを開く", 200, 40,
+        f"background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; font-weight: bold; border-radius: 6px; border:1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BORDER)};"
     )
     button_layout.addWidget(open_dataset_page_button)
     
     # 更新ボタン
     update_button = create_auto_resize_button(
-        "データセット更新", 200, 40, "background-color: #FF9800; color: white; font-weight: bold; border-radius: 6px;"
+        "データセット更新", 200, 40,
+        f"background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)}; font-weight: bold; border-radius: 6px; border:1px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)};"
     )
     button_layout.addWidget(update_button)
     

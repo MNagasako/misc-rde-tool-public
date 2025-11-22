@@ -1,11 +1,13 @@
 """
 UIコントローラー基盤クラス - ARIM RDE Tool v1.13.1
-UIControllerの基本機能・初期化・モード管理を担当
+UI Controllerの基本機能・初期化・モード管理を担当
 """
 import logging
 from qt_compat.widgets import QPushButton, QVBoxLayout, QWidget
 from qt_compat.core import QTimer
 from qt_compat.gui import QFontMetrics
+from classes.theme import get_color, ThemeKey, ThemeManager, ThemeMode
+from classes.theme.global_styles import get_global_base_style
 
 logger = logging.getLogger("RDE_WebView")
 
@@ -71,6 +73,34 @@ class UIControllerCore:
         
         # ログ設定
         self.logger = logging.getLogger("UIControllerCore")
+        # ボタンスタイルキャッシュ
+        self._button_style_cache = {}
+
+    def _build_button_style(self, kind: str) -> str:
+        """ボタン種別に応じたQSSをキャッシュして返す
+
+        kind: primary|secondary|danger|warning|inactive|active
+        """
+        if kind in self._button_style_cache:
+            return self._button_style_cache[kind]
+        from classes.theme import get_color, ThemeKey
+        mapping = {
+            'primary': (ThemeKey.BUTTON_PRIMARY_BACKGROUND, ThemeKey.BUTTON_PRIMARY_TEXT),
+            'secondary': (ThemeKey.BUTTON_SECONDARY_BACKGROUND, ThemeKey.BUTTON_SECONDARY_TEXT),
+            'danger': (ThemeKey.BUTTON_DANGER_BACKGROUND, ThemeKey.BUTTON_DANGER_TEXT),
+            'warning': (ThemeKey.BUTTON_WARNING_BACKGROUND, ThemeKey.BUTTON_WARNING_TEXT),
+            'inactive': (ThemeKey.MENU_BUTTON_INACTIVE_BACKGROUND, ThemeKey.MENU_BUTTON_INACTIVE_TEXT),
+            'active': (ThemeKey.BUTTON_PRIMARY_BACKGROUND, ThemeKey.BUTTON_PRIMARY_TEXT),
+        }
+        bg_key, fg_key = mapping.get(kind, mapping['secondary'])
+        style = (
+            "QPushButton { "
+            f"background-color: {get_color(bg_key)}; "
+            f"color: {get_color(fg_key)}; "
+            "font-weight: bold; border-radius: 6px; margin: 2px; padding: 4px 8px; }"
+        )
+        self._button_style_cache[kind] = style
+        return style
     
     def adjust_button_font_size(self, button, max_width=None, max_height=None):
         """
@@ -141,6 +171,231 @@ class UIControllerCore:
         QTimer.singleShot(100, adjust_font)  # 少し遅延させて確実に調整
         
         return button
+    
+    def _add_theme_toggle_button(self, menu_layout):
+        """テーマ切替ボタンをメニューに追加
+        
+        Args:
+            menu_layout: メニューのレイアウト
+        """
+        from classes.theme import ThemeManager, ThemeMode
+        
+        theme_manager = ThemeManager.instance()
+        
+        # テーマ表示用アイコン/ラベル
+        theme_labels = {
+            ThemeMode.AUTO: "🔄 自動",
+            ThemeMode.LIGHT: "☀️ ライト",
+            ThemeMode.DARK: "🌙 ダーク",
+        }
+        
+        # ボタン作成
+        self.theme_toggle_btn = QPushButton(theme_labels[theme_manager.get_mode()])
+        self.theme_toggle_btn.setFixedSize(120, 32)
+        
+        def update_button_style():
+            """ボタンスタイルを更新"""
+            current_mode = theme_manager.get_mode()
+            self.theme_toggle_btn.setText(theme_labels[current_mode])
+            self.theme_toggle_btn.setStyleSheet(self._build_button_style('secondary'))
+        
+        def on_theme_toggle():
+            """テーマ切替ハンドラ
+            
+            【最適化v2.1.7】処理全体の時間を計測し遅延を可視化
+            """
+            import time
+            toggle_start = time.perf_counter_ns()
+            
+            # テーマモード変更（ThemeManager内で詳細計測）
+            theme_manager.cycle_mode()
+            
+            # ボタン更新（軽量）
+            button_start = time.perf_counter_ns()
+            update_button_style()
+            button_elapsed = (time.perf_counter_ns() - button_start) / 1_000_000
+            
+            # 全UI色再適用（重い可能性）
+            refresh_start = time.perf_counter_ns()
+            self._refresh_all_ui_colors()
+            refresh_elapsed = (time.perf_counter_ns() - refresh_start) / 1_000_000
+            
+            total_elapsed = (time.perf_counter_ns() - toggle_start) / 1_000_000
+            logger.info(f"[ThemeToggle] 処理時間: button={button_elapsed:.2f}ms refresh={refresh_elapsed:.2f}ms total={total_elapsed:.2f}ms")
+        
+        self.theme_toggle_btn.clicked.connect(on_theme_toggle)
+        theme_manager.theme_changed.connect(lambda: update_button_style())
+        
+        update_button_style()
+        menu_layout.addWidget(self.theme_toggle_btn)
+    
+    def _refresh_all_ui_colors(self):
+        """全UIコンポーネントの色を再適用
+        
+        【最適化v2.1.7】各処理段階の時間を計測
+        """
+        import time
+        total_start = time.perf_counter_ns()
+        
+        try:
+            # グローバル基本スタイル適用（最初にベースレイヤー）
+            # 注意: ThemeManagerで既に適用済みのため再適用をスキップ（v2.1.7 重複除去）
+            global_start = time.perf_counter_ns()
+            # ここでは何も適用せず、測定のみ実行
+            global_elapsed = (time.perf_counter_ns() - global_start) / 1_000_000
+            logger.debug("[ThemeToggle] グローバルstylesheet再適用スキップ (ThemeManager側で適用済み)")
+
+            # 左側メニューウィジェットの背景色を更新
+            menu_start = time.perf_counter_ns()
+            if hasattr(self, 'menu_widget'):
+                self.menu_widget.setStyleSheet(f'background-color: {get_color(ThemeKey.MENU_BACKGROUND)}; padding: 5px;')
+            menu_elapsed = (time.perf_counter_ns() - menu_start) / 1_000_000
+            
+            # menu_area_widgetのスタイルを更新
+            area_start = time.perf_counter_ns()
+            if hasattr(self.parent, 'menu_area_widget'):
+                self.parent.menu_area_widget.setStyleSheet(f"""
+                    QWidget {{
+                        background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
+                        color: {get_color(ThemeKey.WINDOW_FOREGROUND)};
+                    }}
+                    QLabel {{
+                        color: {get_color(ThemeKey.WINDOW_FOREGROUND)};
+                    }}
+                    QLineEdit {{
+                        background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                        color: {get_color(ThemeKey.INPUT_TEXT)};
+                        border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                    }}
+                    QTextEdit {{
+                        background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                        color: {get_color(ThemeKey.INPUT_TEXT)};
+                        border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                    }}
+                """)
+            area_elapsed = (time.perf_counter_ns() - area_start) / 1_000_000
+            
+            # メニューボタンの再構築
+            btn_start = time.perf_counter_ns()
+            self._rebuild_menu_buttons_styles()
+            btn_elapsed = (time.perf_counter_ns() - btn_start) / 1_000_000
+            
+            # テーマ切替ボタンのスタイル更新
+            if hasattr(self, 'theme_toggle_btn'):
+                self.theme_toggle_btn.setStyleSheet(
+                    f'background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)}; '
+                    f'color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)}; '
+                    f'font-weight: bold; border-radius: 6px; margin: 2px;'
+                )
+            # 閉じるボタンのスタイル更新
+            if hasattr(self.parent, 'close_btn'):
+                self.parent.close_btn.setStyleSheet(self._build_button_style('danger'))
+            
+            # メインウィンドウ背景色の更新
+            if hasattr(self.parent, 'setStyleSheet'):
+                self.parent.setStyleSheet(f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};")
+                
+            # 各タブウィジェットの再描画をトリガー
+            tab_start = time.perf_counter_ns()
+            self._refresh_tab_widgets()
+            tab_elapsed = (time.perf_counter_ns() - tab_start) / 1_000_000
+            
+            # メインウィンドウの再描画をトリガー
+            if hasattr(self.parent, 'update'):
+                self.parent.update()
+            
+            total_elapsed = (time.perf_counter_ns() - total_start) / 1_000_000
+            logger.info(f"[ThemeToggle] _refresh_all_ui_colors: global={global_elapsed:.2f}ms menu={menu_elapsed:.2f}ms "
+                       f"area={area_elapsed:.2f}ms btn={btn_elapsed:.2f}ms tab={tab_elapsed:.2f}ms total={total_elapsed:.2f}ms")
+            logger.info("[ThemeToggle] UI色の再適用完了")
+        except Exception as e:
+            logger.error(f"[ThemeToggle] UI色再適用エラー: {e}")
+    
+    def _rebuild_menu_buttons_styles(self):
+        """メニューボタンのスタイルを再構築（選択状態を保持）"""
+        # 親ウィンドウから現在のアクティブモードを取得
+        if not hasattr(self.parent, 'current_mode'):
+            logger.debug("[ThemeToggle] parent.current_mode属性が存在しません")
+            return
+        
+        current_mode = self.parent.current_mode
+        if current_mode is None:
+            logger.debug("[ThemeToggle] current_modeがNoneです")
+            return
+        
+        logger.debug(f"[ThemeToggle] メニューボタンスタイル更新: current_mode={current_mode}")
+        
+        # 全ボタンのスタイルを現在のモードに応じて更新
+        for mode, button in self.menu_buttons.items():
+            try:
+                if button is None or not hasattr(button, 'setStyleSheet'):
+                    continue
+                
+                if mode == current_mode:
+                    # アクティブボタン
+                    button.setStyleSheet(self._build_button_style('active'))
+                    logger.debug(f"[ThemeToggle] アクティブボタン設定: {mode}")
+                else:
+                    # 非アクティブボタン
+                    button.setStyleSheet(self._build_button_style('inactive'))
+            except (RuntimeError, AttributeError):
+                continue
+    
+    def _refresh_tab_widgets(self):
+        """各タブウィジェットの再描画
+        
+        【最適化v2.1.7】各タブのrefresh_theme()呼出時間を計測し、
+        遅延箇所を特定してログ出力。
+        """
+        import time
+        
+        widgets = [
+            ('データ取得', self.data_fetch_widget),
+            ('データセット開設', self.dataset_open_widget),
+            ('データ登録', self.data_register_widget),
+            ('設定', self.settings_widget),
+            ('データポータル', self.data_portal_widget),
+        ]
+        
+        for name, widget in widgets:
+            if widget is None:
+                continue
+            
+            start_time = time.perf_counter_ns()
+            try:
+                if hasattr(widget, 'refresh_theme'):
+                    widget.refresh_theme()
+                else:
+                    self._refresh_widget_recursive(widget)
+            except Exception as e:
+                logger.error(f"[ThemeToggle] {name}タブ更新エラー: {e}")
+            finally:
+                elapsed_ms = (time.perf_counter_ns() - start_time) / 1_000_000
+                if elapsed_ms > 10:  # 10ms超過時のみログ
+                    logger.warning(f"[ThemeToggle] {name}タブ更新: {elapsed_ms:.2f}ms (遅延検出)")
+                else:
+                    logger.debug(f"[ThemeToggle] {name}タブ更新: {elapsed_ms:.2f}ms")
+    
+    def _refresh_widget_recursive(self, widget):
+        """ウィジェットとその子要素を再帰的に再描画
+        
+        【注意】テーマ切替時は配色のみ変更し、
+        ファイルIO・API呼出・再構築は実行しない最適化実装。
+        """
+        try:
+            # ウィジェット自体の更新をトリガー（再描画のみ、再構築なし）
+            if hasattr(widget, 'update'):
+                widget.update()
+            
+            # 【最適化】子要素の再帰は深さ1レベルのみに制限
+            # 全階層走査を避けることでテーマ切替時の遅延を大幅削減
+            # 各ウィジェットの refresh_theme() で個別対応済みのため不要
+            # if hasattr(widget, 'children'):
+            #     for child in widget.children():
+            #         if hasattr(child, 'update'):
+            #             self._refresh_widget_recursive(child)
+        except Exception as e:
+            logger.debug(f"[ThemeToggle] ウィジェット再描画エラー: {e}")
         
     def get_data_fetch_layout(self):
         """
@@ -264,7 +519,7 @@ class UIControllerCore:
             
             # 実行ボタン作成
             self.parent.grant_btn = self.create_auto_resize_button(
-                '実行', 120, 36, 'background-color: #1976d2; color: white; font-weight: bold; border-radius: 6px;'
+                '実行', 120, 36, f'background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; font-weight: bold; border-radius: 6px;'
             )
             self.parent.grant_btn.setObjectName('grant_btn')
             self.parent.grant_btn.clicked.connect(self.parent.on_grant_number_decided)
@@ -295,7 +550,7 @@ class UIControllerCore:
             list_txt_path = get_dynamic_file_path('input/list.txt')
             if os.path.exists(list_txt_path):
                 self.parent.batch_btn = self.create_auto_resize_button(
-                    '一括実行', 120, 36, 'background-color: #ff9800; color: white; font-weight: bold; border-radius: 6px;'
+                    '一括実行', 120, 36, f'background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)}; font-weight: bold; border-radius: 6px;'
                 )
                 self.parent.batch_btn.clicked.connect(self.parent.execute_batch_grant_numbers)
                 data_fetch_layout.addWidget(self.parent.batch_btn)
@@ -322,8 +577,8 @@ class UIControllerCore:
             root_layout = QHBoxLayout()
 
             # 左側メニュー用ウィジェット
-            menu_widget = QWidget()
-            menu_widget.setStyleSheet('background-color: #e0f0ff; padding: 5px;')
+            self.menu_widget = QWidget()
+            self.menu_widget.setStyleSheet(f'background-color: {get_color(ThemeKey.MENU_BACKGROUND)}; padding: 5px;')
             menu_layout = QVBoxLayout()
             menu_layout.setSpacing(8)
             menu_layout.setContentsMargins(5, 10, 5, 10)
@@ -348,18 +603,21 @@ class UIControllerCore:
             # スペースを追加（閉じるボタンとヘルプボタンを下部に配置）
             menu_layout.addStretch(1)
             
+            # テーマ切替ボタンをヘルプボタンの上に配置
+            self._add_theme_toggle_button(menu_layout)
+            
             # ヘルプボタンを閉じるボタンの上に配置
             if 'help' in self.menu_buttons:
                 menu_layout.addWidget(self.menu_buttons['help'])
             
             # 閉じるボタンを最下段に配置
             self.parent.close_btn = self.create_auto_resize_button(
-                '閉じる', 120, 32, 'background-color: #f44336; color: white; font-weight: bold; border-radius: 6px; margin: 2px;'
+                '閉じる', 120, 32, f'background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)}; font-weight: bold; border-radius: 6px; margin: 2px;'
             )
             self.parent.close_btn.clicked.connect(self.parent.close)
             menu_layout.addWidget(self.parent.close_btn)
-            menu_widget.setLayout(menu_layout)
-            menu_widget.setFixedWidth(140)
+            self.menu_widget.setLayout(menu_layout)
+            self.menu_widget.setFixedWidth(140)
 
             # 右側：上（WebView）・下（個別メニュー）に分割
             right_widget = QWidget()
@@ -372,6 +630,14 @@ class UIControllerCore:
             webview_widget.setObjectName('webview_widget')
             # 初期サイズを設定してネガティブサイズエラーを防止
             webview_widget.setMinimumSize(100, 50)
+            # 初期ロード時にグローバルスタイル適用（右側コンテナ生成直後）
+            try:
+                from qt_compat.widgets import QApplication
+            except Exception:
+                QApplication = None  # type: ignore
+            app = QApplication.instance() if QApplication else None
+            if app is not None:
+                app.setStyleSheet(get_global_base_style())
             
             # WebViewレイアウト（WebView + ログインコントロール）
             webview_layout = QHBoxLayout()
@@ -398,13 +664,13 @@ class UIControllerCore:
             
             # 待機メッセージ用の専用フレーム
             message_frame = QWidget()
-            message_frame.setStyleSheet('''
-                QWidget {
-                    background-color: #f5f5f5;
-                    border: 1px solid #ddd;
+            message_frame.setStyleSheet(f'''
+                QWidget {{
+                    background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+                    border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                     border-radius: 4px;
                     margin: 5px 0px;
-                }
+                }}
             ''')
             message_layout = QVBoxLayout()
             message_layout.setContentsMargins(10, 5, 10, 5)
@@ -425,6 +691,25 @@ class UIControllerCore:
             
             # 下部：個別メニュー（切り替え可能エリア）
             self.parent.menu_area_widget = QWidget()
+            self.parent.menu_area_widget.setStyleSheet(f"""
+                QWidget {{
+                    background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
+                    color: {get_color(ThemeKey.WINDOW_FOREGROUND)};
+                }}
+                QLabel {{
+                    color: {get_color(ThemeKey.WINDOW_FOREGROUND)};
+                }}
+                QLineEdit {{
+                    background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                    color: {get_color(ThemeKey.INPUT_TEXT)};
+                    border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                }}
+                QTextEdit {{
+                    background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                    color: {get_color(ThemeKey.INPUT_TEXT)};
+                    border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                }}
+            """)
             self.parent.menu_area_layout = QVBoxLayout()
             self.parent.menu_area_layout.setContentsMargins(5, 5, 5, 5)
             self.parent.menu_area_widget.setLayout(self.parent.menu_area_layout)
@@ -435,7 +720,7 @@ class UIControllerCore:
             right_widget.setLayout(right_main_layout)
 
             # ルートレイアウトに左右追加
-            root_layout.addWidget(menu_widget)
+            root_layout.addWidget(self.menu_widget)
             root_layout.addWidget(right_widget, 1)
             self.parent.setLayout(root_layout)
             

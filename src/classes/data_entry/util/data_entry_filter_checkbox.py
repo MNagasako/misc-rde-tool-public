@@ -15,6 +15,8 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt
 from qt_compat.gui import QFont
+from classes.theme.theme_keys import ThemeKey
+from classes.theme.theme_manager import get_color
 
 # 親ディレクトリのsrcをPythonパスに追加
 current_dir = Path(__file__).parent
@@ -534,10 +536,10 @@ def create_checkbox_filter_dropdown(parent=None):
     }
     """
     
-    checkbox_owner.setStyleSheet(checkbox_style + "QCheckBox { color: #B8860B; }")
-    checkbox_assistant.setStyleSheet(checkbox_style + "QCheckBox { color: #4169E1; }")
-    checkbox_member.setStyleSheet(checkbox_style + "QCheckBox { color: #228B22; }")
-    checkbox_agent.setStyleSheet(checkbox_style + "QCheckBox { color: #9370DB; }")
+    checkbox_owner.setStyleSheet(checkbox_style + f"QCheckBox {{ color: {get_color(ThemeKey.ROLE_OWNER_TEXT)}; }}")
+    checkbox_assistant.setStyleSheet(checkbox_style + f"QCheckBox {{ color: {get_color(ThemeKey.ROLE_ASSISTANT_TEXT)}; }}")
+    checkbox_member.setStyleSheet(checkbox_style + f"QCheckBox {{ color: {get_color(ThemeKey.ROLE_MEMBER_TEXT)}; }}")
+    checkbox_agent.setStyleSheet(checkbox_style + f"QCheckBox {{ color: {get_color(ThemeKey.ROLE_AGENT_TEXT)}; }}")
     
     filter_layout.addWidget(checkbox_owner)
     filter_layout.addWidget(checkbox_assistant)
@@ -559,7 +561,7 @@ def create_checkbox_filter_dropdown(parent=None):
     
     # 状況表示ラベル
     status_label = QLabel("読み込み中...")
-    status_label.setStyleSheet("color: #666; font-size: 9pt;")
+    status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 9pt;")
     
     layout.addWidget(filter_widget)
     layout.addWidget(status_label)

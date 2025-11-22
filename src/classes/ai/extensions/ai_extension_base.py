@@ -351,6 +351,12 @@ ARIM課題データ:
 
 {equipment_data}
 
+ファイルツリー情報:
+{file_tree}
+
+STRUCTUREDファイルのテキスト内容:
+{text_from_structured_files}
+
 要求:
 - 学術的且つ技術的で簡潔な説明文を作成してください
 - 150-250文字程度
@@ -359,7 +365,7 @@ ARIM課題データ:
 
 出力: 簡潔な説明文のみ（見出しや形式マーカーなし）
 """,
-            ["name", "type", "grant_number", "existing_description", "dataset_existing_info", "arim_extension_data", "arim_experiment_data", "experiment_summary", "material_index_data", "equipment_data"]
+            ["name", "type", "grant_number", "existing_description", "dataset_existing_info", "arim_extension_data", "arim_experiment_data", "experiment_summary", "material_index_data", "equipment_data", "file_tree", "text_from_structured_files"]
         )
         
         self.register_template(quick_template)
@@ -406,6 +412,7 @@ ARIM課題データ:
         # 将来の拡張用フィールド
         context['file_info'] = kwargs.get('file_info', '')
         context['file_tree'] = kwargs.get('file_tree', '')  # テンプレートで使用されるキー
+        context['text_from_structured_files'] = kwargs.get('text_from_structured_files', '')  # STRUCTUREDファイルのテキスト内容
         context['metadata'] = kwargs.get('metadata', '')
         context['related_datasets'] = kwargs.get('related_datasets', '')
         
@@ -416,6 +423,14 @@ ARIM課題データ:
             logger.debug("file_tree の先頭100文字: %s", context['file_tree'][:100])
         else:
             logger.debug("file_tree が空です")
+        
+        # デバッグ: text_from_structured_files の内容を確認
+        logger.debug("collect_context_data: text_from_structured_files キー追加")
+        if context['text_from_structured_files']:
+            logger.debug("text_from_structured_files の長さ: %s 文字", len(context['text_from_structured_files']))
+            logger.debug("text_from_structured_files の先頭100文字: %s", context['text_from_structured_files'][:100])
+        else:
+            logger.debug("text_from_structured_files が空です")
         
         return context
         

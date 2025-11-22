@@ -11,7 +11,8 @@ from qt_compat.widgets import (
 from qt_compat.core import Qt, Signal
 from qt_compat.gui import QFont
 from config.common import get_dynamic_file_path
-
+from classes.theme.theme_keys import ThemeKey
+from classes.theme.theme_manager import get_color
 # ロガー設定
 logger = logging.getLogger(__name__)
 
@@ -67,7 +68,7 @@ class DataRegisterWidget(QWidget):
         self.dataset_summary_text = QTextEdit()
         self.dataset_summary_text.setMaximumHeight(100)
         self.dataset_summary_text.setReadOnly(True)
-        self.dataset_summary_text.setStyleSheet("background-color: #f5f5f5; border: 1px solid #ccc;")
+        self.dataset_summary_text.setStyleSheet(f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; border: 1px solid #ccc;")
         dataset_layout.addWidget(self.dataset_summary_text)
         
         dataset_frame.setLayout(dataset_layout)

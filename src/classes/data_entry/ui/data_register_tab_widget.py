@@ -8,7 +8,7 @@
 
 import logging
 from qt_compat.widgets import (
-    QWidget, QVBoxLayout, QTabWidget, QLabel, QScrollArea, QSizePolicy, QApplication
+    QWidget, QVBoxLayout, QTabWidget, QLabel, QScrollArea, QSizePolicy, QApplication, QGroupBox
 )
 from qt_compat.core import Qt
 from qt_compat.gui import QFont
@@ -18,9 +18,9 @@ from .data_register_ui_creator import create_data_register_widget
 # ロガー設定
 logger = logging.getLogger(__name__)
 from classes.data_entry.conf.ui_constants import (
-    DATA_REGISTER_TAB_STYLE,
-    DATA_REGISTER_FORM_STYLE,
-    SCROLL_AREA_STYLE,
+    get_data_register_tab_style,
+    get_data_register_form_style,
+    get_scroll_area_style,
     TAB_HEIGHT_RATIO,
 )
 
@@ -38,6 +38,11 @@ class DataRegisterTabWidget(QWidget):
         self._batch_tab_index = None
         self.setup_ui()
         
+        # テーマ変更シグナルに接続
+        from classes.theme import ThemeManager
+        theme_manager = ThemeManager()
+        theme_manager.theme_changed.connect(self.refresh_theme)
+        
     def setup_ui(self):
         """UIのセットアップ"""
         # メインレイアウト
@@ -50,8 +55,36 @@ class DataRegisterTabWidget(QWidget):
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabPosition(QTabWidget.North)
 
-        # モダンなタブスタイル
-        self.tab_widget.setStyleSheet(DATA_REGISTER_TAB_STYLE)
+        # モダンなタブスタイル（ThemeKey適用）
+        from classes.theme.theme_manager import get_color
+        from classes.theme.theme_keys import ThemeKey
+        tab_style = f"""
+            QTabWidget {{
+                background-color: {get_color(ThemeKey.DATA_ENTRY_TAB_CONTAINER_BACKGROUND)};
+            }}
+            QTabWidget::pane {{
+                border: 1px solid {get_color(ThemeKey.TAB_BORDER)};
+                background-color: {get_color(ThemeKey.TAB_BACKGROUND)};
+            }}
+            QTabBar::tab {{
+                background-color: {get_color(ThemeKey.TAB_INACTIVE_BACKGROUND)};
+                color: {get_color(ThemeKey.TAB_INACTIVE_TEXT)};
+                padding: 8px 16px;
+                border: 1px solid {get_color(ThemeKey.TAB_BORDER)};
+                border-bottom: none;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {get_color(ThemeKey.TAB_ACTIVE_BACKGROUND)};
+                color: {get_color(ThemeKey.TAB_ACTIVE_TEXT)};
+                border-bottom: 2px solid {get_color(ThemeKey.TAB_ACTIVE_BORDER)};
+            }}
+            QTabBar::tab:hover {{
+                background-color: {get_color(ThemeKey.MENU_ITEM_BACKGROUND_HOVER)};
+            }}
+        """
+        self.tab_widget.setStyleSheet(tab_style)
 
         # 通常登録タブ
         self.create_normal_register_tab()
@@ -72,6 +105,43 @@ class DataRegisterTabWidget(QWidget):
         # タブ切り替え時のアスペクト比固定解除処理＆一括登録タブ警告
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
         self.tab_widget.currentChanged.connect(self._on_tab_alert)
+    
+    def refresh_theme(self):
+        """テーマ変更時のスタイル更新"""
+        try:
+            # タブ全体スタイル再生成
+            tab_style = get_data_register_tab_style()
+            self.tab_widget.setStyleSheet(tab_style)
+
+            # 通常登録フォーム再適用
+            if hasattr(self, 'normal_widget') and self.normal_widget:
+                self.normal_widget.setStyleSheet(get_data_register_form_style())
+                # 子GroupBoxが個別スタイルを保持している場合はクリアして継承させる
+                for gb in self.normal_widget.findChildren(QGroupBox):
+                    gb.setStyleSheet("")
+            if hasattr(self, 'normal_register_scroll_area') and self.normal_register_scroll_area:
+                self.normal_register_scroll_area.setStyleSheet(get_scroll_area_style())
+
+            # 一括登録側スクロールエリア・内部ウィジェット再適用
+            if hasattr(self, 'batch_register_scroll_area') and self.batch_register_scroll_area:
+                self.batch_register_scroll_area.setStyleSheet(get_scroll_area_style())
+            if hasattr(self, 'batch_widget') and self.batch_widget and hasattr(self.batch_widget, 'refresh_theme'):
+                # 内部でさらに詳細要素を再適用
+                self.batch_widget.refresh_theme()
+
+            # 再描画
+            self.tab_widget.update()
+            # 大量項目を含むQComboBoxの高速化最適化
+            try:
+                from classes.utils.theme_perf_util import optimize_combo_boxes
+                optimize_combo_boxes(self, threshold=500)
+            except Exception:
+                pass
+            self.update()
+            logger.debug("DataRegisterTabWidget: 動的スタイル再適用完了")
+        except Exception as e:
+            logger.error(f"DataRegisterTabWidget: テーマ更新エラー: {e}")
+    
     def _on_tab_alert(self, index):
         """一括登録タブ選択時のみ警告を一度だけ表示"""
         if hasattr(self, '_batch_tab_index') and index == self._batch_tab_index and not self._batch_tab_alert_shown:
@@ -236,6 +306,8 @@ class DataRegisterTabWidget(QWidget):
             self.title, 
             self.button_style
         )
+        # 参照保持（テーマ変更時再スタイル用）
+        self.normal_widget = normal_widget
 
         # ▼ fieldset/legend風の枠組みをQGroupBoxで表現し、各エリアを分割
         # create_data_register_widget側で以下のQGroupBox構成になるよう修正してください:
@@ -244,8 +316,8 @@ class DataRegisterTabWidget(QWidget):
         # 3. 固有情報エリア（QGroupBox, title="固有情報"）
         # 4. データ情報入力エリア（QGroupBox, title="データ情報入力"）
 
-        # スタイルでfieldset/legend風に装飾
-        normal_widget.setStyleSheet(DATA_REGISTER_FORM_STYLE)
+        # スタイルでfieldset/legend風に装飾（動的スタイル適用）
+        normal_widget.setStyleSheet(get_data_register_form_style())
 
         # スクロールエリアでラップ
         scroll_area = QScrollArea()
@@ -258,9 +330,17 @@ class DataRegisterTabWidget(QWidget):
         scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         normal_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-        # スクロールエリアのスタイル
-        scroll_area.setStyleSheet(SCROLL_AREA_STYLE)
-
+        # スクロールエリアのスタイル（ThemeKey適用）
+        from classes.theme.theme_manager import get_color
+        from classes.theme.theme_keys import ThemeKey
+        scroll_area_style = f"""
+            QScrollArea {{
+                background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)};
+                border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)};
+            }}
+        """
+        scroll_area.setStyleSheet(scroll_area_style)
+        self.normal_register_scroll_area = scroll_area
         self.tab_widget.addTab(scroll_area, "通常登録")
         
     def create_batch_register_tab(self):
@@ -268,6 +348,7 @@ class DataRegisterTabWidget(QWidget):
         from .batch_register_widget import BatchRegisterWidget
         # 一括登録ウィジェット作成
         batch_widget = BatchRegisterWidget(self.parent_controller)
+        self.batch_widget = batch_widget
         # スクロールエリアでラップ
         scroll_area = QScrollArea()
         scroll_area.setWidget(batch_widget)
@@ -277,8 +358,18 @@ class DataRegisterTabWidget(QWidget):
         # スクロールエリアのサイズポリシー設定
         scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         batch_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        # スクロールエリアのスタイル
-        scroll_area.setStyleSheet(SCROLL_AREA_STYLE)
+        
+        # スクロールエリアのスタイル（ThemeKey適用）
+        from classes.theme.theme_manager import get_color
+        from classes.theme.theme_keys import ThemeKey
+        scroll_area_style = f"""
+            QScrollArea {{
+                background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)};
+                border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)};
+            }}
+        """
+        scroll_area.setStyleSheet(scroll_area_style)
+        self.batch_register_scroll_area = scroll_area
         self.tab_widget.addTab(scroll_area, "一括登録")
         
     def get_current_tab_index(self):

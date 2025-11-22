@@ -44,6 +44,7 @@ from classes.core.credential_store import (
     CredentialInfo, CredentialStoreHealthCheck
 )
 from classes.managers.app_config_manager import get_config_manager
+from classes.theme import get_color, ThemeKey
 
 # ログ設定
 logger = logging.getLogger(__name__)
@@ -72,13 +73,13 @@ class AutoLoginTabWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
         
-        # タイトル
-        title_label = QLabel("自動ログイン設定")
-        title_font = QFont()
-        title_font.setPointSize(14)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        layout.addWidget(title_label)
+        # タイトル - タブ内に表示されるため不要（コメントアウト）
+        # title_label = QLabel("自動ログイン設定")
+        # title_font = QFont()
+        # title_font.setPointSize(14)
+        # title_font.setBold(True)
+        # title_label.setFont(title_font)
+        # layout.addWidget(title_label)
         
         # セクションA: 状態表示
         self.setup_status_section(layout)
@@ -116,7 +117,7 @@ class AutoLoginTabWidget(QWidget):
         
         # 推奨メッセージ
         recommendation_label = QLabel("💡 OSキーチェーンが最も安全です")
-        recommendation_label.setStyleSheet("color: #0066cc; font-style: italic;")
+        recommendation_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_INFO)}; font-style: italic;")
         status_layout.addWidget(recommendation_label)
         
         layout.addWidget(status_group)
@@ -157,7 +158,7 @@ class AutoLoginTabWidget(QWidget):
         
         self.legacy_file_radio = QRadioButton("旧 login.txt（非推奨）")
         self.legacy_file_radio.setToolTip("平文保存のため非推奨")
-        self.legacy_file_radio.setStyleSheet("color: #cc6600;")
+        self.legacy_file_radio.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_WARNING)};")
         self.storage_group.addButton(self.legacy_file_radio, 3)
         storage_layout.addWidget(self.legacy_file_radio, 3, 1)
         
@@ -174,18 +175,18 @@ class AutoLoginTabWidget(QWidget):
         
         self.save_settings_button = QPushButton("💾 設定を保存")
         self.save_settings_button.clicked.connect(self.save_current_settings)
-        self.save_settings_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
+        self.save_settings_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                 font-weight: bold;
                 padding: 8px 20px;
                 border-radius: 4px;
                 font-size: 11pt;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
         """)
         self.save_settings_button.setToolTip("自動ログイン有効化と保存先設定を保存します")
         settings_button_layout.addWidget(self.save_settings_button)
@@ -235,7 +236,7 @@ class AutoLoginTabWidget(QWidget):
         # RDEページを開くボタン
         self.open_rde_button = QPushButton("RDEページを開く")
         self.open_rde_button.clicked.connect(self.open_rde_page)
-        self.open_rde_button.setStyleSheet("color: #0066cc;")
+        self.open_rde_button.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_INFO)};")
         #button_layout.addWidget(self.open_rde_button)
         
         creds_layout.addLayout(button_layout, 3, 0, 1, 2)
@@ -282,7 +283,11 @@ class AutoLoginTabWidget(QWidget):
         warning_label = QLabel(
             "⚠️ 旧ファイルは平文のため非推奨。設定から安全な保存先へ移行してください。"
         )
-        warning_label.setStyleSheet("color: #cc6600; font-weight: bold; padding: 10px; background-color: #fff3cd; border: 1px solid #ffeaa7; border-radius: 4px;")
+        warning_label.setStyleSheet(
+            f"color: {get_color(ThemeKey.NOTIFICATION_WARNING_TEXT)}; font-weight: bold; "
+            f"padding: 10px; background-color: {get_color(ThemeKey.NOTIFICATION_WARNING_BACKGROUND)}; "
+            f"border: 1px solid {get_color(ThemeKey.NOTIFICATION_WARNING_BORDER)}; border-radius: 4px;"
+        )
         warning_label.setWordWrap(True)
         legacy_layout.addWidget(warning_label)
         

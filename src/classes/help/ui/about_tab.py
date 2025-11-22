@@ -14,6 +14,8 @@ try:
     )
     from qt_compat.core import Qt
     from qt_compat.gui import QFont
+    from classes.theme import ThemeKey
+    from classes.theme.theme_manager import get_color
     PYQT5_AVAILABLE = True
 except ImportError:
     PYQT5_AVAILABLE = False
@@ -71,12 +73,12 @@ class AboutTab(QWidget):
         
         # 著作権
         copyright_label = QLabel(APP_COPYRIGHT)
-        copyright_label.setStyleSheet("color: #7f8c8d; margin-top: 10px;")
+        copyright_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin-top: 10px;")
         layout.addWidget(copyright_label)
         
         # 作者
         author_label = QLabel(f"開発: {APP_AUTHOR}")
-        author_label.setStyleSheet("color: #7f8c8d;")
+        author_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
         layout.addWidget(author_label)
         
         parent_layout.addWidget(group)

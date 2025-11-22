@@ -277,6 +277,15 @@ def create_group_select_widget(parent=None):
     
     # フィルタ選択UI
     filter_combo = QComboBox(parent)
+    # 強制スタイル（OSテーマ逆転時もライト/ダークをアプリ指定通りに）
+    try:
+        from classes.theme.theme_keys import ThemeKey as _TK
+        from classes.theme.theme_manager import get_color as _gc
+        filter_combo.setStyleSheet(
+            f"QComboBox {{ background-color: {_gc(_TK.COMBO_BACKGROUND)}; color: {_gc(_TK.TEXT_PRIMARY)}; border: 1px solid {_gc(_TK.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
+        )
+    except Exception:
+        pass
     #filter_combo.addItem("メンバー（何らかの役割を持つ）", "member")
     #filter_combo.addItem("フィルタなし（全てのグループ）", "none")
     filter_combo.addItem("管理者 または 管理者代理", "owner_assistant")
@@ -308,6 +317,12 @@ def create_group_select_widget(parent=None):
     
     # UIコンポーネントを先に定義（update_group_list関数で参照するため）
     combo = QComboBox(parent)
+    try:
+        combo.setStyleSheet(
+            f"QComboBox {{ background-color: {_gc(_TK.COMBO_BACKGROUND)}; color: {_gc(_TK.TEXT_PRIMARY)}; border: 1px solid {_gc(_TK.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
+        )
+    except Exception:
+        pass
     combo.setMinimumWidth(200)
     combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     combo.setEditable(True)
@@ -318,6 +333,12 @@ def create_group_select_widget(parent=None):
     
     # 課題番号選択欄を先に定義（update_group_list で参照するため）
     grant_combo = QComboBox(parent)
+    try:
+        grant_combo.setStyleSheet(
+            f"QComboBox {{ background-color: {_gc(_TK.COMBO_BACKGROUND)}; color: {_gc(_TK.TEXT_PRIMARY)}; border: 1px solid {_gc(_TK.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
+        )
+    except Exception:
+        pass
     grant_combo.setMinimumWidth(200)
     grant_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     grant_combo.setEditable(True)
@@ -502,6 +523,12 @@ def create_group_select_widget(parent=None):
     # テンプレート選択欄（所属組織のinstrumentを使うテンプレートのみ抽出）
     template_list = []
     template_combo = QComboBox(parent)
+    try:
+        template_combo.setStyleSheet(
+            f"QComboBox {{ background-color: {_gc(_TK.COMBO_BACKGROUND)}; color: {_gc(_TK.TEXT_PRIMARY)}; border: 1px solid {_gc(_TK.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
+        )
+    except Exception:
+        pass
     template_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     template_combo.setEditable(True)
     template_combo.setInsertPolicy(QComboBox.NoInsert)
@@ -599,13 +626,15 @@ def create_group_select_widget(parent=None):
     form_layout = QFormLayout()
     form_layout.setLabelAlignment(Qt.AlignRight)
     form_layout.setFormAlignment(Qt.AlignLeft | Qt.AlignTop)
-    # ラベルを太字に
-    label_filter = QLabel("フィルタ:"); label_filter.setStyleSheet("font-weight: bold;")
-    label_group = QLabel("グループ:"); label_group.setStyleSheet("font-weight: bold;")
-    label_grant = QLabel("課題番号:"); label_grant.setStyleSheet("font-weight: bold;")
-    label_name = QLabel("データセット名:"); label_name.setStyleSheet("font-weight: bold;")
-    label_embargo = QLabel("エンバーゴ期間終了日:"); label_embargo.setStyleSheet("font-weight: bold;")
-    label_template = QLabel("データセットテンプレート名:"); label_template.setStyleSheet("font-weight: bold;")
+    # ラベル太字スタイル (共通ヘルパー使用でQSS削減)
+    from classes.utils.label_style import apply_label_style
+    from classes.theme import ThemeKey as _TKey
+    label_filter = QLabel("フィルタ:"); apply_label_style(label_filter, _TKey.TEXT_PRIMARY, bold=True)
+    label_group = QLabel("グループ:"); apply_label_style(label_group, _TKey.TEXT_PRIMARY, bold=True)
+    label_grant = QLabel("課題番号:"); apply_label_style(label_grant, _TKey.TEXT_PRIMARY, bold=True)
+    label_name = QLabel("データセット名:"); apply_label_style(label_name, _TKey.TEXT_PRIMARY, bold=True)
+    label_embargo = QLabel("エンバーゴ期間終了日:"); apply_label_style(label_embargo, _TKey.TEXT_PRIMARY, bold=True)
+    label_template = QLabel("データセットテンプレート名:"); apply_label_style(label_template, _TKey.TEXT_PRIMARY, bold=True)
     form_layout.addRow(label_filter, filter_combo)
     form_layout.addRow(label_group, combo)
     form_layout.addRow(label_grant, grant_combo)
@@ -614,29 +643,14 @@ def create_group_select_widget(parent=None):
     form_layout.addRow(label_template, template_combo)
     form_layout.addRow(share_core_scope_checkbox)
     form_layout.addRow(anonymize_checkbox)
-    # プレースホルダー色を緑系に
-    combo.lineEdit().setStyleSheet("color: #228B22;")
-    grant_combo.lineEdit().setStyleSheet("color: #228B22;")
-    name_edit.setStyleSheet("color: #228B22;")
-    embargo_edit.setStyleSheet("color: #228B22;")
-    template_combo.lineEdit().setStyleSheet("color: #228B22;")
+    # インラインの固定色指定 (#228B22 など) を撤去しテーマ統一へ移行
+    # 必要なら placeholder などは ThemeKey.TEXT_PLACEHOLDER へ後続で再指定可能
+    from classes.theme.theme_keys import ThemeKey
+    from classes.theme.theme_manager import get_color
     open_btn = QPushButton("データセット開設", parent)
-    open_btn.setStyleSheet("""
-        QPushButton {
-            background-color: #1976d2;
-            color: white;
-            font-weight: bold;
-            font-size: 13px;
-            border-radius: 6px;
-            padding: 8px 20px;
-        }
-        QPushButton:hover {
-            background-color: #1565c0;
-        }
-        QPushButton:pressed {
-            background-color: #0d47a1;
-        }
-    """)
+    # グローバルQSSのボタンvariantを使用
+    open_btn.setProperty("variant", "primary")
+    open_btn.setStyleSheet("font-size: 13px; padding: 8px 20px; border-radius: 6px;")
     form_layout.addRow(open_btn)
     container = QWidget(parent)
     container.setLayout(form_layout)

@@ -13,6 +13,7 @@ try:
         QWidget, QVBoxLayout, QLabel
     )
     from qt_compat.gui import QFont
+    from classes.theme import get_color, ThemeKey
     PYQT5_AVAILABLE = True
 except ImportError:
     PYQT5_AVAILABLE = False
@@ -53,9 +54,9 @@ class EquipmentTab(QWidget):
                 f"この機能を使用するには、アプリケーションを再起動してください。"
             )
             error_label.setStyleSheet(
-                "font-weight: bold; color: #d32f2f; "
-                "background-color: #ffebee; padding: 20px; "
-                "border-radius: 4px; border: 2px solid #ef5350;"
+                f"font-weight: bold; color: {get_color(ThemeKey.PANEL_ERROR_TEXT)}; "
+                f"background-color: {get_color(ThemeKey.PANEL_ERROR_BACKGROUND)}; padding: 20px; "
+                f"border-radius: 4px; border: 2px solid {get_color(ThemeKey.PANEL_ERROR_BORDER)};"
             )
             error_label.setWordWrap(True)
             layout.addWidget(error_label)
@@ -72,9 +73,9 @@ class EquipmentTab(QWidget):
                 f"詳細はログファイルを確認してください。"
             )
             error_label.setStyleSheet(
-                "font-weight: bold; color: #d32f2f; "
-                "background-color: #ffebee; padding: 20px; "
-                "border-radius: 4px; border: 2px solid #ef5350;"
+                f"font-weight: bold; color: {get_color(ThemeKey.PANEL_ERROR_TEXT)}; "
+                f"background-color: {get_color(ThemeKey.PANEL_ERROR_BACKGROUND)}; padding: 20px; "
+                f"border-radius: 4px; border: 2px solid {get_color(ThemeKey.PANEL_ERROR_BORDER)};"
             )
             error_label.setWordWrap(True)
             layout.addWidget(error_label)

@@ -17,6 +17,7 @@ from qt_compat.widgets import (
 from qt_compat.core import Qt, Signal, QThread
 
 from config.common import OUTPUT_DIR, get_dynamic_file_path
+from classes.theme import get_color, ThemeKey
 from classes.managers.log_manager import get_logger
 from ..core.auth_manager import get_auth_manager
 from ..core.portal_client import PortalClient
@@ -86,31 +87,19 @@ class DatasetUploadTab(QWidget):
         self.status_text.setReadOnly(True)
         self.status_text.setMaximumHeight(200)
         self.status_text.setPlaceholderText("アップロードログがここに表示されます...")
+        self.status_text.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                color: {get_color(ThemeKey.INPUT_TEXT)};
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                border-radius: 4px;
+                padding: 8px;
+            }}
+        """)
         
         # 環境選択セクション
         env_group = self._create_environment_selector()
         layout.addWidget(env_group)
-        
-        # 初期環境で portal_client を初期化
-        if self.env_combo.count() > 0:
-            initial_env = self.env_combo.currentData()
-            if initial_env:
-                self.portal_client = PortalClient(environment=initial_env)
-                logger.info(f"portal_client を初期環境で初期化: {initial_env}")
-                
-                # 認証情報チェックと自動読込
-                if self.auth_manager.has_credentials(initial_env):
-                    credentials = self.auth_manager.get_credentials(initial_env)
-                    if credentials:
-                        self.portal_client.set_credentials(credentials)
-                        self._log_status(f"✅ 保存済み認証情報を読み込みました")
-                        logger.info(f"初期環境の認証情報を設定: {initial_env}")
-                else:
-                    self._log_status(
-                        f"⚠️ {self.env_combo.currentText()}の認証情報が保存されていません。\n"
-                        "「ログイン設定」タブで認証情報を保存してください。",
-                        error=True
-                    )
         
         # ファイル選択セクション
         file_group = self._create_file_selector()
@@ -137,6 +126,23 @@ class DatasetUploadTab(QWidget):
         self._on_file_mode_changed()
         
         layout.addStretch()
+    
+    def _apply_status_style(self):
+        """ステータステキストスタイルを適用"""
+        self.status_text.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                color: {get_color(ThemeKey.INPUT_TEXT)};
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                border-radius: 4px;
+                padding: 8px;
+            }}
+        """)
+    
+    def refresh_theme(self):
+        """テーマ変更時のスタイル更新"""
+        self._apply_status_style()
+        self.update()
     
     def _create_environment_selector(self) -> QGroupBox:
         """環境選択セクション"""
@@ -242,7 +248,7 @@ class DatasetUploadTab(QWidget):
         
         # 選択されたデータセット情報表示
         self.dataset_info_label = QLabel("")
-        self.dataset_info_label.setStyleSheet("color: #666; font-size: 10px;")
+        self.dataset_info_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 10px;")
         self.dataset_info_label.setWordWrap(True)
         dataset_layout.addWidget(self.dataset_info_label)
         
@@ -252,21 +258,21 @@ class DatasetUploadTab(QWidget):
         self.bulk_download_btn = QPushButton("📥 画像ファイル一括取得")
         self.bulk_download_btn.setEnabled(False)
         self.bulk_download_btn.clicked.connect(self._on_bulk_download)
-        self.bulk_download_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
+        self.bulk_download_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
                 padding: 8px 16px;
                 border: none;
                 border-radius: 4px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            }}
         """)
         file_download_row.addWidget(self.bulk_download_btn)
         
@@ -315,16 +321,16 @@ class DatasetUploadTab(QWidget):
         self.file_list_widget.currentItemChanged.connect(self._on_file_item_selection_changed)  # カーソルキー対応
         self.file_list_widget.installEventFilter(self)  # キーボードイベントフィルタ
         # スタイルシート: ホバー時の背景色を少し濃く、選択時は更に濃く
-        self.file_list_widget.setStyleSheet("""
-            QListWidget::item:hover {
-                background-color: #e8f4f8;
-            }
-            QListWidget::item:selected {
-                background-color: #d0e8f0;
-            }
-            QListWidget::item:selected:hover {
-                background-color: #d0e8f0;  /* 選択時はホバー色を無効化 */
-            }
+        self.file_list_widget.setStyleSheet(f"""
+            QListWidget::item:hover {{
+                background-color: {get_color(ThemeKey.PANEL_INFO_BACKGROUND)};
+            }}
+            QListWidget::item:selected {{
+                background-color: {get_color(ThemeKey.TABLE_ROW_BACKGROUND_HOVER)};
+            }}
+            QListWidget::item:selected:hover {{
+                background-color: {get_color(ThemeKey.TABLE_ROW_BACKGROUND_HOVER)};  /* 選択時はホバー色を無効化 */
+            }}
         """)
         file_list_left_layout.addWidget(self.file_list_widget)
         
@@ -336,13 +342,13 @@ class DatasetUploadTab(QWidget):
         thumbnail_layout.setContentsMargins(10, 0, 0, 0)
         
         thumbnail_title = QLabel("プレビュー")
-        thumbnail_title.setStyleSheet("font-weight: bold; color: #666;")
+        thumbnail_title.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_MUTED)};")
         thumbnail_layout.addWidget(thumbnail_title)
         
         self.thumbnail_label = QLabel()
         self.thumbnail_label.setFixedSize(200, 200)
         self.thumbnail_label.setAlignment(Qt.AlignCenter)
-        self.thumbnail_label.setStyleSheet("border: 1px solid #ccc; background: #f0f0f0;")
+        self.thumbnail_label.setStyleSheet(f"border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)}; background: {get_color(ThemeKey.PANEL_BACKGROUND)};")
         self.thumbnail_label.setText("ファイルにマウスオーバーで\nプレビューを表示")
         thumbnail_layout.addWidget(self.thumbnail_label)
         thumbnail_layout.addStretch()
@@ -359,21 +365,21 @@ class DatasetUploadTab(QWidget):
         self.upload_images_btn.setEnabled(False)
         self.upload_images_btn.clicked.connect(self._on_upload_images)
         self.upload_images_btn.setToolTip("書誌情報JSONをアップロード後に使用可能になります")
-        self.upload_images_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #FF9800;
-                color: white;
+        self.upload_images_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
                 padding: 8px 16px;
                 border: none;
                 border-radius: 4px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #F57C00;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            }}
         """)
         image_upload_row.addWidget(self.upload_images_btn)
         image_upload_row.addStretch()
@@ -401,7 +407,7 @@ class DatasetUploadTab(QWidget):
         info_label = QLabel(
             "💡 課題番号は元のJSONファイルから自動的に取得されます"
         )
-        info_label.setStyleSheet("color: #666; font-size: 10px;")
+        info_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 10px;")
         layout.addWidget(info_label)
         
         group.setLayout(layout)
@@ -422,22 +428,22 @@ class DatasetUploadTab(QWidget):
         self.upload_btn = QPushButton("📤 書誌情報JSONアップロード")
         self.upload_btn.setEnabled(False)
         self.upload_btn.clicked.connect(self._on_upload)
-        self.upload_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
+        self.upload_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                 padding: 10px 20px;
                 border: none;
                 border-radius: 4px;
                 font-weight: bold;
                 font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            }}
         """)
         layout.addWidget(self.upload_btn)
         
@@ -446,22 +452,22 @@ class DatasetUploadTab(QWidget):
         self.edit_portal_btn.setEnabled(False)
         self.edit_portal_btn.clicked.connect(self._on_edit_portal)
         self.edit_portal_btn.setToolTip("データポータルに登録済みのエントリを修正します")
-        self.edit_portal_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
+        self.edit_portal_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
                 padding: 10px 20px;
                 border: none;
                 border-radius: 4px;
                 font-weight: bold;
                 font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            }}
         """)
         layout.addWidget(self.edit_portal_btn)
         
@@ -470,22 +476,22 @@ class DatasetUploadTab(QWidget):
         self.toggle_status_btn.setEnabled(False)
         self.toggle_status_btn.clicked.connect(self._on_toggle_status)
         self.toggle_status_btn.setToolTip("データポータルの公開/非公開ステータスを切り替えます")
-        self.toggle_status_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #FF9800;
-                color: white;
+        self.toggle_status_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
                 padding: 10px 20px;
                 border: none;
                 border-radius: 4px;
                 font-weight: bold;
                 font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #F57C00;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            }}
         """)
         layout.addWidget(self.toggle_status_btn)
         
@@ -1422,7 +1428,7 @@ class DatasetUploadTab(QWidget):
         if error:
             style = "color: red;"
         else:
-            style = "color: black;"
+            style = f"color: {get_color(ThemeKey.INPUT_TEXT)};"
         
         self.status_text.append(f'<span style="{style}">{message}</span>')
         logger.info(message)

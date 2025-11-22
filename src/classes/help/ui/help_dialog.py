@@ -4,6 +4,8 @@ About（ライセンス）と使用方法を表示
 """
 
 import logging
+from classes.theme import ThemeKey
+from classes.theme.theme_manager import get_color
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +106,7 @@ class HelpDialog(QDialog):
         layout = QVBoxLayout(widget)
         
         label = QLabel(message)
-        label.setStyleSheet("color: red; font-weight: bold;")
+        label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;")
         layout.addWidget(label)
         layout.addStretch()
         

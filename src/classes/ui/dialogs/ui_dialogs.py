@@ -4,11 +4,13 @@ UIControllerから分離したダイアログクラス群
 """
 import logging
 from qt_compat.widgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, 
+    QDialog, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
     QLabel, QShortcut, QApplication
 )
 from qt_compat.core import Qt
 from qt_compat.gui import QFont, QKeySequence
+from classes.theme import get_color, ThemeKey
+from classes.utils.button_styles import get_button_style
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -32,7 +34,7 @@ class TextAreaExpandDialog:
         
         # タイトルラベル
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #1976d2; margin-bottom: 10px;")
+        title_label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {get_color(ThemeKey.TEXT_PRIMARY)}; margin-bottom: 10px;")
         layout.addWidget(title_label)
         
         # テキストエリア
@@ -55,14 +57,14 @@ class TextAreaExpandDialog:
         self.text_area.setReadOnly(not editable)
         
         # スタイル設定
-        self.text_area.setStyleSheet("""
-            QTextEdit {
-                border: 1px solid #ddd;
+        self.text_area.setStyleSheet(f"""
+            QTextEdit {{
+                border: 1px solid {get_color(ThemeKey.BORDER_LIGHT)};
                 border-radius: 6px;
                 padding: 8px;
-                background-color: white;
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
                 line-height: 1.4;
-            }
+            }}
         """)
         
         layout.addWidget(self.text_area)
@@ -72,13 +74,13 @@ class TextAreaExpandDialog:
         
         # 全選択ボタン（Ctrl+Aショートカット）
         select_all_btn = QPushButton("全選択 (Ctrl+A)")
-        select_all_btn.setStyleSheet("background-color: #4caf50; color: white; padding: 8px 16px; border-radius: 4px; font-weight: bold;")
+        select_all_btn.setStyleSheet(get_button_style('success'))
         select_all_btn.clicked.connect(self.text_area.selectAll)
         button_layout.addWidget(select_all_btn)
         
         # コピーボタン（Ctrl+Cショートカット）
         copy_btn = QPushButton("コピー (Ctrl+C)")
-        copy_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 8px 16px; border-radius: 4px; font-weight: bold;")
+        copy_btn.setStyleSheet(get_button_style('primary'))
         copy_btn.clicked.connect(self._copy_text)
         button_layout.addWidget(copy_btn)
         
@@ -86,7 +88,7 @@ class TextAreaExpandDialog:
         
         # 閉じるボタン（Escapeキー）
         close_btn = QPushButton("閉じる (Esc)")
-        close_btn.setStyleSheet("background-color: #757575; color: white; padding: 8px 16px; border-radius: 4px; font-weight: bold;")
+        close_btn.setStyleSheet(get_button_style('neutral'))
         close_btn.clicked.connect(self._close_dialog)
         button_layout.addWidget(close_btn)
         
@@ -179,7 +181,7 @@ class PopupDialog:
         
         # タイトルラベル
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1976d2; margin-bottom: 15px;")
+        title_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {get_color(ThemeKey.TEXT_PRIMARY)}; margin-bottom: 15px;")
         layout.addWidget(title_label)
         
         # テキストエリア
@@ -197,16 +199,16 @@ class PopupDialog:
         self.text_area.setReadOnly(True)
         
         # スタイル設定
-        self.text_area.setStyleSheet("""
-            QTextEdit {
-                border: 2px solid #e0e0e0;
+        self.text_area.setStyleSheet(f"""
+            QTextEdit {{
+                border: 2px solid {get_color(ThemeKey.BORDER_LIGHT)};
                 border-radius: 8px;
                 padding: 12px;
-                background-color: #fafafa;
+                background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)};
                 line-height: 1.5;
-                selection-background-color: #2196f3;
+                selection-background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
                 selection-color: white;
-            }
+            }}
         """)
         
         layout.addWidget(self.text_area)
@@ -216,37 +218,13 @@ class PopupDialog:
         
         # 全選択ボタン
         select_all_btn = QPushButton("全選択 (Ctrl+A)")
-        select_all_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4caf50;
-                color: white;
-                padding: 10px 20px;
-                border-radius: 6px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
+        select_all_btn.setStyleSheet(get_button_style('success'))
         select_all_btn.clicked.connect(self.text_area.selectAll)
         button_layout.addWidget(select_all_btn)
         
         # コピーボタン
         copy_btn = QPushButton("コピー (Ctrl+C)")
-        copy_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196f3;
-                color: white;
-                padding: 10px 20px;
-                border-radius: 6px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #1976d2;
-            }
-        """)
+        copy_btn.setStyleSheet(get_button_style('primary'))
         copy_btn.clicked.connect(self._copy_text)
         button_layout.addWidget(copy_btn)
         
@@ -254,19 +232,7 @@ class PopupDialog:
         
         # 閉じるボタン
         close_btn = QPushButton("閉じる (Esc)")
-        close_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #757575;
-                color: white;
-                padding: 10px 20px;
-                border-radius: 6px;
-                font-weight: bold;
-                font-size: 12px;
-            }
-            QPushButton:hover {
-                background-color: #616161;
-            }
-        """)
+        close_btn.setStyleSheet(get_button_style('neutral'))
         close_btn.clicked.connect(self.dialog.close)
         button_layout.addWidget(close_btn)
         

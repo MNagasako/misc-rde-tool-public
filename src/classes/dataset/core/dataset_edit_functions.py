@@ -7,6 +7,8 @@ from qt_compat.widgets import QMessageBox, QDialog, QVBoxLayout, QTextEdit, QPus
 from qt_compat.core import QDate, QTimer, Qt
 from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
 from core.bearer_token_manager import BearerTokenManager
+from classes.theme.theme_keys import ThemeKey
+from classes.theme.theme_manager import get_color
 
 import logging
 
@@ -492,9 +494,9 @@ def show_response_dialog(parent, title, message, response_text):
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(10)
         
-        # タイトルラベル
+        # タイトルラベル（情報色に統一）
         title_label = QLabel(f"{title} - レスポンス詳細")
-        title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #1976d2; margin-bottom: 10px;")
+        title_label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)}; margin-bottom: 10px;")
         layout.addWidget(title_label)
         
         # レスポンステキストエリア（スクロール対応）
@@ -516,15 +518,15 @@ def show_response_dialog(parent, title, message, response_text):
         font = QFont("Consolas", 10)
         text_area.setFont(font)
         
-        # スタイル設定
-        text_area.setStyleSheet("""
-            QTextEdit {
-                border: 1px solid #ddd;
+        # スタイル設定（グローバルの入力系トーンに合わせる）
+        text_area.setStyleSheet(f"""
+            QTextEdit {{
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
                 border-radius: 6px;
                 padding: 8px;
-                background-color: white;
-                line-height: 1.4;
-            }
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                color: {get_color(ThemeKey.INPUT_TEXT)};
+            }}
         """)
         
         layout.addWidget(text_area)
@@ -535,13 +537,37 @@ def show_response_dialog(parent, title, message, response_text):
         
         # 全選択ボタン
         select_all_btn = QPushButton("全選択 (Ctrl+A)")
-        select_all_btn.setStyleSheet("background-color: #4caf50; color: white; padding: 8px 16px; border-radius: 4px; font-weight: bold;")
+        select_all_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+                border: 1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)};
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
+        """)
         select_all_btn.clicked.connect(text_area.selectAll)
         button_layout.addWidget(select_all_btn)
         
         # コピーボタン
         copy_btn = QPushButton("コピー (Ctrl+C)")
-        copy_btn.setStyleSheet("background-color: #2196f3; color: white; padding: 8px 16px; border-radius: 4px; font-weight: bold;")
+        copy_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+                border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BORDER)};
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+            }}
+        """)
         
         def copy_text():
             from qt_compat.widgets import QApplication
@@ -560,7 +586,19 @@ def show_response_dialog(parent, title, message, response_text):
         
         # 閉じるボタン
         close_btn = QPushButton("閉じる (Esc)")
-        close_btn.setStyleSheet("background-color: #757575; color: white; padding: 8px 16px; border-radius: 4px; font-weight: bold;")
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_NEUTRAL_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DEFAULT_TEXT)};
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+                border: 1px solid {get_color(ThemeKey.BUTTON_DEFAULT_BORDER)};
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_NEUTRAL_BACKGROUND_HOVER)};
+            }}
+        """)
         close_btn.clicked.connect(dlg.close)
         button_layout.addWidget(close_btn)
         

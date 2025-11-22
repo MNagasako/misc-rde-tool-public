@@ -14,6 +14,8 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt
 
+from classes.theme import get_color, ThemeKey
+
 from classes.managers.log_manager import get_logger
 from classes.data_portal.ui.widgets import FilterableCheckboxTable
 
@@ -86,16 +88,16 @@ class PortalEditDialog(QDialog):
         
         self.save_btn = QPushButton("保存")
         self.save_btn.clicked.connect(self._on_save)
-        self.save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
+        self.save_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                 padding: 8px 16px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
         """)
         button_layout.addWidget(self.save_btn)
         

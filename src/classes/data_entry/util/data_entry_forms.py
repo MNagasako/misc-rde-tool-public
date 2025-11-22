@@ -13,6 +13,8 @@ import os
 from config.common import get_dynamic_file_path
 
 from classes.utils.schema_form_util import create_schema_form
+from classes.theme.theme_keys import ThemeKey
+from classes.theme.theme_manager import get_color
 
 
 def create_sample_form(parent=None):
@@ -25,14 +27,14 @@ def create_sample_form(parent=None):
         sample_frame.setObjectName("sample_frame")
         sample_frame.setFrameStyle(QFrame.Box | QFrame.Raised)
         sample_frame.setLineWidth(5)  # 太いボーダー
-        sample_frame.setStyleSheet("""
-            QFrame#sample_frame {
-                background-color: #FF5722;
-                border: 5px solid #D32F2F;
+        sample_frame.setStyleSheet(f"""
+            QFrame#sample_frame {{
+                background-color: {get_color(ThemeKey.PANEL_WARNING_BACKGROUND)};
+                border: 5px solid {get_color(ThemeKey.PANEL_WARNING_BORDER)};
                 border-radius: 10px;
                 margin: 10px;
                 padding: 20px;
-            }
+            }}
         """)
         
         # 固定サイズで強制表示
@@ -47,13 +49,21 @@ def create_sample_form(parent=None):
         # 超目立つタイトル
         title_label = QLabel("� 試料フォーム表示テスト - 見えていますか？ 🚨")
         title_label.setFont(QFont("", 16, QFont.Bold))
-        title_label.setStyleSheet("color: #FFFFFF; background-color: #D32F2F; padding: 15px; border-radius: 5px;")
+        title_label.setStyleSheet(
+            f"color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)}; "
+            f"background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)}; "
+            "padding: 15px; border-radius: 5px;"
+        )
         layout.addWidget(title_label)
         
         # 大きなテストメッセージ
         test_label = QLabel("✅✅✅ このオレンジ色のボックスが見えれば成功です！✅✅✅")
         test_label.setFont(QFont("", 14, QFont.Bold))
-        test_label.setStyleSheet("color: #FFFFFF; background-color: #FF5722; padding: 30px; border: 3px solid #FFFFFF;")
+        test_label.setStyleSheet(
+            f"color: {get_color(ThemeKey.PANEL_WARNING_TEXT)}; "
+            f"background-color: {get_color(ThemeKey.PANEL_WARNING_BACKGROUND)}; "
+            f"padding: 30px; border: 3px solid {get_color(ThemeKey.PANEL_WARNING_BORDER)};"
+        )
         test_label.setFixedHeight(150)
         layout.addWidget(test_label)
         

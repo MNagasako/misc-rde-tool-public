@@ -11,7 +11,8 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt, Signal
 from classes.dataset.util.ai_extension_helper import load_prompt_file, save_prompt_file
-
+from classes.theme.theme_keys import ThemeKey
+from classes.theme.theme_manager import get_color
 
 class AIExtensionPromptEditDialog(QDialog):
     """AI拡張プロンプト編集ダイアログ"""
@@ -47,11 +48,15 @@ class AIExtensionPromptEditDialog(QDialog):
         
         if description:
             desc_label = QLabel(f"説明: {description}")
-            desc_label.setStyleSheet("color: #666; margin: 5px 10px;")
+            desc_label.setStyleSheet(
+                f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin: 5px 10px;"
+            )
             header_layout.addWidget(desc_label)
         
         file_label = QLabel(f"ファイル: {self.prompt_file_path}")
-        file_label.setStyleSheet("font-family: 'Consolas'; color: #888; margin: 5px 10px;")
+        file_label.setStyleSheet(
+            f"font-family: 'Consolas'; color: {get_color(ThemeKey.TEXT_MUTED)}; margin: 5px 10px;"
+        )
         header_layout.addWidget(file_label)
         
         layout.addLayout(header_layout)
@@ -79,52 +84,13 @@ class AIExtensionPromptEditDialog(QDialog):
         button_layout = QHBoxLayout()
         
         self.save_button = QPushButton("保存")
-        self.save_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-weight: bold;
-                border: none;
-                border-radius: 5px;
-                padding: 8px 16px;
-                min-height: 30px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
+        self.save_button.setProperty("variant", "success")
         
         self.cancel_button = QPushButton("キャンセル")
-        self.cancel_button.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                font-weight: bold;
-                border: none;
-                border-radius: 5px;
-                padding: 8px 16px;
-                min-height: 30px;
-            }
-            QPushButton:hover {
-                background-color: #da190b;
-            }
-        """)
+        self.cancel_button.setProperty("variant", "secondary")
         
         self.preview_button = QPushButton("プレビュー更新")
-        self.preview_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                font-weight: bold;
-                border: none;
-                border-radius: 5px;
-                padding: 8px 16px;
-                min-height: 30px;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-        """)
+        self.preview_button.setProperty("variant", "info")
         
         button_layout.addWidget(self.preview_button)
         button_layout.addStretch()
@@ -141,22 +107,24 @@ class AIExtensionPromptEditDialog(QDialog):
     def setup_edit_tab(self, tab_widget):
         """プロンプト編集タブのセットアップ"""
         layout = QVBoxLayout(tab_widget)
-        
+
         # 編集エリア
         edit_label = QLabel("プロンプトテンプレート:")
         edit_label.setStyleSheet("font-weight: bold; margin: 5px;")
         layout.addWidget(edit_label)
-        
+
         self.prompt_edit = QTextEdit()
-        self.prompt_edit.setPlaceholderText("プロンプトテンプレートを入力してください...\n\nテンプレート変数の例:\n{name} - データセット名\n{type} - データセットタイプ\n{description} - 説明")
+        self.prompt_edit.setPlaceholderText(
+            "プロンプトテンプレートを入力してください...\n\nテンプレート変数の例:\n{name} - データセット名\n{type} - データセットタイプ\n{description} - 説明"
+        )
         self.prompt_edit.setMinimumHeight(400)
         layout.addWidget(self.prompt_edit)
-        
+
         # ヘルプ情報
         help_group = QGroupBox("ヘルプ")
         help_layout = QVBoxLayout(help_group)
-        
-        help_text = QLabel("""
+        help_text = QLabel(
+            """
 <b>基本テンプレート変数:</b><br>
 • <code>{name}</code> - データセット名<br>
 • <code>{type}</code> - データセットタイプ<br>
@@ -165,91 +133,15 @@ class AIExtensionPromptEditDialog(QDialog):
 • <code>{experiment_data}</code> - 実験データ（JSON形式）<br>
 • <code>{material_index_data}</code> - マテリアルインデックスデータ<br>
 • <code>{equipment_data}</code> - 装置情報データ<br><br>
-<b>ARIM利用報告書データ（課題番号から自動取得）:</b><br>
-• <code>{arim_report_title}</code> - 利用課題名<br>
-• <code>{arim_report_institute}</code> - 実施機関<br>
-• <code>{arim_report_tech_area}</code> - 技術領域<br>
-• <code>{arim_report_keywords}</code> - キーワード<br>
-• <code>{arim_report_abstract}</code> - 概要・目的・実施内容<br>
-• <code>{arim_report_experimental}</code> - 実験内容<br>
-• <code>{arim_report_results}</code> - 結果と考察<br>
-• <code>{arim_report_user_name}</code> - 利用者名<br>
-• <code>{arim_report_affiliation}</code> - 所属機関<br>
-• <code>{arim_report_remarks}</code> - その他・特記事項<br><br>
-<b>注意事項:</b><br>
-• テンプレート変数は波括弧 { } で囲んでください<br>
-• 存在しない変数は "未設定" に置換されます<br>
-• ARIM報告書データは課題番号があるときのみ取得されます<br>
-• AIが理解しやすい構造化された形式で記述してください
-        """)
+<b>ARIM利用報告書データ:</b><br>
+• <code>{arim_report_title}</code> - 利用課題名 など
+            """
+        )
         help_text.setWordWrap(True)
-        help_text.setStyleSheet("background-color: #f9f9f9; padding: 10px; border-radius: 5px;")
         help_layout.addWidget(help_text)
-        
         layout.addWidget(help_group)
-        
-    def setup_variables_tab(self, tab_widget):
-        """テンプレート変数タブのセットアップ"""
-        layout = QVBoxLayout(tab_widget)
-        
-        # 変数一覧
-        variables_label = QLabel("利用可能なテンプレート変数:")
-        variables_label.setStyleSheet("font-weight: bold; margin: 5px;")
-        layout.addWidget(variables_label)
-        
-        self.variables_list = QListWidget()
-        self.variables_list.setMaximumHeight(200)
-        
-        # 利用可能な変数リスト
-        variables = [
-            ("name", "データセット名", "例: マテリアル特性データセット"),
-            ("type", "データセットタイプ", "例: mixed, experimental, computational"),
-            ("grant_number", "課題番号", "例: JPMXP1234567890"),
-            ("description", "既存の説明文", "例: 既存のデータセット説明"),
-            ("experiment_data", "実験データ（JSON形式）", "実験データの詳細情報"),
-            ("material_index_data", "マテリアルインデックス", "材料分類データ"),
-            ("equipment_data", "装置情報", "使用された実験装置の情報"),
-            ("dataset_existing_info", "データセット既存情報", "RDEから取得した既存情報"),
-            # ARIM利用報告書データ
-            ("arim_report_title", "ARIM利用課題名", "課題番号から取得される利用課題名"),
-            ("arim_report_institute", "ARIM実施機関", "例: 東北大学 / Tohoku Univ."),
-            ("arim_report_tech_area", "ARIM技術領域", "横断技術領域・重要技術領域"),
-            ("arim_report_keywords", "ARIMキーワード", "例: シリコンキャパシタ,水素アニール"),
-            ("arim_report_abstract", "ARIM概要", "目的・用途・実施内容"),
-            ("arim_report_experimental", "ARIM実験内容", "実験手法・実施内容"),
-            ("arim_report_results", "ARIM結果と考察", "実験結果・考察・成果"),
-            ("arim_report_user_name", "ARIM利用者名", "課題申請者名"),
-            ("arim_report_affiliation", "ARIM所属機関", "利用者の所属機関"),
-            ("arim_report_remarks", "ARIM特記事項", "謝辞・参考文献等"),
-            ("arim_extension_data", "ARIM拡張データ", "ARIM課題関連情報"),
-            ("file_tree", "ファイル構成", "データセット内のファイル構造")
-        ]
-        
-        for var_name, var_desc, var_example in variables:
-            item_text = f"{{{var_name}}} - {var_desc}\n    {var_example}"
-            item = QListWidgetItem(item_text)
-            self.variables_list.addItem(item)
-        
-        layout.addWidget(self.variables_list)
-        
-        # 変数挿入ボタン
-        insert_layout = QHBoxLayout()
-        
-        self.insert_var_edit = QLineEdit()
-        self.insert_var_edit.setPlaceholderText("変数名を入力（例: name）")
-        
-        insert_button = QPushButton("変数挿入")
-        insert_button.clicked.connect(self.insert_variable)
-        
-        insert_layout.addWidget(QLabel("変数挿入:"))
-        insert_layout.addWidget(self.insert_var_edit)
-        insert_layout.addWidget(insert_button)
-        insert_layout.addStretch()
-        
-        layout.addLayout(insert_layout)
-        
-        # 変数リスト選択時の挿入
-        self.variables_list.itemDoubleClicked.connect(self.insert_variable_from_list)
+
+        # 変数リスト（挿入支援）は変数タブで構築
         
     def setup_preview_tab(self, tab_widget):
         """プレビュータブのセットアップ"""
@@ -267,9 +159,49 @@ class AIExtensionPromptEditDialog(QDialog):
         
         # サンプルデータ情報
         sample_info = QLabel("※プレビューではサンプルデータを使用しています。実際のAI問い合わせ時には現在のデータセット情報が使用されます。")
-        sample_info.setStyleSheet("color: #666; font-style: italic; margin: 5px;")
+        sample_info.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-style: italic; margin: 5px;"
+        )
         sample_info.setWordWrap(True)
         layout.addWidget(sample_info)
+
+    def setup_variables_tab(self, tab_widget):
+        """テンプレート変数タブのセットアップ"""
+        layout = QVBoxLayout(tab_widget)
+
+        # 利用可能な変数リスト
+        self.variables_list = QListWidget()
+        variables = [
+            ("name", "データセット名", "サンプルデータセット"),
+            ("type", "データセットタイプ", "experimental"),
+            ("grant_number", "課題番号", "JPMXP1234567890"),
+            ("description", "説明", "説明文..."),
+            ("experiment_data", "実験データ", "{\"測定項目\": \"材料特性\"}"),
+            ("material_index_data", "マテリアルインデックスデータ", "{\"材料分類\": \"金属\"}"),
+            ("equipment_data", "装置情報データ", "{\"装置名\": \"分析装置A\"}"),
+            ("arim_report_title", "ARIM 利用課題名", "..."),
+            ("arim_extension_data", "ARIM 拡張データ", "..."),
+            ("file_tree", "ファイル構成", "..."),
+        ]
+        for var_name, var_desc, var_example in variables:
+            item_text = f"{{{var_name}}} - {var_desc}\n    {var_example}"
+            item = QListWidgetItem(item_text)
+            self.variables_list.addItem(item)
+        layout.addWidget(self.variables_list)
+
+        # 変数挿入ボタン
+        insert_layout = QHBoxLayout()
+        self.insert_var_edit = QLineEdit()
+        self.insert_var_edit.setPlaceholderText("変数名を入力（例: name）")
+        insert_button = QPushButton("変数挿入")
+        insert_button.clicked.connect(self.insert_variable)
+        insert_layout.addWidget(QLabel("変数挿入:"))
+        insert_layout.addWidget(self.insert_var_edit)
+        insert_layout.addWidget(insert_button)
+        layout.addLayout(insert_layout)
+
+        # 変数リスト選択時の挿入
+        self.variables_list.itemDoubleClicked.connect(self.insert_variable_from_list)
         
     def load_prompt_content(self):
         """プロンプトファイルの内容を読み込む"""

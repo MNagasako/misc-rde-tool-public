@@ -499,7 +499,9 @@ def create_dataset_dropdown_all(dataset_json_path, parent=None, global_share_fil
     
     # 状況表示ラベル
     status_label = QLabel(f"表示中: {filtered_count}/{total_count} 件")
-    status_label.setStyleSheet("color: #666; font-size: 9pt;")
+    from classes.theme.theme_keys import ThemeKey
+    from classes.theme.theme_manager import get_color
+    status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 9pt;")
     combo._status_label = status_label
     layout.addWidget(status_label)
     
@@ -741,9 +743,11 @@ def create_dataset_dropdown_with_user(dataset_json_path, info_json_path, parent=
     self_json_abspath = os.path.abspath(self_json_path) if os.path.exists(self_json_path) else 'なし'
     path_text = f"dataset.json: {dataset_json_abspath}\nself.json: {self_json_abspath}"
     info_label = QLabel(info_text)
-    info_label.setStyleSheet("color: #1976d2; font-size: 10pt; padding: 2px 0px;")
+    from classes.theme.theme_keys import ThemeKey as _ThemeKey
+    from classes.theme.theme_manager import get_color as _get_color
+    info_label.setStyleSheet(f"color: {_get_color(_ThemeKey.TEXT_INFO)}; font-size: 10pt; padding: 2px 0px;")
     path_label = QLabel(path_text)
-    path_label.setStyleSheet("color: #888; font-size: 9pt; padding: 0px 0px;")
+    path_label.setStyleSheet(f"color: {_get_color(_ThemeKey.TEXT_MUTED)}; font-size: 9pt; padding: 0px 0px;")
 
     # ドロップダウン生成
     dataset_list = load_dataset_and_user_list(actual_dataset_json_path, actual_info_json_path)

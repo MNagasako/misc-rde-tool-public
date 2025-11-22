@@ -10,6 +10,8 @@ from ..util.subgroup_ui_helpers import (
     SubgroupFormBuilder, SubgroupCreateHandler, MemberDataProcessor,
     show_selected_user_ids, load_user_entries, prepare_subgroup_create_request
 )
+from classes.theme import get_color, ThemeKey
+from classes.utils.label_style import apply_label_style
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -25,7 +27,7 @@ def create_subgroup_create_widget(parent, title, color, create_auto_resize_butto
     
     # タイトル
     label = QLabel(f"{title}機能")
-    label.setStyleSheet("font-size: 16px; font-weight: bold; color: #1976d2; padding: 10px;")
+    apply_label_style(label, get_color(ThemeKey.TEXT_PRIMARY), bold=True, point_size=16)
     #main_layout.addWidget(label)
     
     # タブウィジェット
@@ -75,7 +77,7 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
         QWidget().setLayout(widget.layout())
     layout = QVBoxLayout()
     label = QLabel(f"{title}機能")
-    label.setStyleSheet("font-size: 16px; font-weight: bold; color: #1976d2; padding: 10px;")
+    apply_label_style(label, get_color(ThemeKey.TEXT_PRIMARY), bold=True, point_size=16)
     #layout.addWidget(label)
 
     button_style = f"background-color: {color}; color: white; font-weight: bold; border-radius: 6px;"
@@ -137,7 +139,6 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
             border: none;
             margin: 0px;
             padding: 0px;
-            background-color: transparent;
         }
     """)
     
@@ -193,7 +194,7 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     member_layout.setSpacing(2)  # ラベルとテーブル間のスペースを最小化
     
     member_label = QLabel("グループメンバー選択（複数可）:")
-    member_label.setStyleSheet("font-weight: bold; margin: 0px; padding: 2px 0px;")
+    apply_label_style(member_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
     member_layout.addWidget(member_label)
     member_layout.addWidget(scroll)
     
@@ -204,9 +205,10 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     button_row = QHBoxLayout()
     
     def on_show_selected():
-        # 共通セレクターから直接user_rowsを取得
+        # 共通セレクターから直接user_rowsとuser_entriesを取得
         current_user_rows = member_selector.user_rows
-        show_selected_user_ids(widget, current_user_rows, unified_users)
+        current_user_entries = member_selector.user_entries
+        show_selected_user_ids(widget, current_user_rows, current_user_entries)
     exec_button = QPushButton("選択ユーザー/ロールを表示")
     exec_button.clicked.connect(on_show_selected)
     button_row.addWidget(exec_button)

@@ -9,6 +9,7 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt, Signal
 from qt_compat.gui import QFont
+from classes.theme import get_color, ThemeKey, ThemeManager
 
 
 class SubjectEntryWidget(QWidget):
@@ -40,18 +41,18 @@ class SubjectEntryWidget(QWidget):
         
         # 追加ボタン
         self.add_button = QPushButton("+ 課題追加")
-        self.add_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
+        self.add_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
                 color: white;
                 border: none;
                 padding: 5px 10px;
                 border-radius: 3px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
         """)
         self.add_button.clicked.connect(self.add_subject)
         #header_layout.addWidget(self.add_button)
@@ -68,6 +69,8 @@ class SubjectEntryWidget(QWidget):
         self.table.setAlternatingRowColors(True)
         self.table.setMinimumHeight(120)
         self.table.setMaximumHeight(160)
+        # スタイルは_apply_table_style()で一元管理
+        self._apply_table_style()
         
         # 列幅設定
         header = self.table.horizontalHeader()
@@ -97,17 +100,17 @@ class SubjectEntryWidget(QWidget):
         
         # 追加ボタン
         self.add_from_form_button = QPushButton("追加")
-        self.add_from_form_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
+        self.add_from_form_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
                 color: white;
-                border: none;
-                padding: 5px 15px;
-                border-radius: 3px;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
+                font-weight: bold;
+                padding: 6px 12px;
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+            }}
         """)
         self.add_from_form_button.clicked.connect(self.add_from_form)
         form_layout.addWidget(self.add_from_form_button)
@@ -119,6 +122,88 @@ class SubjectEntryWidget(QWidget):
         self.title_edit.returnPressed.connect(self.add_from_form)
         
         self.setLayout(layout)
+        
+        # ThemeManager接続
+        theme_manager = ThemeManager.instance()
+        theme_manager.theme_changed.connect(self.refresh_theme)
+    
+    def _apply_table_style(self):
+        """テーブルスタイルを適用"""
+        if not hasattr(self, 'table') or not self.table:
+            return
+        
+        # Paletteを使って背景色を強制設定（QSSよりも優先度が高い）
+        from qt_compat.gui import QPalette, QColor
+        palette = self.table.palette()
+        palette.setColor(QPalette.Base, QColor(get_color(ThemeKey.TABLE_BACKGROUND)))
+        palette.setColor(QPalette.AlternateBase, QColor(get_color(ThemeKey.TABLE_ROW_BACKGROUND_ALTERNATE)))
+        palette.setColor(QPalette.Text, QColor(get_color(ThemeKey.TABLE_ROW_TEXT)))
+        self.table.setPalette(palette)
+        
+        # QSSでその他のスタイルを設定
+        self.table.setStyleSheet(f"""
+            QTableWidget {{
+                gridline-color: {get_color(ThemeKey.TABLE_BORDER)};
+                border: 1px solid {get_color(ThemeKey.TABLE_BORDER)};
+            }}
+            QTableWidget::item {{
+                padding: 4px;
+            }}
+            QHeaderView::section {{
+                background-color: {get_color(ThemeKey.TABLE_HEADER_BACKGROUND)};
+                color: {get_color(ThemeKey.TABLE_HEADER_TEXT)};
+                padding: 4px;
+                border: 1px solid {get_color(ThemeKey.TABLE_BORDER)};
+                font-weight: bold;
+            }}
+        """)
+    
+    def refresh_theme(self):
+        """テーマ変更時のスタイル更新"""
+        self._apply_table_style()
+        self.add_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: white;
+                border: none;
+                padding: 5px 10px;
+                border-radius: 3px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
+        """)
+        self.add_from_form_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: white;
+                font-weight: bold;
+                padding: 6px 12px;
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+            }}
+        """)
+        # テーブル内の削除ボタンを再描画
+        for row in range(self.table.rowCount()):
+            delete_button = self.table.cellWidget(row, 2)
+            if delete_button:
+                delete_button.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                        color: white;
+                        border: none;
+                        padding: 2px 8px;
+                        border-radius: 2px;
+                        font-size: 10px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+                    }}
+                """)
+        self.update()
     
     def populate_table(self):
         """テーブルにデータを設定"""
@@ -137,18 +222,18 @@ class SubjectEntryWidget(QWidget):
             
             # 削除ボタン
             delete_button = QPushButton("削除")
-            delete_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #f44336;
+            delete_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
                     color: white;
                     border: none;
                     padding: 2px 8px;
                     border-radius: 2px;
                     font-size: 10px;
-                }
-                QPushButton:hover {
-                    background-color: #d32f2f;
-                }
+                }}
+                QPushButton:hover {{
+                    background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+                }}
             """)
             delete_button.clicked.connect(lambda checked, r=row: self.delete_subject(r))
             self.table.setCellWidget(row, 2, delete_button)

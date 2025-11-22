@@ -38,6 +38,12 @@ class DataPortalWidget(QWidget):
         
         self._init_ui()
         self._connect_signals()
+        
+        # テーマ変更シグナルに接続
+        from classes.theme import ThemeManager
+        theme_manager = ThemeManager()
+        theme_manager.theme_changed.connect(self.refresh_theme)
+        
         logger.info("データポータルウィジェット初期化完了")
     
     def _init_ui(self):
@@ -100,6 +106,23 @@ class DataPortalWidget(QWidget):
         """認証情報保存後の処理"""
         logger.info(f"認証情報保存完了: {environment}")
         # 必要に応じてアップロードタブに通知
+    
+    def refresh_theme(self):
+        """テーマ変更時のスタイル更新"""
+        try:
+            # 各タブのrefresh_theme()を呼び出し
+            if hasattr(self, 'login_settings_tab') and hasattr(self.login_settings_tab, 'refresh_theme'):
+                self.login_settings_tab.refresh_theme()
+            if hasattr(self, 'master_data_tab') and hasattr(self.master_data_tab, 'refresh_theme'):
+                self.master_data_tab.refresh_theme()
+            if hasattr(self, 'dataset_upload_tab') and hasattr(self.dataset_upload_tab, 'refresh_theme'):
+                self.dataset_upload_tab.refresh_theme()
+            
+            # ウィジェット全体を再描画
+            self.update()
+            logger.debug("DataPortalWidget: テーマ更新完了")
+        except Exception as e:
+            logger.error(f"DataPortalWidget: テーマ更新エラー: {e}")
     
     def switch_to_login_tab(self):
         """ログイン設定タブに切り替え"""

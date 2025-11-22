@@ -115,6 +115,45 @@ class ProxySessionManager:
         self._configured = False
         self.configure(proxy_config)
     
+    def create_new_session(self, proxy_config: Optional[Dict[str, Any]] = None) -> requests.Session:
+        """
+        完全に新しいセッションを作成して返す（グローバルセッションとは独立）
+        
+        診断・テスト用途で、既存のグローバルセッションに影響を与えずに
+        新規セッションを作成したい場合に使用します。
+        
+        Args:
+            proxy_config: プロキシ設定辞書。Noneの場合は現在の設定を使用
+            
+        Returns:
+            requests.Session: 設定済みの新規セッション
+        """
+        # 設定の取得
+        if proxy_config is None:
+            if not self._configured:
+                self.configure()
+            proxy_config = self._proxy_config.copy()
+        
+        # 新規セッション作成
+        new_session = requests.Session()
+        
+        # プロキシ設定の適用（一時的にセッションを切り替えて適用）
+        original_session = self._session
+        original_configured = self._configured
+        
+        try:
+            self._session = new_session
+            self._apply_proxy_config(proxy_config)
+            self._apply_certificate_config(proxy_config)
+            self._configure_session_adapters()
+        finally:
+            # 元のセッションを復元
+            self._session = original_session
+            self._configured = original_configured
+        
+        logger.info(f"新規セッション作成完了: ID={id(new_session)}, proxies={new_session.proxies}, verify={new_session.verify}")
+        return new_session
+    
     def get_proxy_config(self) -> Dict[str, Any]:
         """
         現在のプロキシ設定を取得
@@ -204,6 +243,14 @@ class ProxySessionManager:
                             if 'no_proxy' in proxies:
                                 proxy_config['no_proxy'] = proxies['no_proxy']
                             
+                            # v2.1.5: SSL設定を統合（network.sslまたはトップレベルssl）
+                            if 'ssl' not in proxy_config and 'ssl' in config_data:
+                                proxy_config['ssl'] = config_data['ssl']
+                            
+                            # cert設定も統合（後方互換性）
+                            if 'cert' not in proxy_config:
+                                proxy_config['cert'] = self._convert_ssl_to_cert_config(proxy_config.get('ssl', {}))
+                            
                             logger.info(f"設定ファイル読み込み(YAML network): mode={proxy_config.get('mode')}")
                             return proxy_config
                         
@@ -213,7 +260,9 @@ class ProxySessionManager:
                                 'mode': config_data['mode'],
                                 'http_proxy': config_data.get('http_proxy', ''),
                                 'https_proxy': config_data.get('https_proxy', ''),
-                                'no_proxy': config_data.get('no_proxy', '')
+                                'no_proxy': config_data.get('no_proxy', ''),
+                                'ssl': config_data.get('ssl', {}),
+                                'cert': self._convert_ssl_to_cert_config(config_data.get('ssl', {}))
                             }
                             logger.info(f"設定ファイル読み込み(YAML toplevel): mode={proxy_config.get('mode')}")
                             return proxy_config
@@ -243,6 +292,13 @@ class ProxySessionManager:
                         if 'no_proxy' in proxies:
                             proxy_config['no_proxy'] = proxies['no_proxy']
                         
+                        # v2.1.5: SSL設定を統合
+                        if 'ssl' not in proxy_config and 'ssl' in config_data:
+                            proxy_config['ssl'] = config_data['ssl']
+                        
+                        if 'cert' not in proxy_config:
+                            proxy_config['cert'] = self._convert_ssl_to_cert_config(proxy_config.get('ssl', {}))
+                        
                         logger.info(f"設定ファイル読み込み(JSON network): mode={proxy_config.get('mode')}")
                         return proxy_config
                     
@@ -252,7 +308,9 @@ class ProxySessionManager:
                             'mode': config_data['mode'],
                             'http_proxy': config_data.get('http_proxy', ''),
                             'https_proxy': config_data.get('https_proxy', ''),
-                            'no_proxy': config_data.get('no_proxy', '')
+                            'no_proxy': config_data.get('no_proxy', ''),
+                            'ssl': config_data.get('ssl', {}),
+                            'cert': self._convert_ssl_to_cert_config(config_data.get('ssl', {}))
                         }
                         logger.info(f"設定ファイル読み込み(JSON toplevel): mode={proxy_config.get('mode')}")
                         return proxy_config
@@ -268,6 +326,25 @@ class ProxySessionManager:
             logger.warning(f"設定ファイル読み込み失敗: {e}")
             return {"mode": "DIRECT"}
     
+    def _convert_ssl_to_cert_config(self, ssl_config: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        SSL設定をcert設定形式に変換（v2.1.5互換）
+        
+        Args:
+            ssl_config: ssl設定セクション
+            
+        Returns:
+            Dict[str, Any]: cert設定形式
+        """
+        cert_config = {
+            'verify': ssl_config.get('verify', True),
+            'ca_bundle': ssl_config.get('ca_bundle', ''),
+            'enterprise_ca': {
+                'enable_truststore': ssl_config.get('truststore', False)
+            }
+        }
+        return cert_config
+
     def _apply_proxy_config(self, config: Dict[str, Any]):
         """
         プロキシ設定をセッションに適用
@@ -283,8 +360,8 @@ class ProxySessionManager:
             self._session.trust_env = False  # システム/環境変数プロキシを無視
             logger.info("プロキシモード: DIRECT - プロキシなし")
             
-        elif mode == 'HTTP':
-            # HTTPプロキシ
+        elif mode in ('HTTP', 'MANUAL'):
+            # HTTPプロキシ / MANUAL（手動設定）
             # network.proxiesセクションまたは直接の設定を確認
             proxies_config = config.get('proxies', {})
             http_proxy = config.get('http_proxy') or proxies_config.get('http')
@@ -295,10 +372,11 @@ class ProxySessionManager:
                     'http': http_proxy,
                     'https': https_proxy
                 }
-                logger.info(f"プロキシモード: HTTP - HTTP:{http_proxy}, HTTPS:{https_proxy}")
+                logger.info(f"プロキシモード: {mode} - HTTP:{http_proxy}, HTTPS:{https_proxy}")
             else:
-                logger.warning("HTTPプロキシ設定が見つからない、DIRECT モード使用")
+                logger.warning(f"{mode}プロキシ設定が見つからない、DIRECT モード使用")
                 self._session.proxies = {}
+                
         elif mode == 'PAC':
             # PAC ファイル自動設定
             pac_config = config.get('pac', {})
@@ -447,49 +525,147 @@ class ProxySessionManager:
     
     def _apply_certificate_config(self, config: Dict[str, Any]):
         """
-        SSL証明書設定をセッションに適用（プロキシ環境対応強化版）
+        SSL証明書設定をセッションに適用（v2.1.5改善版 - SSL設定とプロキシを分離）
+        
+        優先順位:
+        1. 明示的なverify=false設定（手動SSL無効化）
+        2. truststore設定（Windowsシステム証明書ストア）
+        3. カスタムca_bundle
+        4. certifiフォールバック
+        5. デフォルトSSL検証
         
         Args:
             config: プロキシ設定辞書
         """
+        # v2.1.5: cert設定がない場合はssl設定から変換
+        if 'cert' not in config and 'ssl' in config:
+            config['cert'] = self._convert_ssl_to_cert_config(config['ssl'])
+        
         cert_config = config.get('cert', {})
         
-        # SSL検証設定
+        # SSL検証設定（ユーザー設定を最優先）
         verify = cert_config.get('verify', True)
         ca_bundle = cert_config.get('ca_bundle', '')
-        
-        # プロキシ環境でのSSL処理設定
-        proxy_ssl_config = cert_config.get('proxy_ssl_handling', {})
-        ssl_strategy = proxy_ssl_config.get('strategy', 'disable_verify')
-        fallback_to_no_verify = proxy_ssl_config.get('fallback_to_no_verify', True)
-        log_ssl_errors = proxy_ssl_config.get('log_ssl_errors', True)
         
         # 企業CA設定
         enterprise_ca_config = cert_config.get('enterprise_ca', {})
         
-        # プロキシが有効かどうかを確認
-        is_proxy_active = self._is_proxy_active()
+        # レガシー互換性: proxy_ssl_handling設定
+        proxy_ssl_config = cert_config.get('proxy_ssl_handling', {})
+        log_ssl_errors = proxy_ssl_config.get('log_ssl_errors', True)
         
-        if is_proxy_active:
-            logger.info(f"プロキシ環境でのSSL処理: strategy={ssl_strategy}")
-            self._apply_proxy_ssl_strategy(ssl_strategy, verify, ca_bundle, fallback_to_no_verify, log_ssl_errors, enterprise_ca_config)
-        else:
-            # プロキシ無効時の通常のSSL設定
-            self._apply_standard_ssl_config(verify, ca_bundle, cert_config)
+        # プロキシ有無に関わらず、統一されたSSL設定を適用
+        logger.info(f"SSL証明書設定適用: verify={verify}, ca_bundle={bool(ca_bundle)}, truststore={enterprise_ca_config.get('enable_truststore', False)}")
+        self._apply_unified_ssl_config(verify, ca_bundle, enterprise_ca_config, log_ssl_errors)
+    
+    def _apply_unified_ssl_config(self, verify: bool, ca_bundle: str, 
+                                  enterprise_ca_config: Dict[str, Any], log_ssl_errors: bool):
+        """
+        統一SSL設定適用（プロキシ有無に関わらず同一ロジック）
+        
+        Args:
+            verify: SSL検証有効/無効（手動設定を尊重）
+            ca_bundle: CAバンドルパス
+            enterprise_ca_config: 企業CA設定（truststore等）
+            log_ssl_errors: SSLエラーログ出力
+        """
+        try:
+            # 1. 明示的なverify=false（手動SSL無効化 - 最優先）
+            if verify is False:
+                self._session.verify = False
+                self._suppress_ssl_warnings()
+                logger.info("🔓 SSL証明書検証を手動無効化（ユーザー設定）")
+                return
+            
+            # 2. truststore設定（Windowsシステム証明書ストア）
+            if enterprise_ca_config.get('enable_truststore', False) and TRUSTSTORE_AVAILABLE:
+                if self._try_truststore_config(log_ssl_errors):
+                    logger.info("✅ truststore有効化: Windowsシステム証明書ストア使用")
+                    return
+            
+            # 3. カスタムca_bundle
+            if ca_bundle and os.path.exists(ca_bundle):
+                self._session.verify = ca_bundle
+                logger.info(f"✅ カスタムCA Bundle使用: {ca_bundle}")
+                return
+            
+            # 4. certifiフォールバック
+            if self._try_certifi_fallback(log_ssl_errors):
+                logger.info("✅ certifiフォールバック: 標準証明書バンドル使用")
+                return
+            
+            # 5. デフォルトSSL検証
+            self._session.verify = True
+            logger.info("✅ デフォルトSSL検証有効")
+            
+        except Exception as e:
+            if log_ssl_errors:
+                logger.error(f"SSL設定エラー: {e}")
+            # エラー時はデフォルト検証を維持
+            self._session.verify = True
+    
+    def _try_truststore_config(self, log_ssl_errors: bool) -> bool:
+        """
+        truststore設定を試行
+        
+        Returns:
+            bool: 設定成功可否
+        """
+        try:
+            import truststore
+            import ssl
+            
+            # truststoreをデフォルトSSLコンテキストに注入
+            truststore.inject_into_ssl()
+            
+            # カスタムSSLコンテキストを作成（Windowsシステム証明書ストア使用）
+            ssl_context = ssl.create_default_context()
+            ssl_context.load_default_certs()  # Windowsシステム証明書ストアを読み込む
+            
+            # HTTPAdapterにSSLコンテキストを渡す（後で_configure_session_adapters()でマウント）
+            self._truststore_ssl_context = ssl_context
+            self._session.verify = True
+            return True
+            
+        except Exception as e:
+            if log_ssl_errors:
+                logger.warning(f"truststore初期化失敗、次の方法を試行: {e}")
+            return False
+    
+    def _try_certifi_fallback(self, log_ssl_errors: bool) -> bool:
+        """
+        certifiフォールバックを試行
+        
+        Returns:
+            bool: 設定成功可否
+        """
+        try:
+            import certifi
+            self._session.verify = certifi.where()
+            return True
+        except ImportError:
+            if log_ssl_errors:
+                logger.warning("certifi利用不可、デフォルトSSL検証を使用")
+            return False
     
     def _apply_proxy_ssl_strategy(self, strategy: str, verify: bool, ca_bundle: str, 
                                   fallback_to_no_verify: bool, log_ssl_errors: bool, enterprise_ca_config: Dict[str, Any] = None):
         """
-        プロキシ環境でのSSL戦略を適用（企業CA対応）
+        [DEPRECATED v2.1.5] プロキシ環境でのSSL戦略を適用（レガシー互換性のため保持）
+        
+        このメソッドは使用されません。_apply_unified_ssl_config() が代わりに使用されています。
+        後方互換性のためのみコードを残しています。
         
         Args:
-            strategy: SSL処理戦略
-            verify: SSL検証設定
-            ca_bundle: CAバンドルパス  
-            fallback_to_no_verify: 検証失敗時の無効化フォールバック
+            strategy: SSL処理戦略（無視）
+            verify: SSL検証設定（無視）
+            ca_bundle: CAバンドルパス（無視）
+            fallback_to_no_verify: 検証失敗時の無効化フォールバック（無視）
             log_ssl_errors: SSLエラーログ出力
-            enterprise_ca_config: 企業CA設定
+            enterprise_ca_config: 企業CA設定（無視）
         """
+        logger.warning("[DEPRECATED] _apply_proxy_ssl_strategy() は v2.1.5 で非推奨になりました。代わりに _apply_unified_ssl_config() が使用されています。")
+        # 以下のコードは実行されません
         if enterprise_ca_config is None:
             enterprise_ca_config = {}
             

@@ -9,7 +9,8 @@ import json
 import logging
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
-
+from classes.theme.theme_keys import ThemeKey
+from classes.theme.theme_manager import get_color
 # ロガー設定
 logger = logging.getLogger(__name__)
 
@@ -31,9 +32,11 @@ from ..core.batch_register_logic import BatchRegisterLogic, BatchRegisterResult
 from ..core.temp_folder_manager import TempFolderManager
 from ..util.data_entry_filter_util import get_datasets_for_data_entry, get_filtered_datasets
 from classes.data_entry.conf.ui_constants import (
-    BATCH_REGISTER_STYLE,
-    FILE_TREE_STYLE,
-    FILESET_TABLE_STYLE
+    get_batch_register_style,
+    get_file_tree_style,
+    get_fileset_table_style,
+    TAB_HEIGHT_RATIO,
+    TAB_MIN_WIDTH,
 )
 
 
@@ -53,7 +56,8 @@ class FileTreeWidget(QTreeWidget):
         self.setHeaderLabels(["名前", "タイプ", "種類", "拡張子", "サイズ", "含む", "ZIP"])
         self.setSelectionMode(QTreeWidget.ExtendedSelection)  # 複数選択可能
         self.setAlternatingRowColors(True)
-        self.setStyleSheet(FILE_TREE_STYLE)
+        # ファイルツリースタイル適用（動的）
+        self.setStyleSheet(get_file_tree_style())
         
         # ヘッダー設定
         header = self.header()
@@ -176,13 +180,13 @@ class FileTreeWidget(QTreeWidget):
             # スタイル設定
             if file_item.is_excluded:
                 for col in range(5):  # 拡張子列まで（サイズ列含む）
-                    tree_item.setForeground(col, QColor("#999999"))
+                    tree_item.setForeground(col, QColor(get_color(ThemeKey.TEXT_MUTED)))
             else:
                 # サイズ列の色分け（ファイルとディレクトリで色を変える）
                 if file_item.file_type == FileType.FILE:
-                    tree_item.setForeground(4, QColor("#2E8B57"))  # SeaGreen
+                    tree_item.setForeground(4, QColor(get_color(ThemeKey.TEXT_SUCCESS)))  # ファイル：緑系
                 else:
-                    tree_item.setForeground(4, QColor("#4682B4"))  # SteelBlue
+                    tree_item.setForeground(4, QColor(get_color(ThemeKey.TEXT_INFO)))  # ディレクトリ：青系
             
             # マッピング保存
             self.file_items[id(tree_item)] = file_item
@@ -194,7 +198,7 @@ class FileTreeWidget(QTreeWidget):
         # 展開
         self.expandAll()
     
-    def _create_item_type_widget(self, file_item: FileItem, tree_item: QTreeWidgetItem) -> "":
+    def _create_item_type_widget(self, file_item: FileItem, tree_item: QTreeWidgetItem) -> QWidget:
         """ファイル種類選択ウィジェットを作成"""
         widget = QWidget()
         widget.setMinimumWidth(120)  # 最小幅を設定
@@ -307,13 +311,13 @@ class FileTreeWidget(QTreeWidget):
             
             # 視覚的フィードバック
             if file_item.is_excluded:
-                tree_item.setForeground(0, QColor("#999999"))
-                tree_item.setForeground(1, QColor("#999999"))
-                tree_item.setForeground(2, QColor("#999999"))
+                tree_item.setForeground(0, QColor(get_color(ThemeKey.TEXT_MUTED)))
+                tree_item.setForeground(1, QColor(get_color(ThemeKey.TEXT_MUTED)))
+                tree_item.setForeground(2, QColor(get_color(ThemeKey.TEXT_MUTED)))
             else:
-                tree_item.setForeground(0, QColor("#000000"))
-                tree_item.setForeground(1, QColor("#000000"))
-                tree_item.setForeground(2, QColor("#000000"))
+                tree_item.setForeground(0, QColor(get_color(ThemeKey.TEXT_PRIMARY)))
+                tree_item.setForeground(1, QColor(get_color(ThemeKey.TEXT_PRIMARY)))
+                tree_item.setForeground(2, QColor(get_color(ThemeKey.TEXT_PRIMARY)))
             
             # 選択状態をシグナルで通知
             selected_items = self.get_selected_items()
@@ -321,37 +325,6 @@ class FileTreeWidget(QTreeWidget):
             
         except Exception as e:
             logger.error("チェックボックス変更エラー: %s", e)
-    
-    def find_tree_item_by_file_item(self, target_file_item: 'FileItem') -> Optional[QTreeWidgetItem]:
-        """FileItemに対応するQTreeWidgetItemを検索"""
-        for item_id, file_item in self.file_items.items():
-            if file_item == target_file_item or file_item.relative_path == target_file_item.relative_path:
-                # item_idからQTreeWidgetItemを逆引き
-                return self._find_tree_item_by_id(item_id)
-        return None
-    
-    def _find_tree_item_by_id(self, target_id: int) -> Optional[QTreeWidgetItem]:
-        """IDからQTreeWidgetItemを再帰的に検索"""
-        return self._search_tree_item_recursive(self.invisibleRootItem(), target_id)
-    
-    def _search_tree_item_recursive(self, parent: QTreeWidgetItem, target_id: int) -> Optional[QTreeWidgetItem]:
-        """ツリーアイテムを再帰的に検索"""
-        # 親アイテム自体をチェック
-        if id(parent) == target_id:
-            return parent
-        
-        # 子アイテムを検索
-        for i in range(parent.childCount()):
-            child = parent.child(i)
-            if id(child) == target_id:
-                return child
-            
-            # 再帰的に検索
-            result = self._search_tree_item_recursive(child, target_id)
-            if result:
-                return result
-        
-        return None
     
     def show_context_menu(self, position):
         """コンテキストメニュー表示"""
@@ -406,10 +379,10 @@ class FileTreeWidget(QTreeWidget):
         
         # 視覚的なインジケーターを追加（アイコンやテキスト色の変更）
         if is_zip:
-            tree_item.setForeground(0, QColor(0, 0, 255))  # 青色でZIP化対象を示す
+            tree_item.setForeground(0, QColor(get_color(ThemeKey.TEXT_INFO)))  # 青色でZIP化対象を示す
             tree_item.setText(0, f"📦 {file_item.name}")
         else:
-            tree_item.setForeground(0, QColor(0, 0, 0))    # 通常の色に戻す
+            tree_item.setForeground(0, QColor(get_color(ThemeKey.TEXT_PRIMARY)))  # 通常の色に戻す
             tree_item.setText(0, file_item.name)
         
         logger.debug("ZIP化フラグ設定: %s -> %s", file_item.name, is_zip)
@@ -759,17 +732,17 @@ class FileTreeWidget(QTreeWidget):
         """アイテムの表示スタイルを更新"""
         if file_item.is_excluded:
             for col in range(4):
-                tree_item.setForeground(col, QColor("#999999"))
+                tree_item.setForeground(col, QColor(get_color(ThemeKey.TEXT_MUTED)))
         else:
             # 通常色に戻す
             for col in range(4):
-                tree_item.setForeground(col, QColor("#000000"))
+                tree_item.setForeground(col, QColor(get_color(ThemeKey.TEXT_PRIMARY)))
             
             # サイズ列の色分け
             if file_item.file_type == FileType.FILE:
-                tree_item.setForeground(3, QColor("#2E8B57"))  # SeaGreen
+                tree_item.setForeground(3, QColor(get_color(ThemeKey.TEXT_SUCCESS)))  # ファイル：緑系
             else:
-                tree_item.setForeground(3, QColor("#4682B4"))  # SteelBlue
+                tree_item.setForeground(3, QColor(get_color(ThemeKey.TEXT_INFO)))  # ディレクトリ：青系
     
     def on_item_changed(self, item, column):
         """アイテム変更時の処理（未使用だが、互換性のため残す）"""
@@ -789,15 +762,15 @@ class FileTreeWidget(QTreeWidget):
         
         # スタイル更新
         if exclude:
-            tree_item.setForeground(0, QColor("#999999"))
-            tree_item.setForeground(1, QColor("#999999"))
-            tree_item.setForeground(2, QColor("#999999"))
-            tree_item.setForeground(3, QColor("#999999"))
+            tree_item.setForeground(0, QColor(get_color(ThemeKey.TEXT_MUTED)))
+            tree_item.setForeground(1, QColor(get_color(ThemeKey.TEXT_MUTED)))
+            tree_item.setForeground(2, QColor(get_color(ThemeKey.TEXT_MUTED)))
+            tree_item.setForeground(3, QColor(get_color(ThemeKey.TEXT_MUTED)))
         else:
-            tree_item.setForeground(0, QColor("#000000"))
-            tree_item.setForeground(1, QColor("#000000"))
-            tree_item.setForeground(2, QColor("#000000"))
-            tree_item.setForeground(3, QColor("#000000"))
+            tree_item.setForeground(0, QColor(get_color(ThemeKey.TEXT_PRIMARY)))
+            tree_item.setForeground(1, QColor(get_color(ThemeKey.TEXT_PRIMARY)))
+            tree_item.setForeground(2, QColor(get_color(ThemeKey.TEXT_PRIMARY)))
+            tree_item.setForeground(3, QColor(get_color(ThemeKey.TEXT_PRIMARY)))
     
     def find_tree_item_by_file_item(self, target_file_item: FileItem) -> Optional[QTreeWidgetItem]:
         """FileItemに対応するQTreeWidgetItemを検索"""
@@ -850,7 +823,8 @@ class FileSetTableWidget(QTableWidget):
         ])
         
         # スタイル設定
-        self.setStyleSheet(FILESET_TABLE_STYLE)
+        # ファイルセットテーブルスタイル適用（動的）
+        self.setStyleSheet(get_fileset_table_style())
         self.setAlternatingRowColors(True)
         self.setSelectionBehavior(QTableWidget.SelectRows)
         self.setSelectionMode(QTableWidget.SingleSelection)
@@ -980,36 +954,36 @@ class FileSetTableWidget(QTableWidget):
             
             # 登録ボタン
             register_btn = QPushButton("登録")
-            register_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #28a745;
-                    color: white;
+            register_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                     border: none;
                     padding: 4px 8px;
                     border-radius: 4px;
                     min-width: 40px;
-                }
-                QPushButton:hover {
-                    background-color: #218838;
-                }
+                }}
+                QPushButton:hover {{
+                    background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+                }}
             """)
             register_btn.clicked.connect(lambda checked, fid=file_set.id: self.register_single_fileset(fid))
             operations_layout.addWidget(register_btn)
             
             # 削除ボタン
             delete_btn = QPushButton("削除")
-            delete_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #dc3545;
-                    color: white;
+            delete_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
                     border: none;
                     padding: 4px 8px;
                     border-radius: 4px;
                     min-width: 40px;
-                }
-                QPushButton:hover {
-                    background-color: #c82333;
-                }
+                }}
+                QPushButton:hover {{
+                    background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+                }}
             """)
             delete_btn.clicked.connect(lambda checked, fid=file_set.id: self.delete_fileset(fid))
             operations_layout.addWidget(delete_btn)
@@ -1223,40 +1197,40 @@ class FileSetTableWidget(QTableWidget):
         # 表示ボタン
         view_btn = QPushButton("表示")
         view_btn.setEnabled(mapping_file_exists)
-        view_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #17a2b8;
-                color: white;
+        view_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
                 border: none;
                 padding: 2px 6px;
                 border-radius: 3px;
                 font-size: 10px;
-            }
-            QPushButton:hover:enabled {
-                background-color: #138496;
-            }
-            QPushButton:disabled {
-                background-color: #6c757d;
-                color: #adb5bd;
-            }
+            }}
+            QPushButton:hover:enabled {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+            }}
         """)
         view_btn.clicked.connect(lambda: self._view_mapping_file(file_set))
         layout.addWidget(view_btn)
         
         # 更新ボタン
         update_btn = QPushButton("更新")
-        update_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745;
-                color: white;
+        update_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                 border: none;
                 padding: 2px 6px;
                 border-radius: 3px;
                 font-size: 10px;
-            }
-            QPushButton:hover {
-                background-color: #218838;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
         """)
         update_btn.clicked.connect(lambda: self._update_mapping_file(file_set))
         layout.addWidget(update_btn)
@@ -1273,7 +1247,8 @@ class FileSetTableWidget(QTableWidget):
         
         # ファイルセット名ラベル
         name_label = QLabel(file_set.name)
-        name_label.setStyleSheet("font-weight: bold;")
+        from classes.utils.label_style import apply_label_style
+        apply_label_style(name_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
         layout.addWidget(name_label)
         
         # 間隔調整
@@ -1283,20 +1258,20 @@ class FileSetTableWidget(QTableWidget):
         export_icon = QPushButton("出力")
         export_icon.setToolTip("ファイルセットをフォルダまたはZIPファイルとして書き出し")
         export_icon.setFixedSize(35, 25)
-        export_icon.setStyleSheet("""
-            QPushButton {
-                border: 1px solid #28a745;
-                background-color: #f8f9fa;
+        export_icon.setStyleSheet(f"""
+            QPushButton {{
+                border: 1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)};
+                background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
                 font-size: 10px;
                 border-radius: 3px;
-                color: #28a745;
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #d4edda;
-                border-color: #1e7e34;
-                color: #1e7e34;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.PANEL_SUCCESS_BACKGROUND)};
+                border-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
         """)
         export_icon.clicked.connect(lambda: self._export_fileset_folder(file_set))
         layout.addWidget(export_icon)
@@ -1305,25 +1280,25 @@ class FileSetTableWidget(QTableWidget):
         view_icon = QPushButton("表示")
         view_icon.setToolTip("ファイルセットの内容を表示・編集")
         view_icon.setFixedSize(35, 25)
-        view_icon.setStyleSheet("""
-            QPushButton {
-                border: 1px solid #2196f3;
-                background-color: #ffffff;
+        view_icon.setStyleSheet(f"""
+            QPushButton {{
+                border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
                 font-size: 10px;
                 border-radius: 3px;
-                color: #2196f3;
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #e3f2fd;
-                border-color: #1976d2;
-                color: #1976d2;
-            }
-            QPushButton:pressed {
-                background-color: #bbdefb;
-                border-color: #0d47a1;
-                color: #0d47a1;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND)};
+                border-color: {get_color(ThemeKey.BUTTON_PRIMARY_HOVER_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_HOVER_BACKGROUND)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.MENU_ITEM_BACKGROUND_HOVER)};
+                border-color: {get_color(ThemeKey.BUTTON_PRIMARY_ACTIVE_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_ACTIVE_BACKGROUND)};
+            }}
         """)
         view_icon.clicked.connect(lambda: self._show_fileset_content_dialog(file_set))
         layout.addWidget(view_icon)
@@ -1741,7 +1716,8 @@ class DataTreeDialog(QDialog):
         
         # 説明ラベル
         info_label = QLabel("ファイルセットに含めるファイル・フォルダを選択してください")
-        info_label.setStyleSheet("font-weight: bold; padding: 10px;")
+        from classes.utils.label_style import apply_label_style
+        apply_label_style(info_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
         layout.addWidget(info_label)
         
         # ファイルツリー
@@ -1759,7 +1735,7 @@ class DataTreeDialog(QDialog):
         
         # 選択情報
         self.selection_info = QLabel("選択されたアイテム: 0個")
-        self.selection_info.setStyleSheet("color: #666; padding: 5px;")
+        self.selection_info.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; padding: 5px;")
         layout.addWidget(self.selection_info)
         
         # ボタン
@@ -1835,6 +1811,14 @@ class BatchRegisterWidget(QWidget):
         self.load_initial_data()
         self.adjust_window_size()
         logger.debug("BatchRegisterWidget初期化完了")
+
+        # テーマ変更シグナル接続（動的再スタイル対応）
+        try:
+            from classes.theme import ThemeManager
+            theme_manager = ThemeManager()
+            theme_manager.theme_changed.connect(self.refresh_theme)
+        except Exception as e:
+            logger.warning("BatchRegisterWidget: テーマ変更シグナル接続失敗: %s", e)
         
     def setup_ui(self):
         """UIセットアップ"""
@@ -1842,8 +1826,8 @@ class BatchRegisterWidget(QWidget):
         main_layout.setContentsMargins(10, 10, 10, 10)
         main_layout.setSpacing(10)
         
-        # スタイル設定
-        self.setStyleSheet(BATCH_REGISTER_STYLE)
+        # 一括登録ウィジェットスタイル適用（動的）
+        self.setStyleSheet(get_batch_register_style())
         
         # スプリッターでエリア分割
         splitter = QSplitter(Qt.Horizontal)
@@ -1870,8 +1854,50 @@ class BatchRegisterWidget(QWidget):
         main_layout.addWidget(splitter)
         
         self.setLayout(main_layout)
+
+    def refresh_theme(self):
+        """テーマ変更時にスタイルを再適用"""
+        try:
+            # ルートウィジェット
+            self.setStyleSheet(get_batch_register_style())
+            # ファイルツリー
+            if hasattr(self, 'file_tree') and self.file_tree:
+                self.file_tree.setStyleSheet(get_file_tree_style())
+            # ファイルセットテーブル
+            if hasattr(self, 'fileset_table') and self.fileset_table:
+                self.fileset_table.setStyleSheet(get_fileset_table_style())
+            # 登録実行エリア（execution_group）
+            if hasattr(self, 'execution_group') and self.execution_group:
+                self.execution_group.setStyleSheet(f"""
+                QGroupBox {{
+                    background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+                    color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                    border: 2px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                    border-radius: 8px;
+                    margin: 5px;
+                    padding-top: 15px;
+                    font-weight: bold;
+                    font-size: 12px;
+                }}
+                QGroupBox::title {{
+                    subcontrol-origin: margin;
+                    subcontrol-position: top left;
+                    padding: 0 5px;
+                    color: {get_color(ThemeKey.GROUPBOX_TITLE_TEXT)};
+                }}
+                """)
+            # 大量項目を含むQComboBoxの高速化最適化
+            try:
+                from classes.utils.theme_perf_util import optimize_combo_boxes
+                optimize_combo_boxes(self, threshold=500)
+            except Exception:
+                pass
+            self.update()
+            logger.debug("BatchRegisterWidget: 動的スタイル再適用完了")
+        except Exception as e:
+            logger.error("BatchRegisterWidget: テーマ更新エラー: %s", e)
     
-    def create_file_operations_area(self) -> "":
+    def create_file_operations_area(self) -> QWidget:
         """ファイル操作エリア作成"""
         widget = QWidget()
         layout = QVBoxLayout()
@@ -1999,7 +2025,7 @@ class BatchRegisterWidget(QWidget):
         widget.setLayout(layout)
         return widget
     
-    def create_fileset_management_area(self) -> "":
+    def create_fileset_management_area(self) -> QWidget:
         """ファイルセット管理エリア作成"""
         widget = QWidget()
         layout = QVBoxLayout()
@@ -2036,54 +2062,54 @@ class BatchRegisterWidget(QWidget):
         
         # 適用ボタン（旧設定保存ボタン）
         save_btn = QPushButton("適用")
-        save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #007bff;
-                color: white;
+        save_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
                 padding: 4px 8px;
                 border-radius: 4px;
                 font-weight: bold;
                 min-height: 30px;
-            }
-            QPushButton:hover {
-                background-color: #0056b3;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+            }}
         """)
         save_btn.setToolTip("現在の設定を選択されたファイルセットに適用します")
         save_btn.clicked.connect(self.save_fileset_config)
         # button_layout.addWidget(save_btn)
         
         apply_all_btn = QPushButton("全ファイルセットに適用")
-        apply_all_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745;
-                color: white;
+        apply_all_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                 padding: 4px 8px;
                 border-radius: 4px;
                 font-weight: bold;
                 min-height: 30px;
-            }
-            QPushButton:hover {
-                background-color: #218838;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
         """)
         apply_all_btn.setToolTip("現在の設定を全てのファイルセットに適用します")
         apply_all_btn.clicked.connect(self.apply_to_all_filesets)
         button_layout.addWidget(apply_all_btn)
         
         apply_selected_btn = QPushButton("選択適用")
-        apply_selected_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #ffc107;
-                color: black;
+        apply_selected_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
                 padding: 4px 8px;
                 border-radius: 4px;
                 font-weight: bold;
                 min-height: 30px;
-            }
-            QPushButton:hover {
-                background-color: #e0a800;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
+            }}
         """)
         apply_selected_btn.setToolTip("現在の設定を選択されたファイルセットに適用します")
         apply_selected_btn.clicked.connect(self.apply_to_selected_filesets)
@@ -2236,7 +2262,7 @@ class BatchRegisterWidget(QWidget):
         # 初期状態のメッセージ
         self.schema_placeholder_label = QLabel("データセット選択後に固有情報入力フォームが表示されます")
         self.schema_placeholder_label.setAlignment(Qt.AlignCenter)
-        self.schema_placeholder_label.setStyleSheet("color: #666; font-style: italic; padding: 20px;")
+        self.schema_placeholder_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-style: italic; padding: 20px;")
         self.schema_form_layout.addWidget(self.schema_placeholder_label)
         
         # 固有情報フォームを直接scroll_layoutに追加（QGroupBox不使用）
@@ -2256,27 +2282,31 @@ class BatchRegisterWidget(QWidget):
         widget.setLayout(layout)
         return widget
     
-    def create_execution_area(self) -> "":
+    def create_execution_area(self) -> QWidget:
         """登録実行ペイン作成"""
         # グループボックスでレジェンドを追加
         widget = QGroupBox("登録実行")
-        widget.setStyleSheet("""
-            QGroupBox {
-                background-color: #f8f9fa;
-                border: 2px solid #dee2e6;
+        widget.setStyleSheet(f"""
+            QGroupBox {{
+                background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                border: 2px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                 border-radius: 8px;
                 margin: 5px;
                 padding-top: 15px;
                 font-weight: bold;
                 font-size: 12px;
-            }
-            QGroupBox::title {
+            }}
+            QGroupBox::title {{
                 subcontrol-origin: margin;
                 subcontrol-position: top left;
                 padding: 0 5px;
-                color: #495057;
-            }
+                color: {get_color(ThemeKey.GROUPBOX_TITLE_TEXT)};
+            }}
         """)
+        # 参照保持し refresh_theme で再スタイル
+        self.execution_group = widget
+
         
         layout = QHBoxLayout()
         
@@ -2284,16 +2314,17 @@ class BatchRegisterWidget(QWidget):
         summary_layout = QVBoxLayout()
         
         self.summary_label = QLabel("ファイルセット: 0個、総ファイル数: 0、総サイズ: 0 B")
-        self.summary_label.setStyleSheet("font-weight: bold; color: #495057;")
+        from classes.utils.label_style import apply_label_style
+        apply_label_style(self.summary_label, get_color(ThemeKey.TEXT_SECONDARY), bold=True)
         summary_layout.addWidget(self.summary_label)
         
         self.estimate_label = QLabel("推定処理時間: 計算中...")
-        self.estimate_label.setStyleSheet("color: #6c757d;")
+        self.estimate_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
         summary_layout.addWidget(self.estimate_label)
         
         # ステータスラベル追加
         self.status_label = QLabel("一括登録の準備ができました")
-        self.status_label.setStyleSheet("color: #28a745; font-style: italic;")
+        self.status_label.setStyleSheet(f"color: {get_color(ThemeKey.STATUS_SUCCESS)}; font-style: italic;")
         summary_layout.addWidget(self.status_label)
         
         layout.addLayout(summary_layout)
@@ -2304,52 +2335,52 @@ class BatchRegisterWidget(QWidget):
         button_layout = QVBoxLayout()
         
         preview_btn = QPushButton("プレビュー")
-        preview_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #17a2b8;
-                color: white;
+        preview_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
                 padding: 8px 16px;
                 border-radius: 4px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #138496;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+            }}
         """)
         preview_btn.clicked.connect(self.preview_batch_register)
         button_layout.addWidget(preview_btn)
         
         execute_btn = QPushButton("一括登録実行")
-        execute_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745;
-                color: white;
+        execute_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                 padding: 12px 24px;
                 border-radius: 4px;
                 font-weight: bold;
                 font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #218838;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
         """)
         execute_btn.clicked.connect(self.execute_batch_register)
         button_layout.addWidget(execute_btn)
         
         # 一時フォルダ削除ボタンを追加
         cleanup_btn = QPushButton("一時フォルダ削除")
-        cleanup_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #dc3545;
-                color: white;
+        cleanup_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
                 padding: 6px 12px;
                 border-radius: 4px;
                 font-weight: bold;
                 margin-top: 10px;
-            }
-            QPushButton:hover {
-                background-color: #c82333;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+            }}
         """)
         cleanup_btn.clicked.connect(self.cleanup_temp_folders)
         button_layout.addWidget(cleanup_btn)
@@ -4889,11 +4920,6 @@ class BatchRegisterWidget(QWidget):
         except Exception as e:
             logger.warning("前回試料情報読み込みエラー: %s", e)
             self.sample_name_edit.setText("前回の情報読み込みに失敗しました")
-                
-        except Exception as e:
-            logger.warning("試料モード変更処理エラー: %s", e)
-            import traceback
-            traceback.print_exc()
     
     def on_sample_selection_changed(self, index):
         """試料選択インデックス変更時の処理（既存試料選択用）"""
@@ -5282,33 +5308,6 @@ class BatchRegisterWidget(QWidget):
             self.invoice_schema_form = EmptyForm()
             logger.debug("フォールバック空フォーム作成: %s", type(self.invoice_schema_form))
 
-    def apply_to_all_filesets(self):
-        """現在の設定を全てのファイルセットに適用"""
-        if not self.file_set_manager or not self.file_set_manager.file_sets:
-            QMessageBox.information(self, "情報", "適用対象のファイルセットがありません。")
-            return
-        
-        reply = QMessageBox.question(
-            self, "確認",
-            f"現在の設定を全ての{len(self.file_set_manager.file_sets)}個のファイルセットに適用しますか？",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        )
-        
-        if reply == QMessageBox.Yes:
-            try:
-                # 現在の設定を取得
-                settings = self.get_current_settings()
-                applied_count = 0
-                for fileset in self.file_set_manager.file_sets:
-                    self._apply_settings_to_fileset(fileset, settings)
-                    applied_count += 1
-                
-                QMessageBox.information(self, "完了", f"{applied_count}個のファイルセットに設定を適用しました。")
-                self.refresh_fileset_display()
-            except Exception as e:
-                QMessageBox.warning(self, "エラー", f"設定の適用に失敗しました: {e}")
-    
     def apply_to_selected_filesets(self):
         """現在の設定を選択されたファイルセットに適用"""
         if not hasattr(self, 'target_fileset_combo'):
@@ -5340,46 +5339,6 @@ class BatchRegisterWidget(QWidget):
             self.refresh_fileset_display()
         except Exception as e:
             QMessageBox.warning(self, "エラー", f"設定の適用に失敗しました: {e}")
-    
-    def refresh_fileset_display(self):
-        """ファイルセット表示を更新"""
-        logger.debug("refresh_fileset_display (2nd method): 呼び出された")
-        try:
-            logger.debug("refresh_fileset_display (2nd method): fileset_table存在確認")
-            if hasattr(self, 'fileset_table'):
-                logger.debug("refresh_fileset_display (2nd method): fileset_table.refresh_data() 呼び出し")
-                self.fileset_table.refresh_data()
-                logger.debug("refresh_fileset_display (2nd method): fileset_table.refresh_data() 完了")
-            else:
-                logger.debug("refresh_fileset_display (2nd method): fileset_table 未存在")
-            
-            # ターゲットファイルセットコンボボックスを更新
-            if hasattr(self, 'target_fileset_combo'):
-                logger.debug("refresh_fileset_display (2nd method): target_fileset_combo 更新開始")
-                self.update_target_fileset_combo()
-                logger.debug("refresh_fileset_display (2nd method): target_fileset_combo 更新完了")
-        except Exception as e:
-            logger.error("refresh_fileset_display (2nd method): %s", e)
-            import traceback
-            traceback.print_exc()
-    
-    def update_target_fileset_combo(self):
-        """ターゲットファイルセットコンボボックスを更新"""
-        if not hasattr(self, 'target_fileset_combo'):
-            return
-        
-        current_text = self.target_fileset_combo.currentText()
-        self.target_fileset_combo.clear()
-        
-        if self.file_set_manager and self.file_set_manager.file_sets:
-            for fileset in self.file_set_manager.file_sets:
-                self.target_fileset_combo.addItem(fileset.name)
-        
-        # 以前の選択を復元
-        if current_text:
-            index = self.target_fileset_combo.findText(current_text)
-            if index >= 0:
-                self.target_fileset_combo.setCurrentIndex(index)
     
     def setup_dataset_refresh_notification(self):
         """データセット更新通知システムに登録"""
@@ -5609,7 +5568,10 @@ class FilesetConfigDialog(QDialog):
         self.dialog_schema_form_layout = QVBoxLayout()
         self.dialog_schema_placeholder_label = QLabel("データセットを選択すると、固有情報フォームが表示されます")
         self.dialog_schema_placeholder_label.setAlignment(Qt.AlignCenter)
-        self.dialog_schema_placeholder_label.setStyleSheet("color: #666; font-style: italic; padding: 20px;")
+        # テーマ準拠の muted テキストカラーを適用
+        self.dialog_schema_placeholder_label.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-style: italic; padding: 20px;"
+        )
         self.dialog_schema_form_layout.addWidget(self.dialog_schema_placeholder_label)
         scroll_layout.addLayout(self.dialog_schema_form_layout)
         

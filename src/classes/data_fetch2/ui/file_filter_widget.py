@@ -14,6 +14,8 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt, Signal
 from qt_compat.gui import QFont, QIntValidator
+from classes.theme.theme_keys import ThemeKey
+from classes.theme.theme_manager import get_color
 
 logger = logging.getLogger(__name__)
 
@@ -35,10 +37,59 @@ class FileFilterWidget(QWidget):
         self.filter_config = get_default_filter()
         self.setup_ui()
         
+        # ThemeManager接続
+        from classes.theme.theme_manager import ThemeManager
+        theme_manager = ThemeManager.instance()
+        theme_manager.theme_changed.connect(self.refresh_theme)
+        
     def setup_ui(self):
         """UI初期化"""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
+        
+        # チェックボックス共通スタイル（視認性向上）
+        self.checkbox_style = f"""
+            QCheckBox {{
+                spacing: 5px;
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                font-size: 10pt;
+            }}
+            QCheckBox::indicator {{
+                width: 18px;
+                height: 18px;
+                border: 2px solid {get_color(ThemeKey.INPUT_BORDER)};
+                border-radius: 3px;
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+            }}
+            QCheckBox::indicator:hover {{
+                border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)};
+            }}
+            QCheckBox::indicator:checked {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+            }}
+        """
+        
+        # ボタン共通スタイル（視認性向上）
+        self.button_style = f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)};
+                border-radius: 4px;
+                padding: 5px 10px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)};
+                border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+            }}
+        """
         
         # スクロールエリア
         scroll_area = QScrollArea(self)
@@ -85,7 +136,9 @@ class FileFilterWidget(QWidget):
         # 全選択/全解除ボタン
         button_layout = QHBoxLayout()
         select_all_btn = QPushButton("全選択")
+        select_all_btn.setStyleSheet(self.button_style)
         select_none_btn = QPushButton("全解除")
+        select_none_btn.setStyleSheet(self.button_style)
         select_all_btn.clicked.connect(self.select_all_filetypes)
         select_none_btn.clicked.connect(self.select_none_filetypes)
         button_layout.addWidget(select_all_btn)
@@ -97,6 +150,7 @@ class FileFilterWidget(QWidget):
         self.filetype_checkboxes = {}
         for file_type in FILE_TYPES:
             checkbox = QCheckBox(file_type)
+            checkbox.setStyleSheet(self.checkbox_style)
             checkbox.stateChanged.connect(self.on_filter_changed)
             # デフォルト設定を反映
             if file_type in self.filter_config["file_types"]:
@@ -114,7 +168,9 @@ class FileFilterWidget(QWidget):
         # 全選択/全解除ボタン
         button_layout = QHBoxLayout()
         select_all_btn = QPushButton("全選択")
+        select_all_btn.setStyleSheet(self.button_style)
         select_none_btn = QPushButton("全解除")
+        select_none_btn.setStyleSheet(self.button_style)
         select_all_btn.clicked.connect(self.select_all_mediatypes)
         select_none_btn.clicked.connect(self.select_none_mediatypes)
         button_layout.addWidget(select_all_btn)
@@ -126,6 +182,7 @@ class FileFilterWidget(QWidget):
         self.mediatype_checkboxes = {}
         for media_type in MEDIA_TYPES:
             checkbox = QCheckBox(media_type)
+            checkbox.setStyleSheet(self.checkbox_style)
             checkbox.stateChanged.connect(self.on_filter_changed)
             self.mediatype_checkboxes[media_type] = checkbox
             layout.addWidget(checkbox)
@@ -140,7 +197,9 @@ class FileFilterWidget(QWidget):
         # 全選択/全解除ボタン
         button_layout = QHBoxLayout()
         select_all_btn = QPushButton("全選択")
+        select_all_btn.setStyleSheet(self.button_style)
         select_none_btn = QPushButton("全解除")
+        select_none_btn.setStyleSheet(self.button_style)
         select_all_btn.clicked.connect(self.select_all_extensions)
         select_none_btn.clicked.connect(self.select_none_extensions)
         button_layout.addWidget(select_all_btn)
@@ -154,6 +213,7 @@ class FileFilterWidget(QWidget):
         row, col = 0, 0
         for extension in FILE_EXTENSIONS:
             checkbox = QCheckBox(f".{extension}")
+            checkbox.setStyleSheet(self.checkbox_style)
             checkbox.stateChanged.connect(self.on_filter_changed)
             self.extension_checkboxes[extension] = checkbox
             grid_layout.addWidget(checkbox, row, col)
@@ -226,7 +286,7 @@ class FileFilterWidget(QWidget):
         
         # ヘルプテキスト
         help_label = QLabel("• 完全一致または*でワイルドカード指定\\n• 大文字小文字は区別しません")
-        help_label.setStyleSheet("color: #666; font-size: 10px;")
+        help_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 10px;")
         layout.addWidget(help_label)
         
         return group
@@ -278,7 +338,11 @@ class FileFilterWidget(QWidget):
         
         # フィルタ適用
         apply_btn = QPushButton("✅ フィルタ適用")
-        apply_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        apply_btn.setStyleSheet(f"""
+            background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+            color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
+            font-weight: bold;
+        """)
         apply_btn.clicked.connect(self.apply_filter)
         layout.addWidget(apply_btn)
         
@@ -292,7 +356,10 @@ class FileFilterWidget(QWidget):
         self.status_text = QTextEdit()
         self.status_text.setReadOnly(True)
         self.status_text.setMaximumHeight(80)
-        self.status_text.setStyleSheet("background-color: #f5f5f5; border: 1px solid #ddd;")
+        self.status_text.setStyleSheet(f"""
+            background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)};
+            border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+        """)
         layout.addWidget(self.status_text)
         
         self.update_status_display()
@@ -471,6 +538,71 @@ class FileFilterWidget(QWidget):
                 self.status_text.setPlainText(summary)
         except ImportError:
             pass
+    
+    def refresh_theme(self):
+        """テーマ切替時の更新処理"""
+        try:
+            # チェックボックススタイル再生成
+            self.checkbox_style = f"""
+                QCheckBox {{
+                    spacing: 5px;
+                    color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                    font-size: 10pt;
+                }}
+                QCheckBox::indicator {{
+                    width: 18px;
+                    height: 18px;
+                    border: 2px solid {get_color(ThemeKey.INPUT_BORDER)};
+                    border-radius: 3px;
+                    background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                }}
+                QCheckBox::indicator:hover {{
+                    border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                    background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)};
+                }}
+                QCheckBox::indicator:checked {{
+                    background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                    border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                }}
+            """
+            
+            # ボタンスタイル再生成
+            self.button_style = f"""
+                QPushButton {{
+                    background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)};
+                    border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)};
+                    border-radius: 4px;
+                    padding: 5px 10px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)};
+                    border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                }}
+                QPushButton:pressed {{
+                    background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+                }}
+            """
+            
+            # 全チェックボックスにスタイル適用
+            for checkbox in self.filetype_checkboxes.values():
+                checkbox.setStyleSheet(self.checkbox_style)
+            for checkbox in self.mediatype_checkboxes.values():
+                checkbox.setStyleSheet(self.checkbox_style)
+            for checkbox in self.extension_checkboxes.values():
+                checkbox.setStyleSheet(self.checkbox_style)
+            
+            # 全ボタンにスタイル適用（findChildrenで取得）
+            from qt_compat.widgets import QPushButton
+            buttons = self.findChildren(QPushButton)
+            for button in buttons:
+                button.setStyleSheet(self.button_style)
+            
+            self.update()
+        except Exception as e:
+            logger.error(f"FileFilterWidget: テーマ更新エラー: {e}")
 
 def create_file_filter_widget(parent=None) -> FileFilterWidget:
     """ファイルフィルタウィジェット作成ファクトリ関数"""

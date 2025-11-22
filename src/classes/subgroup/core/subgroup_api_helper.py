@@ -125,9 +125,10 @@ def check_subgroup_files():
     elif os.path.exists(config_json_path):
         config_file_used = 'json'
     missing = []
-    for p, label in zip([info_path, member_path], ["info.json", "rde-member.txt"]):
-        if not os.path.exists(p):
-            missing.append(label)
+    # info.jsonのみ必須（rde-member.txtは任意）
+    if not os.path.exists(info_path):
+        missing.append("info.json")
+    
     if not config_file_used:
         pass
         #missing.append("group_config.xlsx or group_config.csv or group_config.json")

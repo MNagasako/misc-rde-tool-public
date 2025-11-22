@@ -19,6 +19,7 @@ except ImportError:
 
 from classes.managers.app_config_manager import get_config_manager
 from classes.core.credential_store import get_credential_store, decide_autologin_source, perform_health_check
+from classes.theme import get_color, ThemeKey
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +48,13 @@ class LoginControlWidget(QWidget):
         
         # グループボックス
         group = QGroupBox()
-        group.setStyleSheet("""
-            QGroupBox {
-                background-color: #f0f8ff;
-                border: 1px solid #cccccc;
+        group.setStyleSheet(f"""
+            QGroupBox {{
+                background-color: {get_color(ThemeKey.PANEL_INFO_BACKGROUND)};
+                border: 1px solid {get_color(ThemeKey.BORDER_LIGHT)};
                 border-radius: 5px;
                 padding: 5px;
-            }
+            }}
         """)
         group_layout = QVBoxLayout(group)
         group_layout.setSpacing(5)
@@ -69,16 +70,16 @@ class LoginControlWidget(QWidget):
         self.execute_login_button = QPushButton("ログイン実行")
         self.execute_login_button.clicked.connect(self.execute_login)
         self.execute_login_button.setMinimumHeight(30)
-        self.execute_login_button.setStyleSheet("""
-            QPushButton {
-                background-color: #FF9800;
-                color: white;
+        self.execute_login_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
                 font-weight: bold;
                 border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #F57C00;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
+            }}
         """)
         group_layout.addWidget(self.execute_login_button)
         
@@ -101,32 +102,32 @@ class LoginControlWidget(QWidget):
             
             if autologin_enabled:
                 self.toggle_autologin_button.setText("自動ログイン✓")
-                self.toggle_autologin_button.setStyleSheet("""
-                    QPushButton {
-                        background-color: #4CAF50;
-                        color: white;
+                self.toggle_autologin_button.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                         font-weight: bold;
                         border-radius: 4px;
-                    }
-                    QPushButton:hover {
-                        background-color: #45a049;
-                    }
-                    QPushButton:checked {
-                        background-color: #2E7D32;
-                    }
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+                    }}
+                    QPushButton:checked {{
+                        background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_PRESSED)};
+                    }}
                 """)
             else:
                 self.toggle_autologin_button.setText("自動ログイン")
-                self.toggle_autologin_button.setStyleSheet("""
-                    QPushButton {
-                        background-color: #2196F3;
-                        color: white;
+                self.toggle_autologin_button.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
                         font-weight: bold;
                         border-radius: 4px;
-                    }
-                    QPushButton:hover {
-                        background-color: #1976D2;
-                    }
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+                    }}
                 """)
                 
         except Exception as e:

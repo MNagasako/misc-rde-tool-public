@@ -1076,7 +1076,12 @@ class UIControllerAI:
             layout = QVBoxLayout()
             
             label = QLabel("AIテスト機能は現在利用できません")
-            label.setStyleSheet("color: #666; font-size: 14px; padding: 20px;")
+            try:
+                from classes.theme.theme_keys import ThemeKey as _ThemeKey
+                from classes.theme.theme_manager import get_color as _get_color
+                label.setStyleSheet(f"color: {_get_color(_ThemeKey.TEXT_MUTED)}; font-size: 14px; padding: 20px;")
+            except Exception:
+                label.setStyleSheet("font-size: 14px; padding: 20px;")
             layout.addWidget(label)
             
             widget.setLayout(layout)

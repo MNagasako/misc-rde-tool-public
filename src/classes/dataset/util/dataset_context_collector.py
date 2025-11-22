@@ -70,10 +70,19 @@ class DatasetContextCollector:
                 logger.debug("file_info が空またはFalsy - file_tree = '%s...'", context['file_tree'][:50])
             
             logger.debug("最終的な context['file_tree'] の長さ: %s 文字", len(context.get('file_tree', '')))
+            
+            # STRUCTUREDファイルのテキスト内容を個別キーとして設定（プロンプトテンプレート用）
+            if 'file_contents' in details and details['file_contents']:
+                context['text_from_structured_files'] = details['file_contents']
+                logger.debug("[OK] text_from_structured_files をセット: %s 文字", len(context['text_from_structured_files']))
+            else:
+                context['text_from_structured_files'] = details.get('file_contents', '（STRUCTUREDファイルのテキスト抽出に失敗しました）')
+                logger.debug("file_contents が空またはFalsy - text_from_structured_files = '%s...'", context['text_from_structured_files'][:50])
         else:
             # 新規作成時はフォームデータのみ
             context.update(self._collect_general_data())
             context['file_tree'] = '（新規作成のためファイルツリー情報なし）'
+            context['text_from_structured_files'] = '（新規作成のためSTRUCTUREDファイル情報なし）'
             
         # ARIM課題データを収集（課題番号が存在する場合）
         if grant_number:
@@ -176,11 +185,15 @@ class DatasetContextCollector:
             # 関連データセットを取得
             details['related_datasets'] = self._get_related_datasets(dataset_id)
             
+            # STRUCTUREDファイルのテキスト内容を取得
+            details['file_contents'] = self._get_file_contents(dataset_id)
+            
         except Exception as e:
             logger.warning("データセット詳細取得エラー: %s", e)
             details['file_info'] = f'（データセット詳細取得中にエラーが発生しました: {str(e)}）'
             details['metadata'] = '（メタデータ取得失敗）'
             details['related_datasets'] = '（関連データセット取得失敗）'
+            details['file_contents'] = '（ファイル内容取得失敗）'
             
         return details
         
@@ -459,6 +472,236 @@ class DatasetContextCollector:
         except Exception as e:
             logger.warning("関連データセット取得エラー: %s", e)
             return ''
+    
+    def _get_file_contents(self, dataset_id: str) -> str:
+        """
+        データセット内のSTRUCTUREDファイルからテキスト内容を抽出
+        
+        Args:
+            dataset_id: データセットID
+            
+        Returns:
+            抽出されたテキスト内容（プロンプトテンプレート用にフォーマット済み）
+        """
+        try:
+            logger.debug("ファイル内容抽出開始: dataset_id=%s", dataset_id)
+            from core.bearer_token_manager import BearerTokenManager
+            from net.http_helpers import proxy_get
+            from classes.dataset.util.file_text_extractor import get_file_text_extractor, format_extracted_files_for_prompt
+            import tempfile
+            
+            # Bearer Token取得（既存ファイル使用時は不要だが、API呼び出し用に試行）
+            bearer_token = BearerTokenManager.get_token_with_relogin_prompt()
+            if not bearer_token:
+                logger.warning("Bearer Token取得失敗 - 既存ダウンロード済みファイルのみ使用します")
+                # トークンがなくても既存ファイルからの抽出は試みる
+            
+            # RDE APIでデータ情報を取得（トークンがある場合のみ）
+            structured_files = []
+            
+            if bearer_token:
+                api_url = f"https://rde-api.nims.go.jp/data?filter%5Bdataset.id%5D={dataset_id}&sort=-created&page%5Boffset%5D=0&page%5Blimit%5D=100&include=owner%2Csample%2CthumbnailFile%2Cfiles"
+                
+                headers = {
+                    "Accept": "application/vnd.api+json",
+                    "Authorization": f"Bearer {bearer_token}",
+                    "Host": "rde-api.nims.go.jp",
+                    "Origin": "https://rde.nims.go.jp",
+                    "Referer": "https://rde.nims.go.jp/"
+                }
+                
+                response = proxy_get(api_url, headers=headers)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    data_list = data.get('data', [])
+                    included = data.get('included', [])
+                    
+                    logger.debug(f"API応答: data件数={len(data_list)}, included件数={len(included)}")
+                    
+                    if data_list:
+                        # includedからファイル情報を抽出
+                        file_dict = {}
+                        file_types_found = {}
+                        for item in included:
+                            if item.get('type') == 'file':
+                                file_dict[item['id']] = item.get('attributes', {})
+                                # デバッグ: fileTypeを集計
+                                ft = item.get('attributes', {}).get('fileType', 'UNKNOWN')
+                                file_types_found[ft] = file_types_found.get(ft, 0) + 1
+                        
+                        logger.debug(f"ファイル情報取得: {len(file_dict)}件, タイプ別={file_types_found}")
+                        
+                        # STRUCTUREDファイルのみをフィルタリング
+                        for data_item in data_list:
+                            relationships = data_item.get('relationships', {})
+                            file_ids = [f['id'] for f in relationships.get('files', {}).get('data', [])]
+                            
+                            for file_id in file_ids:
+                                if file_id in file_dict:
+                                    file_attr = file_dict[file_id]
+                                    file_type = file_attr.get('fileType', '')
+                                    
+                                    if file_type == 'STRUCTURED':
+                                        structured_files.append({
+                                            'id': file_id,
+                                            'name': file_attr.get('fileName', ''),
+                                            'size': file_attr.get('fileSize', 0),
+                                            'media_type': file_attr.get('mediaType', '')
+                                        })
+                        
+                        logger.info(f"API経由でSTRUCTUREDファイル検出: {len(structured_files)}件")
+                else:
+                    logger.warning(f"ファイル情報取得API失敗: HTTP {response.status_code}")
+            
+            # API情報がない場合は、既存ダウンロード済みファイルから直接検索
+            from config.common import get_dynamic_file_path, DATAFILES_DIR
+            import glob
+            
+            dataset_files_dir = get_dynamic_file_path(f'output/rde/data/dataFiles/{dataset_id}')
+            
+            if not structured_files and os.path.exists(dataset_files_dir):
+                logger.info(f"API情報なし - 既存ファイルから直接検索: {dataset_files_dir}")
+                # 既存ファイルを全て検索（再帰的）
+                all_files = glob.glob(os.path.join(dataset_files_dir, '**', '*'), recursive=True)
+                extractor_temp = get_file_text_extractor()
+                
+                for file_path in all_files:
+                    if os.path.isfile(file_path):
+                        file_name = os.path.basename(file_path)
+                        
+                        # 書誌情報JSONファイルを除外（UUIDパターン + .json）
+                        # 例: 4a932435-495b-4394-999a-d42136066b04.json, *_anonymized.json
+                        if file_name.endswith('_anonymized.json'):
+                            continue
+                        # UUID形式のJSONファイルを除外（8-4-4-4-12の形式）
+                        import re
+                        if re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$', file_name, re.IGNORECASE):
+                            continue
+                        
+                        # 抽出可能なファイルのみをstructured_filesに追加
+                        if extractor_temp.is_extractable(file_name):
+                            structured_files.append({
+                                'id': '',  # file_idは不明
+                                'name': file_name,
+                                'size': os.path.getsize(file_path),
+                                'media_type': '',
+                                'local_path': file_path  # 既存ファイルのパスを保持
+                            })
+                logger.info(f"既存ファイルから抽出可能ファイル検出: {len(structured_files)}件")
+            
+            if not structured_files:
+                return '（このデータセットにはSTRUCTUREDタイプのファイルが含まれていません。また、既存のダウンロード済みファイルも見つかりませんでした）'
+            
+            # テキスト抽出器を取得
+            extractor = get_file_text_extractor()
+            
+            # 各ファイルをダウンロードしてテキスト抽出（最大10ファイルまで）
+            # 既存のダウンロードディレクトリを確認（データ取得2と同じ構造）
+            from config.common import get_dynamic_file_path, DATAFILES_DIR
+            import glob
+            
+            extracted_contents = {}
+            max_files = 10
+            
+            # 既存ダウンロード済みファイルの検索パターン: output/rde/data/dataFiles/{dataset_id}/**/*
+            dataset_files_dir = get_dynamic_file_path(f'output/rde/data/dataFiles/{dataset_id}')
+            
+            for idx, file_info in enumerate(structured_files[:max_files], 1):
+                file_name = file_info['name']
+                file_id = file_info.get('id', '')
+                
+                # 画像ファイルは除外（拡張子ベース）
+                if not extractor.is_extractable(file_name):
+                    logger.debug(f"テキスト抽出非対応ファイルをスキップ: {file_name}")
+                    continue
+                
+                try:
+                    file_path = None
+                    
+                    # 0. API情報取得時に既存ファイルパスが判明している場合はそれを使用
+                    if 'local_path' in file_info:
+                        file_path = file_info['local_path']
+                        logger.info(f"既存ファイル（ダイレクト）を使用: {file_name} ({file_path})")
+                    
+                    # 1. 既存のダウンロード済みファイルを検索
+                    if not file_path and os.path.exists(dataset_files_dir):
+                        # ファイル名で再帰検索（サブディレクトリ含む）
+                        search_pattern = os.path.join(dataset_files_dir, '**', file_name)
+                        matching_files = glob.glob(search_pattern, recursive=True)
+                        
+                        if matching_files:
+                            file_path = matching_files[0]
+                            logger.info(f"既存ファイルを使用: {file_name} ({file_path})")
+                    
+                    # 2. 既存ファイルが見つからない場合は動的ダウンロード
+                    if not file_path:
+                        logger.debug(f"既存ファイルなし、動的ダウンロード開始: {file_name}")
+                        
+                        # ダウンロードURL生成（RDE APIのファイルダウンロードエンドポイント）
+                        # データ取得2と同じ形式: /files/{file_id}?isDownload=true
+                        file_download_url = f"https://rde-api.nims.go.jp/files/{file_id}?isDownload=true"
+                        
+                        download_headers = {
+                            "Authorization": f"Bearer {bearer_token}",
+                            "Host": "rde-api.nims.go.jp",
+                            "Origin": "https://rde.nims.go.jp",
+                            "Referer": "https://rde.nims.go.jp/",
+                            "Accept": "*/*",
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                        }
+                        
+                        file_response = proxy_get(file_download_url, headers=download_headers, stream=True)
+                        
+                        if file_response.status_code != 200:
+                            logger.warning(f"ファイルダウンロード失敗: {file_name} (HTTP {file_response.status_code})")
+                            continue
+                        
+                        # 一時ファイルに保存してテキスト抽出
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file_name)[1]) as tmp_file:
+                            for chunk in file_response.iter_content(chunk_size=8192):
+                                if chunk:
+                                    tmp_file.write(chunk)
+                            file_path = tmp_file.name
+                        logger.info(f"動的ダウンロード完了: {file_name}")
+                    
+                    # 3. テキスト抽出（既存ファイルまたはダウンロードしたファイル）
+                    is_temp_file = file_path and file_path.startswith(tempfile.gettempdir())
+                    
+                    try:
+                        extracted_text = extractor.extract_text(file_path, file_name)
+                        
+                        if extracted_text:
+                            extracted_contents[file_name] = extracted_text
+                            logger.info(f"テキスト抽出成功: {file_name} ({len(extracted_text)}文字)")
+                        else:
+                            logger.debug(f"テキスト抽出失敗: {file_name}")
+                    finally:
+                        # 一時ファイル（動的ダウンロードしたファイル）のみ削除
+                        if is_temp_file:
+                            try:
+                                os.unlink(file_path)
+                            except:
+                                pass
+                
+                except Exception as e:
+                    logger.warning(f"ファイル処理エラー ({file_name}): {e}")
+                    import traceback
+                    traceback.print_exc()
+                    continue
+            
+            # 抽出結果をフォーマット
+            formatted_result = format_extracted_files_for_prompt(extracted_contents)
+            logger.info(f"ファイル内容抽出完了: {len(extracted_contents)}件のファイルから {len(formatted_result)}文字を抽出")
+            
+            return formatted_result
+            
+        except Exception as e:
+            error_msg = f"（ファイル内容取得中にエラーが発生: {str(e)}）"
+            logger.warning("%s", error_msg)
+            import traceback
+            traceback.print_exc()
+            return error_msg
 
 
 # グローバルインスタンス

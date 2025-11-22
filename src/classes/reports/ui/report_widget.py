@@ -33,6 +33,11 @@ class ReportWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setup_ui()
+        
+        # テーマ変更シグナルに接続
+        from classes.theme import ThemeManager
+        theme_manager = ThemeManager()
+        theme_manager.theme_changed.connect(self.refresh_theme)
     
     def setup_ui(self):
         """UI構築"""
@@ -91,3 +96,20 @@ class ReportWidget(QWidget):
             error_label = QLabel(f"エラーが発生しました:\n{str(e)}")
             error_label.setWordWrap(True)
             self.tab_widget.addTab(error_label, "⚠ エラー")
+    
+    def refresh_theme(self):
+        """テーマ変更時のスタイル更新"""
+        try:
+            # 各タブのrefresh_theme()を呼び出し
+            if hasattr(self, 'fetch_tab') and hasattr(self.fetch_tab, 'refresh_theme'):
+                self.fetch_tab.refresh_theme()
+            if hasattr(self, 'convert_tab') and hasattr(self.convert_tab, 'refresh_theme'):
+                self.convert_tab.refresh_theme()
+            if hasattr(self, 'research_data_tab') and hasattr(self.research_data_tab, 'refresh_theme'):
+                self.research_data_tab.refresh_theme()
+            
+            # ウィジェット全体を再描画
+            self.update()
+            logger.debug("ReportWidget: テーマ更新完了")
+        except Exception as e:
+            logger.error(f"ReportWidget: テーマ更新エラー: {e}")

@@ -14,6 +14,7 @@ from qt_compat.widgets import (
 from config.common import SUBGROUP_JSON_PATH
 from qt_compat.core import Qt
 from classes.dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
+from classes.theme import get_color, ThemeKey
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -395,7 +396,7 @@ def create_subgroup_edit_widget(parent, title, color, create_auto_resize_button)
     
     # タイトル
     title_label = QLabel(f"{title}機能")
-    title_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #1976d2; padding: 10px;")
+    title_label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {get_color(ThemeKey.TEXT_PRIMARY)}; padding: 10px;")
     # layout.addWidget(title_label)
     
     button_style = f"background-color: {color}; color: white; font-weight: bold; border-radius: 6px;"
@@ -506,7 +507,6 @@ def _create_member_section(layout):
             border: none;
             margin: 0px;
             padding: 0px;
-            background-color: transparent;
         }
     """)
     

@@ -14,6 +14,7 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt
 from config.common import INPUT_DIR, get_dynamic_file_path
+from classes.theme import get_color, ThemeKey
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -44,15 +45,18 @@ class RdeMemberEditorDialog(QDialog):
             "rde-member.txtのメンバーをカスタマイズします。\n"
             "メールアドレスはDICEアカウントとして登録されている必要があります。"
         )
-        info_label.setStyleSheet("color: #666; padding: 5px;")
+        info_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_SECONDARY)}; padding: 5px;")
         layout.addWidget(info_label)
         
-        # テーブル
+        # テーブル作成
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels([
-            "メールアドレス", "ロール", "データセット作成", "メンバー編集", "操作"
-        ])
+        self.table.setColumnCount(5)  # メール、ロール、作成権限、編集権限、削除
+        self.table.setHorizontalHeaderLabels(["メールアドレス", "ロール", "データセット作成", "メンバー編集", ""])
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        # スタイルは_apply_table_style()で一元管理
+        self._apply_table_style()
         
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Stretch)
@@ -92,8 +96,9 @@ class RdeMemberEditorDialog(QDialog):
         # ボタン
         button_layout = QHBoxLayout()
         
-        save_button = QPushButton("保存")
-        save_button.setStyleSheet("background-color: #1976d2; color: white; font-weight: bold; padding: 8px;")
+        self.save_button = QPushButton("保存")
+        self.save_button.setStyleSheet(f"background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; color: white; font-weight: bold; padding: 8px;")
+        save_button = self.save_button
         save_button.clicked.connect(self.save_members)
         button_layout.addWidget(save_button)
         
@@ -103,6 +108,48 @@ class RdeMemberEditorDialog(QDialog):
         
         layout.addLayout(button_layout)
         self.setLayout(layout)
+        
+        # テーマ変更シグナルに接続
+        from classes.theme import ThemeManager
+        theme_manager = ThemeManager()
+        theme_manager.theme_changed.connect(self.refresh_theme)
+    
+    def _apply_table_style(self):
+        """テーブルスタイルを適用"""
+        # Paletteを使って背景色を強制設定
+        from qt_compat.gui import QPalette, QColor
+        palette = self.table.palette()
+        palette.setColor(QPalette.Base, QColor(get_color(ThemeKey.TABLE_BACKGROUND)))
+        palette.setColor(QPalette.AlternateBase, QColor(get_color(ThemeKey.TABLE_ROW_BACKGROUND_ALTERNATE)))
+        palette.setColor(QPalette.Text, QColor(get_color(ThemeKey.TABLE_ROW_TEXT)))
+        self.table.setPalette(palette)
+        
+        # QSSでその他のスタイルを設定
+        self.table.setStyleSheet(f"""
+            QTableWidget {{
+                selection-background-color: {get_color(ThemeKey.TABLE_ROW_BACKGROUND_SELECTED)};
+                selection-color: {get_color(ThemeKey.TABLE_ROW_TEXT_SELECTED)};
+                gridline-color: {get_color(ThemeKey.TABLE_BORDER)};
+                border: 1px solid {get_color(ThemeKey.TABLE_BORDER)};
+            }}
+            QTableWidget::item {{
+                padding: 4px;
+            }}
+            QHeaderView::section {{
+                background-color: {get_color(ThemeKey.TABLE_HEADER_BACKGROUND)};
+                color: {get_color(ThemeKey.TABLE_HEADER_TEXT)};
+                padding: 4px;
+                border: 1px solid {get_color(ThemeKey.TABLE_BORDER)};
+                font-weight: bold;
+            }}
+        """)
+    
+    def refresh_theme(self):
+        """テーマ変更時のスタイル更新"""
+        self._apply_table_style()
+        if hasattr(self, 'save_button'):
+            self.save_button.setStyleSheet(f"background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; color: white; font-weight: bold; padding: 8px;")
+        self.update()
     
     def load_email_to_user_map(self):
         """subGroup.jsonからメールアドレス→ユーザー情報マッピングを作成"""

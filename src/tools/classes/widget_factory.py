@@ -1,5 +1,7 @@
 from qt_compat.widgets import QLabel, QTextEdit, QPushButton, QHBoxLayout, QVBoxLayout
 from qt_compat.gui import QFont
+from classes.theme import get_color, ThemeKey
+from classes.utils.button_styles import get_button_style
 
 def create_labeled_textedit(label_text, placeholder, max_height=100, font_size=None):
     label = QLabel(label_text)
@@ -15,16 +17,18 @@ def create_labeled_textedit(label_text, placeholder, max_height=100, font_size=N
 def create_action_button(text, callback=None, color_style="default", font_size=None):
     button = QPushButton(text)
     # スタイルは color_style で分岐
-    style_map = {
-        "default": "background-color: #f5f5f5; color: #333; border: 1px solid #bbb; border-radius: 4px; padding: 4px 12px;",
-        "action": "background-color: #ff9800; color: #fff; border: none; border-radius: 4px; padding: 4px 12px; font-weight: bold;",
-        "group": "background-color: #4caf50; color: #fff; border: none; border-radius: 4px; padding: 4px 12px; font-weight: bold;",
-        "dataset": "background-color: #8e24aa; color: #fff; border: none; border-radius: 4px; padding: 4px 12px; font-weight: bold;",
-        "auth": "background-color: #1976d2; color: #fff; border: none; border-radius: 4px; padding: 4px 12px; font-weight: bold;",
-        "web": "background-color: #0097a7; color: #fff; border: none; border-radius: 4px; padding: 4px 12px; font-weight: bold;",
-        "api": "background-color: #c62828; color: #fff; border: none; border-radius: 4px; padding: 4px 12px; font-weight: bold;",
+    kind_map = {
+        "default": "default",
+        "action": "warning",
+        "group": "success",
+        "dataset": "secondary",
+        "auth": "primary",
+        "web": "web",
+        "api": "danger",
     }
-    button.setStyleSheet(style_map.get(color_style, style_map["default"]))
+    style = get_button_style(kind_map.get(color_style, "default"))
+    # 最小幅など追加装飾が必要ならここで拡張可能
+    button.setStyleSheet(style)
     if callback:
         button.clicked.connect(callback)
     if font_size:

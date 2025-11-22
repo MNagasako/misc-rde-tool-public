@@ -22,6 +22,9 @@ except ImportError:
     class QWidget: pass
     class QTabWidget: pass
 
+from classes.theme import ThemeKey
+from classes.theme.theme_manager import get_color
+
 logger = logging.getLogger(__name__)
 
 class DataFetch2TabWidget(QTabWidget):
@@ -108,7 +111,7 @@ class DataFetch2TabWidget(QTabWidget):
         
         # 説明
         desc_label = QLabel("データ取得タブで一括取得するファイルの種類や条件を指定します")
-        desc_label.setStyleSheet("color: #666; margin-bottom: 10px;")
+        desc_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin-bottom: 10px;")
         layout.addWidget(desc_label)
         
         # ファイルフィルタウィジェット

@@ -24,6 +24,9 @@ from qt_compat.widgets import QVBoxLayout, QLabel, QWidget, QMessageBox, QProgre
 from qt_compat.core import QTimer, Qt, QMetaObject, Q_ARG, QUrl
 from qt_compat.gui import QDesktopServices
 from config.common import OUTPUT_DIR, DATAFILES_DIR
+from classes.theme import ThemeKey
+from classes.theme.theme_manager import get_color
+from classes.utils.label_style import apply_label_style
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -151,11 +154,38 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     
     # 広域シェア設定フィルタ
     share_label = QLabel("広域シェア設定:")
-    share_label.setStyleSheet("font-weight: bold;")
+    apply_label_style(share_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
+    
+    # ラジオボタン共通スタイル（視認性向上）
+    radio_style = f"""
+        QRadioButton {{
+            spacing: 5px;
+            color: {get_color(ThemeKey.TEXT_PRIMARY)};
+            font-size: 10pt;
+        }}
+        QRadioButton::indicator {{
+            width: 18px;
+            height: 18px;
+            border: 2px solid {get_color(ThemeKey.INPUT_BORDER)};
+            border-radius: 10px;
+            background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+        }}
+        QRadioButton::indicator:hover {{
+            border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+            background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)};
+        }}
+        QRadioButton::indicator:checked {{
+            background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+            border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+        }}
+    """
     
     share_both_radio = QRadioButton("両方")
+    share_both_radio.setStyleSheet(radio_style)
     share_enabled_radio = QRadioButton("有効のみ")
+    share_enabled_radio.setStyleSheet(radio_style)
     share_disabled_radio = QRadioButton("無効のみ")
+    share_disabled_radio.setStyleSheet(radio_style)
     share_both_radio.setChecked(True)  # デフォルト
     
     share_button_group = QButtonGroup()
@@ -173,11 +203,14 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     
     # 関係メンバーフィルタ
     member_label = QLabel("関係メンバー:")
-    member_label.setStyleSheet("font-weight: bold;")
+    apply_label_style(member_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
     
     member_both_radio = QRadioButton("両方")
+    member_both_radio.setStyleSheet(radio_style)
     member_only_radio = QRadioButton("メンバーのみ")
+    member_only_radio.setStyleSheet(radio_style)
     member_non_radio = QRadioButton("非メンバーのみ")
+    member_non_radio.setStyleSheet(radio_style)
     member_both_radio.setChecked(True)  # デフォルト
     
     member_button_group = QButtonGroup()
@@ -201,7 +234,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     
     type_label = QLabel("データセットタイプ:")
     type_label.setMinimumWidth(120)
-    type_label.setStyleSheet("font-weight: bold;")
+    apply_label_style(type_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
     
     type_combo = QComboBox()
     type_combo.addItem("全て", "all")
@@ -224,7 +257,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     
     grant_label = QLabel("課題番号:")
     grant_label.setMinimumWidth(120)
-    grant_label.setStyleSheet("font-weight: bold;")
+    apply_label_style(grant_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
     
     grant_edit = QLineEdit()
     grant_edit.setPlaceholderText("部分一致で検索（例: JPMXP1234）")
@@ -239,7 +272,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     
     # 表示件数ラベル
     count_label = QLabel("表示中: 0/0 件")
-    count_label.setStyleSheet("color: #666; font-size: 10pt; font-weight: bold;")
+    apply_label_style(count_label, get_color(ThemeKey.TEXT_MUTED), bold=True, point_size=10)
     layout.addWidget(count_label)
     
     # データセット検索フィールド
@@ -267,46 +300,56 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     combo.setMaxVisibleItems(15)
     combo.lineEdit().setPlaceholderText("データセットを選択してください")
     
-    combo.setStyleSheet("""
-        QComboBox {
-            border: 2px solid #2196F3;
+    # コンボボックス個別スタイル（ライトモードで暗色に落ちる問題対策）
+    # グローバルQSSを再定義する形になっていたが、背景色が未指定のためOS/Paletteが優先され黒く描画されるケースがあった。
+    # ここで base 状態の background-color と color を明示しテーマキー経由で強制する。
+    combo.setStyleSheet(f"""
+        QComboBox {{
+            background-color: {get_color(ThemeKey.COMBO_BACKGROUND)};
+            color: {get_color(ThemeKey.TEXT_PRIMARY)};
+            border: 2px solid {get_color(ThemeKey.COMBO_BORDER_FOCUS)};
             border-radius: 6px;
             padding: 8px;
             font-size: 11pt;
             min-height: 25px;
             padding-right: 35px;
-        }
-        QComboBox:focus {
-            border-color: #1976D2;
-            background-color: #E3F2FD;
-        }
-        QComboBox:hover {
-            border-color: #1565C0;
-            background-color: #F5F5F5;
-        }
-        QComboBox::drop-down {
+        }}
+        QComboBox:focus {{
+            border-color: {get_color(ThemeKey.COMBO_BORDER_FOCUS)};
+            background-color: {get_color(ThemeKey.COMBO_BACKGROUND_FOCUS)};
+        }}
+        QComboBox:hover {{
+            border-color: {get_color(ThemeKey.COMBO_BORDER)};
+            background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)};
+        }}
+        QComboBox::drop-down {{
             subcontrol-origin: padding;
             subcontrol-position: top right;
             width: 30px;
-            border-left: 1px solid #2196F3;
+            border-left: 1px solid {get_color(ThemeKey.COMBO_BORDER_FOCUS)};
             border-top-right-radius: 4px;
             border-bottom-right-radius: 4px;
-            background-color: #2196F3;
-        }
-        QComboBox::drop-down:hover {
-            background-color: #1976D2;
-        }
-        QComboBox::down-arrow {
+            background-color: {get_color(ThemeKey.COMBO_ARROW_BACKGROUND)};
+        }}
+        QComboBox::drop-down:hover {{
+            background-color: {get_color(ThemeKey.COMBO_ARROW_BACKGROUND_PRESSED)};
+        }}
+        QComboBox::down-arrow {{
             width: 0;
             height: 0;
             border-left: 6px solid transparent;
             border-right: 6px solid transparent;
             border-top: 8px solid white;
             margin: 0px;
-        }
-        QComboBox::down-arrow:on {
-            border-top: 8px solid #E3F2FD;
-        }
+        }}
+        QComboBox::down-arrow:on {{
+            border-top: 8px solid {get_color(ThemeKey.COMBO_BACKGROUND_FOCUS)};
+        }}
+        QComboBox:disabled {{
+            background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)};
+            color: {get_color(ThemeKey.INPUT_TEXT_DISABLED)};
+            border: 1px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)};
+        }}
     """)
     
     # 全件表示ボタン（コンボボックスの隣に配置）
@@ -487,6 +530,60 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     container.search_edit = search_edit
     container.count_label = count_label
     
+    # テーマ更新メソッド追加
+    def refresh_theme():
+        """テーマ切替時の更新処理"""
+        try:
+            # ラベルの色更新
+            apply_label_style(share_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
+            apply_label_style(member_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
+            
+            # ラジオボタンスタイル再生成
+            radio_style = f"""
+                QRadioButton {{
+                    spacing: 5px;
+                    color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                    font-size: 10pt;
+                }}
+                QRadioButton::indicator {{
+                    width: 18px;
+                    height: 18px;
+                    border: 2px solid {get_color(ThemeKey.INPUT_BORDER)};
+                    border-radius: 10px;
+                    background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                }}
+                QRadioButton::indicator:hover {{
+                    border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                    background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)};
+                }}
+                QRadioButton::indicator:checked {{
+                    background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                    border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                }}
+            """
+            
+            # 全ラジオボタンにスタイル適用
+            share_both_radio.setStyleSheet(radio_style)
+            share_enabled_radio.setStyleSheet(radio_style)
+            share_disabled_radio.setStyleSheet(radio_style)
+            member_both_radio.setStyleSheet(radio_style)
+            member_only_radio.setStyleSheet(radio_style)
+            member_non_radio.setStyleSheet(radio_style)
+            
+            # 表示件数ラベルの色更新
+            apply_label_style(count_label, get_color(ThemeKey.TEXT_MUTED), bold=True, point_size=10)
+            
+            container.update()
+        except Exception as e:
+            logger.error(f"create_dataset_dropdown_all: テーマ更新エラー: {e}")
+    
+    container.refresh_theme = refresh_theme
+    
+    # ThemeManager接続
+    from classes.theme.theme_manager import ThemeManager
+    theme_manager = ThemeManager.instance()
+    theme_manager.theme_changed.connect(refresh_theme)
+    
     return container
 
 def create_data_fetch2_widget(parent=None, bearer_token=None):
@@ -504,7 +601,7 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
     dataset_json_abspath = os.path.abspath(dataset_json_path)
 
     path_label = QLabel(f"dataset.jsonパス: {dataset_json_abspath}")
-    path_label.setStyleSheet("color: #888; font-size: 9pt; padding: 0px 0px;")
+    path_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 9pt; padding: 0px 0px;")
     layout.addWidget(path_label)
 
     # 広域シェアフィルタ付きデータセットドロップダウンを作成
@@ -513,9 +610,14 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
 
     # 選択中データセットのファイルリストを取得するボタン
     fetch_files_btn = QPushButton("選択したデータセットのファイルを一括取得")
-    fetch_files_btn.setStyleSheet(
-        "background-color: #1976d2; color: white; font-weight: bold; font-size: 13px; padding: 8px 16px; border-radius: 6px;"
-    )
+    fetch_files_btn.setStyleSheet(f"""
+        background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+        color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+        font-weight: bold;
+        font-size: 13px;
+        padding: 8px 16px;
+        border-radius: 6px;
+    """)
     layout.addWidget(fetch_files_btn)
 
     # エクスプローラーでdataFilesフォルダを開くボタン

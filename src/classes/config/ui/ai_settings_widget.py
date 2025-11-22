@@ -15,6 +15,8 @@ import os
 import logging
 from typing import Dict, Any, List, Optional
 
+from classes.theme import get_color, ThemeKey
+
 try:
     from qt_compat.widgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
@@ -284,7 +286,7 @@ class AISettingsWidget(QWidget):
         
         # 注意事項
         note_label = QLabel("注意: Ollama等のローカルLLMサーバーが必要です。")
-        note_label.setStyleSheet("color: #666; font-style: italic;")
+        note_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-style: italic;")
         form_layout.addRow("", note_label)
         
         group_layout.addLayout(form_layout)

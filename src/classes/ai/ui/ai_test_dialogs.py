@@ -8,6 +8,8 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt
 import os
+from classes.theme.theme_keys import ThemeKey
+from classes.theme.theme_manager import get_color
 
 
 class PromptTemplateEditorDialog(QDialog):
@@ -31,12 +33,12 @@ class PromptTemplateEditorDialog(QDialog):
         
         # 説明ラベル
         info_label = QLabel(f"分析方法「{self.method_name}」のプロンプトテンプレートを編集します。")
-        info_label.setStyleSheet("font-weight: bold; margin-bottom: 10px; color: #333;")
+        info_label.setStyleSheet(f"font-weight: bold; margin-bottom: 10px; color: {get_color(ThemeKey.TEXT_SECONDARY)};")
         layout.addWidget(info_label)
         
         # ファイル名表示
         file_label = QLabel(f"ファイル: {self.prompt_file}")
-        file_label.setStyleSheet("color: #666; margin-bottom: 15px;")
+        file_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin-bottom: 15px;")
         layout.addWidget(file_label)
         
         # テンプレート編集エリア
@@ -47,18 +49,18 @@ class PromptTemplateEditorDialog(QDialog):
         self.template_edit = QTextEdit()
         self.template_edit.setPlainText(self.current_template)
         self.template_edit.setStyleSheet(
-            """
-            QTextEdit {
-                border: 2px solid #ddd;
+            f"""
+            QTextEdit {{
+                border: 2px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                 border-radius: 8px;
                 padding: 10px;
                 font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
                 font-size: 12px;
                 line-height: 1.4;
-            }
-            QTextEdit:focus {
-                border-color: #2196f3;
-            }
+            }}
+            QTextEdit:focus {{
+                border-color: {get_color(ThemeKey.INPUT_BORDER_FOCUS)};
+            }}
             """
         )
         layout.addWidget(self.template_edit)
@@ -75,7 +77,9 @@ class PromptTemplateEditorDialog(QDialog):
             "• {prepared_data} - ARIM拡張データ"
         )
         variables_info.setStyleSheet(
-            "color: #666; background-color: #f8f9fa; border: 1px solid #e9ecef; "
+            f"color: {get_color(ThemeKey.PANEL_NEUTRAL_TEXT)}; "
+            f"background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)}; "
+            f"border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; "
             "border-radius: 4px; padding: 8px; margin-bottom: 15px;"
         )
         layout.addWidget(variables_info)
@@ -85,24 +89,8 @@ class PromptTemplateEditorDialog(QDialog):
         
         # デフォルト復元ボタン
         restore_button = QPushButton("デフォルトに復元")
-        restore_button.setStyleSheet(
-            """
-            QPushButton {
-                background-color: #ffc107;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #e0a800;
-            }
-            QPushButton:pressed {
-                background-color: #d39e00;
-            }
-            """
-        )
+        restore_button.setProperty("variant", "warning")
+        restore_button.setStyleSheet("padding: 8px 16px; border-radius: 4px; font-weight: bold;")
         restore_button.clicked.connect(self.restore_default)
         button_layout.addWidget(restore_button)
         
@@ -117,28 +105,16 @@ class PromptTemplateEditorDialog(QDialog):
         
         # ボタンスタイル
         for button in [button_box.button(QDialogButtonBox.Cancel), button_box.button(QDialogButtonBox.Save)]:
-            button.setStyleSheet(
-                """
-                QPushButton {
-                    padding: 8px 16px;
-                    border-radius: 4px;
-                    font-weight: bold;
-                    min-width: 80px;
-                }
-                """
-            )
+            button.setStyleSheet("padding: 8px 16px; border-radius: 4px; font-weight: bold; min-width: 80px;")
         
-        button_box.button(QDialogButtonBox.Cancel).setStyleSheet(
-            button_box.button(QDialogButtonBox.Cancel).styleSheet() + 
-            "QPushButton { background-color: #6c757d; color: white; border: none; }"
-            "QPushButton:hover { background-color: #5a6268; }"
-        )
+        # バリアントで色制御
+        cancel_btn = button_box.button(QDialogButtonBox.Cancel)
+        if cancel_btn:
+            cancel_btn.setProperty("variant", "secondary")
         
-        button_box.button(QDialogButtonBox.Save).setStyleSheet(
-            button_box.button(QDialogButtonBox.Save).styleSheet() + 
-            "QPushButton { background-color: #28a745; color: white; border: none; }"
-            "QPushButton:hover { background-color: #218838; }"
-        )
+        save_btn = button_box.button(QDialogButtonBox.Save)
+        if save_btn:
+            save_btn.setProperty("variant", "success")
         
         button_layout.addWidget(button_box)
         

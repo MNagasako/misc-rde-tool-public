@@ -145,11 +145,10 @@ class SubgroupConfigManager:
         elif os.path.exists(config_json_path):
             config_file_used = 'json'
         
-        # 不足ファイルチェック
+        # 不足ファイルチェック（rde-member.txtは任意ファイル）
         missing = []
-        for p, label in zip([info_path, member_path], ["info.json", "rde-member.txt"]):
-            if not os.path.exists(p):
-                missing.append(label)
+        if not os.path.exists(info_path):
+            missing.append("info.json")
         
         if not config_file_used:
             missing.append("group_config.xlsx or group_config.csv or group_config.json")

@@ -21,6 +21,8 @@ UI表示の一元管理により、メインクラスから表示ロジックを
 from datetime import datetime
 import logging
 
+from classes.theme import get_color, ThemeKey
+
 logger = logging.getLogger("RDE_WebView")
 
 class DisplayManager:
@@ -126,9 +128,10 @@ class DisplayManager:
                 warning_text = f"{current_text}\n\n⚠️ ログイン処理が停止している可能性があります。"
                 self.autologin_msg_label.setText(warning_text)
                 self.autologin_msg_label.setStyleSheet(
-                    "background-color: #fff3cd; color: #856404; "
-                    "border: 2px solid #ffc107; padding: 10px; "
-                    "border-radius: 5px; font-weight: bold;"
+                    f"background-color: {get_color(ThemeKey.NOTIFICATION_WARNING_BACKGROUND)}; "
+                    f"color: {get_color(ThemeKey.NOTIFICATION_WARNING_TEXT)}; "
+                    f"border: 2px solid {get_color(ThemeKey.NOTIFICATION_WARNING_BORDER)}; "
+                    f"padding: 10px; border-radius: 5px; font-weight: bold;"
                 )
                 
                 logger.warning("ログイン処理が10秒間停止しています: %s", self._last_login_message)

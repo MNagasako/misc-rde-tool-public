@@ -198,7 +198,11 @@ class TaxonomyBuilderDialog(QDialog):
             "選択したキーはスペース区切りで連結されます。\n"
             "例: sample.name invoice.custom.image-mode invoice.basic.data-name"
         )
-        info_label.setStyleSheet("background-color: #f0f0f0; padding: 10px; border: 1px solid #ccc;")
+        info_label.setStyleSheet(f"""
+            background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)};
+            padding: 10px;
+            border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+        """)
         layout.addWidget(info_label)
         
         # メインスプリッター

@@ -10,6 +10,7 @@
 
 import logging
 from typing import Optional
+from classes.theme import get_color, ThemeKey
 
 try:
     from qt_compat.widgets import (
@@ -125,7 +126,7 @@ class MainWindowTabIntegrator:
         layout.addWidget(status_label)
         
         self.status_info_label = QLabel("準備完了")
-        self.status_info_label.setStyleSheet("padding: 5px; background-color: #f0f0f0; border-radius: 3px;")
+        self.status_info_label.setStyleSheet(f"padding: 5px; background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)}; border-radius: 3px;")
         layout.addWidget(self.status_info_label)
         
         layout.addStretch()
@@ -286,18 +287,18 @@ class MainWindowTabIntegrator:
         
         # ヘルプダイアログを開くボタン
         open_help_btn = QPushButton("ヘルプを開く")
-        open_help_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
+        open_help_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
                 font-size: 14px;
                 font-weight: bold;
                 padding: 10px 20px;
                 border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+            }}
         """)
         open_help_btn.clicked.connect(self._open_help_dialog)
         layout.addWidget(open_help_btn)
@@ -314,7 +315,7 @@ class MainWindowTabIntegrator:
             "• プロキシ設定はネットワーク設定タブで行います"
         )
         quick_help_text.setWordWrap(True)
-        quick_help_text.setStyleSheet("padding: 10px; background-color: #f0f0f0; border-radius: 5px;")
+        quick_help_text.setStyleSheet(f"padding: 10px; background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)}; border-radius: 5px;")
         layout.addWidget(quick_help_text)
         
         layout.addStretch()

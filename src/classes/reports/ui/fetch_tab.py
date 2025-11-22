@@ -26,6 +26,8 @@ except ImportError as e:
     logger.error(f"Qt互換モジュールのインポートエラー: {e}")
     raise ImportError(f"Qt互換モジュールが必要です: {e}")
 
+from classes.theme import get_color, ThemeKey
+
 
 class ReportFetchTab(QWidget):
     """報告書データ取得タブ
@@ -163,38 +165,38 @@ class ReportFetchTab(QWidget):
         # 取得開始ボタン
         self.fetch_button = QPushButton("📥 取得開始")
         self.fetch_button.setMinimumHeight(40)
-        self.fetch_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
+        self.fetch_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                 font-weight: bold;
                 border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            }}
         """)
         layout.addWidget(self.fetch_button)
         
         # 一括処理ボタン（取得→変換→研究データ生成）
         self.batch_process_button = QPushButton("🚀 一括処理（取得→変換→研究データ生成）")
         self.batch_process_button.setMinimumHeight(40)
-        self.batch_process_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
+        self.batch_process_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
                 font-weight: bold;
                 border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #0b7dda;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            }}
         """)
         layout.addWidget(self.batch_process_button)
         
@@ -202,19 +204,19 @@ class ReportFetchTab(QWidget):
         self.cancel_button = QPushButton("⛔ キャンセル")
         self.cancel_button.setMinimumHeight(40)
         self.cancel_button.setEnabled(False)
-        self.cancel_button.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
+        self.cancel_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
                 font-weight: bold;
                 border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #da190b;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            }}
         """)
         layout.addWidget(self.cancel_button)
         
@@ -224,6 +226,61 @@ class ReportFetchTab(QWidget):
         layout.addWidget(self.clear_log_button)
         
         return layout
+    
+    def _apply_button_styles(self):
+        """ボタンスタイルを適用"""
+        # 取得開始ボタン
+        self.fetch_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
+                font-weight: bold;
+                border-radius: 5px;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            }}
+        """)
+        
+        # 一括処理ボタン
+        self.batch_process_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+                font-weight: bold;
+                border-radius: 5px;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            }}
+        """)
+        
+        # キャンセルボタン
+        self.cancel_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
+                font-weight: bold;
+                border-radius: 5px;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            }}
+        """)
+    
+    def refresh_theme(self):
+        """テーマ変更時のスタイル更新"""
+        self._apply_button_styles()
+        self.update()
     
     def create_log_area(self) -> QGroupBox:
         """ログ表示エリア作成"""

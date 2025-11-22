@@ -18,6 +18,7 @@ from config.common import SUBGROUP_JSON_PATH
 from ..core.subgroup_data_manager import SubgroupDataManager, MemberDataProcessor
 from .subgroup_validators import SubjectInputValidator, UserRoleValidator, FormValidator, UIValidator
 from ..ui.subgroup_subject_widget import SubjectEntryWidget, parse_subjects_from_text, subjects_to_text
+from classes.theme import get_color, ThemeKey
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -92,7 +93,7 @@ class SubgroupFormBuilder:
         # スタイル設定
         for widget_name, widget in self.form_widgets.items():
             if widget_name not in ['subjects_widget'] and hasattr(widget, 'setStyleSheet'):
-                widget.setStyleSheet("color: #228B22;")
+                widget.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_SUCCESS)};")
         
         # バリデーション設定
         self.validator = SubjectInputValidator(self.form_widgets['subjects_widget'])
@@ -155,21 +156,21 @@ class SubgroupFormBuilder:
             )
             from qt_compat.widgets import QSizePolicy
             button_manual.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-            button_manual.setStyleSheet("""
-                QPushButton {
-                    background-color: #1976d2;
+            button_manual.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
                     color: white;
                     font-weight: bold;
                     font-size: 13px;
                     border-radius: 6px;
                     padding: 8px 20px;
-                }
-                QPushButton:hover {
-                    background-color: #1565c0;
-                }
-                QPushButton:pressed {
-                    background-color: #0d47a1;
-                }
+                }}
+                QPushButton:hover {{
+                    background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+                }}
+                QPushButton:pressed {{
+                    background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_PRESSED)};
+                }}
             """)
             button_manual.clicked.connect(handlers['manual'])
             button_row.addWidget(button_manual)
@@ -420,17 +421,22 @@ def show_selected_user_ids(widget, checkbox_list, user_entries=None):
     user_map = {}
     if user_entries and not isinstance(user_entries, str):
         for user in user_entries:
+            # 統合形式: {"id": "...", "attributes": {...}, "roles": {...}}
+            user_id = user.get("id", "")
             attr = user.get("attributes", {})
-            user_map[user.get("id", "")] = {
-                "userName": attr.get("userName", ""),
+            user_map[user_id] = {
+                "userName": attr.get("userName", user_id),
                 "emailAddress": attr.get("emailAddress", "")
             }
+    
     result_lines = []
     for entry in checkbox_list:
         user_id, owner_radio, assistant_cb, member_cb, agent_cb, viewer_cb = entry
-        user_info = user_map.get(user_id, {"userName": user_id, "emailAddress": ""})
-        user_name = user_info["userName"]
-        email = user_info["emailAddress"]
+        
+        # ユーザー情報取得（デフォルト値としてuser_idを使用）
+        user_info = user_map.get(user_id, {"userName": user_id, "emailAddress": "不明"})
+        user_name = user_info.get("userName", user_id)
+        email = user_info.get("emailAddress", "不明")
         role = []
         
         # ウィジェットが削除されていないかチェック（安全版）

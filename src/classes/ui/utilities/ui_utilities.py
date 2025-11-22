@@ -5,6 +5,7 @@ UIControllerから分離したユーティリティメソッド群
 from qt_compat.widgets import QPushButton
 from qt_compat.gui import QFontMetrics, QFont
 from classes.ui.dialogs.ui_dialogs import TextAreaExpandDialog
+from classes.theme import get_color, ThemeKey
 
 
 class UIUtilities:
@@ -15,22 +16,22 @@ class UIUtilities:
         """テキストエリア用の拡大表示ボタンを作成"""
         expand_btn = QPushButton("🔍")
         expand_btn.setToolTip("拡大表示")
-        expand_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e3f2fd;
-                border: 1px solid #2196f3;
+        expand_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_EXPAND_BORDER)};
                 border-radius: 12px;
                 width: 24px;
                 height: 24px;
                 font-size: 12px;
-                color: #1976d2;
-            }
-            QPushButton:hover {
-                background-color: #bbdefb;
-            }
-            QPushButton:pressed {
-                background-color: #90caf9;
-            }
+                color: {get_color(ThemeKey.BUTTON_EXPAND_TEXT)};
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND_HOVER)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND_PRESSED)};
+            }}
         """)
         expand_btn.setMaximumSize(24, 24)
         expand_btn.setMinimumSize(24, 24)
@@ -90,22 +91,22 @@ class UIUtilities:
         """情報表示用の拡大表示ボタンを作成（専用）"""
         expand_btn = QPushButton("🔍")
         expand_btn.setToolTip(tooltip_text)
-        expand_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e3f2fd;
-                border: 1px solid #2196f3;
+        expand_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_EXPAND_BORDER)};
                 border-radius: 12px;
                 width: 24px;
                 height: 24px;
                 font-size: 12px;
-                color: #1976d2;
-            }
-            QPushButton:hover {
-                background-color: #bbdefb;
-            }
-            QPushButton:pressed {
-                background-color: #90caf9;
-            }
+                color: {get_color(ThemeKey.BUTTON_EXPAND_TEXT)};
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND_HOVER)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND_PRESSED)};
+            }}
         """)
         expand_btn.setMaximumSize(24, 24)
         expand_btn.setMinimumSize(24, 24)

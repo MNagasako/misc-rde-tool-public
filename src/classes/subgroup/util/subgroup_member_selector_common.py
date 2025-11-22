@@ -17,6 +17,7 @@ from qt_compat.core import Qt
 from qt_compat.gui import QColor
 from config.common import SUBGROUP_JSON_PATH
 from net.http_helpers import proxy_get
+from classes.theme import get_color, ThemeKey, ThemeManager
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -102,19 +103,50 @@ class CommonSubgroupMemberSelector(QWidget):
         # フィルタUI（新規作成タブのみ表示）
         if self.show_filter:
             filter_layout = QHBoxLayout()
-            filter_layout.addWidget(QLabel("表示フィルタ:"))
+            
+            # 「表示フィルタ:」ラベル
+            filter_label = QLabel("表示フィルタ:")
+            filter_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_PRIMARY)};")
+            filter_layout.addWidget(filter_label)
+            
+            # チェックボックス共通スタイル（テキスト色を明示的に指定）
+            checkbox_style = f"""
+                QCheckBox {{
+                    spacing: 5px;
+                    color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                }}
+                QCheckBox::indicator {{
+                    width: 16px;
+                    height: 16px;
+                    border: 2px solid {get_color(ThemeKey.INPUT_BORDER)};
+                    border-radius: 3px;
+                    background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                }}
+                QCheckBox::indicator:hover {{
+                    border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                }}
+                QCheckBox::indicator:checked {{
+                    background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                    border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                }}
+            """
             
             self.filter_institution_cb = QCheckBox("実施機関")
             self.filter_institution_cb.setChecked(True)
             self.filter_institution_cb.setToolTip("subGroup.json由来のメンバーを表示")
+            self.filter_institution_cb.setStyleSheet(checkbox_style)
             self.filter_institution_cb.toggled.connect(self.apply_filter)
             filter_layout.addWidget(self.filter_institution_cb)
             
             self.filter_custom_cb = QCheckBox("カスタム")
             self.filter_custom_cb.setChecked(True)
             self.filter_custom_cb.setToolTip("rde-member.txt由来のメンバーを表示")
+            self.filter_custom_cb.setStyleSheet(checkbox_style)
             self.filter_custom_cb.toggled.connect(self.apply_filter)
             filter_layout.addWidget(self.filter_custom_cb)
+            
+            # フィルタラベルとチェックボックスを保存（テーマ更新用）
+            self.filter_label = filter_label
             
             filter_layout.addStretch()
             layout.addLayout(filter_layout)
@@ -145,6 +177,10 @@ class CommonSubgroupMemberSelector(QWidget):
             layout.addWidget(self.table)
         
         self.setLayout(layout)
+        
+        # ThemeManager接続
+        theme_manager = ThemeManager.instance()
+        theme_manager.theme_changed.connect(self.refresh_theme)
     
     def create_custom_table(self):
         """カスタムテーブルウィジェット作成"""
@@ -399,19 +435,9 @@ class CommonSubgroupMemberSelector(QWidget):
         table.setFrameStyle(0)  # フレームを削除
         table.setShowGrid(True)  # グリッド線は表示
         
-        # テーブルの上下余白を削除するための追加設定
-        table.setStyleSheet("""
-            QTableWidget {
-                border: none;
-                margin: 0px;
-                padding: 0px;
-                background-color: white;
-            }
-            QTableWidget::item {
-                border: none;
-                padding: 2px;
-            }
-        """)
+        # 初回スタイル適用（リフレッシュ時と同じ）
+        self.table = table  # _apply_table_style()で参照できるようにする
+        self._apply_table_style()
         
         # 列幅調整
         header = table.horizontalHeader()
@@ -695,22 +721,22 @@ class CommonSubgroupMemberSelector(QWidget):
 
         if is_owner:
             # OWNER選択時: より濃い青色
-            bg_color = QColor(200, 220, 255)
+            bg_color = QColor.fromString(get_color(ThemeKey.ROLE_OWNER_BACKGROUND))
         elif is_assistant:
             # ASSISTANT選択時: 薄い青色
-            bg_color = QColor(230, 240, 255)
+            bg_color = QColor.fromString(get_color(ThemeKey.ROLE_ASSISTANT_BACKGROUND))
         elif is_member:
             # MEMBER選択時: 薄い緑色
-            bg_color = QColor(230, 255, 230)
+            bg_color = QColor.fromString(get_color(ThemeKey.ROLE_MEMBER_BACKGROUND))
         elif is_agent:
             # AGENT選択時: 薄い黄色
-            bg_color = QColor(255, 255, 230)
+            bg_color = QColor.fromString(get_color(ThemeKey.ROLE_AGENT_BACKGROUND))
         elif is_viewer:
             # VIEWER選択時: 薄い灰色
-            bg_color = QColor(240, 240, 240)
+            bg_color = QColor.fromString(get_color(ThemeKey.ROLE_VIEWER_BACKGROUND))
         else:
             # 未選択時: デフォルト背景色
-            bg_color = QColor(255, 255, 255)
+            bg_color = QColor.fromString(get_color(ThemeKey.WINDOW_BACKGROUND))
         
         # 行全体の背景色を設定
         for col in range(self.table.columnCount()):
@@ -996,6 +1022,118 @@ class CommonSubgroupMemberSelector(QWidget):
                 roles.append({"userId": user_id, "role": "VIEWER", "canCreateDatasets": False, "canEditMembers": False})
 
         return selected_user_ids, roles, owner_id
+    
+    def _apply_table_style(self):
+        """テーブルスタイル適用（テーマ切替対応）- 初回とリフレッシュで同じスタイル"""
+        if hasattr(self, 'table') and self.table:
+            # Paletteを使って背景色を強制設定
+            from qt_compat.gui import QPalette, QColor
+            palette = self.table.palette()
+            palette.setColor(QPalette.Base, QColor(get_color(ThemeKey.TABLE_BACKGROUND)))
+            palette.setColor(QPalette.AlternateBase, QColor(get_color(ThemeKey.TABLE_ROW_BACKGROUND_ALTERNATE)))
+            palette.setColor(QPalette.Text, QColor(get_color(ThemeKey.TABLE_ROW_TEXT)))
+            self.table.setPalette(palette)
+            
+            # QSSで全スタイル設定（初回setup_uiと完全に同じ）
+            self.table.setStyleSheet(f"""
+                QTableWidget {{
+                    border: none;
+                    margin: 0px;
+                    padding: 0px;
+                    gridline-color: {get_color(ThemeKey.TABLE_BORDER)};
+                }}
+                QTableWidget::item {{
+                    border: none;
+                    padding: 2px;
+                }}
+                QTableWidget::item:selected {{
+                    background-color: {get_color(ThemeKey.TABLE_ROW_BACKGROUND_SELECTED)};
+                    color: {get_color(ThemeKey.TABLE_ROW_TEXT_SELECTED)};
+                }}
+                QHeaderView::section {{
+                    background-color: {get_color(ThemeKey.TABLE_HEADER_BACKGROUND)};
+                    color: {get_color(ThemeKey.TABLE_HEADER_TEXT)};
+                    padding: 4px;
+                    border: 1px solid {get_color(ThemeKey.TABLE_BORDER)};
+                }}
+                QCheckBox {{
+                    spacing: 5px;
+                    color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                }}
+                QCheckBox::indicator {{
+                    width: 16px;
+                    height: 16px;
+                    border: 2px solid {get_color(ThemeKey.INPUT_BORDER)};
+                    border-radius: 3px;
+                    background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                }}
+                QCheckBox::indicator:hover {{
+                    border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                }}
+                QCheckBox::indicator:checked {{
+                    background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                    border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                }}
+                QRadioButton {{
+                    spacing: 5px;
+                    color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                }}
+                QRadioButton::indicator {{
+                    width: 16px;
+                    height: 16px;
+                    border: 2px solid {get_color(ThemeKey.INPUT_BORDER)};
+                    border-radius: 10px;
+                    background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                }}
+                QRadioButton::indicator:hover {{
+                    border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                }}
+                QRadioButton::indicator:checked {{
+                    background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                    border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                }}
+            """)
+    
+    def refresh_theme(self):
+        """テーマ切替時の更新処理"""
+        try:
+            self._apply_table_style()
+            
+            # フィルタUI更新（表示されている場合のみ）
+            if self.show_filter and hasattr(self, 'filter_label'):
+                # フィルタラベル更新
+                self.filter_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_PRIMARY)};")
+                
+                # チェックボックススタイル更新
+                checkbox_style = f"""
+                    QCheckBox {{
+                        spacing: 5px;
+                        color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                    }}
+                    QCheckBox::indicator {{
+                        width: 16px;
+                        height: 16px;
+                        border: 2px solid {get_color(ThemeKey.INPUT_BORDER)};
+                        border-radius: 3px;
+                        background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                    }}
+                    QCheckBox::indicator:hover {{
+                        border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                    }}
+                    QCheckBox::indicator:checked {{
+                        background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                        border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                    }}
+                """
+                
+                if hasattr(self, 'filter_institution_cb'):
+                    self.filter_institution_cb.setStyleSheet(checkbox_style)
+                if hasattr(self, 'filter_custom_cb'):
+                    self.filter_custom_cb.setStyleSheet(checkbox_style)
+            
+            self.update()
+        except Exception as e:
+            logger.error(f"CommonSubgroupMemberSelector: テーマ更新エラー: {e}")
 
 
 def create_common_subgroup_member_selector(initial_roles=None, prechecked_user_ids=None, show_filter=True, user_entries=None):

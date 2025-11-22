@@ -20,6 +20,7 @@ try:
     from qt_compat.widgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QCheckBox
     from qt_compat.core import Qt, QTimer
     from qt_compat.gui import QIcon, QFont
+    from classes.theme import get_color, ThemeKey
     PYQT5_AVAILABLE = True
 except ImportError:
     PYQT5_AVAILABLE = False
@@ -153,13 +154,13 @@ class ProxyStartupNotificationDialog(QDialog):
         
         info_label.setText(info_text)
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("""
-            QLabel {
+        info_label.setStyleSheet(f"""
+            QLabel {{
                 padding: 10px;
-                background-color: #f0f0f0;
-                border: 1px solid #ccc;
+                background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                 border-radius: 5px;
-            }
+            }}
         """)
         layout.addWidget(info_label)
         
@@ -175,7 +176,7 @@ class ProxyStartupNotificationDialog(QDialog):
 • 設定ファイル: config/network.yaml
         """)
         settings_info.setWordWrap(True)
-        settings_info.setStyleSheet("color: #666; font-size: 10px; padding: 5px;")
+        settings_info.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 10px; padding: 5px;")
         layout.addWidget(settings_info)
         
     def update_countdown(self):

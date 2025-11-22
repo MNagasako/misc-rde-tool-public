@@ -14,6 +14,8 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt, QThread, Signal, QTimer
 from classes.ai.core.ai_manager import AIManager
+from classes.theme import ThemeKey
+from classes.theme.theme_manager import get_color
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -93,6 +95,7 @@ class AISuggestionDialog(QDialog):
         self.ai_thread = None
         self.extension_ai_threads = []  # AI拡張用のスレッドリスト
         self.auto_generate = auto_generate  # 自動生成フラグ
+        self.last_used_prompt = None  # 最後に使用したプロンプトを保存
         
         # AI拡張機能を取得
         self.ai_extension = AIExtensionRegistry.get(extension_name)
@@ -157,6 +160,14 @@ class AISuggestionDialog(QDialog):
         except Exception as e:
             logger.warning("AI拡張タブの初期化に失敗しました: %s", e)
             # AI拡張タブが失敗しても他の機能は使用可能
+        
+        # ファイル抽出設定タブ
+        try:
+            extraction_settings_tab = QWidget()
+            self.tab_widget.addTab(extraction_settings_tab, "ファイル抽出設定")
+            self.setup_extraction_settings_tab(extraction_settings_tab)
+        except Exception as e:
+            logger.warning("ファイル抽出設定タブの初期化に失敗しました: %s", e)
         
         # プログレスバー
         self.progress_bar = QProgressBar()
@@ -266,7 +277,7 @@ class AISuggestionDialog(QDialog):
         layout.addWidget(stats_label)
         
         self.prompt_stats = QLabel("文字数: -, 行数: -, ARIM統合: -")
-        self.prompt_stats.setStyleSheet("color: #666; margin: 5px;")
+        self.prompt_stats.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin: 5px;")
         layout.addWidget(self.prompt_stats)
         
     def setup_detail_tab(self, tab_widget):
@@ -764,7 +775,7 @@ class AISuggestionDialog(QDialog):
         left_layout.setContentsMargins(5, 5, 5, 5)
         
         buttons_label = QLabel("🤖 AIサジェスト機能")
-        buttons_label.setStyleSheet("font-weight: bold; margin: 5px 0; font-size: 13px; color: #495057;")
+        buttons_label.setStyleSheet(f"font-weight: bold; margin: 5px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};")
         left_layout.addWidget(buttons_label)
         
         # ボタンエリア（スクロールなしで直接配置）
@@ -786,7 +797,7 @@ class AISuggestionDialog(QDialog):
         right_layout.setContentsMargins(5, 5, 5, 5)
         
         response_label = QLabel("📝 AI応答結果")
-        response_label.setStyleSheet("font-weight: bold; margin: 5px 0; font-size: 13px; color: #495057;")
+        response_label.setStyleSheet(f"font-weight: bold; margin: 5px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};")
         right_layout.addWidget(response_label)
         
         from qt_compat.widgets import QTextBrowser
@@ -947,6 +958,30 @@ class AISuggestionDialog(QDialog):
         
         response_button_layout.addWidget(self.clear_response_button)
         response_button_layout.addWidget(self.copy_response_button)
+        
+        # プロンプト表示ボタンを追加
+        self.show_prompt_button = QPushButton("📄 使用プロンプト表示")
+        self.show_prompt_button.clicked.connect(self.show_used_prompt)
+        self.show_prompt_button.setStyleSheet("""
+            QPushButton {
+                background-color: #007bff;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #0056b3;
+            }
+            QPushButton:disabled {
+                background-color: #6c757d;
+            }
+        """)
+        self.show_prompt_button.setEnabled(False)  # 初期状態は無効
+        
+        response_button_layout.addWidget(self.show_prompt_button)
         response_button_layout.addStretch()
         
         right_layout.addLayout(response_button_layout)
@@ -960,7 +995,13 @@ class AISuggestionDialog(QDialog):
             logger.warning("AI拡張ボタンの読み込みに失敗しました: %s", e)
             # エラーメッセージを表示
             error_label = QLabel(f"AI拡張機能の初期化に失敗しました。\n\n設定ファイルを確認してください:\ninput/ai/ai_ext_conf.json\n\nエラー: {str(e)}")
-            error_label.setStyleSheet("color: red; padding: 20px; background-color: #fff8f8; border: 1px solid #ffcdd2; border-radius: 5px;")
+            error_label.setStyleSheet(f"""
+                color: {get_color(ThemeKey.TEXT_ERROR)};
+                padding: 20px;
+                background-color: {get_color(ThemeKey.NOTIFICATION_ERROR_BACKGROUND)};
+                border: 1px solid {get_color(ThemeKey.NOTIFICATION_ERROR_BORDER)};
+                border-radius: 5px;
+            """)
             error_label.setWordWrap(True)
             error_label.setAlignment(Qt.AlignCenter)
             self.buttons_layout.addWidget(error_label)
@@ -972,6 +1013,295 @@ class AISuggestionDialog(QDialog):
         if hasattr(self, 'extension_dataset_combo'):
             self.extension_dataset_combo.currentTextChanged.connect(self.on_dataset_selection_changed)
         
+    def setup_extraction_settings_tab(self, tab_widget):
+        """ファイル抽出設定タブのセットアップ"""
+        layout = QVBoxLayout(tab_widget)
+        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setSpacing(10)
+        
+        # ヘッダー
+        header_label = QLabel("⚙️ ファイルテキスト抽出設定")
+        header_label.setStyleSheet("font-size: 14px; font-weight: bold; margin-bottom: 10px; color: #2c3e50;")
+        layout.addWidget(header_label)
+        
+        description_label = QLabel(
+            "AI分析で使用するファイルからのテキスト抽出に関する設定を調整できます。\n"
+            "これらの設定は、データセットのSTRUCTUREDファイルからテキストを抽出する際に適用されます。"
+        )
+        description_label.setWordWrap(True)
+        description_label.setStyleSheet("color: #6c757d; margin-bottom: 10px; font-size: 11px;")
+        layout.addWidget(description_label)
+        
+        # スクロールエリア
+        from qt_compat.widgets import QScrollArea
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QScrollArea.NoFrame)
+        
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        scroll_layout.setSpacing(15)
+        
+        # 1. 対象ファイル種別設定
+        file_types_group = QGroupBox("📄 対象ファイル種別")
+        file_types_layout = QVBoxLayout(file_types_group)
+        
+        file_types_desc = QLabel("テキスト抽出対象とするファイルの拡張子を指定します（カンマ区切り）")
+        file_types_desc.setWordWrap(True)
+        file_types_desc.setStyleSheet("color: #6c757d; font-size: 10px; margin-bottom: 5px;")
+        file_types_layout.addWidget(file_types_desc)
+        
+        from qt_compat.widgets import QLineEdit
+        self.file_extensions_input = QLineEdit()
+        self.file_extensions_input.setPlaceholderText("例: .txt, .csv, .xlsx, .json, .md")
+        self.file_extensions_input.setText(".txt, .csv, .xlsx, .json, .md, .log, .xml")
+        self.file_extensions_input.setStyleSheet("""
+            QLineEdit {
+                padding: 6px;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                font-size: 11px;
+            }
+        """)
+        file_types_layout.addWidget(self.file_extensions_input)
+        
+        scroll_layout.addWidget(file_types_group)
+        
+        # 2. 除外ファイルパターン設定
+        exclude_group = QGroupBox("🚫 除外ファイルパターン")
+        exclude_layout = QVBoxLayout(exclude_group)
+        
+        exclude_desc = QLabel("除外するファイル名のパターンを指定します（正規表現、改行区切り）")
+        exclude_desc.setWordWrap(True)
+        exclude_desc.setStyleSheet("color: #6c757d; font-size: 10px; margin-bottom: 5px;")
+        exclude_layout.addWidget(exclude_desc)
+        
+        self.exclude_patterns_input = QTextEdit()
+        self.exclude_patterns_input.setPlaceholderText(
+            "例:\n"
+            ".*_anonymized\\.json\n"
+            "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.json\n"
+            ".*\\.tmp"
+        )
+        self.exclude_patterns_input.setPlainText(
+            ".*_anonymized\\.json\n"
+            "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.json"
+        )
+        self.exclude_patterns_input.setMaximumHeight(100)
+        self.exclude_patterns_input.setStyleSheet("""
+            QTextEdit {
+                padding: 6px;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                font-size: 10px;
+                font-family: 'Consolas', 'Monaco', monospace;
+            }
+        """)
+        exclude_layout.addWidget(self.exclude_patterns_input)
+        
+        scroll_layout.addWidget(exclude_group)
+        
+        # 3. 処理ファイル数上限
+        from qt_compat.widgets import QSpinBox
+        max_files_group = QGroupBox("📊 処理ファイル数上限")
+        max_files_layout = QVBoxLayout(max_files_group)
+        
+        max_files_desc = QLabel("一度に処理するファイルの最大数を設定します")
+        max_files_desc.setWordWrap(True)
+        max_files_desc.setStyleSheet("color: #6c757d; font-size: 10px; margin-bottom: 5px;")
+        max_files_layout.addWidget(max_files_desc)
+        
+        max_files_h_layout = QHBoxLayout()
+        self.max_files_spinbox = QSpinBox()
+        self.max_files_spinbox.setMinimum(1)
+        self.max_files_spinbox.setMaximum(100)
+        self.max_files_spinbox.setValue(10)
+        self.max_files_spinbox.setSuffix(" 件")
+        self.max_files_spinbox.setStyleSheet("""
+            QSpinBox {
+                padding: 6px;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                font-size: 11px;
+            }
+        """)
+        max_files_h_layout.addWidget(self.max_files_spinbox)
+        max_files_h_layout.addStretch()
+        max_files_layout.addLayout(max_files_h_layout)
+        
+        scroll_layout.addWidget(max_files_group)
+        
+        # 4. ファイルサイズ上限
+        max_file_size_group = QGroupBox("📏 ファイルサイズ上限")
+        max_file_size_layout = QVBoxLayout(max_file_size_group)
+        
+        max_file_size_desc = QLabel("処理対象とするファイルの最大サイズを設定します")
+        max_file_size_desc.setWordWrap(True)
+        max_file_size_desc.setStyleSheet("color: #6c757d; font-size: 10px; margin-bottom: 5px;")
+        max_file_size_layout.addWidget(max_file_size_desc)
+        
+        max_file_size_h_layout = QHBoxLayout()
+        self.max_file_size_spinbox = QSpinBox()
+        self.max_file_size_spinbox.setMinimum(1)
+        self.max_file_size_spinbox.setMaximum(100)
+        self.max_file_size_spinbox.setValue(10)
+        self.max_file_size_spinbox.setSuffix(" MB")
+        self.max_file_size_spinbox.setStyleSheet("""
+            QSpinBox {
+                padding: 6px;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                font-size: 11px;
+            }
+        """)
+        max_file_size_h_layout.addWidget(self.max_file_size_spinbox)
+        max_file_size_h_layout.addStretch()
+        max_file_size_layout.addLayout(max_file_size_h_layout)
+        
+        scroll_layout.addWidget(max_file_size_group)
+        
+        # 5. 出力文字数制限
+        max_chars_group = QGroupBox("📝 出力文字数制限")
+        max_chars_layout = QVBoxLayout(max_chars_group)
+        
+        max_chars_desc = QLabel("抽出したテキストの最大文字数を設定します（1ファイルあたり）")
+        max_chars_desc.setWordWrap(True)
+        max_chars_desc.setStyleSheet("color: #6c757d; font-size: 10px; margin-bottom: 5px;")
+        max_chars_layout.addWidget(max_chars_desc)
+        
+        max_chars_h_layout = QHBoxLayout()
+        self.max_chars_spinbox = QSpinBox()
+        self.max_chars_spinbox.setMinimum(100)
+        self.max_chars_spinbox.setMaximum(50000)
+        self.max_chars_spinbox.setSingleStep(1000)
+        self.max_chars_spinbox.setValue(10000)
+        self.max_chars_spinbox.setSuffix(" 文字")
+        self.max_chars_spinbox.setStyleSheet("""
+            QSpinBox {
+                padding: 6px;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                font-size: 11px;
+            }
+        """)
+        max_chars_h_layout.addWidget(self.max_chars_spinbox)
+        max_chars_h_layout.addStretch()
+        max_chars_layout.addLayout(max_chars_h_layout)
+        
+        scroll_layout.addWidget(max_chars_group)
+        
+        # 6. Excel設定
+        excel_group = QGroupBox("📊 Excel設定")
+        excel_layout = QVBoxLayout(excel_group)
+        
+        excel_desc = QLabel("Excelファイルの処理に関する設定")
+        excel_desc.setWordWrap(True)
+        excel_desc.setStyleSheet("color: #6c757d; font-size: 10px; margin-bottom: 5px;")
+        excel_layout.addWidget(excel_desc)
+        
+        from qt_compat.widgets import QCheckBox
+        self.excel_all_sheets_checkbox = QCheckBox("全シートを処理する（無効時は最初のシートのみ）")
+        self.excel_all_sheets_checkbox.setChecked(True)
+        self.excel_all_sheets_checkbox.setStyleSheet("font-size: 11px;")
+        excel_layout.addWidget(self.excel_all_sheets_checkbox)
+        
+        excel_max_rows_h_layout = QHBoxLayout()
+        excel_max_rows_label = QLabel("シートあたり最大行数:")
+        excel_max_rows_label.setStyleSheet("font-size: 11px;")
+        excel_max_rows_h_layout.addWidget(excel_max_rows_label)
+        
+        self.excel_max_rows_spinbox = QSpinBox()
+        self.excel_max_rows_spinbox.setMinimum(10)
+        self.excel_max_rows_spinbox.setMaximum(10000)
+        self.excel_max_rows_spinbox.setSingleStep(100)
+        self.excel_max_rows_spinbox.setValue(1000)
+        self.excel_max_rows_spinbox.setSuffix(" 行")
+        self.excel_max_rows_spinbox.setStyleSheet("""
+            QSpinBox {
+                padding: 4px;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                font-size: 11px;
+            }
+        """)
+        excel_max_rows_h_layout.addWidget(self.excel_max_rows_spinbox)
+        excel_max_rows_h_layout.addStretch()
+        excel_layout.addLayout(excel_max_rows_h_layout)
+        
+        scroll_layout.addWidget(excel_group)
+        
+        scroll_layout.addStretch()
+        
+        scroll_area.setWidget(scroll_widget)
+        layout.addWidget(scroll_area)
+        
+        # ボタンエリア
+        button_layout = QHBoxLayout()
+        
+        # 設定を読み込みボタン
+        load_settings_button = QPushButton("📂 設定を読み込み")
+        load_settings_button.clicked.connect(self.load_extraction_settings)
+        load_settings_button.setStyleSheet("""
+            QPushButton {
+                background-color: #17a2b8;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #138496;
+            }
+        """)
+        button_layout.addWidget(load_settings_button)
+        
+        # 設定を保存ボタン
+        save_settings_button = QPushButton("💾 設定を保存")
+        save_settings_button.clicked.connect(self.save_extraction_settings)
+        save_settings_button.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #218838;
+            }
+        """)
+        button_layout.addWidget(save_settings_button)
+        
+        # デフォルトに戻すボタン
+        reset_settings_button = QPushButton("🔄 デフォルトに戻す")
+        reset_settings_button.clicked.connect(self.reset_extraction_settings)
+        reset_settings_button.setStyleSheet("""
+            QPushButton {
+                background-color: #ffc107;
+                color: #212529;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #e0a800;
+            }
+        """)
+        button_layout.addWidget(reset_settings_button)
+        
+        button_layout.addStretch()
+        
+        layout.addLayout(button_layout)
+        
+        # 初期設定を読み込み
+        QTimer.singleShot(100, self.load_extraction_settings)
+    
     def load_extension_buttons(self):
         """AI拡張設定からボタンを読み込んで表示"""
         try:
@@ -998,7 +1328,7 @@ class AISuggestionDialog(QDialog):
             
             if not all_buttons:
                 no_buttons_label = QLabel("AI拡張ボタンが設定されていません。\n設定編集ボタンから設定ファイルを確認してください。")
-                no_buttons_label.setStyleSheet("color: #666; text-align: center; padding: 20px;")
+                no_buttons_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; text-align: center; padding: 20px;")
                 no_buttons_label.setAlignment(Qt.AlignCenter)
                 self.buttons_layout.addWidget(no_buttons_label)
                 return
@@ -1089,7 +1419,6 @@ class AISuggestionDialog(QDialog):
             QPushButton:hover {
                 background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
                     stop: 0 #66BB6A, stop: 1 #4CAF50);
-                transform: scale(1.02);
             }
             QPushButton:pressed {
                 background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
@@ -1264,6 +1593,13 @@ class AISuggestionDialog(QDialog):
     def execute_extension_ai_request(self, prompt, button_config, button_widget):
         """AI拡張リクエストを実行"""
         try:
+            # 使用するプロンプトを保存
+            self.last_used_prompt = prompt
+            
+            # プロンプト表示ボタンを有効化
+            if hasattr(self, 'show_prompt_button'):
+                self.show_prompt_button.setEnabled(True)
+            
             # AIリクエストスレッドを作成・実行
             ai_thread = AIRequestThread(prompt, self.context_data)
             
@@ -1562,6 +1898,255 @@ class AISuggestionDialog(QDialog):
             QMessageBox.critical(self, "エラー", f"コピーエラー: {str(e)}")
         except Exception as e:
             QMessageBox.critical(self, "エラー", f"コピーエラー: {str(e)}")
+    
+    def show_used_prompt(self):
+        """使用したプロンプトをダイアログで表示"""
+        try:
+            if not self.last_used_prompt:
+                QMessageBox.information(self, "情報", "表示可能なプロンプトがありません。\nAI機能を実行してから再度お試しください。")
+                return
+            
+            # プロンプト表示ダイアログを作成
+            prompt_dialog = QDialog(self)
+            prompt_dialog.setWindowTitle("使用したプロンプト")
+            prompt_dialog.setModal(True)
+            prompt_dialog.resize(800, 600)
+            
+            layout = QVBoxLayout(prompt_dialog)
+            
+            # ヘッダー
+            header_label = QLabel("📄 AIリクエストで実際に使用したプロンプト")
+            header_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 5px; color: #2c3e50;")
+            layout.addWidget(header_label)
+            
+            # プロンプト表示エリア
+            prompt_display = QTextEdit()
+            prompt_display.setReadOnly(True)
+            prompt_display.setPlainText(self.last_used_prompt)
+            prompt_display.setStyleSheet("""
+                QTextEdit {
+                    border: 1px solid #dee2e6;
+                    border-radius: 5px;
+                    background-color: #f8f9fa;
+                    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                    font-size: 11px;
+                    padding: 8px;
+                }
+            """)
+            layout.addWidget(prompt_display)
+            
+            # 統計情報
+            char_count = len(self.last_used_prompt)
+            line_count = self.last_used_prompt.count('\n') + 1
+            stats_label = QLabel(f"文字数: {char_count:,} / 行数: {line_count:,}")
+            stats_label.setStyleSheet("font-size: 11px; color: #6c757d; margin: 3px;")
+            layout.addWidget(stats_label)
+            
+            # ボタンエリア
+            button_layout = QHBoxLayout()
+            
+            # コピーボタン
+            copy_button = QPushButton("📋 プロンプトをコピー")
+            copy_button.clicked.connect(lambda: self._copy_prompt_to_clipboard(self.last_used_prompt))
+            copy_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #28a745;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 16px;
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #218838;
+                }
+            """)
+            button_layout.addWidget(copy_button)
+            
+            button_layout.addStretch()
+            
+            # 閉じるボタン
+            close_button = QPushButton("閉じる")
+            close_button.clicked.connect(prompt_dialog.accept)
+            close_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #6c757d;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 16px;
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #5a6268;
+                }
+            """)
+            button_layout.addWidget(close_button)
+            
+            layout.addLayout(button_layout)
+            
+            # ダイアログを表示
+            prompt_dialog.exec_()
+            
+        except Exception as e:
+            logger.error("プロンプト表示エラー: %s", e)
+            QMessageBox.critical(self, "エラー", f"プロンプト表示エラー: {str(e)}")
+    
+    def _copy_prompt_to_clipboard(self, prompt_text):
+        """プロンプトをクリップボードにコピー"""
+        try:
+            from qt_compat.widgets import QApplication
+            clipboard = QApplication.clipboard()
+            clipboard.setText(prompt_text)
+            QMessageBox.information(self, "コピー完了", f"プロンプトをクリップボードにコピーしました。\n\n文字数: {len(prompt_text):,}")
+        except Exception as e:
+            QMessageBox.critical(self, "エラー", f"コピーエラー: {str(e)}")
+    
+    def load_extraction_settings(self):
+        """ファイル抽出設定を読み込み"""
+        try:
+            from config.common import get_dynamic_file_path
+            config_path = get_dynamic_file_path('config/app_config.json')
+            
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    extraction_config = config.get('file_text_extraction', {})
+                    
+                    # UIに設定を反映
+                    if hasattr(self, 'file_extensions_input'):
+                        extensions = extraction_config.get('target_extensions', ['.txt', '.csv', '.xlsx', '.json', '.md', '.log', '.xml'])
+                        self.file_extensions_input.setText(', '.join(extensions))
+                    
+                    if hasattr(self, 'exclude_patterns_input'):
+                        patterns = extraction_config.get('exclude_patterns', [
+                            '.*_anonymized\\.json',
+                            '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.json'
+                        ])
+                        self.exclude_patterns_input.setPlainText('\n'.join(patterns))
+                    
+                    if hasattr(self, 'max_files_spinbox'):
+                        self.max_files_spinbox.setValue(extraction_config.get('max_files', 10))
+                    
+                    if hasattr(self, 'max_file_size_spinbox'):
+                        max_size_mb = extraction_config.get('max_file_size_bytes', 10485760) // (1024 * 1024)
+                        self.max_file_size_spinbox.setValue(max_size_mb)
+                    
+                    if hasattr(self, 'max_chars_spinbox'):
+                        self.max_chars_spinbox.setValue(extraction_config.get('max_chars_per_file', 10000))
+                    
+                    if hasattr(self, 'excel_all_sheets_checkbox'):
+                        self.excel_all_sheets_checkbox.setChecked(extraction_config.get('excel_all_sheets', True))
+                    
+                    if hasattr(self, 'excel_max_rows_spinbox'):
+                        self.excel_max_rows_spinbox.setValue(extraction_config.get('excel_max_rows', 1000))
+                    
+                    logger.info("ファイル抽出設定を読み込みました")
+            else:
+                logger.info("設定ファイルが存在しないため、デフォルト設定を使用します")
+                self.reset_extraction_settings()
+                
+        except Exception as e:
+            logger.error("設定読み込みエラー: %s", e)
+            QMessageBox.warning(self, "警告", f"設定の読み込みに失敗しました。デフォルト設定を使用します。\n\nエラー: {str(e)}")
+            self.reset_extraction_settings()
+    
+    def save_extraction_settings(self):
+        """ファイル抽出設定を保存"""
+        try:
+            from config.common import get_dynamic_file_path
+            config_path = get_dynamic_file_path('config/app_config.json')
+            
+            # 既存の設定を読み込み
+            config = {}
+            if os.path.exists(config_path):
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+            
+            # 抽出設定を更新
+            extraction_config = {}
+            
+            # ファイル拡張子
+            if hasattr(self, 'file_extensions_input'):
+                extensions_text = self.file_extensions_input.text().strip()
+                extensions = [ext.strip() for ext in extensions_text.split(',') if ext.strip()]
+                extraction_config['target_extensions'] = extensions
+            
+            # 除外パターン
+            if hasattr(self, 'exclude_patterns_input'):
+                patterns_text = self.exclude_patterns_input.toPlainText().strip()
+                patterns = [p.strip() for p in patterns_text.split('\n') if p.strip()]
+                extraction_config['exclude_patterns'] = patterns
+            
+            # 処理ファイル数上限
+            if hasattr(self, 'max_files_spinbox'):
+                extraction_config['max_files'] = self.max_files_spinbox.value()
+            
+            # ファイルサイズ上限
+            if hasattr(self, 'max_file_size_spinbox'):
+                max_size_bytes = self.max_file_size_spinbox.value() * 1024 * 1024
+                extraction_config['max_file_size_bytes'] = max_size_bytes
+            
+            # 文字数制限
+            if hasattr(self, 'max_chars_spinbox'):
+                extraction_config['max_chars_per_file'] = self.max_chars_spinbox.value()
+            
+            # Excel設定
+            if hasattr(self, 'excel_all_sheets_checkbox'):
+                extraction_config['excel_all_sheets'] = self.excel_all_sheets_checkbox.isChecked()
+            
+            if hasattr(self, 'excel_max_rows_spinbox'):
+                extraction_config['excel_max_rows'] = self.excel_max_rows_spinbox.value()
+            
+            # 設定を保存
+            config['file_text_extraction'] = extraction_config
+            
+            # JSONファイルに書き込み
+            os.makedirs(os.path.dirname(config_path), exist_ok=True)
+            with open(config_path, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+            
+            logger.info("ファイル抽出設定を保存しました: %s", config_path)
+            QMessageBox.information(self, "保存完了", "ファイル抽出設定を保存しました。\n\n次回のAI分析から新しい設定が適用されます。")
+            
+        except Exception as e:
+            logger.error("設定保存エラー: %s", e)
+            QMessageBox.critical(self, "エラー", f"設定の保存に失敗しました。\n\nエラー: {str(e)}")
+    
+    def reset_extraction_settings(self):
+        """ファイル抽出設定をデフォルトに戻す"""
+        try:
+            if hasattr(self, 'file_extensions_input'):
+                self.file_extensions_input.setText(".txt, .csv, .xlsx, .json, .md, .log, .xml")
+            
+            if hasattr(self, 'exclude_patterns_input'):
+                self.exclude_patterns_input.setPlainText(
+                    ".*_anonymized\\.json\n"
+                    "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.json"
+                )
+            
+            if hasattr(self, 'max_files_spinbox'):
+                self.max_files_spinbox.setValue(10)
+            
+            if hasattr(self, 'max_file_size_spinbox'):
+                self.max_file_size_spinbox.setValue(10)
+            
+            if hasattr(self, 'max_chars_spinbox'):
+                self.max_chars_spinbox.setValue(10000)
+            
+            if hasattr(self, 'excel_all_sheets_checkbox'):
+                self.excel_all_sheets_checkbox.setChecked(True)
+            
+            if hasattr(self, 'excel_max_rows_spinbox'):
+                self.excel_max_rows_spinbox.setValue(1000)
+            
+            logger.info("ファイル抽出設定をデフォルトに戻しました")
+            
+        except Exception as e:
+            logger.error("設定リセットエラー: %s", e)
+            QMessageBox.critical(self, "エラー", f"設定のリセットに失敗しました。\n\nエラー: {str(e)}")
     
     def show_button_context_menu(self, position, button_config, button_widget):
         """ボタンの右クリックメニューを表示"""
