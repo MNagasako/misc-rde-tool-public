@@ -76,6 +76,13 @@ class DatasetUploadTab(QWidget):
         
         self._init_ui()
         logger.info("データセットアップロードタブ初期化完了")
+        # テーマ変更時に再適用
+        try:
+            from classes.theme.theme_manager import ThemeManager
+            ThemeManager.get_instance().theme_changed.connect(self.refresh_theme)
+        except Exception as e:
+            logger.debug(f"DatasetUploadTab theme signal connect failed: {e}")
+        self.refresh_theme()
     
     def _init_ui(self):
         """UI初期化"""
@@ -141,8 +148,41 @@ class DatasetUploadTab(QWidget):
     
     def refresh_theme(self):
         """テーマ変更時のスタイル更新"""
-        self._apply_status_style()
-        self.update()
+        try:
+            # ルート背景
+            self.setStyleSheet(f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};")
+            self._apply_status_style()
+            # 入力系
+            from qt_compat.widgets import QLineEdit, QComboBox, QPushButton, QGroupBox, QRadioButton, QCheckBox, QTextEdit
+            # QLineEdit
+            for w in self.findChildren(QLineEdit):
+                w.setStyleSheet(f"QLineEdit {{ background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; border: 1px solid {get_color(ThemeKey.INPUT_BORDER)}; border-radius: 4px; padding: 4px 6px; }}")
+            # QComboBox
+            combo_style = f"QComboBox {{ background-color: {get_color(ThemeKey.COMBO_BACKGROUND)}; color: {get_color(ThemeKey.TEXT_PRIMARY)}; border: 1px solid {get_color(ThemeKey.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
+            for w in self.findChildren(QComboBox):
+                w.setStyleSheet(combo_style)
+            # Buttons (簡易共通適用 - variant未設定のみ)
+            btn_style_default = f"QPushButton {{ background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)}; border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)}; border-radius: 4px; padding: 6px 10px; font-weight: bold; }} QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)}; }} QPushButton:pressed {{ background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_PRESSED)}; }}"
+            for b in self.findChildren(QPushButton):
+                if not b.property("variant"):
+                    b.setStyleSheet(btn_style_default)
+            # GroupBox
+            gb_style = f"QGroupBox {{ border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; border-radius: 6px; margin-top: 8px; background-color: {get_color(ThemeKey.PANEL_BACKGROUND)}; }} QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 2px 4px; color: {get_color(ThemeKey.TEXT_SECONDARY)}; font-weight: bold; }}"
+            for g in self.findChildren(QGroupBox):
+                g.setStyleSheet(gb_style)
+            # Radio / Checkbox
+            indicator_style = (
+                f"QRadioButton {{ color: {get_color(ThemeKey.TEXT_PRIMARY)}; }} QRadioButton::indicator {{ width:16px; height:16px; border:1px solid {get_color(ThemeKey.INPUT_BORDER)}; background:{get_color(ThemeKey.INPUT_BACKGROUND)}; border-radius:8px; }} QRadioButton::indicator:checked {{ background:{get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; }}"
+                f" QCheckBox {{ color: {get_color(ThemeKey.TEXT_PRIMARY)}; }} QCheckBox::indicator {{ width:16px; height:16px; border:1px solid {get_color(ThemeKey.INPUT_BORDER)}; background:{get_color(ThemeKey.INPUT_BACKGROUND)}; border-radius:3px; }} QCheckBox::indicator:checked {{ background:{get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; border-color:{get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; }}"
+            )
+            for r in self.findChildren(QRadioButton):
+                r.setStyleSheet(indicator_style)
+            for c in self.findChildren(QCheckBox):
+                c.setStyleSheet(indicator_style)
+            # Status text already handled
+            self.update()
+        except Exception as e:
+            logger.debug(f"DatasetUploadTab refresh_theme failed: {e}")
     
     def _create_environment_selector(self) -> QGroupBox:
         """環境選択セクション"""

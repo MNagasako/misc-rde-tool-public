@@ -184,7 +184,6 @@ class UIControllerCore:
         
         # テーマ表示用アイコン/ラベル
         theme_labels = {
-            ThemeMode.AUTO: "🔄 自動",
             ThemeMode.LIGHT: "☀️ ライト",
             ThemeMode.DARK: "🌙 ダーク",
         }
@@ -208,7 +207,8 @@ class UIControllerCore:
             toggle_start = time.perf_counter_ns()
             
             # テーマモード変更（ThemeManager内で詳細計測）
-            theme_manager.cycle_mode()
+            # 2状態トグル (AUTO廃止)
+            theme_manager.toggle_mode()
             
             # ボタン更新（軽量）
             button_start = time.perf_counter_ns()

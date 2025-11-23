@@ -17,10 +17,13 @@ from .dark_theme import DarkTheme
 
 
 class ThemeMode(Enum):
-    """テーマモード列挙型"""
+    """テーマモード列挙型 (AUTO廃止: v2.1.8)
+
+    起動時に OS テーマを検出して初期モードを決定し、
+    以後はユーザー操作で LIGHT/DARK をトグルする。
+    """
     LIGHT = "light"
     DARK = "dark"
-    AUTO = "auto"  # OS設定に自動追従（将来実装予定）
 
 
 class ThemeManager(QObject):
@@ -333,18 +336,11 @@ class ThemeManager(QObject):
         return self._current_mode
     
     def cycle_mode(self) -> ThemeMode:
-        """テーマモードをサイクル切り替え
-        
-        AUTO → LIGHT → DARK → AUTO の順に循環。
-        
-        Returns:
-            切り替え後のテーマモード
+        """互換用: 2状態トグル (AUTO廃止後)
+
+        旧コードが cycle_mode() を呼ぶケースを維持するためのラッパ。
         """
-        mode_cycle = [ThemeMode.AUTO, ThemeMode.LIGHT, ThemeMode.DARK]
-        current_index = mode_cycle.index(self._current_mode)
-        next_index = (current_index + 1) % len(mode_cycle)
-        self.set_mode(mode_cycle[next_index])
-        return self._current_mode
+        return self.toggle_mode()
     
     def detect_system_theme(self) -> ThemeMode:
         """OS設定から現在のテーマを検出
@@ -387,19 +383,10 @@ class ThemeManager(QObject):
         return theme_class.validate_completeness()
     
     def _get_current_theme_class(self):
-        """現在のテーマモードに応じたテーマクラスを取得
-        
-        Returns:
-            LightTheme または DarkTheme
-        """
-        if self._current_mode == ThemeMode.AUTO:
-            # OS設定を検出
-            detected = self.detect_system_theme()
-            return DarkTheme if detected == ThemeMode.DARK else LightTheme
-        elif self._current_mode == ThemeMode.DARK:
+        """現在モードに対応するテーマクラスを取得"""
+        if self._current_mode == ThemeMode.DARK:
             return DarkTheme
-        else:  # LIGHT
-            return LightTheme
+        return LightTheme
     
     # ========================================
     # 便利メソッド：よく使う色へのショートカット

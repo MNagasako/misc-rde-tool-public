@@ -20,6 +20,9 @@ ARIM課題データ:
 ファイルツリー情報:
 {file_tree}
 
+STRUCTUREDファイルのテキスト内容:
+{text_from_structured_files}
+
 関連情報:
 - メタデータ: {metadata}
 - 関連データセット: {related_datasets}

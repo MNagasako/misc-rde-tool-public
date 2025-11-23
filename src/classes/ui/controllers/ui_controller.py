@@ -1094,6 +1094,7 @@ class UIController(UIControllerCore):
         データ取得・Excel・段階実行・ステータス表示の統合UI構築
         """
         from qt_compat.widgets import QLabel, QHBoxLayout, QVBoxLayout, QLineEdit, QMessageBox
+        from classes.theme.theme_manager import ThemeManager
         
         try:
             # RDE基本情報取得機能セクション
@@ -1101,19 +1102,32 @@ class UIController(UIControllerCore):
             data_fetch_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)}; margin-bottom: 8px; font-size: 12pt;")
             layout.addWidget(data_fetch_label)
             
+            # データ取得ボタン用のスタイル（INFO系）
+            info_button_style = f"""
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                font-weight: bold;
+                border-radius: 6px;
+                border: 2px solid {get_color(ThemeKey.BUTTON_INFO_BORDER)};
+                padding: 3px;
+            """
+            
             # 横並びで3ボタン配置（1行目）
             btn_layout1 = QHBoxLayout()
             # 基本情報取得ボタン（invoice_schema取得も含む）
-            basic_btn = self.create_auto_resize_button("基本情報取得(ALL)", 180, 40, button_style)
+            self.basic_btn = self.create_auto_resize_button("基本情報取得(ALL)", 180, 40, info_button_style)
+            basic_btn = self.basic_btn
             basic_btn.setToolTip("全ての基本情報・インボイス情報・invoiceSchema情報を取得します")
             basic_btn.clicked.connect(self.fetch_basic_info)
             btn_layout1.addWidget(basic_btn)
-            basic_self_btn = self.create_auto_resize_button("基本情報取得(検索)", 220, 40, button_style)
+            self.basic_self_btn = self.create_auto_resize_button("基本情報取得(検索)", 220, 40, info_button_style)
+            basic_self_btn = self.basic_self_btn
             basic_self_btn.setToolTip("検索キーワードに基づく基本情報・インボイス情報・invoiceSchema情報を取得します")
             basic_self_btn.clicked.connect(self.fetch_basic_info_self)
             btn_layout1.addWidget(basic_self_btn)
             # 共通情報のみ取得ボタン
-            common_only_btn = self.create_auto_resize_button("共通情報のみ取得", 200, 40, button_style)
+            self.common_only_btn = self.create_auto_resize_button("共通情報のみ取得", 200, 40, info_button_style)
+            common_only_btn = self.common_only_btn
             common_only_btn.clicked.connect(self.fetch_common_info_only)
             btn_layout1.addWidget(common_only_btn)
             layout.addLayout(btn_layout1)
@@ -1125,6 +1139,7 @@ class UIController(UIControllerCore):
             # 検索用テキストボックスにラベルを追加
             search_layout = QVBoxLayout()
             search_label = QLabel("検索用キーワード (基本情報(検索)ボタン専用):")
+            self.basic_search_label = search_label
             search_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)}; margin-top: 10px;")
             search_layout.addWidget(search_label)
             
@@ -1152,13 +1167,15 @@ class UIController(UIControllerCore):
         try:
             # 2行目のボタンレイアウト
             btn_layout1_2 = QHBoxLayout()
-            # invoice_schema取得ボタン
-            invoice_schema_btn = self.create_auto_resize_button("invoice_schema取得", 200, 40, button_style)
+            # invoice_schema取得ボタン（INFO系スタイル）
+            self.invoice_schema_btn = self.create_auto_resize_button("invoice_schema取得", 200, 40, info_button_style)
+            invoice_schema_btn = self.invoice_schema_btn
             invoice_schema_btn.clicked.connect(self.fetch_invoice_schema)
             btn_layout1_2.addWidget(invoice_schema_btn)
             
-            # サンプル情報強制取得ボタン
-            sample_info_btn = self.create_auto_resize_button("サンプル情報強制取得", 220, 40, button_style)
+            # サンプル情報強制取得ボタン（INFO系スタイル）
+            self.sample_info_btn = self.create_auto_resize_button("サンプル情報強制取得", 220, 40, info_button_style)
+            sample_info_btn = self.sample_info_btn
             sample_info_btn.clicked.connect(self.fetch_sample_info_only)
             btn_layout1_2.addWidget(sample_info_btn)
             layout.addLayout(btn_layout1_2)
@@ -1184,12 +1201,14 @@ class UIController(UIControllerCore):
             # btn_layout2.addWidget(apply_basic_info_btn)
             
             # まとめXLSXボタン
-            summary_basic_info_btn = self.create_auto_resize_button("📋 まとめXLSX", 180, 40, xlsx_button_style)
+            self.summary_basic_info_btn = self.create_auto_resize_button("📋 まとめXLSX", 180, 40, xlsx_button_style)
+            summary_basic_info_btn = self.summary_basic_info_btn
             summary_basic_info_btn.clicked.connect(self.summary_basic_info_to_Xlsx)
             btn_layout2.addWidget(summary_basic_info_btn)
             
             # まとめXLSXを開くボタン
-            open_summary_xlsx_btn = self.create_auto_resize_button("📂 まとめXLSXを開く", 200, 40, xlsx_button_style)
+            self.open_summary_xlsx_btn = self.create_auto_resize_button("📂 まとめXLSXを開く", 200, 40, xlsx_button_style)
+            open_summary_xlsx_btn = self.open_summary_xlsx_btn
             def open_summary_xlsx():
                 import os
                 from config.common import SUMMARY_XLSX_PATH
@@ -1229,7 +1248,7 @@ class UIController(UIControllerCore):
         try:
             # JSON状況表示セクション
             status_label = QLabel("📊 取得状況表示:")
-            status_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_SECONDARY)}; margin-top: 5px; margin-bottom: 3px; font-size: 10pt;")
+            status_label.setStyleSheet(f"font-weight: bold;  margin-top: 5px; margin-bottom: 3px; font-size: 10pt;")
             layout.addWidget(status_label)
             
             # JSON取得状況表示ウィジェットを追加
@@ -1248,6 +1267,53 @@ class UIController(UIControllerCore):
             layout.addWidget(QLabel("ステータス表示機能にエラーが発生しました"))
 
         # 入力がある場合はポップアップ表示
+
+        # テーマ再適用関数（ライト/ダーク切替時）
+        def _refresh_basic_info_theme():
+            try:
+                # ボタンスタイル再生成
+                info_button_style_new = f"""
+                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                    font-weight: bold;
+                    border-radius: 6px;
+                    border: 2px solid {get_color(ThemeKey.BUTTON_INFO_BORDER)};
+                    padding: 3px;
+                """
+                xlsx_button_style_new = f"background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)}; font-weight: bold; border-radius: 4px; border: 2px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)}; padding: 3px;"
+                for btn in [getattr(self, 'basic_btn', None), getattr(self, 'basic_self_btn', None), getattr(self, 'common_only_btn', None), getattr(self, 'invoice_schema_btn', None), getattr(self, 'sample_info_btn', None)]:
+                    if btn:
+                        btn.setStyleSheet(info_button_style_new)
+                for btn in [getattr(self, 'summary_basic_info_btn', None), getattr(self, 'open_summary_xlsx_btn', None)]:
+                    if btn:
+                        btn.setStyleSheet(xlsx_button_style_new)
+                # 入力欄
+                if hasattr(self, 'basic_info_input'):
+                    self.basic_info_input.setStyleSheet(f"""
+                        QLineEdit {{
+       
+                            border: 2px solid {get_color(ThemeKey.BORDER_INFO)};
+                            border-radius: 6px;
+                            padding: 5px;
+                            font-size: 11pt;
+                        }}
+                        QLineEdit:focus {{
+                            border-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+           
+                        }}
+                    """)
+                # ラベル色再適用
+                if hasattr(self, 'basic_search_label'):
+                    self.basic_search_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)}; margin-top: 10px;")
+                if hasattr(self, 'json_status_widget') and hasattr(self.json_status_widget, 'refresh_theme'):
+                    self.json_status_widget.refresh_theme()
+            except Exception as e:
+                logger.debug("BasicInfo theme refresh failed: %s", e)
+        try:
+            ThemeManager.get_instance().theme_changed.connect(_refresh_basic_info_theme)
+        except Exception as e:
+            logger.debug("BasicInfo theme signal connect failed: %s", e)
+        _refresh_basic_info_theme()
         def show_input_popup():
             text = self.basic_info_input.text()
             if text.strip():
@@ -1780,16 +1846,6 @@ class UIController(UIControllerCore):
         
         layout.addStretch()
         widget.setLayout(layout)
-        return widget
-        
-    def _create_ai_test_widget(self):
-        """AIテスト機能用のウィジェットを作成（AIコントローラーに委譲）"""
-        widget = self.ai_controller.create_ai_test_widget()
-        # AIテストウィジェットの参照を保存
-        if hasattr(self.ai_controller, 'current_ai_test_widget'):
-            self.ai_test_widget = self.ai_controller.current_ai_test_widget
-        else:
-            self.ai_test_widget = None
         return widget
     
     def _initialize_basic_info_tab_validator(self):
@@ -2709,7 +2765,7 @@ class UIController(UIControllerCore):
                 logger.debug("matching_experiments for '%s': %s records", task_id, len(matching_experiments))
                 
                 if matching_experiments:
-                    sample_exp = matching_experiments[0]
+                    sample_exp: dict = matching_experiments[0]  # 型ヒント追加
                     info_lines = []
                     info_lines.append(f"📊 実験データ件数: {len(matching_experiments)}件")
                     
@@ -2720,11 +2776,12 @@ class UIController(UIControllerCore):
                     
                     if use_arim_data:
                         # ARIM実験データの場合
-                        if sample_exp.get("タイトル"):
-                            info_lines.append(f"📝 タイトル: {sample_exp['タイトル']}")
+                        title_val = sample_exp.get("タイトル")
+                        if title_val:
+                            info_lines.append(f"📝 タイトル: {title_val}")
                         
-                        if sample_exp.get("概要"):
-                            summary_val = sample_exp["概要"]
+                        summary_val = sample_exp.get("概要")
+                        if summary_val:
                             if summary_val and not pd.isna(summary_val):
                                 summary = str(summary_val).strip()
                                 if summary:
@@ -2732,8 +2789,9 @@ class UIController(UIControllerCore):
                                         summary = summary[:80] + "..."
                                     info_lines.append(f"🎯 概要: {summary}")
                         
-                        if sample_exp.get("分野"):
-                            info_lines.append(f"🔬 分野: {sample_exp['分野']}")
+                        field_val = sample_exp.get("分野")
+                        if field_val:
+                            info_lines.append(f"🔬 分野: {field_val}")
                         
                         device_val = sample_exp.get("利用装置")
                         if device_val and not pd.isna(device_val):
@@ -2744,11 +2802,12 @@ class UIController(UIControllerCore):
                                 info_lines.append(f"🔧 利用装置: {device}")
                     else:
                         # 標準実験データの場合
-                        if sample_exp.get("課題名"):
-                            info_lines.append(f"📝 課題名: {sample_exp['課題名']}")
+                        task_name_val = sample_exp.get("課題名")
+                        if task_name_val:
+                            info_lines.append(f"📝 課題名: {task_name_val}")
                         
-                        if sample_exp.get("目的"):
-                            purpose_val = sample_exp["目的"]
+                        purpose_val = sample_exp.get("目的")
+                        if purpose_val:
                             if purpose_val and not pd.isna(purpose_val):
                                 purpose = str(purpose_val).strip()
                                 if purpose:
@@ -4110,9 +4169,8 @@ class UIController(UIControllerCore):
             traceback.print_exc()
             from qt_compat.widgets import QMessageBox
             QMessageBox.critical(None, "エラー", f"AI拡張ダイアログの起動に失敗しました: {str(e)}")
-        except Exception as e:
-            logger.error("初回データ登録ウィジェットサイズ適用エラー: %s", e)
             import traceback
+            traceback.print_exc()
     
 
 

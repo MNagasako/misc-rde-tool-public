@@ -117,8 +117,9 @@ class Browser(QWidget):
         
         # テーマ管理の初期化（最優先）
         theme_manager = ThemeManager.instance()
-        theme_manager.set_mode(ThemeMode.AUTO)  # OS設定に従う
-        logger.info(f"[Theme] 初期テーマモード: AUTO (検出: {theme_manager.detect_system_theme().value})")
+        detected = theme_manager.detect_system_theme()
+        theme_manager.set_mode(detected)
+        logger.info(f"[Theme] 初期テーマモード (OS検出): {detected.value}")
         
         # 基本属性の初期化
         self._init_basic_attributes(auto_close, test_mode)

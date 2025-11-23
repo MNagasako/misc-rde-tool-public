@@ -281,8 +281,9 @@ def create_group_select_widget(parent=None):
     try:
         from classes.theme.theme_keys import ThemeKey as _TK
         from classes.theme.theme_manager import get_color as _gc
+        
         filter_combo.setStyleSheet(
-            f"QComboBox {{ background-color: {_gc(_TK.COMBO_BACKGROUND)}; color: {_gc(_TK.TEXT_PRIMARY)}; border: 1px solid {_gc(_TK.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
+            f"QComboBox {{  border: 1px solid {_gc(_TK.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
         )
     except Exception:
         pass
@@ -319,7 +320,7 @@ def create_group_select_widget(parent=None):
     combo = QComboBox(parent)
     try:
         combo.setStyleSheet(
-            f"QComboBox {{ background-color: {_gc(_TK.COMBO_BACKGROUND)}; color: {_gc(_TK.TEXT_PRIMARY)}; border: 1px solid {_gc(_TK.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
+            f"QComboBox {{  border: 1px solid {_gc(_TK.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
         )
     except Exception:
         pass
@@ -335,7 +336,7 @@ def create_group_select_widget(parent=None):
     grant_combo = QComboBox(parent)
     try:
         grant_combo.setStyleSheet(
-            f"QComboBox {{ background-color: {_gc(_TK.COMBO_BACKGROUND)}; color: {_gc(_TK.TEXT_PRIMARY)}; border: 1px solid {_gc(_TK.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
+            f"QComboBox {{border: 1px solid {_gc(_TK.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
         )
     except Exception:
         pass
@@ -525,7 +526,7 @@ def create_group_select_widget(parent=None):
     template_combo = QComboBox(parent)
     try:
         template_combo.setStyleSheet(
-            f"QComboBox {{ background-color: {_gc(_TK.COMBO_BACKGROUND)}; color: {_gc(_TK.TEXT_PRIMARY)}; border: 1px solid {_gc(_TK.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
+            f"QComboBox {{ border: 1px solid {_gc(_TK.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
         )
     except Exception:
         pass
@@ -629,12 +630,18 @@ def create_group_select_widget(parent=None):
     # ラベル太字スタイル (共通ヘルパー使用でQSS削減)
     from classes.utils.label_style import apply_label_style
     from classes.theme import ThemeKey as _TKey
-    label_filter = QLabel("フィルタ:"); apply_label_style(label_filter, _TKey.TEXT_PRIMARY, bold=True)
-    label_group = QLabel("グループ:"); apply_label_style(label_group, _TKey.TEXT_PRIMARY, bold=True)
-    label_grant = QLabel("課題番号:"); apply_label_style(label_grant, _TKey.TEXT_PRIMARY, bold=True)
-    label_name = QLabel("データセット名:"); apply_label_style(label_name, _TKey.TEXT_PRIMARY, bold=True)
-    label_embargo = QLabel("エンバーゴ期間終了日:"); apply_label_style(label_embargo, _TKey.TEXT_PRIMARY, bold=True)
-    label_template = QLabel("データセットテンプレート名:"); apply_label_style(label_template, _TKey.TEXT_PRIMARY, bold=True)
+    label_filter = QLabel("フィルタ:");
+    #apply_label_style(label_filter, _TKey.TEXT_PRIMARY, bold=True)
+    label_group = QLabel("グループ:");
+    #apply_label_style(label_group, _TKey.TEXT_PRIMARY, bold=True)
+    label_grant = QLabel("課題番号:");
+    #apply_label_style(label_grant, _TKey.TEXT_PRIMARY, bold=True)
+    label_name = QLabel("データセット名:"); 
+    #apply_label_style(label_name, _TKey.TEXT_PRIMARY, bold=True)
+    label_embargo = QLabel("エンバーゴ期間終了日:"); 
+    #apply_label_style(label_embargo, _TKey.TEXT_PRIMARY, bold=True)
+    label_template = QLabel("データセットテンプレート名:"); 
+    #apply_label_style(label_template, _TKey.TEXT_PRIMARY, bold=True)
     form_layout.addRow(label_filter, filter_combo)
     form_layout.addRow(label_group, combo)
     form_layout.addRow(label_grant, grant_combo)
@@ -654,6 +661,63 @@ def create_group_select_widget(parent=None):
     form_layout.addRow(open_btn)
     container = QWidget(parent)
     container.setLayout(form_layout)
+
+    # テーマ再適用（ダーク/ライト切替時に背景色が逆転しないよう強制再指定）
+    def _refresh_theme():
+        return
+        try:
+            from classes.theme.theme_keys import ThemeKey as _TK2
+            from classes.theme.theme_manager import get_color as _gc2, ThemeManager as _TM
+            combo_style = (
+                f"QComboBox {{ background-color: {_gc2(_TK2.COMBO_BACKGROUND)}; color: {_gc2(_TK2.TEXT_PRIMARY)}; "
+                f"border: 1px solid {_gc2(_TK2.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
+            )
+            for cb in (filter_combo, combo, grant_combo, template_combo):
+                if cb:
+                    cb.setStyleSheet(combo_style)
+            # LineEdit / DateEdit
+            name_edit.setStyleSheet(
+                f"QLineEdit {{ background-color: {_gc2(_TK2.INPUT_BACKGROUND)}; color: {_gc2(_TK2.INPUT_TEXT)}; "
+                f"border: 1px solid {_gc2(_TK2.INPUT_BORDER)}; border-radius: 4px; padding: 4px 6px; }}"
+                f"QLineEdit:focus {{ border-color: {_gc2(_TK2.BUTTON_INFO_BACKGROUND)}; background-color: {_gc2(_TK2.PANEL_INFO_BACKGROUND)}; }}"
+            )
+            embargo_edit.setStyleSheet(
+                f"QDateEdit {{ background-color: {_gc2(_TK2.INPUT_BACKGROUND)}; color: {_gc2(_TK2.INPUT_TEXT)}; "
+                f"border: 1px solid {_gc2(_TK2.INPUT_BORDER)}; border-radius: 4px; padding: 2px 4px; }}"
+            )
+            # チェックボックス
+            chk_style = (
+                f"QCheckBox {{ color: {_gc2(_TK2.TEXT_PRIMARY)}; }}"
+                f"QCheckBox::indicator {{ width: 16px; height:16px; border:1px solid {_gc2(_TK2.INPUT_BORDER)}; "
+                f"background-color: {_gc2(_TK2.INPUT_BACKGROUND)}; border-radius:3px; }}"
+                f"QCheckBox::indicator:checked {{ background-color: {_gc2(_TK2.BUTTON_PRIMARY_BACKGROUND)}; border-color: {_gc2(_TK2.BUTTON_PRIMARY_BACKGROUND)}; }}"
+            )
+            share_core_scope_checkbox.setStyleSheet(chk_style)
+            anonymize_checkbox.setStyleSheet(chk_style)
+            # 開設ボタン（variant保持しつつ色をテーマに追従）
+            open_btn.setStyleSheet(
+                f"QPushButton {{ font-size:13px; padding:8px 20px; border-radius:6px; "
+                f"background-color: {_gc2(_TK2.BUTTON_PRIMARY_BACKGROUND)}; color: {_gc2(_TK2.BUTTON_PRIMARY_TEXT)}; "
+                f"border:1px solid {_gc2(_TK2.BUTTON_PRIMARY_BORDER)}; font-weight:bold; }}"
+                f"QPushButton:hover {{ background-color: {_gc2(_TK2.BUTTON_PRIMARY_BACKGROUND_HOVER)}; }}"
+                f"QPushButton:pressed {{ background-color: {_gc2(_TK2.BUTTON_PRIMARY_BACKGROUND_PRESSED)}; }}"
+            )
+            # ラベル色再適用（読みやすさ向上）
+            for _lbl in [label_filter, label_group, label_grant, label_name, label_embargo, label_template]:
+                if _lbl:
+                    _lbl.setStyleSheet(f"color: {_gc2(_TK2.TEXT_SECONDARY)}; font-weight:bold;")
+            # コンテナ背景
+            container.setStyleSheet(f"background-color: {_gc2(_TK2.WINDOW_BACKGROUND)};")
+        except Exception as _e:
+            logger.debug("dataset_open_widget theme refresh failed: %s", _e)
+
+    # ThemeManagerへ接続
+    try:
+        from classes.theme.theme_manager import ThemeManager as _TM2
+        _TM2.get_instance().theme_changed.connect(_refresh_theme)
+    except Exception as _e:
+        logger.debug("Theme signal connect failed (dataset open): %s", _e)
+    _refresh_theme()
 
     def on_open():
         idx = combo.currentIndex()

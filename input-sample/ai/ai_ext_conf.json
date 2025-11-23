@@ -57,6 +57,22 @@
       "prompt_file": "input/ai/prompts/ext/test_table.txt",
       "icon": "📋",
       "category": "テスト"
+    },
+        {
+      "id": "dataset_explanation_basic",
+      "label": "データセット説明基本",
+      "description": "データセットの基本的な説明を生成",
+      "prompt_file": "input/ai/prompts/dataset/dataset_explanation_basic.txt",
+      "icon": "📋",
+      "category": "テスト"
+    },
+        {
+      "id": "dataset_explanation_single_full",
+      "label": "データセット説明詳細",
+      "description": "データセットの詳細な説明を生成",
+      "prompt_file": "input/ai/prompts/dataset/dataset_explanation_single_full.txt",
+      "icon": "📋",
+      "category": "テスト"
     }
   ],
   "default_buttons": [

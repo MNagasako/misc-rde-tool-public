@@ -305,22 +305,12 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     # ここで base 状態の background-color と color を明示しテーマキー経由で強制する。
     combo.setStyleSheet(f"""
         QComboBox {{
-            background-color: {get_color(ThemeKey.COMBO_BACKGROUND)};
             color: {get_color(ThemeKey.TEXT_PRIMARY)};
-            border: 2px solid {get_color(ThemeKey.COMBO_BORDER_FOCUS)};
             border-radius: 6px;
             padding: 8px;
             font-size: 11pt;
             min-height: 25px;
             padding-right: 35px;
-        }}
-        QComboBox:focus {{
-            border-color: {get_color(ThemeKey.COMBO_BORDER_FOCUS)};
-            background-color: {get_color(ThemeKey.COMBO_BACKGROUND_FOCUS)};
-        }}
-        QComboBox:hover {{
-            border-color: {get_color(ThemeKey.COMBO_BORDER)};
-            background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)};
         }}
         QComboBox::drop-down {{
             subcontrol-origin: padding;
@@ -329,10 +319,10 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
             border-left: 1px solid {get_color(ThemeKey.COMBO_BORDER_FOCUS)};
             border-top-right-radius: 4px;
             border-bottom-right-radius: 4px;
-            background-color: {get_color(ThemeKey.COMBO_ARROW_BACKGROUND)};
+            
         }}
         QComboBox::drop-down:hover {{
-            background-color: {get_color(ThemeKey.COMBO_ARROW_BACKGROUND_PRESSED)};
+           
         }}
         QComboBox::down-arrow {{
             width: 0;
@@ -343,11 +333,10 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
             margin: 0px;
         }}
         QComboBox::down-arrow:on {{
-            border-top: 8px solid {get_color(ThemeKey.COMBO_BACKGROUND_FOCUS)};
+          
         }}
         QComboBox:disabled {{
-            background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)};
-            color: {get_color(ThemeKey.INPUT_TEXT_DISABLED)};
+          
             border: 1px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)};
         }}
     """)

@@ -141,9 +141,9 @@ class AITestWidget:
         layout.setSpacing(8)
         
         # タイトル
-        title = QLabel("AI機能テスト")
-        title.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)}; padding: 8px; margin-bottom: 5px;")
-        layout.addWidget(title)
+        self._title_label = QLabel("AI機能テスト")
+        self._title_label.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)}; padding: 8px; margin-bottom: 5px;")
+        layout.addWidget(self._title_label)
         
         # AI選択エリア（分割されたメソッド使用）
         self._create_ai_selection_area(layout)
@@ -236,6 +236,8 @@ class AITestWidget:
                 background: {get_color(ThemeKey.SCROLLBAR_HANDLE_HOVER)};
             }}
         """)
+        # 後でテーマ更新するため保持
+        self._scroll_area = scroll_area
         
         # AI設定を初期化（ウィジェット設定後に遅延実行）
         QTimer.singleShot(100, self._init_ai_settings)
@@ -249,7 +251,14 @@ class AITestWidget:
             
         # 初期データ読み込み（ウィジェット作成完了後、遅延を短縮してパフォーマンス向上）
         QTimer.singleShot(100, self._initialize_task_data)  # 1秒から100msに短縮
-        
+
+        # テーマ変更に追従
+        try:
+            from classes.theme.theme_manager import ThemeManager
+            ThemeManager.instance().theme_changed.connect(self.refresh_theme)
+        except Exception:
+            pass
+
         return scroll_area
     
     def _debug_print(self, message):
@@ -401,13 +410,13 @@ class AITestWidget:
         task_info_header_layout = QHBoxLayout()
         task_info_header_layout.setSpacing(10)
 
-        task_info_title_label = QLabel("選択した課題の詳細情報:")
-        task_info_title_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_SECONDARY)}; font-size: 14px;")
-        task_info_header_layout.addWidget(task_info_title_label)
+        self._task_info_title_label = QLabel("選択した課題の詳細情報:")
+        self._task_info_title_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_SECONDARY)}; font-size: 14px;")
+        task_info_header_layout.addWidget(self._task_info_title_label)
 
-        task_info_expand_btn = QPushButton("🔍")
-        task_info_expand_btn.setToolTip("課題詳細情報を拡大表示")
-        task_info_expand_btn.setStyleSheet(f"""
+        self._task_info_expand_btn = QPushButton("🔍")
+        self._task_info_expand_btn.setToolTip("課題詳細情報を拡大表示")
+        self._task_info_expand_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND)};
                 border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
@@ -418,10 +427,10 @@ class AITestWidget:
             QPushButton:hover {{ background-color: {get_color(ThemeKey.MENU_ITEM_BACKGROUND_HOVER)}; }}
             QPushButton:pressed {{ background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; }}
         """)
-        task_info_expand_btn.setMaximumSize(24, 24)
-        task_info_expand_btn.setMinimumSize(24, 24)
-        task_info_expand_btn.clicked.connect(lambda: self.show_task_info_popup())
-        task_info_header_layout.addWidget(task_info_expand_btn)
+        self._task_info_expand_btn.setMaximumSize(24, 24)
+        self._task_info_expand_btn.setMinimumSize(24, 24)
+        self._task_info_expand_btn.clicked.connect(lambda: self.show_task_info_popup())
+        task_info_header_layout.addWidget(self._task_info_expand_btn)
         task_info_header_layout.addStretch()
 
         task_info_layout.addLayout(task_info_header_layout)
@@ -442,9 +451,9 @@ class AITestWidget:
         datasource_layout = QVBoxLayout()
         datasource_layout.setSpacing(8)
 
-        datasource_label = QLabel("実験データソース:")
-        datasource_label.setStyleSheet("margin-top: 10px; font-weight: bold;")
-        datasource_layout.addWidget(datasource_label)
+        self._datasource_label = QLabel("実験データソース:")
+        self._datasource_label.setStyleSheet("margin-top: 10px; font-weight: bold;")
+        datasource_layout.addWidget(self._datasource_label)
 
         datasource_radio_layout = QHBoxLayout()
         datasource_radio_layout.setSpacing(15)
@@ -509,13 +518,13 @@ class AITestWidget:
         experiment_info_header_layout = QHBoxLayout()
         experiment_info_header_layout.setSpacing(10)
 
-        experiment_info_title_label = QLabel("選択した実験データの詳細情報:")
-        experiment_info_title_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_SECONDARY)}; font-size: 14px;")
-        experiment_info_header_layout.addWidget(experiment_info_title_label)
+        self._experiment_info_title_label = QLabel("選択した実験データの詳細情報:")
+        self._experiment_info_title_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_SECONDARY)}; font-size: 14px;")
+        experiment_info_header_layout.addWidget(self._experiment_info_title_label)
 
-        experiment_info_expand_btn = QPushButton("🔍")
-        experiment_info_expand_btn.setToolTip("実験データ詳細情報を拡大表示")
-        experiment_info_expand_btn.setStyleSheet(f"""
+        self._experiment_info_expand_btn = QPushButton("🔍")
+        self._experiment_info_expand_btn.setToolTip("実験データ詳細情報を拡大表示")
+        self._experiment_info_expand_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND)};
                 border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
@@ -526,10 +535,10 @@ class AITestWidget:
             QPushButton:hover {{ background-color: {get_color(ThemeKey.MENU_ITEM_BACKGROUND_HOVER)}; }}
             QPushButton:pressed {{ background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; }}
         """)
-        experiment_info_expand_btn.setMaximumSize(24, 24)
-        experiment_info_expand_btn.setMinimumSize(24, 24)
-        experiment_info_expand_btn.clicked.connect(lambda: self.show_experiment_info_popup())
-        experiment_info_header_layout.addWidget(experiment_info_expand_btn)
+        self._experiment_info_expand_btn.setMaximumSize(24, 24)
+        self._experiment_info_expand_btn.setMinimumSize(24, 24)
+        self._experiment_info_expand_btn.clicked.connect(lambda: self.show_experiment_info_popup())
+        experiment_info_header_layout.addWidget(self._experiment_info_expand_btn)
         experiment_info_header_layout.addStretch()
 
         experiment_info_layout.addLayout(experiment_info_header_layout)
@@ -573,9 +582,9 @@ class AITestWidget:
         self.arim_extension_checkbox.setChecked(True)
         arim_extension_layout.addWidget(self.arim_extension_checkbox)
 
-        arim_info_label = QLabel("(input/ai/arim/converted.xlsxからARIMNOで結合)")
-        arim_info_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 14px; font-style: italic;")
-        arim_extension_layout.addWidget(arim_info_label)
+        self._arim_info_label = QLabel("(input/ai/arim/converted.xlsxからARIMNOで結合)")
+        self._arim_info_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 14px; font-style: italic;")
+        arim_extension_layout.addWidget(self._arim_info_label)
 
         arim_extension_layout.addStretch()
         task_layout.addLayout(arim_extension_layout)
@@ -886,6 +895,233 @@ class AITestWidget:
         layout.addLayout(result_label_layout)
         
         layout.addWidget(self.ai_result_display)
+
+    def refresh_theme(self, *_):
+        """テーマ変更時に必要なスタイルを再適用する"""
+        try:
+            # タイトル
+            if hasattr(self, '_title_label') and self._title_label:
+                self._title_label.setStyleSheet(
+                    f"font-size: 14px; font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)}; padding: 8px; margin-bottom: 5px;"
+                )
+
+            # コンボボックス類
+            if hasattr(self, 'task_id_combo') and self.task_id_combo:
+                self.task_id_combo.setStyleSheet(
+                    f"""
+                    QComboBox {{
+                        padding: 5px;
+                        border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                        border-radius: 4px;
+                        font-size: 12px;
+                    }}
+                    QComboBox::drop-down {{ border: none; background: {get_color(ThemeKey.COMBO_DROPDOWN_BACKGROUND)}; }}
+                    QComboBox::down-arrow {{ width: 12px; height: 12px; }}
+                    """
+                )
+            if hasattr(self, 'experiment_combo') and self.experiment_combo:
+                self.experiment_combo.setStyleSheet(
+                    f"""
+                    QComboBox {{
+                        padding: 5px;
+                        border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                        border-radius: 4px;
+                        font-size: 12px;
+                    }}
+                    QComboBox::drop-down {{ border: none; background: {get_color(ThemeKey.COMBO_DROPDOWN_BACKGROUND)}; }}
+                    """
+                )
+
+            # 情報見出しラベル
+            if hasattr(self, '_task_info_title_label') and self._task_info_title_label:
+                self._task_info_title_label.setStyleSheet(
+                    f"font-weight: bold; color: {get_color(ThemeKey.TEXT_SECONDARY)}; font-size: 14px;"
+                )
+            if hasattr(self, '_experiment_info_title_label') and self._experiment_info_title_label:
+                self._experiment_info_title_label.setStyleSheet(
+                    f"font-weight: bold; color: {get_color(ThemeKey.TEXT_SECONDARY)}; font-size: 14px;"
+                )
+
+            # 情報ラベルの本体
+            if hasattr(self, 'task_info_label') and self.task_info_label:
+                self.task_info_label.setStyleSheet(
+                    f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 14px; padding: 8px; "
+                    f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; border-radius: 3px; margin-top: 5px; border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};"
+                )
+            if hasattr(self, 'experiment_info_label') and self.experiment_info_label:
+                self.experiment_info_label.setStyleSheet(
+                    f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 14px; padding: 12px; background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; "
+                    f"border-radius: 3px; margin-top: 5px; border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};"
+                )
+
+            # 拡大ボタン
+            if hasattr(self, '_task_info_expand_btn') and self._task_info_expand_btn:
+                self._task_info_expand_btn.setStyleSheet(
+                    f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND)};
+                        border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                        border-radius: 12px;
+                        width: 24px; height: 24px;
+                        font-size: 12px; color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                    }}
+                    QPushButton:hover {{ background-color: {get_color(ThemeKey.MENU_ITEM_BACKGROUND_HOVER)}; }}
+                    QPushButton:pressed {{ background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; }}
+                    """
+                )
+            if hasattr(self, '_experiment_info_expand_btn') and self._experiment_info_expand_btn:
+                self._experiment_info_expand_btn.setStyleSheet(
+                    f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND)};
+                        border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                        border-radius: 12px;
+                        width: 24px; height: 24px;
+                        font-size: 12px; color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                    }}
+                    QPushButton:hover {{ background-color: {get_color(ThemeKey.MENU_ITEM_BACKGROUND_HOVER)}; }}
+                    QPushButton:pressed {{ background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; }}
+                    """
+                )
+
+            # データソース関連
+            if hasattr(self, 'arim_exp_radio') and self.arim_exp_radio:
+                self.arim_exp_radio.setStyleSheet(f"font-size: 14px; color: {get_color(ThemeKey.TEXT_SECONDARY)};")
+            if hasattr(self, 'normal_exp_radio') and self.normal_exp_radio:
+                self.normal_exp_radio.setStyleSheet(f"font-size: 14px; color: {get_color(ThemeKey.TEXT_SECONDARY)};")
+            if hasattr(self, 'datasource_info_label') and self.datasource_info_label:
+                self.datasource_info_label.setStyleSheet(
+                    f"color: {get_color(ThemeKey.INPUT_TEXT)}; font-size: 14px; padding: 5px; "
+                    f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; border-radius: 3px; margin-top: 3px;"
+                )
+
+            # ARIM拡張チェック
+            if hasattr(self, 'arim_extension_checkbox') and self.arim_extension_checkbox:
+                self.arim_extension_checkbox.setStyleSheet(
+                    f"""
+                    QCheckBox {{
+                        font-size: 14px;
+                        color: {get_color(ThemeKey.TEXT_SECONDARY)};
+                        spacing: 8px;
+                    }}
+                    QCheckBox::indicator {{ width: 16px; height: 16px; }}
+                    QCheckBox::indicator:unchecked {{
+                        border: 2px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)}; border-radius: 3px; background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
+                    }}
+                    QCheckBox::indicator:checked {{
+                        border: 2px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; border-radius: 3px; background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                        image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iMTIiIHZpZXdCb3g9IjAgMCAxMiAxMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTIgNkw0LjUgOC41TDEwIDMiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgc3Rya2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc+Cg==);
+                    }}
+                    """
+                )
+            if hasattr(self, '_arim_info_label') and self._arim_info_label:
+                self._arim_info_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 14px; font-style: italic;")
+
+            # 分析方法コンボ/説明
+            if hasattr(self, 'analysis_method_combo') and self.analysis_method_combo:
+                self.analysis_method_combo.setStyleSheet(
+                    f"""
+                    QComboBox {{
+                        padding: 8px;
+                        border: 2px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                        border-radius: 6px;
+                        font-size: 12px;
+                        background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
+                    }}
+                    QComboBox::drop-down {{
+                        border: none;
+                        background: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND)};
+                    }}
+                    QComboBox::down-arrow {{
+                        width: 12px;
+                        height: 12px;
+                    }}
+                    """
+                )
+            if hasattr(self, 'analysis_description_label') and self.analysis_description_label:
+                self.analysis_description_label.setStyleSheet(
+                    f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 14px; font-style: italic; margin-left: 10px;"
+                )
+
+            if hasattr(self, 'prompt_edit_button') and self.prompt_edit_button:
+                self.prompt_edit_button.setStyleSheet(
+                    f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_NEUTRAL_BACKGROUND)};
+                        border: 2px solid {get_color(ThemeKey.BUTTON_NEUTRAL_BORDER)};
+                        border-radius: 6px;
+                        font-size: 16px;
+                        font-weight: bold;
+                        color: {get_color(ThemeKey.BUTTON_NEUTRAL_TEXT)};
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND)};
+                        border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                    }}
+                    QPushButton:pressed {{
+                        background-color: {get_color(ThemeKey.MENU_ITEM_BACKGROUND_HOVER)};
+                    }}
+                    """
+                )
+
+            # プログレス
+            if hasattr(self, 'ai_progress_bar') and self.ai_progress_bar:
+                self.ai_progress_bar.setStyleSheet(
+                    f"""
+                    QProgressBar {{
+                        border: 2px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                        border-radius: 5px;
+                        text-align: center;
+                        font-weight: bold;
+                    }}
+                    QProgressBar::chunk {{
+                        background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                        border-radius: 3px;
+                    }}
+                    """
+                )
+            if hasattr(self, 'ai_progress_label') and self.ai_progress_label:
+                self.ai_progress_label.setStyleSheet(
+                    f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 11px; padding: 5px; text-align: center;"
+                )
+
+            # レスポンス表示
+            if hasattr(self, 'ai_response_display') and self.ai_response_display:
+                self.ai_response_display.setStyleSheet(
+                    f"margin-bottom: 10px; border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)}; border-radius: 4px;"
+                )
+            if hasattr(self, 'ai_result_display') and self.ai_result_display:
+                self.ai_result_display.setStyleSheet(
+                    f"border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)}; border-radius: 4px; margin-bottom: 10px;"
+                )
+
+            # スクロールバー
+            if hasattr(self, '_scroll_area') and self._scroll_area:
+                self._scroll_area.setStyleSheet(
+                    f"""
+                    QScrollArea {{
+                        border: none;
+                        background-color: transparent;
+                    }}
+                    QScrollBar:vertical {{
+                        border: none;
+                        background: {get_color(ThemeKey.SCROLLBAR_BACKGROUND)};
+                        width: 12px;
+                        border-radius: 6px;
+                    }}
+                    QScrollBar::handle:vertical {{
+                        background: {get_color(ThemeKey.SCROLLBAR_HANDLE)};
+                        border-radius: 6px;
+                        min-height: 20px;
+                    }}
+                    QScrollBar::handle:vertical:hover {{
+                        background: {get_color(ThemeKey.SCROLLBAR_HANDLE_HOVER)};
+                    }}
+                    """
+                )
+        except Exception as e:
+            logger.debug("refresh_theme failed: %s", e)
 
     def _get_ai_controller_with_setup(self):
         """AIコントローラーを取得し、必要な設定を行う共通ヘルパー"""

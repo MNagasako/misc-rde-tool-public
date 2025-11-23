@@ -594,11 +594,22 @@ class FileFilterWidget(QWidget):
             for checkbox in self.extension_checkboxes.values():
                 checkbox.setStyleSheet(self.checkbox_style)
             
-            # 全ボタンにスタイル適用（findChildrenで取得）
-            from qt_compat.widgets import QPushButton
-            buttons = self.findChildren(QPushButton)
-            for button in buttons:
-                button.setStyleSheet(self.button_style)
+            # 全選択/全解除ボタンにのみスタイル適用（個別スタイルを持つボタンは除外）
+            # findChildrenで全ボタンを取得せず、GroupBox内の全選択/全解除ボタンのみ対象
+            from qt_compat.widgets import QPushButton, QGroupBox
+            for group in self.findChildren(QGroupBox):
+                for button in group.findChildren(QPushButton):
+                    # "全選択"/"全解除"ボタンのみ更新（他は個別スタイルを保持）
+                    if button.text() in ["全選択", "全解除"]:
+                        button.setStyleSheet(self.button_style)
+            
+            # status_textの背景色を更新
+            if hasattr(self, 'status_text') and self.status_text:
+                self.status_text.setStyleSheet(f"""
+                    background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)};
+                    border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                    color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                """)
             
             self.update()
         except Exception as e:

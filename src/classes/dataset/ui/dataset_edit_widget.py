@@ -1410,7 +1410,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         edit_template_display.setPlaceholderText("データセットテンプレート名（表示のみ）")
         edit_template_display.setReadOnly(True)
         # 読み取り専用視覚表示: 未定義キー INPUT_BACKGROUND_READONLY -> 既存 INPUT_BACKGROUND_DISABLED へ置換
-        edit_template_display.setStyleSheet(f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)}; color: {get_color(ThemeKey.TEXT_MUTED)};")
+        # edit_template_display.setStyleSheet(f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)}; color: {get_color(ThemeKey.TEXT_MUTED)};")
         form_layout.addWidget(edit_template_display, 4, 1)
         
         # 問い合わせ先

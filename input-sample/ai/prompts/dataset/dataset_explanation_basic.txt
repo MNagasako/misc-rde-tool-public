@@ -126,6 +126,9 @@ ARIM課題関連情報:
 
 ファイルツリー情報:
 {file_tree}
+
+STRUCTUREDファイルのテキスト内容:
+{text_from_structured_files}
 ```
 
 ---

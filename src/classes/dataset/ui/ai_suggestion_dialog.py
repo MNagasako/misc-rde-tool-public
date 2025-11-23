@@ -216,6 +216,13 @@ class AISuggestionDialog(QDialog):
         # データセット選択ドロップダウンを初期化
         QTimer.singleShot(100, self.initialize_dataset_dropdown)
         
+        # テーマ変更に追従
+        try:
+            from classes.theme.theme_manager import ThemeManager
+            ThemeManager.instance().theme_changed.connect(self.refresh_theme)
+        except Exception:
+            pass
+        
     def setup_main_tab(self, tab_widget):
         """メインタブのセットアップ"""
         layout = QVBoxLayout(tab_widget)
@@ -646,12 +653,12 @@ class AISuggestionDialog(QDialog):
         for i, suggestion in enumerate(self.suggestions):
             if i == selected_index:
                 # 選択された候補は背景色を変更
-                preview_html += f'<div style="background-color: #e6f3ff; border: 2px solid #0066cc; padding: 10px; margin: 5px 0; border-radius: 5px;">'
-                preview_html += f'<h3 style="color: #0066cc; margin: 0 0 10px 0;">【選択中】{suggestion["title"]}</h3>'
+                preview_html += f'<div style=" border: 2px solid #0066cc; padding: 10px; margin: 5px 0; border-radius: 5px;">'
+                preview_html += f'<h3 style=" margin: 0 0 10px 0;">【選択中】{suggestion["title"]}</h3>'
             else:
                 # その他の候補は通常表示
                 preview_html += f'<div style="border: 1px solid #ccc; padding: 10px; margin: 5px 0; border-radius: 5px;">'
-                preview_html += f'<h3 style="color: #333; margin: 0 0 10px 0;">{suggestion["title"]}</h3>'
+                preview_html += f'<h3 style="margin: 0 0 10px 0;">{suggestion["title"]}</h3>'
             
             # HTMLエスケープして改行を<br>に変換（XSS対策）
             import html
@@ -739,20 +746,20 @@ class AISuggestionDialog(QDialog):
             dataset_type = "タイプ未設定"
         
         dataset_info_html = f"""
-        <div style="background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 5px; padding: 10px; margin: 5px 0;">
-            <h4 style="margin: 0 0 8px 0; color: #495057;">📊 対象データセット情報</h4>
+        <div style="border: 1px solid #dee2e6; border-radius: 5px; padding: 10px; margin: 5px 0;">
+            <h4 style="margin: 0 0 8px 0;">📊 対象データセット情報</h4>
             <table style="width: 100%; border-collapse: collapse;">
                 <tr>
-                    <td style="font-weight: bold; color: #6c757d; padding: 2px 10px 2px 0; width: 100px;">データセット名:</td>
-                    <td style="color: #212529; padding: 2px 0;">{dataset_name}</td>
+                    <td style="font-weight: bold;  padding: 2px 10px 2px 0; width: 100px;">データセット名:</td>
+                    <td style="padding: 2px 0;">{dataset_name}</td>
                 </tr>
                 <tr>
-                    <td style="font-weight: bold; color: #6c757d; padding: 2px 10px 2px 0;">課題番号:</td>
-                    <td style="color: #212529; padding: 2px 0;">{grant_number}</td>
+                    <td style="font-weight: bold;  padding: 2px 10px 2px 0;">課題番号:</td>
+                    <td style="padding: 2px 0;">{grant_number}</td>
                 </tr>
                 <tr>
-                    <td style="font-weight: bold; color: #6c757d; padding: 2px 10px 2px 0;">タイプ:</td>
-                    <td style="color: #212529; padding: 2px 0;">{dataset_type}</td>
+                    <td style="font-weight: bold;  padding: 2px 10px 2px 0;">タイプ:</td>
+                    <td style="padding: 2px 0;">{dataset_type}</td>
                 </tr>
             </table>
         </div>
@@ -777,6 +784,8 @@ class AISuggestionDialog(QDialog):
         buttons_label = QLabel("🤖 AIサジェスト機能")
         buttons_label.setStyleSheet(f"font-weight: bold; margin: 5px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};")
         left_layout.addWidget(buttons_label)
+        # refresh_theme用に保持
+        self._buttons_label = buttons_label
         
         # ボタンエリア（スクロールなしで直接配置）
         self.buttons_widget = QWidget()
@@ -799,6 +808,8 @@ class AISuggestionDialog(QDialog):
         response_label = QLabel("📝 AI応答結果")
         response_label.setStyleSheet(f"font-weight: bold; margin: 5px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};")
         right_layout.addWidget(response_label)
+        # refresh_theme用に保持
+        self._response_label = response_label
         
         from qt_compat.widgets import QTextBrowser
         
@@ -821,14 +832,12 @@ class AISuggestionDialog(QDialog):
             QTextBrowser {
                 border: 1px solid #dee2e6;
                 border-radius: 5px;
-                background-color: #ffffff;
                 font-family: 'Yu Gothic', 'Meiryo', sans-serif;
                 font-size: 12px;
                 line-height: 1.3;
                 padding: 6px;
             }
             QTextBrowser h1 {
-                color: #2c3e50;
                 font-size: 16px;
                 font-weight: bold;
                 margin: 8px 0 4px 0;
@@ -836,7 +845,7 @@ class AISuggestionDialog(QDialog):
                 padding-bottom: 2px;
             }
             QTextBrowser h2 {
-                color: #34495e;
+  
                 font-size: 15px;
                 font-weight: bold;
                 margin: 6px 0 3px 0;
@@ -844,7 +853,7 @@ class AISuggestionDialog(QDialog):
                 padding-bottom: 1px;
             }
             QTextBrowser h3 {
-                color: #34495e;
+  
                 font-size: 14px;
                 font-weight: bold;
                 margin: 5px 0 2px 0;
@@ -861,15 +870,14 @@ class AISuggestionDialog(QDialog):
                 line-height: 1.3;
             }
             QTextBrowser code {
-                background-color: #f8f9fa;
-                color: #e83e8c;
+
                 padding: 1px 3px;
                 border-radius: 2px;
                 font-family: 'Consolas', 'Monaco', monospace;
                 font-size: 11px;
             }
             QTextBrowser pre {
-                background-color: #f8f9fa;
+
                 border: 1px solid #e9ecef;
                 border-radius: 3px;
                 padding: 6px;
@@ -882,16 +890,16 @@ class AISuggestionDialog(QDialog):
                 border-left: 3px solid #3498db;
                 margin: 4px 0;
                 padding: 4px 8px;
-                background-color: #f8f9fa;
+   
                 font-style: italic;
             }
             QTextBrowser strong {
                 font-weight: bold;
-                color: #2c3e50;
+       
             }
             QTextBrowser em {
                 font-style: italic;
-                color: #7f8c8d;
+   
             }
             QTextBrowser table {
                 border-collapse: collapse;
@@ -899,15 +907,15 @@ class AISuggestionDialog(QDialog):
                 margin: 6px 0;
                 font-size: 11px;
                 border: 1px solid #dee2e6;
-                background-color: #ffffff;
+    
             }
             QTextBrowser th {
-                background-color: #f8f9fa;
+
                 border: 1px solid #dee2e6;
                 padding: 6px 8px;
                 text-align: left;
                 font-weight: bold;
-                color: #495057;
+      
             }
             QTextBrowser td {
                 border: 1px solid #dee2e6;
@@ -941,19 +949,22 @@ class AISuggestionDialog(QDialog):
         
         self.copy_response_button = QPushButton("📋 コピー")
         self.copy_response_button.clicked.connect(self.copy_extension_response)
-        self.copy_response_button.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745;
-                color: white;
-                border: none;
+        self.copy_response_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)};
                 border-radius: 4px;
                 padding: 6px 12px;
                 font-size: 12px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #218838;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_PRESSED)};
+            }}
         """)
         
         response_button_layout.addWidget(self.clear_response_button)
@@ -1260,19 +1271,22 @@ class AISuggestionDialog(QDialog):
         # 設定を保存ボタン
         save_settings_button = QPushButton("💾 設定を保存")
         save_settings_button.clicked.connect(self.save_extraction_settings)
-        save_settings_button.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745;
-                color: white;
-                border: none;
+        save_settings_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)};
                 border-radius: 4px;
                 padding: 8px 16px;
                 font-size: 11px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #218838;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_PRESSED)};
+            }}
         """)
         button_layout.addWidget(save_settings_button)
         
@@ -1301,6 +1315,99 @@ class AISuggestionDialog(QDialog):
         
         # 初期設定を読み込み
         QTimer.singleShot(100, self.load_extraction_settings)
+
+    def refresh_theme(self, *_):
+        """テーマ変更時に必要なスタイルを再適用する"""
+        try:
+            # プロンプト統計ラベル
+            if hasattr(self, 'prompt_stats') and self.prompt_stats:
+                self.prompt_stats.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin: 5px;")
+            
+            # AI拡張タブ: ボタン統計・説明ラベル
+            if hasattr(self, '_buttons_label') and self._buttons_label:
+                self._buttons_label.setStyleSheet(
+                    f"font-weight: bold; margin: 5px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};"
+                )
+            if hasattr(self, '_response_label') and self._response_label:
+                self._response_label.setStyleSheet(
+                    f"font-weight: bold; margin: 5px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};"
+                )
+
+            # AI拡張: 応答表示エリア（QTextBrowserの枠線・背景色のみ更新、詳細スタイルは保持）
+            if hasattr(self, 'extension_response_display') and self.extension_response_display:
+                # 既存の詳細スタイルを保ったまま境界色のみ更新
+                current_style = self.extension_response_display.styleSheet()
+                # border色とbackground色のみ置換
+                import re
+                updated_style = re.sub(
+                    r'border:\s*1px\s+solid\s+#[0-9a-fA-F]{6};',
+                    f'border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};',
+                    current_style
+                )
+                updated_style = re.sub(
+                    r'background-color:\s*#[0-9a-fA-F]{6};',
+                    f'background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};',
+                    updated_style
+                )
+                self.extension_response_display.setStyleSheet(updated_style)
+
+            # プログレスバー（テーマキーを使用して境界・チャンク色を更新）
+            if hasattr(self, 'progress_bar') and self.progress_bar:
+                self.progress_bar.setStyleSheet(
+                    f"""
+                    QProgressBar {{
+                        border: 2px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                        border-radius: 5px;
+                        text-align: center;
+                        font-weight: bold;
+                    }}
+                    QProgressBar::chunk {{
+                        background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                        border-radius: 3px;
+                    }}
+                    """
+                )
+
+            # アクションボタン群（色再適用）
+            def _apply_btn(btn, variant):
+                try:
+                    if not btn: return
+                    if variant == 'danger':
+                        btn.setStyleSheet(
+                            f"QPushButton {{ background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)}; border:1px solid {get_color(ThemeKey.BUTTON_DANGER_BORDER)}; border-radius:4px; padding:6px 12px; font-weight:bold; }}"
+                            f"QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)}; }}"
+                            f"QPushButton:pressed {{ background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_PRESSED)}; }}"
+                        )
+                    elif variant == 'success':
+                        btn.setStyleSheet(
+                            f"QPushButton {{ background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)}; border:1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)}; border-radius:4px; padding:6px 12px; font-weight:bold; }}"
+                            f"QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)}; }}"
+                            f"QPushButton:pressed {{ background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_PRESSED)}; }}"
+                        )
+                    elif variant == 'info':
+                        btn.setStyleSheet(
+                            f"QPushButton {{ background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_INFO_TEXT)}; border:1px solid {get_color(ThemeKey.BUTTON_INFO_BORDER)}; border-radius:4px; padding:6px 12px; font-weight:bold; }}"
+                            f"QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)}; }}"
+                            f"QPushButton:pressed {{ background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_PRESSED)}; }}"
+                        )
+                    elif variant == 'warning':
+                        btn.setStyleSheet(
+                            f"QPushButton {{ background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)}; border:1px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)}; border-radius:4px; padding:6px 12px; font-weight:bold; }}"
+                            f"QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)}; }}"
+                            f"QPushButton:pressed {{ background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_PRESSED)}; }}"
+                        )
+                except Exception as _e:
+                    logger.debug(f"Button theme apply failed: {_e}")
+
+            _apply_btn(getattr(self, 'clear_response_button', None), 'danger')
+            _apply_btn(getattr(self, 'copy_response_button', None), 'success')
+            _apply_btn(getattr(self, 'show_prompt_button', None), 'info')
+            _apply_btn(getattr(self, 'load_settings_button', None), 'info')
+            _apply_btn(getattr(self, 'save_settings_button', None), 'success')
+            _apply_btn(getattr(self, 'reset_settings_button', None), 'warning')
+
+        except Exception as e:
+            logger.debug("refresh_theme failed: %s", e)
     
     def load_extension_buttons(self):
         """AI拡張設定からボタンを読み込んで表示"""
@@ -1654,7 +1761,7 @@ class AISuggestionDialog(QDialog):
             
             # HTMLフォーマット（コンパクトヘッダー付き）
             formatted_html = f"""
-            <div style="border: 1px solid #e1e5e9; border-radius: 6px; padding: 0; margin: 3px 0; background-color: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+            <div style="border: 1px solid #e1e5e9; border-radius: 6px; padding: 0; margin: 3px 0;  box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
                 <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 8px 12px; border-radius: 6px 6px 0 0; margin-bottom: 0;">
                     <h3 style="margin: 0; font-size: 14px; font-weight: bold;">{icon} {label}</h3>
                     <small style="opacity: 0.9; font-size: 10px;">実行時刻: {timestamp}</small>
@@ -1748,7 +1855,7 @@ class AISuggestionDialog(QDialog):
             # コードブロック（```code``` → <pre><code>code</code></pre>）- コンパクトスタイル
             html_text = re.sub(
                 r'```([^`]*?)```', 
-                r'<pre style="background-color: #f8f9fa; padding: 6px; border-radius: 3px; border: 1px solid #e9ecef; overflow-x: auto; margin: 4px 0;"><code>\1</code></pre>', 
+                r'<pre style=" padding: 6px; border-radius: 3px; border: 1px solid #e9ecef; overflow-x: auto; margin: 4px 0;"><code>\1</code></pre>', 
                 html_text, 
                 flags=re.DOTALL
             )
@@ -1896,8 +2003,7 @@ class AISuggestionDialog(QDialog):
                 QMessageBox.warning(self, "警告", "コピーする内容がありません。")
         except Exception as e:
             QMessageBox.critical(self, "エラー", f"コピーエラー: {str(e)}")
-        except Exception as e:
-            QMessageBox.critical(self, "エラー", f"コピーエラー: {str(e)}")
+
     
     def show_used_prompt(self):
         """使用したプロンプトをダイアログで表示"""
@@ -1916,7 +2022,7 @@ class AISuggestionDialog(QDialog):
             
             # ヘッダー
             header_label = QLabel("📄 AIリクエストで実際に使用したプロンプト")
-            header_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 5px; color: #2c3e50;")
+            header_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 5px; ")
             layout.addWidget(header_label)
             
             # プロンプト表示エリア
@@ -1927,7 +2033,7 @@ class AISuggestionDialog(QDialog):
                 QTextEdit {
                     border: 1px solid #dee2e6;
                     border-radius: 5px;
-                    background-color: #f8f9fa;
+           
                     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
                     font-size: 11px;
                     padding: 8px;
@@ -1939,7 +2045,7 @@ class AISuggestionDialog(QDialog):
             char_count = len(self.last_used_prompt)
             line_count = self.last_used_prompt.count('\n') + 1
             stats_label = QLabel(f"文字数: {char_count:,} / 行数: {line_count:,}")
-            stats_label.setStyleSheet("font-size: 11px; color: #6c757d; margin: 3px;")
+            stats_label.setStyleSheet("font-size: 11px; argin: 3px;")
             layout.addWidget(stats_label)
             
             # ボタンエリア
@@ -1948,19 +2054,22 @@ class AISuggestionDialog(QDialog):
             # コピーボタン
             copy_button = QPushButton("📋 プロンプトをコピー")
             copy_button.clicked.connect(lambda: self._copy_prompt_to_clipboard(self.last_used_prompt))
-            copy_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #28a745;
-                    color: white;
-                    border: none;
+            copy_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
+                    border: 1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)};
                     border-radius: 4px;
                     padding: 8px 16px;
                     font-size: 12px;
                     font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #218838;
-                }
+                }}
+                QPushButton:hover {{
+                    background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+                }}
+                QPushButton:pressed {{
+                    background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_PRESSED)};
+                }}
             """)
             button_layout.addWidget(copy_button)
             
@@ -2549,20 +2658,20 @@ class AISuggestionDialog(QDialog):
             
             # HTMLを更新
             dataset_info_html = f"""
-        <div style="background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 5px; padding: 10px; margin: 5px 0;">
-            <h4 style="margin: 0 0 8px 0; color: #495057;">📊 対象データセット情報</h4>
+        <div style="border: 1px solid #dee2e6; border-radius: 5px; padding: 10px; margin: 5px 0;">
+            <h4 style="margin: 0 0 8px 0; ">📊 対象データセット情報</h4>
             <table style="width: 100%; border-collapse: collapse;">
                 <tr>
-                    <td style="font-weight: bold; color: #6c757d; padding: 2px 10px 2px 0; width: 100px;">データセット名:</td>
-                    <td style="color: #212529; padding: 2px 0;">{dataset_name}</td>
+                    <td style="font-weight: bold; padding: 2px 10px 2px 0; width: 100px;">データセット名:</td>
+                    <td style=" padding: 2px 0;">{dataset_name}</td>
                 </tr>
                 <tr>
-                    <td style="font-weight: bold; color: #6c757d; padding: 2px 10px 2px 0;">課題番号:</td>
-                    <td style="color: #212529; padding: 2px 0;">{grant_number}</td>
+                    <td style="font-weight: bold;  padding: 2px 10px 2px 0;">課題番号:</td>
+                    <td style=" padding: 2px 0;">{grant_number}</td>
                 </tr>
                 <tr>
-                    <td style="font-weight: bold; color: #6c757d; padding: 2px 10px 2px 0;">タイプ:</td>
-                    <td style="color: #212529; padding: 2px 0;">{dataset_type}</td>
+                    <td style="font-weight: bold;  padding: 2px 10px 2px 0;">タイプ:</td>
+                    <td style=" padding: 2px 0;">{dataset_type}</td>
                 </tr>
             </table>
         </div>
