@@ -127,13 +127,18 @@ class SettingsTabWidget(QWidget):
         """タブ切替時の遅延ロード処理"""
         if index in self._lazy_tabs and not self._tab_loaded[index]:
             try:
+                # 再入防止のため、先にフラグを立てる
+                self._tab_loaded[index] = True
+                
                 # 実際のウィジェットをロード
                 loader_func = self._lazy_tabs[index]
                 loader_func()
-                self._tab_loaded[index] = True
+                
                 logger.info(f"遅延ロード完了: タブインデックス {index}")
             except Exception as e:
                 logger.error(f"遅延ロード失敗 (タブ{index}): {e}")
+                # 失敗した場合はフラグを戻して再試行可能にする
+                self._tab_loaded[index] = False
     
     def refresh_theme(self):
         """テーマ変更時のスタイル更新"""

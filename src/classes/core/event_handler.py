@@ -319,7 +319,8 @@ class EventHandler:
                     
                     # v1.20.3: PySide6対応 - sessionStorage設定待機のため3秒遅延
                     logger.info('[TOKEN] Bearerトークン自動取得を開始（3秒後）')
-                    self.parent.login_manager.try_get_bearer_token(initial_delay=3000)  # rde.nims.go.jpのトークン取得
+                    # v2.1.x: ensure_both_tokensを使用して順次取得（RDE -> Material）
+                    self.parent.login_manager.ensure_both_tokens()
                     
                     # Cookie保存とフォーム表示
                     QTimer.singleShot(1000, self.parent.save_cookies_and_show_grant_form)

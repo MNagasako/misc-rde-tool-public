@@ -416,7 +416,7 @@ class LoginManager:
         except Exception as e:
             logger.error(f"[TOKEN] BearerToken保存エラー ({host}): {e}")
 
-    def try_get_bearer_token(self, retries=3, host='rde.nims.go.jp', initial_delay=0):
+    def try_get_bearer_token(self, retries=3, host='rde.nims.go.jp', initial_delay=0, on_completed=None):
         """
         WebViewからBearerトークンを取得する（複数ホスト対応）
         
@@ -424,11 +424,12 @@ class LoginManager:
             retries: リトライ回数
             host: 対象ホスト名（デフォルト: 'rde.nims.go.jp'）
             initial_delay: 初回取得前の遅延時間（ミリ秒、デフォルト: 0）
+            on_completed: 完了時コールバック (success: bool) -> None
         """
         # PySide6対応：初回取得時はsessionStorageが設定されるまで待機
         if initial_delay > 0:
             logger.info(f"[TOKEN] {initial_delay}ms待機してからBearerトークン取得開始")
-            QTimer.singleShot(initial_delay, lambda: self.try_get_bearer_token(retries, host, 0))
+            QTimer.singleShot(initial_delay, lambda: self.try_get_bearer_token(retries, host, 0, on_completed))
             return
         
         logger.info(f"[TOKEN] Bearerトークン取得開始: host={host}, retries={retries}")
@@ -462,7 +463,11 @@ class LoginManager:
                 logger.debug("sessionStorageが空 - リトライ=%s", retries)
                 if retries > 0:
                     logger.warning(f"[TOKEN] トークン取得失敗 ({host})。リトライします... (残り{retries-1}回)")
-                    QTimer.singleShot(2000, lambda: self.try_get_bearer_token(retries=retries - 1, host=host))
+                    QTimer.singleShot(2000, lambda: self.try_get_bearer_token(retries=retries - 1, host=host, on_completed=on_completed))
+                else:
+                    # リトライ終了 - 失敗
+                    if on_completed:
+                        on_completed(False)
                 return
             
             logger.debug("sessionStorage内容:")
@@ -605,20 +610,18 @@ class LoginManager:
                 # v1.16: 認証完了後のクリーンアップ
                 self._secure_cleanup_credentials()
                 
-                # rde.nims.go.jpの場合は、続けてrde-material.nims.go.jpのトークンも取得
-                # v1.18.3: 無限ループ防止 - まだ取得していない場合のみ実行
-                if host == 'rde.nims.go.jp' and not self._material_token_fetched:
-                    logger.info("[TOKEN] rde-material.nims.go.jpのトークン取得を開始します")
-                    logger.debug("Material トークン取得プロセスを2秒後に開始")
-                    # メッセージ更新: Materialトークン取得開始
-                    self.browser.update_autologin_msg("🔄 Materialトークン取得中...")
-                    QTimer.singleShot(2000, lambda: self.fetch_material_token())
-
+                # 完了コールバックを実行
+                if on_completed:
+                    on_completed(True)
                 
                 return
             else:
                 logger.warning(f"[TOKEN] BearerトークンがsessionStorageから取得できませんでした ({host})")
                 logger.debug("AccessToken形式のデータが見つかりませんでした")
+                
+                # リトライ終了 - 失敗（sessionStorageはあるがトークンがない場合）
+                if retries <= 0 and on_completed:
+                    on_completed(False)
         
         logger.debug("JavaScript実行開始")
         self.webview.page().runJavaScript(js_code, handle_token_list)
@@ -884,13 +887,15 @@ class LoginManager:
                         if hasattr(self, '_material_timeout_timer'):
                             logger.debug("[TOKEN] タイムアウト監視を停止（トークン取得開始）")
                         
-                        self.try_get_bearer_token(retries=3, host='rde-material.nims.go.jp')
-                        # トークン取得完了後、元のrde.nims.go.jp/rde/datasetsに戻る
-                        # 注意: try_get_bearer_token内で_notify_login_completeが呼ばれる
-                        QTimer.singleShot(2000, self.return_to_rde_datasets)
+                        # コールバックで元のページに戻る
+                        self.try_get_bearer_token(
+                            retries=3, 
+                            host='rde-material.nims.go.jp',
+                            on_completed=lambda success: QTimer.singleShot(500, self.return_to_rde_datasets)
+                        )
                     
-                    # 待機時間を6秒に延長（認証処理とsessionStorage更新を待つ）
-                    self._material_token_fetch_timer = QTimer.singleShot(6000, after_token_fetch)
+                    # 待機時間を3秒に短縮（リトライ機構があるため）
+                    self._material_token_fetch_timer = QTimer.singleShot(3000, after_token_fetch)
                 else:
                     # まだ認証リダイレクト中
                     logger.info(f"[TOKEN] 認証リダイレクト中: {current_url}")
@@ -1091,33 +1096,50 @@ class LoginManager:
             self._rde_token_acquired = False
             self._material_token_acquired = False
             self._material_token_fetched = False
+            rde_exists = False
+            material_exists = False
         
+        # マテリアルトークン取得処理（コールバック用）
+        def fetch_material_if_needed(rde_success=True):
+            if not rde_success:
+                logger.warning("[TOKEN-ENSURE] RDEトークン取得失敗のため、マテリアルトークン取得を中止")
+                self.browser.update_autologin_msg("❌ RDEトークン取得失敗")
+                return
+
+            if not material_exists or force_refresh:
+                logger.info("[TOKEN-ENSURE] マテリアルトークンを取得します")
+                self.browser.update_autologin_msg("🔄 マテリアルトークン取得中...")
+                # RDEトークン取得後に実行（少し待機してから）
+                QTimer.singleShot(1000, self.fetch_material_token)
+            else:
+                logger.info("[TOKEN-ENSURE] マテリアルトークンは既に存在")
+                self._material_token_acquired = True
+                check_completion()
+
+        def check_completion():
+            # 両トークンが既に存在する場合、ログイン完了通知を送信
+            if self._rde_token_acquired and self._material_token_acquired:
+                logger.info("[TOKEN-ENSURE] ✅ 両トークン既存 - ログイン完了通知を送信")
+                self._login_in_progress = False
+                self.browser.update_autologin_msg("✅ ログイン完了")
+                QTimer.singleShot(500, self._notify_login_complete)
+
         # RDEトークンが不足している場合
         if not rde_exists or force_refresh:
             logger.info("[TOKEN-ENSURE] RDEトークンを取得します")
             self.browser.update_autologin_msg("🔄 RDEトークン取得中...")
             # 3秒待機してからトークン取得（PySide6対応）
-            self.try_get_bearer_token(retries=3, host='rde.nims.go.jp', initial_delay=3000)
+            self.try_get_bearer_token(
+                retries=3, 
+                host='rde.nims.go.jp', 
+                initial_delay=3000,
+                on_completed=fetch_material_if_needed
+            )
         else:
             logger.info("[TOKEN-ENSURE] RDEトークンは既に存在")
             self._rde_token_acquired = True
-        
-        # マテリアルトークンが不足している場合
-        if not material_exists or force_refresh:
-            logger.info("[TOKEN-ENSURE] マテリアルトークンを取得します")
-            self.browser.update_autologin_msg("🔄 マテリアルトークン取得中...")
-            # RDEトークン取得後に実行
-            QTimer.singleShot(5000, self.fetch_material_token)
-        else:
-            logger.info("[TOKEN-ENSURE] マテリアルトークンは既に存在")
-            self._material_token_acquired = True
-        
-        # 両トークンが既に存在する場合、ログイン完了通知を送信
-        if self._rde_token_acquired and self._material_token_acquired:
-            logger.info("[TOKEN-ENSURE] ✅ 両トークン既存 - ログイン完了通知を送信")
-            self._login_in_progress = False
-            self.browser.update_autologin_msg("✅ ログイン完了")
-            QTimer.singleShot(500, self._notify_login_complete)
+            # RDE済みなら次はMaterial
+            fetch_material_if_needed(True)
     
     def is_login_complete(self) -> bool:
         """
