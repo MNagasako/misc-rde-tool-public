@@ -1,8 +1,9 @@
 # ARCHIVE LOG
 
-移動日: 2025-11-08
+## 移動履歴
 
-以下の旧版リリースノートを `docs/archive/` に退避しました（配布用リポジトリの整理のため）。
+### 2025-11-08
+以下の旧版リリースノートを `docs/archive/` に退避（配布用リポジトリ整理）。
 
 - RELEASE_NOTES_v1.13.2.md
 - RELEASE_NOTES_v1.15.2.md
@@ -19,4 +20,16 @@
 - RELEASE_NOTES_v1.19.1.md
 - RELEASE_NOTES_v1.19.2.md
 
-備考: 最新の v1.20.0 は配布用ドキュメントとしてルートの `docs/RELEASE_NOTES_v1.20.0.md` を維持しています。
+備考: 当時最新の v1.20.0 は一時的にルート保持。
+
+### 2025-11-25
+v2.0.x 系（初期移行期）のリリースノートをアーカイブへ移動。
+
+- RELEASE_NOTES_v2.0.0.md
+- RELEASE_NOTES_v2.0.1.md
+- RELEASE_NOTES_v2.0.5.md
+- RELEASE_NOTES_v2.0.6.md
+- RELEASE_NOTES_v2.0.7.md
+- RELEASE_NOTES_v2.0.8.md
+
+現行維持: 最新安定版 v2.1.8 のみ `docs/` 直下に残置。
