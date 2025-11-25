@@ -46,7 +46,7 @@
        ```
 
 #### PyInstaller による単一ファイル EXE の再生成（参考）
-ドキュメント: `docs/binary_build_notes.md` を参照（社内/開発者向け）。
+ドキュメント: `docs/binary_build_notes.md` を参照（開発者向け）。
 
 ```powershell
 pyinstaller arim_rde_tool.spec --clean --noconfirm
