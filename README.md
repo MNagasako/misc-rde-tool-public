@@ -56,18 +56,6 @@ pyinstaller arim_rde_tool.spec --clean --noconfirm
 
 ---
 
-## 📖 機能マニュアル
-
-各機能の詳細な使い方は以下のドキュメントを参照してください。
-
-* **[機能別ドキュメント一覧](docs/features/README.md)**
-    * **[0. ログイン機能](docs/features/01_LOGIN_FEATURE.md)**: RDE/データポータルへのログイン設定
-    * **[1. データ取得](docs/features/02_DATA_FETCH_FEATURE.md)**: データセットや画像の一括ダウンロード
-    * **[2. サブグループ管理](docs/features/03_SUBGROUP_CREATE_FEATURE.md)**: 研究グループの作成・編集
-    * **[3. データセット管理](docs/features/04_DATASET_OPEN_FEATURE.md)**: データセットの新規開設・編集
-    * **[4. データ登録](docs/features/05_DATA_REGISTER_FEATURE.md)**: ファイルのアップロードとメタデータ登録
-    * **[5. AI機能](docs/features/06_AI_TEST_FEATURE.md)**: AIによる説明文生成・チャット支援
-    * **[6. 設定](docs/features/08_SETTINGS_FEATURE.md)**: アプリケーションの各種設定
 
 > **暫定マニュアル（Notion）**
 > 開発中の最新情報や補足事項は [こちらのNotionページ](https://cuddly-stinger-40d.notion.site/v2-0-0-2a4fc2cb5fc380978d95fbd07c6fa37e?pvs=74) も参照してください。
@@ -184,10 +172,10 @@ pyinstaller arim_rde_tool.spec --clean --noconfirm
 
 ---
 
-## 🛡 ライセンスと第三者成果物
+## 🛡 ライセンス
 
 * ライセンス: **LGPLv3** （`LICENSE`）
-* 第三者ライブラリ通知: `THIRD_PARTY_NOTICES/`, `licenses_index.json`
+* サードパーティライブラリ: `THIRD_PARTY_NOTICES/`, `licenses_index.json`
 * 過去版のモジュールライセンス一覧: `docs/archive/MODULE_LICENSES_*.md`
 
 LGPLv3 の要件（再頒布条件等）は https://www.gnu.org/licenses/lgpl-3.0 を参照してください。
@@ -219,7 +207,7 @@ LGPLv3 の要件（再頒布条件等）は https://www.gnu.org/licenses/lgpl-3.
 | フォルダ | 用途 |
 |----------|------|
 | `input/` | 設定ファイル / 操作対象一覧投入 |
-| `output/` | 取得結果 / 生成物出力先 |
+| `output/` | 取得結果 / 出力先 |
 | `input-sample/` | サンプル設定 / 初期参考ファイル |
 | `config/` | ネットワーク等の環境別設定 |
 
