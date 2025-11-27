@@ -330,6 +330,7 @@ class BatchRegisterLogic(QObject):
         if self.progress_dialog:
             self.progress_dialog.close()
             self.progress_dialog = None
+            QApplication.processEvents()  # UI更新を確実に処理
         
         # 結果をシグナルで通知
         self.finished.emit(result)

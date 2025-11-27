@@ -13,6 +13,7 @@ from net.http_helpers import proxy_get, proxy_post
 from classes.managers.log_manager import get_logger
 from .auth_manager import PortalCredentials
 from ..conf.config import get_data_portal_config
+from bs4 import BeautifulSoup
 
 logger = get_logger("DataPortal.PortalClient")
 
@@ -280,12 +281,94 @@ class PortalClient:
             self._save_login_debug_response("login_page", response.text)
             logger.info("ログインページ取得成功")
             
-            # Step 2: ログインフォーム送信
-            login_data = {
-                'id': self.credentials.login_username,  # 'user_id'ではなく'id'
-                'password': self.credentials.login_password,
-                'pass_check': '1'  # ログインチェックフラグ
-            }
+            # Step 2: ログインフォーム送信（HTMLから動的抽出）
+            # ログインページのフォームから全input/buttonを抽出し、必要項目を上書き
+            parsed_fields: Dict[str, Any] = {}
+            post_target: str = "index.php"
+            try:
+                soup = BeautifulSoup(response.text, 'lxml')
+
+                # 候補フォームを収集
+                candidate_forms = soup.find_all('form')
+                target_form = None
+
+                # ユーザー名/パスワードのいずれかを含むフォームを優先選択
+                username_keys = ['id', 'user_id', 'username', 'login_id']
+                password_keys = ['password', 'pass', 'pwd', 'login_password']
+
+                for f in candidate_forms:
+                    names = set(inp.get('name') for inp in f.find_all('input') if inp.get('name'))
+                    if any(k in names for k in username_keys) and any(k in names for k in password_keys):
+                        target_form = f
+                        break
+
+                # 見つからなければ最初のフォームを使用
+                if target_form is None and candidate_forms:
+                    target_form = candidate_forms[0]
+
+                if target_form:
+                    # form actionを取得
+                    action_attr = target_form.get('action')
+                    if action_attr:
+                        post_target = action_attr
+
+                    # input要素を収集
+                    inputs = target_form.find_all('input')
+                    for inp in inputs:
+                        name = inp.get('name')
+                        if not name:
+                            continue
+                        value = inp.get('value', '')
+                        parsed_fields[name] = value
+
+                    # button要素(type=submit)も収集（name/valueが要求されるサイト対策）
+                    for btn in target_form.find_all('button'):
+                        btn_type = (btn.get('type') or '').lower()
+                        name = btn.get('name')
+                        if btn_type == 'submit' and name:
+                            value = btn.get('value') or btn.text.strip() or 'submit'
+                            parsed_fields[name] = value
+                else:
+                    logger.warning("ログインフォームが見つかりません。既定フィールドで送信します。")
+            except Exception as e:
+                logger.warning(f"ログインフォーム解析失敗: {e}。既定フィールドで送信します。")
+
+            # ユーザー名フィールドの推定と適用
+            username_keys = ['id', 'user_id', 'username', 'login_id']
+            applied_username = False
+            for key in username_keys:
+                if key in parsed_fields:
+                    parsed_fields[key] = self.credentials.login_username
+                    applied_username = True
+                    break
+            if not applied_username:
+                # デフォルトキー
+                parsed_fields['id'] = self.credentials.login_username
+
+            # パスワードフィールドの推定と適用
+            password_keys = ['password', 'pass', 'pwd', 'login_password']
+            applied_password = False
+            for key in password_keys:
+                if key in parsed_fields:
+                    parsed_fields[key] = self.credentials.login_password
+                    applied_password = True
+                    break
+            if not applied_password:
+                parsed_fields['password'] = self.credentials.login_password
+
+            # ログインチェック/CSRF類似フィールドの適用（存在すれば上書き、なければ追加）
+            if 'pass_check' in parsed_fields:
+                parsed_fields['pass_check'] = '1'
+            else:
+                parsed_fields['pass_check'] = '1'
+
+            # 追加でsubmit相当の候補を補完（必要に応じて）
+            submit_candidates = ['login', 'submit', 'submit_login']
+            if not any(k in parsed_fields for k in submit_candidates):
+                # フォームにボタンnameがない場合、一般的なキーを補う
+                parsed_fields['submit'] = 'login'
+
+            login_data = parsed_fields
             
             # PySide6対応: Referer/Originヘッダーを明示的に設定
             headers = {
@@ -294,8 +377,8 @@ class PortalClient:
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
             
-            logger.info(f"ログインフォーム送信: id={self.credentials.login_username}, pass_check=1")
-            success, response = self.post("index.php", data=login_data, headers=headers)
+            logger.info(f"ログインフォーム送信: id={self.credentials.login_username}, pass_check=1, action={post_target}")
+            success, response = self.post(post_target, data=login_data, headers=headers)
             
             if not success:
                 return False, f"ログイン送信失敗: {response}"

@@ -106,7 +106,7 @@ def _log_and_execute(method: str, url: str, session: requests.Session, **kwargs)
 
 def proxy_get(url: str, **kwargs) -> requests.Response:
     """
-    プロキシ対応 GET リクエスト
+    プロキシ対応 GET リクエスト（Bearer Token自動付与）
     
     Args:
         url: リクエストURL
@@ -116,12 +116,26 @@ def proxy_get(url: str, **kwargs) -> requests.Response:
         requests.Response: レスポンスオブジェクト
     """
     session = get_proxy_session()
+    
+    # Bearer Token自動付与（ヘッダーに含まれていない場合）
+    if 'headers' not in kwargs or kwargs['headers'] is None:
+        kwargs['headers'] = {}
+    
+    if 'Authorization' not in kwargs['headers']:
+        try:
+            from config.common import get_bearer_token_for_url
+            bearer_token = get_bearer_token_for_url(url)
+            if bearer_token:
+                kwargs['headers']['Authorization'] = f'Bearer {bearer_token}'
+        except Exception:
+            pass  # トークン取得失敗時は何もしない（Cookie認証にフォールバック）
+    
     return _log_and_execute('GET', url, session, **kwargs)
 
 def proxy_post(url: str, data: Optional[Union[Dict, str, bytes]] = None,
                json: Optional[Dict] = None, **kwargs) -> requests.Response:
     """
-    プロキシ対応 POST リクエスト
+    プロキシ対応 POST リクエスト（Bearer Token自動付与）
     
     Args:
         url: リクエストURL
@@ -133,12 +147,26 @@ def proxy_post(url: str, data: Optional[Union[Dict, str, bytes]] = None,
         requests.Response: レスポンスオブジェクト
     """
     session = get_proxy_session()
+    
+    # Bearer Token自動付与
+    if 'headers' not in kwargs or kwargs['headers'] is None:
+        kwargs['headers'] = {}
+    
+    if 'Authorization' not in kwargs['headers']:
+        try:
+            from config.common import get_bearer_token_for_url
+            bearer_token = get_bearer_token_for_url(url)
+            if bearer_token:
+                kwargs['headers']['Authorization'] = f'Bearer {bearer_token}'
+        except Exception:
+            pass
+    
     return _log_and_execute('POST', url, session, data=data, json=json, **kwargs)
 
 def proxy_put(url: str, data: Optional[Union[Dict, str, bytes]] = None,
               json: Optional[Dict] = None, **kwargs) -> requests.Response:
     """
-    プロキシ対応 PUT リクエスト
+    プロキシ対応 PUT リクエスト（Bearer Token自動付与）
     
     Args:
         url: リクエストURL
@@ -150,12 +178,26 @@ def proxy_put(url: str, data: Optional[Union[Dict, str, bytes]] = None,
         requests.Response: レスポンスオブジェクト
     """
     session = get_proxy_session()
+    
+    # Bearer Token自動付与
+    if 'headers' not in kwargs or kwargs['headers'] is None:
+        kwargs['headers'] = {}
+    
+    if 'Authorization' not in kwargs['headers']:
+        try:
+            from config.common import get_bearer_token_for_url
+            bearer_token = get_bearer_token_for_url(url)
+            if bearer_token:
+                kwargs['headers']['Authorization'] = f'Bearer {bearer_token}'
+        except Exception:
+            pass
+    
     return _log_and_execute('PUT', url, session, data=data, json=json, **kwargs)
 
 def proxy_patch(url: str, data: Optional[Union[Dict, str, bytes]] = None,
                 json: Optional[Dict] = None, **kwargs) -> requests.Response:
     """
-    プロキシ対応 PATCH リクエスト
+    プロキシ対応 PATCH リクエスト（Bearer Token自動付与）
     
     Args:
         url: リクエストURL  
@@ -167,12 +209,26 @@ def proxy_patch(url: str, data: Optional[Union[Dict, str, bytes]] = None,
         requests.Response: レスポンスオブジェクト
     """
     session = get_proxy_session()
+    
+    # Bearer Token自動付与
+    if 'headers' not in kwargs or kwargs['headers'] is None:
+        kwargs['headers'] = {}
+    
+    if 'Authorization' not in kwargs['headers']:
+        try:
+            from config.common import get_bearer_token_for_url
+            bearer_token = get_bearer_token_for_url(url)
+            if bearer_token:
+                kwargs['headers']['Authorization'] = f'Bearer {bearer_token}'
+        except Exception:
+            pass
+    
     return _log_and_execute('PATCH', url, session, data=data, json=json, **kwargs)
 
 def proxy_delete(url: str, data: Optional[Union[Dict, str, bytes]] = None,
                  json: Optional[Dict] = None, **kwargs) -> requests.Response:
     """
-    プロキシ対応 DELETE リクエスト
+    プロキシ対応 DELETE リクエスト（Bearer Token自動付与）
     
     Args:
         url: リクエストURL
@@ -184,6 +240,20 @@ def proxy_delete(url: str, data: Optional[Union[Dict, str, bytes]] = None,
         requests.Response: レスポンスオブジェクト
     """
     session = get_proxy_session()
+    
+    # Bearer Token自動付与
+    if 'headers' not in kwargs or kwargs['headers'] is None:
+        kwargs['headers'] = {}
+    
+    if 'Authorization' not in kwargs['headers']:
+        try:
+            from config.common import get_bearer_token_for_url
+            bearer_token = get_bearer_token_for_url(url)
+            if bearer_token:
+                kwargs['headers']['Authorization'] = f'Bearer {bearer_token}'
+        except Exception:
+            pass
+    
     return _log_and_execute('DELETE', url, session, data=data, json=json, **kwargs)
 
 def proxy_head(url: str, **kwargs) -> requests.Response:

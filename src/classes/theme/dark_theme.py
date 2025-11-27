@@ -56,6 +56,10 @@ class DarkTheme:
         ThemeKey.MENU_BACKGROUND: "#1a1a1a",  # 非常に暗い背景
         ThemeKey.MENU_BUTTON_INACTIVE_BACKGROUND: "#2a2a2a",  # やや明るめ
         ThemeKey.MENU_BUTTON_INACTIVE_TEXT: "#b0b0b0",
+        ThemeKey.MENU_BUTTON_ACTIVE_BACKGROUND: "#42a5f5",  # Primary Blue (Dark Mode)
+        ThemeKey.MENU_BUTTON_ACTIVE_TEXT: "#000000",
+        ThemeKey.MENU_BUTTON_HOVER_BACKGROUND: "#2a3a4a",  # Slightly lighter dark blue
+        ThemeKey.MENU_BUTTON_HOVER_TEXT: "#64b5f6",
         
         # ========================================
         # Button - ボタン全般（明度を上げる）
@@ -77,7 +81,7 @@ class DarkTheme:
         
         # ワーニングボタン（Orange 400→300→200）
         ThemeKey.BUTTON_WARNING_BACKGROUND: "#ffa726",  # Orange 400
-        ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER: "#ffb74d",  # Orange 300
+        ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER: "#ffcc80",  # Orange 200 - much lighter for visibility
         ThemeKey.BUTTON_WARNING_BACKGROUND_PRESSED: "#ffcc80",  # Orange 200
         ThemeKey.BUTTON_WARNING_TEXT: "#000000",
         ThemeKey.BUTTON_WARNING_BORDER: "#ffb74d",
@@ -103,7 +107,7 @@ class DarkTheme:
         
         # インフォボタン（Blue 400→300）
         ThemeKey.BUTTON_INFO_BACKGROUND: "#42a5f5",  # Blue 400
-        ThemeKey.BUTTON_INFO_BACKGROUND_HOVER: "#64b5f6",  # Blue 300
+        ThemeKey.BUTTON_INFO_BACKGROUND_HOVER: "#90caf9",  # Blue 200 - much lighter for visibility
         ThemeKey.BUTTON_INFO_TEXT: "#000000",
         ThemeKey.BUTTON_INFO_BORDER: "#64b5f6",
         
@@ -114,6 +118,7 @@ class DarkTheme:
         
         # デフォルトボタン（メニューボタン非アクティブ背景と揃える）
         ThemeKey.BUTTON_DEFAULT_BACKGROUND: "#2a2a2a",
+        ThemeKey.BUTTON_DEFAULT_BACKGROUND_HOVER: "#333333",
         ThemeKey.BUTTON_DEFAULT_TEXT: "#e0e0e0",
         ThemeKey.BUTTON_DEFAULT_BORDER: "#333333",
         

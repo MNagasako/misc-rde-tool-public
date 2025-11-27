@@ -235,20 +235,51 @@ class BasicInfoTabValidator:
                 self.controller.json_status_widget.status_text.setPlainText(new_text)
                 
                 # 色に応じてスタイルを変更
-                if color == "green":
-                    style = "font-family: 'Consolas'; font-size: 9pt; border: 2px solid green;"
-                elif color == "red":
-                    style = "font-family: 'Consolas'; font-size: 9pt; border: 2px solid red;"
-                elif color == "orange":
-                    style = "font-family: 'Consolas'; font-size: 9pt; border: 2px solid orange;"
-                else:
-                    style = "font-family: 'Consolas'; font-size: 9pt;"
+                from classes.theme import get_color, ThemeKey
                 
-                self.controller.json_status_widget.status_text.setStyleSheet(style)
+                # Base style components
+                bg_color = get_color(ThemeKey.INPUT_BACKGROUND)
+                text_color = get_color(ThemeKey.INPUT_TEXT)
+                
+                # Build stylesheet using string concatenation to avoid f-string brace issues
+                if color == "green":
+                    border_style = "border: 2px solid green;"
+                elif color == "red":
+                    border_style = "border: 2px solid red;"
+                elif color == "orange":
+                    border_style = "border: 2px solid orange;"
+                else:
+                    border_style = ""
+                
+                # Construct the stylesheet
+                style = (
+                    "QTextEdit { "
+                    "font-family: 'Consolas'; "
+                    "font-size: 9pt; "
+                    f"{border_style} "
+                    f"background-color: {bg_color}; "
+                    f"color: {text_color}; "
+                    "}"
+                )
+                
+                # Debug: Log the stylesheet
+                logger.debug(f"[TabValidator] Setting QTextEdit stylesheet (color={color})")
+                logger.debug(f"[TabValidator] Stylesheet: {style}")
+                logger.debug(f"[TabValidator] Stylesheet length: {len(style)}")
+                
+                try:
+                    self.controller.json_status_widget.status_text.setStyleSheet(style)
+                    logger.debug(f"[TabValidator] Stylesheet applied successfully")
+                except Exception as style_error:
+                    logger.error(f"[TabValidator] setStyleSheet failed: {style_error}")
+                    logger.error(f"[TabValidator] Problematic stylesheet: {style}")
+                    import traceback
+                    traceback.print_exc()
                 
         except Exception as e:
             logger.error(f"ステータス表示更新エラー: {e}")
-
+            import traceback
+            traceback.print_exc()
 
 def create_basic_info_tab_validator(parent, controller):
     """

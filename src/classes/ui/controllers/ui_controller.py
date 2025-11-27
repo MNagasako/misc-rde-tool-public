@@ -14,6 +14,7 @@ from qt_compat.core import QTimer
 
 from config.common import INPUT_DIR, get_dynamic_file_path
 from classes.theme import get_color, ThemeKey
+from classes.utils.button_styles import get_menu_button_style
 
 # UIControllerCore をインポート
 from .ui_controller_core import UIControllerCore
@@ -669,8 +670,8 @@ class UIController(UIControllerCore):
         モード切り替え用のウィジェットを初期化
         """
         # ボタンスタイルの設定（統一サイズで重なりを防ぐ）
-        base_active_style = f'background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; font-weight: bold; border-radius: 6px; margin: 2px;'
-        base_inactive_style = f'background-color: {get_color(ThemeKey.MENU_BUTTON_INACTIVE_BACKGROUND)}; color: {get_color(ThemeKey.MENU_BUTTON_INACTIVE_TEXT)}; font-weight: bold; border-radius: 6px; margin: 2px;'
+        base_active_style = get_menu_button_style(True)
+        base_inactive_style = get_menu_button_style(False)
         button_width = 120  # ボタン幅を統一
         button_height = 32  # ボタン高さを統一
 
@@ -1047,13 +1048,9 @@ class UIController(UIControllerCore):
                     continue
                     
                 if mode == active_mode:
-                    button.setStyleSheet(
-                        f'background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; font-weight: bold; border-radius: 6px;'
-                    )
+                    button.setStyleSheet(get_menu_button_style(True))
                 else:
-                    button.setStyleSheet(
-                        f'background-color: {get_color(ThemeKey.MENU_BUTTON_INACTIVE_BACKGROUND)}; color: {get_color(ThemeKey.MENU_BUTTON_INACTIVE_TEXT)}; font-weight: bold; border-radius: 6px;'
-                    )
+                    button.setStyleSheet(get_menu_button_style(False))
                 
                 # スタイル変更後にフォントサイズを再調整（安全性チェック付き）
                 def safe_adjust_font(b=button):
@@ -1103,14 +1100,8 @@ class UIController(UIControllerCore):
             layout.addWidget(data_fetch_label)
             
             # データ取得ボタン用のスタイル（INFO系）
-            info_button_style = f"""
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                font-weight: bold;
-                border-radius: 6px;
-                border: 2px solid {get_color(ThemeKey.BUTTON_INFO_BORDER)};
-                padding: 3px;
-            """
+            from classes.utils.button_styles import get_button_style
+            info_button_style = get_button_style('info')
             
             # 横並びで3ボタン配置（1行目）
             btn_layout1 = QHBoxLayout()
@@ -1190,7 +1181,8 @@ class UIController(UIControllerCore):
             layout.addWidget(xlsx_label)
             
             # XLSX関連ボタン用のスタイル（橙色系）
-            xlsx_button_style = f"background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)}; font-weight: bold; border-radius: 4px; border: 2px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)}; padding: 3px;"
+            from classes.utils.button_styles import get_button_style
+            xlsx_button_style = get_button_style('warning')
             
             # 横並びで3ボタン配置（XLSX関連）
             btn_layout2 = QHBoxLayout()
@@ -4135,12 +4127,13 @@ class UIController(UIControllerCore):
                 'dataset_id': ''
             }
             
-            # ダイアログを作成
+            # ダイアログを作成（AI拡張モード）
             dialog = AISuggestionDialog(
                 parent=None,  # 親を指定しない
                 context_data=context_data,
                 extension_name="dataset_description",
-                auto_generate=False
+                auto_generate=False,
+                mode="ai_extension"  # AI拡張モード: AI拡張、ファイル抽出設定タブのみ表示
             )
             
             # AI拡張タブを選択

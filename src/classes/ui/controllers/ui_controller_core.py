@@ -146,11 +146,15 @@ class UIControllerCore:
     def create_auto_resize_button(self, text, width, height, base_style):
         """
         フォントサイズ自動調整機能付きのボタンを作成
+        
+        注意: このメソッドはサイズとフォント調整のみを行います。
+        スタイル（色、hover効果等）はbase_styleで完全に指定してください。
+        
         Args:
             text: ボタンのテキスト
             width: ボタンの幅
             height: ボタンの高さ
-            base_style: ベースのスタイル
+            base_style: ボタンのスタイル（完全なQSS文字列）
         Returns:
             QPushButton: 作成されたボタン
         """

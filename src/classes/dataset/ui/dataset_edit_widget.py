@@ -1050,6 +1050,48 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         except Exception as e:
             logger.error("関連データセット読み込み中にエラー: %s", e)
     
+    # 関連データセット追加処理（共通化）
+    def add_related_dataset_to_list(selected_datasets_list, dataset_id, dataset_name):
+        """関連データセットをリストに追加（削除ボタン付きウィジェット）"""
+        # 既に選択済みかチェック
+        for i in range(selected_datasets_list.count()):
+            item = selected_datasets_list.item(i)
+            if item and item.data(Qt.UserRole) == dataset_id:
+                logger.info("データセット '%s' は既に選択済みです", dataset_name)
+                return False
+        
+        # リストアイテム作成
+        item = QListWidgetItem()
+        item.setData(Qt.UserRole, dataset_id)
+        selected_datasets_list.addItem(item)
+        
+        # 削除ボタン付きウィジェットを作成
+        item_widget = QWidget()
+        item_layout = QHBoxLayout()
+        item_layout.setContentsMargins(4, 2, 4, 2)
+        
+        # データセット名ラベル
+        dataset_label = QLabel(f"{dataset_name} (ID: {dataset_id})")
+        item_layout.addWidget(dataset_label, 1)  # stretch factor 1
+        
+        # 削除ボタン
+        remove_btn = QPushButton("❌")
+        remove_btn.setMaximumWidth(30)
+        remove_btn.setToolTip("この関連データセットを削除")
+        remove_btn.setStyleSheet("QPushButton { padding: 2px; }")
+        remove_btn.clicked.connect(
+            lambda checked=False, i=item: selected_datasets_list.takeItem(selected_datasets_list.row(i))
+        )
+        item_layout.addWidget(remove_btn)
+        
+        item_widget.setLayout(item_layout)
+        selected_datasets_list.setItemWidget(item, item_widget)
+        
+        # アイテムのサイズを調整
+        item.setSizeHint(item_widget.sizeHint())
+        
+        return True
+    
     # 関連データセット選択イベント処理
     def on_related_dataset_selected(related_dataset_combo, selected_datasets_list):
         """関連データセットが選択された時の処理"""
@@ -1079,22 +1121,12 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             dataset_id = selected_dataset.get("id", "")
             dataset_name = selected_dataset.get("attributes", {}).get("name", "名前なし")
             
-            # 既に選択済みかチェック
-            for i in range(selected_datasets_list.count()):
-                item = selected_datasets_list.item(i)
-                if item.data(Qt.UserRole) == dataset_id:
-                    logger.info("データセット '%s' は既に選択済みです", dataset_name)
-                    related_dataset_combo.lineEdit().clear()
-                    return
-            
-            # リストに追加
-            list_item = QListWidgetItem(f"{dataset_name} (ID: {dataset_id})")
-            list_item.setData(Qt.UserRole, dataset_id)
-            selected_datasets_list.addItem(list_item)
+            # 既に選択済みかチェックと追加は共通関数で処理
+            if add_related_dataset_to_list(selected_datasets_list, dataset_id, dataset_name):
+                logger.info("関連データセットを追加: %s (ID: %s)", dataset_name, dataset_id)
             
             # コンボボックスをクリア
             related_dataset_combo.lineEdit().clear()
-            logger.info("関連データセットを追加: %s (ID: %s)", dataset_name, dataset_id)
     
     # 関連データセット削除処理
     def on_remove_dataset(selected_datasets_list):
@@ -1289,8 +1321,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 
                 logger.debug("AI提案に渡すコンテキストデータ: %s", context_data)
                 
-                # AI提案ダイアログを表示（自動生成有効）
-                dialog = AISuggestionDialog(parent=widget, context_data=context_data, auto_generate=True)
+                # AI提案ダイアログを表示（自動生成有効、データセット提案モード）
+                dialog = AISuggestionDialog(
+                    parent=widget, 
+                    context_data=context_data, 
+                    auto_generate=True,
+                    mode="dataset_suggestion"  # データセット提案モード: AI提案、プロンプト全文、詳細情報タブ
+                )
                 
                 # スピナー停止
                 ai_suggest_button.stop_loading()
@@ -1468,7 +1505,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         form_layout.addWidget(QLabel("関連情報:"), 7, 0)
         edit_related_links_edit = QTextEdit()
         edit_related_links_edit.setPlaceholderText("関連情報を入力（タイトル1:URL1,タイトル2:URL2 の形式）")
-        edit_related_links_edit.setMaximumHeight(80)  # 4行程度
+        edit_related_links_edit.setMaximumHeight(65)  # 80 → 65に縮小
         form_layout.addWidget(edit_related_links_edit, 7, 1)
         
         # TAGフィールド（ビルダーダイアログ使用）
@@ -1517,7 +1554,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         form_layout.addWidget(QLabel("データセット引用の書式:"), 9, 0)
         edit_citation_format_edit = QTextEdit()
         edit_citation_format_edit.setPlaceholderText("データセット引用の書式を入力")
-        edit_citation_format_edit.setMaximumHeight(60)  # 80 → 60に変更（約3行）
+        edit_citation_format_edit.setMaximumHeight(55)  # 60 → 55に縮小
         form_layout.addWidget(edit_citation_format_edit, 9, 1)
         
         # 利用ライセンス選択
@@ -1602,16 +1639,11 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         related_dataset_combo.lineEdit().setPlaceholderText("関連データセットを検索・選択...")
         related_datasets_layout.addWidget(related_dataset_combo)
         
-        # 選択されたデータセット一覧（4行程度）
+        # 選択されたデータセット一覧（高さを拡張）
         selected_datasets_list = QListWidget()
-        selected_datasets_list.setMaximumHeight(80)  # 4行程度
+        selected_datasets_list.setMaximumHeight(150)  # 80 → 150に拡張（約7-8行）
         selected_datasets_list.setAlternatingRowColors(True)
         related_datasets_layout.addWidget(selected_datasets_list)
-        
-        # 削除ボタン
-        remove_dataset_btn = QPushButton("選択解除")
-        remove_dataset_btn.setMaximumWidth(100)
-        related_datasets_layout.addWidget(remove_dataset_btn)
         
         related_datasets_widget.setLayout(related_datasets_layout)
         form_layout.addWidget(related_datasets_widget, 11, 1)
@@ -1665,7 +1697,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 edit_taxonomy_edit, edit_related_links_edit, edit_tags_edit,
                 edit_citation_format_edit, edit_license_combo, edit_data_listing_gallery_radio, edit_data_listing_tree_radio, 
                 related_dataset_combo, selected_datasets_list,
-                remove_dataset_btn, edit_anonymize_checkbox,
+                edit_anonymize_checkbox,
                 edit_data_entry_prohibited_checkbox, edit_data_entry_delete_prohibited_checkbox, edit_share_core_scope_checkbox,
                 edit_template_display)
     
@@ -1675,7 +1707,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
      edit_taxonomy_edit, edit_related_links_edit, edit_tags_edit,
      edit_citation_format_edit, edit_license_combo, edit_data_listing_gallery_radio, edit_data_listing_tree_radio, 
      related_dataset_combo, selected_datasets_list,
-     remove_dataset_btn, edit_anonymize_checkbox,
+     edit_anonymize_checkbox,
      edit_data_entry_prohibited_checkbox, edit_data_entry_delete_prohibited_checkbox, edit_share_core_scope_checkbox,
      edit_template_display) = create_edit_form()
     
@@ -1717,19 +1749,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                         related_dataset_combo.setCurrentIndex(-1)  # 選択をクリア
                         return
                 
-                # リストに追加
-                item = QListWidgetItem(f"{dataset_title} (ID: {dataset_id})")
-                item.setData(Qt.UserRole, dataset_id)
-                selected_datasets_list.addItem(item)
+                # リストに追加（削除ボタン付きウィジェットとして）
+                if add_related_dataset_to_list(selected_datasets_list, dataset_id, dataset_title):
+                    logger.info("関連データセットを追加: %s", dataset_title)
                 
-                logger.info("関連データセットを追加: %s", dataset_title)
                 related_dataset_combo.setCurrentIndex(-1)  # 選択をクリア
     
     related_dataset_combo.activated.connect(on_related_combo_activated)
-    
-    remove_dataset_btn.clicked.connect(
-        lambda: on_remove_dataset(selected_datasets_list)
-    )
     
     # フォームクリア処理
     def clear_edit_form():
@@ -1986,10 +2012,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                             break
                     
                     # リストに追加
-                    list_item = QListWidgetItem(f"{dataset_name} (ID: {dataset_id})")
-                    list_item.setData(Qt.UserRole, dataset_id)
-                    selected_datasets_list.addItem(list_item)
-                    logger.debug("関連データセット追加: %s (ID: %s)", dataset_name, dataset_id)
+                    if add_related_dataset_to_list(selected_datasets_list, dataset_id, dataset_name):
+                        logger.debug("関連データセット追加: %s (ID: %s)", dataset_name, dataset_id)
         else:
             logger.debug("関連データセットが空")
         

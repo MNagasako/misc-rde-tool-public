@@ -48,24 +48,15 @@ class AIRequestThread(QThread):
                 
             ai_manager = AIManager()
             
-            # AI設定を取得
-            from classes.config.ui.ai_settings_widget import get_ai_config
-            ai_config = get_ai_config()
-            
             if self._stop_requested:
                 return
             
-            if not ai_config:
-                self.error_occurred.emit("AI設定が見つかりません")
-                return
-                
-            # デフォルトプロバイダーとモデルを取得
-            provider = ai_config.get('default_provider', 'gemini')
-            model = ai_config.get('providers', {}).get(provider, {}).get('default_model', 'gemini-2.0-flash')
+            # AIManagerからデフォルト設定を取得
+            provider = ai_manager.get_default_provider()
+            model = ai_manager.get_default_model(provider)
             
             # デバッグ用ログ出力
             logger.debug("AI設定取得: provider=%s, model=%s", provider, model)
-            logger.debug("AI設定内容: %s", ai_config)
             
             if self._stop_requested:
                 return
@@ -84,9 +75,14 @@ class AIRequestThread(QThread):
 
 
 class AISuggestionDialog(QDialog):
-    """AI提案ダイアログクラス"""
+    """AI提案ダイアログクラス
     
-    def __init__(self, parent=None, context_data=None, extension_name="dataset_description", auto_generate=True):
+    モード:
+        - dataset_suggestion: データセット説明文提案モード（AI提案、プロンプト全文、詳細情報タブ）
+        - ai_extension: AI拡張機能モード（AI拡張、ファイル抽出設定タブ）
+    """
+    
+    def __init__(self, parent=None, context_data=None, extension_name="dataset_description", auto_generate=True, mode="dataset_suggestion"):
         super().__init__(parent)
         self.context_data = context_data or {}
         self.extension_name = extension_name
@@ -96,6 +92,7 @@ class AISuggestionDialog(QDialog):
         self.extension_ai_threads = []  # AI拡張用のスレッドリスト
         self.auto_generate = auto_generate  # 自動生成フラグ
         self.last_used_prompt = None  # 最後に使用したプロンプトを保存
+        self.mode = mode  # 表示モード: "dataset_suggestion" または "ai_extension"
         
         # AI拡張機能を取得
         self.ai_extension = AIExtensionRegistry.get(extension_name)
@@ -137,37 +134,39 @@ class AISuggestionDialog(QDialog):
         self.tab_widget = QTabWidget()
         layout.addWidget(self.tab_widget)
         
-        # メインタブ
-        main_tab = QWidget()
-        self.tab_widget.addTab(main_tab, "AI提案")
-        self.setup_main_tab(main_tab)
+        # モードに応じてタブを選択的に追加
+        if self.mode == "dataset_suggestion":
+            # データセット提案モード: AI提案、プロンプト全文、詳細情報
+            main_tab = QWidget()
+            self.tab_widget.addTab(main_tab, "AI提案")
+            self.setup_main_tab(main_tab)
+            
+            prompt_tab = QWidget()
+            self.tab_widget.addTab(prompt_tab, "プロンプト全文")
+            self.setup_prompt_tab(prompt_tab)
+            
+            detail_tab = QWidget()
+            self.tab_widget.addTab(detail_tab, "詳細情報")
+            self.setup_detail_tab(detail_tab)
+            
+        elif self.mode == "ai_extension":
+            # AI拡張モード: AI拡張、ファイル抽出設定
+            try:
+                extension_tab = QWidget()
+                self.tab_widget.addTab(extension_tab, "AI拡張")
+                self.setup_extension_tab(extension_tab)
+            except Exception as e:
+                logger.warning("AI拡張タブの初期化に失敗しました: %s", e)
+            
+            try:
+                extraction_settings_tab = QWidget()
+                self.tab_widget.addTab(extraction_settings_tab, "ファイル抽出設定")
+                self.setup_extraction_settings_tab(extraction_settings_tab)
+            except Exception as e:
+                logger.warning("ファイル抽出設定タブの初期化に失敗しました: %s", e)
         
-        # プロンプト表示タブ
-        prompt_tab = QWidget()
-        self.tab_widget.addTab(prompt_tab, "プロンプト全文")
-        self.setup_prompt_tab(prompt_tab)
-        
-        # 詳細情報タブ
-        detail_tab = QWidget()
-        self.tab_widget.addTab(detail_tab, "詳細情報")
-        self.setup_detail_tab(detail_tab)
-        
-        # AI拡張タブ
-        try:
-            extension_tab = QWidget()
-            self.tab_widget.addTab(extension_tab, "AI拡張")
-            self.setup_extension_tab(extension_tab)
-        except Exception as e:
-            logger.warning("AI拡張タブの初期化に失敗しました: %s", e)
-            # AI拡張タブが失敗しても他の機能は使用可能
-        
-        # ファイル抽出設定タブ
-        try:
-            extraction_settings_tab = QWidget()
-            self.tab_widget.addTab(extraction_settings_tab, "ファイル抽出設定")
-            self.setup_extraction_settings_tab(extraction_settings_tab)
-        except Exception as e:
-            logger.warning("ファイル抽出設定タブの初期化に失敗しました: %s", e)
+        # 注: データセット開設タブでの将来的な利用も想定
+        # データセット開設タブから呼び出す場合は、mode="dataset_suggestion"を使用
         
         # プログレスバー
         self.progress_bar = QProgressBar()
@@ -212,6 +211,12 @@ class AISuggestionDialog(QDialog):
         button_layout.addWidget(self.cancel_button)
         
         layout.addLayout(button_layout)
+        
+        # タブ切替時のボタン表示制御
+        self.tab_widget.currentChanged.connect(self.toggle_action_buttons)
+        
+        # 初期状態でボタン表示を更新
+        QTimer.singleShot(50, self.toggle_action_buttons)
         
         # データセット選択ドロップダウンを初期化
         QTimer.singleShot(100, self.initialize_dataset_dropdown)
@@ -328,7 +333,10 @@ class AISuggestionDialog(QDialog):
         self.generate_button.clicked.connect(self.generate_suggestions)
         self.apply_button.clicked.connect(self.accept)
         self.cancel_button.clicked.connect(self.reject)
-        self.suggestion_list.currentItemChanged.connect(self.on_suggestion_selected)
+        
+        # データセット提案モードのみsuggestion_listが存在
+        if self.mode == "dataset_suggestion" and hasattr(self, 'suggestion_list'):
+            self.suggestion_list.currentItemChanged.connect(self.on_suggestion_selected)
         
     def generate_suggestions(self):
         """AI提案を生成"""
@@ -367,7 +375,12 @@ class AISuggestionDialog(QDialog):
             self.progress_bar.setVisible(False)
         
     def update_detail_display(self, prompt):
-        """詳細情報タブの表示を更新"""
+        """詳細情報タブの表示を更新（データセット提案モードのみ）"""
+        # AI拡張モードでは詳細情報タブが存在しないため早期リターン
+        if self.mode != "dataset_suggestion":
+            logger.debug("AI拡張モードのため、詳細情報表示をスキップ")
+            return
+            
         logger.debug("プロンプト表示更新: 全%s文字", len(prompt))
         
         # プロンプト内にファイル情報が含まれているか確認
@@ -377,17 +390,20 @@ class AISuggestionDialog(QDialog):
             logger.warning("プロンプトにファイル情報が見つかりません")
         
         # プロンプト表示（詳細情報タブ）
-        self.prompt_display.setText(prompt)
+        if hasattr(self, 'prompt_display'):
+            self.prompt_display.setText(prompt)
         
         # プロンプト全文表示（プロンプトタブ）
-        self.full_prompt_display.setPlainText(prompt)
+        if hasattr(self, 'full_prompt_display'):
+            self.full_prompt_display.setPlainText(prompt)
         
         # プロンプト統計情報を更新
         char_count = len(prompt)
         line_count = prompt.count('\n') + 1
         has_arim_data = "ARIM課題関連情報" in prompt
         
-        self.prompt_stats.setText(f"文字数: {char_count}, 行数: {line_count}, ARIM統合: {'○' if has_arim_data else '×'}")
+        if hasattr(self, 'prompt_stats'):
+            self.prompt_stats.setText(f"文字数: {char_count}, 行数: {line_count}, ARIM統合: {'○' if has_arim_data else '×'}")
         
         # コンテキストデータ表示
         context_text = "収集されたコンテキストデータ:\n\n"
@@ -397,7 +413,8 @@ class AISuggestionDialog(QDialog):
                 context_text += f"■ {key}:\n{value}\n\n"
             else:
                 context_text += f"• {key}: {value}\n"
-        self.context_display.setText(context_text)
+        if hasattr(self, 'context_display'):
+            self.context_display.setText(context_text)
         
     def edit_prompt_template(self):
         """プロンプトテンプレート編集ダイアログを表示"""
@@ -424,11 +441,10 @@ class AISuggestionDialog(QDialog):
         try:
             logger.debug("プロンプト構築開始 - 入力コンテキスト: %s", self.context_data)
             
-            # AI設定を取得してプロバイダー・モデル情報を追加
-            from classes.config.ui.ai_settings_widget import get_ai_config
-            ai_config = get_ai_config()
-            provider = ai_config.get('default_provider', 'gemini') if ai_config else 'gemini'
-            model = ai_config.get('providers', {}).get(provider, {}).get('default_model', 'gemini-2.0-flash') if ai_config else 'gemini-2.0-flash'
+            # AIManagerからデフォルトプロバイダー・モデル情報を取得
+            ai_manager = AIManager()
+            provider = ai_manager.get_default_provider()
+            model = ai_manager.get_default_model(provider)
             
             logger.debug("使用予定AI: provider=%s, model=%s", provider, model)
             
@@ -570,9 +586,15 @@ class AISuggestionDialog(QDialog):
             logger.error("AIエラー処理エラー: %s", e)
         
     def parse_suggestions(self, response_text):
-        """AI応答から提案候補を抽出"""
+        """AI応答から提案候補を抽出（データセット提案モードのみ）"""
+        # AI拡張モードでは提案リストが存在しないため早期リターン
+        if self.mode != "dataset_suggestion":
+            logger.debug("AI拡張モードのため、提案解析をスキップ")
+            return
+            
         self.suggestions.clear()
-        self.suggestion_list.clear()
+        if hasattr(self, 'suggestion_list'):
+            self.suggestion_list.clear()
         
         try:
             # AI拡張機能を使用してレスポンスを解析
@@ -580,11 +602,13 @@ class AISuggestionDialog(QDialog):
             
             for suggestion in parsed_suggestions:
                 self.suggestions.append(suggestion)
-                item = QListWidgetItem(suggestion['title'])
-                self.suggestion_list.addItem(item)
+                if hasattr(self, 'suggestion_list'):
+                    item = QListWidgetItem(suggestion['title'])
+                    self.suggestion_list.addItem(item)
                 
             if self.suggestions:
-                self.suggestion_list.setCurrentRow(0)
+                if hasattr(self, 'suggestion_list'):
+                    self.suggestion_list.setCurrentRow(0)
                 self.apply_button.setEnabled(True)
                 
                 # 全候補をプレビューエリアに表示
@@ -599,16 +623,21 @@ class AISuggestionDialog(QDialog):
                 'text': response_text.strip()
             })
             
-            item = QListWidgetItem('AI提案')
-            self.suggestion_list.addItem(item)
-            self.suggestion_list.setCurrentRow(0)
+            if hasattr(self, 'suggestion_list'):
+                item = QListWidgetItem('AI提案')
+                self.suggestion_list.addItem(item)
+                self.suggestion_list.setCurrentRow(0)
             self.apply_button.setEnabled(True)
             
             # フォールバック時も全候補表示
             self.display_all_suggestions()
     
     def display_all_suggestions(self):
-        """全ての提案候補をプレビューエリアに表示"""
+        """全ての提案候補をプレビューエリアに表示（データセット提案モードのみ）"""
+        # AI拡張モードではプレビューエリアが存在しない
+        if self.mode != "dataset_suggestion" or not hasattr(self, 'preview_text'):
+            return
+            
         if not self.suggestions:
             self.preview_text.setPlainText("提案候補がありません。")
             return
@@ -631,8 +660,29 @@ class AISuggestionDialog(QDialog):
             logger.warning("自動AI提案生成エラー: %s", e)
             # エラーが発生しても処理を続行（手動実行は可能）
             
+    def toggle_action_buttons(self):
+        """タブ切替時のアクションボタン表示制御
+        
+        AI提案タブ選択時のみ、生成/適用/キャンセルボタンを表示
+        それ以外のタブでは非表示にする
+        """
+        current_tab_index = self.tab_widget.currentIndex()
+        current_tab_text = self.tab_widget.tabText(current_tab_index)
+        
+        # AI提案タブ選択時のみボタンを表示
+        is_ai_suggestion_tab = (current_tab_text == "AI提案")
+        
+        self.generate_button.setVisible(is_ai_suggestion_tab)
+        self.apply_button.setVisible(is_ai_suggestion_tab)
+        self.cancel_button.setVisible(is_ai_suggestion_tab)
+        
+        logger.debug("ボタン表示制御: タブ='%s', 表示=%s", current_tab_text, is_ai_suggestion_tab)
+    
     def on_suggestion_selected(self, current, previous):
-        """提案選択時の処理（候補選択マーク用）"""
+        """提案選択時の処理（候補選択マーク用・データセット提案モードのみ）"""
+        if self.mode != "dataset_suggestion" or not hasattr(self, 'suggestion_list'):
+            return
+            
         if current:
             row = self.suggestion_list.row(current)
             if 0 <= row < len(self.suggestions):
@@ -643,7 +693,10 @@ class AISuggestionDialog(QDialog):
                 self.update_preview_highlight(row)
             
     def update_preview_highlight(self, selected_index):
-        """プレビューエリアで選択された候補をハイライト"""
+        """プレビューエリアで選択された候補をハイライト（データセット提案モードのみ）"""
+        if self.mode != "dataset_suggestion" or not hasattr(self, 'preview_text'):
+            return
+            
         if not self.suggestions:
             return
             
@@ -685,6 +738,16 @@ class AISuggestionDialog(QDialog):
         header_layout.addWidget(title_label)
         
         header_layout.addStretch()
+        
+        # デフォルトAI設定表示
+        ai_manager = AIManager()
+        default_provider = ai_manager.get_default_provider()
+        default_model = ai_manager.get_default_model(default_provider)
+        
+        ai_config_label = QLabel(f"🤖 使用AI: {default_provider.upper()} / {default_model}")
+        ai_config_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin: 5px; font-size: 11px;")
+        ai_config_label.setToolTip("グローバル設定で指定されたデフォルトAIを使用します")
+        header_layout.addWidget(ai_config_label)
         
         # 設定ボタン
         config_button = QPushButton("設定編集")

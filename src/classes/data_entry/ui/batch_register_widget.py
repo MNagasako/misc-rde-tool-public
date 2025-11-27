@@ -7,6 +7,7 @@
 import os
 import json
 import logging
+import time
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 from classes.theme.theme_keys import ThemeKey
@@ -880,12 +881,16 @@ class FileSetTableWidget(QTableWidget):
         for line in traceback.format_stack()[-3:-1]:
             logger.debug("  %s", line.strip())
         
+        # 受信したファイルセットの詳細をログ出力
+        for i, fs in enumerate(file_sets):
+            logger.debug("load_file_sets: FileSet[%s] id=%s, name=%s, items=%s", i, fs.id, fs.name, len(fs.items))
+        
         self.file_sets = file_sets
         self.setRowCount(len(file_sets))
         logger.debug("FileSetTableWidget.load_file_sets: テーブル行数を %s に設定", len(file_sets))
         
         for row, file_set in enumerate(file_sets):
-            logger.debug("FileSetTableWidget: 行%s 処理中: %s", row, file_set.name)
+            logger.debug("FileSetTableWidget: 行%s 処理中: %s (id=%s, items=%s)", row, file_set.name, file_set.id, len(file_set.items))
             
             # ファイルセット名（アイコン付きのクリック可能ウィジェット）
             name_widget = self._create_name_widget_with_icon(file_set)
@@ -1122,6 +1127,9 @@ class FileSetTableWidget(QTableWidget):
                 parent=self,
                 bearer_token=None  # v1.18.4: 自動選択に変更
             )
+            dialog.show()  # ダイアログを表示
+            dialog.raise_()  # 最前面に持ってくる
+            dialog.activateWindow()  # アクティブ化
             dialog.exec()
             
         except Exception as e:
@@ -1291,13 +1299,13 @@ class FileSetTableWidget(QTableWidget):
             }}
             QPushButton:hover {{
                 background-color: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND)};
-                border-color: {get_color(ThemeKey.BUTTON_PRIMARY_HOVER_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_PRIMARY_HOVER_BACKGROUND)};
+                border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
             }}
             QPushButton:pressed {{
                 background-color: {get_color(ThemeKey.MENU_ITEM_BACKGROUND_HOVER)};
-                border-color: {get_color(ThemeKey.BUTTON_PRIMARY_ACTIVE_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_PRIMARY_ACTIVE_BACKGROUND)};
+                border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_PRESSED)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_PRESSED)};
             }}
         """)
         view_icon.clicked.connect(lambda: self._show_fileset_content_dialog(file_set))
@@ -1397,6 +1405,8 @@ class FileSetTableWidget(QTableWidget):
         dialog = QDialog(self)
         dialog.setWindowTitle(f"ファイルセット内容 - {file_set.name}")
         dialog.setModal(True)
+        # 最前面表示設定（マルチディスプレイ環境対応）
+        dialog.setWindowFlags(dialog.windowFlags() | Qt.WindowStaysOnTopHint)
         dialog.resize(800, 600)
         
         layout = QVBoxLayout()
@@ -1447,6 +1457,9 @@ class FileSetTableWidget(QTableWidget):
         
         layout.addLayout(button_layout)
         dialog.setLayout(layout)
+        dialog.show()  # ダイアログを表示
+        dialog.raise_()  # 最前面に持ってくる
+        dialog.activateWindow()  # アクティブ化
         dialog.exec()
     
     def _apply_fileset_changes(self, dialog, file_set, file_tree):
@@ -1710,6 +1723,8 @@ class DataTreeDialog(QDialog):
         """UIセットアップ"""
         self.setWindowTitle("データツリー選択")
         self.setModal(True)
+        # 最前面表示設定（マルチディスプレイ環境対応）
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
         self.resize(600, 500)
         
         layout = QVBoxLayout()
@@ -1796,6 +1811,9 @@ class BatchRegisterWidget(QWidget):
         
         # ファイルセット復元処理中フラグ（自動設定適用を防ぐため）
         self._restoring_fileset = False
+        
+        # データセット存在検証キャッシュ（重複検証を防止）
+        self._verified_datasets = set()
         
         # ベアラートークンを初期化時に設定
         self.bearer_token = None
@@ -2780,14 +2798,15 @@ class BatchRegisterWidget(QWidget):
                 for i, fs in enumerate(self.file_set_manager.file_sets):
                     logger.debug("FileSet %s: id=%s, name=%s, items=%s", i, fs.id, fs.name, len(fs.items))
             
-            if self.file_set_manager and self.file_set_manager.file_sets:
+            # 条件判定を明示的に: file_setsが存在し、かつ空でないこと
+            if self.file_set_manager and len(self.file_set_manager.file_sets) > 0:
                 # ファイルセットテーブルを更新
-                logger.debug("refresh_fileset_display: テーブル更新開始")
+                logger.debug("refresh_fileset_display: テーブル更新開始 (件数=%s)", len(self.file_set_manager.file_sets))
                 self.fileset_table.load_file_sets(self.file_set_manager.file_sets)
                 logger.debug("refresh_fileset_display: テーブル更新完了")
             else:
                 # ファイルセットがない場合はクリア
-                logger.debug("refresh_fileset_display: テーブルクリア")
+                logger.debug("refresh_fileset_display: テーブルクリア (manager=%s)", self.file_set_manager)
                 self.fileset_table.setRowCount(0)
             
             # ファイルセット選択コンボボックスも更新
@@ -3612,11 +3631,16 @@ class BatchRegisterWidget(QWidget):
             
             # データツリー選択ダイアログ
             dialog = DataTreeDialog(file_items, self)
+            dialog.show()  # ダイアログを表示
+            dialog.raise_()  # 最前面に持ってくる
+            dialog.activateWindow()  # アクティブ化
             if dialog.exec() == QDialog.Accepted:
                 selected_items = dialog.get_selected_items()
                 if selected_items:
                     # ファイルセット名入力
-                    name, ok = QInputDialog.getText(self, "ファイルセット名", "ファイルセット名を入力してください:")
+                    input_dialog = QInputDialog(self)
+                    input_dialog.setWindowFlags(input_dialog.windowFlags() | Qt.WindowStaysOnTopHint)
+                    name, ok = input_dialog.getText(self, "ファイルセット名", "ファイルセット名を入力してください:")
                     if ok and name:
                         file_set = self.file_set_manager.create_manual_fileset(name, selected_items)
                         
@@ -4273,6 +4297,11 @@ class BatchRegisterWidget(QWidget):
     
     def update_dataset_combo(self):
         """データセットコンボボックスを更新"""
+        # 検証キャッシュはデータセット一覧フル更新時のみクリアする（個別エラーでの再構築は行わない方針）
+        # ここではクリアしないことで不要な再検証ループを防止
+        if not hasattr(self, '_invalid_datasets'):
+            self._invalid_datasets = {}  # {dataset_id: error_type}
+        
         self.dataset_combo.clear()
         
         if not self.datasets:
@@ -4283,16 +4312,38 @@ class BatchRegisterWidget(QWidget):
         self.dataset_combo.addItem("データセットを選択...")
         
         # データセットを追加
-        for dataset in self.datasets:
+        for i, dataset in enumerate(self.datasets):
             dataset_id = dataset.get('id', '')
             attributes = dataset.get('attributes', {})
             title = attributes.get('title', 'タイトルなし')
             
+            # エラーマーカーを追加
+            error_marker = ""
+            if hasattr(self, '_invalid_datasets') and dataset_id in self._invalid_datasets:
+                error_type = self._invalid_datasets[dataset_id]
+                if error_type == 'not_found':
+                    error_marker = " [⚠️ 未検出]"
+                elif error_type == 'unauthorized':
+                    error_marker = " [⚠️ 認証エラー]"
+                elif error_type == 'format_error':
+                    error_marker = " [⚠️ フォーマットエラー]"
+                else:
+                    error_marker = " [⚠️ エラー]"
+            
             # コンボボックス表示用のテキスト
-            display_text = f"{title} ({dataset_id[:8]}...)" if len(dataset_id) > 8 else f"{title} ({dataset_id})"
+            display_text = f"{title} ({dataset_id[:8]}...){error_marker}" if len(dataset_id) > 8 else f"{title} ({dataset_id}){error_marker}"
             
             # アイテムを追加（データとしてdataset_idを保存）
             self.dataset_combo.addItem(display_text, dataset_id)
+            
+            # 無効なデータセットは無効化
+            if error_marker:
+                from qt_compat.core import Qt
+                model = self.dataset_combo.model()
+                item = model.item(i + 1)  # +1 for placeholder
+                if item:
+                    item.setEnabled(False)
+                    item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
     
     def get_selected_dataset_id(self) -> Optional[str]:
         """選択されたデータセットIDを取得"""
@@ -4795,6 +4846,20 @@ class BatchRegisterWidget(QWidget):
             if dataset_id and dataset_data:
                 logger.info("データセット選択確定: %s", dataset_id)
                 
+                # ========== データセット存在検証 ==========
+                validation_result = self._validate_dataset_existence(dataset_id)
+                if not validation_result['valid']:
+                    if not hasattr(self, '_invalid_datasets'):
+                        self._invalid_datasets = {}
+                    self._invalid_datasets[dataset_id] = validation_result.get('error_type', 'other')
+                    logger.warning("データセット検証失敗、次の有効なエントリへ移動: %s", dataset_id)
+                    # 現在アイテムを即時マーク（再構築せずにテキスト更新＋無効化）
+                    self._mark_dataset_invalid(index, dataset_id, validation_result.get('error_type', 'other'))
+                    # 次の有効なデータセットへ移動
+                    self._select_next_valid_dataset()
+                    return
+                # ==========================================
+                
                 # サンプル一覧を更新
                 self.update_sample_list(dataset_id)
                 
@@ -4806,8 +4871,17 @@ class BatchRegisterWidget(QWidget):
                 self.update_schema_form(dataset_data)
                 logger.debug("update_schema_form呼び出し後")
                 
-                # 選択された旨を表示
-                QTimer.singleShot(500, lambda: print(f"[INFO] データセット反映完了: {dataset_id}"))
+                # データセット反映ログ（短時間重複抑制）
+                now_ts = time.time()
+                if not hasattr(self, '_last_reflected_dataset_id'):
+                    self._last_reflected_dataset_id = None
+                    self._last_reflected_time = 0.0
+                if (self._last_reflected_dataset_id != dataset_id) or (now_ts - getattr(self, '_last_reflected_time', 0) > 1.0):
+                    logger.info("データセット反映完了: %s", dataset_id)
+                    self._last_reflected_dataset_id = dataset_id
+                    self._last_reflected_time = now_ts
+                else:
+                    logger.debug("データセット反映ログ抑制: %s", dataset_id)
                 
                 # 選択されたファイルセットに設定を自動適用
                 self.auto_apply_settings_to_selected()
@@ -4820,6 +4894,215 @@ class BatchRegisterWidget(QWidget):
             logger.warning("データセット変更処理エラー: %s", e)
             import traceback
             traceback.print_exc()
+    
+    def _validate_dataset_existence(self, dataset_id: str) -> Dict[str, any]:
+        """
+        データセット存在検証（RDE API使用）
+        
+        Args:
+            dataset_id: 検証するデータセットID
+            
+        Returns:
+            Dict: {
+                'valid': bool,           # 検証成功/失敗
+                'status_code': int,      # HTTPステータスコード
+                'error_type': str,       # エラー種別 ('not_found', 'unauthorized', 'network', 'other')
+                'message': str           # ユーザー向けメッセージ
+            }
+        """
+        try:
+            # キャッシュ確認（既に検証済みのIDはスキップ）
+            if not hasattr(self, '_verified_datasets'):
+                self._verified_datasets = set()
+            
+            if dataset_id in self._verified_datasets:
+                logger.debug("データセット存在検証スキップ（キャッシュ済み）: %s", dataset_id)
+                return {'valid': True, 'status_code': 200, 'error_type': None, 'message': ''}
+            
+            # API呼び出し
+            from config.site_rde import URLS
+            from net.http_helpers import proxy_get
+            
+            detail_url = URLS['api']['dataset_detail'].format(id=dataset_id)
+            logger.info("データセット存在検証開始: %s", dataset_id)
+            logger.debug("[DATASET-VALIDATION] リクエストURL: %s", detail_url)
+            
+            # RDE API必須ヘッダー
+            headers = {
+                'Accept': 'application/vnd.api+json',
+                'Content-Type': 'application/vnd.api+json'
+            }
+            
+            resp = proxy_get(detail_url, headers=headers, timeout=10)
+            
+            # デバッグ: レスポンス詳細をログ出力
+            logger.debug("[DATASET-VALIDATION] レスポンスステータス: %s", resp.status_code)
+            logger.debug("[DATASET-VALIDATION] レスポンスヘッダー: %s", dict(resp.headers))
+            if resp.status_code >= 400:
+                try:
+                    logger.error("[DATASET-VALIDATION] エラーレスポンスボディ: %s", resp.text[:500])
+                except Exception:
+                    pass
+            
+            # ステータスコード別処理
+            if resp.status_code == 200:
+                self._verified_datasets.add(dataset_id)
+                logger.info("データセット存在確認成功: %s", dataset_id)
+                return {'valid': True, 'status_code': 200, 'error_type': None, 'message': ''}
+            
+            elif resp.status_code == 404:
+                logger.error("データセット未検出 (404): id=%s", dataset_id)
+                return {
+                    'valid': False,
+                    'status_code': 404,
+                    'error_type': 'not_found',
+                    'message': f'データセットが存在しないか、アクセス権限がありません。\n\nデータセットID: {dataset_id}\n\nRDEサイトで該当データセットが開設されているか確認してください。'
+                }
+            
+            elif resp.status_code == 401:
+                    # 未認証: 選択段階で停止（再ログイン/権限確認を促す）
+                    logger.error("未認証 (401) データセットアクセス拒否: id=%s", dataset_id)
+                    return {
+                        'valid': False,
+                        'status_code': 401,
+                        'error_type': 'unauthorized',
+                        'message': (
+                            'データセットにアクセスできません (401 Unauthorized)。\n\n'
+                            f'Dataset ID: {dataset_id}\n'
+                            'ログイン状態または権限を確認し、必要なら再ログインしてください。'
+                        )
+                    }
+            
+            elif resp.status_code == 422:
+                # リクエストフォーマットエラー: クエリパラメータ不正の可能性
+                try:
+                    error_body = resp.text[:500]
+                    logger.error("リクエストフォーマットエラー (422): id=%s, response=%s", dataset_id, error_body)
+                except Exception:
+                    logger.error("リクエストフォーマットエラー (422): id=%s", dataset_id)
+                return {
+                    'valid': False,
+                    'status_code': 422,
+                    'error_type': 'format_error',
+                    'message': f'リクエストフォーマットエラー (422 Unprocessable Entity)。\n\nDataset ID: {dataset_id}\n\nクエリパラメータまたはヘッダーに問題がある可能性があります。'
+                }
+            
+            else:
+                logger.error("データセット取得失敗: id=%s status=%s", dataset_id, resp.status_code)
+                return {
+                    'valid': False,
+                    'status_code': resp.status_code,
+                    'error_type': 'other',
+                    'message': f'データセット情報の取得に失敗しました。\n\nHTTPステータス: {resp.status_code}\nデータセットID: {dataset_id}'
+                }
+        
+        except Exception as e:
+            logger.error("データセット存在検証エラー: %s", e, exc_info=True)
+            return {
+                'valid': False,
+                'status_code': 0,
+                'error_type': 'network',
+                'message': f'ネットワークエラーが発生しました。\n\nエラー内容: {str(e)}\n\n接続設定を確認してください。'
+            }
+    
+    def _select_next_valid_dataset(self):
+        """次の有効なデータセットを選択"""
+        try:
+            if not hasattr(self, '_invalid_datasets'):
+                self._invalid_datasets = {}
+            
+            # 現在のインデックスから次の有効なエントリを探す
+            current_index = self.dataset_combo.currentIndex()
+            total_count = self.dataset_combo.count()
+            
+            for offset in range(1, total_count):
+                next_index = (current_index + offset) % total_count
+                
+                # プレースホルダーをスキップ
+                if next_index == 0:
+                    continue
+                
+                next_dataset_id = self.dataset_combo.itemData(next_index)
+                
+                # 無効なデータセットをスキップ
+                if next_dataset_id and next_dataset_id not in self._invalid_datasets:
+                    logger.info("次の有効なデータセットへ移動: index=%s, id=%s", next_index, next_dataset_id)
+                    self.dataset_combo.setCurrentIndex(next_index)
+                    return
+            
+            # 有効なデータセットが見つからない場合はプレースホルダーに戻す
+            logger.warning("有効なデータセットが見つかりませんでした")
+            self.dataset_combo.setCurrentIndex(0)
+            self.clear_dynamic_fields()
+            
+        except Exception as e:
+            logger.error("次の有効なデータセット選択エラー: %s", e)
+    
+    def _mark_dataset_invalid(self, combo_index: int, dataset_id: str, error_type: str):
+        """コンボボックス内の対象データセットをエラー表示＆無効化"""
+        try:
+            from qt_compat.core import Qt
+            item_text = self.dataset_combo.itemText(combo_index)
+            if not item_text:
+                return
+            # 既にマーク済みなら二重更新回避
+            if '⚠' in item_text:
+                return
+            if error_type == 'not_found':
+                marker = ' [⚠️ 未検出]'
+            elif error_type == 'unauthorized':
+                marker = ' [⚠️ 認証エラー]'
+            elif error_type == 'format_error':
+                marker = ' [⚠️ フォーマットエラー]'
+            else:
+                marker = ' [⚠️ エラー]'
+            self.dataset_combo.setItemText(combo_index, f"{item_text}{marker}")
+            # 無効化
+            model = self.dataset_combo.model()
+            item = model.item(combo_index)
+            if item:
+                item.setEnabled(False)
+                item.setFlags(item.flags() & ~Qt.ItemIsEnabled)
+            logger.debug("データセットを無効化: index=%s id=%s type=%s", combo_index, dataset_id, error_type)
+        except Exception as e:
+            logger.warning("データセット無効化処理エラー: %s", e)
+
+    def _handle_dataset_validation_error(self, validation_result: Dict[str, any]):
+        """
+        データセット検証エラーのUIフィードバック
+        
+        Args:
+            validation_result: _validate_dataset_existence の戻り値
+        """
+        error_type = validation_result.get('error_type')
+        message = validation_result.get('message', '不明なエラーが発生しました。')
+        
+        # エラー種別に応じたアイコンとタイトル
+        if error_type == 'not_found':
+            icon = QMessageBox.Warning
+            title = "データセット未検出"
+        elif error_type == 'unauthorized':
+            icon = QMessageBox.Warning
+            title = "認証エラー"
+        elif error_type == 'network':
+            icon = QMessageBox.Critical
+            title = "ネットワークエラー"
+        else:
+            icon = QMessageBox.Critical
+            title = "エラー"
+        
+        # エラーダイアログ表示
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(icon)
+        msg_box.setWindowTitle(title)
+        msg_box.setText(message)
+        msg_box.setStandardButtons(QMessageBox.Ok)
+        msg_box.exec()
+        
+        # データセットコンボボックスをクリア（不正な選択を解除）
+        if hasattr(self, 'dataset_combo'):
+            self.dataset_combo.setCurrentIndex(0)  # 最初の空白項目に戻す
+            logger.info("データセット選択をクリアしました")
     
     def on_sample_mode_changed(self, mode):
         """試料選択変更時の処理（統合フォーム対応）"""
@@ -5219,8 +5502,10 @@ class BatchRegisterWidget(QWidget):
     def clear_dynamic_fields(self):
         """動的フィールドをクリア"""
         try:
-            self.sample_id_combo.clear()
-            self.experiment_id_combo.clear()
+            if hasattr(self, 'sample_id_combo') and self.sample_id_combo is not None:
+                self.sample_id_combo.clear()
+            if hasattr(self, 'experiment_id_combo') and self.experiment_id_combo is not None:
+                self.experiment_id_combo.clear()
             self.clear_schema_form()
             
         except Exception as e:

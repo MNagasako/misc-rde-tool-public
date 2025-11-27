@@ -1,5 +1,23 @@
 """
 データセット開設・編集のタブ付きウィジェット
+
+将来的な拡張:
+    このウィジェットでもAI説明文提案機能を実装する場合は、
+    AIDescriptionSuggestionDialog を mode="dataset_suggestion" で呼び出す。
+    
+    使用例:
+        from classes.dataset.ui.ai_suggestion_dialog import AISuggestionDialog
+        
+        dialog = AISuggestionDialog(
+            parent=self,
+            context_data=context_data,
+            auto_generate=True,
+            mode="dataset_suggestion"  # データセット提案モード
+        )
+        
+        if dialog.exec() == QDialog.Accepted:
+            suggestion = dialog.get_selected_suggestion()
+            # 説明文フィールドに反映
 """
 import os
 from qt_compat.widgets import QWidget, QVBoxLayout, QLabel, QTabWidget

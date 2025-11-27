@@ -61,7 +61,7 @@ class Uploader:
         except Exception as e:
             logger.warning(f"デバッグレスポンス保存失敗: {e}")
     
-    def upload_json_file(self, json_file_path: str) -> Tuple[bool, str]:
+    def upload_json_file(self, json_file_path: str, dry_run: bool = False) -> Tuple[bool, str]:
         """
         JSONファイルをアップロード
         
@@ -120,18 +120,22 @@ class Uploader:
             if hasattr(response_or_message, 'text'):
                 self._save_debug_response("step2_upload_confirmation", response_or_message.text)
             
-            # Step 3: 最終登録
-            logger.info("Step 3: 最終登録...")
-            success, response_or_message = self._complete_upload(json_path)
-            if not success:
-                return False, f"最終登録失敗: {response_or_message}"
-            
-            # レスポンスを保存（デバッグ用）
-            if hasattr(response_or_message, 'text'):
-                self._save_debug_response("step3_complete_upload", response_or_message.text)
-            
-            logger.info("✅ JSONファイルアップロード完了!")
-            return True, "アップロード成功"
+            # Step 3: 最終登録（dry_run時はスキップ）
+            if dry_run:
+                logger.info("Step 3: 最終登録はdry-runのためスキップします")
+                return True, "確認画面まで到達（dry-runで登録は未実行）"
+            else:
+                logger.info("Step 3: 最終登録...")
+                success, response_or_message = self._complete_upload(json_path)
+                if not success:
+                    return False, f"最終登録失敗: {response_or_message}"
+                
+                # レスポンスを保存（デバッグ用）
+                if hasattr(response_or_message, 'text'):
+                    self._save_debug_response("step3_complete_upload", response_or_message.text)
+                
+                logger.info("✅ JSONファイルアップロード完了!")
+                return True, "アップロード成功"
             
         except Exception as e:
             logger.error(f"アップロード処理でエラー: {e}")

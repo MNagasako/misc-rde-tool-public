@@ -42,10 +42,6 @@ class SettingsTabWidget(QWidget):
         self.parent_widget = parent
         self.bearer_token = bearer_token
         
-        # 遅延ロード管理
-        self._lazy_tabs = {}
-        self._tab_loaded = {}
-        
         self.setup_ui()
         
         # テーマ変更シグナルに接続
@@ -63,7 +59,6 @@ class SettingsTabWidget(QWidget):
         
         # タブウィジェット
         self.tab_widget = QTabWidget()
-        self.tab_widget.currentChanged.connect(self._on_tab_changed)
         layout.addWidget(self.tab_widget)
         
         # プロキシ設定タブ（段組表示）
@@ -75,8 +70,8 @@ class SettingsTabWidget(QWidget):
         # アプリケーション設定タブ
         self.setup_application_tab()
         
-        # AI設定タブ（遅延ロード）
-        self._add_lazy_tab("AI設定", self.setup_ai_tab)
+        # AI設定タブ（即座にロード）
+        self.setup_ai_tab()
             
         # 自動ログインタブ
         self.setup_autologin_tab()
@@ -87,11 +82,11 @@ class SettingsTabWidget(QWidget):
         # インポートタブ（ダミー）
         self.setup_import_tab_dummy()
         
-        # 報告書タブ（遅延ロード）
-        self._add_lazy_tab("報告書", self.setup_report_tab)
+        # 報告書タブ（即座にロード）
+        self.setup_report_tab()
         
-        # 設備タブ（遅延ロード）
-        self._add_lazy_tab("設備", self.setup_equipment_tab)
+        # 設備タブ（即座にロード）
+        self.setup_equipment_tab()
             
         # ボタンエリア
         button_layout = QHBoxLayout()
@@ -107,38 +102,6 @@ class SettingsTabWidget(QWidget):
         button_layout.addWidget(self.reload_button)
         
     #layout.addLayout(button_layout)
-    
-    def _add_lazy_tab(self, title: str, loader_func):
-        """遅延ロード用プレースホルダータブ追加"""
-        placeholder = QWidget()
-        placeholder_layout = QVBoxLayout()
-        placeholder_layout.addStretch()
-        label = QLabel(f"{title}を読み込み中...")
-        label.setAlignment(Qt.AlignCenter)
-        placeholder_layout.addWidget(label)
-        placeholder_layout.addStretch()
-        placeholder.setLayout(placeholder_layout)
-        
-        tab_index = self.tab_widget.addTab(placeholder, title)
-        self._lazy_tabs[tab_index] = loader_func
-        self._tab_loaded[tab_index] = False
-        
-    def _on_tab_changed(self, index: int):
-        """タブ切替時の遅延ロード処理"""
-        if index in self._lazy_tabs and not self._tab_loaded[index]:
-            try:
-                # 再入防止のため、先にフラグを立てる
-                self._tab_loaded[index] = True
-                
-                # 実際のウィジェットをロード
-                loader_func = self._lazy_tabs[index]
-                loader_func()
-                
-                logger.info(f"遅延ロード完了: タブインデックス {index}")
-            except Exception as e:
-                logger.error(f"遅延ロード失敗 (タブ{index}): {e}")
-                # 失敗した場合はフラグを戻して再試行可能にする
-                self._tab_loaded[index] = False
     
     def refresh_theme(self):
         """テーマ変更時のスタイル更新"""
@@ -507,7 +470,7 @@ class SettingsTabWidget(QWidget):
         self.tab_widget.addTab(widget, "アプリケーション")
     
     def setup_ai_tab(self):
-        """AI設定タブ（遅延ロード対応）"""
+        """AI設定タブ"""
         try:
             from classes.config.ui.ai_settings_widget import create_ai_settings_widget
             
@@ -526,13 +489,10 @@ class SettingsTabWidget(QWidget):
                 # AI設定ウィジェットへの参照を保存
                 self.ai_widget = ai_widget
                 
-                # 既存のプレースホルダーを置換
-                for index, loader in self._lazy_tabs.items():
-                    if loader == self.setup_ai_tab:
-                        self.tab_widget.removeTab(index)
-                        self.tab_widget.insertTab(index, ai_scroll, "AI設定")
-                        logger.info("AI設定タブをロードしました")
-                        return
+                # タブを追加
+                self.tab_widget.addTab(ai_scroll, "AI設定")
+                logger.info("AI設定タブをロードしました")
+                return
             else:
                 # フォールバック：簡略版を作成
                 self.setup_ai_tab_fallback()
@@ -780,7 +740,7 @@ class SettingsTabWidget(QWidget):
         logger.info("[settings_tab_widget] フォールバック自動ログインタブ追加完了: インデックス=%s", tab_index)
     
     def setup_report_tab(self):
-        """報告書タブ（遅延ロード対応）"""
+        """報告書タブ"""
         logger.info("[settings_tab_widget] 報告書タブ作成開始")
         try:
             from classes.config.ui.report_tab import ReportTab
@@ -795,13 +755,10 @@ class SettingsTabWidget(QWidget):
             
             self.report_widget = report_widget
             
-            # 既存のプレースホルダーを置換
-            for index, loader in self._lazy_tabs.items():
-                if loader == self.setup_report_tab:
-                    self.tab_widget.removeTab(index)
-                    self.tab_widget.insertTab(index, report_scroll, "報告書")
-                    logger.info("[settings_tab_widget] 報告書タブ追加成功: インデックス=%s", index)
-                    return
+            # タブを追加
+            self.tab_widget.addTab(report_scroll, "報告書")
+            logger.info("[settings_tab_widget] 報告書タブ追加成功")
+            return
             
         except Exception as e:
             logger.warning(f"[settings_tab_widget] 報告書タブ作成失敗: {e}")
@@ -825,7 +782,7 @@ class SettingsTabWidget(QWidget):
             self.tab_widget.addTab(widget, "報告書")
     
     def setup_equipment_tab(self):
-        """設備タブ（遅延ロード対応）"""
+        """設備タブ"""
         logger.info("[settings_tab_widget] 設備タブ作成開始")
         try:
             from classes.config.ui.equipment_tab import EquipmentTab
@@ -840,13 +797,10 @@ class SettingsTabWidget(QWidget):
             
             self.equipment_widget = equipment_widget
             
-            # 既存のプレースホルダーを置換
-            for index, loader in self._lazy_tabs.items():
-                if loader == self.setup_equipment_tab:
-                    self.tab_widget.removeTab(index)
-                    self.tab_widget.insertTab(index, equipment_scroll, "設備")
-                    logger.info("[settings_tab_widget] 設備タブ追加成功: インデックス=%s", index)
-                    return
+            # タブを追加
+            self.tab_widget.addTab(equipment_scroll, "設備")
+            logger.info("[settings_tab_widget] 設備タブ追加成功")
+            return
             
         except Exception as e:
             logger.warning(f"[settings_tab_widget] 設備タブ作成失敗: {e}")

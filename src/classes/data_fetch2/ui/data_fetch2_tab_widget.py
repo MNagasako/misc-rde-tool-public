@@ -64,10 +64,12 @@ class DataFetch2TabWidget(QTabWidget):
             
         # レスポンシブデザイン設定
         self.setup_responsive_layout()
-         # データセット取得タブを追加
-        self.create_dataset_tab()       
-        # タブ作成
+        # データセット取得タブを追加
+        self.create_dataset_tab()
+        # フィルタタブ作成
         self.create_filter_tab()
+        # 初期フィルタ状態の伝播（フィルタタブのデフォルトをデータ取得タブへ反映）
+        self.init_filter_state()
         
 
         
@@ -137,7 +139,14 @@ class DataFetch2TabWidget(QTabWidget):
             # 既存の機能ウィジェットを統合
             tab_widget = create_data_fetch2_widget(self, self.bearer_token)
             if tab_widget:
+                self.data_fetch_widget = tab_widget  # ウィジェットへの参照を保存
                 self.addTab(tab_widget, "📊 データ取得")
+                # 初期フィルタの表示を即時反映
+                try:
+                    if hasattr(self, 'current_filter_config') and hasattr(self.data_fetch_widget, 'set_filter_config_for_display'):
+                        self.data_fetch_widget.set_filter_config_for_display(self.current_filter_config)
+                except Exception:
+                    pass
             else:
                 # フォールバック
                 fallback_widget = QWidget()
@@ -145,6 +154,7 @@ class DataFetch2TabWidget(QTabWidget):
                 fallback_label = QLabel("データ取得機能は利用できません")
                 fallback_label.setStyleSheet("color: red; font-weight: bold;")
                 fallback_layout.addWidget(fallback_label)
+                self.data_fetch_widget = None
                 self.addTab(fallback_widget, "📊 データ取得")
         except ImportError as e:
             logger.error(f"データ取得ウィジェットのインポートエラー: {e}")
@@ -153,6 +163,7 @@ class DataFetch2TabWidget(QTabWidget):
             fallback_label = QLabel("データ取得機能は利用できません")
             fallback_label.setStyleSheet("color: red; font-weight: bold;")
             fallback_layout.addWidget(fallback_label)
+            self.data_fetch_widget = None
             self.addTab(fallback_widget, "📊 データ取得")
             
     def on_file_filter_changed(self, filter_config):
@@ -168,6 +179,47 @@ class DataFetch2TabWidget(QTabWidget):
             logger.debug(f"フィルタ概要: {summary}")
         except ImportError:
             pass
+        
+        # データ取得タブのフィルタ状態表示を更新（直接反映を優先）
+        try:
+            if hasattr(self, 'data_fetch_widget') and self.data_fetch_widget and hasattr(self.data_fetch_widget, 'set_filter_config_for_display'):
+                self.data_fetch_widget.set_filter_config_for_display(filter_config)
+                logger.debug("フィルタ変更内容をデータ取得タブへ直接反映しました")
+            else:
+                self.update_data_fetch_filter_status()
+        except Exception as e:
+            logger.debug(f"直接反映エラー: {e}")
+            self.update_data_fetch_filter_status()
+    
+    def update_data_fetch_filter_status(self):
+        """データ取得タブのフィルタ状態表示を更新"""
+        try:
+            if hasattr(self, 'data_fetch_widget') and self.data_fetch_widget:
+                # 直接設定が可能ならそれを使い、無ければ自己更新を呼ぶ
+                if hasattr(self.data_fetch_widget, 'set_filter_config_for_display'):
+                    self.data_fetch_widget.set_filter_config_for_display(self.current_filter_config)
+                    logger.debug("データ取得タブへフィルタ設定を直接反映しました")
+                elif hasattr(self.data_fetch_widget, 'update_filter_status_display'):
+                    self.data_fetch_widget.update_filter_status_display()
+                    logger.debug("データ取得タブのフィルタ状態表示を更新しました")
+        except Exception as e:
+            logger.debug(f"フィルタ状態表示更新エラー: {e}")
+
+    def init_filter_state(self):
+        """初期フィルタ状態の同期を実施"""
+        try:
+            if hasattr(self, 'file_filter_widget') and self.file_filter_widget:
+                # フィルタタブの現在値（デフォルト）を取得して反映
+                default_config = getattr(self.file_filter_widget, 'filter_config', None)
+                # 防御的に空構成ならデフォルトを使用
+                if not default_config or not default_config.get("file_types"):
+                    from classes.data_fetch2.conf.file_filter_config import get_default_filter
+                    default_config = get_default_filter()
+                logger.debug(f"初期フィルタ状態を同期: {default_config}")
+                self.current_filter_config = default_config
+                self.update_data_fetch_filter_status()
+        except Exception as e:
+            logger.debug(f"初期フィルタ同期エラー: {e}")
 
 
 def create_data_fetch2_tab_widget(parent=None):

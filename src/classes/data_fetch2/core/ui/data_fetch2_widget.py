@@ -300,17 +300,21 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     combo.setMaxVisibleItems(15)
     combo.lineEdit().setPlaceholderText("データセットを選択してください")
     
-    # コンボボックス個別スタイル（ライトモードで暗色に落ちる問題対策）
-    # グローバルQSSを再定義する形になっていたが、背景色が未指定のためOS/Paletteが優先され黒く描画されるケースがあった。
-    # ここで base 状態の background-color と color を明示しテーマキー経由で強制する。
+    # コンボボックス個別スタイル（フォント表示問題対策）
+    # テキストが隠れないよう十分な高さとパディングを確保
     combo.setStyleSheet(f"""
         QComboBox {{
+            background-color: {get_color(ThemeKey.COMBO_BACKGROUND)};
             color: {get_color(ThemeKey.TEXT_PRIMARY)};
+            border: 1px solid {get_color(ThemeKey.COMBO_BORDER)};
             border-radius: 6px;
-            padding: 8px;
-            font-size: 11pt;
-            min-height: 25px;
+            padding: 8px 12px;
+            font-size: 10pt;
+            min-height: 30px;
             padding-right: 35px;
+        }}
+        QComboBox:focus {{
+            border: 1px solid {get_color(ThemeKey.COMBO_BORDER_FOCUS)};
         }}
         QComboBox::drop-down {{
             subcontrol-origin: padding;
@@ -319,24 +323,23 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
             border-left: 1px solid {get_color(ThemeKey.COMBO_BORDER_FOCUS)};
             border-top-right-radius: 4px;
             border-bottom-right-radius: 4px;
-            
         }}
         QComboBox::drop-down:hover {{
-           
+            background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
         }}
         QComboBox::down-arrow {{
             width: 0;
             height: 0;
             border-left: 6px solid transparent;
             border-right: 6px solid transparent;
-            border-top: 8px solid white;
+            border-top: 8px solid {get_color(ThemeKey.TEXT_PRIMARY)};
             margin: 0px;
         }}
         QComboBox::down-arrow:on {{
-          
+            border-top: 8px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
         }}
         QComboBox:disabled {{
-          
+            background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)};
             border: 1px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)};
         }}
     """)
@@ -593,9 +596,63 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
     path_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 9pt; padding: 0px 0px;")
     layout.addWidget(path_label)
 
-    # 広域シェアフィルタ付きデータセットドロップダウンを作成
+    # ファイルフィルタ状態表示ラベルを追加（パスの直下に配置）
+    filter_status_label = QLabel("📋 ファイルフィルタ: 読み込み中...")
+    filter_status_label.setStyleSheet(f"""
+        background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+        color: {get_color(ThemeKey.TEXT_PRIMARY)};
+        padding: 8px 12px;
+        border-radius: 4px;
+        border: 1px solid {get_color(ThemeKey.PANEL_BORDER)};
+        font-size: 12px;
+    """)
+    filter_status_label.setWordWrap(True)
+    layout.addWidget(filter_status_label)
+    
+    # 広域シェアフィルタ付きデータセットドロップダウンを作成（フィルタ表示の下に配置）
     fetch2_dropdown_widget = create_dataset_dropdown_all(dataset_json_path, widget, global_share_filter="both")
     layout.addWidget(fetch2_dropdown_widget)
+
+    # ウィジェットにフィルタ状態ラベルを保存（後で更新できるように）
+    widget.filter_status_label = filter_status_label
+    
+    # 初期フィルタ状態を表示
+    def update_filter_status_display():
+        """フィルタ状態表示を更新"""
+        try:
+            # 親ウィジェット（DataFetch2TabWidget）からフィルタ設定を取得
+            parent_tab_widget = widget.parent()
+            from classes.data_fetch2.conf.file_filter_config import get_default_filter
+            from classes.data_fetch2.util.file_filter_util import get_filter_summary
+            if parent_tab_widget and hasattr(parent_tab_widget, 'current_filter_config') and parent_tab_widget.current_filter_config:
+                filter_config = parent_tab_widget.current_filter_config
+            else:
+                # 初期状態でもデフォルトフィルタを表示して未適用を明示
+                filter_config = get_default_filter()
+            summary = get_filter_summary(filter_config)
+            filter_status_label.setText(f"📋 ファイルフィルタ: {summary}")
+            filter_status_label.setToolTip(f"ファイルフィルタタブで設定された条件:\n{summary}")
+        except Exception as e:
+            logger.debug(f"フィルタ状態表示更新エラー: {e}")
+            filter_status_label.setText("📋 ファイルフィルタ: 設定を確認できません")
+
+    def set_filter_config_for_display(filter_config):
+        """親経由でなく直接フィルタ設定を受け取り表示を更新"""
+        try:
+            from classes.data_fetch2.util.file_filter_util import get_filter_summary
+            summary = get_filter_summary(filter_config or {})
+            filter_status_label.setText(f"📋 ファイルフィルタ: {summary}")
+            filter_status_label.setToolTip(f"ファイルフィルタタブで設定された条件:\n{summary}")
+        except Exception as e:
+            logger.debug(f"直接表示更新エラー: {e}")
+            filter_status_label.setText("📋 ファイルフィルタ: 設定を確認できません")
+    
+    # ウィジェットに更新関数を保存
+    widget.update_filter_status_display = update_filter_status_display
+    widget.set_filter_config_for_display = set_filter_config_for_display
+    
+    # 初回表示更新（少し遅延させてタブ構築完了後に実行）
+    # 初期表示更新はタブ側のinit_filter_stateで実施するためここではタイマー更新を行わない
 
     # 選択中データセットのファイルリストを取得するボタン
     fetch_files_btn = QPushButton("選択したデータセットのファイルを一括取得")

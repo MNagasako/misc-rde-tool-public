@@ -53,6 +53,10 @@ class ThemeKey(str, Enum):
     MENU_BACKGROUND = "menu.background"
     MENU_BUTTON_INACTIVE_BACKGROUND = "menu.button.inactive.background"
     MENU_BUTTON_INACTIVE_TEXT = "menu.button.inactive.text"
+    MENU_BUTTON_ACTIVE_BACKGROUND = "menu.button.active.background"
+    MENU_BUTTON_ACTIVE_TEXT = "menu.button.active.text"
+    MENU_BUTTON_HOVER_BACKGROUND = "menu.button.hover.background"
+    MENU_BUTTON_HOVER_TEXT = "menu.button.hover.text"
     
     # ========================================
     # Button - ボタン全般
@@ -111,6 +115,7 @@ class ThemeKey(str, Enum):
     
     # デフォルトボタン（薄灰色）
     BUTTON_DEFAULT_BACKGROUND = "button.default.background"
+    BUTTON_DEFAULT_BACKGROUND_HOVER = "button.default.background.hover"
     BUTTON_DEFAULT_TEXT = "button.default.text"
     BUTTON_DEFAULT_BORDER = "button.default.border"
     

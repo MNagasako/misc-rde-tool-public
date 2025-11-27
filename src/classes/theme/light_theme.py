@@ -56,6 +56,10 @@ class LightTheme:
         ThemeKey.MENU_BACKGROUND: "#e3f2fd",  # ライトブルー背景
         ThemeKey.MENU_BUTTON_INACTIVE_BACKGROUND: "#90a4ae",  # Blue Grey 300
         ThemeKey.MENU_BUTTON_INACTIVE_TEXT: "#ffffff",
+        ThemeKey.MENU_BUTTON_ACTIVE_BACKGROUND: "#1976d2",  # Primary Blue
+        ThemeKey.MENU_BUTTON_ACTIVE_TEXT: "#ffffff",
+        ThemeKey.MENU_BUTTON_HOVER_BACKGROUND: "#bbdefb",  # Lighter Blue
+        ThemeKey.MENU_BUTTON_HOVER_TEXT: "#1976d2",
         
         # ========================================
         # Button - ボタン全般
@@ -77,7 +81,7 @@ class LightTheme:
         
         # ワーニングボタン（橙系）
         ThemeKey.BUTTON_WARNING_BACKGROUND: "#FF9800",
-        ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER: "#F57C00",
+        ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER: "#E65100",  # Much darker for visibility
         ThemeKey.BUTTON_WARNING_BACKGROUND_PRESSED: "#e68900",
         ThemeKey.BUTTON_WARNING_TEXT: "#ffffff",
         ThemeKey.BUTTON_WARNING_BORDER: "#F57C00",
@@ -103,7 +107,7 @@ class LightTheme:
         
         # インフォボタン（水色）
         ThemeKey.BUTTON_INFO_BACKGROUND: "#2196F3",
-        ThemeKey.BUTTON_INFO_BACKGROUND_HOVER: "#1976D2",
+        ThemeKey.BUTTON_INFO_BACKGROUND_HOVER: "#0d47a1",  # Much darker for visibility
         ThemeKey.BUTTON_INFO_TEXT: "#ffffff",
         ThemeKey.BUTTON_INFO_BORDER: "#1976D2",
         
@@ -114,6 +118,7 @@ class LightTheme:
         
         # デフォルトボタン（薄灰色）
         ThemeKey.BUTTON_DEFAULT_BACKGROUND: "#f5f5f5",
+        ThemeKey.BUTTON_DEFAULT_BACKGROUND_HOVER: "#e0e0e0",
         ThemeKey.BUTTON_DEFAULT_TEXT: "#333333",
         ThemeKey.BUTTON_DEFAULT_BORDER: "#bbbbbb",
         

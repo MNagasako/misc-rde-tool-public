@@ -336,6 +336,13 @@ class CommonSubgroupMemberSelector(QWidget):
                     viewer_cb.setChecked(row_data['viewer_checked'])
                     self.setCellWidget(new_row, 6, viewer_cb)
 
+                    # 除外ボタン再作成
+                    from qt_compat.widgets import QPushButton
+                    remove_btn = QPushButton("除外")
+                    remove_btn.setMaximumWidth(60)
+                    remove_btn.clicked.connect(lambda checked, r=new_row, uid=row_data['owner_user_id']: self.parent_selector._on_remove_member(r, uid))
+                    self.setCellWidget(new_row, 7, remove_btn)
+
                     # 背景色とイベント接続を復元
                     if hasattr(self.parent_selector, 'update_row_background'):
                         # 排他制御を含むハンドラーを作成
@@ -425,8 +432,8 @@ class CommonSubgroupMemberSelector(QWidget):
                 logger.debug("テーブル再構築完了 - user_rows更新: %s行", len(self.parent_selector.user_rows))
         
         table = CustomTableWidget(self)
-        table.setColumnCount(7)
-        table.setHorizontalHeaderLabels(["メンバー名", "メールアドレス", "管理者", "代理", "メンバ", "登録代行", "閲覧"])
+        table.setColumnCount(8)
+        table.setHorizontalHeaderLabels(["メンバー名", "メールアドレス", "管理者", "代理", "メンバ", "登録代行", "閲覧", "除外"])
         table.setRowCount(len(self.user_entries))
         table.setSortingEnabled(True)
         
@@ -448,6 +455,7 @@ class CommonSubgroupMemberSelector(QWidget):
         header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # MEMBER
         header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # AGENT
         header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # VIEWER
+        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # 除外
 
         # 行の高さを統一（より小さく設定）
         table.verticalHeader().setDefaultSectionSize(22)  # さらに小さく
@@ -575,6 +583,12 @@ class CommonSubgroupMemberSelector(QWidget):
                     member_cb.setChecked(False)
                     agent_cb.setChecked(False)
 
+            # 除外ボタン
+            remove_btn = QPushButton("除外")
+            remove_btn.setMaximumWidth(60)
+            remove_btn.clicked.connect(lambda checked, r=row, uid=user_id: self._on_remove_member(r, uid))
+            self.table.setCellWidget(row, 7, remove_btn)
+            
             self.user_rows.append((user_id, owner_radio, assistant_cb, member_cb, agent_cb, viewer_cb))
             
             # 排他制御イベント接続
@@ -702,6 +716,45 @@ class CommonSubgroupMemberSelector(QWidget):
                 agent_cb.setChecked(False)
         self.update_row_background(row)
 
+    def _on_remove_member(self, row, user_id):
+        """メンバー除外ボタンクリック時の処理"""
+        # メンバー名を取得して確認ダイアログ表示
+        name_item = self.table.item(row, 0)
+        member_name = name_item.text() if name_item else "不明なユーザー"
+        
+        from qt_compat.widgets import QMessageBox
+        reply = QMessageBox.question(
+            self,
+            "メンバー除外確認",
+            f"メンバー '{member_name}' をリストから除外しますか？\n\n除外後も、サブグループ更新時に再度追加できます。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        # テーブルから行を削除
+        self.table.removeRow(row)
+        
+        # user_rowsリストを再構築
+        self.user_rows.clear()
+        for i in range(self.table.rowCount()):
+            owner_radio = self.table.cellWidget(i, 2)
+            assistant_cb = self.table.cellWidget(i, 3)
+            member_cb = self.table.cellWidget(i, 4)
+            agent_cb = self.table.cellWidget(i, 5)
+            viewer_cb = self.table.cellWidget(i, 6)
+            if owner_radio and assistant_cb and member_cb and agent_cb and viewer_cb:
+                uid = getattr(owner_radio, 'user_id', None)
+                if uid:
+                    self.user_rows.append((uid, owner_radio, assistant_cb, member_cb, agent_cb, viewer_cb))
+        
+        logger.info(f"メンバー '{member_name}' (ID: {user_id}) を除外しました")
+        
+        # OWNER選択の妥当性を再チェック
+        self.validate_owner_selection()
+    
     def update_row_background(self, row):
         """行の背景色を更新"""
         owner_radio = self.table.cellWidget(row, 2)
@@ -882,6 +935,12 @@ class CommonSubgroupMemberSelector(QWidget):
         viewer_cb = QCheckBox()
         viewer_cb.user_id = user_id
         self.table.setCellWidget(row_count, 6, viewer_cb)
+        
+        # 除外ボタン
+        remove_btn = QPushButton("除外")
+        remove_btn.setMaximumWidth(60)
+        remove_btn.clicked.connect(lambda checked, r=row_count, uid=user_id: self._on_remove_member(r, uid))
+        self.table.setCellWidget(row_count, 7, remove_btn)
         
         # 排他制御イベント接続
         owner_radio.toggled.connect(lambda checked, r=row_count: self._on_owner_changed(r, checked))

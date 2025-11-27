@@ -150,43 +150,39 @@ def validate_filter_config(filter_config: Dict[str, Any]) -> List[str]:
     return errors
 
 def get_filter_summary(filter_config: Dict[str, Any]) -> str:
-    """フィルタ設定の概要文字列を生成"""
+    """フィルタ設定の概要文字列を生成（未適用も明示）"""
     parts = []
-    
+
     # ファイルタイプ
-    file_types = filter_config.get("file_types", [])
-    if file_types:
-        parts.append(f"タイプ: {', '.join(file_types)}")
-    
-    # メディアタイプ    
-    media_types = filter_config.get("media_types", [])
-    if media_types:
-        parts.append(f"メディア: {', '.join(media_types)}")
-        
+    file_types = filter_config.get("file_types", []) or []
+    parts.append(f"タイプ: {', '.join(file_types) if file_types else '未指定'}")
+
+    # メディアタイプ
+    media_types = filter_config.get("media_types", []) or []
+    parts.append(f"メディア: {', '.join(media_types) if media_types else '未指定'}")
+
     # 拡張子
-    extensions = filter_config.get("extensions", [])
-    if extensions:
-        parts.append(f"拡張子: {', '.join(extensions)}")
-        
+    extensions = filter_config.get("extensions", []) or []
+    parts.append(f"拡張子: {', '.join(extensions) if extensions else '未指定'}")
+
     # ファイル名パターン
-    filename_pattern = filter_config.get("filename_pattern", "")
-    if filename_pattern:
-        parts.append(f"名前: {filename_pattern}")
-        
+    filename_pattern = (filter_config.get("filename_pattern", "") or "").strip()
+    parts.append(f"名前: {filename_pattern if filename_pattern else '未指定'}")
+
     # ファイルサイズ
-    size_min = filter_config.get("size_min", 0)
-    size_max = filter_config.get("size_max", 0)
-    if size_min > 0 or size_max > 0:
-        if size_min > 0 and size_max > 0:
-            parts.append(f"サイズ: {size_min:,}-{size_max:,}bytes")
-        elif size_min > 0:
-            parts.append(f"サイズ: {size_min:,}bytes以上")
-        elif size_max > 0:
-            parts.append(f"サイズ: {size_max:,}bytes以下")
-    
+    size_min = int(filter_config.get("size_min", 0) or 0)
+    size_max = int(filter_config.get("size_max", 0) or 0)
+    if size_min > 0 and size_max > 0:
+        parts.append(f"サイズ: {size_min:,}-{size_max:,}bytes")
+    elif size_min > 0:
+        parts.append(f"サイズ: {size_min:,}bytes以上")
+    elif size_max > 0:
+        parts.append(f"サイズ: {size_max:,}bytes以下")
+    else:
+        parts.append("サイズ: 未指定")
+
     # ダウンロード上限
-    max_count = filter_config.get("max_download_count", 0)
-    if max_count > 0:
-        parts.append(f"上限: {max_count}件")
-        
-    return "; ".join(parts) if parts else "フィルタなし"
+    max_count = int(filter_config.get("max_download_count", 0) or 0)
+    parts.append(f"上限: {max_count}件" if max_count > 0 else "上限: なし")
+
+    return "; ".join(parts)

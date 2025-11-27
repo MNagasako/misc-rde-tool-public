@@ -41,9 +41,9 @@ class FileSetPreviewWidget(QWidget):
     def setup_dialog_size(self):
         """ダイアログサイズを設定（ディスプレイ高さの90%）"""
         try:
-            from qt_compat.widgets import QDesktopWidget
-            desktop = QDesktopWidget()
-            screen_rect = desktop.screenGeometry()
+            from qt_compat.widgets import QApplication
+            screen = QApplication.primaryScreen()
+            screen_rect = screen.availableGeometry()
             
             # ディスプレイ高さの90%、幅は適切なサイズに設定
             target_height = int(screen_rect.height() * 0.9)
@@ -51,11 +51,19 @@ class FileSetPreviewWidget(QWidget):
             
             self.resize(target_width, target_height)
             
-            # ダイアログを画面中央に配置
-            self.move(
-                (screen_rect.width() - target_width) // 2,
-                (screen_rect.height() - target_height) // 2
-            )
+            # 親ウィンドウがある場合は親の中央に、なければ画面中央に配置
+            parent_widget = self.parent()
+            if parent_widget:
+                parent_geo = parent_widget.geometry()
+                self.move(
+                    parent_geo.x() + (parent_geo.width() - target_width) // 2,
+                    parent_geo.y() + (parent_geo.height() - target_height) // 2
+                )
+            else:
+                self.move(
+                    (screen_rect.width() - target_width) // 2,
+                    (screen_rect.height() - target_height) // 2
+                )
             
             logger.debug("プレビューダイアログサイズ設定: %sx%s", target_width, target_height)
         except Exception as e:
@@ -757,13 +765,8 @@ class FileSetPreviewWidget(QWidget):
         """登録時のファイル名を取得（複数ファイルセット対応）"""
         try:
             # ファイルアイテムから所属するファイルセットを検索
-            target_file_set = None
-            for fs in self.file_sets:
-                if fs and hasattr(fs, 'get_valid_items'):
-                    valid_items = fs.get_valid_items()
-                    if file_item in valid_items:
-                        target_file_set = fs
-                        break
+            # 単一ファイルセット用ウィジェットのため、self.file_setを使用
+            target_file_set = self.file_set
             
             if not target_file_set:
                 # ファイルセットが見つからない場合は基本的なファイル名を返す
@@ -807,14 +810,8 @@ class FileSetPreviewWidget(QWidget):
     def _get_zip_display_filename(self, file_item: FileItem) -> str:
         """ZIP化されたファイルの表示用ファイル名を取得（旧バージョン、互換性維持）"""
         try:
-            # 現在のファイルセットを探す
-            target_file_set = None
-            for fs in self.file_sets:
-                if fs and hasattr(fs, 'get_valid_items'):
-                    valid_items = fs.get_valid_items()
-                    if file_item in valid_items:
-                        target_file_set = fs
-                        break
+            # 単一ファイルセット用ウィジェットのため、self.file_setを使用
+            target_file_set = self.file_set
             
             if target_file_set:
                 return self._get_zip_display_filename_for_fileset(file_item, target_file_set)
@@ -863,14 +860,8 @@ class FileSetPreviewWidget(QWidget):
     def _is_file_zipped(self, file_item: FileItem) -> bool:
         """ファイルがZIP化されるかどうかを判定（旧バージョン、互換性維持）"""
         try:
-            # 現在のファイルセットを探す
-            target_file_set = None
-            for fs in self.file_sets:
-                if fs and hasattr(fs, 'get_valid_items'):
-                    valid_items = fs.get_valid_items()
-                    if file_item in valid_items:
-                        target_file_set = fs
-                        break
+            # 単一ファイルセット用ウィジェットのため、self.file_setを使用
+            target_file_set = self.file_set
             
             if target_file_set:
                 return self._is_file_zipped_for_fileset(file_item, target_file_set)
@@ -1367,8 +1358,30 @@ API情報:
                     
                 else:
                     error_detail = upload_result.get('error', '不明なエラー') if upload_result else '戻り値がありません'
-                    logger.error("アップロード失敗: %s", error_detail)
-                    QMessageBox.warning(self, "アップロード失敗", f"ファイルアップロードに失敗しました\n\nエラー詳細:\n{error_detail}")
+                    logger.error("アップロード失敗: ファイル=%s, エラー=%s", file_item.name, error_detail)
+                    
+                    # より詳細なエラーメッセージを表示
+                    error_message = f"""ファイルアップロードに失敗しました
+
+ファイル: {file_item.name}
+
+エラー詳細:
+{error_detail}
+
+考えられる原因:
+• ネットワーク接続の問題
+• プロキシ設定の問題
+• SSL証明書の問題
+• サーバー側のエラー
+• トークンの有効期限切れ
+
+対処方法:
+1. ネットワーク接続を確認してください
+2. プロキシ設定（設定タブ）を確認してください
+3. 再ログインしてトークンを更新してください
+4. しばらく待ってから再試行してください"""
+                    
+                    QMessageBox.warning(self, "アップロード失敗", error_message)
                     
             finally:
                 progress.close()
@@ -2609,6 +2622,9 @@ API情報:
         close_btn.clicked.connect(dialog.accept)
         layout.addWidget(close_btn)
         
+        dialog.show()  # ダイアログを表示
+        dialog.raise_()  # 最前面に持ってくる
+        dialog.activateWindow()  # アクティブ化
         dialog.exec()
     
     def _get_register_filename(self, file_item: FileItem) -> str:
@@ -2688,6 +2704,8 @@ class BatchRegisterPreviewDialog(QDialog):
         self.bearer_token = bearer_token
         self.setWindowTitle("一括登録プレビュー")
         self.setModal(True)
+        # 最前面表示設定（マルチディスプレイ環境対応）
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
         
         # ダイアログサイズをディスプレイの90%に設定
         self.setup_dialog_size()
@@ -2699,9 +2717,9 @@ class BatchRegisterPreviewDialog(QDialog):
     def setup_dialog_size(self):
         """ダイアログサイズを設定（ディスプレイ高さの90%）"""
         try:
-            from qt_compat.widgets import QDesktopWidget
-            desktop = QDesktopWidget()
-            screen_rect = desktop.screenGeometry()
+            from qt_compat.widgets import QApplication
+            screen = QApplication.primaryScreen()
+            screen_rect = screen.availableGeometry()
             
             # ディスプレイサイズの90%に設定
             target_width = int(screen_rect.width() * 0.9)
@@ -2715,11 +2733,18 @@ class BatchRegisterPreviewDialog(QDialog):
             
             self.resize(target_width, target_height)
             
-            # ダイアログを画面中央に配置
-            self.move(
-                (screen_rect.width() - target_width) // 2,
-                (screen_rect.height() - target_height) // 2
-            )
+            # 親ウィンドウがある場合は親の中央に、なければ画面中央に配置
+            if self.parent():
+                parent_geo = self.parent().geometry()
+                self.move(
+                    parent_geo.x() + (parent_geo.width() - target_width) // 2,
+                    parent_geo.y() + (parent_geo.height() - target_height) // 2
+                )
+            else:
+                self.move(
+                    (screen_rect.width() - target_width) // 2,
+                    (screen_rect.height() - target_height) // 2
+                )
             
             logger.debug("プレビューダイアログサイズ設定: %sx%s", target_width, target_height)
         except Exception as e:
@@ -3574,6 +3599,8 @@ class BatchRegisterPreviewDialog(QDialog):
         self.bearer_token = bearer_token
         self.setWindowTitle("一括登録プレビュー（複数ファイルセット）")
         self.setModal(True)
+        # 最前面表示設定（マルチディスプレイ環境対応）
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
         
         # ダイアログサイズをディスプレイの90%に設定
         self.setup_dialog_size()
@@ -3585,9 +3612,9 @@ class BatchRegisterPreviewDialog(QDialog):
     def setup_dialog_size(self):
         """ダイアログサイズを設定（ディスプレイ高さの90%）"""
         try:
-            from qt_compat.widgets import QDesktopWidget
-            desktop = QDesktopWidget()
-            screen_rect = desktop.screenGeometry()
+            from qt_compat.widgets import QApplication
+            screen = QApplication.primaryScreen()
+            screen_rect = screen.availableGeometry()
             
             # ディスプレイサイズの90%に設定
             target_width = int(screen_rect.width() * 0.9)
@@ -3601,11 +3628,18 @@ class BatchRegisterPreviewDialog(QDialog):
             
             self.resize(target_width, target_height)
             
-            # ダイアログを画面中央に配置
-            self.move(
-                (screen_rect.width() - target_width) // 2,
-                (screen_rect.height() - target_height) // 2
-            )
+            # 親ウィンドウがある場合は親の中央に、なければ画面中央に配置
+            if self.parent():
+                parent_geo = self.parent().geometry()
+                self.move(
+                    parent_geo.x() + (parent_geo.width() - target_width) // 2,
+                    parent_geo.y() + (parent_geo.height() - target_height) // 2
+                )
+            else:
+                self.move(
+                    (screen_rect.width() - target_width) // 2,
+                    (screen_rect.height() - target_height) // 2
+                )
             
             logger.debug("複数ファイルセットプレビューダイアログサイズ設定: %sx%s", target_width, target_height)
         except Exception as e:
@@ -3853,23 +3887,36 @@ class BatchRegisterPreviewDialog(QDialog):
                 logger.info("ユーザーが全ファイルセット一括アップロードをキャンセルしました")
                 return
             
-            # プログレスダイアログ
+            # プログレスダイアログ（アップロード）
             progress = QProgressDialog("全ファイルセット一括アップロード中...", "キャンセル", 0, len(valid_file_sets), self)
             progress.setWindowModality(Qt.WindowModal)
+            progress.setValue(0)  # 初期値を明示的に設定
+            progress.setLabelText(f"アップロード準備中... (0/{len(valid_file_sets)})")
+            QApplication.processEvents()  # UI更新を即座に反映
             progress.show()
+            # 進捗計測（テスト用）
+            self._last_upload_progress_values = []
+            _orig_upload_set_value = progress.setValue
+            def _instrument_upload_set_value(val):
+                try:
+                    self._last_upload_progress_values.append(val)
+                except Exception:
+                    pass
+                _orig_upload_set_value(val)
+            progress.setValue = _instrument_upload_set_value
             
             # 結果集計
             total_uploaded = 0
             total_failed = 0
+            skip_count = 0
             fileset_results = []
             
             for i, file_set in enumerate(valid_file_sets):
                 if progress.wasCanceled():
                     logger.info("ユーザーによりアップロードがキャンセルされました")
                     break
-                
+
                 progress.setLabelText(f"アップロード中: {file_set.name} ({i+1}/{len(valid_file_sets)})")
-                progress.setValue(i)
                 QApplication.processEvents()
                 
                 try:
@@ -3897,9 +3944,14 @@ class BatchRegisterPreviewDialog(QDialog):
                         'error': str(e)
                     })
                     total_failed += 1
+
+                # 完了後に進捗を更新（i+1）
+                progress.setValue(i + 1)
+                QApplication.processEvents()
             
             progress.setValue(len(valid_file_sets))
-            progress.close()
+            progress.close()  # プログレスダイアログを明示的に閉じる
+            QApplication.processEvents()  # UI更新を確実に処理
             
             # 結果表示
             result_message = f"""全ファイルセット一括アップロード完了
@@ -4006,14 +4058,28 @@ class BatchRegisterPreviewDialog(QDialog):
                 logger.info("ユーザーが全ファイルセット一括データ登録をキャンセルしました")
                 return
             
-            # プログレスダイアログ
+            # プログレスダイアログ（データ登録）
             progress = QProgressDialog("全ファイルセット一括データ登録中...", "キャンセル", 0, len(valid_file_sets), self)
             progress.setWindowModality(Qt.WindowModal)
+            progress.setValue(0)  # 初期値を明示的に設定
+            progress.setLabelText(f"データ登録準備中... (0/{len(valid_file_sets)})")
+            QApplication.processEvents()  # UI更新を即座に反映
             progress.show()
+            # 進捗計測（テスト用）
+            self._last_register_progress_values = []
+            _orig_register_set_value = progress.setValue
+            def _instrument_register_set_value(val):
+                try:
+                    self._last_register_progress_values.append(val)
+                except Exception:
+                    pass
+                _orig_register_set_value(val)
+            progress.setValue = _instrument_register_set_value
             
             # 結果集計
             total_registered = 0
             total_failed = 0
+            skip_count = 0  # 404/401等によりスキップされたファイルセット数
             fileset_results = []
             previous_sample_id = None  # 前回のサンプルIDを保存
             
@@ -4021,11 +4087,10 @@ class BatchRegisterPreviewDialog(QDialog):
                 if progress.wasCanceled():
                     logger.info("ユーザーによりデータ登録がキャンセルされました")
                     break
-                
+
                 progress.setLabelText(f"データ登録中: {file_set.name} ({i+1}/{len(valid_file_sets)})")
-                progress.setValue(i)
                 QApplication.processEvents()
-                
+
                 try:
                     # 前回と同じ試料IDを使用する場合の処理
                     sample_mode = getattr(file_set, 'sample_mode', 'new')
@@ -4042,7 +4107,23 @@ class BatchRegisterPreviewDialog(QDialog):
                         logger.info("前回サンプルID継承: %s -> %s", file_set.name, previous_sample_id)
                     
                     register_result = self._register_single_fileset(None, file_set)
-                    
+
+                    # スキップ判定 (404/401 等)
+                    if register_result.get('skipped'):
+                        fileset_results.append({
+                            'name': file_set.name,
+                            'success': False,
+                            'skipped': True,
+                            'skip_reason': register_result.get('skip_reason'),
+                            'error': register_result.get('error')
+                        })
+                        skip_count += 1
+                        logger.warning("[SKIP] %s: %s", file_set.name, register_result.get('error'))
+                        # 進捗更新のみで次へ
+                        progress.setValue(i + 1)
+                        QApplication.processEvents()
+                        continue
+
                     if register_result.get('success'):
                         fileset_results.append({
                             'name': file_set.name,
@@ -4076,9 +4157,19 @@ class BatchRegisterPreviewDialog(QDialog):
                         'error': str(e)
                     })
                     total_failed += 1
+
+                # 完了後に進捗を更新（i+1）
+                progress.setValue(i + 1)
+                QApplication.processEvents()
             
             progress.setValue(len(valid_file_sets))
             progress.close()
+            QApplication.processEvents()  # UI更新を確実に処理
+            
+            # プログレスダイアログが完全に閉じるまで短時間待機
+            from qt_compat.core import QTimer
+            QTimer.singleShot(100, lambda: None)  # 100ms待機
+            QApplication.processEvents()
             
             # 結果表示
             result_message = f"""全ファイルセット一括データ登録完了
@@ -4087,11 +4178,20 @@ class BatchRegisterPreviewDialog(QDialog):
 • 対象ファイルセット: {len(valid_file_sets)}個
 • 登録成功: {total_registered}個
 • 登録失敗: {total_failed}個
+• スキップ: {skip_count}個
 
 ファイルセット別結果:"""
             
             for result in fileset_results[:8]:  # 最初の8件まで表示
-                if result['success']:
+                if result.get('skipped'):
+                    reason = result.get('skip_reason')
+                    if reason == 'not_found':
+                        result_message += f"\n↷ {result['name']}: スキップ (データセット未検出)"
+                    elif reason == 'unauthorized':
+                        result_message += f"\n↷ {result['name']}: スキップ (未認証)"
+                    else:
+                        result_message += f"\n↷ {result['name']}: スキップ"
+                elif result['success']:
                     sample_info = f" (試料ID: {result['sample_id'][:8]}...)" if result.get('sample_id') else ""
                     result_message += f"\n✓ {result['name']}: 成功{sample_info}"
                 else:
@@ -4101,10 +4201,17 @@ class BatchRegisterPreviewDialog(QDialog):
             if len(fileset_results) > 8:
                 result_message += f"\n... 他{len(fileset_results) - 8}件"
             
-            if total_failed == 0:
-                QMessageBox.information(self, "データ登録完了", result_message)
-            else:
-                QMessageBox.warning(self, "データ登録完了（一部失敗）", result_message)
+            # メッセージボックスを作成して最前面表示を保証
+            msgbox = QMessageBox(self)
+            msgbox.setWindowTitle("データ登録完了" if total_failed == 0 else "データ登録完了（一部失敗）")
+            msgbox.setText(result_message)
+            msgbox.setIcon(QMessageBox.Information if total_failed == 0 else QMessageBox.Warning)
+            msgbox.setStandardButtons(QMessageBox.Ok)
+            msgbox.setWindowFlags(msgbox.windowFlags() | Qt.WindowStaysOnTopHint)
+            msgbox.show()
+            msgbox.raise_()
+            msgbox.activateWindow()
+            msgbox.exec()
             
             logger.info("全ファイルセット一括データ登録完了: 成功=%s, 失敗=%s", total_registered, total_failed)
             
@@ -4156,6 +4263,54 @@ class BatchRegisterPreviewDialog(QDialog):
                 logger.error("データセットID取得失敗 - ファイルセット詳細:")
                 logger.debug("  - FileSet全属性: %s", vars(file_set))
                 return {'success_count': 0, 'failed_count': 1, 'error': 'データセットIDが取得できません'}
+
+            # ==============================
+            # データセット存在プリフライト検証
+            # ==============================
+            try:
+                # 一度成功したIDはキャッシュして再検証を省略
+                if not hasattr(self, '_verified_datasets'):
+                    self._verified_datasets = set()
+                if dataset_id not in self._verified_datasets:
+                    from config.site_rde import URLS
+                    from net.http_helpers import proxy_get
+                    detail_url = URLS['api']['dataset_detail'].format(id=dataset_id)
+                    
+                    # RDE API必須ヘッダー
+                    headers = {
+                        'Accept': 'application/vnd.api+json',
+                        'Content-Type': 'application/vnd.api+json'
+                    }
+                    
+                    resp = proxy_get(detail_url, headers=headers, timeout=10)
+                    if resp.status_code == 404:
+                        logger.error("データセット未検出 (404) スキップ: id=%s", dataset_id)
+                        return {
+                            'success_count': 0,
+                            'failed_count': 0,
+                            'skipped': True,
+                            'skip_reason': 'not_found',
+                            'error': f'データセットが存在しません (id={dataset_id})'
+                        }
+                    elif resp.status_code == 401:
+                        # 本来選択段階でブロックされる想定。安全のためスキップ。
+                        logger.error("未認証 (401) データセットアクセス拒否 スキップ: id=%s", dataset_id)
+                        return {
+                            'success_count': 0,
+                            'failed_count': 0,
+                            'skipped': True,
+                            'skip_reason': 'unauthorized',
+                            'error': f'未認証のためアクセスできません (id={dataset_id})'
+                        }
+                    elif resp.status_code >= 400:
+                        logger.error("データセット取得失敗: id=%s status=%s", dataset_id, resp.status_code)
+                        return {'success_count': 0, 'failed_count': 1, 'error': f'データセット取得エラー status={resp.status_code}'}
+                    else:
+                        self._verified_datasets.add(dataset_id)
+                        logger.debug("データセット存在確認成功(キャッシュ): %s", dataset_id)
+            except Exception as e:
+                logger.warning("データセット存在確認エラー (続行): %s", e)
+                # ネットワーク一時障害の場合は後続でエラー化する可能性あり、ここでは続行
             
             # 対象ファイル取得
             valid_items = file_set.get_valid_items()
@@ -4218,8 +4373,15 @@ class BatchRegisterPreviewDialog(QDialog):
             
             # アップロードが先に実行されているかチェック・実行
             upload_result = self._upload_single_fileset(bearer_token, file_set)
+            if upload_result.get('skipped'):
+                return {
+                    'success': False,
+                    'skipped': True,
+                    'skip_reason': upload_result.get('skip_reason', 'skipped'),
+                    'error': upload_result.get('error', 'スキップされました')
+                }
             if upload_result['success_count'] == 0:
-                return {'success': False, 'error': 'ファイルアップロードに失敗しました'}
+                return {'success': False, 'error': upload_result.get('error', 'ファイルアップロードに失敗しました')}
             
             # データセット情報取得・復元
             dataset_info = getattr(file_set, 'dataset_info', None)
@@ -4470,16 +4632,31 @@ class BatchRegisterPreviewDialog(QDialog):
             # Bearer Token自動選択対応のpost_binaryを使用
             from classes.utils.api_request_helper import post_binary
             
+            logger.info("=== ファイルアップロード開始 ===")
+            logger.info("URL: %s", url)
+            logger.info("ファイル名: %s", register_filename)
+            logger.info("ファイルサイズ: %s bytes", file_size)
+            
             resp = post_binary(url, binary_data, bearer_token=None, headers=headers)
             
+            logger.info("=== アップロードレスポンス ===")
             logger.debug("レスポンス受信 - ステータス: %s", resp.status_code if resp else 'None')
+            
+            if resp is None:
+                # respがNoneの場合、詳細なエラー情報を取得
+                error_msg = "通信エラー: サーバーへの接続に失敗しました。ネットワーク接続、プロキシ設定、SSL証明書を確認してください。"
+                logger.error("アップロード失敗: %s", error_msg)
+                logger.error("詳細: post_binary()がNoneを返しました - Timeout/ConnectionError/SSLError等の可能性")
+                return {"error": error_msg}
+            
             if resp:
                 logger.debug("レスポンス受信 - テキスト: %s", resp.text[:500])
             
-            if resp is None or not (200 <= resp.status_code < 300):
+            if not (200 <= resp.status_code < 300):
                 error_text = resp.text[:200] if resp else '通信エラー'
-                error_msg = f"HTTP {resp.status_code if resp else 'None'}: {error_text}"
+                error_msg = f"HTTP {resp.status_code}: {error_text}"
                 logger.error("アップロード失敗: %s", error_msg)
+                logger.error("完全なレスポンス: %s", resp.text if resp else 'None')
                 return {"error": error_msg}
             
             # JSONレスポンスをパース

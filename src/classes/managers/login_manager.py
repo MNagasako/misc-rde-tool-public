@@ -629,6 +629,7 @@ class LoginManager:
     def on_cookie_added(self, cookie):
         """
         Cookieが追加された時のイベントハンドラ
+        WebViewのCookieをRequestsセッションへ同期
         Args:
             cookie: 追加されたCookieオブジェクト
         """
@@ -643,6 +644,48 @@ class LoginManager:
             
             logger.debug("[COOKIE-DEBUG] Cookie追加: domain=%s, name=%s, value_len=%s", domain, name, len(value))
             logger.debug(f"Cookie追加: domain={domain}, name={name}, value={value[:20]}...")
+            
+            # RDE関連CookieをRequestsセッションへ同期
+            if 'nims.go.jp' in domain:
+                try:
+                    from net.session_manager import get_proxy_session
+                    import http.cookiejar
+                    
+                    session = get_proxy_session()
+                    
+                    # RequestsのCookieを作成
+                    # QWebEngineのCookieをhttp.cookiejar.Cookie形式に変換
+                    expires = cookie.expirationDate().toSecsSinceEpoch() if cookie.expirationDate().isValid() else None
+                    secure = cookie.isSecure()
+                    http_only = cookie.isHttpOnly()
+                    path = cookie.path()
+                    
+                    cookie_obj = http.cookiejar.Cookie(
+                        version=0,
+                        name=name,
+                        value=value,
+                        port=None,
+                        port_specified=False,
+                        domain=domain,
+                        domain_specified=True,
+                        domain_initial_dot=domain.startswith('.'),
+                        path=path,
+                        path_specified=True,
+                        secure=secure,
+                        expires=expires,
+                        discard=False,
+                        comment=None,
+                        comment_url=None,
+                        rest={'HttpOnly': http_only},
+                        rfc2109=False
+                    )
+                    
+                    session.cookies.set_cookie(cookie_obj)
+                    logger.info("[COOKIE-SYNC] Requestsセッションへ同期: domain=%s, name=%s", domain, name)
+                    
+                except Exception as sync_error:
+                    logger.warning("[COOKIE-SYNC] セッション同期失敗: %s", sync_error)
+            
         except Exception as e:
             logger.error("[COOKIE-DEBUG] Cookie追加エラー: %s", e)
             logger.error(f"Cookie追加エラー: {e}")

@@ -136,8 +136,25 @@ class DisplayManager:
                 
                 logger.warning("ログイン処理が10秒間停止しています: %s", self._last_login_message)
             
+            # 自動でログイン実行ボタンをクリック
+            self._auto_click_login_button()
+            
             # login_help_labelを表示（存在する場合）
             self._show_login_help_label()
+    
+    def _auto_click_login_button(self):
+        """自動でログイン実行ボタンをクリック"""
+        try:
+            if hasattr(self.autologin_msg_label, 'parent'):
+                parent = self.autologin_msg_label.parent()
+                while parent:
+                    if hasattr(parent, 'execute_login_button'):
+                        logger.info("🤖 自動ログイン実行ボタンをクリックします")
+                        parent.execute_login_button.click()
+                        break
+                    parent = parent.parent() if hasattr(parent, 'parent') else None
+        except Exception as e:
+            logger.error(f"自動ログインボタンクリックエラー: {e}")
     
     def _show_login_help_label(self):
         """ログイン情報ラベルを表示"""

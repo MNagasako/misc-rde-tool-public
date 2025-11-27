@@ -157,8 +157,24 @@ class DatasetUploadTab(QWidget):
             # QLineEdit
             for w in self.findChildren(QLineEdit):
                 w.setStyleSheet(f"QLineEdit {{ background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; border: 1px solid {get_color(ThemeKey.INPUT_BORDER)}; border-radius: 4px; padding: 4px 6px; }}")
-            # QComboBox
-            combo_style = f"QComboBox {{ background-color: {get_color(ThemeKey.COMBO_BACKGROUND)}; color: {get_color(ThemeKey.TEXT_PRIMARY)}; border: 1px solid {get_color(ThemeKey.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
+            # QComboBox - フォントが隠れないように高さとパディング調整
+            combo_style = f"""QComboBox {{
+                background-color: {get_color(ThemeKey.COMBO_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                border: 1px solid {get_color(ThemeKey.COMBO_BORDER)};
+                border-radius: 4px;
+                padding: 6px 8px;
+                min-height: 28px;
+                font-size: 10pt;
+            }}
+            QComboBox::drop-down {{
+                border: none;
+                width: 20px;
+            }}
+            QComboBox::down-arrow {{
+                width: 12px;
+                height: 12px;
+            }}"""
             for w in self.findChildren(QComboBox):
                 w.setStyleSheet(combo_style)
             # Buttons (簡易共通適用 - variant未設定のみ)
@@ -360,16 +376,27 @@ class DatasetUploadTab(QWidget):
         self.file_list_widget.itemClicked.connect(self._on_file_item_clicked)  # クリックイベント
         self.file_list_widget.currentItemChanged.connect(self._on_file_item_selection_changed)  # カーソルキー対応
         self.file_list_widget.installEventFilter(self)  # キーボードイベントフィルタ
-        # スタイルシート: ホバー時の背景色を少し濃く、選択時は更に濃く
+        # スタイルシート: フォントが隠れないようパディングとサイズを調整
         self.file_list_widget.setStyleSheet(f"""
-            QListWidget::item:hover {{
-                background-color: {get_color(ThemeKey.PANEL_INFO_BACKGROUND)};
+            QListWidget {{
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
             }}
-            QListWidget::item:selected {{
+            QListWidget::item {{
+                padding: 2px;
+                border-radius: 2px;
+                min-height: 32px;
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+            }}
+            QListWidget::item:hover {{
                 background-color: {get_color(ThemeKey.TABLE_ROW_BACKGROUND_HOVER)};
             }}
+            QListWidget::item:selected {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+            }}
             QListWidget::item:selected:hover {{
-                background-color: {get_color(ThemeKey.TABLE_ROW_BACKGROUND_HOVER)};  /* 選択時はホバー色を無効化 */
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
             }}
         """)
         file_list_left_layout.addWidget(self.file_list_widget)
@@ -401,7 +428,7 @@ class DatasetUploadTab(QWidget):
         # 画像アップロードボタン
         image_upload_row = QHBoxLayout()
         
-        self.upload_images_btn = QPushButton("�️ 画像アップロード")
+        self.upload_images_btn = QPushButton("📤 画像アップロード")
         self.upload_images_btn.setEnabled(False)
         self.upload_images_btn.clicked.connect(self._on_upload_images)
         self.upload_images_btn.setToolTip("書誌情報JSONをアップロード後に使用可能になります")
@@ -761,6 +788,33 @@ class DatasetUploadTab(QWidget):
                 # 現在選択中のデータセットIDを保存
                 self.current_dataset_id = dataset_id
                 
+                # RDEサイト上にデータセットが存在するか確認
+                rde_exists = self._check_rde_dataset_exists(dataset_id)
+                
+                if not rde_exists:
+                    # RDEサイトにデータセットが存在しない場合
+                    self.dataset_info_label.setText(
+                        f"⚠️ RDEサイト上にデータセットが存在しません\n"
+                        f"データセット: {dataset_name}\n"
+                        f"ID: {dataset_id}\n"
+                        f"\n※RDEサイトでデータセットを開設してください"
+                    )
+                    self._log_status(f"❌ RDEサイト上にデータセットが存在しません: {dataset_id}", error=True)
+                    
+                    # 全ボタンを無効化
+                    self.bulk_download_btn.setEnabled(False)
+                    self.upload_images_btn.setEnabled(False)
+                    self.upload_btn.setEnabled(False)
+                    self.edit_portal_btn.setEnabled(False)
+                    self.toggle_status_btn.setEnabled(False)
+                    
+                    # ファイルリストも非表示
+                    self.file_list_widget.clear()
+                    self.file_list_group.setVisible(False)
+                    self.thumbnail_label.setText("ファイルにマウスオーバーで\nプレビューを表示")
+                    
+                    return
+                
                 # データポータルにエントリが存在するか確認
                 self._check_portal_entry_exists(dataset_id)
                 
@@ -854,6 +908,33 @@ class DatasetUploadTab(QWidget):
             
             # 現在選択中のデータセットIDを保存
             self.current_dataset_id = dataset_id
+            
+            # RDEサイト上にデータセットが存在するか確認
+            rde_exists = self._check_rde_dataset_exists(dataset_id)
+            
+            if not rde_exists:
+                # RDEサイトにデータセットが存在しない場合
+                self.dataset_info_label.setText(
+                    f"⚠️ RDEサイト上にデータセットが存在しません\n"
+                    f"データセット: {dataset_name}\n"
+                    f"ID: {dataset_id}\n"
+                    f"\n※RDEサイトでデータセットを開設してください"
+                )
+                self._log_status(f"❌ RDEサイト上にデータセットが存在しません: {dataset_id}", error=True)
+                
+                # 全ボタンを無効化
+                self.bulk_download_btn.setEnabled(False)
+                self.upload_images_btn.setEnabled(False)
+                self.upload_btn.setEnabled(False)
+                self.edit_portal_btn.setEnabled(False)
+                self.toggle_status_btn.setEnabled(False)
+                
+                # ファイルリストも非表示
+                self.file_list_widget.clear()
+                self.file_list_group.setVisible(False)
+                self.thumbnail_label.setText("ファイルにマウスオーバーで\nプレビューを表示")
+                
+                return
             
             # ファイルリスト表示を常に更新（既存ファイルがある場合のみ表示）
             if files_exist:
@@ -1826,20 +1907,36 @@ class DatasetUploadTab(QWidget):
                 item = QListWidgetItem()
                 item_widget = QWidget()
                 item_layout = QHBoxLayout()
-                item_layout.setContentsMargins(5, 2, 5, 2)
+                item_layout.setContentsMargins(6, 2, 6, 2)
+                item_layout.setSpacing(8)
                 
-                # チェックボックス
+                # チェックボックス - サイズ調整
                 checkbox = QCheckBox()
                 checkbox.setChecked(False)  # デフォルトで未チェックに変更
+                checkbox.setStyleSheet(f"""
+                    QCheckBox {{
+                        spacing: 6px;
+                    }}
+                    QCheckBox::indicator {{
+                        width: 16px;
+                        height: 16px;
+                    }}
+                """)
                 # チェックボックス変更時にプレビュー表示
                 checkbox.stateChanged.connect(lambda state, itm=item: self._on_checkbox_changed(itm))
                 item_layout.addWidget(checkbox)
                 
-                # ファイル名ラベル
-                file_label = QLabel(file_info['relative_path'])
-                file_label.setStyleSheet("padding: 2px;")
-                # ファイルパスをツールチップに設定
-                file_label.setToolTip(f"パス: {file_info['path']}\nサイズ: {file_info['size']:,} bytes")
+                # ファイル名ラベル - ファイル名のみ表示（相対パスではなく）
+                file_label = QLabel(file_info['name'])
+                file_label.setStyleSheet(f"""
+                    QLabel {{
+                        padding: 2px;
+                        font-size: 11pt;
+                        color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                    }}
+                """)
+                # 相対パスをツールチップに設定
+                file_label.setToolTip(f"相対パス: {file_info['relative_path']}\nフルパス: {file_info['path']}\nサイズ: {file_info['size']:,} bytes")
                 item_layout.addWidget(file_label, stretch=1)
                 
                 item_widget.setLayout(item_layout)
@@ -2671,6 +2768,35 @@ class DatasetUploadTab(QWidget):
         except Exception as e:
             logger.error(f"temp_filename抽出エラー: {e}")
             return ""
+    
+    def _check_rde_dataset_exists(self, dataset_id: str) -> bool:
+        """
+        RDEサイト上にデータセットが存在するか確認
+        
+        Args:
+            dataset_id: データセットID
+            
+        Returns:
+            bool: 存在する場合True
+        """
+        try:
+            from net.http_helpers import proxy_get
+            
+            # RDEサイトのデータセットページにアクセス
+            dataset_url = f"https://rde.nims.go.jp/rde/datasets/{dataset_id}"
+            logger.info(f"[RDE_CHECK] データセット存在確認: {dataset_url}")
+            
+            response = proxy_get(dataset_url, allow_redirects=False)
+            
+            # 200 OKならデータセットが存在
+            exists = response.status_code == 200
+            logger.info(f"[RDE_CHECK] ステータスコード: {response.status_code}, 存在: {exists}")
+            
+            return exists
+            
+        except Exception as e:
+            logger.error(f"[RDE_CHECK] データセット存在確認エラー: {e}")
+            return False
     
     def _check_portal_entry_exists(self, dataset_id: str):
         """

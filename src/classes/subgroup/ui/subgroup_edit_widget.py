@@ -110,51 +110,52 @@ class SubgroupEditHandler(SubgroupCreateHandler):
             logger.debug("レスポンス内容: %s", resp.text)
             
             if resp.status_code in (200, 201, 202):
-                QMessageBox.information(self.widget, "更新成功", f"サブグループ[{group_name}]の更新に成功しました。")
-                
-                # 成功時にsubGroup.jsonを自動再取得
+                # 成功メッセージ表示前にsubGroup.jsonを自動再取得（スキップなし）
+                refresh_success = False
                 try:
-                    from qt_compat.core import QTimer
-                    def auto_refresh():
-                        try:
-                            from classes.basic.core.basic_info_logic import auto_refresh_subgroup_json
-                            from classes.utils.progress_worker import SimpleProgressWorker
-                            from classes.basic.ui.ui_basic_info import show_progress_dialog
-                            
-                            # プログレス表示付きで自動更新
-                            worker = SimpleProgressWorker(
-                                task_func=auto_refresh_subgroup_json,
-                                task_kwargs={'bearer_token': bearer_token},
-                                task_name="サブグループ情報自動更新"
-                            )
-                            
-                            # プログレス表示
-                            progress_dialog = show_progress_dialog(self.widget, "サブグループ情報自動更新", worker)
-                            
-                            # サブグループ更新通知を送信
-                            try:
-                                from classes.dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
-                                subgroup_notifier = get_subgroup_refresh_notifier()
-                                # 更新完了後に少し遅延して通知
-                                from qt_compat.core import QTimer
-                                def send_notification():
-                                    try:
-                                        subgroup_notifier.notify_refresh()
-                                        logger.info("サブグループ更新通知を送信しました")
-                                    except Exception as e:
-                                        logger.warning("サブグループ更新通知送信に失敗: %s", e)
-                                QTimer.singleShot(2000, send_notification)  # 2秒後に通知
-                            except Exception as e:
-                                logger.warning("サブグループ更新通知の設定に失敗: %s", e)
-                            
-                        except Exception as e:
-                            logger.error("サブグループ情報自動更新でエラー: %s", e)
+                    from classes.basic.core.basic_info_logic import auto_refresh_subgroup_json
+                    from classes.utils.progress_worker import SimpleProgressWorker
+                    from classes.basic.ui.ui_basic_info import show_progress_dialog
                     
-                    # 3秒後に自動更新実行
-                    QTimer.singleShot(3000, auto_refresh)
+                    logger.info("サブグループ更新成功 - subGroup.json即座に再取得開始")
+                    
+                    # プログレス表示付きで自動更新（即座に実行）
+                    worker = SimpleProgressWorker(
+                        task_func=auto_refresh_subgroup_json,
+                        task_kwargs={'bearer_token': bearer_token},
+                        task_name="サブグループ情報更新"
+                    )
+                    
+                    # プログレス表示（ブロッキング実行）
+                    progress_dialog = show_progress_dialog(self.widget, "サブグループ情報更新中", worker)
+                    
+                    refresh_success = True
+                    logger.info("サブグループ情報自動更新完了")
+                    
+                    # サブグループ更新通知を送信
+                    try:
+                        from classes.dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
+                        subgroup_notifier = get_subgroup_refresh_notifier()
+                        from qt_compat.core import QTimer
+                        def send_notification():
+                            try:
+                                subgroup_notifier.notify_refresh()
+                                logger.info("サブグループ更新通知を送信しました")
+                            except Exception as e:
+                                logger.warning("サブグループ更新通知送信に失敗: %s", e)
+                        QTimer.singleShot(500, send_notification)  # 0.5秒後に通知
+                    except Exception as e:
+                        logger.warning("サブグループ更新通知の設定に失敗: %s", e)
                     
                 except Exception as e:
-                    logger.error("自動更新の設定でエラー: %s", e)
+                    logger.error("サブグループ情報自動更新でエラー: %s", e)
+                    QMessageBox.warning(
+                        self.widget, 
+                        "更新警告", 
+                        f"サブグループ[{group_name}]の更新には成功しましたが、\nsubGroup.jsonの自動更新に失敗しました。\n\n"
+                        f"基本情報タブで手動更新を実行してください。\n\nエラー: {e}"
+                    )
+                    # エラー時のみメッセージ表示（通常は自動更新のプログレスダイアログで完結）
                 
                 return True
             else:

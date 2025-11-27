@@ -195,8 +195,11 @@ def load_unified_member_list(subgroup_id=None, dynamic_users=None, bearer_token=
     """
     統合メンバーリスト読み込み（rde-member.txt + subGroup.json + 動的追加ユーザー + API補完）
     
+    **修正タブ専用モード**: subgroup_idが指定されている場合は、そのサブグループのメンバーのみを返す
+    （rde-member.txtや動的追加ユーザーは含めない）
+    
     Args:
-        subgroup_id: 修正対象のサブグループID（新規作成時はNone）
+        subgroup_id: 修正対象のサブグループID（新規作成時はNone、修正時は指定）
         dynamic_users: 動的追加されたユーザーリスト [{"id": "", "userName": "", "emailAddress": ""}, ...]
         bearer_token: API補完用の認証トークン
     
@@ -205,7 +208,8 @@ def load_unified_member_list(subgroup_id=None, dynamic_users=None, bearer_token=
             unified_users: 統合されたユーザーリスト
             member_info: ユーザーID -> ユーザー詳細情報のマッピング
     """
-    logger.debug("load_unified_member_list 開始: subgroup_id=%s, bearer_token=%s", subgroup_id, 'あり' if bearer_token else 'なし')
+    logger.debug("load_unified_member_list 開始: subgroup_id=%s (修正タブモード=%s), bearer_token=%s", 
+                 subgroup_id, subgroup_id is not None, 'あり' if bearer_token else 'なし')
     
     # 0. subGroup.jsonを最初に読み込み（複数箇所で使用するため）
     subgroup_data = None
@@ -236,139 +240,142 @@ def load_unified_member_list(subgroup_id=None, dynamic_users=None, bearer_token=
     except Exception as e:
         logger.warning("subGroup.json事前読み込みエラー: %s", e)
 
-    # 1. rde-member.txtからメンバー読み込み
+    # 1. rde-member.txtからメンバー読み込み（修正タブモードではスキップ）
     rde_members = {}
-    try:
-        paths = check_subgroup_files()
-        if os.path.exists(paths["member_path"]):
-            with open(paths["member_path"], 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            # JSON形式（セミコロン区切り）とCSV形式（カンマ区切り）の両方に対応
-            # まずJSON形式を試行
-            is_json_format = False
-            if ';' in content:
-                member_lines = content.split(';')
-                for line in member_lines:
-                    line = line.strip()
-                    if not line or line.startswith('#'):
-                        continue
-                    try:
-                        member_data = json.loads(line)
-                        user_id = member_data.get('id', '')
-                        if user_id:
-                            rde_members[user_id] = {
-                                'id': user_id,
-                                'userName': member_data.get('userName', member_data.get('name', 'Unknown')),
-                                'emailAddress': member_data.get('emailAddress', member_data.get('email', '')),
-                                'organizationName': member_data.get('organizationName', ''),
-                                'familyName': member_data.get('familyName', ''),
-                                'givenName': member_data.get('givenName', ''),
-                                'source': 'rde-member.txt',
-                                'source_format': 'json'
-                            }
-                            is_json_format = True
-                    except json.JSONDecodeError:
-                        continue
-            
-            # JSON形式でない場合はCSV形式（カンマ区切り）として読み込み
-            if not is_json_format:
-                logger.debug("rde-member.txt: CSV形式として読み込みます")
+    if subgroup_id is None:  # 新規作成時のみrde-member.txtを読み込む
+        try:
+            paths = check_subgroup_files()
+            if os.path.exists(paths["member_path"]):
+                with open(paths["member_path"], 'r', encoding='utf-8') as f:
+                    content = f.read()
                 
-                # CSV形式で読み込み: メールアドレス, role, canCreateDatasets, canEditMembers
-                lines = content.split('\n')
-                for line in lines:
-                    line = line.strip()
-                    if not line or line.startswith('#'):
-                        continue
+                # JSON形式（セミコロン区切り）とCSV形式（カンマ区切り）の両方に対応
+                # まずJSON形式を試行
+                is_json_format = False
+                if ';' in content:
+                    member_lines = content.split(';')
+                    for line in member_lines:
+                        line = line.strip()
+                        if not line or line.startswith('#'):
+                            continue
+                        try:
+                            member_data = json.loads(line)
+                            user_id = member_data.get('id', '')
+                            if user_id:
+                                rde_members[user_id] = {
+                                    'id': user_id,
+                                    'userName': member_data.get('userName', member_data.get('name', 'Unknown')),
+                                    'emailAddress': member_data.get('emailAddress', member_data.get('email', '')),
+                                    'organizationName': member_data.get('organizationName', ''),
+                                    'familyName': member_data.get('familyName', ''),
+                                    'givenName': member_data.get('givenName', ''),
+                                    'source': 'rde-member.txt',
+                                    'source_format': 'json'
+                                }
+                                is_json_format = True
+                        except json.JSONDecodeError:
+                            continue
+                
+                # JSON形式でない場合はCSV形式（カンマ区切り）として読み込み
+                if not is_json_format:
+                    logger.debug("rde-member.txt: CSV形式として読み込みます")
                     
-                    # セミコロンで終わる場合は削除
-                    if line.endswith(';'):
-                        line = line[:-1]
-                    
-                    parts = [x.strip() for x in line.split(',')]
-                    if len(parts) >= 4:
-                        email = parts[0]
-                        role_num = parts[1]  # 1=OWNER, 2=ASSISTANT
-                        can_create = parts[2] == '1'
-                        can_edit = parts[3] == '1'
+                    # CSV形式で読み込み: メールアドレス, role, canCreateDatasets, canEditMembers
+                    lines = content.split('\n')
+                    for line in lines:
+                        line = line.strip()
+                        if not line or line.startswith('#'):
+                            continue
                         
-                        # メールアドレスからユーザー情報を取得（まずローカルマップから）
-                        user_info = None
-                        user_id = None
+                        # セミコロンで終わる場合は削除
+                        if line.endswith(';'):
+                            line = line[:-1]
                         
-                        if email in email_to_user_map:
-                            user_info = email_to_user_map[email]
-                            user_id = user_info['id']
-                            logger.debug("CSV読み込み（ローカル）: %s -> %s (ID: %s...)", email, user_info.get('userName'), user_id[:20])
-                        else:
-                            # subGroup.jsonに存在しない場合、APIで検索
-                            logger.debug("rde-member.txt: メールアドレス %s がローカルに存在しないため、APIで検索します", email)
+                        parts = [x.strip() for x in line.split(',')]
+                        if len(parts) >= 4:
+                            email = parts[0]
+                            role_num = parts[1]  # 1=OWNER, 2=ASSISTANT
+                            can_create = parts[2] == '1'
+                            can_edit = parts[3] == '1'
                             
-                            if bearer_token:
-                                import urllib.parse
-                                from net.http_helpers import proxy_get
-                                
-                                try:
-                                    # APIでメールアドレス検索
-                                    encoded_email = urllib.parse.quote_plus(email)
-                                    filter_param = urllib.parse.quote('filter[emailAddress]', safe='')
-                                    url = f"https://rde-user-api.nims.go.jp/users?{filter_param}={encoded_email}"
-                                    
-                                    headers = {
-                                        'Authorization': f'Bearer {bearer_token}',
-                                        'Accept': 'application/vnd.api+json',
-                                        'Content-Type': 'application/json'
-                                    }
-                                    
-                                    response = proxy_get(url, headers=headers)
-                                    response.raise_for_status()
-                                    
-                                    data = response.json()
-                                    users = data.get('data', [])
-                                    
-                                    if users:
-                                        # 最初のユーザーを取得
-                                        user = users[0]
-                                        attr = user.get('attributes', {})
-                                        user_id = user.get('id', '')
-                                        user_info = {
-                                            'id': user_id,
-                                            'userName': attr.get('userName', 'Unknown'),
-                                            'emailAddress': attr.get('emailAddress', email),
-                                            'organizationName': attr.get('organizationName', ''),
-                                            'familyName': attr.get('familyName', ''),
-                                            'givenName': attr.get('givenName', '')
-                                        }
-                                        logger.debug("CSV読み込み（API）: %s -> %s (ID: %s...)", email, user_info.get('userName'), user_id[:20])
-                                    else:
-                                        logger.warning("rde-member.txt: メールアドレス %s のユーザーがAPIでも見つかりません", email)
-                                except Exception as api_error:
-                                    logger.error("rde-member.txt API検索エラー (%s): %s", email, api_error)
+                            # メールアドレスからユーザー情報を取得（まずローカルマップから）
+                            user_info = None
+                            user_id = None
+                            
+                            if email in email_to_user_map:
+                                user_info = email_to_user_map[email]
+                                user_id = user_info['id']
+                                logger.debug("CSV読み込み（ローカル）: %s -> %s (ID: %s...)", email, user_info.get('userName'), user_id[:20])
                             else:
-                                logger.warning("rde-member.txt: Bearer token未提供のため、%s のAPI検索をスキップ", email)
-                        
-                        # ユーザー情報が取得できた場合のみ追加
-                        if user_info and user_id:
-                            rde_members[user_id] = {
-                                'id': user_id,
-                                'userName': user_info.get('userName', 'Unknown'),
-                                'emailAddress': email,
-                                'organizationName': user_info.get('organizationName', ''),
-                                'familyName': user_info.get('familyName', ''),
-                                'givenName': user_info.get('givenName', ''),
-                                'source': 'rde-member.txt',
-                                'source_format': 'csv',
-                                'role_from_file': 'OWNER' if role_num == '1' else 'ASSISTANT',
-                                'canCreateDatasets': can_create,
-                                'canEditMembers': can_edit
-                            }
+                                # subGroup.jsonに存在しない場合、APIで検索
+                                logger.debug("rde-member.txt: メールアドレス %s がローカルに存在しないため、APIで検索します", email)
+                                
+                                if bearer_token:
+                                    import urllib.parse
+                                    from net.http_helpers import proxy_get
+                                    
+                                    try:
+                                        # APIでメールアドレス検索
+                                        encoded_email = urllib.parse.quote_plus(email)
+                                        filter_param = urllib.parse.quote('filter[emailAddress]', safe='')
+                                        url = f"https://rde-user-api.nims.go.jp/users?{filter_param}={encoded_email}"
+                                        
+                                        headers = {
+                                            'Authorization': f'Bearer {bearer_token}',
+                                            'Accept': 'application/vnd.api+json',
+                                            'Content-Type': 'application/json'
+                                        }
+                                        
+                                        response = proxy_get(url, headers=headers)
+                                        response.raise_for_status()
+                                        
+                                        data = response.json()
+                                        users = data.get('data', [])
+                                        
+                                        if users:
+                                            # 最初のユーザーを取得
+                                            user = users[0]
+                                            attr = user.get('attributes', {})
+                                            user_id = user.get('id', '')
+                                            user_info = {
+                                                'id': user_id,
+                                                'userName': attr.get('userName', 'Unknown'),
+                                                'emailAddress': attr.get('emailAddress', email),
+                                                'organizationName': attr.get('organizationName', ''),
+                                                'familyName': attr.get('familyName', ''),
+                                                'givenName': attr.get('givenName', '')
+                                            }
+                                            logger.debug("CSV読み込み（API）: %s -> %s (ID: %s...)", email, user_info.get('userName'), user_id[:20])
+                                        else:
+                                            logger.warning("rde-member.txt: メールアドレス %s のユーザーがAPIでも見つかりません", email)
+                                    except Exception as api_error:
+                                        logger.error("rde-member.txt API検索エラー (%s): %s", email, api_error)
+                                else:
+                                    logger.warning("rde-member.txt: Bearer token未提供のため、%s のAPI検索をスキップ", email)
+                            
+                            # ユーザー情報が取得できた場合のみ追加
+                            if user_info and user_id:
+                                rde_members[user_id] = {
+                                    'id': user_id,
+                                    'userName': user_info.get('userName', 'Unknown'),
+                                    'emailAddress': email,
+                                    'organizationName': user_info.get('organizationName', ''),
+                                    'familyName': user_info.get('familyName', ''),
+                                    'givenName': user_info.get('givenName', ''),
+                                    'source': 'rde-member.txt',
+                                    'source_format': 'csv',
+                                    'role_from_file': 'OWNER' if role_num == '1' else 'ASSISTANT',
+                                    'canCreateDatasets': can_create,
+                                    'canEditMembers': can_edit
+                                }
                 
                 logger.debug("CSV形式rde-member.txt読み込み完了: %s名", len(rde_members))
-    except Exception as e:
-        logger.warning("rde-member.txt読み込みエラー: %s", e)
-        import traceback
-        logger.debug("詳細エラー: %s", traceback.format_exc())
+        except Exception as e:
+            logger.warning("rde-member.txt読み込みエラー: %s", e)
+            import traceback
+            logger.debug("詳細エラー: %s", traceback.format_exc())
+    else:
+        logger.debug("修正タブモード: rde-member.txtの読み込みをスキップ")
 
     # 2. subGroup.jsonから既存ロール情報読み込み（既に読み込み済みのsubgroup_dataを使用）
     subgroup_roles = {}
@@ -452,30 +459,32 @@ def load_unified_member_list(subgroup_id=None, dynamic_users=None, bearer_token=
         import traceback
         logger.debug("詳細エラー: %s", traceback.format_exc())
 
-    # 3. 動的追加ユーザーを組み込み（一時ファイル + パラメータ）
+    # 3. 動的追加ユーザーを組み込み（一時ファイル + パラメータ）（修正タブモードではスキップ）
     dynamic_members = {}
-    
-    # 一時ファイルから動的ユーザーを読み込み
-    temp_dynamic_users = load_dynamic_users_from_temp()
-    all_dynamic_users = temp_dynamic_users.copy()
-    
-    # パラメータで渡された動的ユーザーも追加
-    if dynamic_users:
-        all_dynamic_users.extend(dynamic_users)
-    
-    # 重複排除しながら動的メンバー辞書を作成
-    for user in all_dynamic_users:
-        user_id = user.get('id', '')
-        if user_id and user_id not in dynamic_members:
-            dynamic_members[user_id] = {
-                'id': user_id,
-                'userName': user.get('userName', user.get('name', 'Unknown')),
-                'emailAddress': user.get('emailAddress', user.get('email', '')),
-                'organizationName': user.get('organizationName', ''),
-                'familyName': user.get('familyName', ''),
-                'givenName': user.get('givenName', ''),
-                'source': 'dynamic'
-            }
+    if subgroup_id is None:  # 新規作成時のみ動的ユーザーを読み込む
+        # 一時ファイルから動的ユーザーを読み込み
+        temp_dynamic_users = load_dynamic_users_from_temp()
+        all_dynamic_users = temp_dynamic_users.copy()
+        
+        # パラメータで渡された動的ユーザーも追加
+        if dynamic_users:
+            all_dynamic_users.extend(dynamic_users)
+        
+        # 重複排除しながら動的メンバー辞書を作成
+        for user in all_dynamic_users:
+            user_id = user.get('id', '')
+            if user_id and user_id not in dynamic_members:
+                dynamic_members[user_id] = {
+                    'id': user_id,
+                    'userName': user.get('userName', user.get('name', 'Unknown')),
+                    'emailAddress': user.get('emailAddress', user.get('email', '')),
+                    'organizationName': user.get('organizationName', ''),
+                    'familyName': user.get('familyName', ''),
+                    'givenName': user.get('givenName', ''),
+                    'source': 'dynamic'
+                }
+    else:
+        logger.debug("修正タブモード: 動的追加ユーザーの読み込みをスキップ")
 
     # 4. 全てのユーザーIDを統合
     all_user_ids = set()

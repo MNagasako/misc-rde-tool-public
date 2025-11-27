@@ -2,7 +2,7 @@ import json
 import os
 import logging
 from qt_compat.widgets import QMessageBox
-from qt_compat.core import QMetaObject, Qt, Q_ARG
+from qt_compat.core import QMetaObject, Qt, Q_ARG, QTimer
 from config.common import OUTPUT_DIR
 from classes.utils.api_request_helper import api_request, fetch_binary, download_request  # refactored to use api_request_helper
 from core.bearer_token_manager import BearerTokenManager
@@ -12,41 +12,35 @@ logger = logging.getLogger(__name__)
 
 def safe_show_message(parent, title, message, message_type="warning"):
     """
-    スレッドセーフなメッセージ表示
+    スレッドセーフなメッセージ表示（PySide6）
+    - 別スレッドからの呼び出しは QTimer.singleShot(0, ...) でメインスレッドに委譲
+    - 親ウィジェットの show_* スロット呼び出しに依存せず、直接 QMessageBox を使用
     """
     if parent is None:
         return
-    
-    try:
-        from qt_compat.core import QThread
-        if hasattr(parent, 'thread') and parent.thread() != QThread.currentThread():
-            # 別スレッドからの呼び出しの場合はメタオブジェクトを使用
-            if message_type == "warning":
-                QMetaObject.invokeMethod(parent, "show_warning_message", 
-                                       Qt.QueuedConnection,
-                                       Q_ARG(str, title),
-                                       Q_ARG(str, message))
-            elif message_type == "critical":
-                QMetaObject.invokeMethod(parent, "show_critical_message", 
-                                       Qt.QueuedConnection,
-                                       Q_ARG(str, title),
-                                       Q_ARG(str, message))
-            elif message_type == "information":
-                QMetaObject.invokeMethod(parent, "show_information_message", 
-                                       Qt.QueuedConnection,
-                                       Q_ARG(str, title),
-                                       Q_ARG(str, message))
-        else:
-            # メインスレッドからの呼び出しの場合は直接表示
+
+    def _show():
+        try:
             if message_type == "warning":
                 QMessageBox.warning(parent, title, message)
             elif message_type == "critical":
                 QMessageBox.critical(parent, title, message)
             elif message_type == "information":
                 QMessageBox.information(parent, title, message)
+            else:
+                QMessageBox.information(parent, title, message)
+        except Exception as e:
+            logger.error(f"メッセージボックス表示エラー: {e}")
+            logger.error(f"[{message_type.upper()}] {title}: {message}")
+
+    try:
+        from qt_compat.core import QThread
+        if hasattr(parent, 'thread') and parent.thread() != QThread.currentThread():
+            QTimer.singleShot(0, _show)
+        else:
+            _show()
     except Exception as e:
         logger.error(f"メッセージボックス表示エラー: {e}")
-        # フォールバック：ログのみ
         logger.error(f"[{message_type.upper()}] {title}: {message}")
 
 # ファイルパスに使用できない文字を全角記号に置換

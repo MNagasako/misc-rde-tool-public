@@ -38,6 +38,9 @@ QScrollBar:vertical {{ background-color: {get_color(ThemeKey.SCROLLBAR_BACKGROUN
 QScrollBar::handle:vertical {{ background-color: {get_color(ThemeKey.SCROLLBAR_HANDLE)}; border-radius: 5px; min-height: 16px; }}
 QScrollBar::handle:vertical:hover {{ background-color: {get_color(ThemeKey.SCROLLBAR_HANDLE_HOVER)}; }}
 {combo_section}
+QPushButton {{ background-color: {get_color(ThemeKey.BUTTON_DEFAULT_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_DEFAULT_TEXT)}; border: 1px solid {get_color(ThemeKey.BUTTON_DEFAULT_BORDER)}; border-radius: 4px; padding: 4px 8px; }}
+QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_DEFAULT_BACKGROUND_HOVER)}; }}
+QPushButton:disabled {{ background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)}; border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)}; }}
 QLineEdit, QTextEdit {{ background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; border: 1px solid {get_color(ThemeKey.INPUT_BORDER)}; border-radius: 4px; padding: 4px; }}
 QLineEdit:focus, QTextEdit:focus {{ background-color: {get_color(ThemeKey.INPUT_BACKGROUND_FOCUS)}; border: 1px solid {get_color(ThemeKey.INPUT_BORDER_FOCUS)}; }}
 QLineEdit:disabled, QTextEdit:disabled {{ background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)}; color: {get_color(ThemeKey.INPUT_TEXT_DISABLED)}; border: 1px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)}; }}

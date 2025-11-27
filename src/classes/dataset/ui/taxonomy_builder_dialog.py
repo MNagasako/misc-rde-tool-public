@@ -14,6 +14,7 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt, Signal
 from qt_compat.gui import QFont
+from classes.theme import get_color, ThemeKey
 
 
 class TaxonomyBuilderDialog(QDialog):

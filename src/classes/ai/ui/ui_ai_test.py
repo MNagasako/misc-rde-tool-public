@@ -291,6 +291,11 @@ class AITestWidget:
         self.ai_model_combo.setStyleSheet("QComboBox { font-size: 14px; padding: 4px; }")
         ai_layout.addWidget(self.ai_model_combo)
         
+        # デフォルト設定表示ラベル
+        self.default_ai_label = QLabel("💡 デフォルト設定を読み込み中...")
+        self.default_ai_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 11px; margin-left: 10px;")
+        ai_layout.addWidget(self.default_ai_label)
+        
         # 接続テストボタン
         test_btn = UIUtilities.create_auto_resize_button(
             "接続テスト", 80, 30,
@@ -1521,6 +1526,13 @@ class AITestWidget:
             if current_index >= 0:
                 current_provider = self.ai_provider_combo.itemData(current_index)
                 self._update_model_list(current_provider)
+            
+            # デフォルト設定表示ラベルを更新
+            if hasattr(self, 'default_ai_label'):
+                default_provider = self.ai_manager.get_default_provider()
+                default_model = self.ai_manager.get_default_model(default_provider)
+                self.default_ai_label.setText(f"💡 デフォルト: {default_provider.upper()} / {default_model}")
+                self.default_ai_label.setToolTip(f"グローバル設定のデフォルトAI\nプロバイダー: {default_provider}\nモデル: {default_model}")
                 
         except Exception as e:
             logger.error("AI設定初期化エラー: %s", e)

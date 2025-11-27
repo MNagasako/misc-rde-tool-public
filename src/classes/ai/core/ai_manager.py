@@ -248,18 +248,43 @@ class AIManager:
         if response.status_code == 200:
             result = response.json()
             if "candidates" in result and len(result["candidates"]) > 0:
-                content = result["candidates"][0]["content"]["parts"][0]["text"]
-                usage_metadata = result.get("usageMetadata", {})
-                
-                return {
-                    "success": True, 
-                    "response": content,
-                    "content": content,  # 互換性のため追加
-                    "usage": usage_metadata,
-                    "tokens_used": usage_metadata.get("totalTokenCount", 0),  # 互換性のため追加
-                    "model": model,
-                    "response_time": response_time
-                }
+                try:
+                    # レスポンス構造を安全にパース
+                    candidate = result["candidates"][0]
+                    content_obj = candidate.get("content", {})
+                    parts = content_obj.get("parts", [])
+                    
+                    if not parts:
+                        logger.error(f"Gemini API レスポンスにpartsが存在しません: {result}")
+                        return {
+                            "success": False,
+                            "error": "Geminiからの応答にpartsが存在しません",
+                            "model": model,
+                            "response_time": response_time,
+                            "raw_response": result
+                        }
+                    
+                    content = parts[0].get("text", "")
+                    usage_metadata = result.get("usageMetadata", {})
+                    
+                    return {
+                        "success": True, 
+                        "response": content,
+                        "content": content,  # 互換性のため追加
+                        "usage": usage_metadata,
+                        "tokens_used": usage_metadata.get("totalTokenCount", 0),  # 互換性のため追加
+                        "model": model,
+                        "response_time": response_time
+                    }
+                except (KeyError, IndexError, TypeError) as e:
+                    logger.error(f"Gemini API レスポンスのパースエラー: {e}, レスポンス: {result}")
+                    return {
+                        "success": False,
+                        "error": f"レスポンスのパースエラー: {str(e)}",
+                        "model": model,
+                        "response_time": response_time,
+                        "raw_response": result
+                    }
             else:
                 return {
                     "success": False, 
@@ -324,30 +349,73 @@ class AIManager:
             if response.status_code == 200:
                 result = response.json()
                 
-                # Ollama独自API形式のレスポンス処理
-                if "/api/generate" in base_url:
-                    content = result.get("response", "")
-                    usage_info = {
-                        "prompt_eval_count": result.get("prompt_eval_count", 0),
-                        "eval_count": result.get("eval_count", 0),
-                        "total_duration": result.get("total_duration", 0)
+                try:
+                    # Ollama独自API形式のレスポンス処理
+                    if "/api/generate" in base_url:
+                        content = result.get("response", "")
+                        if not content:
+                            logger.warning(f"Local LLM APIから空の応答を受信: {result}")
+                            return {
+                                "success": False, 
+                                "error": "Local LLM APIから空の応答を受信しました",
+                                "raw_response": result,
+                                "model": model,
+                                "response_time": response_time
+                            }
+                        
+                        usage_info = {
+                            "prompt_eval_count": result.get("prompt_eval_count", 0),
+                            "eval_count": result.get("eval_count", 0),
+                            "total_duration": result.get("total_duration", 0)
+                        }
+                        tokens_used = usage_info.get("prompt_eval_count", 0) + usage_info.get("eval_count", 0)
+                    else:
+                        # OpenAI互換API形式のレスポンス処理（安全なアクセス）
+                        choices = result.get("choices", [])
+                        if not choices:
+                            logger.error(f"Local LLM APIレスポンスにchoicesが存在しません: {result}")
+                            return {
+                                "success": False,
+                                "error": "Local LLM APIレスポンスにchoicesが存在しません",
+                                "raw_response": result,
+                                "model": model,
+                                "response_time": response_time
+                            }
+                        
+                        message = choices[0].get("message", {})
+                        content = message.get("content", "")
+                        if not content:
+                            logger.warning(f"Local LLM APIから空のcontentを受信: {result}")
+                            return {
+                                "success": False,
+                                "error": "Local LLM APIから空のcontentを受信しました",
+                                "raw_response": result,
+                                "model": model,
+                                "response_time": response_time
+                            }
+                        
+                        usage_info = result.get("usage", {})
+                        tokens_used = usage_info.get("total_tokens", 0)
+                    
+                    return {
+                        "success": True, 
+                        "response": content,
+                        "content": content,  # 互換性のため追加
+                        "usage": usage_info,
+                        "tokens_used": tokens_used,  # 互換性のため追加
+                        "model": model,
+                        "response_time": response_time
                     }
-                    tokens_used = usage_info.get("prompt_eval_count", 0) + usage_info.get("eval_count", 0)
-                else:
-                    # OpenAI互換API形式のレスポンス処理
-                    content = result["choices"][0]["message"]["content"]
-                    usage_info = result.get("usage", {})
-                    tokens_used = usage_info.get("total_tokens", 0)
-                
-                return {
-                    "success": True, 
-                    "response": content,
-                    "content": content,  # 互換性のため追加
-                    "usage": usage_info,
-                    "tokens_used": tokens_used,  # 互換性のため追加
-                    "model": model,
-                    "response_time": response_time
-                }
+                except (KeyError, IndexError, TypeError) as e:
+                    logger.error(f"Local LLM API レスポンス解析エラー: {e}")
+                    logger.error(f"レスポンス全体: {result}")
+                    return {
+                        "success": False, 
+                        "error": f"Local LLM API レスポンス解析エラー: {str(e)}",
+                        "raw_response": result,
+                        "model": model,
+                        "response_time": response_time
+                    }
             else:
                 return {
                     "success": False, 
