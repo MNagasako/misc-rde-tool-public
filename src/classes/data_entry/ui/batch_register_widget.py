@@ -12,6 +12,8 @@ from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
+from classes.data_entry.util.template_format_validator import TemplateFormatValidator
+
 # ロガー設定
 logger = logging.getLogger(__name__)
 
@@ -814,6 +816,7 @@ class FileSetTableWidget(QTableWidget):
         super().__init__(parent)
         self.file_sets = []
         self.file_set_manager = None  # file_set_managerへの参照
+        self.required_exts = []  # テンプレート対応拡張子（正規化済み）
         self.setup_ui()
     
     def setup_ui(self):
@@ -837,26 +840,37 @@ class FileSetTableWidget(QTableWidget):
         header.setMinimumSectionSize(60)   # 最小列幅を設定
         
         # カラム幅設定とリサイズ可能設定
-        header.setSectionResizeMode(0, QHeaderView.Interactive)  # ファイルセット名（リサイズ可能）
-        header.setSectionResizeMode(1, QHeaderView.Interactive)        # ファイル数（固定）
-        header.setSectionResizeMode(2, QHeaderView.Interactive)  # マッピングファイル（リサイズ可能）
-        header.setSectionResizeMode(3, QHeaderView.Interactive)        # サイズ（固定）
-        header.setSectionResizeMode(4, QHeaderView.Interactive)  # 整理方法（リサイズ可能）
-        header.setSectionResizeMode(5, QHeaderView.Interactive)  # データ名（リサイズ可能）
-        header.setSectionResizeMode(6, QHeaderView.Interactive)  # 試料（リサイズ可能）
-        header.setSectionResizeMode(7, QHeaderView.Interactive)  # データセット（リサイズ可能）
-        header.setSectionResizeMode(8, QHeaderView.Fixed)        # 操作（固定）
+        # 内容に応じて自動幅を優先しつつ長い列は手動調整可能
+        header.setSectionResizeMode(0, QHeaderView.Interactive)      # 名称
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents) # ファイル数(対象数含む)
+        header.setSectionResizeMode(2, QHeaderView.Interactive)      # マッピング
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents) # サイズ
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents) # 整理方法
+        header.setSectionResizeMode(5, QHeaderView.Interactive)      # データ名
+        header.setSectionResizeMode(6, QHeaderView.Interactive)      # 試料
+        header.setSectionResizeMode(7, QHeaderView.Interactive)      # データセット
+        header.setSectionResizeMode(8, QHeaderView.Fixed)            # 操作
         
         # 初期幅設定（推奨値）
-        self.setColumnWidth(0, 180)  # ファイルセット名（少し大きく）
-        self.setColumnWidth(1, 170)   # ファイル数
-        self.setColumnWidth(2, 120)  # マッピングファイル
-        self.setColumnWidth(3, 80)   # サイズ
-        self.setColumnWidth(4, 100)  # 整理方法
-        self.setColumnWidth(5, 120)  # データ名
-        self.setColumnWidth(6, 100)  # 試料
-        self.setColumnWidth(7, 140)  # データセット
-        self.setColumnWidth(8, 140)  # 操作（登録・削除ボタン用に拡大）
+        self.setColumnWidth(0, 160)
+        self.setColumnWidth(1, 110)  # F/D/M 表示で十分
+        self.setColumnWidth(2, 110)
+        self.setColumnWidth(3, 70)
+        self.setColumnWidth(4, 80)
+        self.setColumnWidth(5, 110)
+        self.setColumnWidth(6, 110)
+        self.setColumnWidth(7, 130)
+        self.setColumnWidth(8, 140)
+
+        # 行高さ・余白調整
+        vh = self.verticalHeader()
+        vh.setDefaultSectionSize(26)
+        vh.setMinimumSectionSize(24)
+        vh.setVisible(False)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        # セルのパディング微調整（既存スタイルに追加）
+        self.setStyleSheet(self.styleSheet() + "\nQTableWidget::item { padding: 2px 4px; }")
         
         # 選択変更シグナル
         self.itemSelectionChanged.connect(self.on_selection_changed)
@@ -896,13 +910,15 @@ class FileSetTableWidget(QTableWidget):
             name_widget = self._create_name_widget_with_icon(file_set)
             self.setCellWidget(row, 0, name_widget)
             
-            # ファイル数（ファイル / フォルダの形式）
+            # ファイル数 + 対象拡張子一致数（F/D/M 形式）
             try:
                 file_count = file_set.get_file_count()
                 dir_count = file_set.get_directory_count()
-                count_text = f"{file_count}F / {dir_count}D"
             except:
-                count_text = "0F / 0D"
+                file_count = 0
+                dir_count = 0
+            match_count = self._compute_match_count(file_set)
+            count_text = f"{file_count}F/{dir_count}D({match_count}M)"
             count_item = QTableWidgetItem(count_text)
             count_item.setTextAlignment(Qt.AlignCenter)
             self.setItem(row, 1, count_item)
@@ -994,6 +1010,29 @@ class FileSetTableWidget(QTableWidget):
             operations_layout.addWidget(delete_btn)
             
             self.setCellWidget(row, 8, operations_widget)  # 操作列に配置
+
+    def _compute_match_count(self, file_set: FileSet) -> int:
+        """テンプレート対応拡張子に一致するファイル数を算出"""
+        if not self.required_exts:
+            return 0
+        total = 0
+        try:
+            for item in file_set.get_valid_items():
+                if getattr(item, 'file_type', None) == FileType.FILE:
+                    name = getattr(item, 'name', '') or getattr(item, 'relative_path', '')
+                    ext = Path(name).suffix.lower().lstrip('.')
+                    if ext in self.required_exts:
+                        total += 1
+        except Exception:
+            pass
+        return total
+
+    def set_required_extensions(self, exts: List[str]):
+        """対象拡張子を設定し再描画"""
+        self.required_exts = [e.lower().strip().lstrip('.') for e in exts]
+        if self.file_sets:
+            # 行を再ロードして F/D/M を更新
+            self.load_file_sets(self.file_sets)
     
     def _format_size(self, size_bytes: int) -> str:
         """ファイルサイズをフォーマット"""
@@ -1122,10 +1161,17 @@ class FileSetTableWidget(QTableWidget):
             
             # v1.18.4: Bearer Tokenはapi_request_helperが自動選択するため、取得不要
             from .batch_preview_dialog import BatchRegisterPreviewDialog
+            allowed_exts = []
+            try:
+                if hasattr(self, 'fileset_table') and self.fileset_table:
+                    allowed_exts = getattr(self.fileset_table, 'required_exts', []) or []
+            except Exception:
+                allowed_exts = []
             dialog = BatchRegisterPreviewDialog(
                 file_sets=[target_fileset],
                 parent=self,
-                bearer_token=None  # v1.18.4: 自動選択に変更
+                bearer_token=None,  # v1.18.4: 自動選択に変更
+                allowed_exts=allowed_exts
             )
             dialog.show()  # ダイアログを表示
             dialog.raise_()  # 最前面に持ってくる
@@ -2065,10 +2111,25 @@ class BatchRegisterWidget(QWidget):
         
         # ファイルセットテーブル
         self.fileset_table = FileSetTableWidget()
+        # スクロールが効かない・見えない対策として最低高さとサイズポリシーを設定
+        try:
+            self.fileset_table.setMinimumHeight(260)
+            self.fileset_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            # スクロールバーの表示ポリシー（必要時）
+            self.fileset_table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            self.fileset_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        except Exception:
+            pass
         self.fileset_table.set_file_set_manager(self.file_set_manager)  # file_set_managerを設定
         fileset_layout.addWidget(self.fileset_table)
         
         fileset_group.setLayout(fileset_layout)
+        # グループ自体にも最低高さを設定し、潰れないようにする
+        try:
+            fileset_group.setMinimumHeight(300)
+            fileset_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        except Exception:
+            pass
         layout.addWidget(fileset_group)
         
         # ファイルセット詳細・設定
@@ -2207,6 +2268,19 @@ class BatchRegisterWidget(QWidget):
         
         detail_layout.addLayout(dataset_layout)
         
+        # --- テンプレート対応拡張子表示ラベル ---
+        self.batch_template_format_label = QLabel("データセットを選択してください")
+        self.batch_template_format_label.setWordWrap(True)
+        self.batch_template_format_label.setStyleSheet(
+            f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
+            f"border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)}; border-radius: 4px;"
+        )
+        detail_layout.addWidget(self.batch_template_format_label)
+        
+        # 検証用バリデータ
+        self.batch_validator = TemplateFormatValidator()
+        self.batch_current_template_id = None
+        
         # スクロールエリアでラップ
         scroll_area = QScrollArea()
         self.scroll_widget = QWidget()  # クラス属性として保存
@@ -2296,6 +2370,12 @@ class BatchRegisterWidget(QWidget):
         
         detail_group.setLayout(detail_layout)
         layout.addWidget(detail_group)
+        # 上:下 の高さ配分（ファイルセット一覧:詳細 = 1:1 に調整）
+        try:
+            layout.setStretch(0, 1)
+            layout.setStretch(1, 1)
+        except Exception:
+            pass
         
         widget.setLayout(layout)
         return widget
@@ -4154,7 +4234,13 @@ class BatchRegisterWidget(QWidget):
             # 新しい詳細プレビューダイアログを表示
             from classes.data_entry.ui.batch_preview_dialog import BatchRegisterPreviewDialog
             
-            dialog = BatchRegisterPreviewDialog(self.file_set_manager.file_sets, self, bearer_token=None)
+            allowed_exts = []
+            try:
+                if hasattr(self, 'fileset_table') and self.fileset_table:
+                    allowed_exts = getattr(self.fileset_table, 'required_exts', []) or []
+            except Exception:
+                allowed_exts = []
+            dialog = BatchRegisterPreviewDialog(self.file_set_manager.file_sets, self, bearer_token=None, allowed_exts=allowed_exts)
             result = dialog.exec()
             
             if result == QDialog.Accepted:
@@ -4212,10 +4298,17 @@ class BatchRegisterWidget(QWidget):
             from .batch_preview_dialog import BatchRegisterPreviewDialog
             
             # 複数ファイルセット用のプレビューダイアログを作成して実行
+            allowed_exts = []
+            try:
+                if hasattr(self, 'fileset_table') and self.fileset_table:
+                    allowed_exts = getattr(self.fileset_table, 'required_exts', []) or []
+            except Exception:
+                allowed_exts = []
             batch_dialog = BatchRegisterPreviewDialog(
                 file_sets=self.file_set_manager.file_sets,
                 parent=self,
-                bearer_token=None  # v1.18.4: 自動選択に変更
+                bearer_token=None,  # v1.18.4: 自動選択に変更
+                allowed_exts=allowed_exts
             )
             
             # プログレスダイアログの表示設定
@@ -4871,6 +4964,38 @@ class BatchRegisterWidget(QWidget):
                 self.update_schema_form(dataset_data)
                 logger.debug("update_schema_form呼び出し後")
                 
+                # --- テンプレート対応拡張子表示を更新 ---
+                template_id = None
+                relationships = dataset_data.get('relationships', {})
+                template = relationships.get('template', {}).get('data', {})
+                if isinstance(template, dict):
+                    template_id = template.get('id', '')
+                
+                self.batch_current_template_id = template_id
+                if not self.batch_validator.is_formats_json_available():
+                    self.batch_template_format_label.setText(
+                        "⚠ 対応ファイル形式情報が読み込まれていません。\n"
+                        "設定 → データ構造化タブでXLSXファイルを読み込んでください。"
+                    )
+                    self.batch_template_format_label.setStyleSheet(
+                        "padding: 8px; background-color: #fff3cd; color: #856404; "
+                        "border: 1px solid #ffc107; border-radius: 4px;"
+                    )
+                else:
+                    format_text = self.batch_validator.get_format_display_text(template_id)
+                    self.batch_template_format_label.setText(f"📋 対応ファイル形式: {format_text}")
+                    self.batch_template_format_label.setStyleSheet(
+                        f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
+                        f"border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)}; border-radius: 4px;"
+                    )
+                    # 対応拡張子をファイルセットテーブルへ反映し対象ファイル数を更新
+                    try:
+                        required_exts = self.batch_validator.get_extensions_for_template(template_id)
+                        if hasattr(self, 'fileset_table') and self.fileset_table:
+                            self.fileset_table.set_required_extensions(required_exts)
+                    except Exception as ext_e:
+                        logger.warning("対応拡張子反映エラー: %s", ext_e)
+                
                 # データセット反映ログ（短時間重複抑制）
                 now_ts = time.time()
                 if not hasattr(self, '_last_reflected_dataset_id'):
@@ -4974,18 +5099,42 @@ class BatchRegisterWidget(QWidget):
                     }
             
             elif resp.status_code == 422:
-                # リクエストフォーマットエラー: クエリパラメータ不正の可能性
+                # updateViews付きの詳細取得が 422 を返すケースがあるため、パラメータを取り除いたリカバリリクエストを試行
+                logger.warning("データセット詳細取得が422を返却: id=%s。パラメータを省いた再取得を試行します", dataset_id)
+                from config.site_rde import URL_RDE_API_BASE
+
+                fallback_url = f"{URL_RDE_API_BASE}datasets/{dataset_id}"
+                logger.debug("[DATASET-VALIDATION] フォールバックURL: %s", fallback_url)
                 try:
-                    error_body = resp.text[:500]
-                    logger.error("リクエストフォーマットエラー (422): id=%s, response=%s", dataset_id, error_body)
-                except Exception:
-                    logger.error("リクエストフォーマットエラー (422): id=%s", dataset_id)
-                return {
-                    'valid': False,
-                    'status_code': 422,
-                    'error_type': 'format_error',
-                    'message': f'リクエストフォーマットエラー (422 Unprocessable Entity)。\n\nDataset ID: {dataset_id}\n\nクエリパラメータまたはヘッダーに問題がある可能性があります。'
-                }
+                    fallback_resp = proxy_get(fallback_url, headers=headers, timeout=10)
+                    if fallback_resp.status_code == 200:
+                        self._verified_datasets.add(dataset_id)
+                        logger.info("パラメータ簡略化後のデータセット取得に成功: %s", dataset_id)
+                        return {'valid': True, 'status_code': 200, 'error_type': None, 'message': ''}
+                    else:
+                        try:
+                            error_body = fallback_resp.text[:500]
+                        except Exception:
+                            error_body = ''
+                        logger.error(
+                            "データセット詳細取得失敗 (fallback): id=%s status=%s response=%s",
+                            dataset_id,
+                            fallback_resp.status_code,
+                            error_body,
+                        )
+                        return {
+                            'valid': False,
+                            'status_code': fallback_resp.status_code,
+                            'error_type': 'format_error',
+                            'message': (
+                                'データセット情報の取得に失敗しました (422)。\n'
+                                f'対象ID: {dataset_id}\n'
+                                '登録対象のデータセットが利用可能か、もしくはAPI仕様変更が発生していないかを確認してください。'
+                            ),
+                        }
+                except Exception as fallback_error:
+                    logger.error("データセット詳細再取得エラー: %s", fallback_error, exc_info=True)
+                    raise
             
             else:
                 logger.error("データセット取得失敗: id=%s status=%s", dataset_id, resp.status_code)
