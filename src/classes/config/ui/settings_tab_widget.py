@@ -64,12 +64,6 @@ class SettingsTabWidget(QWidget):
         # プロキシ設定タブ（段組表示）
         self.setup_proxy_tab_responsive()
         
-        # ネットワーク設定タブ
-        self.setup_network_tab()
-        
-        # アプリケーション設定タブ
-        self.setup_application_tab()
-        
         # AI設定タブ（即座にロード）
         self.setup_ai_tab()
             
@@ -82,8 +76,10 @@ class SettingsTabWidget(QWidget):
         # データ構造化タブ（アップロード + 解析結果表示）
         self.setup_data_structuring_tab()
 
-        # インポートタブ（ダミー）
-        self.setup_import_tab_dummy()
+        # 除外されたタブ（ユーザー要望）:
+        # - ネットワーク設定タブ
+        # - アプリケーション設定タブ
+        # - インポートタブ
         
         # 報告書タブ（即座にロード）
         self.setup_report_tab()

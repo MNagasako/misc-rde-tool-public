@@ -62,6 +62,53 @@ def replace_invalid_path_chars(s):
     })
     return s.translate(table)
 
+def get_dataset_filetype_counts(dataset_obj: dict, bearer_token: str, file_filter_config: dict | None = None) -> dict:
+    """指定データセットの fileType 件数を、実ダウンロード処理と同じパスで集計する。
+    - dataEntry/{dataset_id}.json が無ければ API から include=files を取得
+    - included の file.type='file' の attributes.fileType を集計
+    - file_filter_config が与えられた場合は、'file_types' による絞り込みを適用
+    """
+    try:
+        if not isinstance(dataset_obj, dict):
+            return {}
+        dataset_id = dataset_obj.get('id', '')
+        dataset_attributes = dataset_obj.get('attributes', {})
+        grantNumber = dataset_attributes.get('grantNumber', '')
+
+        # dataEntry ローカルファイル有無を確認（ダウンロード処理に合わせる）
+        entry_path = os.path.normpath(os.path.join(OUTPUT_DIR, f'rde/data/dataEntry/{dataset_id}.json'))
+
+        counts: dict = {}
+
+        def _apply_filter(ftype: str) -> bool:
+            if not file_filter_config:
+                return True
+            ft_list = file_filter_config.get('file_types') or []
+            return (not ft_list) or (ftype in ft_list)
+
+        # ローカル dataEntry がなければ API から取得
+        url = f"https://rde-api.nims.go.jp/data?filter%5Bdataset.id%5D={dataset_id}&sort=-created&page%5Boffset%5D=0&page%5Blimit%5D=100&include=files"
+        headers = {
+            "Accept": "application/vnd.api+json",
+            "Authorization": f"Bearer {bearer_token}",
+            "Origin": "https://rde.nims.go.jp",
+            "Referer": "https://rde.nims.go.jp/",
+        }
+        resp = api_request("GET", url, headers=headers, params=None)
+        if not resp or resp.status_code != 200:
+            return {}
+        jd = resp.json()
+        included = jd.get('included', [])
+        for item in included:
+            if item.get('type') == 'file':
+                ftype = item.get('attributes', {}).get('fileType', 'UNKNOWN')
+                if _apply_filter(ftype):
+                    counts[ftype] = counts.get(ftype, 0) + 1
+        return counts
+    except Exception as e:
+        logger.debug(f"get_dataset_filetype_counts error: {e}")
+        return {}
+
 def download_all_files_from_files_json(data_id, bearer_token=None, parent=None, progress_callback=None):
     """
     dataFiles/{data_id}.json の data 配列内の各ファイルID・fileNameで全ファイルをダウンロードし保存
@@ -771,6 +818,7 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
         logger.info("ステップ1: 全エントリのファイル情報取得中...")
         total_files = 0
         entry_file_counts = {}  # {data_entry_id: ファイル数}
+        filetype_counts = {}
         
         for idx, entry in enumerate(data_entries):
             data_id = entry.get('id')
@@ -820,8 +868,15 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
                     max_download = file_filter_config.get("max_download_count", 0)
                     file_count = len(filtered_files)
                     if max_download > 0 and file_count > max_download:
-                        file_count = max_download
+                        # 上限に合わせて先頭から採用
+                        filtered_files = filtered_files[:max_download]
+                        file_count = len(filtered_files)
                     
+                    # fileType別件数を集計（実ダウンロード予定に準拠）
+                    for f in filtered_files:
+                        ftype = f.get("attributes", {}).get("fileType", "UNKNOWN")
+                        filetype_counts[ftype] = filetype_counts.get(ftype, 0) + 1
+
                     entry_file_counts[data_id] = file_count
                     total_files += file_count
                     logger.debug(f"エントリ {data_id}: {file_count}ファイル")
@@ -878,8 +933,22 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
         errors = result.get("errors", [])
         
         if cancelled:
+            # キャンセル時でもここまでの filetype_counts / total_files / downloaded_file_count を使って内訳付き返却
             logger.warning(f"処理がキャンセルされました: {success_count}件成功, {failed_count}件失敗, {skipped_count}件スキップ")
-            return "キャンセルされました"
+            if filetype_counts:
+                parts = [f"  ・ {k}: {v}件" for k, v in sorted(filetype_counts.items())]
+                inner = "\n".join(parts)
+                counts_text = f"\n\n└─ 内訳（fileType別）:\n{inner}"
+            else:
+                counts_text = "\n\n└─ 内訳（fileType別）: 対象ファイルなし"
+            actual_downloaded = downloaded_file_count[0] if isinstance(downloaded_file_count, list) and downloaded_file_count else 0
+            cancel_msg = (
+                "⚠️ キャンセルされました" +
+                f"\n\n📊 合計ダウンロード予定ファイル: {total_files}件" + counts_text +
+                f"\n\n✅ 実ダウンロード完了ファイル: {actual_downloaded}件"
+            )
+            logger.info(cancel_msg)
+            return cancel_msg
         
         # エラーログ出力
         if errors:
@@ -892,7 +961,22 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
             progress_callback(1.0, 1.0, 
                             f"処理完了: {success_count}エントリ成功, {failed_count}エントリ失敗, {skipped_count}エントリスキップ")
 
-        success_msg = f"dataEntry/{dataset_id}.json内の各data idについてdataFiles/に保存しました。成功: {success_count}件, 失敗: {failed_count}件, スキップ: {skipped_count}件"
+        # ファイルタイプ内訳テキスト
+        if filetype_counts:
+            parts = [f"  ・ {k}: {v}件" for k, v in sorted(filetype_counts.items())]
+            inner = "\n".join(parts)
+            counts_text = f"\n\n└─ 内訳（fileType別）:\n{inner}"
+        else:
+            counts_text = "\n\n└─ 内訳（fileType別）: 対象ファイルなし"
+        actual_downloaded = downloaded_file_count[0] if isinstance(downloaded_file_count, list) and downloaded_file_count else 0
+        success_msg = (
+            f"dataEntry/{dataset_id}.json内の各data idについてdataFiles/に保存しました。\n"
+            f"\n✔ 成功: {success_count}件"
+            f"\n✖ 失敗: {failed_count}件"
+            f"\n⦿ スキップ: {skipped_count}件"
+            f"\n\n📊 合計ダウンロード予定ファイル: {total_files}件" + counts_text +
+            f"\n\n✅ 実ダウンロード完了ファイル: {actual_downloaded}件"
+        )
         logger.info(success_msg)
         return success_msg
 

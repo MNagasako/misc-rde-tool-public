@@ -475,8 +475,9 @@ class UIControllerCore:
 
     def center_window(self):
         """
-        ウィンドウを画面中央（横）、最上部（縦）に移動
+        起動時のウィンドウ位置設定: 画面中央（横）、最上部（縦）
         v2.1.3: 縦位置を画面最上部に変更
+        v2.1.10: 起動時のみ実行、ウィジェット切替時は実行しない
         """
         try:
             from qt_compat.widgets import QApplication
@@ -493,9 +494,10 @@ class UIControllerCore:
                 # 縦位置は最上部に設定（Y座標を0に）
                 x = window_geometry.x()
                 self.parent.move(x, 0)
+                logger.debug("起動時ウィンドウ位置設定: x=%s, y=0", x)
                 
         except Exception as e:
-            logger.error("ウィンドウ位置調整エラー: %s", e)
+            logger.error("ウィンドウ位置設定エラー: %s", e)
     
     def show_grant_number_form(self):
         """

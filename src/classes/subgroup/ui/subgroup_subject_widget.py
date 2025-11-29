@@ -30,7 +30,16 @@ class SubjectEntryWidget(QWidget):
     
     def setup_ui(self):
         """UIセットアップ"""
-        layout = QVBoxLayout()
+        # 領域背景（課題領域）
+        outer_layout = QVBoxLayout()
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        panel = QWidget()
+        panel.setStyleSheet(f"background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)}; border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; border-radius: 4px;")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
         
         # ヘッダー部分
         header_layout = QHBoxLayout()
@@ -62,7 +71,7 @@ class SubjectEntryWidget(QWidget):
         # テーブル部分
         self.table = QTableWidget()
         self.table.setColumnCount(3)  # 課題番号、課題名、削除ボタン
-        self.table.setHorizontalHeaderLabels(["課題番号 *", "課題名", ""])
+        self.table.setHorizontalHeaderLabels(["課題番号 *", "課題名", "削除"])
         
         # テーブル設定
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -86,14 +95,14 @@ class SubjectEntryWidget(QWidget):
         form_layout = QHBoxLayout()
         
         # 課題番号入力
-        form_layout.addWidget(QLabel("課題番号:"))
+        form_layout.addWidget(QLabel("課題番号"))
         self.grant_number_edit = QLineEdit()
         self.grant_number_edit.setPlaceholderText("例: JPMXP1225TU9999-TEST")
         self.grant_number_edit.setMaximumWidth(200)
         form_layout.addWidget(self.grant_number_edit)
         
         # 課題名入力
-        form_layout.addWidget(QLabel("課題名:"))
+        form_layout.addWidget(QLabel("課題名"))
         self.title_edit = QLineEdit()
         self.title_edit.setPlaceholderText("例: 研究課題名（省略可）")
         form_layout.addWidget(self.title_edit)
@@ -121,7 +130,8 @@ class SubjectEntryWidget(QWidget):
         self.grant_number_edit.returnPressed.connect(self.add_from_form)
         self.title_edit.returnPressed.connect(self.add_from_form)
         
-        self.setLayout(layout)
+        outer_layout.addWidget(panel)
+        self.setLayout(outer_layout)
         
         # ThemeManager接続
         theme_manager = ThemeManager.instance()
@@ -221,7 +231,7 @@ class SubjectEntryWidget(QWidget):
             self.table.setItem(row, 1, title_item)
             
             # 削除ボタン
-            delete_button = QPushButton("削除")
+            delete_button = QPushButton("×")
             delete_button.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};

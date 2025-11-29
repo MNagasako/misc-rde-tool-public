@@ -328,7 +328,7 @@ def send_dataset_update_request(widget, parent, selected_dataset,
         f"エンバーゴ期間終了日: {attr.get('embargoDate')}\n"
         f"匿名化: {attr.get('isAnonymized')}\n"
         f"データ登録・削除禁止: {attr.get('isDataEntryProhibited')}\n"
-        f"\nこの操作はARIMデータポータルのデータセット情報を更新します。"
+        f"\nこの操作はRDEのデータセット情報を更新します。"
     )
     
     msg_box = QMessageBox(widget)

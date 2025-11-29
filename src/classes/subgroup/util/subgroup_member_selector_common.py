@@ -61,6 +61,18 @@ class CommonSubgroupMemberSelector(QWidget):
         try:
             from ..core import subgroup_api_helper
             
+            # キャッシュマネージャー初期化：subGroup.jsonからユーザー情報をロード
+            try:
+                from ..core.user_cache_manager import UserCacheManager
+                from ..core.subgroup_data_manager import SubgroupDataManager
+                cache_mgr = UserCacheManager.instance()
+                if not cache_mgr.is_initialized():
+                    user_entries_for_cache = SubgroupDataManager.load_user_entries()
+                    cache_mgr.load_from_subgroup_json(user_entries_for_cache)
+                    logger.debug(f"ユーザーキャッシュ初期化完了: {cache_mgr.get_cache_stats()}")
+            except Exception as cache_init_err:
+                logger.warning(f"キャッシュ初期化エラー: {cache_init_err}")
+            
             # 一時ファイルから動的ユーザーを読み込み
             temp_dynamic_users = subgroup_api_helper.load_dynamic_users_from_temp()
             
@@ -109,23 +121,41 @@ class CommonSubgroupMemberSelector(QWidget):
             filter_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_PRIMARY)};")
             filter_layout.addWidget(filter_label)
             
-            # チェックボックス共通スタイル（テキスト色を明示的に指定）
+            # チェックボックス共通スタイル（テキスト色を明示的に指定・サイズ縮小）
             checkbox_style = f"""
                 QCheckBox {{
-                    spacing: 5px;
+                    spacing: 3px;
                     color: {get_color(ThemeKey.TEXT_PRIMARY)};
                 }}
                 QCheckBox::indicator {{
-                    width: 16px;
-                    height: 16px;
-                    border: 2px solid {get_color(ThemeKey.INPUT_BORDER)};
-                    border-radius: 3px;
+                    width: 14px;
+                    height: 14px;
+                    border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                    border-radius: 2px;
                     background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
                 }}
                 QCheckBox::indicator:hover {{
                     border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
                 }}
                 QCheckBox::indicator:checked {{
+                    background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                    border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                }}
+                QRadioButton {{
+                    spacing: 3px;
+                    color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                }}
+                QRadioButton::indicator {{
+                    width: 14px;
+                    height: 14px;
+                    border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                    border-radius: 7px;
+                    background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                }}
+                QRadioButton::indicator:hover {{
+                    border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                }}
+                QRadioButton::indicator:checked {{
                     background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
                     border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
                 }}
@@ -163,6 +193,12 @@ class CommonSubgroupMemberSelector(QWidget):
         self.add_user_button.clicked.connect(self.add_user_by_email)
         add_user_layout.addWidget(self.add_user_button)
         
+        # 全行再フェッチ（手動更新）ボタン
+        refresh_button = QPushButton("手動更新")
+        refresh_button.setToolTip("氏名/メールをAPIで再取得してキャッシュ更新")
+        refresh_button.clicked.connect(self.refresh_all_entries)
+        add_user_layout.addWidget(refresh_button)
+
         layout.addLayout(add_user_layout)
         
         if isinstance(self.user_entries, str):
@@ -181,6 +217,42 @@ class CommonSubgroupMemberSelector(QWidget):
         # ThemeManager接続
         theme_manager = ThemeManager.instance()
         theme_manager.theme_changed.connect(self.refresh_theme)
+
+    def refresh_all_entries(self):
+        """全行の氏名・メールをAPIで再フェッチしてキャッシュ更新"""
+        try:
+            from core.bearer_token_manager import BearerTokenManager
+            from ..core.subgroup_api_helper import fetch_user_details_by_id
+            from ..core.user_cache_manager import cache_user_from_api
+            bearer_token = BearerTokenManager.get_valid_token()
+            if not bearer_token:
+                QMessageBox.warning(self, "認証エラー", "Bearer tokenが取得できません。ログインを確認してください。")
+                return
+            updated_count = 0
+            for row in range(self.table.rowCount()):
+                owner_radio = self.table.cellWidget(row, 2)
+                if not owner_radio or not hasattr(owner_radio, 'user_id'):
+                    continue
+                user_id = owner_radio.user_id
+                details = fetch_user_details_by_id(user_id, bearer_token)
+                if details:
+                    cache_user_from_api(user_id, details)
+                    name = details.get('userName', '')
+                    mail = details.get('emailAddress', '')
+                    # 画面更新
+                    name_item = self.table.item(row, 0)
+                    email_item = self.table.item(row, 1)
+                    if name_item:
+                        name_item.setText(name)
+                    if email_item:
+                        email_item.setText(mail)
+                    updated_count += 1
+                    # シェル出力（確実に見えるようprintも使用）
+                    print(f"[MemberSelector.refresh] row={row} ID={user_id} NAME={name} MAIL={mail}")
+                    logger.info(f"[MemberSelector.refresh] row={row} ID={user_id} NAME={name} MAIL={mail}")
+            QMessageBox.information(self, "更新完了", f"{updated_count}件のエントリーを更新しました。")
+        except Exception as e:
+            QMessageBox.critical(self, "更新エラー", f"手動更新中にエラーが発生しました:\n{e}")
     
     def create_custom_table(self):
         """カスタムテーブルウィジェット作成"""
@@ -336,10 +408,24 @@ class CommonSubgroupMemberSelector(QWidget):
                     viewer_cb.setChecked(row_data['viewer_checked'])
                     self.setCellWidget(new_row, 6, viewer_cb)
 
-                    # 除外ボタン再作成
+                    # 除外ボタン再作成（×印＋赤色）
                     from qt_compat.widgets import QPushButton
-                    remove_btn = QPushButton("除外")
-                    remove_btn.setMaximumWidth(60)
+                    remove_btn = QPushButton("×")
+                    remove_btn.setMaximumWidth(40)
+                    remove_btn.setStyleSheet("""
+                        QPushButton {
+                            background-color: #dc3545;
+                            color: white;
+                            font-weight: bold;
+                            font-size: 14px;
+                            border: none;
+                            border-radius: 3px;
+                            padding: 2px;
+                        }
+                        QPushButton:hover {
+                            background-color: #c82333;
+                        }
+                    """)
                     remove_btn.clicked.connect(lambda checked, r=new_row, uid=row_data['owner_user_id']: self.parent_selector._on_remove_member(r, uid))
                     self.setCellWidget(new_row, 7, remove_btn)
 
@@ -486,17 +572,90 @@ class CommonSubgroupMemberSelector(QWidget):
         for row, user in enumerate(self.user_entries):
             # データ構造を統一的に処理
             # 新形式: 直接プロパティ（load_unified_member_list由来）
-            if 'userName' in user:
-                user_name = user.get('userName', '')
-                email = user.get('emailAddress', '')
-                user_id = user.get('id', '')
+            # 入力の多様な形式に対応して堅牢に抽出
+            if isinstance(user, dict):
+                if 'userName' in user or 'emailAddress' in user:
+                    user_name = user.get('userName', '')
+                    # emailAddress優先、次いでemail, mailAddressのフォールバック
+                    email = (
+                        user.get('emailAddress')
+                        or user.get('email')
+                        or user.get('mailAddress')
+                        or ''
+                    )
+                    user_id = user.get('id', '')
+                else:
+                    # 旧形式: attributes構造
+                    attr = user.get("attributes", {})
+                    user_name = attr.get('userName', '')
+                    email = (
+                        attr.get('emailAddress')
+                        or attr.get('email')
+                        or attr.get('mailAddress')
+                        or ''
+                    )
+                    user_id = user.get("id", "")
             else:
-                # 旧形式: attributes構造
-                attr = user.get("attributes", {})
-                user_name = attr.get('userName', '')
-                email = attr.get('emailAddress', '')
-                user_id = user.get("id", "")
+                # 想定外形式
+                user_name = ''
+                email = ''
+                user_id = ''
+
+            # デバッグログ: 元データ構造と値を出力
+            try:
+                logger.info(
+                    "[MemberSelector.populate] row=%s, source=%s, keys=%s, ID=%s, NAME=%s, MAIL=%s",
+                    row,
+                    user.get('source', user.get('source_format', 'unknown')),
+                    sorted(list(user.keys())) if isinstance(user, dict) else type(user),
+                    (user_id or ''),
+                    (user_name or ''),
+                    (email or '')
+                )
+            except Exception:
+                pass
             
+            # 氏名/メールの欠損時はキャッシュ/APIで補完しキャッシュ更新
+            try:
+                if (not user_name or user_name.strip() == '') or (not email or email.strip() == ''):
+                    from ..core.user_cache_manager import get_cached_user, cache_user_from_api
+                    cached = None
+                    if user_id:
+                        cached = get_cached_user(user_id)
+                    if cached:
+                        user_name = user_name or cached.get('userName', '')
+                        email = email or cached.get('emailAddress', '')
+                        logger.debug(f"修正タブ: キャッシュ補完 {user_id} → name='{user_name}', email='{email}'")
+                    else:
+                        from ..core.subgroup_api_helper import fetch_user_details_by_id
+                        from core.bearer_token_manager import BearerTokenManager
+                        bearer_token = BearerTokenManager.get_valid_token()
+                        if bearer_token and user_id:
+                            user_details = fetch_user_details_by_id(user_id, bearer_token)
+                            if user_details:
+                                fetched_name = user_details.get('userName', '')
+                                fetched_email = user_details.get('emailAddress', '')
+                                if not user_name:
+                                    user_name = fetched_name
+                                if not email:
+                                    email = fetched_email
+                                cache_user_from_api(user_id, user_details)
+                                logger.debug(f"修正タブ: API補完&キャッシュ更新 {user_id} → name='{user_name}', email='{email}'")
+            except Exception as e:
+                logger.debug(f"修正タブ: 氏名/メール補完失敗（ID: {user_id}）: {e}")
+
+            # デバッグログ: 補完後の値
+            try:
+                logger.info(
+                    "[MemberSelector.populate] after-complement row=%s, ID=%s, NAME=%s, MAIL=%s",
+                    row,
+                    (user_id or ''),
+                    (user_name or ''),
+                    (email or '')
+                )
+            except Exception:
+                pass
+
             # メンバー名
             name_item = QTableWidgetItem(user_name)
             name_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
@@ -583,9 +742,23 @@ class CommonSubgroupMemberSelector(QWidget):
                     member_cb.setChecked(False)
                     agent_cb.setChecked(False)
 
-            # 除外ボタン
-            remove_btn = QPushButton("除外")
-            remove_btn.setMaximumWidth(60)
+            # 除外ボタン（×印＋赤色）
+            remove_btn = QPushButton("×")
+            remove_btn.setMaximumWidth(40)
+            remove_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #dc3545;
+                    color: white;
+                    font-weight: bold;
+                    font-size: 14px;
+                    border: none;
+                    border-radius: 3px;
+                    padding: 2px;
+                }
+                QPushButton:hover {
+                    background-color: #c82333;
+                }
+            """)
             remove_btn.clicked.connect(lambda checked, r=row, uid=user_id: self._on_remove_member(r, uid))
             self.table.setCellWidget(row, 7, remove_btn)
             
@@ -875,6 +1048,14 @@ class CommonSubgroupMemberSelector(QWidget):
                 'givenName': user.get('attributes', {}).get('givenName', ''),
                 'source': 'dynamic'
             }
+            
+            # キャッシュに保存
+            try:
+                from ..core.user_cache_manager import cache_user
+                cache_user(user_id, user_data, source="manual")
+                logger.debug(f"ユーザー追加時にキャッシュ保存: {user_id} ({user_name})")
+            except Exception as cache_err:
+                logger.warning(f"キャッシュ保存失敗: {cache_err}")
             
             # 動的ユーザーリストに追加
             if not any(u.get('id') == user_id for u in self.dynamic_users):

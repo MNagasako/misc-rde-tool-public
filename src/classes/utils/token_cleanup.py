@@ -27,6 +27,24 @@ def is_debug_skip_mode() -> bool:
     return debug_skip in ('1', 'true', 'yes')
 
 
+def should_skip_cleanup() -> bool:
+    """
+    トークンクリーンアップをスキップすべきかチェック
+    
+    開発モード（--keep-tokens引数またはSKIP_TOKEN_CLEANUP環境変数）が有効な場合、
+    トークン・認証情報の自動削除をスキップします。
+    
+    Returns:
+        bool: クリーンアップをスキップする場合True
+    
+    Note:
+        この機能は開発用途のみに使用してください。
+        本番環境ではセキュリティリスクがあります。
+    """
+    skip_cleanup = os.environ.get('SKIP_TOKEN_CLEANUP', '').lower()
+    return skip_cleanup in ('1', 'true', 'yes')
+
+
 def clear_private_directory():
     """
     output/.private ディレクトリの内容をクリア
@@ -78,9 +96,16 @@ def cleanup_on_startup():
     """
     起動時のクリーンアップ処理
     
-    v2.0.4: 常に実行（セキュリティのため）
+    v2.1.8: SKIP_TOKEN_CLEANUP環境変数が有効な場合はスキップ
     output/.private の内容を自動削除します。
     """
+    if should_skip_cleanup():
+        logger.warning("[CLEANUP] 開発モード - 起動時トークンクリーンアップをスキップ")
+        print("=" * 80)
+        print("⚠️  開発モード: 既存トークン・認証情報を保持します")
+        print("=" * 80)
+        return
+    
     debug_mode = is_debug_skip_mode()
     
     if debug_mode:
@@ -103,9 +128,16 @@ def cleanup_on_exit():
     """
     終了時のクリーンアップ処理
     
-    v2.0.4: 常に実行（セキュリティのため）
+    v2.1.8: SKIP_TOKEN_CLEANUP環境変数が有効な場合はスキップ
     output/.private の内容を自動削除します。
     """
+    if should_skip_cleanup():
+        logger.warning("[CLEANUP] 開発モード - 終了時トークンクリーンアップをスキップ")
+        print("=" * 80)
+        print("⚠️  開発モード: トークン・認証情報を保持したまま終了します")
+        print("=" * 80)
+        return
+    
     debug_mode = is_debug_skip_mode()
     
     if debug_mode:

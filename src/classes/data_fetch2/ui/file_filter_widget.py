@@ -12,7 +12,8 @@ from qt_compat.widgets import (
     QGroupBox, QPushButton, QScrollArea, QTextEdit,
     QFrame, QButtonGroup, QRadioButton, QSlider
 )
-from qt_compat.core import Qt, Signal
+from qt_compat.core import Qt, Signal, QTimer
+from qt_compat.widgets import QSizePolicy
 from qt_compat.gui import QFont, QIntValidator
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
@@ -20,9 +21,10 @@ from classes.theme.theme_manager import get_color
 logger = logging.getLogger(__name__)
 
 from ..conf.file_filter_config import (
-    FILE_TYPES, MEDIA_TYPES, FILE_EXTENSIONS, 
+    FILE_TYPES, MEDIA_TYPES, FILE_EXTENSIONS,
     FILE_SIZE_RANGES, get_default_filter
 )
+from classes.config.core import supported_formats_service as formats_service
 from ..util.file_filter_util import validate_filter_config, get_filter_summary
 
 class FileFilterWidget(QWidget):
@@ -30,22 +32,42 @@ class FileFilterWidget(QWidget):
     
     # フィルタ変更通知シグナル（PySide6: dict→objectに変更）
     filterChanged = Signal(object)
+
+    # 候補キャッシュ（プロセス内メモリ）
+    _CACHED_EXTS: List[str] = []
+    _CACHED_MEDIA: List[str] = []
+    # 初期描画のタイミング計測情報
+    _last_timing: Dict[str, float] = {}
     
     def __init__(self, parent=None):
         super().__init__(parent)
         
         self.filter_config = get_default_filter()
-        self.setup_ui()
+        self.setup_ui_content()  # 即座に完全なUIを構築
         
         # ThemeManager接続
         from classes.theme.theme_manager import ThemeManager
         theme_manager = ThemeManager.instance()
         theme_manager.theme_changed.connect(self.refresh_theme)
         
-    def setup_ui(self):
-        """UI初期化"""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
+    def setup_ui_content(self):
+        """UI本体の構築"""
+        # 初期化時の再描画を抑制して一括構築
+        import time
+        logger.info("[FileFilter] UI構築開始")
+        t0 = time.perf_counter()
+        
+        # 全体の更新を完全に停止
+        self.setUpdatesEnabled(False)
+        
+        # レイアウト作成（既存がなければ新規、あれば再利用）
+        layout = self.layout()
+        if not layout:
+            layout = QVBoxLayout(self)
+            layout.setContentsMargins(5, 5, 5, 5)
+        
+        # レイアウトの自動調整を一時無効化
+        layout.setSizeConstraint(QVBoxLayout.SetNoConstraint)
         
         # チェックボックス共通スタイル（視認性向上）
         self.checkbox_style = f"""
@@ -91,23 +113,52 @@ class FileFilterWidget(QWidget):
             }}
         """
         
-        # スクロールエリア
+        # まずはタブ上部に「現在のフィルタ設定」と「操作ボタン」を配置（常時表示）
+        header_status = self.create_status_display()
+        layout.addWidget(header_status)
+        header_actions = self.create_action_buttons()
+        layout.addWidget(header_actions)
+
+        # スクロールエリア（フィルタ設定本体）
         scroll_area = QScrollArea(self)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setMinimumHeight(600)
+        scroll_area.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding))
+        # 高さは後段で安定化処理時に決定する（過度な固定でスクロールが消えないようにする）
         
         # メインコンテンツ
         content_widget = QWidget()
+        content_widget.setUpdatesEnabled(False)
         content_layout = QVBoxLayout(content_widget)
+        # コンテンツレイアウトも自動調整を無効化
+        content_layout.setSizeConstraint(QVBoxLayout.SetNoConstraint)
+        # コンテンツ側は高さを固定せず増加を許容（スクロールバー維持のため）
         
+        # 候補リスト拡充（キャッシュ優先 → ソース取り込み）
+        t_aug_start = time.perf_counter()
+        if not FileFilterWidget._CACHED_EXTS or not FileFilterWidget._CACHED_MEDIA:
+            exts, media = self._augment_candidates_from_supported_formats()
+            FileFilterWidget._CACHED_EXTS = exts
+            FileFilterWidget._CACHED_MEDIA = media
+        self._ext_candidates = list(FileFilterWidget._CACHED_EXTS)
+        self._media_candidates = list(FileFilterWidget._CACHED_MEDIA)
+        t_aug_end = time.perf_counter()
+        if not self._ext_candidates:
+            self._ext_candidates = list(FILE_EXTENSIONS)
+        if not self._media_candidates:
+            self._media_candidates = list(MEDIA_TYPES)
+
         # ファイルタイプフィルタ
         content_layout.addWidget(self.create_filetype_group())
         
         # メディアタイプフィルタ
+        t_media_start = time.perf_counter()
         content_layout.addWidget(self.create_mediatype_group())
+        t_media_end = time.perf_counter()
         
         # 拡張子フィルタ
+        t_ext_start = time.perf_counter()
         content_layout.addWidget(self.create_extension_group())
+        t_ext_end = time.perf_counter()
         
         # ファイルサイズフィルタ
         content_layout.addWidget(self.create_filesize_group())
@@ -118,15 +169,95 @@ class FileFilterWidget(QWidget):
         # ダウンロード上限設定
         content_layout.addWidget(self.create_download_limit_group())
         
-        # フィルタ操作ボタン
-        content_layout.addWidget(self.create_action_buttons())
-        
-        # フィルタ状況表示
-        content_layout.addWidget(self.create_status_display())
+        # 操作ボタン/状況表示はヘッダに移動したためスクロール対象から除外
         
         content_layout.addStretch()
+        
+        # スクロールエリアへ設定（まだ更新は無効のまま）
         scroll_area.setWidget(content_widget)
         layout.addWidget(scroll_area)
+        self._filter_scroll_area = scroll_area
+        
+        # レイアウトを確定させる（ジオメトリ計算を完了）
+        logger.info("[FileFilter] レイアウト確定開始")
+        content_widget.updateGeometry()
+        content_layout.activate()  # レイアウト計算を強制実行
+        self.updateGeometry()
+        layout.activate()
+        logger.info("[FileFilter] レイアウト確定完了")
+        
+        # 全ての構築とレイアウト計算完了後に一度だけ更新を有効化
+        content_widget.setUpdatesEnabled(True)
+        self.setUpdatesEnabled(True)
+        
+        # スクロール領域の高さをウインドウに合わせて初期設定
+        self._filter_header_status = header_status
+        self._filter_header_actions = header_actions
+        self._filter_scroll_area = scroll_area
+        # スクロールバーは最初から必要に応じて表示（見た目維持のため）
+        try:
+            self._filter_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        except Exception:
+            pass
+        self._stabilized = False
+        self._stabilize_timer = None
+        # 初期高さの確定をデバウンスして実行
+        self._schedule_stabilize_height()
+
+        t_end = time.perf_counter()
+        logger.info(f"[FileFilter] UI構築完了: {t_end - t0:.3f}秒")
+        FileFilterWidget._last_timing = {
+            'total_setup_ui_sec': round(t_end - t0, 6),
+            'augment_candidates_sec': round(t_aug_end - t_aug_start, 6),
+            'build_mediatype_group_sec': round(t_media_end - t_media_start, 6),
+            'build_extension_group_sec': round(t_ext_end - t_ext_start, 6),
+        }
+        
+    def setup_ui(self):
+        """UI初期化（旧エントリポイント、互換性のため残す）"""
+        self.setup_ui_content()
+
+    def resizeEvent(self, event):
+        """リサイズ時: 初期はデバウンス、安定後は即時反映"""
+        try:
+            if not getattr(self, '_stabilized', False):
+                # 初期安定までは度々の高さ変更を抑制
+                self._schedule_stabilize_height()
+            else:
+                self._set_scroll_height()
+        except Exception:
+            pass
+        super().resizeEvent(event)
+
+    def _set_scroll_height(self):
+        """タブ領域に合わせてスクロールエリア高さを設定"""
+        if not hasattr(self, '_filter_scroll_area') or not self._filter_scroll_area:
+            return
+        header_height = 0
+        if hasattr(self, '_filter_header_status') and self._filter_header_status:
+            header_height += self._filter_header_status.sizeHint().height()
+        if hasattr(self, '_filter_header_actions') and self._filter_header_actions:
+            header_height += self._filter_header_actions.sizeHint().height()
+        # パディング分を差し引き、ウインドウに合わせる
+        available = max(self.height() - header_height - 20, 200)
+        self._filter_scroll_area.setMinimumHeight(available)
+        self._filter_scroll_area.setMaximumHeight(available)
+
+    def _schedule_stabilize_height(self):
+        """初期描画時の高さ確定をデバウンス"""
+        if getattr(self, '_stabilize_timer', None) is None:
+            self._stabilize_timer = QTimer(self)
+            self._stabilize_timer.setSingleShot(True)
+            self._stabilize_timer.timeout.connect(self._finalize_initial_height)
+        # 40msに短縮し初期表示完了を高速化
+        self._stabilize_timer.start(40)
+
+    def _finalize_initial_height(self):
+        """初回表示の高さを一度だけ確定し、スクロールバーを有効化"""
+        try:
+            self._set_scroll_height()
+        finally:
+            self._stabilized = True
         
     def create_filetype_group(self) -> "QGroupBox":
         """ファイルタイプ選択グループ"""
@@ -180,14 +311,67 @@ class FileFilterWidget(QWidget):
         
         # チェックボックス群
         self.mediatype_checkboxes = {}
-        for media_type in MEDIA_TYPES:
+        for media_type in getattr(self, '_media_candidates', MEDIA_TYPES):
             checkbox = QCheckBox(media_type)
             checkbox.setStyleSheet(self.checkbox_style)
             checkbox.stateChanged.connect(self.on_filter_changed)
             self.mediatype_checkboxes[media_type] = checkbox
             layout.addWidget(checkbox)
+
+        # 任意追加UI
+        add_layout = QHBoxLayout()
+        add_input = QLineEdit()
+        add_input.setPlaceholderText("任意のメディアタイプ（例: image/svg+xml）を追加")
+        add_btn = QPushButton("追加")
+        add_btn.setStyleSheet(self.button_style)
+        # 手動更新ボタン（キャッシュ更新→再構築）
+        refresh_btn = QPushButton("🔄 更新")
+        refresh_btn.setToolTip("対応形式を再取得して一覧を更新")
+        refresh_btn.setStyleSheet(self.button_style)
+        def _refresh_media():
+            exts, media = self._augment_candidates_from_supported_formats()
+            FileFilterWidget._CACHED_EXTS = exts
+            FileFilterWidget._CACHED_MEDIA = media
+            self._rebuild_mediatype_group(layout)
+        refresh_btn.clicked.connect(_refresh_media)
+        def _add_media_type():
+            text = add_input.text().strip()
+            if not text:
+                return
+            if text not in self.mediatype_checkboxes:
+                cb = QCheckBox(text)
+                cb.setStyleSheet(self.checkbox_style)
+                cb.setChecked(True)
+                cb.stateChanged.connect(self.on_filter_changed)
+                self.mediatype_checkboxes[text] = cb
+                layout.addWidget(cb)
+                self.on_filter_changed()
+                add_input.clear()
+        add_btn.clicked.connect(_add_media_type)
+        add_layout.addWidget(add_input)
+        add_layout.addWidget(add_btn)
+        add_layout.addWidget(refresh_btn)
+        layout.addLayout(add_layout)
             
         return group
+
+    def _rebuild_mediatype_group(self, layout: QVBoxLayout):
+        """メディアタイプグループをキャッシュから再構築"""
+        try:
+            # 既存チェックボックス削除
+            for mt, cb in list(getattr(self, 'mediatype_checkboxes', {}).items()):
+                cb.setParent(None)
+            self.mediatype_checkboxes = {}
+            # 新規候補で再追加
+            for media_type in FileFilterWidget._CACHED_MEDIA:
+                checkbox = QCheckBox(media_type)
+                checkbox.setStyleSheet(self.checkbox_style)
+                checkbox.stateChanged.connect(self.on_filter_changed)
+                self.mediatype_checkboxes[media_type] = checkbox
+                layout.addWidget(checkbox)
+            self.on_filter_changed()
+        except Exception:
+            pass
         
     def create_extension_group(self) -> "QGroupBox":
         """拡張子選択グループ"""
@@ -202,28 +386,129 @@ class FileFilterWidget(QWidget):
         select_none_btn.setStyleSheet(self.button_style)
         select_all_btn.clicked.connect(self.select_all_extensions)
         select_none_btn.clicked.connect(self.select_none_extensions)
+        # 手動更新ボタン（キャッシュ更新→再構築）
+        refresh_btn = QPushButton("🔄 更新")
+        refresh_btn.setToolTip("対応形式を再取得して一覧を更新")
+        refresh_btn.setStyleSheet(self.button_style)
+        def _refresh_exts():
+            exts, media = self._augment_candidates_from_supported_formats()
+            FileFilterWidget._CACHED_EXTS = exts
+            FileFilterWidget._CACHED_MEDIA = media
+            self._rebuild_extension_grid(layout)
+        refresh_btn.clicked.connect(_refresh_exts)
         button_layout.addWidget(select_all_btn)
         button_layout.addWidget(select_none_btn)
+        button_layout.addWidget(refresh_btn)
         button_layout.addStretch()
         layout.addLayout(button_layout)
         
-        # チェックボックス群（2列レイアウト）
-        grid_layout = QGridLayout()
+        # チェックボックス群（7列レイアウト）をコンテナ内で一括構築
+        container = QWidget(group)
+        container.setUpdatesEnabled(False)
+        grid_layout = QGridLayout(container)
+        grid_layout.setHorizontalSpacing(12)
+        grid_layout.setVerticalSpacing(6)
         self.extension_checkboxes = {}
+        columns = 7
         row, col = 0, 0
-        for extension in FILE_EXTENSIONS:
-            checkbox = QCheckBox(f".{extension}")
+        # シグナルを後でまとめて接続するために一時保持
+        pending_checkboxes: List[QCheckBox] = []
+        for extension in getattr(self, '_ext_candidates', FILE_EXTENSIONS):
+            checkbox = QCheckBox(f".{extension}", parent=container)
             checkbox.setStyleSheet(self.checkbox_style)
-            checkbox.stateChanged.connect(self.on_filter_changed)
             self.extension_checkboxes[extension] = checkbox
             grid_layout.addWidget(checkbox, row, col)
+            pending_checkboxes.append(checkbox)
             col += 1
-            if col >= 2:
+            if col >= columns:
                 col = 0
                 row += 1
-                
-        layout.addLayout(grid_layout)
+
+        # メタ情報保持
+        self._ext_grid_layout = grid_layout
+        self._ext_grid_cols = columns
+        self._ext_grid_pos = (row, col)
+        
+        # まとめて接続（描画解放前に一度だけ）
+        for cb in pending_checkboxes:
+            cb.stateChanged.connect(self.on_filter_changed)
+        
+        # 一括構築完了後にコンテナを追加して表示
+        container.setUpdatesEnabled(True)
+        layout.addWidget(container)
+
+        # 任意追加UI
+        add_layout = QHBoxLayout()
+        add_input = QLineEdit()
+        add_input.setPlaceholderText("任意の拡張子を追加（例: svg, raw）")
+        add_btn = QPushButton("追加")
+        add_btn.setStyleSheet(self.button_style)
+        def _add_extension():
+            raw = add_input.text().strip().lower()
+            if not raw:
+                return
+            ext = raw.lstrip('.')
+            if ext not in self.extension_checkboxes:
+                cb = QCheckBox(f".{ext}")
+                cb.setStyleSheet(self.checkbox_style)
+                cb.setChecked(True)
+                cb.stateChanged.connect(self.on_filter_changed)
+                self.extension_checkboxes[ext] = cb
+                # 新規もグリッドに追加（5列で折り返し）
+                row, col = getattr(self, '_ext_grid_pos', (0, 0))
+                cols = getattr(self, '_ext_grid_cols', 5)
+                grid = getattr(self, '_ext_grid_layout', None)
+                if grid is not None:
+                    grid.addWidget(cb, row, col)
+                    col += 1
+                    if col >= cols:
+                        col = 0
+                        row += 1
+                    self._ext_grid_pos = (row, col)
+                self.on_filter_changed()
+                add_input.clear()
+        add_btn.clicked.connect(_add_extension)
+        add_layout.addWidget(add_input)
+        add_layout.addWidget(add_btn)
+        layout.addLayout(add_layout)
         return group
+
+    def _rebuild_extension_grid(self, layout: QVBoxLayout):
+        """拡張子グリッドをキャッシュから再構築"""
+        try:
+            # 既存チェックボックス削除
+            for ext, cb in list(getattr(self, 'extension_checkboxes', {}).items()):
+                cb.setParent(None)
+            # 新しいグリッド
+            grid_layout = QGridLayout()
+            grid_layout.setHorizontalSpacing(12)
+            grid_layout.setVerticalSpacing(6)
+            self.extension_checkboxes = {}
+            columns = getattr(self, '_ext_grid_cols', 7)
+            row, col = 0, 0
+            for extension in FileFilterWidget._CACHED_EXTS:
+                checkbox = QCheckBox(f".{extension}")
+                checkbox.setStyleSheet(self.checkbox_style)
+                checkbox.stateChanged.connect(self.on_filter_changed)
+                self.extension_checkboxes[extension] = checkbox
+                grid_layout.addWidget(checkbox, row, col)
+                col += 1
+                if col >= columns:
+                    col = 0
+                    row += 1
+            self._ext_grid_layout = grid_layout
+            self._ext_grid_cols = columns
+            self._ext_grid_pos = (row, col)
+            # 既存のレイアウト末尾に再追加（旧グリッドの親からは外している）
+            layout.addLayout(grid_layout)
+            self.on_filter_changed()
+        except Exception:
+            pass
+
+    @staticmethod
+    def get_last_timing() -> Dict[str, float]:
+        """直近の初期描画タイミング情報を取得"""
+        return dict(FileFilterWidget._last_timing)
         
     def create_filesize_group(self) -> "QGroupBox":
         """ファイルサイズフィルタグループ"""
@@ -511,7 +796,7 @@ class FileFilterWidget(QWidget):
         preset_config.update({
             "file_types": ["MAIN_IMAGE"],
             "media_types": ["image/png", "image/jpeg", "image/tiff"],
-            "extensions": ["png", "jpeg", "tif"]
+            "extensions": ["png", "jpg", "jpeg", "tif"]
         })
         self.set_filter_config(preset_config)
         
@@ -614,6 +899,50 @@ class FileFilterWidget(QWidget):
             self.update()
         except Exception as e:
             logger.error(f"FileFilterWidget: テーマ更新エラー: {e}")
+
+    def _augment_candidates_from_supported_formats(self):
+        """対応ファイル形式JSONから拡張子候補と対応メディアタイプ候補を拡充し返す。
+        取得済みの形式を初期値として採用する。
+        戻り値: (extensions: List[str], media_types: List[str])
+        """
+        try:
+            import os, json
+            out_path = formats_service.get_default_output_path()
+            if not os.path.exists(out_path):
+                return (list(FILE_EXTENSIONS), list(MEDIA_TYPES))
+            with open(out_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            entries = meta.get("entries") or []
+            exts = set(FILE_EXTENSIONS)
+            media = set(MEDIA_TYPES)
+
+            # 既知拡張子→MIMEの簡易マップ（不足は任意追加で補完可能）
+            mime_map = {
+                "png": "image/png",
+                "jpg": "image/jpeg",
+                "jpeg": "image/jpeg",
+                "tif": "image/tiff",
+                "tiff": "image/tiff",
+                "csv": "text/csv",
+                "json": "application/json",
+                "txt": "text/plain",
+                "pdf": "application/pdf",
+                "xml": "application/xml",
+            }
+
+            for e in entries:
+                for ext in (e.get("file_exts") or []):
+                    if isinstance(ext, str) and ext:
+                        exts.add(ext.lower())
+                        mt = mime_map.get(ext.lower())
+                        if mt:
+                            media.add(mt)
+
+            # 更新反映（順序はアルファベット順に整える）
+            return (sorted(exts), sorted(media))
+        except Exception as exc:
+            logger.warning(f"対応形式候補の取り込みに失敗: {exc}")
+            return (list(FILE_EXTENSIONS), list(MEDIA_TYPES))
 
 def create_file_filter_widget(parent=None) -> FileFilterWidget:
     """ファイルフィルタウィジェット作成ファクトリ関数"""

@@ -295,12 +295,14 @@ class KeyringCredentialStore(BaseCredentialStore):
             # パスワードとメタデータを削除
             try:
                 self._keyring.delete_password(self.SERVICE_NAME, username)
-            except:
+            except Exception as e:
+                logger.warning(f"キーチェーンパスワード削除失敗: {e}")
                 pass  # 削除失敗は警告のみ
             
             try:
                 self._keyring.delete_password(f"{self.SERVICE_NAME}_meta", username)
-            except:
+            except Exception as e:
+                logger.warning(f"キーチェーンメタデータ削除失敗: {e}")
                 pass
             
             logger.info(f"認証情報をキーチェーンから削除: {username}")
@@ -404,7 +406,8 @@ class EncryptedFileCredentialStore(BaseCredentialStore):
                 encrypted = win32crypt.CryptProtectData(test_data, None, None, None, None, 0)
                 decrypted = win32crypt.CryptUnprotectData(encrypted, None, None, None, 0)[1]
                 return decrypted == test_data
-            except:
+            except (ImportError, OSError) as e:
+                logger.debug(f"Win32暗号化テスト失敗: {e}")
                 return False
         
         elif system in ["darwin", "linux"]:
@@ -414,7 +417,8 @@ class EncryptedFileCredentialStore(BaseCredentialStore):
                 backend = keyring.get_keyring()
                 if backend and hasattr(backend, 'priority') and backend.priority > 0:
                     return True
-            except:
+            except (ImportError, AttributeError) as e:
+                logger.debug(f"キーチェーン可用性チェック失敗: {e}")
                 pass
             return False
         
@@ -551,7 +555,8 @@ class EncryptedFileCredentialStore(BaseCredentialStore):
                 try:
                     import keyring
                     keyring.delete_password(f"{self.SERVICE_NAME}_key", "encryption_key")
-                except:
+                except Exception as e:
+                    logger.warning(f"キーチェーン暗号化鍵削除失敗: {e}")
                     pass
             
             logger.info("暗号化ファイルを削除")

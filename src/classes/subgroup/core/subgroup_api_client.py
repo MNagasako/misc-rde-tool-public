@@ -146,7 +146,7 @@ class SubgroupApiClient:
             logger.debug("認証失敗")
             return False
         
-        logger.debug("認証成功、RDEトークン使用: %s...", self.bearer_token[:20])
+        logger.debug("認証成功、RDEトークン使用: %s...", self.bearer_token[:20] if self.bearer_token else 'None')
         api_url = f"{self.api_base_url}/groups/{group_id}"
         logger.debug("API呼び出し: %s", api_url)
         headers = self._build_headers()
@@ -635,12 +635,40 @@ class SubgroupPayloadBuilder:
         """
         attr = payload['data']['attributes']
         
-        # ロール情報の簡易表示
+        # ロール日本語訳マッピング
+        role_translation = {
+            'OWNER': '管理者',
+            'ASSISTANT': '代理',
+            'MEMBER': 'メンバ',
+            'AGENT': '登録代行',
+            'VIEWER': '閲覧'
+        }
+        
+        # ユーザー名キャッシュから取得
+        from classes.subgroup.core.user_cache_manager import UserCacheManager
+        cache_manager = UserCacheManager.instance()
+        
+        # ロール情報の簡易表示（氏名 + 日本語ロール）
         role_summary = []
         for role in attr.get('roles', []):
             user_id = role.get('userId', '')
             role_name = role.get('role', '')
-            role_summary.append(f"{user_id}({role_name})")
+            
+            # ユーザー名をキャッシュから取得
+            user_info = cache_manager.get_user(user_id)
+            if user_info and user_info.get('userName'):
+                display_name = user_info['userName']
+            else:
+                # キャッシュにない場合はIDを表示
+                display_name = user_id[:10] + "..." if len(user_id) > 10 else user_id
+            
+            # ロールを日本語化
+            role_jp = role_translation.get(role_name, role_name)
+            
+            role_summary.append(f"  {display_name}({role_jp})")
+        
+        # メンバー表示（全員を改行で表示）
+        members_text = "\n".join(role_summary) if role_summary else "  なし"
         
         return (
             f"本当にサブグループを{operation_type}しますか？\n\n"
@@ -649,9 +677,10 @@ class SubgroupPayloadBuilder:
             f"課題数: {len(attr.get('subjects', []))}\n"
             f"研究資金数: {len(attr.get('funds', []))}\n"
             f"メンバー数: {len(attr.get('roles', []))}\n"
-            f"ロール: {', '.join(role_summary[:3])}{'...' if len(role_summary) > 3 else ''}\n"
-            f"\nこの操作はARIMデータポータルでサブグループを{operation_type}します。"
+            f"メンバー:\n{members_text}\n"
+            f"\nこの操作はRDEでサブグループを{operation_type}します。"
         )
+    
     
     @staticmethod
     def build_detailed_request_info(payload, api_url):

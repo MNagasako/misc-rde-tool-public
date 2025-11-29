@@ -21,7 +21,7 @@ import logging
 import threading
 import json
 from qt_compat.widgets import QVBoxLayout, QLabel, QWidget, QMessageBox, QProgressDialog, QComboBox, QPushButton
-from qt_compat.core import QTimer, Qt, QMetaObject, Q_ARG, QUrl
+from qt_compat.core import QTimer, Qt, QMetaObject, Q_ARG, QUrl, Signal, QObject
 from qt_compat.gui import QDesktopServices
 from config.common import OUTPUT_DIR, DATAFILES_DIR
 from classes.theme import ThemeKey
@@ -29,7 +29,20 @@ from classes.theme.theme_manager import get_color
 from classes.utils.label_style import apply_label_style
 
 # ロガー設定
+# シグナル用ヘルパークラス
+class SummaryUpdateSignal(QObject):
+    """内訳ラベル更新用シグナル"""
+    update_text = Signal(str)
+
+_summary_signal = SummaryUpdateSignal()
+
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    _h = logging.StreamHandler()
+    _fmt = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    _h.setFormatter(_fmt)
+    logger.addHandler(_h)
+logger.setLevel(logging.INFO)
 
 def safe_show_message_widget(parent, title, message, message_type="warning"):
     """
@@ -62,7 +75,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     import json
     import os
     from qt_compat.widgets import QWidget, QVBoxLayout, QComboBox, QLabel, QHBoxLayout, QRadioButton, QLineEdit, QPushButton, QButtonGroup, QCompleter
-    from qt_compat.core import Qt
+    from qt_compat.core import Qt, QObject, QEvent
     
     def check_global_sharing_enabled(dataset_item):
         """広域シェアが有効かどうかをチェック"""
@@ -298,10 +311,12 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     combo.setEditable(True)
     combo.setInsertPolicy(QComboBox.NoInsert)
     combo.setMaxVisibleItems(15)
-    combo.lineEdit().setPlaceholderText("データセットを選択してください")
+    # プレースホルダは項目ではなく、入力欄のヒントとして表示
+    combo.lineEdit().setPlaceholderText("— データセットを選択してください —")
     
     # コンボボックス個別スタイル（フォント表示問題対策）
     # テキストが隠れないよう十分な高さとパディングを確保
+    # フォーカス可視化強化（枠色+薄い背景）
     combo.setStyleSheet(f"""
         QComboBox {{
             background-color: {get_color(ThemeKey.COMBO_BACKGROUND)};
@@ -314,7 +329,8 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
             padding-right: 35px;
         }}
         QComboBox:focus {{
-            border: 1px solid {get_color(ThemeKey.COMBO_BORDER_FOCUS)};
+            border: 2px solid {get_color(ThemeKey.COMBO_BORDER_FOCUS)};
+            background-color: {get_color(ThemeKey.COMBO_BACKGROUND_FOCUS)};
         }}
         QComboBox::drop-down {{
             subcontrol-origin: padding;
@@ -425,11 +441,10 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
                 
                 filtered_datasets.append(dataset)
             
-            # コンボボックスを更新
+            # コンボボックスを更新（ダミー項目は追加しない）
             combo.clear()
-            combo.addItem("-- データセットを選択してください --", None)
             
-            display_list = ["-- データセットを選択してください --"]
+            display_list = []
             
             for dataset in filtered_datasets:
                 attrs = dataset.get("attributes", {})
@@ -472,12 +487,18 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
             filtered_count = len(filtered_datasets)
             count_label.setText(f"表示中: {filtered_count}/{total_count} 件")
             
+            # 何も選択されていない状態にし、プレースホルダを表示
+            combo.setCurrentIndex(-1)
+            # 初期状態は検索可能にする
+            if combo.lineEdit():
+                combo.lineEdit().setReadOnly(False)
+            
             logger.info("データセットフィルタリング完了: 広域シェア=%s, メンバー=%s, タイプ=%s, 課題番号='%s', 結果=%s/%s件", share_filter_type, member_filter_type, dtype_filter, grant_filter, filtered_count, total_count)
             
         except Exception as e:
             logger.error("データセット読み込みエラー: %s", e)
             combo.clear()
-            combo.addItem("-- データセット読み込みエラー --", None)
+            # エラー時もダミー項目は追加しない
             count_label.setText("表示中: 0/0 件")
             import traceback
             traceback.print_exc()
@@ -512,6 +533,65 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     
     # 初回読み込み
     load_and_filter_datasets()
+
+    # ---- 明示的状態管理 (empty / typing / selected) ----
+    container.combo_state = "empty"
+
+    def _set_state_empty():
+        combo.setCurrentIndex(-1)
+        if combo.lineEdit():
+            combo.lineEdit().setReadOnly(False)
+            combo.lineEdit().clear()
+            combo.lineEdit().setPlaceholderText("— データセットを選択してください —（部分一致検索で絞り込み可）")
+        container.combo_state = "empty"
+
+    def _set_state_selected():
+        if combo.currentIndex() >= 0 and combo.lineEdit():
+            combo.lineEdit().setReadOnly(True)
+        container.combo_state = "selected"
+
+    def _on_index_changed(index: int):
+        if index >= 0:
+            _set_state_selected()
+        else:
+            _set_state_empty()
+
+    combo.currentIndexChanged.connect(_on_index_changed)
+
+    def _on_lineedit_text_changed(text: str):
+        if container.combo_state == "selected":
+            return  # 読み取り専用時は無視
+        if text.strip():
+            container.combo_state = "typing"
+        else:
+            container.combo_state = "empty"
+    if combo.lineEdit():
+        combo.lineEdit().textChanged.connect(_on_lineedit_text_changed)
+
+    class _ComboStateFilter(QObject):
+        def eventFilter(self, watched, event):
+            try:
+                if watched is combo:
+                    # 選択状態での単一クリックは必ず empty に戻す
+                    if event.type() == QEvent.MouseButtonPress and container.combo_state == "selected":
+                        _set_state_empty()
+                        return False
+                    # ダブルクリックはどの状態でも編集開始（empty化）
+                    if event.type() == QEvent.MouseButtonDblClick:
+                        _set_state_empty()
+                        if combo.lineEdit():
+                            combo.lineEdit().setFocus()
+                        return False
+                return False
+            except Exception:
+                return False
+
+    combo.installEventFilter(_ComboStateFilter(combo))
+
+    def force_reset_combo():
+        _set_state_empty()
+    container.force_reset_combo = force_reset_combo
+    _set_state_empty()
     
     # コンテナの属性設定
     container.dataset_dropdown = combo
@@ -521,6 +601,13 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     container.grant_edit = grant_edit
     container.search_edit = search_edit
     container.count_label = count_label
+
+    # テストや外部から編集モードを強制するためのユーティリティを公開
+    def enable_dataset_editing():
+        if combo.lineEdit():
+            combo.lineEdit().setReadOnly(False)
+            combo.lineEdit().setFocus()
+    container.enable_dataset_editing = enable_dataset_editing
     
     # テーマ更新メソッド追加
     def refresh_theme():
@@ -585,6 +672,10 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
     """
     widget = QWidget(parent)
     layout = QVBoxLayout(widget)
+    try:
+        layout.setAlignment(Qt.AlignTop)
+    except Exception:
+        pass
 
     # dataset.jsonのパス
     dataset_json_path = os.path.normpath(os.path.join(OUTPUT_DIR, 'rde/data/dataset.json'))
@@ -592,8 +683,10 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
     # dataset.jsonの絶対パスを表示
     dataset_json_abspath = os.path.abspath(dataset_json_path)
 
+    from qt_compat.widgets import QSizePolicy
     path_label = QLabel(f"dataset.jsonパス: {dataset_json_abspath}")
     path_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 9pt; padding: 0px 0px;")
+    path_label.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
     layout.addWidget(path_label)
 
     # ファイルフィルタ状態表示ラベルを追加（パスの直下に配置）
@@ -607,6 +700,7 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
         font-size: 12px;
     """)
     filter_status_label.setWordWrap(True)
+    filter_status_label.setSizePolicy(QSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed))
     layout.addWidget(filter_status_label)
     
     # 広域シェアフィルタ付きデータセットドロップダウンを作成（フィルタ表示の下に配置）
@@ -748,7 +842,7 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
                     
                     # プログレスダイアログ作成
                     progress_dialog = QProgressDialog(widget)
-                    progress_dialog.setWindowTitle("ファイルリスト取得")
+                    progress_dialog.setWindowTitle("ファイル一括取得")
                     progress_dialog.setLabelText("処理を開始しています...")
                     progress_dialog.setRange(0, 100)
                     progress_dialog.setValue(0)
@@ -803,15 +897,32 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
                             if progress_dialog:
                                 progress_dialog.close()
                             if success:
-                                logger.info(f"ファイル取得処理完了: dataset_id={dataset_obj}")
+                                logger.info(f"ファイル取得処理完了: dataset_id={dataset_obj}, message_len={len(message) if isinstance(message, str) else 'N/A'}")
+                                logger.info(f"完了メッセージ詳細\n---\n{message}\n---")
                                 if message and message != "no_data":
                                     safe_show_message_widget(widget, "完了", message, "information")
                                 elif message == "no_data":
                                     safe_show_message_widget(widget, "情報", "選択されたデータセットにはデータエントリがありませんでした", "information")
                                 else:
-                                    safe_show_message_widget(widget, "完了", "ファイルリスト取得が完了しました", "information")
+                                    # フォールバックでも最低限の件数を表示する
+                                    try:
+                                        from classes.data_fetch2.core.logic.fetch2_filelist_logic import get_dataset_filetype_counts
+                                        # 可能なら直前選択のdataset_idで再集計
+                                        combo = getattr(fetch2_dropdown_widget, 'dataset_dropdown', None)
+                                        dsid = combo.itemData(combo.currentIndex()) if combo else None
+                                        from core.bearer_token_manager import BearerTokenManager
+                                        token_fb = BearerTokenManager.get_token_with_relogin_prompt(parent)
+                                        counts_fb = get_dataset_filetype_counts({"id": dsid, "attributes": {}}, token_fb, None) if (dsid and token_fb) else {}
+                                        total_fb = sum(counts_fb.values())
+                                        parts_fb = [f"{k}: {v}" for k, v in sorted(counts_fb.items())]
+                                        inner_fb = "、".join(parts_fb) if parts_fb else "対象ファイルなし"
+                                        fb_msg = f"ファイル一括取得が完了しました\n合計ダウンロード予定ファイル: {total_fb}件\n内訳（fileType別）: {inner_fb}"
+                                        safe_show_message_widget(widget, "完了", fb_msg, "information")
+                                    except Exception:
+                                        safe_show_message_widget(widget, "完了", "ファイル一括取得が完了しました", "information")
                             else:
                                 logger.error(f"ファイル取得処理失敗: dataset_id={dataset_obj}, error={message}")
+                                logger.error(f"失敗メッセージ詳細\n---\n{message}\n---")
                                 error_msg = message if message else "ファイル取得中にエラーが発生しました"
                                 safe_show_message_widget(widget, "エラー", error_msg, "critical")
                         QTimer.singleShot(0, handle_finished)
@@ -858,4 +969,99 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
 
     fetch_files_btn.clicked.connect(on_fetch_files)
 
+    # ダウンロード予定内訳の表示ラベル
+    summary_label = QLabel("📦 ダウンロード予定内訳: 未選択")
+    summary_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-size: 11px;")
+    layout.addWidget(summary_label)
+    try:
+        widget.planned_summary_label = summary_label
+    except Exception:
+        pass
+
+    def update_planned_summary():
+        try:
+            combo = getattr(fetch2_dropdown_widget, 'dataset_dropdown', None)
+            if not combo or combo.currentIndex() < 0:
+                summary_label.setText("📦 ダウンロード予定内訳: 未選択")
+                return
+            dataset_id = combo.itemData(combo.currentIndex())
+            if not dataset_id:
+                summary_label.setText("📦 ダウンロード予定内訳: 未選択")
+                return
+
+            # Bearer Token取得
+            from core.bearer_token_manager import BearerTokenManager
+            token = BearerTokenManager.get_token_with_relogin_prompt(parent)
+            if not token:
+                summary_label.setText("📦 ダウンロード予定内訳: 認証が必要です")
+                return
+
+            # 別スレッドでAPI集計してUI更新
+            from threading import Thread
+            def worker():
+                try:
+                    # dataset.json から選択データセットオブジェクトを取得
+                    ds_obj = None
+                    try:
+                        with open(dataset_json_path, 'r', encoding='utf-8') as f:
+                            dataset_data = json.load(f)
+                        items = dataset_data['data'] if isinstance(dataset_data, dict) and 'data' in dataset_data else dataset_data
+                        for d in items or []:
+                            if isinstance(d, dict) and d.get('id') == dataset_id:
+                                ds_obj = d
+                                break
+                    except Exception:
+                        ds_obj = None
+                    from classes.data_fetch2.core.logic.fetch2_filelist_logic import get_dataset_filetype_counts
+                    # 親タブのフィルタ（あれば適用）
+                    file_filter_config = None
+                    try:
+                        parent_obj = widget.parent()
+                        while parent_obj:
+                            if hasattr(parent_obj, 'current_filter_config'):
+                                file_filter_config = parent_obj.current_filter_config
+                                break
+                            parent_obj = parent_obj.parent()
+                    except Exception:
+                        file_filter_config = None
+                    logger.info(f"内訳更新開始: dataset_id={dataset_id}, filter={file_filter_config}")
+                    counts = get_dataset_filetype_counts(ds_obj or {"id": dataset_id, "attributes": {}}, token, file_filter_config)
+                    total = sum(counts.values())
+                    parts = [f"{k}: {v}" for k, v in sorted(counts.items()) if v > 0]
+                    text = "、".join(parts) if parts else "対象ファイルなし"
+                    logger.info(f"内訳更新完了: total={total}, detail={text}")
+                    new_text = f"📦 ダウンロード予定内訳: 合計 {total} 件({text})"
+                    # シグナル経由でメインスレッドに確実に更新
+                    _summary_signal.update_text.emit(new_text)
+                except Exception as e:
+                    logger.warning(f"内訳更新失敗: {e}")
+                    _summary_signal.update_text.emit("📦 ダウンロード予定内訳: 取得に失敗しました")
+            
+            # シグナルをラベルに接続
+            _summary_signal.update_text.connect(summary_label.setText)
+            Thread(target=worker, daemon=True).start()
+        except Exception:
+            summary_label.setText("📦 ダウンロード予定内訳: 取得に失敗しました")
+
+    # コンボ選択変更で内訳更新
+    try:
+        def _on_index_changed(idx):
+            try:
+                dsid = fetch2_dropdown_widget.dataset_dropdown.itemData(idx)
+            except Exception:
+                dsid = None
+            logger.info(f"dataset_dropdown changed: idx={idx}, dataset_id={dsid}")
+            update_planned_summary()
+        fetch2_dropdown_widget.dataset_dropdown.currentIndexChanged.connect(_on_index_changed)
+        logger.info("dataset_dropdown connected to update_planned_summary")
+    except Exception:
+        pass
+    # 初期選択がある場合にも更新を一度実行
+    try:
+        QTimer.singleShot(0, update_planned_summary)
+    except Exception:
+        pass
+
+    # 余白を下へ押し上げるストレッチで上側に詰める
+    layout.addStretch()
     return widget

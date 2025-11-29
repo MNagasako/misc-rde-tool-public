@@ -817,9 +817,27 @@ def main():
         parser.add_argument('--logout', action='store_true', help='古いCookieを削除しRDEから完全ログアウトしてから開始')
         parser.add_argument('--auto-close', action='store_true', help='自動終了を有効にする（デフォルト: 手動終了）')
         parser.add_argument('--test', action='store_true', help='テストモードで自動ログイン・自動検索・自動終了')
+        parser.add_argument('--keep-tokens', action='store_true', help='開発モード: トークン・認証情報を起動/終了時に削除しない')
+        parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], default='INFO', help='ログレベルを指定 (デフォルト: INFO)')
         parser.add_argument('--version', '-v', action='store_true', help='バージョン情報を表示して終了')
         parser.add_argument('--version-all', action='store_true', help='全バージョン記載箇所をまとめて表示して終了')
         args = parser.parse_args()
+        
+        # ログレベル設定
+        if args.log_level:
+            config_manager = get_config_manager()
+            config_manager.set("logging.level", args.log_level)
+            logger.info("ログレベルを %s に設定しました", args.log_level)
+    
+        # 開発モード: トークン保持フラグを環境変数に設定
+        if args.keep_tokens:
+            os.environ['SKIP_TOKEN_CLEANUP'] = '1'
+            logger.info("[DEVELOPMENT MODE] トークン保持モード有効 - 起動/終了時にトークンを削除しません")
+            print("="*80)
+            print("⚠️  開発モード: トークン・認証情報を保持します")
+            print("   起動時・終了時の自動削除がスキップされます")
+            print("   セキュリティリスクがあるため、開発用途のみに使用してください")
+            print("="*80)
 
         if args.version:
             try:

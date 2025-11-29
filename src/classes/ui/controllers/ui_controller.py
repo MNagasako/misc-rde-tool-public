@@ -4067,12 +4067,7 @@ class UIController(UIControllerCore):
                     
                     logger.debug("初回データ登録ウィジェット作成: 画面サイズ適用 %sx%s", target_width, target_height)
                     self.parent.resize(target_width, target_height)
-                    
-                    # 画面中央に配置
-                    self.parent.move(
-                        (screen.width() - target_width) // 2,
-                        (screen.height() - target_height) // 2
-                    )
+                    # 位置調整は行わない（ユーザー要望により削除）
             
             # UIが完全に作成された後にサイズを適用
             QTimer.singleShot(50, apply_sizing)

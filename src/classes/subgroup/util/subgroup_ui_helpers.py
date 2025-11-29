@@ -62,10 +62,10 @@ class SubgroupFormBuilder:
         
     def build_manual_input_form(self, default_values=None):
         """
-        手動入力フォームの構築（新しい課題入力ウィジェット使用）
+        手動入力フォームの構築（新しい課題入力ウィジェット・研究資金番号ウィジェット使用）
         
         Args:
-            default_values (dict): 初期値辞書 {"group_name": "...", "description": "...", "subjects": [...], etc.}
+            default_values (dict): 初期値辞書 {"group_name": "...", "description": "...", "subjects": [...], "funds": [...], etc.}
         """
         form_grid = QGridLayout()
         defaults = default_values or {}
@@ -86,13 +86,14 @@ class SubgroupFormBuilder:
             initial_subjects = parse_subjects_from_text(initial_subjects)
         self.form_widgets['subjects_widget'] = SubjectEntryWidget(initial_subjects)
         
-        self.form_widgets['funds_edit'] = QLineEdit()
-        self.form_widgets['funds_edit'].setPlaceholderText("研究資金番号 (カンマ区切り)")
-        self.form_widgets['funds_edit'].setText(defaults.get('funds', ''))
+        # 新しい研究資金番号ウィジェット
+        from ..ui.funding_number_widget import FundingNumberWidget
+        initial_funds = defaults.get('funds', [])
+        self.form_widgets['funds_widget'] = FundingNumberWidget(initial_funds)
         
         # スタイル設定
         for widget_name, widget in self.form_widgets.items():
-            if widget_name not in ['subjects_widget'] and hasattr(widget, 'setStyleSheet'):
+            if widget_name not in ['subjects_widget', 'funds_widget'] and hasattr(widget, 'setStyleSheet'):
                 widget.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_SUCCESS)};")
         
         # バリデーション設定
@@ -103,7 +104,7 @@ class SubgroupFormBuilder:
             'group': QLabel("グループ名:"),
             'desc': QLabel("説明:"),
             'subjects': QLabel("課題:"),
-            'funds': QLabel("研究資金番号 (カンマ区切り):")
+            'funds': QLabel("研究資金:")
         }
         
         for label in labels.values():
@@ -116,11 +117,11 @@ class SubgroupFormBuilder:
         form_grid.addWidget(self.form_widgets['desc_edit'], 1, 1)
         form_grid.addWidget(labels['subjects'], 2, 0, Qt.AlignTop)
         form_grid.addWidget(self.form_widgets['subjects_widget'], 2, 1)
-        form_grid.addWidget(labels['funds'], 3, 0)
-        form_grid.addWidget(self.form_widgets['funds_edit'], 3, 1)
+        form_grid.addWidget(labels['funds'], 3, 0, Qt.AlignTop)
+        form_grid.addWidget(self.form_widgets['funds_widget'], 3, 1)
         
         # 幅調整
-        for widget_name in ['group_name_edit', 'desc_edit', 'funds_edit']:
+        for widget_name in ['group_name_edit', 'desc_edit']:
             self.form_widgets[widget_name].setMinimumWidth(180)
         
         self.layout.addLayout(form_grid)
@@ -276,22 +277,14 @@ class SubgroupCreateHandler:
             payload_str: ペイロードの文字列表現
             operation_type: 操作タイプ（"作成" または "更新"）
         """
+        # SubgroupPayloadBuilderを使用してメッセージを生成（氏名+日本語ロール表示）
+        from classes.subgroup.core.subgroup_api_client import SubgroupPayloadBuilder
+        
         attr = payload['data']['attributes']
+        group_name = attr.get('name', '')
         
-        # ユーザーマップ作成（簡易版）
-        def role_label(role):
-            uid = role.get('userId', '')
-            return f"{uid}({role.get('role','')})"
-        
-        simple_text = (
-            f"本当にサブグループを{operation_type}しますか？\n\n"
-            f"グループ名: {attr.get('name')}\n"
-            f"説明: {attr.get('description')}\n"
-            f"課題番号: {attr.get('subjects')[0]['grantNumber'] if attr.get('subjects') else ''}\n"
-            f"研究資金: {', '.join(f.get('fundNumber','') for f in attr.get('funds', []))}\n"
-            f"ロール: {', '.join(role_label(r) for r in attr.get('roles', []))}\n"
-            f"\nこの操作はARIMデータポータルでサブグループを{operation_type}します。"
-        )
+        # build_request_infoを使用して統一されたメッセージを生成
+        simple_text = SubgroupPayloadBuilder.build_request_info(payload, group_name, operation_type)
         
         msg_box = QMessageBox(self.widget)
         msg_box.setWindowTitle(f"サブグループ{operation_type}の確認")
@@ -437,27 +430,69 @@ def show_selected_user_ids(widget, checkbox_list, user_entries=None):
         user_info = user_map.get(user_id, {"userName": user_id, "emailAddress": "不明"})
         user_name = user_info.get("userName", user_id)
         email = user_info.get("emailAddress", "不明")
+        
+        # ユーザー名が空またはIDと同じ場合はキャッシュまたはAPIで取得を試みる
+        if not user_name or user_name == user_id or user_name.strip() == "":
+            # キャッシュから取得試行
+            try:
+                from ..core.user_cache_manager import get_cached_user, cache_user_from_api
+                cached = get_cached_user(user_id)
+                if cached:
+                    user_name = cached.get('userName', user_id)
+                    if not email or email == "不明":
+                        email = cached.get('emailAddress', "不明")
+                    logger.debug(f"キャッシュからユーザー名取得: {user_id} → {user_name}")
+                else:
+                    # キャッシュにない場合はAPI取得
+                    from ..core.subgroup_api_helper import fetch_user_details_by_id
+                    from core.bearer_token_manager import BearerTokenManager
+                    bearer_token = BearerTokenManager.get_valid_token()
+                    if bearer_token:
+                        user_details = fetch_user_details_by_id(user_id, bearer_token)
+                        if user_details:
+                            user_name = user_details.get('userName', user_id)
+                            if not email or email == "不明":
+                                email = user_details.get('emailAddress', "不明")
+                            # キャッシュに保存
+                            cache_user_from_api(user_id, user_details)
+                            logger.debug(f"APIからユーザー名取得&キャッシュ保存: {user_id} → {user_name}")
+            except Exception as e:
+                logger.debug(f"ユーザー名取得失敗（ID: {user_id}）: {e}")
+        
+        # ロール日本語訳マッピング（テーブルヘッダに合わせる）
+        role_translation = {
+            'OWNER': '管理者',
+            'ASSISTANT': '代理',
+            'MEMBER': 'メンバ',
+            'AGENT': '登録代行',
+            'VIEWER': '閲覧'
+        }
+        
         role = []
         
         # ウィジェットが削除されていないかチェック（安全版）
         if _is_widget_checked_safe(owner_radio):
-            role.append('OWNER')
+            role.append(role_translation.get('OWNER', 'OWNER'))
             
         if _is_widget_checked_safe(assistant_cb):
-            role.append('ASSISTANT')
+            role.append(role_translation.get('ASSISTANT', 'ASSISTANT'))
             
         if _is_widget_checked_safe(member_cb):
-            role.append('MEMBER')
+            role.append(role_translation.get('MEMBER', 'MEMBER'))
 
         if _is_widget_checked_safe(agent_cb):
-            role.append('AGENT')
+            role.append(role_translation.get('AGENT', 'AGENT'))
 
         if _is_widget_checked_safe(viewer_cb):
-            role.append('VIEWER')
+            role.append(role_translation.get('VIEWER', 'VIEWER'))
 
         if role:
-            # 氏名を太字、メールアドレスを表示
-            result_lines.append(f"<b>{user_name}</b>（{email}）: {', '.join(role)}")
+            # 名前を主体、IDを括弧内に省略表示（最大10文字）
+            truncated_id = user_id[:10] + "..." if len(user_id) > 10 else user_id
+            user_display = user_name if user_name != user_id else f"<i>ID: {truncated_id}</i>"
+            if user_name != user_id:
+                user_display = f"{user_name} <span style='color: gray; font-size: smaller;'>({truncated_id})</span>"
+            result_lines.append(f"{user_display} : {', '.join(role)}")
     if result_lines:
         msg = "選択されたユーザーとロール:<br>" + "<br>".join(result_lines)
         QMessageBox.information(widget, "選択結果", msg)
@@ -477,19 +512,20 @@ def prepare_subgroup_create_request(widget, parent, user_rows=None):
     # user_rowsがNoneならwidget.user_rowsを参照
     if user_rows is None:
         user_rows = getattr(widget, 'user_rows', None)
-    
-    # OWNERが必須チェック（安全版）
-    owner_count = 0
+    # セーフガード（構文破損回避）
+    if not user_rows:
+        return
+    # ロール抽出（安全版）
     selected_user_ids = []
     roles = []
     owner_id = None
+    owner_count = 0
 
-    for user_entry in user_rows or []:
+    for entry in user_rows or []:
         try:
-            user_id, owner_radio, assistant_cb, member_cb, agent_cb, viewer_cb = user_entry
+            user_id, owner_radio, assistant_cb, member_cb, agent_cb, viewer_cb = entry
         except Exception:
             continue
-
         try:
             if _is_widget_checked_safe(owner_radio):
                 owner_count += 1
@@ -539,12 +575,13 @@ def prepare_subgroup_create_request(widget, parent, user_rows=None):
     if owner_count == 0:
         QMessageBox.warning(widget, "OWNER未選択", "サブグループには必ずOWNERを1名選択してください。")
         return
-    elif owner_count > 1:
+    if owner_count > 1:
         QMessageBox.warning(widget, "OWNER重複選択", f"OWNERは1名のみ選択してください。現在{owner_count}名が選択されています。")
         return
-    
+
+    # OWNERを先頭に配置
     if owner_id:
-        selected_user_ids = [owner_id] + selected_user_ids
+        selected_user_ids = [owner_id] + [uid for uid in selected_user_ids if uid != owner_id]
     if not selected_user_ids:
         QMessageBox.warning(widget, "ユーザー未選択", "サブグループに追加するユーザーを1人以上選択してください。")
         return
@@ -574,16 +611,13 @@ def prepare_subgroup_create_request(widget, parent, user_rows=None):
         popup_text, payload, api_url, headers = subgroup_api_helper.build_subgroup_request(info, group_config, member_lines, idx, group, selected_user_ids)
         # --- 確認ダイアログ（1段階、詳細表示ボタンでpayload全文） ---
         payload_str = json.dumps(payload, ensure_ascii=False, indent=2)
+        
+        # SubgroupPayloadBuilderを使用してメッセージを生成（氏名+日本語ロール表示）
+        from classes.subgroup.core.subgroup_api_client import SubgroupPayloadBuilder
         attr = payload['data']['attributes']
-        simple_text = (
-            f"本当にサブグループを作成しますか？\n\n"
-            f"グループ名: {attr.get('name')}\n"
-            f"説明: {attr.get('description')}\n"
-            f"課題番号: {attr.get('subjects')[0]['grantNumber'] if attr.get('subjects') else ''}\n"
-            f"研究資金: {', '.join(f.get('fundNumber','') for f in attr.get('funds', []))}\n"
-            f"ロール: {', '.join(f'{r['userId']}({r['role']})' for r in attr.get('roles', []))}\n"
-            f"\nこの操作はRDEに新規サブグループを作成します。"
-        )
+        group_name = attr.get('name', '')
+        simple_text = SubgroupPayloadBuilder.build_request_info(payload, group_name, "作成")
+        
         msg_box = QMessageBox(widget)
         msg_box.setWindowTitle("サブグループ作成の確認")
         msg_box.setIcon(QMessageBox.Question)

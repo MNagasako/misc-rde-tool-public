@@ -953,7 +953,8 @@ class ProxySessionManager:
                                 # DERからPEM形式に変換
                                 cert_pem = ssl.DER_cert_to_PEM_cert(cert_der)
                                 certificates.append(cert_pem)
-                            except Exception:
+                            except (ssl.SSLError, ValueError) as e:
+                                logger.debug(f"証明書変換スキップ: {e}")
                                 continue
                                 
                 except ImportError:
@@ -1015,7 +1016,8 @@ class ProxySessionManager:
         try:
             # セッションのプロキシ設定を確認
             return bool(self._session.proxies.get('http') or self._session.proxies.get('https'))
-        except:
+        except (AttributeError, KeyError) as e:
+            logger.debug(f"プロキシ設定取得エラー: {e}")
             return False
     
     def _test_ssl_connection_with_fallback(self, fallback_to_no_verify: bool, log_ssl_errors: bool) -> bool:

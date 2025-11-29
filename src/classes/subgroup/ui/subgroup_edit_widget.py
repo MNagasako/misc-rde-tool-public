@@ -191,19 +191,31 @@ class EditFormManager:
         subjects_data = group_data.get('subjects', [])
         self.form_widgets['subjects_widget'].set_subjects_data(subjects_data)
         
-        # 研究資金情報設定
-        funds_text = MemberDataProcessor.extract_funds_for_display(
-            group_data.get('funds', [])
-        )
-        self.form_widgets['funds_edit'].setText(funds_text)
+        # 研究資金情報設定（新しいウィジェット用）
+        funds_data = group_data.get('funds', [])
+        if 'funds_widget' in self.form_widgets:
+            # リスト形式に変換
+            funds_list = []
+            for fund in funds_data:
+                if isinstance(fund, dict):
+                    fund_number = fund.get("fundNumber", "")
+                    if fund_number:
+                        funds_list.append(fund_number)
+                else:
+                    funds_list.append(str(fund))
+            self.form_widgets['funds_widget'].set_funding_numbers(funds_list)
     
     def get_form_values(self):
         """フォームから値を取得"""
+        funds_value = []
+        if 'funds_widget' in self.form_widgets:
+            funds_value = self.form_widgets['funds_widget'].get_funding_numbers()
+        
         return {
             'group_name': self.form_widgets['group_name_edit'].text().strip(),
             'description': self.form_widgets['desc_edit'].text().strip(),
             'subjects_data': self.form_widgets['subjects_widget'].get_subjects_data(),
-            'funds_text': self.form_widgets['funds_edit'].text().strip()
+            'funds_list': funds_value
         }
 
 
@@ -893,9 +905,9 @@ def _execute_update(edit_handler, form_values, roles):
     group_id = selected_group['id']
     group_name = form_values['group_name']
     
-    # ペイロード作成（新しい課題データ形式対応）
+    # ペイロード作成（新しい課題データ形式・研究資金番号リスト対応）
     subjects = form_values['subjects_data']  # 既にリスト形式
-    funds = [f.strip() for f in form_values['funds_text'].split(',') if f.strip()]
+    funds = form_values.get('funds_list', [])  # リスト形式で取得
     
     payload = edit_handler.extract_update_payload(
         group_id, group_name, form_values['description'], subjects, funds, roles

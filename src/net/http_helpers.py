@@ -10,7 +10,10 @@ from .session_manager import get_proxy_session, _session_manager
 from typing import Dict, Optional, Any, Union
 import requests  # 型ヒント用のみ
 import time
+import logging
 from . import api_logger
+
+logger = logging.getLogger(__name__)
 
 def _log_and_execute(method: str, url: str, session: requests.Session, **kwargs) -> requests.Response:
     """
@@ -127,7 +130,8 @@ def proxy_get(url: str, **kwargs) -> requests.Response:
             bearer_token = get_bearer_token_for_url(url)
             if bearer_token:
                 kwargs['headers']['Authorization'] = f'Bearer {bearer_token}'
-        except Exception:
+        except (ImportError, AttributeError, KeyError) as e:
+            logger.debug(f"Bearer Token取得失敗、Cookie認証にフォールバック: {e}")
             pass  # トークン取得失敗時は何もしない（Cookie認証にフォールバック）
     
     return _log_and_execute('GET', url, session, **kwargs)
@@ -220,7 +224,8 @@ def proxy_patch(url: str, data: Optional[Union[Dict, str, bytes]] = None,
             bearer_token = get_bearer_token_for_url(url)
             if bearer_token:
                 kwargs['headers']['Authorization'] = f'Bearer {bearer_token}'
-        except Exception:
+        except (ImportError, AttributeError, KeyError) as e:
+            logger.debug(f"Bearer Token取得失敗、Cookie認証にフォールバック: {e}")
             pass
     
     return _log_and_execute('PATCH', url, session, data=data, json=json, **kwargs)
@@ -251,7 +256,8 @@ def proxy_delete(url: str, data: Optional[Union[Dict, str, bytes]] = None,
             bearer_token = get_bearer_token_for_url(url)
             if bearer_token:
                 kwargs['headers']['Authorization'] = f'Bearer {bearer_token}'
-        except Exception:
+        except (ImportError, AttributeError, KeyError) as e:
+            logger.debug(f"Bearer Token取得失敗、Cookie認証にフォールバック: {e}")
             pass
     
     return _log_and_execute('DELETE', url, session, data=data, json=json, **kwargs)
@@ -315,7 +321,8 @@ def add_auth_header(headers: Optional[Dict[str, str]] = None,
         try:
             from config.common import get_bearer_token_for_url
             bearer_token = get_bearer_token_for_url(url)
-        except Exception:
+        except (ImportError, AttributeError, KeyError) as e:
+            logger.debug(f"Bearer Token自動選択失敗: {e}")
             pass  # 自動選択失敗時は何もしない
     
     if bearer_token:

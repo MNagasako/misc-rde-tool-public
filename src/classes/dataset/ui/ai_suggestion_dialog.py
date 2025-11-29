@@ -111,6 +111,7 @@ class AISuggestionDialog(QDialog):
         self.setWindowTitle("AI説明文提案")
         self.setModal(True)
         self.resize(900, 700)
+        # 位置調整は行わない（ユーザー要望により削除）
         
         layout = QVBoxLayout(self)
         

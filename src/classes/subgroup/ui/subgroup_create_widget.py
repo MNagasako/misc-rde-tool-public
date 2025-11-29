@@ -241,7 +241,8 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
         group_name = form_widgets['group_name_edit'].text().strip()
         description = form_widgets['desc_edit'].text().strip()
         subjects = create_handler.extract_subjects_from_widget(form_widgets['subjects_widget'])
-        funds = [f.strip() for f in form_widgets['funds_edit'].text().split(',') if f.strip()]
+        # 研究資金番号を新ウィジェットから取得
+        funds = form_widgets['funds_widget'].get_funding_numbers() if 'funds_widget' in form_widgets else []
         
         # ユーザーロール情報の抽出とバリデーション
         selected_user_ids, roles, owner_id, owner_count = create_handler.extract_user_roles()

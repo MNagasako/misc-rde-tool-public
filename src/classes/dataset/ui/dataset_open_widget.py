@@ -71,6 +71,7 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
         tab_widget.addTab(error_widget, "新規開設")
     
     # 編集タブ
+    edit_tab = None  # 初期化
     try:
         from classes.dataset.ui.dataset_edit_widget import create_dataset_edit_widget
         edit_tab = create_dataset_edit_widget(parent, "データセット編集", create_auto_resize_button)
@@ -104,14 +105,11 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
             if index == 1:  # 0: 新規開設, 1: 修正, 2: データエントリー
                 logger.info("修正タブが選択されました - データセットリストをリフレッシュします")
                 # edit_tab内のload_existing_datasets関数を呼び出し
-                try:
-                    if hasattr(edit_tab, '_refresh_dataset_list'):
-                        edit_tab._refresh_dataset_list()
-                        logger.info("データセットリストのリフレッシュが完了しました")
-                    else:
-                        logger.warning("データセットリフレッシュ機能が見つかりません")
-                except NameError:
-                    logger.warning("edit_tabが定義されていません")
+                if edit_tab is not None and hasattr(edit_tab, '_refresh_dataset_list'):
+                    edit_tab._refresh_dataset_list()
+                    logger.info("データセットリストのリフレッシュが完了しました")
+                else:
+                    logger.debug("データセットリフレッシュ機能がスキップされました (edit_tab=%s)", edit_tab is not None)
             # データエントリータブ（インデックス2）が選択された場合
             elif index == 2:  # データエントリータブ
                 logger.info("データエントリータブが選択されました")

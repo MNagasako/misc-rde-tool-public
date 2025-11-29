@@ -27,6 +27,20 @@ from classes.dataset.ui.ai_suggestion_dialog import AISuggestionDialog
 logger = logging.getLogger(__name__)
 
 
+def _normalize_display_text(text: str) -> str:
+    """表示テキストの微差（全角/半角・連続空白・改行等）を吸収する簡易正規化"""
+    try:
+        if not isinstance(text, str):
+            return str(text)
+        import unicodedata
+        t = unicodedata.normalize('NFKC', text)
+        # 連続空白を1つに、前後空白除去
+        t = re.sub(r"\s+", " ", t).strip()
+        return t
+    except Exception:
+        return text
+
+
 def extract_dataset_id_from_text(text):
     """
     Completer選択テキストからデータセットIDを抽出
@@ -42,6 +56,75 @@ def extract_dataset_id_from_text(text):
     if id_match:
         return id_match.group(1)
     return None
+
+
+def resolve_dataset_selection(combo_box, text):
+    """表示テキストから対象データセットのインデックスを解決するヘルパー。
+
+    1) _display_to_dataset_map に直接マッピングがあれば高速解決
+    2) 既存アイテムの itemText 完全一致で探索
+    3) テキストから ID 抽出し、itemData(dict)の id と突き合わせ
+
+    Args:
+        combo_box (QComboBox): 対象コンボボックス
+        text (str): Completer等から渡された表示テキスト
+
+    Returns:
+        int: 見つかったインデックス（失敗時は -1）
+    """
+    try:
+        if not text:
+            return -1
+
+        total_items = combo_box.count()
+        norm_text = _normalize_display_text(text)
+
+        # 1) 直接マップ
+        display_map = getattr(combo_box, '_display_to_dataset_map', None)
+        if display_map and (text in display_map or norm_text in display_map):
+            target_dataset = display_map.get(text) or display_map.get(norm_text)
+            target_id = target_dataset.get("id") if isinstance(target_dataset, dict) else None
+            if target_id:
+                for i in range(total_items):
+                    item_data = combo_box.itemData(i)
+                    if isinstance(item_data, dict) and item_data.get("id") == target_id:
+                        return i
+            # ID無しの場合は参照一致で探索
+            for i in range(total_items):
+                if combo_box.itemData(i) is target_dataset:
+                    return i
+
+        # 2) 完全一致（正規化比較）
+        for i in range(total_items):
+            if _normalize_display_text(combo_box.itemText(i)) == norm_text:
+                return i
+
+        # 3) ID抽出して突合
+        target_id = extract_dataset_id_from_text(text)
+        if target_id:
+            for i in range(total_items):
+                item_data = combo_box.itemData(i)
+                if isinstance(item_data, dict) and item_data.get("id") == target_id:
+                    return i
+        return -1
+    except Exception as e:
+        logger.debug("resolve_dataset_selection error: %s", e)
+        return -1
+
+def rebuild_display_map(combo_box):
+    """コンボボックス内の現在の表示テキストとitemData(dict)からマップを再構築"""
+    try:
+        mapping = {}
+        for i in range(combo_box.count()):
+            data = combo_box.itemData(i)
+            text = combo_box.itemText(i)
+            if isinstance(data, dict) and text and text.startswith("-- データセットを選択") is False:
+                mapping[_normalize_display_text(text)] = data
+        if mapping:
+            combo_box._display_to_dataset_map = mapping
+            logger.debug("display_to_dataset_map 再構築: %s件", len(mapping))
+    except Exception as e:
+        logger.debug("rebuild_display_map 失敗: %s", e)
 
 
 def repair_json_file(file_path):
@@ -648,6 +731,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 if total_items > 500:  # 500件以上の場合のみ
                     QTimer.singleShot(1, lambda: None)  # 1msの非ブロッキング待機
                     QApplication.processEvents()
+            # 追加完了後にマップ再構築
+            rebuild_display_map(combo_box)
+            # 初期選択を未選択状態に（ラインエディットのプレースホルダのみ表示）
+            combo_box.setCurrentIndex(-1)
             
         finally:
             combo_box.blockSignals(False)
@@ -721,6 +808,20 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         # データセット一覧をComboBoxに保存（mousePressEvent用）
         existing_dataset_combo._datasets_cache = datasets
         existing_dataset_combo._display_names_cache = display_names
+        # 表示テキスト→データセット(dict)の高速マップを構築（Completer選択用）
+        try:
+            existing_dataset_combo._display_to_dataset_map = {
+                display_names[i]: datasets[i]
+                for i in range(min(len(display_names), len(datasets)))
+                if isinstance(datasets[i], dict)
+            }
+        except Exception as map_err:
+            logger.debug("display_to_dataset_map 構築失敗: %s", map_err)
+        # コンボを未選択状態にする（ヘッダー/プレースホルダのみ）
+        try:
+            existing_dataset_combo.setCurrentIndex(-1)
+        except Exception:
+            pass
 
     # データセット情報を読み込んでドロップダウンに追加
     def load_existing_datasets(filter_type="user_only", grant_number_filter="", force_reload=False):
@@ -2092,69 +2193,68 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 setup_related_datasets(related_dataset_combo)
     
     def on_completer_activated(text):
-        """QCompleterでフィルタ選択された場合の処理"""
-        logger.info("Completerから選択: %r", text)
+        """QCompleterでフィルタ選択された場合の処理（直接フォーム更新版）"""
+        logger.info("Completer選択テキスト: %r", text)
         
-        # Completerから選択されたテキストは、display_namesリストのいずれかと一致する
-        # このテキストを使ってコンボボックス内のアイテムを検索
-        # ただし、findTextは表示テキストベースなので信頼性が低い
-        # 代わりに、全アイテムのitemTextを完全一致で比較してインデックスを取得
+        # コンボボックスのシグナルブロック状態を検証
+        signals_blocked_before = existing_dataset_combo.signalsBlocked()
+        logger.debug("Completer起動時のシグナルブロック状態: %s", signals_blocked_before)
         
-        total_items = existing_dataset_combo.count()
-        logger.debug("コンボボックス総アイテム数: %s", total_items)
+        # マップから直接データセットを取得
+        display_map = getattr(existing_dataset_combo, '_display_to_dataset_map', None)
+        if not display_map:
+            logger.error("Completer選択失敗: マップが存在しません")
+            return
         
-        found_index = -1
-        for i in range(total_items):
-            item_text = existing_dataset_combo.itemText(i)
-            if item_text == text:
-                # 完全一致でインデックス発見
-                found_index = i
-                logger.info("テキスト完全一致でインデックス発見: %s", found_index)
-                break
+        # 正規化テキストでマップ検索
+        norm_text = _normalize_display_text(text)
+        dataset_dict = display_map.get(norm_text)
         
-        if found_index >= 0:
-            # インデックスが見つかった場合、そのitemDataを取得
-            item_data = existing_dataset_combo.itemData(found_index)
-            if item_data and isinstance(item_data, dict):
-                dataset_id = item_data.get("id", "")
-                dataset_name = item_data.get("attributes", {}).get("name", "")
-                logger.info("データセット発見: id=%s, name=%s", dataset_id, dataset_name)
-                # setCurrentIndexでコンボボックスの選択を変更
-                # これによりon_dataset_selection_changedが自動的にトリガーされる
-                existing_dataset_combo.setCurrentIndex(found_index)
+        if dataset_dict:
+            # データセット辞書が見つかった場合、直接フォームに反映
+            dataset_id = dataset_dict.get("id", "")
+            dataset_name = dataset_dict.get("attributes", {}).get("name", "不明")
+            logger.info("Completer選択成功: id=%s name=%s", dataset_id, dataset_name)
+            
+            # コンボボックスのインデックスを設定（可能であれば）
+            idx = -1
+            for i in range(existing_dataset_combo.count()):
+                item_data = existing_dataset_combo.itemData(i)
+                if isinstance(item_data, dict) and item_data.get("id") == dataset_id:
+                    idx = i
+                    break
+            
+            if idx >= 0:
+                # シグナルブロックしてインデックス設定（二重呼び出し防止）
+                logger.debug("setCurrentIndex前のシグナルブロック状態: %s", existing_dataset_combo.signalsBlocked())
+                existing_dataset_combo.blockSignals(True)
+                logger.debug("blockSignals(True)後の状態: %s", existing_dataset_combo.signalsBlocked())
+                existing_dataset_combo.setCurrentIndex(idx)
+                existing_dataset_combo.blockSignals(False)
+                logger.debug("blockSignals(False)後の状態: %s", existing_dataset_combo.signalsBlocked())
             else:
-                logger.warning("インデックス%sのitemDataが不正: %s", found_index, item_data)
+                logger.warning("Completer選択後にコンボボックスから該当アイテムが見つかりませんでした (ID: %s)", dataset_id)
+            
+            # 関連データセットリストを再セットアップ（現在のデータセットを除外）
+            setup_related_datasets(related_dataset_combo, exclude_dataset_id=dataset_id)
+            
+            # 直接フォーム更新
+            populate_edit_form_local(dataset_dict)
         else:
-            # 完全一致で見つからない場合、ID抽出で検索
-            logger.warning("テキスト完全一致でインデックスが見つかりません。ID抽出で再試行")
-            target_id = extract_dataset_id_from_text(text)
-            if not target_id:
-                logger.error("選択されたテキストからIDを抽出できません: %s", text)
-                return
-            
-            logger.info("抽出されたID: %s", target_id)
-            
-            # IDで検索
-            for i in range(total_items):
-                item_data = existing_dataset_combo.itemData(i)
-                if item_data and isinstance(item_data, dict):
-                    dataset_id = item_data.get("id", "")
-                    if dataset_id == target_id:
-                        found_index = i
-                        logger.info("IDマッチでインデックス発見: %s (dataset_id=%s)", found_index, dataset_id)
-                        existing_dataset_combo.setCurrentIndex(found_index)
-                        return
-            
-            logger.error("選択されたテキストに対応するインデックスが見つかりません: %s (ID: %s)", text, target_id)
-            # デバッグ: 最初の5アイテムの情報を出力
-            logger.debug("デバッグ: 最初の5アイテムの情報:")
-            for i in range(min(5, total_items)):
-                item_text = existing_dataset_combo.itemText(i)
-                item_data = existing_dataset_combo.itemData(i)
-                if item_data:
-                    logger.debug("  [%s] text=%s, id=%s", i, item_text[:50], item_data.get("id", "N/A"))
-                else:
-                    logger.debug("  [%s] text=%s, itemData=None", i, item_text[:50])
+            # マップに見つからない場合の詳細ログ
+            logger.error("Completer選択解決失敗: text=%s norm=%s", text, norm_text)
+            logger.error("マップエントリ数: %s", len(display_map))
+            logger.error("マップの先頭3キー: %s", list(display_map.keys())[:3])
+            # アイテム数確認
+            total_items = existing_dataset_combo.count()
+            logger.error("全アイテム数: %s", total_items)
+            if total_items > 0:
+                for i in range(min(10, total_items)):
+                    t = existing_dataset_combo.itemText(i)
+                    d = existing_dataset_combo.itemData(i)
+                    if isinstance(d, dict):
+                        logger.error("  [%s] raw='%s' norm='%s' id=%s", i, t[:80], _normalize_display_text(t)[:80], d.get("id"))
+
     
     existing_dataset_combo.currentIndexChanged.connect(on_dataset_selection_changed)
     
