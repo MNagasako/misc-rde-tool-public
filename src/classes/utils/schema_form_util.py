@@ -38,50 +38,64 @@ def create_schema_form(schema_path, parent=None):
         return None
 
     # 固有情報（custom）セクションを取得
-    custom = schema.get("properties", {}).get("custom", {})
-    if not custom:
-        return None
+    custom = schema.get("properties", {}).get("custom")
+    label_text = "固有情報"
+    if isinstance(custom, dict):
+        label_text = custom.get("label", {}).get("ja", label_text)
 
     # フォームグループ作成
-    group = QGroupBox(custom.get("label", {}).get("ja", "固有情報"), parent)
-    
+    group = QGroupBox(label_text, parent)
+
     # 独立ダイアログとして表示されることを防ぐ
     from qt_compat.core import Qt
     group.setWindowFlags(Qt.Widget)  # 明示的にウィジェットフラグを設定
     group.setVisible(False)  # 初期状態では非表示に設定
-    
+
     layout = QVBoxLayout(group)
 
-    # プロパティ解析・フォーム要素生成
-    properties = custom.get("properties", {})
+    properties = {}
+    if isinstance(custom, dict):
+        properties = custom.get("properties", {}) or {}
+
     key_to_widget = {}
 
-    for key, prop in properties.items():
-        row = QHBoxLayout()
-        
-        # ラベル作成
-        label = QLabel(prop.get("label", {}).get("ja", key))
-        row.addWidget(label)
+    if not properties:
+        # フォーム項目が定義されていない場合は説明ラベルのみ表示
+        logger.info("スキーマに固有情報フィールドが存在しません: %s", schema_path)
+        info_label = QLabel("このテンプレートには固有情報の入力項目が定義されていません。")
+        info_label.setWordWrap(True)
+        info_label.setObjectName("schema_form_no_custom_info")
+        layout.addWidget(info_label)
+        # 後続処理で共通メソッドを付与するため、空マップを設定
+        key_to_widget = {}
+    else:
+        # プロパティ解析・フォーム要素生成
+        for key, prop in properties.items():
+            row = QHBoxLayout()
 
-        # 入力要素作成
-        if "enum" in prop:
-            # 選択肢がある場合：コンボボックス
-            combo = QComboBox()
-            combo.addItem("")  # 初期値として空欄を追加
-            combo.addItems([str(v) for v in prop["enum"]])
-            combo.setEditable(False)
-            combo.setPlaceholderText(prop.get("options", {}).get("placeholder", {}).get("ja", ""))
-            combo.setCurrentIndex(0)  # 空欄をデフォルト選択
-            row.addWidget(combo)
-            key_to_widget[key] = combo
-        else:
-            # 自由入力：テキストフィールド
-            edit = QLineEdit()
-            edit.setPlaceholderText(prop.get("options", {}).get("placeholder", {}).get("ja", ""))
-            row.addWidget(edit)
-            key_to_widget[key] = edit
+            # ラベル作成
+            label = QLabel(prop.get("label", {}).get("ja", key))
+            row.addWidget(label)
 
-        layout.addLayout(row)
+            # 入力要素作成
+            if "enum" in prop:
+                # 選択肢がある場合：コンボボックス
+                combo = QComboBox()
+                combo.addItem("")  # 初期値として空欄を追加
+                combo.addItems([str(v) for v in prop["enum"]])
+                combo.setEditable(False)
+                combo.setPlaceholderText(prop.get("options", {}).get("placeholder", {}).get("ja", ""))
+                combo.setCurrentIndex(0)  # 空欄をデフォルト選択
+                row.addWidget(combo)
+                key_to_widget[key] = combo
+            else:
+                # 自由入力：テキストフィールド
+                edit = QLineEdit()
+                edit.setPlaceholderText(prop.get("options", {}).get("placeholder", {}).get("ja", ""))
+                row.addWidget(edit)
+                key_to_widget[key] = edit
+
+            layout.addLayout(row)
 
     group.setLayout(layout)
     # 英語key→widgetマッピングを保存

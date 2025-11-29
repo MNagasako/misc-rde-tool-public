@@ -8,6 +8,7 @@ import webbrowser
 import shutil
 import codecs
 import logging
+import re
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGridLayout, 
     QPushButton, QMessageBox, QScrollArea, QCheckBox, QRadioButton, 
@@ -24,6 +25,23 @@ from classes.dataset.ui.ai_suggestion_dialog import AISuggestionDialog
 
 # ロガー設定
 logger = logging.getLogger(__name__)
+
+
+def extract_dataset_id_from_text(text):
+    """
+    Completer選択テキストからデータセットIDを抽出
+    
+    Args:
+        text: Completerから受け取ったテキスト
+        
+    Returns:
+        str: 抽出されたID、失敗時はNone
+    """
+    # パターン: "ID: xxxx-xxxx-xxxx-xxxx"形式（大文字小文字不問）
+    id_match = re.search(r'ID:\s*([a-f0-9\-]+)', text, re.IGNORECASE)
+    if id_match:
+        return id_match.group(1)
+    return None
 
 
 def repair_json_file(file_path):
@@ -690,6 +708,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         popup_view.setMinimumHeight(240)
         popup_view.setMaximumHeight(240)
         existing_dataset_combo.setCompleter(completer)
+        # Completerからの選択シグナルを接続
+        completer.activated.connect(on_completer_activated)
         
         # プレースホルダーテキストを設定
         if existing_dataset_combo.lineEdit():
@@ -2070,6 +2090,71 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 clear_edit_form()
                 # 関連データセットリストを再セットアップ（除外なし）
                 setup_related_datasets(related_dataset_combo)
+    
+    def on_completer_activated(text):
+        """QCompleterでフィルタ選択された場合の処理"""
+        logger.info("Completerから選択: %r", text)
+        
+        # Completerから選択されたテキストは、display_namesリストのいずれかと一致する
+        # このテキストを使ってコンボボックス内のアイテムを検索
+        # ただし、findTextは表示テキストベースなので信頼性が低い
+        # 代わりに、全アイテムのitemTextを完全一致で比較してインデックスを取得
+        
+        total_items = existing_dataset_combo.count()
+        logger.debug("コンボボックス総アイテム数: %s", total_items)
+        
+        found_index = -1
+        for i in range(total_items):
+            item_text = existing_dataset_combo.itemText(i)
+            if item_text == text:
+                # 完全一致でインデックス発見
+                found_index = i
+                logger.info("テキスト完全一致でインデックス発見: %s", found_index)
+                break
+        
+        if found_index >= 0:
+            # インデックスが見つかった場合、そのitemDataを取得
+            item_data = existing_dataset_combo.itemData(found_index)
+            if item_data and isinstance(item_data, dict):
+                dataset_id = item_data.get("id", "")
+                dataset_name = item_data.get("attributes", {}).get("name", "")
+                logger.info("データセット発見: id=%s, name=%s", dataset_id, dataset_name)
+                # setCurrentIndexでコンボボックスの選択を変更
+                # これによりon_dataset_selection_changedが自動的にトリガーされる
+                existing_dataset_combo.setCurrentIndex(found_index)
+            else:
+                logger.warning("インデックス%sのitemDataが不正: %s", found_index, item_data)
+        else:
+            # 完全一致で見つからない場合、ID抽出で検索
+            logger.warning("テキスト完全一致でインデックスが見つかりません。ID抽出で再試行")
+            target_id = extract_dataset_id_from_text(text)
+            if not target_id:
+                logger.error("選択されたテキストからIDを抽出できません: %s", text)
+                return
+            
+            logger.info("抽出されたID: %s", target_id)
+            
+            # IDで検索
+            for i in range(total_items):
+                item_data = existing_dataset_combo.itemData(i)
+                if item_data and isinstance(item_data, dict):
+                    dataset_id = item_data.get("id", "")
+                    if dataset_id == target_id:
+                        found_index = i
+                        logger.info("IDマッチでインデックス発見: %s (dataset_id=%s)", found_index, dataset_id)
+                        existing_dataset_combo.setCurrentIndex(found_index)
+                        return
+            
+            logger.error("選択されたテキストに対応するインデックスが見つかりません: %s (ID: %s)", text, target_id)
+            # デバッグ: 最初の5アイテムの情報を出力
+            logger.debug("デバッグ: 最初の5アイテムの情報:")
+            for i in range(min(5, total_items)):
+                item_text = existing_dataset_combo.itemText(i)
+                item_data = existing_dataset_combo.itemData(i)
+                if item_data:
+                    logger.debug("  [%s] text=%s, id=%s", i, item_text[:50], item_data.get("id", "N/A"))
+                else:
+                    logger.debug("  [%s] text=%s, itemData=None", i, item_text[:50])
     
     existing_dataset_combo.currentIndexChanged.connect(on_dataset_selection_changed)
     

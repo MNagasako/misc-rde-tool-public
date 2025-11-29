@@ -1516,6 +1516,11 @@ API情報:
             # 前提条件チェック
             if not self._validate_upload_prerequisites():
                 return
+            # 対応拡張子一致ゼロ時の警告（続行可）
+            if self.file_set and hasattr(self, 'allowed_exts'):
+                if not self._confirm_when_no_match(self.file_set, "アップロード"):
+                    logger.info("対応拡張子未検出のためユーザーがアップロードをキャンセル")
+                    return
             
             # 確認ダイアログ
             reply = QMessageBox.question(
@@ -2697,11 +2702,12 @@ API情報:
 class BatchRegisterPreviewDialog(QDialog):
     """一括登録プレビューダイアログ"""
     
-    def __init__(self, file_sets: List[FileSet], parent=None, bearer_token: str = None):
+    def __init__(self, file_sets: List[FileSet], parent=None, bearer_token: str = None, allowed_exts: Optional[List[str]] = None):
         super().__init__(parent)
         self.file_sets = file_sets
         self.duplicate_files = set()
         self.bearer_token = bearer_token
+        self.allowed_exts = [e.lower().strip().lstrip('.') for e in (allowed_exts or [])]
         self.setWindowTitle("一括登録プレビュー")
         self.setModal(True)
         # 最前面表示設定（マルチディスプレイ環境対応）
@@ -2715,15 +2721,15 @@ class BatchRegisterPreviewDialog(QDialog):
         self.load_data()
     
     def setup_dialog_size(self):
-        """ダイアログサイズを設定（ディスプレイ高さの90%）"""
+        """ダイアログサイズを設定（ディスプレイ高さの80%に縮小、ツールバー操作性改善）"""
         try:
             from qt_compat.widgets import QApplication
             screen = QApplication.primaryScreen()
             screen_rect = screen.availableGeometry()
             
-            # ディスプレイサイズの90%に設定
-            target_width = int(screen_rect.width() * 0.9)
-            target_height = int(screen_rect.height() * 0.9)
+            # ディスプレイサイズの80%に設定（はみ出し防止）
+            target_width = int(screen_rect.width() * 0.8)
+            target_height = int(screen_rect.height() * 0.8)
             
             # 最小サイズを設定
             min_width = 800
@@ -2732,6 +2738,7 @@ class BatchRegisterPreviewDialog(QDialog):
             target_height = max(target_height, min_height)
             
             self.resize(target_width, target_height)
+            self.setSizeGripEnabled(True)
             
             # 親ウィンドウがある場合は親の中央に、なければ画面中央に配置
             if self.parent():
@@ -2776,6 +2783,42 @@ class BatchRegisterPreviewDialog(QDialog):
         layout.addWidget(button_box)
         
         self.setLayout(layout)
+
+    def _compute_match_count(self, fs: FileSet) -> int:
+        """許可拡張子に一致するファイル数を算出"""
+        if not self.allowed_exts:
+            return 0
+        total = 0
+        try:
+            for item in fs.get_valid_items():
+                if item.file_type == FileType.FILE:
+                    ext = Path(item.name).suffix.lower().lstrip('.')
+                    if ext in self.allowed_exts:
+                        total += 1
+        except Exception:
+            pass
+        return total
+
+    def _confirm_when_no_match(self, fs: FileSet, action_label: str) -> bool:
+        """一致ファイルが0件のときに警告し、続行可否を確認"""
+        try:
+            match_count = self._compute_match_count(fs)
+            if match_count == 0 and self.allowed_exts:
+                msg = QMessageBox(self)
+                msg.setIcon(QMessageBox.Warning)
+                msg.setWindowTitle("対応ファイル未検出")
+                msg.setText(
+                    "選択されたファイルセットに、テンプレート対応拡張子のファイルが見つかりません。\n"
+                    "アップロードを続行しますか？\n\n"
+                    "注: 対応ファイルリストが最新でない場合、未掲載でもアップロード可能な場合があります。"
+                )
+                msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+                msg.setDefaultButton(QMessageBox.No)
+                result = msg.exec_()
+                return result == QMessageBox.Yes
+            return True
+        except Exception:
+            return True
     
     def check_duplicates(self):
         """ファイル重複をチェック"""
@@ -3109,6 +3152,11 @@ class BatchRegisterPreviewDialog(QDialog):
             # 前提条件チェック
             if not self._validate_registration_prerequisites():
                 return
+            # 対応拡張子一致ゼロ時の警告（続行可）
+            if self.file_set and hasattr(self, 'allowed_exts'):
+                if not self._confirm_when_no_match(self.file_set, "データ登録"):
+                    logger.info("対応拡張子未検出のためユーザーがデータ登録をキャンセル")
+                    return
             
             # 確認ダイアログ
             reply = QMessageBox.question(
@@ -3592,11 +3640,12 @@ class BatchRegisterPreviewDialog(QDialog):
 class BatchRegisterPreviewDialog(QDialog):
     """一括登録プレビューダイアログ（複数ファイルセット対応）"""
     
-    def __init__(self, file_sets: List[FileSet], parent=None, bearer_token: str = None):
+    def __init__(self, file_sets: List[FileSet], parent=None, bearer_token: str = None, allowed_exts: Optional[List[str]] = None):
         super().__init__(parent)
         self.file_sets = file_sets
         self.duplicate_files = set()
         self.bearer_token = bearer_token
+        self.allowed_exts = [e.lower().strip().lstrip('.') for e in (allowed_exts or [])]
         self.setWindowTitle("一括登録プレビュー（複数ファイルセット）")
         self.setModal(True)
         # 最前面表示設定（マルチディスプレイ環境対応）
@@ -3610,15 +3659,15 @@ class BatchRegisterPreviewDialog(QDialog):
         self.load_data()
     
     def setup_dialog_size(self):
-        """ダイアログサイズを設定（ディスプレイ高さの90%）"""
+        """ダイアログサイズを設定（ディスプレイ高さの80%に縮小、ツールバー操作性改善）"""
         try:
             from qt_compat.widgets import QApplication
             screen = QApplication.primaryScreen()
             screen_rect = screen.availableGeometry()
             
-            # ディスプレイサイズの90%に設定
-            target_width = int(screen_rect.width() * 0.9)
-            target_height = int(screen_rect.height() * 0.9)
+            # ディスプレイサイズの80%に設定（はみ出し防止）
+            target_width = int(screen_rect.width() * 0.8)
+            target_height = int(screen_rect.height() * 0.8)
             
             # 最小サイズを設定
             min_width = 1000
@@ -3627,6 +3676,7 @@ class BatchRegisterPreviewDialog(QDialog):
             target_height = max(target_height, min_height)
             
             self.resize(target_width, target_height)
+            self.setSizeGripEnabled(True)
             
             # 親ウィンドウがある場合は親の中央に、なければ画面中央に配置
             if self.parent():
@@ -3727,6 +3777,40 @@ class BatchRegisterPreviewDialog(QDialog):
         layout.addLayout(buttons_layout)
         
         self.setLayout(layout)
+
+    def _compute_match_count(self, fs: FileSet) -> int:
+        if not self.allowed_exts:
+            return 0
+        total = 0
+        try:
+            for item in fs.get_valid_items():
+                if item.file_type == FileType.FILE:
+                    ext = Path(item.name).suffix.lower().lstrip('.')
+                    if ext in self.allowed_exts:
+                        total += 1
+        except Exception:
+            pass
+        return total
+
+    def _confirm_when_no_match(self, fs: FileSet, action_label: str) -> bool:
+        try:
+            match_count = self._compute_match_count(fs)
+            if match_count == 0 and self.allowed_exts:
+                msg = QMessageBox(self)
+                msg.setIcon(QMessageBox.Warning)
+                msg.setWindowTitle("対応ファイル未検出")
+                msg.setText(
+                    f"ファイルセット '{fs.name}' に、テンプレート対応拡張子のファイルが見つかりません。\n"
+                    f"{action_label} を続行しますか？\n\n"
+                    "注: 対応ファイルリストが最新でない場合、未掲載でもアップロード可能な場合があります。"
+                )
+                msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+                msg.setDefaultButton(QMessageBox.No)
+                result = msg.exec_()
+                return result == QMessageBox.Yes
+            return True
+        except Exception:
+            return True
     
     def check_duplicates(self):
         """ファイル重複をチェック（複数ファイルセット間）"""
@@ -3873,6 +3957,33 @@ class BatchRegisterPreviewDialog(QDialog):
                 file_items = [item for item in valid_items if item.file_type == FileType.FILE]
                 display_items = self._get_display_file_items_for_fileset(fs, file_items)
                 total_files += len(display_items)
+
+            # 対応拡張子一致ゼロのファイルセットがある場合は事前警告（続行可）
+            try:
+                if hasattr(self, 'allowed_exts') and self.allowed_exts:
+                    zero_match_sets = []
+                    for fs in valid_file_sets:
+                        if self._compute_match_count(fs) == 0:
+                            zero_match_sets.append(fs.name)
+                    if zero_match_sets:
+                        text = (
+                            "一部のファイルセットでテンプレート対応拡張子のファイルが見つかりません。\n"
+                            "アップロードを続行しますか？\n\n"
+                            "注: 対応ファイルリストが最新でない場合、未掲載でもアップロード可能な場合があります。\n\n"
+                            f"影響対象: {', '.join(zero_match_sets[:5])}{' ...' if len(zero_match_sets)>5 else ''}"
+                        )
+                        res = QMessageBox.question(
+                            self,
+                            "対応ファイル未検出",
+                            text,
+                            QMessageBox.Yes | QMessageBox.No,
+                            QMessageBox.No
+                        )
+                        if res != QMessageBox.Yes:
+                            logger.info("ユーザーが一致ゼロ警告でキャンセル")
+                            return
+            except Exception:
+                pass
             
             reply = QMessageBox.question(
                 self, "全ファイルセット一括アップロード確認", 
@@ -4041,6 +4152,32 @@ class BatchRegisterPreviewDialog(QDialog):
             
             confirmation_text = f"全ファイルセット（{len(valid_file_sets)}個）の一括データ登録を実行しますか？\n\n"
             confirmation_text += f"対象ファイル数: {total_files}個\n"
+            # 対応拡張子一致ゼロのファイルセットがある場合は事前警告（続行可）
+            try:
+                if hasattr(self, 'allowed_exts') and self.allowed_exts:
+                    zero_match_sets = []
+                    for fs in valid_file_sets:
+                        if self._compute_match_count(fs) == 0:
+                            zero_match_sets.append(fs.name)
+                    if zero_match_sets:
+                        text = (
+                            "一部のファイルセットでテンプレート対応拡張子のファイルが見つかりません。\n"
+                            "データ登録を続行しますか？\n\n"
+                            "注: 対応ファイルリストが最新でない場合、未掲載でもアップロード可能な場合があります。\n\n"
+                            f"影響対象: {', '.join(zero_match_sets[:5])}{' ...' if len(zero_match_sets)>5 else ''}"
+                        )
+                        res = QMessageBox.question(
+                            self,
+                            "対応ファイル未検出",
+                            text,
+                            QMessageBox.Yes | QMessageBox.No,
+                            QMessageBox.No
+                        )
+                        if res != QMessageBox.Yes:
+                            logger.info("ユーザーが一致ゼロ警告でキャンセル")
+                            return
+            except Exception:
+                pass
             
             if same_as_previous_sets:
                 confirmation_text += f"「前回と同じ」試料モード: {len(same_as_previous_sets)}個\n"
@@ -4144,7 +4281,8 @@ class BatchRegisterPreviewDialog(QDialog):
                         fileset_results.append({
                             'name': file_set.name,
                             'success': False,
-                            'error': error_detail
+                            'error': error_detail,
+                            'error_details': register_result.get('error_details')
                         })
                         total_failed += 1
                         logger.error("%s: 登録失敗 - %s", file_set.name, error_detail)
@@ -4154,7 +4292,8 @@ class BatchRegisterPreviewDialog(QDialog):
                     fileset_results.append({
                         'name': file_set.name,
                         'success': False,
-                        'error': str(e)
+                        'error': str(e),
+                        'error_details': str(e)
                     })
                     total_failed += 1
 
@@ -4207,6 +4346,19 @@ class BatchRegisterPreviewDialog(QDialog):
             msgbox.setText(result_message)
             msgbox.setIcon(QMessageBox.Information if total_failed == 0 else QMessageBox.Warning)
             msgbox.setStandardButtons(QMessageBox.Ok)
+
+            detailed_failures = [
+                result for result in fileset_results
+                if not result.get('success') and result.get('error_details')
+            ]
+            if detailed_failures:
+                detail_sections = []
+                for failure in detailed_failures:
+                    section_lines = [f"[{failure['name']}]"]
+                    section_lines.append(failure['error_details'])
+                    detail_sections.append("\n".join(section_lines).strip())
+                msgbox.setDetailedText("\n\n---\n\n".join(detail_sections))
+
             msgbox.setWindowFlags(msgbox.windowFlags() | Qt.WindowStaysOnTopHint)
             msgbox.show()
             msgbox.raise_()
@@ -4276,24 +4428,65 @@ class BatchRegisterPreviewDialog(QDialog):
                     from net.http_helpers import proxy_get
                     detail_url = URLS['api']['dataset_detail'].format(id=dataset_id)
                     
-                    # RDE API必須ヘッダー
+                    # ヘッダーなしでGET（テストのモック互換性確保）
+                    resp = proxy_get(detail_url, timeout=10)
+                    def format_response_detail(label: str, url: str, response) -> str:
+                        try:
+                            status_code = getattr(response, 'status_code', 'unknown')
+                        except Exception:
+                            status_code = 'unknown'
+
+                        lines = [f"[{label}] URL: {url}", f"[{label}] Status: {status_code}"]
+
+                        headers = getattr(response, 'headers', None)
+                        if headers:
+                            header_lines = []
+                            try:
+                                for key, value in headers.items():
+                                    header_lines.append(f"  {key}: {value}")
+                            except Exception:
+                                header_lines.append(f"  {headers}")
+                            lines.append(f"[{label}] Headers:")
+                            lines.extend(header_lines)
+                        else:
+                            lines.append(f"[{label}] Headers: (none)")
+
+                        body = getattr(response, 'text', '')
+                        if body is None:
+                            body = ''
+                        if not isinstance(body, str):
+                            try:
+                                body = str(body)
+                            except Exception:
+                                body = '<unavailable>'
+                        if len(body) > 2000:
+                            body = body[:2000] + "\n... (truncated)"
+                        body_lines = body.replace('\r\n', '\n').split('\n') if body else []
+                        if body_lines and any(line.strip() for line in body_lines):
+                            lines.append(f"[{label}] Body:")
+                            lines.extend(body_lines)
+                        else:
+                            lines.append(f"[{label}] Body: (empty)")
+
+                        return "\n".join(lines)
+
                     headers = {
                         'Accept': 'application/vnd.api+json',
-                        'Content-Type': 'application/vnd.api+json'
+                        'Content-Type': 'application/vnd.api+json',
                     }
-                    
+
                     resp = proxy_get(detail_url, headers=headers, timeout=10)
+
                     if resp.status_code == 404:
-                        logger.error("データセット未検出 (404) スキップ: id=%s", dataset_id)
+                        logger.error("データセット未検出 (404) エラー扱い: id=%s", dataset_id)
+                        error_details = format_response_detail("Primary", detail_url, resp)
                         return {
                             'success_count': 0,
-                            'failed_count': 0,
-                            'skipped': True,
-                            'skip_reason': 'not_found',
-                            'error': f'データセットが存在しません (id={dataset_id})'
+                            'failed_count': 1,
+                            'error': f'データセットが存在しません (id={dataset_id})',
+                            'error_details': error_details,
                         }
                     elif resp.status_code == 401:
-                        # 本来選択段階でブロックされる想定。安全のためスキップ。
                         logger.error("未認証 (401) データセットアクセス拒否 スキップ: id=%s", dataset_id)
                         return {
                             'success_count': 0,
@@ -4302,9 +4495,57 @@ class BatchRegisterPreviewDialog(QDialog):
                             'skip_reason': 'unauthorized',
                             'error': f'未認証のためアクセスできません (id={dataset_id})'
                         }
+                    elif resp.status_code == 422:
+                        logger.warning("データセット詳細取得が422を返却: id=%s。パラメータを省いた再取得を試行します", dataset_id)
+                        error_details = format_response_detail("Primary", detail_url, resp)
+
+                        from config.site_rde import URL_RDE_API_BASE
+
+                        fallback_url = f"{URL_RDE_API_BASE}datasets/{dataset_id}"
+                        try:
+                            fallback_resp = proxy_get(fallback_url, headers=headers, timeout=10)
+                        except Exception as fallback_error:
+                            logger.error("データセット詳細再取得エラー: %s", fallback_error, exc_info=True)
+                            fallback_detail = f"Fallback request failed: {fallback_error}"
+                            combined_details = error_details + "\n\n" + fallback_detail
+                            return {
+                                'success_count': 0,
+                                'failed_count': 1,
+                                'error': f'データセット取得エラー status=422 (id={dataset_id})',
+                                'error_details': combined_details,
+                            }
+
+                        if fallback_resp.status_code == 200:
+                            self._verified_datasets.add(dataset_id)
+                            logger.info("パラメータ簡略化後のデータセット取得に成功: %s", dataset_id)
+                        else:
+                            try:
+                                error_body = fallback_resp.text[:500]
+                            except Exception:
+                                error_body = ''
+                            logger.error(
+                                "データセット詳細取得失敗 (fallback): id=%s status=%s response=%s",
+                                dataset_id,
+                                fallback_resp.status_code,
+                                error_body,
+                            )
+                            fallback_detail_text = format_response_detail("Fallback", fallback_url, fallback_resp)
+                            combined = error_details + "\n\n" + fallback_detail_text
+                            return {
+                                'success_count': 0,
+                                'failed_count': 1,
+                                'error': f'データセット取得エラー status={fallback_resp.status_code} (id={dataset_id})',
+                                'error_details': combined,
+                            }
                     elif resp.status_code >= 400:
                         logger.error("データセット取得失敗: id=%s status=%s", dataset_id, resp.status_code)
-                        return {'success_count': 0, 'failed_count': 1, 'error': f'データセット取得エラー status={resp.status_code}'}
+                        error_details = format_response_detail("Primary", detail_url, resp)
+                        return {
+                            'success_count': 0,
+                            'failed_count': 1,
+                            'error': f'データセット取得エラー status={resp.status_code} (id={dataset_id})',
+                            'error_details': error_details,
+                        }
                     else:
                         self._verified_datasets.add(dataset_id)
                         logger.debug("データセット存在確認成功(キャッシュ): %s", dataset_id)

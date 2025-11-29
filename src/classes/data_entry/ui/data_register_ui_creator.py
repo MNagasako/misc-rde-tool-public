@@ -16,6 +16,7 @@ from classes.theme.theme_manager import get_color
 from qt_compat.gui import QFont
 from qt_compat.core import QTimer, Qt
 from config.common import get_dynamic_file_path
+from classes.data_entry.util.template_format_validator import TemplateFormatValidator
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -123,6 +124,31 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
 
     # --- 固有情報フォームの動的生成用 ---
     schema_form_widget = None
+    
+    # --- ファイル検証用バリデータ ---
+    validator = TemplateFormatValidator()
+    
+    # --- テンプレート対応拡張子表示ラベル ---
+    template_format_label = QLabel("データセットを選択してください")
+    template_format_label.setWordWrap(True)
+    template_format_label.setStyleSheet(
+        f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
+        f"border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)}; border-radius: 4px;"
+    )
+    layout.addWidget(template_format_label)
+    parent_controller.template_format_label = template_format_label
+    
+    # --- ファイル検証結果表示ラベル ---
+    file_validation_label = QLabel("")
+    file_validation_label.setWordWrap(True)
+    file_validation_label.setStyleSheet(
+        f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
+        f"border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)}; border-radius: 4px;"
+    )
+    file_validation_label.setVisible(False)
+    layout.addWidget(file_validation_label)
+    parent_controller.file_validation_label = file_validation_label
+    parent_controller.current_template_id = None  # 現在選択中のテンプレートID
 
     # combo取得（dataset_dropdownの型によって異なる）
     if hasattr(parent_controller.dataset_dropdown, 'dataset_dropdown'):
@@ -226,15 +252,80 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
                     name = child.objectName() or child.placeholderText() or child.__class__.__name__
                     safe_name = f"schema_{name}".replace(' ', '_').replace('（', '').replace('）', '')
                     setattr(parent_controller, safe_name, child)
+        
+        # --- テンプレート対応拡張子表示を更新 ---
+        parent_controller.current_template_id = template_id
+        if not validator.is_formats_json_available():
+            template_format_label.setText(
+                "⚠ 対応ファイル形式情報が読み込まれていません。\n"
+                "設定 → データ構造化タブでXLSXファイルを読み込んでください。"
+            )
+            template_format_label.setStyleSheet(
+                f"padding: 8px; background-color: #fff3cd; color: #856404; "
+                f"border: 1px solid #ffc107; border-radius: 4px;"
+            )
+        else:
+            format_text = validator.get_format_display_text(template_id)
+            template_format_label.setText(f"📋 対応ファイル形式: {format_text}")
+            template_format_label.setStyleSheet(
+                f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
+                f"border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)}; border-radius: 4px;"
+            )
+        
+        # --- ファイル選択済みの場合は再検証 ---
+        if hasattr(parent_controller, 'selected_register_files') and parent_controller.selected_register_files:
+            update_file_validation()
 
 
 
-    combo.currentIndexChanged.connect(on_dataset_changed)
+    if combo is not None:
+        combo.currentIndexChanged.connect(on_dataset_changed)
 
     # ファイル選択・登録実行ボタンを分離
     btn_layout = QHBoxLayout()
     btn_layout.setSpacing(15)  # ボタン間隔を広げる
 
+
+    # --- ファイル検証関数 ---
+    def update_file_validation():
+        """選択されたファイルを検証して結果を表示"""
+        files = getattr(parent_controller, 'selected_register_files', [])
+        template_id = getattr(parent_controller, 'current_template_id', None)
+        
+        if not files:
+            file_validation_label.setVisible(False)
+            return
+        
+        if not template_id:
+            file_validation_label.setText("⚠ データセットを選択してください")
+            file_validation_label.setStyleSheet(
+                "padding: 8px; background-color: #fff3cd; color: #856404; "
+                "border: 1px solid #ffc107; border-radius: 4px;"
+            )
+            file_validation_label.setVisible(True)
+            return
+        
+        # 検証実行
+        result = validator.validate_files(files, template_id)
+        
+        if result.is_valid:
+            # 有効なファイルあり
+            file_validation_label.setText(f"✅ {result.validation_message}")
+            file_validation_label.setStyleSheet(
+                "padding: 8px; background-color: #d4edda; color: #155724; "
+                "border: 1px solid #c3e6cb; border-radius: 4px;"
+            )
+        else:
+            # 有効なファイルなし
+            file_validation_label.setText(f"{result.validation_message}")
+            file_validation_label.setStyleSheet(
+                "padding: 8px; background-color: #f8d7da; color: #721c24; "
+                "border: 1px solid #f5c6cb; border-radius: 4px;"
+            )
+        
+        file_validation_label.setVisible(True)
+    
+    parent_controller.update_file_validation = update_file_validation
 
     # ファイル選択ボタン
     button_file_select_text = "📁 ファイル選択(未選択)"
@@ -277,12 +368,13 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
     if hasattr(parent_controller, 'data_name_input'):
         parent_controller.data_name_input.textChanged.connect(lambda: update_register_button_state())
 
-    # ファイル選択時に呼ばれるコールバックで状態更新
+    # ファイル選択時に呼ばれるコールバックで状態更新と検証実行
     if hasattr(parent_controller, 'on_file_select_clicked'):
         orig_file_select = parent_controller.on_file_select_clicked
         def wrapped_file_select():
             result = orig_file_select()
             update_register_button_state()
+            update_file_validation()
             return result
         parent_controller.on_file_select_clicked = wrapped_file_select
         button_file_select.clicked.disconnect()

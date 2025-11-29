@@ -79,6 +79,9 @@ class SettingsTabWidget(QWidget):
         # トークン状態タブ
         self.setup_token_status_tab()
 
+        # データ構造化タブ（アップロード + 解析結果表示）
+        self.setup_data_structuring_tab()
+
         # インポートタブ（ダミー）
         self.setup_import_tab_dummy()
         
@@ -469,6 +472,94 @@ class SettingsTabWidget(QWidget):
         layout.addStretch()
         self.tab_widget.addTab(widget, "アプリケーション")
     
+    
+    def setup_data_structuring_tab(self):
+        """データ構造化タブを作成し、アップロードと解析結果表示を統合"""
+        try:
+            from classes.config.ui.upload_xlsx_tab import UploadXlsxTab
+            from classes.config.ui.supported_formats_tab import SupportedFormatsTab
+        except Exception as e:
+            logger.warning(f"データ構造化タブのロードに失敗: {e}")
+            return
+
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+
+        # アップロードセクション
+        upload_group = QGroupBox("XLSXアップロード")
+        upload_layout = QVBoxLayout(upload_group)
+        self.upload_xlsx_tab = UploadXlsxTab(self)
+        upload_layout.addWidget(self.upload_xlsx_tab)
+
+        # 解析結果セクション
+        result_group = QGroupBox("解析結果（対応ファイル形式一覧）")
+        result_layout = QVBoxLayout(result_group)
+        self.supported_formats_tab = SupportedFormatsTab(self)
+        result_layout.addWidget(self.supported_formats_tab)
+
+        # シグナル接続：アップロード→解析完了で一覧更新（元ファイルパス付き）
+        if hasattr(self.upload_xlsx_tab, 'entriesParsed'):
+            try:
+                self.upload_xlsx_tab.entriesParsed.connect(self._update_formats_with_source)
+            except Exception as ce:
+                logger.debug(f"entriesParsed接続失敗: {ce}")
+        
+        # 起動時に既存JSON読み込み
+        self._load_existing_formats()
+
+        layout.addWidget(upload_group)
+        layout.addWidget(result_group)
+        layout.addStretch()
+
+        self.tab_widget.addTab(container, "データ構造化")
+    
+    def _update_formats_with_source(self, entries):
+        """解析完了時にentriesと元ファイルパスを一覧へ渡す"""
+        try:
+            import json, pathlib
+            json_path = pathlib.Path("output/supported_formats.json")
+            if json_path.exists():
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    meta = json.load(f)
+                    source = meta.get("source_file", "")
+                    self.supported_formats_tab.set_entries(entries, source)
+            else:
+                self.supported_formats_tab.set_entries(entries)
+        except Exception as e:
+            logger.error(f"一覧更新エラー: {e}")
+            self.supported_formats_tab.set_entries(entries)
+    
+    def _load_existing_formats(self):
+        """起動時に既存のsupported_formats.jsonを読み込んで一覧へ表示"""
+        try:
+            import json, pathlib
+            from classes.config.core.models import SupportedFileFormatEntry
+            json_path = pathlib.Path("output/supported_formats.json")
+            if not json_path.exists():
+                return
+            with open(json_path, 'r', encoding='utf-8') as f:
+                meta = json.load(f)
+                source = meta.get("source_file", "")
+                entries_data = meta.get("entries", [])
+                entries = [
+                    SupportedFileFormatEntry(
+                        equipment_id=e["equipment_id"],
+                        file_exts=e.get("file_exts", []),
+                        file_descs=e.get("file_descs", {}),
+                        template_name=e.get("template_name", ""),
+                        template_version=e.get("template_version"),
+                        source_sheet=e.get("source_sheet", ""),
+                        original_format=e.get("original_format", ""),
+                    )
+                    for e in entries_data
+                ]
+                self.supported_formats_tab.set_entries(entries, source)
+                logger.info(f"既存データを読み込みました: {len(entries)}件")
+        except Exception as e:
+            logger.debug(f"既存データ読み込み失敗（初回起動？）: {e}")
+    
     def setup_ai_tab(self):
         """AI設定タブ"""
         try:
@@ -834,3 +925,260 @@ def create_settings_tab_widget(parent=None, bearer_token=None):
         import traceback
         traceback.print_exc()
         return None
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+    
+
