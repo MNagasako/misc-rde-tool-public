@@ -26,17 +26,82 @@ def render_markdown_to_html(markdown_text: str) -> str:
     html_parts = []
     html_parts.append('<style>')
     html_parts.append('''
-        body { font-family: "Yu Gothic UI", "Meiryo UI", sans-serif; line-height: 1.6; }
-        h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
-        h2 { color: #34495e; border-bottom: 1px solid #bdc3c7; padding-bottom: 5px; margin-top: 20px; }
-        h3 { color: #7f8c8d; margin-top: 15px; }
-        code { background-color: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: "Consolas", monospace; }
-        pre { background-color: #f4f4f4; padding: 10px; border-radius: 5px; overflow-x: auto; }
-        ul, ol { margin-left: 20px; }
-        li { margin: 5px 0; }
-        blockquote { border-left: 4px solid #3498db; padding-left: 15px; color: #7f8c8d; }
-        a { color: #3498db; text-decoration: none; }
-        a:hover { text-decoration: underline; }
+        body { 
+            font-family: "Yu Gothic UI", "Meiryo UI", sans-serif; 
+            line-height: 1.5; 
+            margin: 0;
+            padding: 0;
+            font-size: 11pt;
+        }
+        h1 { 
+            color: #2c3e50; 
+            border-bottom: 2px solid #3498db; 
+            padding-bottom: 8px;
+            margin-top: 16px;
+            margin-bottom: 12px;
+            font-size: 16pt;
+        }
+        h2 { 
+            color: #34495e; 
+            border-bottom: 1px solid #bdc3c7; 
+            padding-bottom: 4px; 
+            margin-top: 14px;
+            margin-bottom: 10px;
+            font-size: 13pt;
+        }
+        h3 { 
+            color: #7f8c8d; 
+            margin-top: 12px;
+            margin-bottom: 8px;
+            font-size: 11.5pt;
+        }
+        p {
+            margin-top: 6px;
+            margin-bottom: 6px;
+        }
+        code { 
+            background-color: #f4f4f4; 
+            padding: 1px 4px; 
+            border-radius: 3px; 
+            font-family: "Consolas", monospace;
+            font-size: 10pt;
+        }
+        pre { 
+            background-color: #f4f4f4; 
+            padding: 8px; 
+            border-radius: 4px; 
+            overflow-x: auto;
+            margin-top: 8px;
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+        ul, ol { 
+            margin-left: 20px;
+            margin-top: 6px;
+            margin-bottom: 6px;
+            padding-left: 0;
+        }
+        li { 
+            margin: 3px 0;
+        }
+        blockquote { 
+            border-left: 3px solid #3498db; 
+            padding-left: 12px; 
+            color: #7f8c8d;
+            margin-top: 8px;
+            margin-bottom: 8px;
+            margin-left: 4px;
+        }
+        a { 
+            color: #3498db; 
+            text-decoration: none; 
+        }
+        a:hover { 
+            text-decoration: underline; 
+        }
+        br {
+            line-height: 0.5;
+        }
     ''')
     html_parts.append('</style>')
     html_parts.append('<body>')

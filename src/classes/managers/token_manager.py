@@ -486,7 +486,8 @@ class TokenManager(QObject):
             for host, token_dict in tokens_dict.items():
                 # v2.0.3: クラス定数を使用してアクティブホストのみ処理
                 if host not in self.ACTIVE_HOSTS:
-                    logger.debug(f"[自動リフレッシュ] 非アクティブホストをスキップ: {host}")
+                    # ダミー・未知ホストは完全スキップ（通知しない）
+                    logger.debug(f"[自動リフレッシュ] 非アクティブ/ダミーホストをスキップ: {host}")
                     continue
                 
                 try:

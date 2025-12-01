@@ -34,3 +34,4 @@ from .data_register_logic import (
 
 # データ登録UIウィジェット
 from .data_register_widget import DataRegisterWidget
+# RegistrationStatusWidget は UI 層に属するため、ここではインポートしない（循環依存回避）

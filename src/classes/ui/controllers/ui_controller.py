@@ -268,8 +268,8 @@ class UIController(UIControllerCore):
         if not hasattr(self, 'menu_buttons'):
             return
         
-        # ログインと設定以外を無効化/有効化
-        exclude_modes = {'login', 'settings'}
+        # ログイン、設定、ヘルプは常に有効
+        exclude_modes = {'login', 'settings', 'help'}
         for mode, button in self.menu_buttons.items():
             if mode not in exclude_modes and button and hasattr(button, 'setEnabled'):
                 button.setEnabled(enabled)
@@ -518,7 +518,62 @@ class UIController(UIControllerCore):
                 QMessageBox.warning(None, "エラー", "データファイルが選択されていません。")
                 return
 
-            run_data_register_logic(parent=None, bearer_token=bearer_token, dataset_info=dataset_info, form_values=form_values, file_paths=file_paths, attachment_paths=attachment_paths)
+            result = run_data_register_logic(parent=None, bearer_token=bearer_token, dataset_info=dataset_info, form_values=form_values, file_paths=file_paths, attachment_paths=attachment_paths)
+            # 成功時ステータスダイアログ表示（最新1件確認）
+            try:
+                if result and isinstance(result, dict) and result.get('success'):
+                    # create_entry.json の内容を利用可能なら読み込み
+                    from config.common import get_dynamic_file_path
+                    import json, os
+                    entry_json_path = get_dynamic_file_path('output/rde/create_entry.json')
+                    data_item = None
+                    if os.path.exists(entry_json_path):
+                        with open(entry_json_path, 'r', encoding='utf-8') as f:
+                            created_data = json.load(f)
+                            # RDEエントリー生成レスポンスの簡易抽出
+                            entry = (created_data.get('data') or {}) if isinstance(created_data, dict) else {}
+                            eid = entry.get('id') or 'NEW'
+                            attrs = entry.get('attributes') or {}
+                            invoice = attrs.get('invoice') or {}
+                            basic = invoice.get('basic') or {}
+                            sample = invoice.get('sample') or {}
+                            data_name = basic.get('dataName') or form_values.get('dataName')
+                            created_ts = sample.get('created') or basic.get('dateSubmitted')  # 優先: sample.created
+                            instrument_id = basic.get('instrumentId') or ''
+                            owner_id = basic.get('dataOwnerId') or ''
+                            data_item = {
+                                'id': eid,
+                                'attributes': {
+                                    'name': data_name,
+                                    'created': created_ts or ''
+                                },
+                                'relationships': {
+                                    'owner': {'data': {'id': owner_id}},
+                                    'instrument': {'data': {'id': instrument_id}} if instrument_id else {}
+                                }
+                            }
+                    if not data_item:
+                        # フォールバック（レスポンス未解析）: 入力値と現在時刻で擬似作成
+                        import datetime as _dt
+                        data_item = {
+                            'id': 'NEW',
+                            'attributes': {
+                                'name': form_values.get('dataName') or '',
+                                'created': _dt.datetime.utcnow().isoformat() + 'Z'
+                            },
+                            'relationships': {
+                                'owner': {'data': {'id': ''}},
+                                'instrument': {}
+                            }
+                        }
+                    # タブウィジェット経由でダイアログ表示
+                    try:
+                        if hasattr(self.parent, 'data_register_tab_widget'):
+                            self.parent.data_register_tab_widget.show_status_after_single(data_item)
+                    except Exception as se:
+                        logger.warning(f"登録後ステータスダイアログ表示失敗: {se}")
+            except Exception as ie:
+                logger.warning(f"登録後ステータス処理例外: {ie}")
         except Exception as e:
             from qt_compat.widgets import QMessageBox
             QMessageBox.warning(None, "エラー", f"データ登録ロジック呼び出し失敗: {e}")

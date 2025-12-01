@@ -33,31 +33,132 @@ def _normalize_ext(raw: str) -> str:
 
 def _extract_exts_with_desc(text: str) -> Dict[str, str]:
     """複合記述から {拡張子: 説明} 辞書を抽出。
+    
+    対応パターン:
+    - 基本: .rawファイル（スペクトル）
+    - スラッシュ区切り: .dm3/4ファイル → dm3, dm4
+    - カンマ区切り: .dm3, .dm4ファイル → dm3, dm4
+    - 全角カンマ区切り: .dm3、.dm4ファイル → dm3, dm4
+    - 改行区切り: .tif\n.tiff → tif, tiff
+    - 「または」区切り: .txt または .csv → txt, csv
+    - 「or」区切り: .txt or .dx → txt, dx
+    - ドットなしスラッシュ: .jdf/.jdx → jdf, jdx
+    
     例: ".rawファイル（スペクトル）\n.xlsxファイル（測定条件）" 
         → {'raw': 'スペクトル', 'xlsx': '測定条件'}
+    例: ".dm3/4ファイル（スペクトル/測定条件）"
+        → {'dm3': 'スペクトル/測定条件', 'dm4': 'スペクトル/測定条件'}
     """
     if not isinstance(text, str):
         return {}
-    # 改行や全角スペースを統一
-    t = text.replace('\n', ' ').replace('\r', ' ').replace('　', ' ')
+    
+    # === 前処理: 全角文字を半角に正規化 ===
+    # 全角記号を半角に統一
+    t = text
+    t = t.replace('．', '.')  # 全角ドット
+    t = t.replace('、', ',')  # 全角カンマ
+    t = t.replace('，', ',')  # 全角カンマ（別形式）
+    t = t.replace('（', '(')  # 全角括弧
+    t = t.replace('）', ')')  
+    t = t.replace('【', '[')
+    t = t.replace('】', ']')
+    t = t.replace('　', ' ')  # 全角スペース
+    
+    # 改行を空白に統一
+    t = t.replace('\n', ' ').replace('\r', ' ')
+    
+    # 連続する空白を1つに圧縮
     t = re.sub(r"\s+", " ", t)
     
-    # パターン: .ext + オプション「ファイル」 + 括弧内説明
-    # 例: .raw, .rawファイル, .rawファイル（説明）, .raw（説明）
-    pattern = r"\.([a-z0-9]+)(?:ファイル)?(?:[（(]([^）)]+)[）)])?"
-    matches = re.finditer(pattern, t, flags=re.IGNORECASE)
-    
     result = {}
-    for m in matches:
+    
+    # === パターン1: 複合拡張子（スラッシュ区切り）の展開 ===
+    # 例: .dm3/4 → .dm3, .dm4
+    # 例: .tif/tiff → .tif, .tiff
+    # パターン: .拡張子1/拡張子2 または .拡張子1/数字
+    def expand_slash_notation(m: re.Match) -> str:
+        """スラッシュ記法を展開: .dm3/4 → .dm3, .dm4"""
+        prefix = m.group(1)  # 先頭の拡張子部分
+        suffix = m.group(2)  # スラッシュ後の部分
+        
+        # 数字のみの場合（例: dm3/4）
+        if suffix.isdigit():
+            # 先頭から数字以外を削除して基本部分を取得
+            base = re.sub(r'\d+$', '', prefix)
+            # 展開: dm3, dm4
+            expanded = f".{prefix}, .{base}{suffix}"
+            return expanded
+        else:
+            # 文字列の場合（例: tif/tiff）
+            expanded = f".{prefix}, .{suffix}"
+            return expanded
+    
+    # スラッシュ区切りを展開（後続の「ファイル」や括弧は保持）
+    t = re.sub(r'\.([a-z0-9]+)/([a-z0-9]+)', expand_slash_notation, t, flags=re.IGNORECASE)
+    
+    # === パターン2: 「または」「or」を半角カンマに統一 ===
+    t = re.sub(r'\s*または\s*', ', ', t)
+    t = re.sub(r'\s+or\s+', ', ', t, flags=re.IGNORECASE)
+    
+    # === パターン3: 複数拡張子の抽出 ===
+    # マッチパターン: .ext または ext のみ（カンマ・スペース区切り対応）
+    # 全体を複数の拡張子候補として分割抽出
+    
+    # 括弧内の説明文を一時的に保護（先に抽出）
+    desc_pattern = r'[([（]([^)\]）]+)[)\]）]'
+    descriptions = []
+    def save_desc(m: re.Match) -> str:
+        idx = len(descriptions)
+        descriptions.append(m.group(1).strip())
+        return f"__DESC{idx}__"
+    
+    t_protected = re.sub(desc_pattern, save_desc, t)
+    
+    # 拡張子パターン抽出: .ext または ext（「ファイル」「file」等のキーワードも除外）
+    # カンマやスペースで区切られた拡張子を全て抽出
+    ext_pattern = r'\.?([a-z0-9]+)(?:ファイル|file)?'
+    
+    # 抽出候補をリスト化
+    ext_candidates = []
+    for token in re.split(r'[,\s]+', t_protected):
+        token = token.strip()
+        if not token or token.startswith('__DESC'):
+            continue
+        # ドットで始まるまたは英数字のみのトークン
+        m = re.match(r'^\.?([a-z0-9]+)(?:ファイル|file)?$', token, re.IGNORECASE)
+        if m:
+            ext_raw = m.group(1)
+            # 明らかに拡張子でない文字列をフィルタ（日本語・長すぎる等）
+            if len(ext_raw) <= 10 and re.match(r'^[a-z0-9]+$', ext_raw, re.IGNORECASE):
+                ext_candidates.append(ext_raw)
+    
+    # === パターン4: 正規表現による詳細マッチング（フォールバック） ===
+    # より複雑なパターンに対応（「.ext(説明)」形式）
+    detailed_pattern = r'\.([a-z0-9]+)(?:ファイル|file)?(?:[([（]([^)\]）]+)[)\]）])?'
+    for m in re.finditer(detailed_pattern, t, flags=re.IGNORECASE):
         ext_raw = m.group(1)
-        desc = m.group(2) if m.group(2) else ""
+        desc = m.group(2).strip() if m.group(2) else ""
+        
+        if len(ext_raw) <= 10 and re.match(r'^[a-z0-9]+$', ext_raw, re.IGNORECASE):
+            ext_norm = _normalize_ext(ext_raw)
+            if ext_norm:
+                # 説明文の保護されたプレースホルダーを復元
+                for idx, saved_desc in enumerate(descriptions):
+                    desc = desc.replace(f"__DESC{idx}__", saved_desc)
+                
+                if ext_norm in result:
+                    # 既存の説明がある場合は追記
+                    if desc and desc not in result[ext_norm]:
+                        result[ext_norm] = result[ext_norm] + "/" + desc
+                else:
+                    result[ext_norm] = desc
+    
+    # === パターン5: シンプルな拡張子候補の追加 ===
+    # 上記パターンで拾えなかった候補を追加
+    for ext_raw in ext_candidates:
         ext_norm = _normalize_ext(ext_raw)
-        if ext_norm:
-            # 既存があれば追記
-            if ext_norm in result and desc:
-                result[ext_norm] = result[ext_norm] + "," + desc.strip()
-            else:
-                result[ext_norm] = desc.strip()
+        if ext_norm and ext_norm not in result:
+            result[ext_norm] = ""
     
     return result
 

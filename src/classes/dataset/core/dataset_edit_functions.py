@@ -20,7 +20,7 @@ def create_dataset_update_payload(selected_dataset, edit_dataset_name_edit, edit
                                 edit_description_edit, edit_embargo_edit, edit_contact_edit,
                                 edit_taxonomy_edit, edit_related_links_edit, edit_tags_edit,
                                 edit_citation_format_edit, edit_license_combo, edit_data_listing_gallery_radio, edit_data_listing_tree_radio, 
-                                selected_datasets_list, edit_anonymize_checkbox, edit_data_entry_prohibited_checkbox, 
+                                widget, edit_anonymize_checkbox, edit_data_entry_prohibited_checkbox, 
                                 edit_data_entry_delete_prohibited_checkbox, edit_share_core_scope_checkbox):
     """データセット更新用のペイロードを作成"""
     original_dataset_id = selected_dataset.get("id")  # 元のデータセットIDを明確に保存
@@ -65,8 +65,8 @@ def create_dataset_update_payload(selected_dataset, edit_dataset_name_edit, edit
     taxonomy_text = edit_taxonomy_edit.text().strip()
     taxonomy_keys = [key.strip() for key in taxonomy_text.split() if key.strip()] if taxonomy_text else []
     
-    # 関連情報（新しい書式に対応）
-    related_links_text = edit_related_links_edit.toPlainText().strip()
+    # 関連情報（新しい書式に対応、QLineEdit対応）
+    related_links_text = edit_related_links_edit.text().strip()
     related_links = []
     logger.debug("関連情報テキスト: '%s'", related_links_text)
     
@@ -108,23 +108,22 @@ def create_dataset_update_payload(selected_dataset, edit_dataset_name_edit, edit
         tags = [tag.strip() for tag in tags_text.split(",") if tag.strip()]
         logger.debug("解析されたTAG: %s", tags)
     
-    # データセット引用の書式
-    citation_format = edit_citation_format_edit.toPlainText().strip()
+    # データセット引用の書式（QLineEdit対応）
+    citation_format = edit_citation_format_edit.text().strip()
     logger.debug("引用書式: '%s'", citation_format)
     
     logger.debug("最終的な関連情報リスト: %s", related_links)
     logger.debug("最終的なTAGリスト: %s", tags)
     logger.debug("最終的な引用書式: '%s'", citation_format)
     
-    # 関連データセット
+    # 関連データセット（widget._selected_related_dataset_idsから取得）
+    related_dataset_ids = getattr(widget, '_selected_related_dataset_ids', [])
     related_datasets = []
-    for i in range(selected_datasets_list.count()):
-        item = selected_datasets_list.item(i)
-        related_dataset_id = item.data(Qt.UserRole)  # 変数名を変更して衝突を回避
-        if related_dataset_id:
+    for dataset_id in related_dataset_ids:
+        if dataset_id:
             related_datasets.append({
                 "type": "dataset",
-                "id": related_dataset_id
+                "id": dataset_id
             })
     logger.debug("関連データセット: %s件", len(related_datasets))
     for idx, rel_ds in enumerate(related_datasets):
@@ -273,7 +272,7 @@ def send_dataset_update_request(widget, parent, selected_dataset,
         edit_description_edit, edit_embargo_edit, edit_contact_edit,
         edit_taxonomy_edit, edit_related_links_edit, edit_tags_edit,
         edit_citation_format_edit, edit_license_combo, edit_data_listing_gallery_radio, edit_data_listing_tree_radio, 
-        selected_datasets_list, edit_anonymize_checkbox, edit_data_entry_prohibited_checkbox, 
+        widget, edit_anonymize_checkbox, edit_data_entry_prohibited_checkbox, 
         edit_data_entry_delete_prohibited_checkbox, edit_share_core_scope_checkbox
     )
     

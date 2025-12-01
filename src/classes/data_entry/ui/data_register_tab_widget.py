@@ -90,10 +90,13 @@ class DataRegisterTabWidget(QWidget):
         self.create_normal_register_tab()
 
         # 一括登録タブ
-        self.create_batch_register_tab()
+        batch_index = self.create_batch_register_tab()
 
-        # 一括登録タブのインデックスを記録（setup_uiの最後で）
-        self._batch_tab_index = self.tab_widget.count() - 1
+        # 登録状況タブ
+        self.create_status_tab()
+
+        # 一括登録タブのインデックスを記録（明示的に保持）
+        self._batch_tab_index = batch_index
 
         main_layout.addWidget(self.tab_widget)
         self.setLayout(main_layout)
@@ -370,7 +373,18 @@ class DataRegisterTabWidget(QWidget):
         """
         scroll_area.setStyleSheet(scroll_area_style)
         self.batch_register_scroll_area = scroll_area
-        self.tab_widget.addTab(scroll_area, "一括登録")
+        idx = self.tab_widget.addTab(scroll_area, "一括登録")
+        return idx
+
+    def create_status_tab(self):
+        """登録状況タブを作成"""
+        try:
+            from .registration_status_widget import RegistrationStatusWidget
+            status_widget = RegistrationStatusWidget(self)
+            # スクロールは不要なため直接追加（行数が多い場合は後でScrollArea化）
+            self.tab_widget.addTab(status_widget, "登録状況")
+        except Exception as e:
+            logger.error(f"登録状況タブの作成に失敗: {e}")
         
     def get_current_tab_index(self):
         """現在選択されているタブのインデックスを取得"""
@@ -381,6 +395,51 @@ class DataRegisterTabWidget(QWidget):
         self.tab_widget.setCurrentIndex(index)
 
     # resizeEventのオーバーライドは不要（ウインドウサイズ変更を妨げない）
+
+    def show_status_after_single(self, data_item: dict):
+        """通常登録完了後に、最新1件＋総件数を表示するダイアログを開く。
+        data_item: 登録に使用した dataEntry 形式の1アイテム（id/attributes/relationships を含む）
+        """
+        try:
+            # dataset 名取得（dataset_dropdownの型に応じて）
+            dataset_name = None
+            combo = None
+            if hasattr(self.parent_controller, 'dataset_dropdown'):
+                dd = self.parent_controller.dataset_dropdown
+                if hasattr(dd, 'dataset_dropdown'):
+                    combo = dd.dataset_dropdown
+                elif hasattr(dd, 'dataset_filter_widget') and hasattr(dd.dataset_filter_widget, 'dataset_dropdown'):
+                    combo = dd.dataset_filter_widget.dataset_dropdown
+                elif getattr(dd, 'currentText', None):
+                    combo = dd
+            if combo and getattr(combo, 'currentText', None):
+                dataset_name = combo.currentText()
+
+            from .registration_status_dialog import show_status_dialog_for_single
+            show_status_dialog_for_single(self, dataset_name or '', data_item)
+        except Exception as e:
+            logger.error(f"通常登録後ステータスダイアログ表示エラー: {e}")
+
+    def show_status_after_batch(self, data_items: list):
+        """一括登録完了後に、全ファイルセットの登録状況をまとめて表示するダイアログを開く。"""
+        try:
+            dataset_name = None
+            combo = None
+            if hasattr(self.parent_controller, 'dataset_dropdown'):
+                dd = self.parent_controller.dataset_dropdown
+                if hasattr(dd, 'dataset_dropdown'):
+                    combo = dd.dataset_dropdown
+                elif hasattr(dd, 'dataset_filter_widget') and hasattr(dd.dataset_filter_widget, 'dataset_dropdown'):
+                    combo = dd.dataset_filter_widget.dataset_dropdown
+                elif getattr(dd, 'currentText', None):
+                    combo = dd
+            if combo and getattr(combo, 'currentText', None):
+                dataset_name = combo.currentText()
+
+            from .registration_status_dialog import show_status_dialog_for_batch
+            show_status_dialog_for_batch(self, dataset_name or '', data_items)
+        except Exception as e:
+            logger.error(f"一括登録後ステータスダイアログ表示エラー: {e}")
 
 
 def create_data_register_tab_widget(parent_controller, title="データ登録", button_style=None):

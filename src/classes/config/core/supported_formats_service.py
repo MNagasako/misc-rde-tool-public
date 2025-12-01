@@ -4,8 +4,8 @@ import json
 import shutil
 from typing import List
 
-from classes.config.core.models import SupportedFileFormatEntry
-from classes.config.core.xlsx_supported_formats import parse_supported_formats
+from .models import SupportedFileFormatEntry
+from .xlsx_supported_formats import parse_supported_formats
 
 try:
     from config import common as common_paths
@@ -42,9 +42,23 @@ def copy_to_input(src_path: str) -> str:
 
 
 def parse_and_save(xlsx_path: str) -> List[SupportedFileFormatEntry]:
-    """XLSXを解析し、JSONへ保存する。元ファイルパスも記録。"""
+    """XLSXを解析し、JSONへ保存する。元ファイルパスも記録。
+    
+    保存内容:
+    - output/supported_formats.json: 全エントリの詳細情報
+    - entries内のfile_extsに全拡張子リストが含まれる
+    
+    さらに、全ユニークな拡張子リストをextensions_listフィールドに追加保存。
+    """
     entries = parse_supported_formats(xlsx_path)
     out_path = get_default_output_path()
+    
+    # 全ユニークな拡張子を収集
+    all_extensions = set()
+    for e in entries:
+        all_extensions.update(e.file_exts)
+    extensions_list = sorted(all_extensions)
+    
     # JSON保存
     payload = [
         {
@@ -61,11 +75,14 @@ def parse_and_save(xlsx_path: str) -> List[SupportedFileFormatEntry]:
     import os
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     
-    # メタ情報も保存（元ファイルパス、解析日時）
+    # メタ情報も保存（元ファイルパス、解析日時、拡張子リスト）
     import datetime
     meta = {
         "source_file": xlsx_path,
         "parsed_at": datetime.datetime.now().isoformat(),
+        "extensions_list": extensions_list,  # 全拡張子リスト（アルファベット順）
+        "extensions_count": len(extensions_list),  # 拡張子種類数
+        "entries_count": len(entries),  # エントリ数
         "entries": payload,
     }
     

@@ -32,8 +32,8 @@ class AboutTab(QWidget):
     def setup_ui(self):
         """UI構築"""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
         
         # アプリケーション情報
         self.create_app_info_section(layout)
@@ -45,6 +45,7 @@ class AboutTab(QWidget):
         """アプリケーション情報セクション"""
         group = QGroupBox("アプリケーション情報")
         layout = QVBoxLayout(group)
+        layout.setSpacing(6)
         
         # アプリ名
         try:
@@ -61,7 +62,7 @@ class AboutTab(QWidget):
         
         title_label = QLabel(f"{APP_NAME} {APP_VERSION}")
         title_font = QFont()
-        title_font.setPointSize(16)
+        title_font.setPointSize(14)
         title_font.setBold(True)
         title_label.setFont(title_font)
         layout.addWidget(title_label)
@@ -73,7 +74,7 @@ class AboutTab(QWidget):
         
         # 著作権
         copyright_label = QLabel(APP_COPYRIGHT)
-        copyright_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin-top: 10px;")
+        copyright_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin-top: 6px;")
         layout.addWidget(copyright_label)
         
         # 作者
@@ -91,6 +92,8 @@ class AboutTab(QWidget):
         # Aboutテキスト表示
         about_browser = QTextBrowser()
         about_browser.setOpenExternalLinks(True)
+        # ドキュメントマージンを小さく設定
+        about_browser.document().setDocumentMargin(8)
         
         try:
             # Markdownファイルから読み込み

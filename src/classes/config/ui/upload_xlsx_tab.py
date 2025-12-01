@@ -1,7 +1,11 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog, QHBoxLayout, QLineEdit
-from PySide6.QtCore import Signal
+try:
+    from qt_compat.widgets import QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog, QHBoxLayout, QLineEdit
+    from qt_compat.core import Signal
+except ImportError:
+    from src.qt_compat.widgets import QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog, QHBoxLayout, QLineEdit
+    from src.qt_compat.core import Signal
 
 from classes.config.core.supported_formats_service import copy_to_input, parse_and_save
 

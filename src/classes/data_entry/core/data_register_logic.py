@@ -627,76 +627,69 @@ def select_and_save_files_to_temp(parent=None):
         temp_file_paths.append(dst_path)
     return temp_file_paths
 
-def upload_file(bearer_token,datasetId= "a74b58c0-9907-40e7-a261-a75519730d82",file_path=None):
+def upload_file(bearer_token, datasetId="a74b58c0-9907-40e7-a261-a75519730d82", file_path=None):
+    """ファイルアップロード（net.http_helpers経由 / リトライ付き）
+    502/503/504 などのサーバ・ゲートウェイ系エラーは指数バックオフ再試行 (最大3回)
+    戻り値: uploadId もしくは None
     """
-    データ登録APIへのファイルアップロードテスト
-    """
+    from net.http_helpers import proxy_post
     if not bearer_token:
-        logger.error("Bearerトークンが取得できません。ログイン状態を確認してください。")
-        return
-
-    output_dir=os.path.join(OUTPUT_RDE_DIR, "data")
-    if not file_path: # テスト用のデータセットID要ファイル
-        file_path = os.path.join(INPUT_DIR, "file", "test.dm4")
+        logger.error("Bearerトークン未取得のためアップロード不可。ログイン状態を確認してください。")
+        return None
+    output_dir = os.path.join(OUTPUT_RDE_DIR, "data")
+    if not file_path:
+        file_path = os.path.join(INPUT_DIR, "file", "test.dm4")  # フォールバックテストファイル
     url = f"https://rde-entry-api-arim.nims.go.jp/uploads?datasetId={datasetId}"
-    headers = {
-        "Accept": "application/json",
-        "Accept-Encoding": "gzip",
-        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-        "Connection": "keep-alive",
-        "Authorization": f"Bearer {bearer_token}",
-        "Content-Type": "application/octet-stream",
-        "Host": "rde-entry-api-arim.nims.go.jp",
-        "X-File-Name": "TEST.dm4",
-        "Origin": "https://rde-entry-arim.nims.go.jp",
-        "Referer": "https://rde-entry-arim.nims.go.jp/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-site",
-        "sec-ch-ua": '"Not)A;Brand";v="8", "Chromium";v="138", "Google Chrome";v="138"',
-        "sec-ch-ua-mobile": "?0",
-        "sec-ch-ua-platform": '"Windows"', 
-    }
-    
     try:
         filename = os.path.basename(file_path)
-        encoded_filename = urllib.parse.quote(filename)
-
-        # Authorizationヘッダーは削除（post_binary内で自動選択される）
-        headers = {
-            "Accept": "application/json",
-            "X-File-Name": encoded_filename,
-            "User-Agent": "PythonUploader/1.0",
-        }
-
-        logger.info("アップロード開始: %s", filename)
-        logger.debug("X-File-Name: %s", encoded_filename)
-
         with open(file_path, 'rb') as f:
             binary_data = f.read()
-
-        # bearer_token=Noneで自動選択を有効化
-        resp = post_binary(url, binary_data, bearer_token=None, headers=headers)
-        if resp is None:
-            raise Exception("Binary upload failed: Request error")
-        resp.raise_for_status()  # エラーなら例外
-
-        data = resp.json()
-
-        os.makedirs(output_dir, exist_ok=True)
-        output_path = os.path.join(output_dir, "upload_file.json")
-        with open(output_path, "w", encoding="utf-8") as outf:
-            json.dump(data, outf, ensure_ascii=False, indent=2)
-
-        upload_id = data.get("uploadId")
-        logger.info("[SUCCESS] アップロード成功: uploadId = %s", upload_id)
-        return upload_id
-
+        size_bytes = len(binary_data)
+        encoded_filename = urllib.parse.quote(filename)
+        base_headers = {
+            "Accept": "application/json",
+            "X-File-Name": encoded_filename,
+            "Content-Type": "application/octet-stream",
+            "User-Agent": "PythonUploader/1.0",
+        }
+        max_attempts = 3
+        backoff = 1.5
+        for attempt in range(1, max_attempts + 1):
+            logger.info(f"[UPLOAD] 開始 attempt={attempt}/{max_attempts} file={filename} size={size_bytes}B datasetId={datasetId}")
+            try:
+                resp = proxy_post(url, data=binary_data, headers=base_headers, timeout=90)
+                status = resp.status_code
+                if status >= 500:
+                    logger.warning(f"[UPLOAD] サーバエラー status={status} attempt={attempt} body_length={len(resp.text)}")
+                    if attempt < max_attempts:
+                        import time as _t
+                        sleep_sec = backoff ** attempt
+                        logger.info(f"[UPLOAD] リトライ待機 {sleep_sec:.1f}s")
+                        _t.sleep(sleep_sec)
+                        continue
+                resp.raise_for_status()
+                data = resp.json()
+                os.makedirs(output_dir, exist_ok=True)
+                with open(os.path.join(output_dir, "upload_file.json"), "w", encoding="utf-8") as outf:
+                    json.dump(data, outf, ensure_ascii=False, indent=2)
+                upload_id = data.get("uploadId")
+                logger.info(f"[UPLOAD] 成功 uploadId={upload_id} status={status} attempts={attempt}")
+                return upload_id
+            except Exception as ue:
+                if 'resp' in locals() and resp is not None:
+                    status = getattr(resp, 'status_code', 'N/A')
+                    text_preview = resp.text[:300] if hasattr(resp, 'text') else ''
+                    logger.error(f"[UPLOAD] 失敗 attempt={attempt} status={status} error={ue} resp_preview={text_preview}")
+                else:
+                    logger.error(f"[UPLOAD] 失敗 attempt={attempt} error={ue}")
+                if attempt < max_attempts:
+                    import time as _t
+                    sleep_sec = backoff ** attempt
+                    logger.info(f"[UPLOAD] リトライ待機 {sleep_sec:.1f}s (exception)")
+                    _t.sleep(sleep_sec)
+                    continue
+                return None
     except Exception as e:
-        logger.error("アップロードエラー: %s", e)
-        if 'resp' in locals() and resp is not None:
-            logger.debug("ステータス: %s", resp.status_code)
-            logger.debug("レスポンス: %s", resp.text)
-
+        logger.error(f"[UPLOAD] 致命的エラー file={file_path} error={e}")
+        return None
     return None

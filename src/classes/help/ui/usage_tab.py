@@ -69,8 +69,6 @@ DEFAULT_USAGE_TEXT = """
 1. トークンの有効期限を確認してください
 2. 課題番号が正しいか確認してください
 
-## お問い合わせ
-不明な点がございましたら、ARIM事業までお問い合わせください。
 
 ---
 
@@ -88,13 +86,13 @@ class UsageTab(QWidget):
     def setup_ui(self):
         """UI構築"""
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(15)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(8)
         
         # タイトル
         title_label = QLabel("使用方法")
         title_font = QFont()
-        title_font.setPointSize(14)
+        title_font.setPointSize(12)
         title_font.setBold(True)
         title_label.setFont(title_font)
         layout.addWidget(title_label)
@@ -102,6 +100,8 @@ class UsageTab(QWidget):
         # 使用方法表示エリア
         self.usage_browser = QTextBrowser()
         self.usage_browser.setOpenExternalLinks(True)
+        # ドキュメントマージンを小さく設定
+        self.usage_browser.document().setDocumentMargin(8)
         
         # 使用方法テキストを読み込み
         usage_text = self.load_usage_text()

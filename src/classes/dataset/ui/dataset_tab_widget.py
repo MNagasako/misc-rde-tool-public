@@ -2,7 +2,7 @@
 データセットタブウィジェット - QTabWidgetベース
 データセット開設、修正、データエントリー機能の統合UI
 """
-from qt_compat.widgets import QWidget, QTabWidget, QVBoxLayout, QLabel
+from qt_compat.widgets import QWidget, QTabWidget, QVBoxLayout, QLabel, QScrollArea
 from classes.dataset.ui.dataset_open_widget import create_dataset_open_widget
 from classes.dataset.ui.dataset_edit_widget import create_dataset_edit_widget
 from classes.dataset.ui.dataset_dataentry_widget_minimal import create_dataset_dataentry_widget
@@ -44,7 +44,11 @@ class DatasetTabWidget(QTabWidget):
                 title="データセット修正",
                 create_auto_resize_button=ui_controller.create_auto_resize_button if ui_controller else None
             )
-            edit_layout.addWidget(self.edit_widget)
+            # 修正タブ全体をスクロール可能にする
+            edit_scroll = QScrollArea()
+            edit_scroll.setWidgetResizable(True)
+            edit_scroll.setWidget(self.edit_widget)
+            edit_layout.addWidget(edit_scroll)
         except Exception as e:
             error_label = QLabel(f"データセット修正機能読み込みエラー: {e}")
             error_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;")

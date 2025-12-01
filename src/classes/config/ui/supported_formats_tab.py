@@ -2,11 +2,28 @@ from __future__ import annotations
 
 from typing import List
 
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
-    QHeaderView, QLineEdit, QHBoxLayout
-)
-from PySide6.QtCore import Qt
+try:
+    try:
+        from qt_compat.widgets import (
+            QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
+            QHeaderView, QLineEdit, QHBoxLayout
+        )
+        from qt_compat.core import Qt
+        from unittest.mock import MagicMock
+        if any(isinstance(cls, MagicMock) for cls in (QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QHBoxLayout)):
+            raise ImportError("qt_compat widgets contaminated by MagicMock")
+    except Exception:
+        from PySide6.QtWidgets import (
+            QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
+            QHeaderView, QLineEdit, QHBoxLayout
+        )
+        from PySide6.QtCore import Qt
+except ImportError:
+    from src.qt_compat.widgets import (
+        QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
+        QHeaderView, QLineEdit, QHBoxLayout
+    )
+    from src.qt_compat.core import Qt
 import re
 import logging
 import json
@@ -180,19 +197,73 @@ class SupportedFormatsTab(QWidget):
         self._apply_filters()
 
     def _parse_extensions(self, raw_text: str) -> List[str]:
-        """ユーザーが入力した拡張子文字列を正規化"""
-        tokens = re.split(r"[\s,;]+", raw_text.strip()) if raw_text else []
-        normalized = []
+        """ユーザーが入力した拡張子文字列を正規化
+
+        対応:
+        - 区切り: 半角/全角カンマ・セミコロン・空白・「または」/or
+        - スラッシュ表記の展開: .dm3/4 -> dm3, dm4 / tif/tiff -> tif, tiff
+        - 先頭ドット・ワイルドカード除去、重複排除、lower化
+        """
+        if not raw_text:
+            return []
+
+        text = raw_text.strip()
+        # 全角記号 → 半角に寄せる簡易正規化
+        replacements = {
+            '、': ',', '，': ',', '；': ';', '・': ',', '／': '/', '　': ' ',
+        }
+        for k, v in replacements.items():
+            text = text.replace(k, v)
+        # または / or を区切りに
+        text = re.sub(r"\s*(または|or)\s*", ",", text, flags=re.IGNORECASE)
+
+        tokens = re.split(r"[\s,;]+", text)
+
+        def expand_slash(tok: str) -> List[str]:
+            # 例: dm3/4, dm3/dm4, tif/tiff の展開
+            if '/' not in tok:
+                return [tok]
+            parts = [p for p in tok.split('/') if p]
+            if not parts:
+                return []
+            head = parts[0]
+            # 先頭が英字+数字のとき、後続が数字のみなら置換展開
+            m = re.match(r"^([a-z]+)(\d+)$", head, re.IGNORECASE)
+            if m:
+                base, _num = m.group(1), m.group(2)
+                out = [head]
+                for p in parts[1:]:
+                    if re.fullmatch(r"\d+", p):
+                        out.append(f"{base}{p}")
+                    else:
+                        out.append(p)
+                return out
+            # それ以外は単純分割
+            return parts
+
+        normalized: List[str] = []
         for token in tokens:
             token = token.strip()
             if not token:
                 continue
-            token = token.replace("*", "")
+            token = token.replace('*', '')
             if token.startswith('.'):
                 token = token[1:]
             token = token.lower()
-            if token and token not in normalized:
-                normalized.append(token)
+            # スラッシュ展開
+            expanded = []
+            for t in expand_slash(token):
+                t = t.strip()
+                if not t:
+                    continue
+                if t.startswith('.'):
+                    t = t[1:]
+                t = t.lower()
+                if t and t not in expanded:
+                    expanded.append(t)
+            for t in expanded:
+                if t and t not in normalized:
+                    normalized.append(t)
         return normalized
 
     def _update_entry_extensions(self, entry: SupportedFileFormatEntry, new_exts: List[str]):

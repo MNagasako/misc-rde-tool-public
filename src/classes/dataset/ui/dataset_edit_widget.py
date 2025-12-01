@@ -13,7 +13,8 @@ from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGridLayout, 
     QPushButton, QMessageBox, QScrollArea, QCheckBox, QRadioButton, 
     QButtonGroup, QDialog, QTextEdit, QComboBox, QCompleter, QDateEdit,
-    QListWidget, QListWidgetItem, QProgressDialog, QApplication
+    QListWidget, QListWidgetItem, QProgressDialog, QApplication, QSplitter,
+    QTableWidget, QTableWidgetItem, QHeaderView
 )
 from qt_compat.core import Qt, QDate, QTimer
 from config.common import get_dynamic_file_path
@@ -25,6 +26,136 @@ from classes.dataset.ui.ai_suggestion_dialog import AISuggestionDialog
 
 # ロガー設定
 logger = logging.getLogger(__name__)
+
+def match_registration_candidates(dataset_name: str, data_name: str, owner_id: str, instrument_id: str | None,
+                                  created_ts: str | None, registration_entries: list, threshold_seconds: int = 7200):
+    """登録状況候補マッチング (24h 緩和ウィンドウ)
+    条件:
+      - datasetName 完全一致
+      - dataName 完全一致
+      - createdByUserId 一致
+      - instrumentId 両方存在すれば一致
+      - startTime と created の絶対秒差 <= threshold_seconds (両方パース可能な場合)
+    戻り値: マッチした登録状況エントリー(dict)のリスト
+    """
+    import datetime as _dt
+    results = []
+    created_dt = None
+    if created_ts:
+        try:
+            created_dt = _dt.datetime.fromisoformat(created_ts.replace('Z', '+00:00'))
+        except Exception:
+            created_dt = None
+    for r in registration_entries:
+        try:
+            if r.get('datasetName') != dataset_name:
+                continue
+            if r.get('dataName') != data_name:
+                continue
+            if r.get('createdByUserId') != owner_id:
+                continue
+            if instrument_id and r.get('instrumentId') and r.get('instrumentId') != instrument_id:
+                continue
+            if created_dt:
+                start_time = r.get('startTime')
+                if start_time:
+                    try:
+                        start_dt = _dt.datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                        if abs((start_dt - created_dt).total_seconds()) > threshold_seconds:
+                            continue
+                    except Exception:
+                        pass
+            results.append(r)
+        except Exception as ie:
+            logger.debug("match_registration_candidates 内部エラー: %s", ie)
+    return results
+
+def format_start_time_jst(start_time: str) -> str:
+    """UTC時刻文字列を日本時間（JST）に変換してYYYY-MM-DD HH:MM:SS形式で返す
+    
+    Args:
+        start_time: ISO 8601形式のUTC時刻文字列（例: '2024-12-01T10:30:45Z'）
+    
+    Returns:
+        日本時間の年月日時分秒文字列（例: '2024-12-01 19:30:45'）
+        変換失敗時は元の文字列をそのまま返す
+    """
+    if not start_time:
+        return ''
+    try:
+        import datetime as _dt
+        # UTC時刻としてパース
+        utc_dt = _dt.datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+        # JST（UTC+9時間）に変換
+        jst_dt = utc_dt + _dt.timedelta(hours=9)
+        # YYYY-MM-DD HH:MM:SS形式で返す
+        return jst_dt.strftime('%Y-%m-%d %H:%M:%S')
+    except Exception as e:
+        logger.debug("start_time変換エラー: %s", e)
+        return start_time
+
+def build_expanded_rows_for_dataset_entries(items: list, dataset_name: str | None, registration_entries: list, collapse_tight: bool = True) -> list:
+    """UIテーブル拡張行構築ロジックを分離 (テスト用)。
+    items: dataEntry JSON内の data 配列
+    戻り値: [{data_entry_id, data_name, reg_id, reg_status, linkable}, ...]
+    """
+    status_map = {r.get('id'): r.get('status') for r in registration_entries if isinstance(r, dict)}
+    expanded_rows = []
+    for item in items:
+        eid = item.get('id') or ''
+        attrs = item.get('attributes') or {}
+        data_name = attrs.get('name', '')
+        created_ts = attrs.get('created')
+        rels = item.get('relationships') or {}
+        owner_id = rels.get('owner', {}).get('data', {}).get('id', '')
+        instrument_id = rels.get('instrument', {}).get('data', {}).get('id') if rels.get('instrument') else None
+        matches = []
+        if dataset_name:
+            matches = match_registration_candidates(dataset_name, data_name, owner_id, instrument_id, created_ts, registration_entries, threshold_seconds=7200)
+        # 5分(300秒)以内に収まる候補がある場合は最も時間差が小さいものを1件に絞り込む（UIテーブルでは無効化可能）
+        if created_ts and collapse_tight:
+            import datetime as _dt
+            try:
+                created_dt = _dt.datetime.fromisoformat(created_ts.replace('Z', '+00:00'))
+            except Exception:
+                created_dt = None
+            if created_dt and matches:
+                tight = []
+                for m in matches:
+                    st = m.get('startTime')
+                    if not st:
+                        continue
+                    try:
+                        start_dt = _dt.datetime.fromisoformat(st.replace('Z', '+00:00'))
+                        diff = abs((start_dt - created_dt).total_seconds())
+                        if diff <= 300:
+                            tight.append((diff, m))
+                    except Exception:
+                        continue
+                if tight:
+                    tight.sort(key=lambda x: x[0])
+                    matches = [tight[0][1]]
+        if not matches:
+            expanded_rows.append({
+                'data_entry_id': eid,
+                'data_name': data_name,
+                'reg_id': '',
+                'reg_status': '',
+                'start_time': '',
+                'linkable': False
+            })
+        else:
+            for m in matches:
+                rid = m.get('id', '')
+                expanded_rows.append({
+                    'data_entry_id': eid,
+                    'data_name': data_name,
+                    'reg_id': rid,
+                    'reg_status': status_map.get(rid, ''),
+                    'start_time': m.get('startTime', ''),
+                    'linkable': bool(rid)
+                })
+    return expanded_rows
 
 
 def _normalize_display_text(text: str) -> str:
@@ -1335,10 +1466,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         
         # AIボタン（通常版・ダイアログ表示）
         ai_suggest_button = SpinnerButton("🤖 AI提案")
-        ai_suggest_button.setMinimumWidth(80)  # サイズを拡大
+        ai_suggest_button.setMinimumWidth(80)
         ai_suggest_button.setMaximumWidth(100)
-        ai_suggest_button.setMinimumHeight(45)  # 高さを拡大
-        ai_suggest_button.setMaximumHeight(50)
+        ai_suggest_button.setMinimumHeight(32)
+        ai_suggest_button.setMaximumHeight(36)
         ai_suggest_button.setToolTip("AIによる説明文の提案（ダイアログ表示）\n複数の候補から選択できます")
         ai_suggest_button.setStyleSheet(f"""
             QPushButton {{
@@ -1348,7 +1479,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 font-weight: bold;
                 border: 1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)};
                 border-radius: 6px;
-                padding: 8px;
+                padding: 4px 8px;
             }}
             QPushButton:hover {{
                 background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
@@ -1362,10 +1493,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         
         # クイックAIボタン（即座反映版）
         quick_ai_button = SpinnerButton("⚡ Quick AI")
-        quick_ai_button.setMinimumWidth(80)  # サイズを拡大
+        quick_ai_button.setMinimumWidth(80)
         quick_ai_button.setMaximumWidth(100)
-        quick_ai_button.setMinimumHeight(45)  # 高さを拡大
-        quick_ai_button.setMaximumHeight(50)
+        quick_ai_button.setMinimumHeight(32)
+        quick_ai_button.setMaximumHeight(36)
         quick_ai_button.setToolTip("AIによる説明文の即座生成（直接反映）\nワンクリックで自動入力されます")
         quick_ai_button.setStyleSheet(f"""
             QPushButton {{
@@ -1375,7 +1506,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 font-weight: bold;
                 border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BORDER)};
                 border-radius: 6px;
-                padding: 8px;
+                padding: 4px 8px;
             }}
             QPushButton:hover {{
                 background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
@@ -1622,12 +1753,22 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         
         taxonomy_builder_button.clicked.connect(open_taxonomy_builder)
         
-        # 関連情報（旧：関連リンク）
+        # 関連情報（旧：関連リンク）- ビルダーダイアログ使用
         form_layout.addWidget(QLabel("関連情報:"), 7, 0)
-        edit_related_links_edit = QTextEdit()
-        edit_related_links_edit.setPlaceholderText("関連情報を入力（タイトル1:URL1,タイトル2:URL2 の形式）")
-        edit_related_links_edit.setMaximumHeight(65)  # 80 → 65に縮小
-        form_layout.addWidget(edit_related_links_edit, 7, 1)
+        related_links_layout = QHBoxLayout()
+        edit_related_links_edit = QLineEdit()
+        edit_related_links_edit.setPlaceholderText("関連情報を入力（タイトル1:URL1,タイトル2:URL2 の形式、設定ボタンでも編集可能）")
+        
+        related_links_builder_button = QPushButton("設定...")
+        related_links_builder_button.setMaximumWidth(80)
+        
+        related_links_layout.addWidget(edit_related_links_edit)
+        related_links_layout.addWidget(related_links_builder_button)
+        
+        # レイアウトをWidgetでラップしてGridLayoutに追加
+        related_links_widget = QWidget()
+        related_links_widget.setLayout(related_links_layout)
+        form_layout.addWidget(related_links_widget, 7, 1)
         
         # TAGフィールド（ビルダーダイアログ使用）
         form_layout.addWidget(QLabel("TAG:"), 8, 0)
@@ -1671,11 +1812,75 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         
         tag_builder_button.clicked.connect(open_tag_builder)
         
-        # データセット引用の書式（高さを3行程度に調整）
+        # 関連データセットビルダーボタンのイベントハンドラー
+        def open_related_datasets_builder():
+            """関連データセットビルダーダイアログを開く"""
+            try:
+                from classes.dataset.ui.related_datasets_builder_dialog import RelatedDatasetsBuilderDialog
+                
+                # 現在選択されているデータセットIDを取得
+                current_dataset_id = None
+                current_grant_number = None
+                current_index = existing_dataset_combo.currentIndex()
+                if current_index > 0:
+                    selected_dataset = existing_dataset_combo.itemData(current_index)
+                    if selected_dataset:
+                        current_dataset_id = selected_dataset.get("id")
+                        current_grant_number = selected_dataset.get("attributes", {}).get("grantNumber")
+                
+                # 現在の関連データセットIDリスト
+                current_dataset_ids = getattr(widget, '_selected_related_dataset_ids', [])
+                
+                dialog = RelatedDatasetsBuilderDialog(
+                    parent=widget,
+                    current_dataset_ids=current_dataset_ids,
+                    exclude_dataset_id=current_dataset_id,
+                    current_grant_number=current_grant_number
+                )
+                
+                # 関連データセット変更シグナルに接続
+                def on_datasets_changed(dataset_ids):
+                    widget._selected_related_dataset_ids = dataset_ids
+                    count = len(dataset_ids)
+                    edit_related_datasets_display.setText(f"{count}件")
+                    logger.debug("関連データセット更新: %s件", count)
+                
+                dialog.datasets_changed.connect(on_datasets_changed)
+                
+                dialog.exec()
+                
+            except Exception as e:
+                QMessageBox.warning(widget, "エラー", f"関連データセットビルダーの起動に失敗しました:\n{e}")
+        
+        # 関連情報ビルダーボタンのイベントハンドラー
+        def open_related_links_builder():
+            """関連情報ビルダーダイアログを開く"""
+            try:
+                from classes.dataset.ui.related_links_builder_dialog import RelatedLinksBuilderDialog
+                
+                current_links = edit_related_links_edit.text().strip()
+                
+                dialog = RelatedLinksBuilderDialog(
+                    parent=widget,
+                    current_links=current_links
+                )
+                
+                # 関連情報変更シグナルに接続
+                dialog.links_changed.connect(
+                    lambda links: edit_related_links_edit.setText(links)
+                )
+                
+                dialog.exec()
+                
+            except Exception as e:
+                QMessageBox.warning(widget, "エラー", f"関連情報ビルダーの起動に失敗しました:\n{e}")
+        
+        related_links_builder_button.clicked.connect(open_related_links_builder)
+        
+        # データセット引用の書式（テキストボックスへ変更）
         form_layout.addWidget(QLabel("データセット引用の書式:"), 9, 0)
-        edit_citation_format_edit = QTextEdit()
+        edit_citation_format_edit = QLineEdit()
         edit_citation_format_edit.setPlaceholderText("データセット引用の書式を入力")
-        edit_citation_format_edit.setMaximumHeight(55)  # 60 → 55に縮小
         form_layout.addWidget(edit_citation_format_edit, 9, 1)
         
         # 利用ライセンス選択
@@ -1748,26 +1953,28 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         
         form_layout.addWidget(edit_license_combo, 10, 1)
         
-        # 関連データセット選択
+        # 関連データセット - ビルダーダイアログ使用
         form_layout.addWidget(QLabel("関連データセット:"), 11, 0)
+        related_datasets_layout = QHBoxLayout()
+        edit_related_datasets_display = QLineEdit()
+        edit_related_datasets_display.setReadOnly(True)
+        edit_related_datasets_display.setPlaceholderText("関連データセット（設定ボタンで編集）")
+        edit_related_datasets_display.setStyleSheet(f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)}; color: {get_color(ThemeKey.TEXT_MUTED)};")
+        
+        related_datasets_builder_button = QPushButton("設定...")
+        related_datasets_builder_button.setMaximumWidth(80)
+        related_datasets_builder_button.clicked.connect(open_related_datasets_builder)
+        
+        related_datasets_layout.addWidget(edit_related_datasets_display)
+        related_datasets_layout.addWidget(related_datasets_builder_button)
+        
+        # レイアウトをWidgetでラップしてGridLayoutに追加
         related_datasets_widget = QWidget()
-        related_datasets_layout = QVBoxLayout()
-        
-        # 関連データセット選択コンボボックス
-        related_dataset_combo = QComboBox()
-        related_dataset_combo.setEditable(True)
-        related_dataset_combo.setInsertPolicy(QComboBox.NoInsert)
-        related_dataset_combo.lineEdit().setPlaceholderText("関連データセットを検索・選択...")
-        related_datasets_layout.addWidget(related_dataset_combo)
-        
-        # 選択されたデータセット一覧（高さを拡張）
-        selected_datasets_list = QListWidget()
-        selected_datasets_list.setMaximumHeight(150)  # 80 → 150に拡張（約7-8行）
-        selected_datasets_list.setAlternatingRowColors(True)
-        related_datasets_layout.addWidget(selected_datasets_list)
-        
         related_datasets_widget.setLayout(related_datasets_layout)
         form_layout.addWidget(related_datasets_widget, 11, 1)
+        
+        # 内部データ保持用（IDリスト）
+        widget._selected_related_dataset_ids = []
         
         # データ一覧表示タイプ選択（ラジオボタン）- 関連データセットの下に移動
         form_layout.addWidget(QLabel("データ一覧表示タイプ:"), 12, 0)
@@ -1786,27 +1993,25 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         data_listing_type_widget.setLayout(data_listing_type_layout)
         form_layout.addWidget(data_listing_type_widget, 12, 1)
         
-        # チェックボックス（2列表示）
+        # チェックボックス（横並び1行）
         checkbox_widget = QWidget()
-        checkbox_layout = QGridLayout()
+        checkbox_layout = QHBoxLayout()
         checkbox_layout.setContentsMargins(0, 0, 0, 0)
-        
+        checkbox_layout.setSpacing(12)
+
         edit_anonymize_checkbox = QCheckBox("データセットを匿名にする")
-        checkbox_layout.addWidget(edit_anonymize_checkbox, 0, 0)
-        
+        # 既存互換: 個別の『データ登録を禁止する』チェックボックスも生成（非表示行）
         edit_data_entry_prohibited_checkbox = QCheckBox("データ登録を禁止する")
-        # checkbox_layout.addWidget(edit_data_entry_prohibited_checkbox, 0, 1)
-        
-        # データ登録及び削除を禁止するチェックボックスを追加
         edit_data_entry_delete_prohibited_checkbox = QCheckBox("データの登録及び削除を禁止する")
-        checkbox_layout.addWidget(edit_data_entry_delete_prohibited_checkbox, 1, 0)
-        
-        # データ中核拠点広域シェア
         edit_share_core_scope_checkbox = QCheckBox("データ中核拠点広域シェア（RDE全体での共有）を有効にする")
-        checkbox_layout.addWidget(edit_share_core_scope_checkbox, 1, 1)
-        
+
+        checkbox_layout.addWidget(edit_anonymize_checkbox)
+        # 横並び3つの指定に合わせ、『データ登録を禁止する』を採用
+        checkbox_layout.addWidget(edit_data_entry_prohibited_checkbox)
+        checkbox_layout.addWidget(edit_share_core_scope_checkbox)
+
         checkbox_widget.setLayout(checkbox_layout)
-        
+
         form_layout.addWidget(QLabel("共有範囲/利用制限:"), 14, 0)
         form_layout.addWidget(checkbox_widget, 14, 1)
         
@@ -1817,7 +2022,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 edit_description_edit, edit_embargo_edit, edit_contact_edit,
                 edit_taxonomy_edit, edit_related_links_edit, edit_tags_edit,
                 edit_citation_format_edit, edit_license_combo, edit_data_listing_gallery_radio, edit_data_listing_tree_radio, 
-                related_dataset_combo, selected_datasets_list,
+                edit_related_datasets_display,
                 edit_anonymize_checkbox,
                 edit_data_entry_prohibited_checkbox, edit_data_entry_delete_prohibited_checkbox, edit_share_core_scope_checkbox,
                 edit_template_display)
@@ -1827,56 +2032,234 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
      edit_description_edit, edit_embargo_edit, edit_contact_edit,
      edit_taxonomy_edit, edit_related_links_edit, edit_tags_edit,
      edit_citation_format_edit, edit_license_combo, edit_data_listing_gallery_radio, edit_data_listing_tree_radio, 
-     related_dataset_combo, selected_datasets_list,
+     edit_related_datasets_display,
      edit_anonymize_checkbox,
      edit_data_entry_prohibited_checkbox, edit_data_entry_delete_prohibited_checkbox, edit_share_core_scope_checkbox,
      edit_template_display) = create_edit_form()
     
-    layout.addWidget(edit_form_widget)
-    
-    # 関連データセット機能のセットアップとイベント接続
-    setup_related_datasets(related_dataset_combo)
-    
-    # ラムダ関数を使用してイベント接続（引数を渡すため）
-    related_dataset_combo.lineEdit().returnPressed.connect(
-        lambda: on_related_dataset_selected(related_dataset_combo, selected_datasets_list)
-    )
-    
-    # コンボボックスのアイテム選択時のイベント処理
-    def on_related_combo_activated(index):
-        """コンボボックスでアイテムが選択された時の処理"""
-        if index >= 0:
-            dataset = related_dataset_combo.itemData(index)
-            if dataset:
-                dataset_id = dataset.get("id", "")
-                dataset_title = dataset.get("attributes", {}).get("name", "名前なし")
-                
-                # 自己参照チェック - 現在編集中のデータセットと同じIDかどうか
-                current_dataset_index = existing_dataset_combo.currentIndex()
-                if current_dataset_index > 0:  # 有効なデータセットが選択されている場合
-                    current_dataset = existing_dataset_combo.itemData(current_dataset_index)
-                    if current_dataset:
-                        current_dataset_id = current_dataset.get("id", "")
-                        if dataset_id == current_dataset_id:
-                            logger.info("自分自身を関連データセットに指定することはできません: %s", dataset_title)
-                            related_dataset_combo.setCurrentIndex(-1)  # 選択をクリア
-                            return
-                
-                # 重複チェック
-                for row in range(selected_datasets_list.count()):
-                    existing_item = selected_datasets_list.item(row)
-                    if existing_item.data(Qt.UserRole) == dataset_id:
-                        logger.info("データセットは既に選択されています: %s", dataset_title)
-                        related_dataset_combo.setCurrentIndex(-1)  # 選択をクリア
+    # 上: 既存フォーム / 下: データエントリー一覧 の縦スプリッターを追加
+    content_splitter = QSplitter(Qt.Vertical)
+    content_splitter.setChildrenCollapsible(False)
+    content_splitter.addWidget(edit_form_widget)
+
+    # データエントリー一覧パネル
+    entries_panel = QWidget()
+    entries_panel_layout = QVBoxLayout()
+    entries_panel_layout.setContentsMargins(0, 0, 0, 0)
+    entries_title = QLabel("データエントリー一覧（選択データセット）")
+    entries_title.setStyleSheet("font-weight: bold;")
+    entries_panel_layout.addWidget(entries_title)
+
+    # MagicMock汚染の影響を避けるため、ここで動的に実体クラスを解決
+    try:
+        from qt_compat.widgets import QTableWidget as _QTableWidget, QTableWidgetItem as _QTableWidgetItem, QPushButton as _QPushButton, QHeaderView as _QHeaderView
+        from unittest.mock import MagicMock
+        # qt_compat が MagicMock を返している場合は PySide6 実体へフォールバック
+        if any(isinstance(cls, MagicMock) for cls in (_QTableWidget, _QTableWidgetItem, _QPushButton, _QHeaderView)):
+            raise ImportError("qt_compat widgets contaminated by MagicMock")
+    except Exception:
+        from PySide6.QtWidgets import QTableWidget as _QTableWidget, QTableWidgetItem as _QTableWidgetItem, QPushButton as _QPushButton, QHeaderView as _QHeaderView
+
+    entries_table = _QTableWidget()
+    # 列拡張: 登録状況開始日時とリンク列を追加 (複数候補は行分割表示)
+    entries_table.setColumnCount(6)
+    entries_table.setHorizontalHeaderLabels(["データエントリーID", "名称", "登録状況ID", "登録状況ステータス", "登録開始日時", "リンク"])
+    entries_header = entries_table.horizontalHeader()
+    entries_header.setSectionResizeMode(0, _QHeaderView.ResizeToContents)
+    entries_header.setSectionResizeMode(1, _QHeaderView.Stretch)
+    entries_header.setSectionResizeMode(2, _QHeaderView.ResizeToContents)
+    entries_header.setSectionResizeMode(3, _QHeaderView.ResizeToContents)
+    entries_header.setSectionResizeMode(4, _QHeaderView.ResizeToContents)
+    entries_header.setSectionResizeMode(5, _QHeaderView.ResizeToContents)
+    entries_table.setSortingEnabled(True)
+    entries_table.setEditTriggers(_QTableWidget.NoEditTriggers)
+    entries_panel_layout.addWidget(entries_table)
+    entries_panel.setLayout(entries_panel_layout)
+
+    content_splitter.addWidget(entries_panel)
+    content_splitter.setStretchFactor(0, 1)
+    content_splitter.setStretchFactor(1, 1)
+
+    # スプリッターをメインレイアウトに追加
+    layout.addWidget(content_splitter)
+
+    # 参照をウィジェットに保持
+    widget._entries_table = entries_table
+
+    def _load_registration_entries():
+        """登録状況キャッシュ (entries_all / entries_latest) から生データリストを読み取る"""
+        entries = []
+        try:
+            candidates = [
+                get_dynamic_file_path('output/rde/entries_all.json'),
+                get_dynamic_file_path('output/rde/entries_latest.json'),
+            ]
+            for p in candidates:
+                if p and os.path.exists(p):
+                    try:
+                        with open(p, 'r', encoding='utf-8') as f:
+                            data = json.load(f)
+                        if isinstance(data, list) and data:
+                            entries.extend(data)
+                            # entries_all があればそれを優先し終了
+                            if 'entries_all' in p:
+                                break
+                    except Exception as ie:
+                        logger.debug("登録状況キャッシュ読み込み失敗: %s", ie)
+        except Exception as e:
+            logger.debug("登録状況エントリー読み込み失敗: %s", e)
+        return entries
+
+    def _match_registration_for_entry(dataset_name: str, data_name: str, owner_id: str, instrument_id: str | None,
+                                      created_ts: str | None, registration_entries: list, threshold_seconds: int = 86400):
+        """単一データエントリーに対応する登録状況候補を抽出 (24h以内 / 複合キー一致)
+        条件:
+          - datasetName 完全一致 (選択データセットの name)
+          - dataName 完全一致 (エントリー attributes.name)
+          - createdByUserId 一致 (エントリー owner.id)
+          - (instrumentId が両方に存在する場合は一致)
+          - startTime と created の絶対差が threshold_seconds 以内 (両方取れた場合)
+        """
+        import datetime as _dt
+        results = []
+        # created_ts を datetime へ
+        created_dt = None
+        if created_ts:
+            try:
+                created_dt = _dt.datetime.fromisoformat(created_ts.replace('Z', '+00:00'))
+            except Exception:
+                created_dt = None
+
+        for r in registration_entries:
+            try:
+                if r.get('datasetName') != dataset_name:
+                    continue
+                if r.get('dataName') != data_name:
+                    continue
+                if r.get('createdByUserId') != owner_id:
+                    continue
+                if instrument_id and r.get('instrumentId') and r.get('instrumentId') != instrument_id:
+                    continue
+                # 時刻差判定
+                if created_dt:
+                    start_time = r.get('startTime')
+                    if start_time:
+                        try:
+                            start_dt = _dt.datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                            if abs((start_dt - created_dt).total_seconds()) > threshold_seconds:
+                                continue
+                        except Exception:
+                            # パース失敗時は時刻条件無視 (緩く)
+                            pass
+                results.append(r)
+            except Exception as ie:
+                logger.debug("マッチング判定中エラー: %s", ie)
+        return results
+
+    def update_entries_table_for_dataset(dataset_id: str, dataset_name: str | None, force_refresh: bool = False):
+        """選択データセットのエントリー一覧をテーブルへ反映 (登録状況ID相関付き・複数候補行分割)
+
+        行生成ルール:
+          - マッチ0件: 1行 (登録状況ID/ステータス空, リンク列はボタン無効)
+          - マッチ1件: 1行 (登録状況ID/ステータス/リンクボタン有効)
+          - マッチ複数: マッチ件数分の行 (各行に個別ID/ステータス/リンク)
+        """
+        try:
+            entries_table.setRowCount(0)
+            if not dataset_id:
+                return
+
+            # データエントリーJSONの存在確認と取得
+            dataentry_dir = get_dynamic_file_path("output/rde/data/dataEntry")
+            os.makedirs(dataentry_dir, exist_ok=True)
+            dataentry_path = os.path.join(dataentry_dir, f"{dataset_id}.json")
+
+            if force_refresh or not os.path.exists(dataentry_path):
+                try:
+                    from classes.basic.core.basic_info_logic import fetch_data_entry_info_from_api
+                    # bearer_token=None で自動選択（関数内で扱う）
+                    fetch_data_entry_info_from_api(None, dataset_id, dataentry_dir)
+                except Exception as fe:
+                    logger.warning("データエントリー情報の取得に失敗: %s", fe)
+
+            if not os.path.exists(dataentry_path):
+                # 取得できていない場合は空のまま
+                return
+
+            # JSONを読み込み
+            with open(dataentry_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            items = data.get('data') or []
+            registration_entries = _load_registration_entries()
+            status_map = {r.get('id'): r.get('status') for r in registration_entries if isinstance(r, dict)}
+
+            # 行データ構築 (スプリット後合計行数計算)
+            # 新しいヘルパー関数で行展開（2時間上限）
+            # UIテーブルでは複数候補をそのまま分割表示するため、tight collapse を無効化
+            expanded_rows = build_expanded_rows_for_dataset_entries(items, dataset_name, registration_entries, collapse_tight=False)
+
+            entries_table.setRowCount(len(expanded_rows))
+            for row, rdata in enumerate(expanded_rows):
+                full_id = str(rdata['data_entry_id'])
+                trunc_id = (full_id[:10] + "…") if len(full_id) > 10 else full_id
+                id_item = _QTableWidgetItem(trunc_id)
+                id_item.setToolTip(full_id)
+                name_item = _QTableWidgetItem(str(rdata['data_name']))
+                full_reg_id = str(rdata['reg_id'])
+                trunc_reg_id = (full_reg_id[:10] + "…") if len(full_reg_id) > 10 else full_reg_id
+                reg_id_item = _QTableWidgetItem(trunc_reg_id)
+                reg_id_item.setToolTip(full_reg_id)
+                reg_status_item = _QTableWidgetItem(str(rdata['reg_status']))
+                entries_table.setItem(row, 0, id_item)
+                entries_table.setItem(row, 1, name_item)
+                entries_table.setItem(row, 2, reg_id_item)
+                entries_table.setItem(row, 3, reg_status_item)
+                # 列4: 登録開始日時（JST年月日時分秒）
+                start_time_jst = format_start_time_jst(rdata.get('start_time', ''))
+                start_time_item = _QTableWidgetItem(start_time_jst)
+                entries_table.setItem(row, 4, start_time_item)
+                # 列5: リンクボタン
+                if rdata['linkable']:
+                    btn = _QPushButton("開く")
+                    rid_local = rdata['reg_id']
+                    btn.clicked.connect(lambda _=None, rid=rid_local: webbrowser.open(f"https://rde-entry-arim.nims.go.jp/data-entry/datasets/entries/{rid}"))
+                    entries_table.setCellWidget(row, 5, btn)
+                else:
+                    btn = _QPushButton("開く")
+                    btn.setEnabled(False)
+                    entries_table.setCellWidget(row, 5, btn)
+
+            # コンテキストメニューで元の値をコピー可能にする
+            try:
+                from qt_compat.core import QClipboard
+                entries_table.setContextMenuPolicy(Qt.CustomContextMenu)
+
+                def on_table_context_menu(pos):
+                    index = entries_table.indexAt(pos)
+                    if not index.isValid():
                         return
-                
-                # リストに追加（削除ボタン付きウィジェットとして）
-                if add_related_dataset_to_list(selected_datasets_list, dataset_id, dataset_title):
-                    logger.info("関連データセットを追加: %s", dataset_title)
-                
-                related_dataset_combo.setCurrentIndex(-1)  # 選択をクリア
-    
-    related_dataset_combo.activated.connect(on_related_combo_activated)
+                    col = index.column()
+                    if col in (0, 2):
+                        item = entries_table.item(index.row(), col)
+                        if item:
+                            # ツールチップにフルIDを保持している
+                            full_value = item.toolTip() or item.text()
+                            cb = QApplication.clipboard()
+                            cb.setText(full_value)
+                            # 目立つ通知は避け、静かなログのみ
+                            logger.debug("テーブルのフルIDをクリップボードへコピー: col=%s value=%s", col, full_value)
+
+                entries_table.customContextMenuRequested.connect(on_table_context_menu)
+            except Exception as _:
+                # 失敗しても致命的ではないため無視
+                pass
+
+        except Exception as e:
+            logger.error("エントリー一覧更新時にエラー: %s", e)
+
+    # 外部テストから直接呼び出せるように参照を公開
+    widget.update_entries_table_for_dataset = update_entries_table_for_dataset
     
     # フォームクリア処理
     def clear_edit_form():
@@ -1891,7 +2274,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         edit_citation_format_edit.clear()  # 引用書式フィールドをクリア
         edit_license_combo.setCurrentIndex(-1)  # ライセンス選択をクリア
         edit_template_display.clear()  # テンプレート表示をクリア
-        selected_datasets_list.clear()  # 関連データセット一覧をクリア
+        edit_related_datasets_display.clear()  # 関連データセット表示をクリア
+        widget._selected_related_dataset_ids = []  # 関連データセットIDリストをクリア
         edit_anonymize_checkbox.setChecked(False)
         edit_data_entry_prohibited_checkbox.setChecked(False)
         edit_data_entry_delete_prohibited_checkbox.setChecked(False)  # 新しいチェックボックス
@@ -1907,7 +2291,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         embargo_date = QDate(next_year, 3, 31)
         edit_embargo_edit.setDate(embargo_date)
     
-    # 関連情報バリデーション機能
+    # 関連情報バリデーション機能（QLineEdit対応）
     def validate_related_links(text):
         """関連情報の書式をバリデーション"""
         if not text.strip():
@@ -1952,9 +2336,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         else:
             return True, f"{len(valid_links)}件の関連情報が有効です"
     
-    # 関連情報のリアルタイムバリデーション
+    # 関連情報のリアルタイムバリデーション（QLineEdit対応）
     def on_related_links_changed():
-        text = edit_related_links_edit.toPlainText()
+        text = edit_related_links_edit.text()
         is_valid, message = validate_related_links(text)
         
         if is_valid:
@@ -2116,26 +2500,17 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         relationships = selected_dataset.get("relationships", {})
         related_datasets_data = relationships.get("relatedDatasets", {}).get("data", [])
         
-        # 関連データセット一覧をクリア
-        selected_datasets_list.clear()
+        # 関連データセットIDリストを更新
+        dataset_ids = [rd.get("id", "") for rd in related_datasets_data if rd.get("id")]
+        widget._selected_related_dataset_ids = dataset_ids
         
-        if related_datasets_data:
-            logger.debug("関連データセット: %s件", len(related_datasets_data))
-            for related_dataset in related_datasets_data:
-                dataset_id = related_dataset.get("id", "")
-                if dataset_id:
-                    # 全データセットキャッシュから詳細情報を取得
-                    cached_datasets = getattr(related_dataset_combo, '_all_datasets_cache', [])
-                    dataset_name = "名前取得中..."
-                    for cached_dataset in cached_datasets:
-                        if cached_dataset.get("id") == dataset_id:
-                            dataset_name = cached_dataset.get("attributes", {}).get("name", "名前なし")
-                            break
-                    
-                    # リストに追加
-                    if add_related_dataset_to_list(selected_datasets_list, dataset_id, dataset_name):
-                        logger.debug("関連データセット追加: %s (ID: %s)", dataset_name, dataset_id)
+        # 件数を表示
+        count = len(dataset_ids)
+        if count > 0:
+            edit_related_datasets_display.setText(f"{count}件")
+            logger.debug("関連データセット: %s件", count)
         else:
+            edit_related_datasets_display.clear()
             logger.debug("関連データセットが空")
         
         # チェックボックス
@@ -2173,8 +2548,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         if current_index <= 0:  # 最初のアイテム（"-- データセットを選択してください --"）または無効な選択
             logger.debug("データセット未選択状態 - フォームをクリアします")
             clear_edit_form()
-            # 関連データセットリストを再セットアップ（除外なし）
-            setup_related_datasets(related_dataset_combo)
+            # エントリー表をクリア
+            update_entries_table_for_dataset(None, None)
         else:
             selected_dataset = existing_dataset_combo.itemData(current_index)
             if selected_dataset:
@@ -2182,15 +2557,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 dataset_id = selected_dataset.get("id", "")
                 logger.debug("データセット '%s' を選択 - フォームに反映します", dataset_name)
                 
-                # 関連データセットリストを再セットアップ（現在のデータセットを除外）
-                setup_related_datasets(related_dataset_combo, exclude_dataset_id=dataset_id)
-                
                 populate_edit_form_local(selected_dataset)
+                # 選択データセットのエントリー一覧を更新
+                update_entries_table_for_dataset(dataset_id, dataset_name, force_refresh=False)
             else:
                 logger.debug("データセットデータが取得できません - フォームをクリアします")
                 clear_edit_form()
-                # 関連データセットリストを再セットアップ（除外なし）
-                setup_related_datasets(related_dataset_combo)
+                update_entries_table_for_dataset(None, None)
     
     def on_completer_activated(text):
         """QCompleterでフィルタ選択された場合の処理（直接フォーム更新版）"""
@@ -2235,11 +2608,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             else:
                 logger.warning("Completer選択後にコンボボックスから該当アイテムが見つかりませんでした (ID: %s)", dataset_id)
             
-            # 関連データセットリストを再セットアップ（現在のデータセットを除外）
-            setup_related_datasets(related_dataset_combo, exclude_dataset_id=dataset_id)
-            
             # 直接フォーム更新
             populate_edit_form_local(dataset_dict)
+            # エントリー一覧を更新
+            update_entries_table_for_dataset(dataset_id, dataset_name, force_refresh=False)
         else:
             # マップに見つからない場合の詳細ログ
             logger.error("Completer選択解決失敗: text=%s norm=%s", text, norm_text)
@@ -2460,7 +2832,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             edit_dataset_name_edit, edit_grant_number_combo, edit_description_edit,
             edit_embargo_edit, edit_contact_edit, edit_taxonomy_edit,
             edit_related_links_edit, edit_tags_edit, edit_citation_format_edit, edit_license_combo,
-            edit_data_listing_gallery_radio, edit_data_listing_tree_radio, selected_datasets_list, edit_anonymize_checkbox, 
+            edit_data_listing_gallery_radio, edit_data_listing_tree_radio, widget, edit_anonymize_checkbox, 
             edit_data_entry_prohibited_checkbox, edit_data_entry_delete_prohibited_checkbox,
             edit_share_core_scope_checkbox, ui_refresh_callback=refresh_ui_after_update
         )

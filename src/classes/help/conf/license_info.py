@@ -1,19 +1,19 @@
 """
-ライセンス情報定義 - ARIM RDE Tool v2.1.5
+ライセンス情報定義 - ARIM RDE Tool v2.1.12
 """
 
 # アプリケーション情報
 APP_NAME = "ARIM RDE Tool"
-APP_VERSION = "v2.1.5"
-APP_DESCRIPTION = "DICE/RDEシステムからARIMデータポータルへのデータ移行ツール"
-APP_AUTHOR = "ARIM事業"
-APP_COPYRIGHT = "Copyright © 2024-2025 ARIM"
+APP_VERSION = "v2.1.12"
+APP_DESCRIPTION = "ARIM事業 RDEシステム/データポータル の 操作支援ツール"
+APP_AUTHOR = "MNagasako"
+APP_COPYRIGHT = "Copyright © 2024-2025 MNagasako"
 
 # ライセンス情報
 LICENSE_TEXT = """
 MIT License
 
-Copyright (c) 2024-2025 ARIM事業
+Copyright (c) 2024-2025 MNagasako
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
