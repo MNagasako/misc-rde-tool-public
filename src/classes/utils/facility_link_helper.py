@@ -83,7 +83,36 @@ def extract_equipment_id(text: str) -> Optional[str]:
     return None
 
 
+def lookup_facility_name_by_equipment_id(json_path: Path, equipment_id: str) -> Optional[str]:
+    """Lookup facility name by '設備ID' within the JSON at json_path.
+    Returns name string or None.
+    """
+    try:
+        with json_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return None
+    facilities = data.get("facilities") if isinstance(data, dict) else None
+    if not isinstance(facilities, list):
+        return None
+    for item in facilities:
+        if not isinstance(item, dict):
+            continue
+        if str(item.get("設備ID")) == str(equipment_id):
+            name = item.get("設備名称")
+            return str(name) if name is not None else None
+    return None
+
+
 def build_equipment_anchor(code: str, equipment_id: str) -> str:
     """Build anchor tag for equipment code and id."""
     href = f"https://nanonet.go.jp/facility.php?mode=detail&code={code}"
     return f"<a href=\"{href}\">{equipment_id}</a>"
+
+
+def build_equipment_anchor_with_name(code: str, equipment_id: str, equipment_name: str) -> str:
+    """Build anchor tag for equipment code, id and name.
+    Format: <a href='...'>ID：Name</a>
+    """
+    href = f"https://nanonet.go.jp/facility.php?mode=detail&code={code}"
+    return f"<a href=\"{href}\">{equipment_id}:{equipment_name}</a>"

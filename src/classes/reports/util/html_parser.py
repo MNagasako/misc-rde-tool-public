@@ -99,20 +99,18 @@ def extract_list_items(soup: BeautifulSoup, heading_text: str) -> list:
     """
     見出しの後にある<ul>または<ol>内の<li>要素を抽出
     
-    DOIリンクがある場合はHTMLリンク形式で返す
+    プレーンテキストのみを返す（HTMLタグは付与しない）
     
     Args:
         soup: BeautifulSoupオブジェクト
         heading_text: 見出しテキスト
     
     Returns:
-        リストアイテムのリスト
-        - DOIリンクがある場合: '<a href="...">テキスト</a>' 形式
-        - リンクがない場合: テキストのみ
+        リストアイテムのリスト（プレーンテキスト）
     
     Examples:
         >>> items = extract_list_items(soup, '論文・プロシーディング')
-        >>> # ['<a href="https://doi.org/...">論文1</a>', 'テキストのみの論文2', ...]
+        >>> # ['論文1のタイトルとDOI情報', 'テキストのみの論文2', ...]
     """
     tag = soup.find('h5', string=heading_text)
     if tag is None:
@@ -137,23 +135,10 @@ def extract_list_items(soup: BeautifulSoup, heading_text: str) -> list:
     
     items = []
     for li in list_element.find_all('li', recursive=False):
-        # DOIリンクがあるか確認
-        a_tag = li.find('a', href=True)
-        if a_tag and a_tag.get('href'):
-            # リンクがある場合はHTML形式で保存
-            href = a_tag.get('href')
-            text = li.get_text(strip=True)
-            # DOIリンクの場合はHTMLリンク形式
-            if 'doi.org' in href or 'pubs.acs.org' in href:
-                items.append(f'<a href="{href}">{text}</a>')
-            else:
-                # その他のリンクはテキストのみ
-                items.append(text)
-        else:
-            # リンクがない場合はテキストのみ
-            text = li.get_text(strip=True)
-            if text:  # 空でない場合のみ追加
-                items.append(text)
+        # テキストのみを抽出（HTMLタグは付与しない）
+        text = li.get_text(strip=True)
+        if text:  # 空でない場合のみ追加
+            items.append(text)
     
     return items
 

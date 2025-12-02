@@ -13,6 +13,7 @@ from qt_compat.widgets import (
     QTableWidget, QTableWidgetItem, QHeaderView
 )
 from qt_compat.core import Qt
+from qt_compat import get_screen_geometry
 
 from classes.theme import get_color, ThemeKey
 
@@ -48,7 +49,11 @@ class PortalEditDialog(QDialog):
         
         self.setWindowTitle(f"データポータル修正 - {dataset_id[:8]}...")
         self.setMinimumWidth(800)
-        self.setMinimumHeight(600)
+        
+        # 初期ウィンドウ高さを画面高さ - 100px に設定
+        screen_rect = get_screen_geometry(self)
+        initial_height = max(600, screen_rect.height() - 100)  # 最低600pxを保証
+        self.resize(800, initial_height)
         
         self._init_ui()
         logger.info(f"修正ダイアログ初期化: t_code={t_code}, dataset_id={dataset_id}, metadata={len(self.metadata)}項目")
@@ -160,15 +165,16 @@ class PortalEditDialog(QDialog):
         group.setLayout(layout)
         return group
     
-    def _create_editable_list_table(self, field_prefix: str, label: str, max_rows: int = 20, visible_rows: int = 5) -> 'QTableWidget':
+    def _create_editable_list_table(self, field_prefix: str, label: str, max_rows: int = 20, visible_rows: int = 5):
         """
         編集可能なリストテーブルを作成（装置・プロセス、論文・プロシーディング用）
+        常に20行表示、5行以上はスクロールバーで表示
         
         Args:
             field_prefix: フィールドのプレフィックス（例: 't_equip_process', 't_paper_proceed'）
             label: ラベル
-            max_rows: 最大行数（デフォルト20）
-            visible_rows: 表示行数（デフォルト5）
+            max_rows: 固定行数（常に20）
+            visible_rows: スクロールなしで表示する行数（デフォルト5）
         
         Returns:
             QTableWidget: テーブルウィジェット
@@ -177,28 +183,27 @@ class PortalEditDialog(QDialog):
         table.setColumnCount(1)
         table.setHorizontalHeaderLabels([label])
         table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        table.setRowCount(max_rows)
+        
+        # 常に20行表示
+        table.setRowCount(20)
+        
+        # 既存データを読み込み
+        for i in range(1, 21):
+            field_name = f"{field_prefix}{i}"
+            value = ""
+            if field_name in self.form_data:
+                value = self.form_data[field_name].get('value', '')
+            
+            item = QTableWidgetItem(value)
+            table.setItem(i - 1, 0, item)
         
         # 行の高さを設定
         table.verticalHeader().setDefaultSectionSize(25)
-        # 表示行数分の高さに設定
+        
+        # 5行分の表示高さに固定（それ以上はスクロール）
         table_height = visible_rows * 25 + table.horizontalHeader().height() + 2
         table.setMaximumHeight(table_height)
         table.setMinimumHeight(table_height)
-        
-        # 既存データを読み込み
-        for i in range(1, max_rows + 1):
-            field_name = f"{field_prefix}{i}"
-            if field_name in self.form_data:
-                value = self.form_data[field_name].get('value', '')
-                if value:
-                    item = QTableWidgetItem(value)
-                    table.setItem(i - 1, 0, item)
-        
-        # 空のセルを追加
-        for i in range(table.rowCount()):
-            if table.item(i, 0) is None:
-                table.setItem(i, 0, QTableWidgetItem(""))
         
         return table
     
@@ -521,8 +526,8 @@ class PortalEditDialog(QDialog):
             auto_btn.clicked.connect(lambda: self._open_checkbox_autoset_dialog('タグ 自動設定', 'mt_code_array[]', 'tag'))
             layout.addRow("", auto_btn)
         
-        # 装置・プロセス - テーブル表示（5行表示、最大5行）
-        equip_process_table = self._create_editable_list_table('t_equip_process', '装置・プロセス', max_rows=5, visible_rows=5)
+        # 装置・プロセス - テーブル表示（20行固定、5行以上はスクロール）
+        equip_process_table = self._create_editable_list_table('t_equip_process', '装置・プロセス', max_rows=20, visible_rows=5)
         self.field_widgets['t_equip_process'] = equip_process_table
         layout.addRow("装置・プロセス:", equip_process_table)
         
@@ -545,29 +550,29 @@ class PortalEditDialog(QDialog):
         auto_equipment_btn.setToolTip("報告書から利用した主な設備を自動設定します")
         layout.addRow("", auto_equipment_btn)
         
-        # 論文・プロシーディング - テーブル表示（5行表示、最大20行）
-        paper_proceed_table = self._create_editable_list_table('t_paper_proceed', '論文・プロシーディング', max_rows=20, visible_rows=5)
+        # 論文・プロシーディング - テーブル表示（20行固定、5行以上はスクロール）
+        paper_proceed_table = self._create_editable_list_table('t_paper_proceed', '論文・プロシーディング（DOI URL）', max_rows=20, visible_rows=5)
         self.field_widgets['t_paper_proceed'] = paper_proceed_table
         layout.addRow("論文・プロシーディング:", paper_proceed_table)
         
-        # 論文・プロシーディング 自動設定ボタン
-        auto_publications_btn = QPushButton("🤖 論文・プロシーディング 自動設定")
-        auto_publications_btn.clicked.connect(self._on_auto_set_publications)
-        auto_publications_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                padding: 6px 12px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
-            }}
-        """)
-        auto_publications_btn.setToolTip("報告書から論文・プロシーディング（DOI）を自動設定します")
-        layout.addRow("", auto_publications_btn)
+        # 論文・プロシーディング 自動設定ボタン（将来復活する可能性あり、現在は非表示）
+        # auto_publications_btn = QPushButton("🤖 論文・プロシーディング 自動設定")
+        # auto_publications_btn.clicked.connect(self._on_auto_set_publications)
+        # auto_publications_btn.setStyleSheet(f"""
+        #     QPushButton {{
+        #         background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+        #         color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+        #         padding: 6px 12px;
+        #         border: none;
+        #         border-radius: 4px;
+        #         font-weight: bold;
+        #     }}
+        #     QPushButton:hover {{
+        #         background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+        #     }}
+        # """)
+        # auto_publications_btn.setToolTip("報告書から論文・プロシーディング（DOI）を自動設定します")
+        # layout.addRow("", auto_publications_btn)
         
         # その他のフィールド
         for key, field_data in self.form_data.items():
@@ -741,15 +746,21 @@ class PortalEditDialog(QDialog):
                     post_data[key] = []
             elif key in ['t_equip_process', 't_paper_proceed']:
                 # QTableWidget（装置・プロセス、論文・プロシーディング）
+                # サーバー側は20件固定を期待しているため、常に20件分送信
                 if isinstance(widget, QTableWidget):
-                    # 全ての行について、空値でもキーを含める
+                    # テーブルから値を取得（圧縮されている可能性があるため実際の行数のみ）
+                    values = []
                     for row in range(widget.rowCount()):
-                        field_name = f"{key}{row + 1}"
                         item = widget.item(row, 0)
                         if item and item.text().strip():
-                            post_data[field_name] = item.text().strip()
+                            values.append(item.text().strip())
+                    
+                    # 20件固定で送信（不足分は空文字列）
+                    for i in range(1, 21):
+                        field_name = f"{key}{i}"
+                        if i - 1 < len(values):
+                            post_data[field_name] = values[i - 1]
                         else:
-                            # 空値の場合も空文字列として送信
                             post_data[field_name] = ""
             elif isinstance(widget, QComboBox):
                 value = widget.currentData()
@@ -1029,7 +1040,157 @@ class PortalEditDialog(QDialog):
             )
     
     def _on_auto_set_equipment(self):
-        """装置・プロセスを自動設定"""
+        """装置・プロセスを選択的置換ダイアログで自動設定"""
+        try:
+            from ..core.auto_setting_helper import (
+                extract_equipment_from_report,
+                get_grant_number_from_dataset_json
+            )
+            from .auto_setting_dialog import AutoSettingDialog
+            from .selective_replacement_dialog import SelectiveReplacementDialog
+            from classes.utils.facility_link_helper import (
+                find_latest_facilities_json,
+                lookup_facility_code_by_equipment_id,
+                lookup_facility_name_by_equipment_id,
+                extract_equipment_id,
+                build_equipment_anchor,
+                build_equipment_anchor_with_name,
+            )
+            
+            # 助成番号を取得
+            grant_number = get_grant_number_from_dataset_json(self.dataset_id)
+            
+            if not grant_number:
+                QMessageBox.warning(
+                    self,
+                    "警告",
+                    "助成番号が取得できませんでした。\nデータセットのJSONファイルを確認してください。"
+                )
+                return
+            
+            # 報告書ベースの候補取得関数（装置リスト用）
+            def fetch_equipment_from_report(dataset_id: str) -> dict:
+                result = extract_equipment_from_report(dataset_id, grant_number)
+                # 装置リストを文字列に変換（AutoSettingDialog表示用）
+                equipment_list = result.get("equipment", []) if result else []
+                text = "\n".join(equipment_list) if equipment_list else ""
+                return {"equipment": equipment_list, "text": text}
+            
+            # 情報源選択ダイアログを表示
+            info_dialog = AutoSettingDialog(
+                title="装置・プロセス 自動設定",
+                field_name="装置・プロセス",
+                dataset_id=self.dataset_id,
+                report_fetcher=fetch_equipment_from_report,
+                ai_fetcher=None,  # AI推定は未対応
+                metadata=self.metadata,
+                parent=self
+            )
+            
+            if info_dialog.exec_() != QDialog.Accepted:
+                return  # キャンセルされた
+            
+            # 取得した候補を取り出す
+            info_result = info_dialog.get_result()
+            if not info_result or "equipment" not in info_result:
+                QMessageBox.warning(
+                    self,
+                    "警告",
+                    "装置・プロセスの候補が取得できませんでした。"
+                )
+                return
+            
+            equipment_list = info_result.get("equipment", [])
+            
+            # 既存のテーブル内容を取得
+            table = self.field_widgets.get('t_equip_process')
+            current_items = []
+            if table and isinstance(table, QTableWidget):
+                for i in range(table.rowCount()):
+                    item = table.item(i, 0)
+                    text = item.text() if item else ""
+                    current_items.append(text)
+            
+            # 装置ID正規化関数（facility_link_helper使用）
+            def equipment_normalizer(text: str) -> str:
+                equip_id = extract_equipment_id(text)
+                return equip_id.lower() if equip_id else text.strip().lower()
+            
+            # リンク化拡張機能（設備ID + 設備名）
+            def apply_equipment_link(row: int, current_text: str, suggested_text: str) -> str:
+                """装置IDをリンクタグに変換（設備名付き）"""
+                text = suggested_text if suggested_text else current_text
+                if not text:
+                    return text
+                
+                latest_path = find_latest_facilities_json()
+                if latest_path is None:
+                    return text
+                
+                equip_id = extract_equipment_id(text)
+                if equip_id:
+                    code = lookup_facility_code_by_equipment_id(latest_path, equip_id)
+                    name = lookup_facility_name_by_equipment_id(latest_path, equip_id)
+                    if code and name:
+                        return build_equipment_anchor_with_name(code, equip_id, name)
+                return text
+            
+            extension_buttons = [
+                {"label": "リンク化", "callback": apply_equipment_link}
+            ]
+            
+            # 選択的置換ダイアログ表示
+            dialog = SelectiveReplacementDialog(
+                title="装置・プロセス 選択的置換",
+                field_prefix="t_equip_process",
+                current_items=current_items,
+                suggested_items=equipment_list,
+                normalizer=equipment_normalizer,
+                extension_buttons=extension_buttons,
+                parent=self
+            )
+            
+            if dialog.exec_() == QDialog.Accepted:
+                result_data = dialog.get_result()
+                final_items = result_data.get('final_items', [])
+                
+                # テーブルに適用（最大5行）
+                if table and isinstance(table, QTableWidget):
+                    # クリア
+                    for i in range(table.rowCount()):
+                        table.setItem(i, 0, QTableWidgetItem(""))
+                    
+                    # リンク化して設定（設備名付き）
+                    latest_path = find_latest_facilities_json()
+                    for i, equipment in enumerate(final_items[:5]):
+                        text = str(equipment) if equipment is not None else ""
+                        anchor_text = None
+                        if latest_path is not None:
+                            equip_id = extract_equipment_id(text)
+                            if equip_id:
+                                code = lookup_facility_code_by_equipment_id(latest_path, equip_id)
+                                name = lookup_facility_name_by_equipment_id(latest_path, equip_id)
+                                if code and name:
+                                    anchor_text = build_equipment_anchor_with_name(code, equip_id, name)
+                        table.setItem(i, 0, QTableWidgetItem(anchor_text or text))
+                    
+                    logger.info(f"装置・プロセス適用: {len(final_items)}件（最大5件表示）")
+                    QMessageBox.information(
+                        self,
+                        "完了",
+                        f"装置・プロセスを{len(final_items)}件設定しました。"
+                    )
+        
+        except Exception as e:
+            logger.error(f"装置・プロセス自動設定エラー: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "エラー",
+                f"自動設定中にエラーが発生しました:\n{e}"
+            )
+    
+    def _on_auto_set_equipment_legacy(self):
+        """装置・プロセスを自動設定（旧実装・参考用）"""
         try:
             from ..core.auto_setting_helper import (
                 extract_equipment_from_report,
@@ -1066,8 +1227,10 @@ class PortalEditDialog(QDialog):
                     from classes.utils.facility_link_helper import (
                         find_latest_facilities_json,
                         lookup_facility_code_by_equipment_id,
+                        lookup_facility_name_by_equipment_id,
                         extract_equipment_id,
                         build_equipment_anchor,
+                        build_equipment_anchor_with_name,
                     )
                     latest_path = find_latest_facilities_json()
                     
@@ -1078,7 +1241,7 @@ class PortalEditDialog(QDialog):
                         for i in range(table.rowCount()):
                             table.setItem(i, 0, QTableWidgetItem(""))
                         
-                        # 新しいデータを設定（最大5行）
+                        # 新しいデータを設定（最大5行）（設備名付き）
                         for i, equipment in enumerate(equipment_list[:5]):
                             text = str(equipment) if equipment is not None else ""
                             anchor_text = None
@@ -1086,8 +1249,9 @@ class PortalEditDialog(QDialog):
                                 equip_id = extract_equipment_id(text)
                                 if equip_id:
                                     code = lookup_facility_code_by_equipment_id(latest_path, equip_id)
-                                    if code:
-                                        anchor_text = build_equipment_anchor(code, equip_id)
+                                    name = lookup_facility_name_by_equipment_id(latest_path, equip_id)
+                                    if code and name:
+                                        anchor_text = build_equipment_anchor_with_name(code, equip_id, name)
                             table.setItem(i, 0, QTableWidgetItem(anchor_text or text))
                         
                         logger.info(f"装置・プロセス設定(リンク化): {len(equipment_list)}件（最大5件表示） 最新JSON: {latest_path if latest_path else 'なし'}")
@@ -1122,7 +1286,109 @@ class PortalEditDialog(QDialog):
             )
     
     def _on_auto_set_publications(self):
-        """論文・プロシーディングを自動設定"""
+        """論文・プロシーディングを選択的置換ダイアログで自動設定"""
+        try:
+            from ..core.auto_setting_helper import (
+                extract_publications_from_report,
+                get_grant_number_from_dataset_json
+            )
+            from .selective_replacement_dialog import SelectiveReplacementDialog
+            
+            # 助成番号を取得
+            grant_number = get_grant_number_from_dataset_json(self.dataset_id)
+            
+            if not grant_number:
+                QMessageBox.warning(
+                    self,
+                    "警告",
+                    "助成番号が取得できませんでした。\nデータセットのJSONファイルを確認してください。"
+                )
+                return
+            
+            # プログレスダイアログ
+            progress = QProgressDialog("報告書から論文情報を取得中...", "中止", 0, 0, self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.setValue(0)
+            progress.show()
+            
+            try:
+                # 報告書から論文情報を取得
+                result = extract_publications_from_report(self.dataset_id, grant_number)
+                progress.close()
+                
+                # 結果に関わらずダイアログを表示（空の場合も含む）
+                publications_list = result.get("publications", []) if result else []
+                
+                # 既存のテーブル内容を取得
+                table = self.field_widgets.get('t_paper_proceed')
+                current_items = []
+                if table and isinstance(table, QTableWidget):
+                    for i in range(table.rowCount()):
+                        item = table.item(i, 0)
+                        text = item.text() if item else ""
+                        current_items.append(text)
+                
+                # DOI正規化関数
+                def doi_normalizer(text: str) -> str:
+                    """DOIを正規化（プロトコル除去・小文字化）"""
+                    normalized = text.strip().lower()
+                    # https://doi.org/ や http://dx.doi.org/ を除去
+                    normalized = normalized.replace("https://doi.org/", "")
+                    normalized = normalized.replace("http://doi.org/", "")
+                    normalized = normalized.replace("http://dx.doi.org/", "")
+                    normalized = normalized.replace("https://dx.doi.org/", "")
+                    return normalized
+                
+                # 将来の拡張機能用（現在は空）
+                extension_buttons = []
+                
+                # 選択的置換ダイアログ表示
+                dialog = SelectiveReplacementDialog(
+                    title="論文・プロシーディング 選択的置換",
+                    field_prefix="t_paper_proceed",
+                    current_items=current_items,
+                    suggested_items=publications_list,
+                    normalizer=doi_normalizer,
+                    extension_buttons=extension_buttons,
+                    parent=self
+                )
+                
+                if dialog.exec_() == QDialog.Accepted:
+                    result_data = dialog.get_result()
+                    final_items = result_data.get('final_items', [])
+                    
+                    # テーブルに適用（最大20行）
+                    if table and isinstance(table, QTableWidget):
+                        # クリア
+                        for i in range(table.rowCount()):
+                            table.setItem(i, 0, QTableWidgetItem(""))
+                        
+                        # 設定
+                        for i, publication in enumerate(final_items[:20]):
+                            table.setItem(i, 0, QTableWidgetItem(publication))
+                        
+                        logger.info(f"論文・プロシーディング適用: {len(final_items)}件（最大20件表示）")
+                        QMessageBox.information(
+                            self,
+                            "完了",
+                            f"論文・プロシーディングを{len(final_items)}件設定しました。"
+                        )
+            
+            except Exception as e:
+                progress.close()
+                raise
+        
+        except Exception as e:
+            logger.error(f"論文・プロシーディング自動設定エラー: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "エラー",
+                f"自動設定中にエラーが発生しました:\n{e}"
+            )
+    
+    def _on_auto_set_publications_legacy(self):
+        """論文・プロシーディングを自動設定（旧実装・参考用）"""
         try:
             from ..core.auto_setting_helper import (
                 extract_publications_from_report,
@@ -1295,3 +1561,97 @@ class PortalEditDialog(QDialog):
         except Exception as e:
             logger.error(f"自動設定ダイアログエラー: {e}", exc_info=True)
             QMessageBox.critical(self, "エラー", f"自動設定ダイアログ処理中にエラーが発生しました:\n{e}")
+    
+    def _on_facility_link_batch(self):
+        """装置・プロセステーブル内の設備IDを一括リンク化"""
+        try:
+            from classes.utils.facility_link_helper import (
+                find_latest_facilities_json,
+                lookup_facility_code_by_equipment_id,
+                lookup_facility_name_by_equipment_id,
+                extract_equipment_id,
+                build_equipment_anchor,
+                build_equipment_anchor_with_name,
+            )
+            
+            # テーブルウィジェット取得
+            table = self.field_widgets.get('t_equip_process')
+            if not table or not isinstance(table, QTableWidget):
+                QMessageBox.warning(
+                    self,
+                    "警告",
+                    "装置・プロセステーブルが見つかりません。"
+                )
+                return
+            
+            # 最新の設備マスターJSON取得
+            latest_path = find_latest_facilities_json()
+            if latest_path is None:
+                QMessageBox.warning(
+                    self,
+                    "警告",
+                    "設備マスターJSONファイルが見つかりません。\n基本情報タブで設備情報を取得してください。"
+                )
+                return
+            
+            # 各行をスキャンしてリンク化
+            linked_count = 0
+            unchanged_count = 0
+            
+            for i in range(table.rowCount()):
+                item = table.item(i, 0)
+                if not item:
+                    continue
+                
+                text = item.text().strip()
+                if not text:
+                    continue
+                
+                # 既にアンカータグの場合はスキップ
+                if text.startswith('<a ') and '</a>' in text:
+                    unchanged_count += 1
+                    continue
+                
+                # 設備ID抽出
+                equip_id = extract_equipment_id(text)
+                if equip_id:
+                    # 設備コード・設備名取得
+                    code = lookup_facility_code_by_equipment_id(latest_path, equip_id)
+                    name = lookup_facility_name_by_equipment_id(latest_path, equip_id)
+                    if code and name:
+                        # リンクタグ生成（設備名付き）
+                        anchor_text = build_equipment_anchor_with_name(code, equip_id, name)
+                        table.setItem(i, 0, QTableWidgetItem(anchor_text))
+                        linked_count += 1
+                        logger.debug(f"設備リンク化: {equip_id} -> {code} ({name})")
+                    else:
+                        unchanged_count += 1
+                        logger.debug(f"設備コードまたは設備名未取得: {equip_id}")
+                else:
+                    unchanged_count += 1
+            
+            # 結果通知
+            if linked_count > 0:
+                QMessageBox.information(
+                    self,
+                    "完了",
+                    f"設備リンク化完了:\n{linked_count}件をリンク化しました。\n{unchanged_count}件は変更なし。"
+                )
+                logger.info(f"設備リンク化完了: {linked_count}件")
+            else:
+                QMessageBox.information(
+                    self,
+                    "完了",
+                    "リンク化対象の設備IDが見つかりませんでした。"
+                )
+        
+        except Exception as e:
+            logger.error(f"設備リンク化エラー: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "エラー",
+                f"設備リンク化中にエラーが発生しました:\n{e}"
+            )
+    
+
+

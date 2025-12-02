@@ -35,6 +35,7 @@ class AutoSettingDialog(QDialog):
                  report_fetcher: Optional[Callable] = None,
                  ai_fetcher: Optional[Callable] = None,
                  metadata: Optional[Dict[str, Any]] = None,
+                 description: Optional[str] = None,
                  parent=None):
         """
         初期化
@@ -46,6 +47,7 @@ class AutoSettingDialog(QDialog):
             report_fetcher: 報告書ベースの候補取得関数 (dataset_id) -> Dict[str, str]
             ai_fetcher: AIベースの候補取得関数 (dataset_id) -> Dict[str, str]
             metadata: メタデータ（選択肢情報、マッピング用）
+            description: ダイアログの説明文（Noneの場合は自動生成）
             parent: 親ウィジェット
         """
         super().__init__(parent)
@@ -55,6 +57,7 @@ class AutoSettingDialog(QDialog):
         self.report_fetcher = report_fetcher
         self.ai_fetcher = ai_fetcher
         self.metadata = metadata or {}
+        self.description = description or self._generate_description()
         
         self.selected_source = "report"  # デフォルトは報告書
         self.candidates = {}  # 取得した候補 {"main": "value", "sub": "value"}
@@ -68,9 +71,32 @@ class AutoSettingDialog(QDialog):
         self._init_ui()
         logger.info(f"自動設定ダイアログ初期化: field={field_name}, dataset={dataset_id}")
     
+    def _generate_description(self) -> str:
+        """フィールド名に基づいて説明文を自動生成"""
+        descriptions = {
+            "重要技術領域（主・副）": "報告書またはAIから重要技術領域の候補を取得し、主・副を設定します。",
+            "横断技術領域（主・副）": "報告書から横断技術領域の候補を取得し、主・副を設定します。",
+            "装置・プロセス": "報告書から利用した設備の候補を取得し、選択的置換ダイアログで適用します。",
+        }
+        return descriptions.get(self.field_name, f"{self.field_name}の候補を自動取得します。")
+    
     def _init_ui(self):
         """UI初期化"""
         layout = QVBoxLayout(self)
+        
+        # 説明ラベル
+        desc_label = QLabel(self.description)
+        desc_label.setWordWrap(True)
+        desc_label.setStyleSheet(f"""
+            QLabel {{
+                color: {get_color(ThemeKey.TEXT_SECONDARY)};
+                padding: 8px;
+                background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)};
+                border-radius: 4px;
+                font-size: 11px;
+            }}
+        """)
+        layout.addWidget(desc_label)
         
         # 情報源選択グループ
         source_group = QGroupBox("情報源選択")
@@ -243,25 +269,36 @@ class AutoSettingDialog(QDialog):
         source_name = "報告書" if self.selected_source == "report" else "AI推定"
         text_parts.append(f"【情報源】 {source_name}\n")
         
-        # 候補内容
-        if "main" in self.candidates:
-            text_parts.append(f"【主】 {self.candidates['main']}")
-        if "sub" in self.candidates:
-            text_parts.append(f"【副】 {self.candidates['sub']}")
-        
-        # メタデータとのマッピング確認（あれば）
-        if self.metadata:
-            text_parts.append("\n\n【マッピング確認】")
-            for key in ["main", "sub"]:
-                if key in self.candidates:
-                    value = self.candidates[key]
-                    if value:
-                        # メタデータからラベルを検索
-                        matched = self._find_metadata_label(value)
-                        if matched:
-                            text_parts.append(f"{key}: {value} → {matched}")
-                        else:
-                            text_parts.append(f"{key}: {value} (マッピングなし)")
+        # 候補内容（装置・プロセスリスト or 主・副形式）
+        if "equipment" in self.candidates:
+            # 装置・プロセスリスト形式
+            equipment_list = self.candidates.get("equipment", [])
+            if equipment_list:
+                text_parts.append(f"【装置・プロセス一覧】 ({len(equipment_list)}件)")
+                for eq in equipment_list:
+                    text_parts.append(f"  • {eq}")
+            else:
+                text_parts.append("【装置・プロセス一覧】 候補が見つかりませんでした")
+        else:
+            # 主・副形式（重要技術領域、横断技術領域）
+            if "main" in self.candidates:
+                text_parts.append(f"【主】 {self.candidates['main']}")
+            if "sub" in self.candidates:
+                text_parts.append(f"【副】 {self.candidates['sub']}")
+            
+            # メタデータとのマッピング確認（あれば）
+            if self.metadata:
+                text_parts.append("\n【マッピング確認】")
+                for key in ["main", "sub"]:
+                    if key in self.candidates:
+                        value = self.candidates[key]
+                        if value:
+                            # メタデータからラベルを検索
+                            matched = self._find_metadata_label(value)
+                            if matched:
+                                text_parts.append(f"{key}: {value} → {matched}")
+                            else:
+                                text_parts.append(f"{key}: {value} (マッピングなし)")
         
         self.candidate_text.setPlainText("\n".join(text_parts))
     
@@ -297,13 +334,29 @@ class AutoSettingDialog(QDialog):
             QMessageBox.warning(self, "警告", "候補が取得されていません")
             return
         
-        # 確認ダイアログ
-        reply = QMessageBox.question(
-            self,
-            "適用確認",
-            f"以下の候補を適用しますか?\n\n主: {self.candidates.get('main', '(なし)')}\n副: {self.candidates.get('sub', '(なし)')}",
-            QMessageBox.Yes | QMessageBox.No
-        )
+        # 確認ダイアログ（装置・プロセスリスト or 主・副形式）
+        if "equipment" in self.candidates:
+            # 装置・プロセス形式
+            equipment_list = self.candidates.get("equipment", [])
+            count = len(equipment_list)
+            preview = "\n".join(equipment_list[:5])  # 最初の5件をプレビュー
+            if count > 5:
+                preview += f"\n... 他 {count - 5}件"
+            
+            reply = QMessageBox.question(
+                self,
+                "適用確認",
+                f"以下の候補を適用しますか?\n\n装置・プロセス: {count}件\n\n{preview}",
+                QMessageBox.Yes | QMessageBox.No
+            )
+        else:
+            # 主・副形式
+            reply = QMessageBox.question(
+                self,
+                "適用確認",
+                f"以下の候補を適用しますか?\n\n主: {self.candidates.get('main', '(なし)')}\n副: {self.candidates.get('sub', '(なし)')}",
+                QMessageBox.Yes | QMessageBox.No
+            )
         
         if reply == QMessageBox.Yes:
             self.applied_result = self.candidates
