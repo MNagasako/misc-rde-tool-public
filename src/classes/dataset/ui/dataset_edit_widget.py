@@ -1527,7 +1527,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         # AI提案ダイアログ表示のコールバック関数（既存）
         def show_ai_suggestion():
             try:
-                # スピナー開始
+                # スピナー開始（ボタン無効化）
                 ai_suggest_button.start_loading("AI生成中")
                 QApplication.processEvents()  # UI更新
                 
@@ -1581,9 +1581,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                     mode="dataset_suggestion"  # データセット提案モード: AI提案、プロンプト全文、詳細情報タブ
                 )
                 
-                # スピナー停止
-                ai_suggest_button.stop_loading()
-                
+                # ダイアログをモーダルで開く（完了/キャンセルまで待機）
                 if dialog.exec() == QDialog.Accepted:
                     suggestion = dialog.get_selected_suggestion()
                     if suggestion:
@@ -1594,9 +1592,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                             edit_description_edit.setText(suggestion)
                         
             except Exception as e:
-                # エラー時もスピナーを停止
-                ai_suggest_button.stop_loading()
                 QMessageBox.critical(widget, "エラー", f"AI提案機能でエラーが発生しました: {str(e)}")
+            finally:
+                # 完了/キャンセル/エラー時にボタンを再有効化
+                ai_suggest_button.stop_loading()
         
         # クイックAI生成のコールバック関数（新規）
         def show_quick_ai_suggestion():

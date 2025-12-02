@@ -13,7 +13,7 @@ from urllib.parse import urlparse, parse_qs
 from bs4 import BeautifulSoup
 
 # HTTPヘルパー（本アプリの統一されたrequests機能）
-from net.http_helpers import proxy_get
+from net.http_helpers import proxy_get, proxy_post
 
 # 報告書機能の設定とユーティリティ
 from ..conf.field_definitions import (
@@ -94,6 +94,97 @@ class ReportScraper:
         
         self.logger.info(f"報告書一覧取得完了: 合計 {len(all_links)} 件")
         return all_links
+    
+    def search_reports_by_keyword(self, keyword: str) -> List[Dict[str, str]]:
+        """
+        キーワードで報告書を検索（POST検索）
+        
+        Args:
+            keyword: 検索キーワード（課題番号など）
+        
+        Returns:
+            報告書リンク情報のリスト
+            [{"code": "...", "key": "...", "url": "...", "title": "..."}, ...]
+        
+        Note:
+            報告書サイトのPOST検索機能を使用します。
+            URL: https://nanonet.go.jp/user_report.php
+            Method: POST
+            Content-Type: application/x-www-form-urlencoded
+            Body: keyword=<検索キーワード>
+        """
+        self.logger.info(f"報告書キーワード検索開始: keyword={keyword}")
+        
+        try:
+            # POST検索実行
+            form_data = {'keyword': keyword}
+            response = proxy_post(
+                self.list_url,
+                data=form_data,
+                headers={'Content-Type': 'application/x-www-form-urlencoded'}
+            )
+            response.encoding = 'utf-8'
+            
+            if response.status_code != 200:
+                self.logger.warning(f"検索失敗: HTTPステータス {response.status_code}")
+                return []
+            
+            # レスポンスHTMLをパース
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # 報告書リンクを抽出（_get_links_from_page と同じロジック）
+            links = []
+            
+            for a_tag in soup.find_all('a', href=True):
+                href = a_tag.get('href', '')
+                
+                # hrefを文字列に変換
+                if not isinstance(href, str):
+                    continue
+                
+                # 報告書詳細ページのリンクをフィルタ
+                if 'user_report.php' in href and 'mode=detail' in href and 'code=' in href and 'key=' in href:
+                    # 絶対URLに変換
+                    if not href.startswith('http'):
+                        if href.startswith('/'):
+                            full_url = f"{self.base_url}{href}"
+                        else:
+                            full_url = f"{self.base_url}/{href}"
+                    else:
+                        full_url = href
+                    
+                    # URLからcode/keyを抽出
+                    try:
+                        parsed_url = urlparse(full_url)
+                        params = parse_qs(parsed_url.query)
+                        code = params.get('code', [None])[0]
+                        key = params.get('key', [None])[0]
+                        
+                        if code and key:
+                            # タイトルを取得
+                            title = a_tag.get_text(strip=True) or f"Report {code}"
+                            
+                            link_info = {
+                                'code': code,
+                                'key': key,
+                                'url': full_url,
+                                'title': title
+                            }
+                            
+                            # 重複チェック
+                            if not any(l['code'] == code and l['key'] == key for l in links):
+                                links.append(link_info)
+                    
+                    except Exception as e:
+                        self.logger.warning(f"リンク解析エラー ({href}): {e}")
+                        continue
+            
+            self.logger.info(f"キーワード検索完了: {len(links)} 件の報告書を発見")
+            return links
+            
+        except Exception as e:
+            self.logger.error(f"キーワード検索エラー: {e}")
+            return []
     
     def fetch_report(self, report_url: str) -> Optional[Dict]:
         """
@@ -345,12 +436,9 @@ class ReportScraper:
             cross_tech_element = tag.find_next('p')
             if cross_tech_element is not None:
                 cross_tech_text = cross_tech_element.text.strip()
-                # 「主: XXX、副: YYY」のようなパターンを解析
-                main_match = re.search(r'主[:：]\s*([^、]+)', cross_tech_text)
-                sub_match = re.search(r'副[:：]\s*(.+)', cross_tech_text)
-                
-                data["横断技術領域・主"] = main_match.group(1).strip() if main_match else ""
-                data["横断技術領域・副"] = sub_match.group(1).strip() if sub_match else ""
+                main, sub = self._parse_main_sub_fields(cross_tech_text)
+                data["横断技術領域・主"] = main
+                data["横断技術領域・副"] = sub
             else:
                 data["横断技術領域・主"] = ""
                 data["横断技術領域・副"] = ""
@@ -360,11 +448,9 @@ class ReportScraper:
                 important_tech_element = cross_tech_element.find_next('p')
                 if important_tech_element is not None:
                     important_tech_text = important_tech_element.text.strip()
-                    main_match = re.search(r'主[:：]\s*([^、]+)', important_tech_text)
-                    sub_match = re.search(r'副[:：]\s*(.+)', important_tech_text)
-                    
-                    data["重要技術領域・主"] = main_match.group(1).strip() if main_match else ""
-                    data["重要技術領域・副"] = sub_match.group(1).strip() if sub_match else ""
+                    main, sub = self._parse_main_sub_fields(important_tech_text)
+                    data["重要技術領域・主"] = main
+                    data["重要技術領域・副"] = sub
                 else:
                     data["重要技術領域・主"] = ""
                     data["重要技術領域・副"] = ""
@@ -373,6 +459,42 @@ class ReportScraper:
             data["横断技術領域・副"] = ""
             data["重要技術領域・主"] = ""
             data["重要技術領域・副"] = ""
+    
+    def _parse_main_sub_fields(self, text: str) -> tuple[str, str]:
+        """
+        主・副フィールドをパース
+        
+        形式: 【XXX】（主 / Main）<主の値>（副 / Sub）<副の値>
+        
+        Args:
+            text: パース対象のテキスト
+        
+        Returns:
+            (主の値, 副の値) のタプル
+        """
+        main = ""
+        sub = ""
+        
+        # 主の抽出: "主" を含む括弧の後、次の括弧または行末まで
+        main_match = re.search(r'[（(][^）)]*主[^）)]*[）)]\s*([^（(]+?)(?=[（(]|$)', text)
+        if main_match:
+            main = main_match.group(1).strip()
+            # 末尾の「/」以降（英語部分）を削除
+            if '/' in main:
+                main = main.split('/')[0].strip()
+        
+        # 副の抽出: "副" を含む括弧の後、行末まで
+        sub_match = re.search(r'[（(][^）)]*副[^）)]*[）)]\s*(.+?)$', text)
+        if sub_match:
+            sub = sub_match.group(1).strip()
+            # 末尾の「/」以降（英語部分）を削除
+            if '/' in sub:
+                sub = sub.split('/')[0].strip()
+            # 「-」は未設定を意味する
+            if sub == '-':
+                sub = ""
+        
+        return main, sub
     
     def _extract_keywords(self, soup: BeautifulSoup, html_content: str) -> str:
         """キーワードを抽出"""

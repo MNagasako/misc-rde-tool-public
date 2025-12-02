@@ -7,7 +7,8 @@ import os
 from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QTextEdit, QMessageBox, QTabWidget, QWidget, QGroupBox,
-    QLineEdit, QFormLayout, QScrollArea, QListWidget, QListWidgetItem
+    QLineEdit, QFormLayout, QScrollArea, QListWidget, QListWidgetItem,
+    QComboBox, QSizePolicy
 )
 from qt_compat.core import Qt, Signal
 from classes.dataset.util.ai_extension_helper import load_prompt_file, save_prompt_file
@@ -33,6 +34,8 @@ class AIExtensionPromptEditDialog(QDialog):
         self.setWindowTitle("AI拡張プロンプト編集")
         self.setModal(True)
         self.resize(800, 600)
+        # ユーザーが高さを変更できるようサイズグリップを有効化
+        self.setSizeGripEnabled(True)
         
         layout = QVBoxLayout(self)
         
@@ -117,8 +120,25 @@ class AIExtensionPromptEditDialog(QDialog):
         self.prompt_edit.setPlaceholderText(
             "プロンプトテンプレートを入力してください...\n\nテンプレート変数の例:\n{name} - データセット名\n{type} - データセットタイプ\n{description} - 説明"
         )
-        self.prompt_edit.setMinimumHeight(400)
+        # 最小高さを抑えて、ダイアログの縮小を妨げないようにする
+        self.prompt_edit.setMinimumHeight(240)
+        self.prompt_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.prompt_edit)
+
+        # 出力フォーマット選択（text/json）
+        fmt_group = QGroupBox("出力フォーマット")
+        fmt_layout = QHBoxLayout(fmt_group)
+        fmt_label = QLabel("LLM応答の期待フォーマット:")
+        self.output_format_combo = QComboBox()
+        self.output_format_combo.addItems(["text", "json"])
+        # 初期値（button_configにあればそれを使用）
+        init_fmt = self.button_config.get('output_format', 'text')
+        if init_fmt not in ["text", "json"]:
+            init_fmt = "text"
+        self.output_format_combo.setCurrentText(init_fmt)
+        fmt_layout.addWidget(fmt_label)
+        fmt_layout.addWidget(self.output_format_combo)
+        layout.addWidget(fmt_group)
 
         # ヘルプ情報
         help_group = QGroupBox("ヘルプ")
@@ -134,12 +154,23 @@ class AIExtensionPromptEditDialog(QDialog):
 • <code>{material_index_data}</code> - マテリアルインデックスデータ<br>
 • <code>{equipment_data}</code> - 装置情報データ<br><br>
 <b>ARIM利用報告書データ:</b><br>
-• <code>{arim_report_title}</code> - 利用課題名 など
+• <code>{arim_report_title}</code> - 利用課題名 など<br><br>
+<b>データポータルマスタデータ:</b><br>
+• <code>{dataportal_material_index}</code> - マテリアルインデックスマスタ<br>
+• <code>{dataportal_tag}</code> - タグマスタ<br>
+• <code>{dataportal_equipment}</code> - 装置分類マスタ<br><br>
+<b>静的データ:</b><br>
+• <code>{static_material_index}</code> - MI.json（input/ai/MI.json）
             """
         )
         help_text.setWordWrap(True)
         help_layout.addWidget(help_text)
-        layout.addWidget(help_group)
+        # ヘルプセクションはスクロール可能にして、ダイアログの最小サイズを抑制
+        help_scroll = QScrollArea()
+        help_scroll.setWidget(help_group)
+        help_scroll.setWidgetResizable(True)
+        help_scroll.setMaximumHeight(240)
+        layout.addWidget(help_scroll)
 
         # 変数リスト（挿入支援）は変数タブで構築
         
@@ -154,7 +185,9 @@ class AIExtensionPromptEditDialog(QDialog):
         
         self.preview_display = QTextEdit()
         self.preview_display.setReadOnly(True)
-        self.preview_display.setMinimumHeight(400)
+        # 最小高さを抑える
+        self.preview_display.setMinimumHeight(240)
+        self.preview_display.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.preview_display)
         
         # サンプルデータ情報
@@ -182,6 +215,10 @@ class AIExtensionPromptEditDialog(QDialog):
             ("arim_report_title", "ARIM 利用課題名", "..."),
             ("arim_extension_data", "ARIM 拡張データ", "..."),
             ("file_tree", "ファイル構成", "..."),
+            ("dataportal_material_index", "データポータル マテリアルインデックスマスタ", "{...JSON...}"),
+            ("dataportal_tag", "データポータル タグマスタ", "{...JSON...}"),
+            ("dataportal_equipment", "データポータル 装置分類マスタ", "{...JSON...}"),
+            ("static_material_index", "静的マテリアルインデックス (MI.json)", "{...JSON...}"),
         ]
         for var_name, var_desc, var_example in variables:
             item_text = f"{{{var_name}}} - {var_desc}\n    {var_example}"
@@ -281,7 +318,11 @@ class AIExtensionPromptEditDialog(QDialog):
                 'equipment_data': '{"装置名": "分析装置A", "精度": "±0.1%"}',
                 'dataset_existing_info': 'RDEから取得した既存情報（サンプル）',
                 'arim_extension_data': 'ARIM課題関連情報（サンプル）',
-                'file_tree': 'ファイル構成情報（サンプル）'
+                'file_tree': 'ファイル構成情報（サンプル）',
+                'dataportal_material_index': '{"environment": "sample", "data": {"1": "デバイス・センサー関連材料"}}',
+                'dataportal_tag': '{"environment": "sample", "data": {"tag1": "タグ例"}}',
+                'dataportal_equipment': '{"environment": "sample", "data": {"eq1": "装置例"}}',
+                'static_material_index': '{"categories": ["金属", "セラミックス"]}'
             }
             
             # テンプレート変数を置換
@@ -297,6 +338,32 @@ class AIExtensionPromptEditDialog(QDialog):
         """プロンプトを保存"""
         try:
             current_content = self.prompt_edit.toPlainText()
+            # 出力フォーマットの取得
+            selected_fmt = self.output_format_combo.currentText()
+            # 設定ファイルの更新（ai_ext_conf.json の対象ボタンの output_format）
+            try:
+                from classes.dataset.util.ai_extension_helper import load_ai_extension_config
+                config = load_ai_extension_config()
+                # 該当ボタンIDで更新
+                btn_id = self.button_config.get('id')
+                if btn_id and 'buttons' in config:
+                    for btn in config['buttons']:
+                        if btn.get('id') == btn_id:
+                            btn['output_format'] = selected_fmt
+                            break
+                    # 保存
+                    from config.common import get_base_dir
+                    import os, json
+                    conf_path = os.path.join(get_base_dir(), 'input', 'ai', 'ai_ext_conf.json')
+                    os.makedirs(os.path.dirname(conf_path), exist_ok=True)
+                    with open(conf_path, 'w', encoding='utf-8') as f:
+                        json.dump(config, f, ensure_ascii=False, indent=2)
+                else:
+                    # 該当が無ければ無視（情報ログ）
+                    pass
+            except Exception as e:
+                # フォーマット保存失敗は致命的ではないため警告のみ
+                QMessageBox.warning(self, "警告", f"出力フォーマットの保存に失敗しました: {e}")
             
             if self.prompt_file_path:
                 # ファイルに保存

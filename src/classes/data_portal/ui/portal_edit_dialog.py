@@ -336,6 +336,26 @@ class PortalEditDialog(QDialog):
             self.field_widgets['sub_mita_code_array[]'] = combo
             layout.addRow("重要技術領域（副）:", combo)
         
+        # 重要技術領域（主・副）自動設定ボタン
+        if 'main_mita_code_array[]' in self.metadata or 'sub_mita_code_array[]' in self.metadata:
+            auto_tech_btn = QPushButton("🤖 重要技術領域 自動設定")
+            auto_tech_btn.clicked.connect(self._on_auto_set_important_tech_areas)
+            auto_tech_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                    padding: 6px 12px;
+                    border: none;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+                }}
+            """)
+            auto_tech_btn.setToolTip("報告書またはAIから重要技術領域を自動設定します")
+            layout.addRow("", auto_tech_btn)
+        
         # 横断技術領域 (mcta_code_array[]) - チェックボックスグループ（複数選択可）
         if 'mcta_code_array[]' in self.metadata:
             container = QWidget()
@@ -372,6 +392,26 @@ class PortalEditDialog(QDialog):
             self.field_widgets['mcta_code_array[]'] = checkboxes
             layout.addRow("横断技術領域:", container)
         
+        # 横断技術領域 自動設定ボタン
+        if 'mcta_code_array[]' in self.metadata:
+            auto_cross_tech_btn = QPushButton("🤖 横断技術領域 自動設定")
+            auto_cross_tech_btn.clicked.connect(self._on_auto_set_cross_tech_areas)
+            auto_cross_tech_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                    padding: 6px 12px;
+                    border: none;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+                }}
+            """)
+            auto_cross_tech_btn.setToolTip("報告書から横断技術領域を自動設定します")
+            layout.addRow("", auto_cross_tech_btn)
+        
         # 設備分類 (mec_code_array[]) - フィルタ可能チェックボックステーブル
         if 'mec_code_array[]' in self.metadata:
             options = self.metadata['mec_code_array[]']['options']
@@ -389,6 +429,25 @@ class PortalEditDialog(QDialog):
             )
             self.field_widgets['mec_code_array[]'] = table_widget
             layout.addRow("設備分類:", table_widget)
+
+            # 自動設定（設備分類）
+            auto_btn = QPushButton("🤖 設備分類 自動設定")
+            auto_btn.setToolTip("専用ダイアログでAI提案を確認・適用します")
+            auto_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                    padding: 6px 12px;
+                    border: none;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+                }}
+            """)
+            auto_btn.clicked.connect(lambda: self._open_checkbox_autoset_dialog('設備分類 自動設定', 'mec_code_array[]', 'equipment'))
+            layout.addRow("", auto_btn)
         
         # マテリアルインデックス (mmi_code_array[]) - フィルタ可能チェックボックステーブル
         if 'mmi_code_array[]' in self.metadata:
@@ -407,6 +466,24 @@ class PortalEditDialog(QDialog):
             )
             self.field_widgets['mmi_code_array[]'] = table_widget
             layout.addRow("マテリアルインデックス:", table_widget)
+
+            auto_btn = QPushButton("🤖 マテリアルインデックス 自動設定")
+            auto_btn.setToolTip("専用ダイアログでAI提案を確認・適用します")
+            auto_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                    padding: 6px 12px;
+                    border: none;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+                }}
+            """)
+            auto_btn.clicked.connect(lambda: self._open_checkbox_autoset_dialog('マテリアルインデックス 自動設定', 'mmi_code_array[]', 'material_index'))
+            layout.addRow("", auto_btn)
         
         # タグ (mt_code_array[]) - フィルタ可能チェックボックステーブル
         if 'mt_code_array[]' in self.metadata:
@@ -425,16 +502,72 @@ class PortalEditDialog(QDialog):
             )
             self.field_widgets['mt_code_array[]'] = table_widget
             layout.addRow("タグ:", table_widget)
+
+            auto_btn = QPushButton("🤖 タグ 自動設定")
+            auto_btn.setToolTip("専用ダイアログでAI提案を確認・適用します")
+            auto_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                    padding: 6px 12px;
+                    border: none;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+                }}
+            """)
+            auto_btn.clicked.connect(lambda: self._open_checkbox_autoset_dialog('タグ 自動設定', 'mt_code_array[]', 'tag'))
+            layout.addRow("", auto_btn)
         
         # 装置・プロセス - テーブル表示（5行表示、最大5行）
         equip_process_table = self._create_editable_list_table('t_equip_process', '装置・プロセス', max_rows=5, visible_rows=5)
         self.field_widgets['t_equip_process'] = equip_process_table
         layout.addRow("装置・プロセス:", equip_process_table)
         
+        # 装置・プロセス 自動設定ボタン
+        auto_equipment_btn = QPushButton("🤖 装置・プロセス 自動設定")
+        auto_equipment_btn.clicked.connect(self._on_auto_set_equipment)
+        auto_equipment_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                padding: 6px 12px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+            }}
+        """)
+        auto_equipment_btn.setToolTip("報告書から利用した主な設備を自動設定します")
+        layout.addRow("", auto_equipment_btn)
+        
         # 論文・プロシーディング - テーブル表示（5行表示、最大20行）
         paper_proceed_table = self._create_editable_list_table('t_paper_proceed', '論文・プロシーディング', max_rows=20, visible_rows=5)
         self.field_widgets['t_paper_proceed'] = paper_proceed_table
         layout.addRow("論文・プロシーディング:", paper_proceed_table)
+        
+        # 論文・プロシーディング 自動設定ボタン
+        auto_publications_btn = QPushButton("🤖 論文・プロシーディング 自動設定")
+        auto_publications_btn.clicked.connect(self._on_auto_set_publications)
+        auto_publications_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                padding: 6px 12px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+            }}
+        """)
+        auto_publications_btn.setToolTip("報告書から論文・プロシーディング（DOI）を自動設定します")
+        layout.addRow("", auto_publications_btn)
         
         # その他のフィールド
         for key, field_data in self.form_data.items():
@@ -703,3 +836,462 @@ class PortalEditDialog(QDialog):
             logger.info(f"[DEBUG] 保存: {filepath}")
         except Exception as e:
             logger.warning(f"デバッグ保存失敗: {e}")
+    
+    def _on_auto_set_important_tech_areas(self):
+        """重要技術領域（主・副）を自動設定"""
+        try:
+            from ..core.auto_setting_helper import (
+                extract_important_tech_areas_from_report,
+                suggest_important_tech_areas_with_ai,
+                get_grant_number_from_dataset_json
+            )
+            from .auto_setting_dialog import AutoSettingDialog
+            
+            # 助成番号を取得
+            grant_number = get_grant_number_from_dataset_json(self.dataset_id)
+            
+            if not grant_number:
+                QMessageBox.warning(
+                    self,
+                    "警告",
+                    "助成番号が取得できませんでした。\nデータセットのJSONファイルを確認してください。"
+                )
+                return
+            
+            # 報告書ベースの候補取得関数
+            def fetch_from_report(dataset_id: str) -> dict:
+                return extract_important_tech_areas_from_report(dataset_id, grant_number)
+            
+            # AIベースの候補取得関数
+            def fetch_from_ai(dataset_id: str) -> dict:
+                return suggest_important_tech_areas_with_ai(dataset_id)
+            
+            # 自動設定ダイアログを表示
+            dialog = AutoSettingDialog(
+                title="重要技術領域 自動設定",
+                field_name="重要技術領域（主・副）",
+                dataset_id=self.dataset_id,
+                report_fetcher=fetch_from_report,
+                ai_fetcher=fetch_from_ai,
+                metadata=self.metadata,
+                parent=self
+            )
+            
+            if dialog.exec_() == QDialog.Accepted:
+                result = dialog.get_result()
+                
+                if result:
+                    # 主を設定
+                    if "main" in result and result["main"]:
+                        main_combo = self.field_widgets.get('main_mita_code_array[]')
+                        if main_combo and isinstance(main_combo, QComboBox):
+                            # メタデータから対応するvalueを検索
+                            main_value = self._find_metadata_value('main_mita_code_array[]', result["main"])
+                            if main_value:
+                                index = main_combo.findData(main_value)
+                                if index >= 0:
+                                    main_combo.setCurrentIndex(index)
+                                    logger.info(f"重要技術領域（主）設定: {result['main']}")
+                                else:
+                                    # valueで見つからない場合、テキストで検索
+                                    index = main_combo.findText(result["main"])
+                                    if index >= 0:
+                                        main_combo.setCurrentIndex(index)
+                                        logger.info(f"重要技術領域（主）設定（テキスト一致）: {result['main']}")
+                    
+                    # 副を設定
+                    if "sub" in result and result["sub"]:
+                        sub_combo = self.field_widgets.get('sub_mita_code_array[]')
+                        if sub_combo and isinstance(sub_combo, QComboBox):
+                            # メタデータから対応するvalueを検索
+                            sub_value = self._find_metadata_value('sub_mita_code_array[]', result["sub"])
+                            if sub_value:
+                                index = sub_combo.findData(sub_value)
+                                if index >= 0:
+                                    sub_combo.setCurrentIndex(index)
+                                    logger.info(f"重要技術領域（副）設定: {result['sub']}")
+                                else:
+                                    # valueで見つからない場合、テキストで検索
+                                    index = sub_combo.findText(result["sub"])
+                                    if index >= 0:
+                                        sub_combo.setCurrentIndex(index)
+                                        logger.info(f"重要技術領域（副）設定（テキスト一致）: {result['sub']}")
+                    
+                    QMessageBox.information(
+                        self,
+                        "完了",
+                        f"重要技術領域を設定しました。\n\n主: {result.get('main', '(なし)')}\n副: {result.get('sub', '(なし)')}"
+                    )
+        
+        except Exception as e:
+            logger.error(f"重要技術領域自動設定エラー: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "エラー",
+                f"自動設定中にエラーが発生しました:\n{e}"
+            )
+    
+    def _find_metadata_value(self, field_name: str, label_or_value: str) -> Optional[str]:
+        """
+        メタデータからラベルまたは値に対応するvalueを検索
+        
+        Args:
+            field_name: フィールド名（例: 'main_mita_code_array[]'）
+            label_or_value: 検索するラベルまたは値
+        
+        Returns:
+            Optional[str]: 対応するvalue（見つからない場合はNone）
+        """
+        if field_name not in self.metadata:
+            return None
+        
+        for opt in self.metadata[field_name].get("options", []):
+            if opt.get("value") == label_or_value or opt.get("label") == label_or_value:
+                return opt.get("value")
+        
+        return None
+
+    def _on_auto_set_cross_tech_areas(self):
+        """横断技術領域を自動設定"""
+        try:
+            from ..core.auto_setting_helper import (
+                extract_cross_tech_areas_from_report,
+                get_grant_number_from_dataset_json
+            )
+            from .auto_setting_dialog import AutoSettingDialog
+            
+            # 助成番号を取得
+            grant_number = get_grant_number_from_dataset_json(self.dataset_id)
+            
+            if not grant_number:
+                QMessageBox.warning(
+                    self,
+                    "警告",
+                    "助成番号が取得できませんでした。\nデータセットのJSONファイルを確認してください。"
+                )
+                return
+            
+            # 報告書ベースの候補取得関数
+            def fetch_from_report(dataset_id: str) -> dict:
+                return extract_cross_tech_areas_from_report(dataset_id, grant_number)
+            
+            # 自動設定ダイアログを表示
+            dialog = AutoSettingDialog(
+                title="横断技術領域 自動設定",
+                field_name="横断技術領域（主・副）",
+                dataset_id=self.dataset_id,
+                report_fetcher=fetch_from_report,
+                ai_fetcher=None,  # AI推定は未対応
+                metadata=self.metadata,
+                parent=self
+            )
+            
+            if dialog.exec_() == QDialog.Accepted:
+                result = dialog.get_result()
+                
+                if result:
+                    # 横断技術領域はチェックボックスリスト
+                    checkboxes = self.field_widgets.get('mcta_code_array[]', [])
+                    
+                    if checkboxes:
+                        # まず全てのチェックを外す
+                        for cb in checkboxes:
+                            cb.setChecked(False)
+                        
+                        # 主を設定
+                        if "main" in result and result["main"]:
+                            for cb in checkboxes:
+                                if result["main"] in cb.text():
+                                    cb.setChecked(True)
+                                    logger.info(f"横断技術領域（主）設定: {result['main']}")
+                                    break
+                        
+                        # 副を設定
+                        if "sub" in result and result["sub"]:
+                            for cb in checkboxes:
+                                if result["sub"] in cb.text():
+                                    cb.setChecked(True)
+                                    logger.info(f"横断技術領域（副）設定: {result['sub']}")
+                                    break
+                        
+                        QMessageBox.information(
+                            self,
+                            "完了",
+                            f"横断技術領域を設定しました。\n\n主: {result.get('main', '(なし)')}\n副: {result.get('sub', '(なし)')}"
+                        )
+        
+        except Exception as e:
+            logger.error(f"横断技術領域自動設定エラー: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "エラー",
+                f"自動設定中にエラーが発生しました:\n{e}"
+            )
+    
+    def _on_auto_set_equipment(self):
+        """装置・プロセスを自動設定"""
+        try:
+            from ..core.auto_setting_helper import (
+                extract_equipment_from_report,
+                get_grant_number_from_dataset_json
+            )
+            
+            # 助成番号を取得
+            grant_number = get_grant_number_from_dataset_json(self.dataset_id)
+            
+            if not grant_number:
+                QMessageBox.warning(
+                    self,
+                    "警告",
+                    "助成番号が取得できませんでした。\nデータセットのJSONファイルを確認してください。"
+                )
+                return
+            
+            # プログレスダイアログ
+            progress = QProgressDialog("報告書から設備情報を取得中...", "中止", 0, 0, self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.setValue(0)
+            progress.show()
+            
+            try:
+                # 報告書から設備情報を取得
+                result = extract_equipment_from_report(self.dataset_id, grant_number)
+                
+                progress.close()
+                
+                if result and result.get("equipment"):
+                    equipment_list = result["equipment"]
+                    # リンクタグ化準備
+                    from classes.utils.facility_link_helper import (
+                        find_latest_facilities_json,
+                        lookup_facility_code_by_equipment_id,
+                        extract_equipment_id,
+                        build_equipment_anchor,
+                    )
+                    latest_path = find_latest_facilities_json()
+                    
+                    # 装置・プロセステーブルに設定
+                    table = self.field_widgets.get('t_equip_process')
+                    if table and isinstance(table, QTableWidget):
+                        # 既存の内容をクリア
+                        for i in range(table.rowCount()):
+                            table.setItem(i, 0, QTableWidgetItem(""))
+                        
+                        # 新しいデータを設定（最大5行）
+                        for i, equipment in enumerate(equipment_list[:5]):
+                            text = str(equipment) if equipment is not None else ""
+                            anchor_text = None
+                            if latest_path is not None:
+                                equip_id = extract_equipment_id(text)
+                                if equip_id:
+                                    code = lookup_facility_code_by_equipment_id(latest_path, equip_id)
+                                    if code:
+                                        anchor_text = build_equipment_anchor(code, equip_id)
+                            table.setItem(i, 0, QTableWidgetItem(anchor_text or text))
+                        
+                        logger.info(f"装置・プロセス設定(リンク化): {len(equipment_list)}件（最大5件表示） 最新JSON: {latest_path if latest_path else 'なし'}")
+                        
+                        QMessageBox.information(
+                            self,
+                            "完了",
+                            f"装置・プロセスを設定しました。\n\n{len(equipment_list)}件の設備情報を取得しました。"
+                        )
+                    else:
+                        QMessageBox.warning(
+                            self,
+                            "エラー",
+                            "装置・プロセステーブルが見つかりませんでした。"
+                        )
+                else:
+                    QMessageBox.warning(
+                        self,
+                        "情報なし",
+                        "報告書に設備情報が登録されていません。"
+                    )
+            
+            finally:
+                progress.close()
+        
+        except Exception as e:
+            logger.error(f"装置・プロセス自動設定エラー: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "エラー",
+                f"自動設定中にエラーが発生しました:\n{e}"
+            )
+    
+    def _on_auto_set_publications(self):
+        """論文・プロシーディングを自動設定"""
+        try:
+            from ..core.auto_setting_helper import (
+                extract_publications_from_report,
+                get_grant_number_from_dataset_json
+            )
+            
+            # 助成番号を取得
+            grant_number = get_grant_number_from_dataset_json(self.dataset_id)
+            
+            if not grant_number:
+                QMessageBox.warning(
+                    self,
+                    "警告",
+                    "助成番号が取得できませんでした。\nデータセットのJSONファイルを確認してください。"
+                )
+                return
+            
+            # プログレスダイアログ
+            progress = QProgressDialog("報告書から論文情報を取得中...", "中止", 0, 0, self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.setValue(0)
+            progress.show()
+            
+            try:
+                # 報告書から論文情報を取得
+                result = extract_publications_from_report(self.dataset_id, grant_number)
+                
+                progress.close()
+                
+                if result and result.get("publications"):
+                    publications_list = result["publications"]
+                    
+                    # 論文・プロシーディングテーブルに設定
+                    table = self.field_widgets.get('t_paper_proceed')
+                    if table and isinstance(table, QTableWidget):
+                        # 既存の内容をクリア
+                        for i in range(table.rowCount()):
+                            table.setItem(i, 0, QTableWidgetItem(""))
+                        
+                        # 新しいデータを設定（最大20行）
+                        for i, publication in enumerate(publications_list[:20]):
+                            table.setItem(i, 0, QTableWidgetItem(publication))
+                        
+                        logger.info(f"論文・プロシーディング設定: {len(publications_list)}件（最大20件表示）")
+                        
+                        QMessageBox.information(
+                            self,
+                            "完了",
+                            f"論文・プロシーディングを設定しました。\n\n{len(publications_list)}件の論文情報を取得しました。"
+                        )
+                    else:
+                        QMessageBox.warning(
+                            self,
+                            "エラー",
+                            "論文・プロシーディングテーブルが見つかりませんでした。"
+                        )
+                else:
+                    QMessageBox.warning(
+                        self,
+                        "情報なし",
+                        "報告書に論文情報が登録されていません。"
+                    )
+            
+            finally:
+                progress.close()
+        
+        except Exception as e:
+            logger.error(f"論文・プロシーディング自動設定エラー: {e}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "エラー",
+                f"自動設定中にエラーが発生しました:\n{e}"
+            )
+
+    def _on_ai_suggest_checkbox_array(self, field_key: str, category: str):
+        """AIで提案を取得し、チェックボックス配列に適用（設備/MI/タグ）"""
+        try:
+            from ..core.auto_setting_helper import fetch_ai_proposals_for_category
+
+            widget = self.field_widgets.get(field_key)
+            if not isinstance(widget, FilterableCheckboxTable):
+                QMessageBox.warning(self, "エラー", "対象フィールドが見つかりませんでした")
+                return
+
+            # 適用モード
+            mode = "append"
+            if category == 'equipment' and hasattr(self, 'apply_mode_mec'):
+                mode = 'replace' if self.apply_mode_mec.currentText() == '置換' else 'append'
+            elif category == 'material_index' and hasattr(self, 'apply_mode_mmi'):
+                mode = 'replace' if self.apply_mode_mmi.currentText() == '置換' else 'append'
+            elif category == 'tag' and hasattr(self, 'apply_mode_mt'):
+                mode = 'replace' if self.apply_mode_mt.currentText() == '置換' else 'append'
+
+            # 取得中インジケータ
+            progress = QProgressDialog("AIから候補を取得中...", None, 0, 0, self)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.show()
+
+            try:
+                proposals = fetch_ai_proposals_for_category(self.dataset_id, category)
+            finally:
+                progress.close()
+
+            if not proposals:
+                QMessageBox.warning(self, "候補なし", "AIから候補を取得できませんでした")
+                return
+
+            # メタデータ上の有効なIDにフィルタ
+            meta = self.metadata.get(field_key, {}).get('options', [])
+            valid_ids = {str(opt.get('value')) for opt in meta}
+            proposed_ids = [p.get('id') for p in proposals if p.get('id') in valid_ids]
+
+            if not proposed_ids:
+                QMessageBox.warning(self, "候補不一致", "AI候補はメタデータに一致しませんでした")
+                return
+
+            current = set(widget.get_selected_values())
+            new_set = set(proposed_ids) if mode == 'replace' else (current.union(proposed_ids))
+
+            widget.set_selected_values(sorted(new_set))
+
+            QMessageBox.information(
+                self,
+                "AI適用完了",
+                f"{len(proposed_ids)}件の候補を{ '置換' if mode=='replace' else '追記' }で適用しました。\n現在の選択数: {len(new_set)}"
+            )
+        except Exception as e:
+            logger.error(f"AI提案適用エラー: {e}", exc_info=True)
+            QMessageBox.critical(self, "エラー", f"AI提案の適用中にエラーが発生しました:\n{e}")
+
+    def _open_checkbox_autoset_dialog(self, title: str, field_key: str, category: str):
+        """チェックボックス配列用 自動設定ダイアログを開き、適用する"""
+        try:
+            from .auto_setting_checkbox_dialog import AutoSettingCheckboxDialog
+            from ..core.auto_setting_helper import fetch_ai_proposals_for_category_with_debug
+
+            dialog = AutoSettingCheckboxDialog(
+                title=title,
+                field_key=field_key,
+                dataset_id=self.dataset_id,
+                category=category,
+                metadata=self.metadata,
+                report_fetcher=None,
+                ai_fetcher_debug=lambda dataset_id, cat: fetch_ai_proposals_for_category_with_debug(dataset_id, cat),
+                parent=self,
+            )
+
+            if dialog.exec_() == QDialog.Accepted:
+                result = dialog.get_result()
+                if not result:
+                    return
+                mode = result.get('mode', 'append')
+                ids = result.get('ids', [])
+
+                widget = self.field_widgets.get(field_key)
+                if not isinstance(widget, FilterableCheckboxTable):
+                    QMessageBox.warning(self, "エラー", "対象フィールドが見つかりませんでした")
+                    return
+
+                current = set(widget.get_selected_values())
+                new_set = set(ids) if mode == 'replace' else (current.union(ids))
+                widget.set_selected_values(sorted(new_set))
+
+                QMessageBox.information(
+                    self,
+                    "完了",
+                    f"{len(ids)}件の候補を{ '置換' if mode=='replace' else '追記' }で適用しました。\n現在の選択数: {len(new_set)}"
+                )
+        except Exception as e:
+            logger.error(f"自動設定ダイアログエラー: {e}", exc_info=True)
+            QMessageBox.critical(self, "エラー", f"自動設定ダイアログ処理中にエラーが発生しました:\n{e}")

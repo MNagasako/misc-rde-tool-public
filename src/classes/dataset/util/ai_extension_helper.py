@@ -99,7 +99,7 @@ def save_prompt_file(prompt_file_path, content):
         return False
 
 def format_prompt_with_context(prompt_template, context_data):
-    """プロンプトテンプレートをコンテキストデータで置換する（ARIM報告書対応）"""
+    """プロンプトテンプレートをコンテキストデータで置換する（ARIM報告書対応・データポータルマスタ対応）"""
     try:
         # 基本的な置換処理
         formatted_prompt = prompt_template
@@ -127,6 +127,24 @@ def format_prompt_with_context(prompt_template, context_data):
                 logger.warning("ARIM報告書取得でエラー: %s", e)
                 # エラーがあってもベースのコンテキストで続行
         
+        # データポータルマスタデータを取得・統合
+        try:
+            master_data = load_dataportal_master_data()
+            if master_data:
+                enhanced_context.update(master_data)
+                logger.debug("データポータルマスタデータを統合: %s項目", len(master_data))
+        except Exception as e:
+            logger.warning("データポータルマスタデータ取得でエラー: %s", e)
+
+        # 静的マテリアルインデックス（MI.json）を取得・統合
+        try:
+            static_mi = load_static_material_index()
+            if static_mi:
+                enhanced_context.update(static_mi)
+                logger.debug("静的マテリアルインデックスを統合")
+        except Exception as e:
+            logger.warning("静的マテリアルインデックス取得でエラー: %s", e)
+        
         # コンテキストデータのキーと値で置換
         for key, value in enhanced_context.items():
             placeholder = f"{{{key}}}"
@@ -140,3 +158,80 @@ def format_prompt_with_context(prompt_template, context_data):
     except Exception as e:
         logger.error("プロンプト置換エラー: %s", e)
         return prompt_template
+
+
+def load_dataportal_master_data():
+    """データポータルマスタデータを読み込む
+    
+    Returns:
+        dict: プレースホルダ用のマスタデータ辞書
+            - dataportal_material_index: マテリアルインデックスマスタ（JSON文字列）
+            - dataportal_tag: タグマスタ（JSON文字列）
+            - dataportal_equipment: 装置分類マスタ（JSON文字列）
+    """
+    result = {}
+    
+    # マスタデータの定義（ファイル名パターン）
+    master_types = [
+        ('dataportal_material_index', 'material_index'),
+        ('dataportal_tag', 'tag'),
+        ('dataportal_equipment', 'equipment')
+    ]
+    
+    for placeholder_key, file_prefix in master_types:
+        try:
+            # production優先、なければtestを使用
+            production_path = os.path.join(get_base_dir(), 'input', 'master_data', f'{file_prefix}_production.json')
+            test_path = os.path.join(get_base_dir(), 'input', 'master_data', f'{file_prefix}_test.json')
+            
+            target_path = None
+            if os.path.exists(production_path):
+                target_path = production_path
+                logger.debug("マスタデータ読み込み（production）: %s", file_prefix)
+            elif os.path.exists(test_path):
+                target_path = test_path
+                logger.debug("マスタデータ読み込み（test）: %s", file_prefix)
+            else:
+                logger.warning("マスタデータファイルが見つかりません: %s", file_prefix)
+                result[placeholder_key] = "マスタデータなし"
+                continue
+            
+            # JSONファイル読み込み
+            with open(target_path, 'r', encoding='utf-8') as f:
+                master_json = json.load(f)
+            
+            # JSON文字列として格納（整形して見やすく）
+            result[placeholder_key] = json.dumps(master_json, ensure_ascii=False, indent=2)
+            logger.info("マスタデータ読み込み成功: %s (件数: %s)", file_prefix, master_json.get('count', 'N/A'))
+            
+        except Exception as e:
+            logger.error("マスタデータ読み込みエラー (%s): %s", file_prefix, e)
+            result[placeholder_key] = f"マスタデータ読み込みエラー: {str(e)}"
+    
+    return result
+
+
+def load_static_material_index():
+    """静的マテリアルインデックス(MI.json)を読み込み、プレースホルダ提供
+
+    Returns:
+        dict: { 'static_material_index': '<JSON文字列>' }
+    """
+    try:
+        mi_path = os.path.join(get_base_dir(), 'input', 'ai', 'MI.json')
+        if not os.path.exists(mi_path):
+            logger.info("MI.jsonが見つかりません: %s", mi_path)
+            # テストの安定性のため、空配列のJSONを返す
+            return {'static_material_index': '[]'}
+
+        with open(mi_path, 'r', encoding='utf-8') as f:
+            mi_json = json.load(f)
+
+        mi_str = json.dumps(mi_json, ensure_ascii=False, indent=2)
+        logger.info("MI.json読み込み成功（カテゴリ数推定）")
+        return {'static_material_index': mi_str}
+
+    except Exception as e:
+        logger.error("MI.json読み込みエラー: %s", e)
+        # エラー時も空配列のJSONを返す
+        return {'static_material_index': '[]'}

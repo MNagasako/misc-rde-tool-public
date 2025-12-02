@@ -73,6 +73,9 @@ class DatasetUploadTab(QWidget):
         self.json_uploaded = False  # JSONアップロード完了フラグ
         self.current_t_code = None  # 現在のt_code（画像アップロード用）
         self.current_status = None  # 現在のステータス（'公開済' or '非公開'）
+        self.current_environment = None  # 現在の環境（production/test）
+        self.current_public_code = None  # 公開ページURL用 code
+        self.current_public_key = None   # 公開ページURL用 key
         
         self._init_ui()
         logger.info("データセットアップロードタブ初期化完了")
@@ -538,6 +541,30 @@ class DatasetUploadTab(QWidget):
         """)
         layout.addWidget(self.edit_portal_btn)
         
+        # ブラウザ表示ボタン（公開ページ）
+        self.public_view_btn = QPushButton("🌐 ブラウザで表示")
+        self.public_view_btn.setEnabled(False)
+        self.public_view_btn.clicked.connect(self._on_open_public_view)
+        self.public_view_btn.setToolTip("データポータル公開ページを既定ブラウザで開きます")
+        self.public_view_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                padding: 10px 20px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            }}
+        """)
+        layout.addWidget(self.public_view_btn)
+        
         # ステータス変更ボタン
         self.toggle_status_btn = QPushButton("🔄 ステータス変更")
         self.toggle_status_btn.setEnabled(False)
@@ -590,6 +617,9 @@ class DatasetUploadTab(QWidget):
             return
         
         self._log_status(f"環境選択: {display_name}")
+        
+        # 現在の環境を保持
+        self.current_environment = environment
         
         # PortalClientを作成（環境が変わったら再作成）
         self.portal_client = PortalClient(environment=environment)
@@ -816,6 +846,8 @@ class DatasetUploadTab(QWidget):
                     return
                 
                 # データポータルにエントリが存在するか確認
+                # 公開ページボタンはチェック結果で決定するため一旦無効化
+                self.public_view_btn.setEnabled(False)
                 self._check_portal_entry_exists(dataset_id)
                 
                 # ファイルリスト表示を常に更新（既存ファイルがある場合のみ表示）
@@ -876,6 +908,8 @@ class DatasetUploadTab(QWidget):
             self.upload_btn.setEnabled(True)
             
             # データポータルにエントリが存在するか確認
+            # 公開ページボタンはチェック結果で決定するため一旦無効化
+            self.public_view_btn.setEnabled(False)
             self._check_portal_entry_exists(dataset_id)
             
             # 画像ファイルの取得状況を確認
@@ -1535,6 +1569,11 @@ class DatasetUploadTab(QWidget):
             
             # 画像アップロードボタンの有効化判定を更新
             self._update_image_upload_button_state()
+            
+            # データポータル修正ボタンを有効化（データセットが選択されている場合）
+            if self.current_dataset_id:
+                self.edit_portal_btn.setEnabled(True)
+                logger.info(f"データポータル修正ボタン有効化: dataset_id={self.current_dataset_id}")
             
         else:
             self._log_status("=" * 50)
@@ -2898,6 +2937,23 @@ class DatasetUploadTab(QWidget):
                 else:
                     self.current_status = None
                     logger.warning(f"[CHECK_ENTRY] ステータス情報が見つかりません")
+
+                # 公開ページURLの code/key を抽出（存在すれば公開ページボタンを有効化）
+                self.current_public_code = None
+                self.current_public_key = None
+                try:
+                    for a in soup.find_all('a', href=True):
+                        href = a.get('href') or ''
+                        if 'arim_data.php' in href and 'mode=detail' in href and 'code=' in href and 'key=' in href:
+                            m_code = re.search(r'[?&]code=(\d+)', href)
+                            m_key = re.search(r'[?&]key=([A-Za-z0-9]+)', href)
+                            if m_code and m_key:
+                                self.current_public_code = m_code.group(1)
+                                self.current_public_key = m_key.group(1)
+                                logger.info(f"[CHECK_ENTRY] 公開URLパラメータ抽出: code={self.current_public_code}, key={self.current_public_key}")
+                                break
+                except Exception as ex:
+                    logger.debug(f"[CHECK_ENTRY] 公開URL抽出スキップ: {ex}")
                 
                 if match:
                     logger.info(f"[CHECK_ENTRY] ✅ エントリ存在 - 修正可能 (form: {match.group()})")
@@ -2916,17 +2972,22 @@ class DatasetUploadTab(QWidget):
                     else:
                         self.toggle_status_btn.setEnabled(False)
                         self.toggle_status_btn.setToolTip("ステータス情報が取得できません")
+
+                    # 公開ページボタン（code/keyが取れている場合のみ有効化）
+                    self.public_view_btn.setEnabled(bool(self.current_public_code and self.current_public_key))
                 else:
                     logger.warning(f"[CHECK_ENTRY] ⚠️ エントリ存在 - 修正リンクが見つかりません")
                     self.edit_portal_btn.setEnabled(False)
                     self.edit_portal_btn.setToolTip("修正リンクが無効です")
                     self.toggle_status_btn.setEnabled(False)
+                    self.public_view_btn.setEnabled(False)
             else:
                 logger.info(f"[CHECK_ENTRY] ⚠️ エントリ未登録")
                 self.edit_portal_btn.setEnabled(False)
                 self.edit_portal_btn.setToolTip("エントリが登録されていません")
                 self.toggle_status_btn.setEnabled(False)
                 self.current_status = None
+                self.public_view_btn.setEnabled(False)
             
             logger.info(f"[CHECK_ENTRY] ===== エントリ確認完了 (ボタン有効: {self.edit_portal_btn.isEnabled()}, ステータス: {self.current_status}) =====")
             
@@ -2938,6 +2999,22 @@ class DatasetUploadTab(QWidget):
             self.edit_portal_btn.setEnabled(False)
             self.toggle_status_btn.setEnabled(False)
             self._update_image_upload_button_state()
+
+    def _on_open_public_view(self):
+        """公開ページを既定ブラウザで開く"""
+        if not (self.current_public_code and self.current_public_key):
+            self._show_warning("公開ページのURL情報が取得できていません")
+            return
+        try:
+            env = self.current_environment or self.env_combo.currentData() or "production"
+            from classes.utils.data_portal_public import build_public_detail_url
+            url = build_public_detail_url(env, self.current_public_code, self.current_public_key)
+            import webbrowser
+            webbrowser.open(url)
+            self._log_status(f"🌐 公開ページを開きました: {url}")
+        except Exception as e:
+            logger.error(f"公開ページ起動エラー: {e}")
+            self._show_error(f"公開ページを開く際にエラーが発生しました\n{e}")
     
     def _on_edit_portal(self):
         """データポータル修正処理"""

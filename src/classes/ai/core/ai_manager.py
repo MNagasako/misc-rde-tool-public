@@ -215,10 +215,20 @@ class AIManager:
                 "response_time": response_time
             }
     
-    def _send_gemini_request(self, prompt: str, model: str) -> Dict[str, Any]:
-        """Gemini APIにリクエストを送信"""        
+    def _send_gemini_request(self, prompt: str, model: str, retry_count: int = 0) -> Dict[str, Any]:
+        """Gemini APIにリクエストを送信（リトライ対応）
+        
+        Args:
+            prompt: 送信するプロンプト
+            model: 使用するモデル名
+            retry_count: 現在のリトライ回数（内部使用）
+        
+        Returns:
+            APIレスポンスの辞書
+        """        
         config = self.config["ai_providers"]["gemini"]
         api_key = config.get("api_key", "")
+        max_retries = 2  # 最大リトライ回数
         
         if not api_key:
             return {"success": False, "error": "Gemini APIキーが設定されていません"}
@@ -255,17 +265,29 @@ class AIManager:
                     parts = content_obj.get("parts", [])
                     
                     if not parts:
-                        logger.error(f"Gemini API レスポンスにpartsが存在しません: {result}")
-                        return {
-                            "success": False,
-                            "error": "Geminiからの応答にpartsが存在しません",
-                            "model": model,
-                            "response_time": response_time,
-                            "raw_response": result
-                        }
+                        logger.warning(f"Gemini API レスポンスにpartsが存在しません (試行 {retry_count + 1}/{max_retries + 1}): {result}")
+                        
+                        # リトライ可能な場合はリトライ
+                        if retry_count < max_retries:
+                            logger.info(f"Gemini APIリクエストをリトライします (試行 {retry_count + 2}/{max_retries + 1})")
+                            time.sleep(1)  # 1秒待機してからリトライ
+                            return self._send_gemini_request(prompt, model, retry_count + 1)
+                        else:
+                            logger.error(f"Gemini API リトライ回数上限に達しました。最終レスポンス: {result}")
+                            return {
+                                "success": False,
+                                "error": f"Geminiからの応答にpartsが存在しません（{max_retries + 1}回試行後も失敗）",
+                                "model": model,
+                                "response_time": response_time,
+                                "raw_response": result
+                            }
                     
                     content = parts[0].get("text", "")
                     usage_metadata = result.get("usageMetadata", {})
+                    
+                    # リトライ後の成功をログ出力
+                    if retry_count > 0:
+                        logger.info(f"Gemini APIリクエストが {retry_count + 1}回目の試行で成功しました")
                     
                     return {
                         "success": True, 
@@ -274,7 +296,8 @@ class AIManager:
                         "usage": usage_metadata,
                         "tokens_used": usage_metadata.get("totalTokenCount", 0),  # 互換性のため追加
                         "model": model,
-                        "response_time": response_time
+                        "response_time": response_time,
+                        "retry_count": retry_count  # リトライ回数を記録
                     }
                 except (KeyError, IndexError, TypeError) as e:
                     logger.error(f"Gemini API レスポンスのパースエラー: {e}, レスポンス: {result}")
