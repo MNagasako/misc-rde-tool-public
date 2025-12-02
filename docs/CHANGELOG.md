@@ -4,6 +4,32 @@
 
 ---
 
+## v2.1.13 (2025-12-02) - ブラウザ起動ボタン・設備リンク自動化
+
+### 🔗 データセット/公開ページ連携
+
+- 「🌐 ブラウザで表示」ボタン追加
+  - 検索結果HTMLから `code`/`key` を抽出し、環境別公開ページURLを生成
+  - 既定ブラウザで公開ページを起動
+
+### 🧩 装置・プロセス 自動設定
+
+- 設備ID→code 解決の自動化（最新 `output/arim-site/facilities_*.json` を参照）
+- `<a href="https://nanonet.go.jp/facility.php?mode=detail&code={code}">{ID}</a>` 形式のリンクタグ生成
+
+### 🛠 ユーティリティ追加・安定化
+
+- `classes/utils/data_portal_public.py`: 公開ページURLビルダー
+- `classes/utils/facility_link_helper.py`: 設備リンク生成ヘルパー
+- パス管理の誤インポート修正（`config.common` に統一）
+
+### 🧪 テスト
+
+- ユニットテスト強化（utils ほか）
+- 代表ウィジェットテストは環境差のため `xfail` 指定
+
+---
+
 ## v2.1.12 (2025-12-01) - データセット修正タブUI改善
 
 ### 🎨 データセット修正タブUI改善
