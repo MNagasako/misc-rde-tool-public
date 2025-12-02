@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル移行ツール v2.1.13** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル移行ツール v2.1.14** のバイナリ配布およびドキュメント公開用リポジトリです。
 
 > ⚠ 本ツールは単独の個人開発による非公式ツールです。ARIM事業 / RDE / ARIMデータポータルの公式サポート対象ではありません。開発チーム・ロードマップ・将来計画の事前告知は一切行いません。ここに記載しているのは現行バージョンで提供中の機能のみです。
 > RDEサイトおよびデータポータルの画面・通信挙動を独自解析し再現しているため、サイト側の仕様変更で予告なく動作しなくなる・誤作動する可能性があります。利用は自己責任で行ってください。
@@ -14,15 +14,16 @@
 
 ## 🚀 最新情報
 
-**2025-12-02 最新リリース**: バージョン2.1.13（ブラウザ起動ボタン・設備リンク自動化）
+**2025-12-02 最新リリース**: バージョン2.1.14（自動設定ダイアログ改善・設備リンク名称表示）
 
-### v2.1.13 の主な改善
+### v2.1.14 の主な改善
 
-- データセットタブ: 「🌐 ブラウザで表示」ボタンを追加し、検索結果から抽出した `code`/`key` を用いて環境別公開ページを既定ブラウザで起動
-- 装置・プロセス 自動設定: 最新の `output/arim-site/facilities_*.json` から設備ID→code を解決し、リンクタグを自動生成
-- ユーティリティ追加: `classes/utils/data_portal_public.py`（公開URLビルダー）、`classes/utils/facility_link_helper.py`（設備リンク生成）
-- 安定化: パス管理の誤インポートを修正（`config.common` 参照に統一）
-- テスト: 関連ユニットテスト強化・代表ウィジェットテスト `xfail` 指定
+- データポータル自動設定ダイアログに説明文表示を追加（情報源・機能を明示してユーザビリティ向上）
+- 装置・プロセス自動設定を2段階フローに統一（情報源選択 → 選択的置換）
+- 設備リンクに設備名を付加（例: "NM-005:液中原子間力顕微鏡 (AFM)"）
+- AutoSettingDialog: 装置・プロセスリスト形式の表示対応
+- facility_link_helper: 設備名取得・名称付きアンカー生成機能追加
+- テスト: AutoSettingDialog用テスト5件追加（widget汚染対策実装）
 
 ---
 
