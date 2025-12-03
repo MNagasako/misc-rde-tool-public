@@ -940,12 +940,14 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         existing_dataset_combo._datasets_cache = datasets
         existing_dataset_combo._display_names_cache = display_names
         # 表示テキスト→データセット(dict)の高速マップを構築（Completer選択用）
+        # キーを正規化してCompleter選択時のマッチング精度を向上
         try:
             existing_dataset_combo._display_to_dataset_map = {
-                display_names[i]: datasets[i]
+                _normalize_display_text(display_names[i]): datasets[i]
                 for i in range(min(len(display_names), len(datasets)))
                 if isinstance(datasets[i], dict)
             }
+            logger.debug("display_to_dataset_map 構築完了: %s エントリ", len(existing_dataset_combo._display_to_dataset_map))
         except Exception as map_err:
             logger.debug("display_to_dataset_map 構築失敗: %s", map_err)
         # コンボを未選択状態にする（ヘッダー/プレースホルダのみ）
@@ -1134,7 +1136,12 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             if not hasattr(existing_dataset_combo, '_mouse_press_event_set'):
                 orig_mouse_press = existing_dataset_combo.mousePressEvent
                 def combo_mouse_press_event(event):
-                    if not existing_dataset_combo.lineEdit().text():
+                    # ドロップダウンボタンクリック時は常に全リスト表示
+                    # テキストボックス部分のクリックでもCompleterが機能するため問題なし
+                    current_text = existing_dataset_combo.lineEdit().text() if existing_dataset_combo.lineEdit() else ""
+                    
+                    # コンボボックスが空、またはアイテム数が0の場合はキャッシュから復元
+                    if existing_dataset_combo.count() == 0:
                         # コンボボックスをクリア
                         existing_dataset_combo.clear()
                         
@@ -1142,7 +1149,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                         cached_datasets = getattr(existing_dataset_combo, '_datasets_cache', [])
                         cached_display_names = getattr(existing_dataset_combo, '_display_names_cache', [])
                         
-                        logger.debug("コンボボックス展開: %s件のデータセット", len(cached_datasets))
+                        logger.debug("コンボボックス展開（キャッシュから復元）: %s件のデータセット", len(cached_datasets))
                         
                         # 高速化されたアイテム追加処理
                         if cached_datasets:
@@ -1150,6 +1157,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                         else:
                             # フォールバック：キャッシュがない場合は従来の方法
                             existing_dataset_combo.addItem("-- データセットを選択してください --", None)
+                        
+                        # 復元後、元のテキストを設定
+                        if current_text and existing_dataset_combo.lineEdit():
+                            existing_dataset_combo.lineEdit().setText(current_text)
                     
                     existing_dataset_combo.showPopup()
                     orig_mouse_press(event)
@@ -2582,6 +2593,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     def on_completer_activated(text):
         """QCompleterでフィルタ選択された場合の処理（直接フォーム更新版）"""
         logger.info("Completer選択テキスト: %r", text)
+        logger.debug("Completer選択時のコンボボックス状態: count=%s", existing_dataset_combo.count())
         
         # コンボボックスのシグナルブロック状態を検証
         signals_blocked_before = existing_dataset_combo.signalsBlocked()
@@ -2603,6 +2615,21 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             dataset_name = dataset_dict.get("attributes", {}).get("name", "不明")
             logger.info("Completer選択成功: id=%s name=%s", dataset_id, dataset_name)
             
+            # コンボボックスが空の場合はキャッシュから復元
+            if existing_dataset_combo.count() == 0:
+                logger.warning("Completer選択後にコンボボックスが空 - キャッシュから復元を試みます")
+                cached_datasets = getattr(existing_dataset_combo, '_datasets_cache', [])
+                cached_display_names = getattr(existing_dataset_combo, '_display_names_cache', [])
+                
+                if cached_datasets and cached_display_names:
+                    logger.info("キャッシュから %s 件のアイテムを復元", len(cached_datasets))
+                    # シグナルブロックして復元
+                    existing_dataset_combo.blockSignals(True)
+                    populate_combo_box_with_progress(existing_dataset_combo, cached_datasets, cached_display_names)
+                    existing_dataset_combo.blockSignals(False)
+                else:
+                    logger.error("キャッシュが空 - 復元できません")
+            
             # コンボボックスのインデックスを設定（可能であれば）
             idx = -1
             for i in range(existing_dataset_combo.count()):
@@ -2621,6 +2648,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 logger.debug("blockSignals(False)後の状態: %s", existing_dataset_combo.signalsBlocked())
             else:
                 logger.warning("Completer選択後にコンボボックスから該当アイテムが見つかりませんでした (ID: %s)", dataset_id)
+                logger.debug("コンボボックスアイテム数: %s", existing_dataset_combo.count())
             
             # 直接フォーム更新
             populate_edit_form_local(dataset_dict)
@@ -2631,15 +2659,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             logger.error("Completer選択解決失敗: text=%s norm=%s", text, norm_text)
             logger.error("マップエントリ数: %s", len(display_map))
             logger.error("マップの先頭3キー: %s", list(display_map.keys())[:3])
+            # 正規化キーでの再検索試行
+            logger.error("マップ内の正規化キー例（最初の3件）:")
+            for i, key in enumerate(list(display_map.keys())[:3]):
+                logger.error("  [%s] '%s'", i, key[:100])
             # アイテム数確認
             total_items = existing_dataset_combo.count()
             logger.error("全アイテム数: %s", total_items)
-            if total_items > 0:
-                for i in range(min(10, total_items)):
-                    t = existing_dataset_combo.itemText(i)
-                    d = existing_dataset_combo.itemData(i)
-                    if isinstance(d, dict):
-                        logger.error("  [%s] raw='%s' norm='%s' id=%s", i, t[:80], _normalize_display_text(t)[:80], d.get("id"))
 
     
     existing_dataset_combo.currentIndexChanged.connect(on_dataset_selection_changed)

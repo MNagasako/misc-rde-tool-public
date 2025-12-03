@@ -93,9 +93,35 @@ def _build_ai_prompt(dataset_id: str, category: str) -> Tuple[Optional[str], Opt
         logger.warning(f"プロンプトテンプレートが読み込めません: {prompt_file}")
         return None, None
 
-    # 基本コンテキスト + format_prompt_with_context（ARIM/マスタ/MI統合）
+    # DatasetContextCollectorで完全なコンテキストを収集（AI説明文提案と同じフロー）
+    from classes.dataset.util.dataset_context_collector import get_dataset_context_collector
+    context_collector = get_dataset_context_collector()
+    
+    # 基本コンテキストを読み込み
     base_ctx = _load_dataset_basic_context(dataset_id)
-    prompt = format_prompt_with_context(raw_template, base_ctx)
+    
+    # collect_full_contextでARIM情報・実験データ・ファイルツリー等を統合
+    full_context = context_collector.collect_full_context(
+        dataset_id=dataset_id,
+        name=base_ctx.get('name', ''),
+        type=base_ctx.get('type', ''),
+        existing_description=base_ctx.get('existing_description', ''),
+        grant_number=base_ctx.get('grant_number', '')
+    )
+    
+    logger.debug(f"完全コンテキスト収集完了: {list(full_context.keys())}")
+    
+    # format_prompt_with_contextでプレースホルダを置換（ARIM/マスタ/MI統合込み）
+    prompt = format_prompt_with_context(raw_template, full_context)
+    
+    # 未解決プレースホルダの確認
+    unresolved = []
+    for key in ['file_tree', 'text_from_structured_files', 'arim_extension_data', 'arim_experiment_data', 'experiment_summary', 'dataset_existing_info']:
+        if '{' + key + '}' in prompt:
+            unresolved.append(key)
+    if unresolved:
+        logger.warning(f"未解決プレースホルダ（データポータルAI）: {unresolved}")
+    
     return prompt, output_format
 
 
