@@ -135,6 +135,9 @@ def _extract_json_segment(text: str) -> Optional[str]:
 def _parse_ai_json(text: str) -> Optional[Any]:
     """AI応答テキストからJSONを抽出・パース（簡易サニタイズ対応）"""
     t = _strip_code_fences(text)
+    # 全体が引用で包まれている場合（例: '"{...}"' や "'{...}'"）は外側の引用を除去
+    if (t.startswith('"') and t.endswith('"')) or (t.startswith("'") and t.endswith("'")):
+        t = t[1:-1].strip()
     obj = _try_json_loads(t)
     if obj is not None:
         return obj
@@ -529,15 +532,55 @@ def suggest_important_tech_areas_with_ai(dataset_id: str) -> Dict[str, str]:
         if ai_result.get('success', False):
             response_text = ai_result.get('response') or ai_result.get('content', '')
             logger.info(f"AIリクエスト成功: {len(response_text)}文字の応答")
-            
-            # 応答をパースして主・副を抽出
-            main_match = re.search(r'主[:：]\s*(.+?)(?:\n|$)', response_text)
-            sub_match = re.search(r'副[:：]\s*(.+?)(?:\n|$)', response_text)
-            
-            if main_match:
-                result["main"] = main_match.group(1).strip()
-            if sub_match:
-                result["sub"] = sub_match.group(1).strip()
+            # JSON応答（dataportal/MItree）優先で解析し、失敗時はテキスト正規表現にフォールバック
+            parsed_json = None
+            try:
+                parsed_json = json.loads(response_text)
+            except Exception:
+                parsed_json = None
+
+            if isinstance(parsed_json, dict):
+                dp_key = 'dataportal' if 'dataportal' in parsed_json else ('dataporatal' if 'dataporatal' in parsed_json else None)
+                mi_list = parsed_json.get('MItree') or []
+                if mi_list and isinstance(mi_list, list):
+                    # 参考情報として返す（AutoSettingDialogで併記）
+                    try:
+                        # 正規化: 各要素を {rank,label,reason} の辞書に
+                        ref_items = []
+                        for item in mi_list:
+                            ref_items.append({
+                                'rank': item.get('rank'),
+                                'label': item.get('label'),
+                                'reason': item.get('reason'),
+                                'hierarchy': item.get('hierarchy')
+                            })
+                        result['MItree'] = ref_items
+                    except Exception:
+                        result['MItree'] = mi_list  # 元のまま
+                if dp_key and isinstance(parsed_json.get(dp_key), list) and parsed_json.get(dp_key):
+                    top = parsed_json.get(dp_key)[0]
+                    label = top.get('label') if isinstance(top, dict) else str(top)
+                    result['main'] = label or result['main']
+                    # 副候補が存在すれば2番目を使用
+                    if len(parsed_json.get(dp_key)) > 1:
+                        second = parsed_json.get(dp_key)[1]
+                        result['sub'] = (second.get('label') if isinstance(second, dict) else str(second)) or result['sub']
+                else:
+                    # テキスト形式フォールバック
+                    main_match = re.search(r'主[:：]\s*(.+?)(?:\n|$)', response_text)
+                    sub_match = re.search(r'副[:：]\s*(.+?)(?:\n|$)', response_text)
+                    if main_match:
+                        result["main"] = main_match.group(1).strip()
+                    if sub_match:
+                        result["sub"] = sub_match.group(1).strip()
+            else:
+                # テキスト形式のみ
+                main_match = re.search(r'主[:：]\s*(.+?)(?:\n|$)', response_text)
+                sub_match = re.search(r'副[:：]\s*(.+?)(?:\n|$)', response_text)
+                if main_match:
+                    result["main"] = main_match.group(1).strip()
+                if sub_match:
+                    result["sub"] = sub_match.group(1).strip()
             
             logger.info(f"AI推定成功: main={result['main']}, sub={result['sub']}")
         else:

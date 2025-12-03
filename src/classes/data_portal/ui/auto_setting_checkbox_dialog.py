@@ -80,6 +80,7 @@ class AutoSettingCheckboxDialog(QDialog):
         self.proposals: List[Dict[str, Any]] = []
         self.last_prompt: str = ""
         self.last_raw_json: str = ""
+        self.mi_tree_ref: List[Dict[str, Any]] = []
 
         # AIスレッド参照（初回fetch前に存在する必要あり）
         self.ai_thread: Optional[AIProposalThread] = None
@@ -234,6 +235,19 @@ class AutoSettingCheckboxDialog(QDialog):
             self.candidate_list.addItem(item)
             if reason:
                 lines.append(f"・{label}（{pid}）: {reason}")
+
+        # 参考情報（MItree）があれば併記（material_indexカテゴリ時）
+        if self.category == 'material_index' and self.mi_tree_ref:
+            lines.append("\n【参考】 マテリアルインデックス（詳細）候補")
+            for i, item in enumerate(self.mi_tree_ref[:5], start=1):
+                label = item.get('label') if isinstance(item, dict) else str(item)
+                hierarchy = item.get('hierarchy') if isinstance(item, dict) else None
+                reason = item.get('reason') if isinstance(item, dict) else ''
+                lines.append(f"  ・{i}. {label}")
+                if hierarchy:
+                    lines.append(f"     階層: {hierarchy}")
+                if reason:
+                    lines.append(f"     理由: {reason}")
         if lines:
             self.detail_text.setPlainText("\n".join(lines))
         else:
@@ -298,6 +312,56 @@ class AutoSettingCheckboxDialog(QDialog):
             meta_opts = self.metadata.get(self.field_key, {}).get("options", [])
             valid_ids = {str(o.get("value")) for o in meta_opts}
             self.proposals = [p for p in proposals if str(p.get("id")) in valid_ids]
+
+            # 参考情報: 受信JSONから MItree を抽出（material_index のみ）
+            self.mi_tree_ref = []
+            try:
+                import json as _json
+                raw = (self.last_raw_json or "").strip()
+                # コードフェンスや余計な前後テキストを除去してJSON部分のみ抽出
+                def _extract_json_dict(text: str):
+                    # ```json ... ``` を除去
+                    if text.startswith("```"):
+                        # 最初のフェンスを削除
+                        text = text.split("\n", 1)[1] if "\n" in text else text
+                        # 終了フェンスを削除
+                        if "```" in text:
+                            text = text.rsplit("```", 1)[0]
+                    # 全体が引用で包まれている場合は外す（例: '"{...}"' や "'{...}'"）
+                    t = text.strip()
+                    if (t.startswith('"') and t.endswith('"')) or (t.startswith("'") and t.endswith("'")):
+                        t = t[1:-1].strip()
+                    text = t
+                    # 先頭の { と末尾の } を検出してサブストリング
+                    start = text.find("{")
+                    end = text.rfind("}")
+                    if start != -1 and end != -1 and end > start:
+                        candidate = text[start:end+1]
+                        try:
+                            return _json.loads(candidate)
+                        except Exception:
+                            pass
+                    # そのままパースを試す
+                    try:
+                        return _json.loads(text)
+                    except Exception:
+                        return None
+                data = _extract_json_dict(raw) if raw else None
+                if isinstance(data, dict):
+                    mi_list = data.get('MItree') or []
+                    if isinstance(mi_list, list):
+                        # 正規化
+                        self.mi_tree_ref = [
+                            {
+                                'rank': (item.get('rank') if isinstance(item, dict) else None),
+                                'label': (item.get('label') if isinstance(item, dict) else str(item)),
+                                'reason': (item.get('reason') if isinstance(item, dict) else ''),
+                                'hierarchy': (item.get('hierarchy') if isinstance(item, dict) else None)
+                            }
+                            for item in mi_list
+                        ]
+            except Exception:
+                self.mi_tree_ref = []
             self._display_proposals()
             self.apply_btn.setEnabled(bool(self.proposals))
         except Exception as e:

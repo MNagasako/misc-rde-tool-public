@@ -106,6 +106,23 @@ def format_prompt_with_context(prompt_template, context_data):
         
         # ARIM報告書データを取得・統合
         enhanced_context = context_data.copy()
+        # エイリアスと不足キーのフォールバックを事前適用
+        try:
+            if 'type' not in enhanced_context and 'dataset_type' in enhanced_context:
+                enhanced_context['type'] = enhanced_context.get('dataset_type') or ''
+            if 'existing_description' not in enhanced_context and 'description' in enhanced_context:
+                enhanced_context['existing_description'] = enhanced_context.get('description') or ''
+            if 'llm_model_name' not in enhanced_context:
+                provider = enhanced_context.get('llm_provider') or ''
+                model = enhanced_context.get('llm_model') or ''
+                if provider or model:
+                    enhanced_context['llm_model_name'] = f"{provider}:{model}".strip(':')
+            # プレースホルダに空文字を入れて未置換を防ぐ
+            for k in ['material_index_data', 'equipment_data', 'file_tree', 'text_from_structured_files']:
+                if k not in enhanced_context:
+                    enhanced_context[k] = ''
+        except Exception as _alias_err:
+            logger.debug("テンプレート置換のエイリアス適用で警告: %s", _alias_err)
         grant_number = context_data.get('grant_number')
         
         if grant_number and grant_number != "未設定":

@@ -99,7 +99,7 @@ rde_env/*
 !rde_env/.gitkeep
 output/**
 !output/.gitkeep
-input/**
+
 !input/.gitkeep
 input_/**
 !input_/.gitkeep

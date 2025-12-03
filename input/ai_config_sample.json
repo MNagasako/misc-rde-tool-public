@@ -1,0 +1,70 @@
+{
+  "ai_providers": {
+    "openai": {
+      "enabled": true,
+      "api_key": "",
+      "base_url": "https://api.openai.com/v1",
+      "models": [
+        "gpt-5",
+        "gpt-5-mini",
+        "gpt-5-nano",
+        "gpt-4.1",
+        "gpt-4.1-mini",
+        "gpt-4.1-nano",
+        "o4-mini-deep-research",
+        "gpt-4o",
+        "gpt-4o-mini",
+        "gpt-4-turbo",
+        "gpt-3.5-turbo"
+      ],
+      "default_model": "gpt-4o-mini"
+    },
+    "gemini": {
+      "enabled": true,
+      "api_key": "",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta",
+      "models": [
+        "gemini-2.0-flash",
+        "gemini-1.5-pro",
+        "gemini-1.5-flash",
+        "gemini-1.0-pro"
+      ],
+      "default_model": "gemini-2.0-flash"
+    },
+    "local_llm": {
+      "enabled": true,
+      "base_url": "http://aem-ws-avizo.imr.tohoku.ac.jp:11434/api/generate",
+      "models": [
+        "gemma3:1b",
+        "gemma3:4b",
+        "gemma3:12b",
+        "gemma3:27b",
+        "llama3.1:8b",
+        "deepseek-r1:7b",
+        "deepseek-r1:8b",
+        "deepseek-r1:14b",
+        "deepseek-coder-v2:16b",
+        "qwen2.5:7b-instruct",
+        "qwen2.5:14b-instruct",
+        "qwen2.5-coder:7b-instruct",
+        "gpt-oss:20b",
+        "gpt-oss:20b-8k-gpu",
+        "gpt-oss:20b-16k",
+        "gpt-oss:20b-32k",
+        "gpt-oss:20b-64k",
+        "gpt-oss:20b-8k-allgpu",
+        "gpt-oss:20b-16k-allgpu",
+        "gpt-oss:20b-32k-allgpu",
+        "gpt-oss:20b-64k-allgpu",
+        "gemma3:4b-allgpu",
+        "gpt-oss:20b-8k-gpu"
+      ],
+      "default_model": "gpt-oss:20b-8k-allgpu",
+      "note": "Ollama等のローカルLLMサーバーが必要です。軽量版: gemma3:1b, 高性能版: gemma3:27b, コーディング: deepseek-coder-v2:16b, 推論: deepseek-r1シリーズ"
+    }
+  },
+  "default_provider": "gemini",
+  "timeout": 30,
+  "max_tokens": 1000,
+  "temperature": 0.7
+}

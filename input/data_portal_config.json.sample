@@ -1,0 +1,10 @@
+{
+  "// 注意": "ベーシック認証情報とログイン情報は全てkeyringで管理されます",
+  "// 補足": "このファイルにはURLのみを設定してください",
+  "test": {
+    "url": "https://example.cloudfront.net/test.example.com/data_service/system_arim_data/"
+  },
+  "production": {
+    "url": "https://nanonet.go.jp/data_service/system_arim_data/"
+  }
+}

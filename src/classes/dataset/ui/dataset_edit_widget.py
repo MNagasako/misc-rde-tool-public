@@ -1571,6 +1571,21 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 if hasattr(edit_contact_edit, 'text'):
                     context_data['contact'] = edit_contact_edit.text().strip()
                 
+                # データセットIDが未設定の場合のフォールバック取得
+                if not context_data.get('dataset_id'):
+                    try:
+                        # コンボボックスの現在選択から抽出（"ID: XXXXX" の形式を想定）
+                        if hasattr(existing_dataset_combo, 'currentText'):
+                            txt = existing_dataset_combo.currentText()
+                            import re
+                            m = re.search(r"ID:\s*([A-Za-z0-9_-]+)", txt)
+                            fallback_id = m.group(1) if m else None
+                            if fallback_id:
+                                context_data['dataset_id'] = fallback_id
+                                logger.debug("フォールバックでデータセットID設定: %s", fallback_id)
+                    except Exception as _e:
+                        logger.debug("データセットIDフォールバック取得に失敗: %s", _e)
+
                 logger.debug("AI提案に渡すコンテキストデータ: %s", context_data)
                 
                 # AI提案ダイアログを表示（自動生成有効、データセット提案モード）

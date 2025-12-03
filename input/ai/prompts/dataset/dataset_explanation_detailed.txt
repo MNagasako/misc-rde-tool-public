@@ -1,0 +1,34 @@
+データセットの詳細説明文を生成してください。
+
+基本情報:
+- データセット名: {name}
+- データセットタイプ: {type}
+- 研究課題番号: {grant_number}
+- 既存の説明: {existing_description}
+
+ARIM課題データ:
+- 課題データ: {dataset_existing_info}
+- 拡張情報: {arim_extension_data}
+- 実験データ: {arim_experiment_data}
+
+{arim_detailed_experiment}
+
+{material_index_data}
+
+{equipment_data}
+
+ファイルツリー情報:
+{file_tree}
+
+STRUCTUREDファイルのテキスト内容:
+{text_from_structured_files}
+
+関連情報:
+- メタデータ: {metadata}
+- 関連データセット: {related_datasets}
+
+要求:
+専門的で包括的な説明文を作成してください。研究の背景、データの特徴、利用方法を含めてください。
+
+出力形式:
+[詳細版] ここに詳細な説明文（500文字以内）\n**xx文字**\n**AIによる自動生成（{llm_model_name}）**

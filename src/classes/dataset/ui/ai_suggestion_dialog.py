@@ -151,11 +151,7 @@ class AISuggestionDialog(QDialog):
         
         header_layout.addStretch()
         
-        # プロンプトテンプレート編集ボタン
-        self.edit_template_button = QPushButton("プロンプト編集")
-        self.edit_template_button.setToolTip("プロンプトテンプレートを編集")
-        self.edit_template_button.clicked.connect(self.edit_prompt_template)
-        header_layout.addWidget(self.edit_template_button)
+        # プロンプトテンプレート編集ボタンは廃止（AI拡張側で編集）
         
         layout.addLayout(header_layout)
         
@@ -482,10 +478,33 @@ class AISuggestionDialog(QDialog):
                     self.ai_thread.wait(1000)
             
             # AIリクエストスレッドを開始
-            self.ai_thread = AIRequestThread(prompt, self.context_data)
-            self.ai_thread.result_ready.connect(self.on_ai_result)
-            self.ai_thread.error_occurred.connect(self.on_ai_error)
-            self.ai_thread.start()
+            # 使用するプロンプトを保存（再試行用）
+            self.last_used_prompt = prompt
+            self._json_retry_count = 0
+            thread = AIRequestThread(prompt, self.context_data)
+            if thread is None:
+                logger.error("AIRequestThreadがNoneです。初期化失敗")
+                self.generate_button.stop_loading()
+                self.cancel_ai_button.setVisible(False)
+                self.progress_bar.setVisible(False)
+                if hasattr(self, 'spinner_overlay'):
+                    self.spinner_overlay.stop()
+                QMessageBox.critical(self, "AIエラー", "AI処理用のスレッド初期化に失敗しました。")
+                return
+            try:
+                thread.result_ready.connect(self.on_ai_result)
+                thread.error_occurred.connect(self.on_ai_error)
+            except Exception as conn_err:
+                logger.error("AIRequestThreadシグナル接続エラー: %s", conn_err)
+                self.generate_button.stop_loading()
+                self.cancel_ai_button.setVisible(False)
+                self.progress_bar.setVisible(False)
+                if hasattr(self, 'spinner_overlay'):
+                    self.spinner_overlay.stop()
+                QMessageBox.critical(self, "AIエラー", f"AIスレッド接続に失敗しました: {conn_err}")
+                return
+            self.ai_thread = thread
+            thread.start()
             
         except Exception as e:
             logger.error("AI提案生成エラー: %s", e)
@@ -496,6 +515,68 @@ class AISuggestionDialog(QDialog):
             # スピナーオーバーレイ停止
             if hasattr(self, 'spinner_overlay'):
                 self.spinner_overlay.stop()
+
+    def _resend_ai_request(self, prompt):
+        """JSON解析失敗時の再試行用にAIリクエストを再送"""
+        try:
+            # 既存スレッドを安全に停止
+            if self.ai_thread and self.ai_thread.isRunning():
+                self.ai_thread.stop()
+                self.ai_thread.wait(500)
+            # スピナー継続表示
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, 0)
+            if hasattr(self, 'spinner_overlay'):
+                self.spinner_overlay.start()
+            # 再送
+            self.ai_thread = AIRequestThread(prompt, self.context_data)
+            if not self.ai_thread:
+                raise RuntimeError("AIRequestThreadの初期化に失敗しました")
+            try:
+                self.ai_thread.result_ready.connect(self.on_ai_result)
+                self.ai_thread.error_occurred.connect(self.on_ai_error)
+            except Exception as conn_err:
+                logger.error("AIRequestThreadシグナル接続エラー: %s", conn_err)
+                raise
+            self.ai_thread.start()
+        except Exception as e:
+            logger.error("AI再送エラー: %s", e)
+
+    def _try_parse_json_suggestions(self, response_text) -> bool:
+        """JSON形式の応答から提案候補を抽出。成功時True"""
+        try:
+            import json as _json
+            data = _json.loads(response_text)
+            keys = [
+                ("explain_normal", "簡潔版"),
+                ("explain_full", "詳細版"),
+                ("explain_simple", "一般版")
+            ]
+            suggestions = []
+            for k, title in keys:
+                val = data.get(k)
+                if isinstance(val, str) and val.strip():
+                    suggestions.append({"title": title, "text": val.strip()})
+            if suggestions:
+                # 既存候補を置換
+                self.suggestions.clear()
+                if hasattr(self, 'suggestion_list'):
+                    self.suggestion_list.clear()
+                for s in suggestions:
+                    self.suggestions.append(s)
+                    if hasattr(self, 'suggestion_list'):
+                        self.suggestion_list.addItem(s['title'])
+                # 最初を選択
+                if hasattr(self, 'suggestion_list') and self.suggestion_list.count() > 0:
+                    self.suggestion_list.setCurrentRow(0)
+                self.apply_button.setEnabled(True)
+                # プレビュー更新
+                self.display_all_suggestions()
+                return True
+            return False
+        except Exception as e:
+            logger.debug("JSON候補解析失敗: %s", e)
+            return False
         
     def update_detail_display(self, prompt):
         """詳細情報タブの表示を更新（データセット提案モードのみ）"""
@@ -539,25 +620,8 @@ class AISuggestionDialog(QDialog):
         if hasattr(self, 'context_display'):
             self.context_display.setText(context_text)
         
-    def edit_prompt_template(self):
-        """プロンプトテンプレート編集ダイアログを表示"""
-        try:
-            dialog = PromptTemplateEditDialog(
-                parent=self,
-                extension_name=self.extension_name,
-                template_name="basic"
-            )
-            
-            if dialog.exec() == QDialog.Accepted:
-                # テンプレートが更新された場合、AI拡張機能を再読み込み
-                self.ai_extension = AIExtensionRegistry.get(self.extension_name)
-                if not self.ai_extension:
-                    self.ai_extension = DatasetDescriptionExtension()
-                    
-                QMessageBox.information(self, "更新完了", "プロンプトテンプレートが更新されました")
-                
-        except Exception as e:
-            QMessageBox.critical(self, "エラー", f"プロンプトテンプレート編集エラー: {str(e)}")
+    
+    # 旧プロンプト編集機能は廃止
         
     def build_prompt(self):
         """AIリクエスト用プロンプトを構築"""
@@ -599,23 +663,47 @@ class AISuggestionDialog(QDialog):
             context['llm_model'] = model
             context['llm_model_name'] = f"{provider}:{model}"  # プロンプトテンプレート用
             
-            # 毎回外部テンプレートファイルを最新の状態で読み込み
-            logger.debug("外部テンプレートファイルを再読み込み中...")
-            reload_success = self.ai_extension.reload_external_templates()
-            if reload_success:
-                logger.debug("外部テンプレート再読み込み成功")
-            else:
-                logger.warning("外部テンプレート再読み込み失敗、既存テンプレートを使用")
-            
-            # デフォルトテンプレートを取得
-            template = self.ai_extension.get_template("basic")
-            if not template:
-                logger.warning("テンプレートが取得できませんでした")
-                # フォールバック用の簡単なプロンプト
+            # JSONデータセット説明基本のテンプレートをAI拡張設定から読み込み
+            from classes.dataset.util.ai_extension_helper import load_ai_extension_config, load_prompt_file, format_prompt_with_context
+            ext_conf = load_ai_extension_config()
+            prompt_file = None
+            self._expected_output_format = "text"
+            try:
+                for btn in ext_conf.get("buttons", []):
+                    if btn.get("id") == "json_explain_dataset_basic":
+                        prompt_file = btn.get("prompt_file") or btn.get("prompt_template")
+                        self._expected_output_format = btn.get("output_format", "text")
+                        break
+            except Exception as _e:
+                logger.warning("AI拡張設定の解析に失敗: %s", _e)
+
+            if not prompt_file:
+                logger.warning("json_explain_dataset_basic のテンプレート定義が見つかりません。フォールバックします。")
                 return f"データセット '{context.get('name', '未設定')}' の説明文を提案してください。"
-            
-            # プロンプトをレンダリング（contextを使用）
-            prompt = template.render(context)
+
+            # テンプレートファイルを読み込み、プレースホルダを動的置換
+            template_text = load_prompt_file(prompt_file)
+            if not template_text:
+                logger.warning("テンプレートファイルが読み込めませんでした: %s", prompt_file)
+                return f"データセット '{context.get('name', '未設定')}' の説明文を提案してください。"
+
+            # 置換前に重要キーの収集状況をログ
+            ft_len = len(full_context.get('file_tree', '') or '')
+            ts_len = len(full_context.get('text_from_structured_files', '') or '')
+            logger.debug("テンプレート: %s / 出力形式: %s", prompt_file, self._expected_output_format)
+            logger.debug("context[file_tree] 長さ: %s, context[text_from_structured_files] 長さ: %s", ft_len, ts_len)
+
+            prompt = format_prompt_with_context(template_text, context)
+
+            # 置換後に未解決プレースホルダが残っていないか確認
+            unresolved_keys = []
+            for key in ['file_tree', 'text_from_structured_files', 'name', 'type', 'grant_number', 'existing_description', 'llm_model_name']:
+                if '{' + key + '}' in prompt:
+                    unresolved_keys.append(key)
+            if unresolved_keys:
+                logger.warning("未解決プレースホルダ: %s", unresolved_keys)
+            else:
+                logger.debug("主要プレースホルダは全て置換済み")
             
             logger.debug("生成されたプロンプト長: %s 文字", len(prompt))
             logger.debug("ARIM関連情報含有: %s", 'ARIM課題関連情報' in prompt)
@@ -656,7 +744,7 @@ class AISuggestionDialog(QDialog):
 
 [簡潔版] ここに簡潔な説明（200文字程度）
 
-[学術版] ここに学術的な説明（500文字程度）
+[詳細版] ここに学術的な説明（500文字程度）
 
 [一般版] ここに一般向けの説明（300文字程度）
 
@@ -693,7 +781,25 @@ class AISuggestionDialog(QDialog):
             self.response_detail.setText(response_detail)
             
             if response_text:
-                self.parse_suggestions(response_text)
+                # 出力形式がjson指定の場合はJSON優先で解析し、失敗時は最大3回まで再取得
+                retries = getattr(self, "_json_retry_count", 0)
+                if getattr(self, "_expected_output_format", "text") == "json":
+                    parsed_ok = self._try_parse_json_suggestions(response_text)
+                    if not parsed_ok and retries < 3:
+                        logger.info("JSON解析に失敗。再試行 %d/3", retries + 1)
+                        self._json_retry_count = retries + 1
+                        # 再送信（同一プロンプト）
+                        prompt = self.last_used_prompt if self.last_used_prompt else self.build_prompt()
+                        self._resend_ai_request(prompt)
+                        return
+                    if not parsed_ok and retries >= 3:
+                        logger.warning("JSON解析失敗が続いたため、テキスト解析へフォールバック")
+                        self.parse_suggestions(response_text)
+                    else:
+                        # JSON解析成功時はUI更新済み
+                        pass
+                else:
+                    self.parse_suggestions(response_text)
             else:
                 QMessageBox.warning(self, "警告", "AIからの応答が空です")
                 
@@ -734,8 +840,15 @@ class AISuggestionDialog(QDialog):
             self.suggestion_list.clear()
         
         try:
-            # AI拡張機能を使用してレスポンスを解析
-            parsed_suggestions = self.ai_extension.process_ai_response(response_text)
+            # 出力形式に応じて解析
+            if getattr(self, "_expected_output_format", "text") == "json":
+                if self._try_parse_json_suggestions(response_text):
+                    parsed_suggestions = self.suggestions  # 既に設定済み
+                else:
+                    # JSON解析に失敗した場合はテキスト解析にフォールバック
+                    parsed_suggestions = self.ai_extension.process_ai_response(response_text)
+            else:
+                parsed_suggestions = self.ai_extension.process_ai_response(response_text)
             
             for suggestion in parsed_suggestions:
                 self.suggestions.append(suggestion)

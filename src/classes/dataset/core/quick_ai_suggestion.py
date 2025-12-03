@@ -136,7 +136,7 @@ def _clean_quick_response(response_text: str) -> str:
     # 改行を削除
     cleaned = response_text.strip()
     
-    # 不要な形式マーカーを削除（[簡潔版]、[学術版]など）
+    # 不要な形式マーカーを削除（[簡潔版]、[詳細版]など）
     lines = cleaned.split('\n')
     
     # 最初の有効な行を取得（形式マーカーでない行）

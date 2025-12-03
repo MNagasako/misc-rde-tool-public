@@ -285,6 +285,20 @@ class AutoSettingDialog(QDialog):
                 text_parts.append(f"【主】 {self.candidates['main']}")
             if "sub" in self.candidates:
                 text_parts.append(f"【副】 {self.candidates['sub']}")
+
+            # 参考情報: MItree（マテリアルインデックス詳細）候補があれば併記
+            if "MItree" in self.candidates and isinstance(self.candidates["MItree"], list) and self.candidates["MItree"]:
+                text_parts.append("\n【参考】 マテリアルインデックス（詳細）候補")
+                # 上位3件まで表示（label / hierarchy / 理由）
+                for i, item in enumerate(self.candidates["MItree"][:3], start=1):
+                    label = item.get('label') if isinstance(item, dict) else str(item)
+                    hierarchy = item.get('hierarchy') if isinstance(item, dict) else None
+                    reason = item.get('reason') if isinstance(item, dict) else ''
+                    text_parts.append(f"  ・{i}. {label}")
+                    if hierarchy:
+                        text_parts.append(f"     階層: {hierarchy}")
+                    if reason:
+                        text_parts.append(f"     理由: {reason}")
             
             # メタデータとのマッピング確認（あれば）
             if self.metadata:

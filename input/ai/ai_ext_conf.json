@@ -1,0 +1,111 @@
+{
+  "version": "1.0.0",
+  "description": "AI拡張機能の設定ファイル - データセット関連のAIサジェスト機能のボタン・プロンプトマッピング",
+  "buttons": [
+    {
+      "id": "suggest_important_tech_area",
+      "label": "重要技術領域",
+      "description": "データセットの重要技術領域を提案",
+      "prompt_file": "input/ai/prompts/ext/suggest_importantTechArea.txt",
+      "icon": "🔬",
+      "category": "技術分析",
+      "output_format": "text"
+    },
+    {
+      "id": "json_suggest_important_tech_area",
+      "label": "JSON重要技術領域",
+      "description": "データセットの重要技術領域を提案",
+      "prompt_file": "input/ai/prompts/json/json_suggest_importantTechArea.txt",
+      "icon": "🔬",
+      "category": "技術分析",
+      "output_format": "json"
+    },
+    {
+      "id": "suggest_keywords",
+      "label": "キーワード提案",
+      "description": "データセットに適したキーワードを提案",
+      "prompt_file": "input/ai/prompts/ext/suggest_keywords.txt",
+      "icon": "🏷️",
+      "category": "メタデータ",
+      "output_format": "text"
+    },
+    {
+      "id": "dataset_explanation_basic",
+      "label": "データセット説明基本",
+      "description": "データセットの基本的な説明を生成",
+      "prompt_file": "input/ai/prompts/dataset/dataset_explanation_basic.txt",
+      "icon": "📋",
+      "category": "テスト"
+    },
+    {
+      "id": "json_explain_dataset_basic",
+      "label": "JSONデータセット説明基本",
+      "description": "データセットの基本的な説明を生成",
+      "prompt_file": "input/ai/prompts/json/json_explain_dataset_basic.txt",
+      "icon": "📋",
+      "category": "テスト",
+      "output_format": "json"
+    },
+    {
+      "id": "json_suggest_material_index",
+      "label": "JSONマテリアルインデックス提案",
+      "description": "マテリアルインデックスを提案",
+      "prompt_file": "input/ai/prompts/json/json_suggest_material_index.txt",
+      "icon": "📋",
+      "category": "テスト",
+      "output_format": "json"
+    },
+    {
+      "id": "json_suggest_tag",
+      "label": "JSONタグ提案",
+      "description": "タグを提案",
+      "prompt_file": "input/ai/prompts/json/json_suggest_tag.txt",
+      "icon": "📋",
+      "category": "テスト",
+      "output_format": "json"
+    },
+    {
+      "id": "json_suggest_equipment_class",
+      "label": "JSON設備分類提案",
+      "description": "設備分類を提案",
+      "prompt_file": "input/ai/prompts/json/json_suggest_equipment_class.txt",
+      "icon": "📋",
+      "category": "テスト",
+      "output_format": "json"
+    },
+    {
+      "id": "dataset_explanation_single_full",
+      "label": "データセット説明詳細",
+      "description": "データセットの詳細な説明を生成",
+      "prompt_file": "input/ai/prompts/dataset/dataset_explanation_single_full.txt",
+      "icon": "📋",
+      "category": "テスト"
+    }
+  ],
+  "default_buttons": [
+    {
+      "id": "default_analysis",
+      "label": "総合分析",
+      "description": "データセットの総合的な分析を実行",
+      "prompt_template": "以下のデータセットについて総合的な分析を行ってください。\n\nデータセット名: {name}\nタイプ: {type}\n課題番号: {grant_number}\n既存説明: {description}\n\n分析項目:\n1. 技術的特徴\n2. 学術的価値\n3. 応用可能性\n4. データ品質\n5. 改善提案\n\n各項目について詳しく分析し、200文字程度で要約してください。",
+      "icon": "📊",
+      "category": "総合"
+    }
+  ],
+  "ui_settings": {
+    "buttons_per_row": 3,
+    "button_height": 60,
+    "button_width": 140,
+    "response_area_height": 400,
+    "enable_categories": true,
+    "show_icons": true
+  },
+  "data_portal_integration": {
+    "suggest_button_ids": {
+      "equipment": "json_suggest_equipment_class",
+      "material_index": "json_suggest_material_index",
+      "tag": "json_suggest_tag"
+    },
+    "timeout_seconds": 60
+  }
+}
