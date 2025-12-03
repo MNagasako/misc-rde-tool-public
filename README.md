@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル移行ツール v2.1.14** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル移行ツール v2.1.15** のバイナリ配布およびドキュメント公開用リポジトリです。
 
 > ⚠ 本ツールは単独の個人開発による非公式ツールです。ARIM事業 / RDE / ARIMデータポータルの公式サポート対象ではありません。開発チーム・ロードマップ・将来計画の事前告知は一切行いません。ここに記載しているのは現行バージョンで提供中の機能のみです。
 > RDEサイトおよびデータポータルの画面・通信挙動を独自解析し再現しているため、サイト側の仕様変更で予告なく動作しなくなる・誤作動する可能性があります。利用は自己責任で行ってください。
@@ -14,16 +14,14 @@
 
 ## 🚀 最新情報
 
-**2025-12-02 最新リリース**: バージョン2.1.14（自動設定ダイアログ改善・設備リンク名称表示）
+**2025-12-03 最新リリース**: バージョン2.1.15（配布版更新・リリース整備）
 
-### v2.1.14 の主な改善
-
-- データポータル自動設定ダイアログに説明文表示を追加（情報源・機能を明示してユーザビリティ向上）
-- 装置・プロセス自動設定を2段階フローに統一（情報源選択 → 選択的置換）
-- 設備リンクに設備名を付加（例: "NM-005:液中原子間力顕微鏡 (AFM)"）
-- AutoSettingDialog: 装置・プロセスリスト形式の表示対応
-- facility_link_helper: 設備名取得・名称付きアンカー生成機能追加
-- テスト: AutoSettingDialog用テスト5件追加（widget汚染対策実装）
+### v2.1.15 の主な改善
+ 
+- バージョンリビジョン更新（v2.1.15）
+- 公開配布ドキュメント更新（VERSION/README/CHANGELOG/RELEASE_NOTES）
+- GitHubタグ・リリース整備（インストーラー添付）
+- インストーラー更新: `dist/arim_rde_tool_setup.2.1.15.exe`
 
 ---
 
