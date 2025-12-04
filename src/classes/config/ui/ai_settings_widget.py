@@ -61,8 +61,8 @@ class AISettingsWidget(QWidget):
         self._pricing_cache: Dict[str, Dict[str, str]] = {}
         # 取得処理の多重実行防止とスレッド参照
         self._fetch_inflight: set[str] = set()
-        self._workers: Dict[str, QThread] = {}
-        self._progress_boxes: Dict[str, QMessageBox] = {}
+        self._workers: Dict[str, "QThread"] = {}
+        self._progress_boxes: Dict[str, "QMessageBox"] = {}
         
         # UI要素の参照
         self.provider_widgets = {}
@@ -133,7 +133,7 @@ class AISettingsWidget(QWidget):
         
         # 最大トークン数
         self.max_tokens_spinbox = QSpinBox()
-        self.max_tokens_spinbox.setRange(1, 10000)
+        self.max_tokens_spinbox.setRange(1, 100000)
         self.max_tokens_spinbox.setValue(1000)
         group_layout.addRow("最大トークン数:", self.max_tokens_spinbox)
         
