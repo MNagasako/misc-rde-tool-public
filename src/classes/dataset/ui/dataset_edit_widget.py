@@ -1535,6 +1535,38 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         ai_buttons_layout.addWidget(ai_suggest_button)
         ai_buttons_layout.addWidget(quick_ai_button)
         
+        # AI CHECKボタン（品質チェック版）
+        ai_check_button = SpinnerButton("📋 AI CHECK")
+        ai_check_button.setMinimumWidth(80)
+        ai_check_button.setMaximumWidth(100)
+        ai_check_button.setMinimumHeight(32)
+        ai_check_button.setMaximumHeight(36)
+        ai_check_button.setToolTip("説明文の簡易品質チェック\nAIが妥当性を評価します")
+        ai_check_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                font-size: 11px;
+                font-weight: bold;
+                border: 1px solid {get_color(ThemeKey.BUTTON_INFO_BORDER)};
+                border-radius: 6px;
+                padding: 4px 8px;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_PRESSED)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+            }}
+        """)
+        
+        ai_buttons_layout.addWidget(ai_check_button)
+        
         # AI提案ダイアログ表示のコールバック関数（既存）
         def show_ai_suggestion():
             try:
@@ -1694,6 +1726,321 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         
         ai_suggest_button.clicked.connect(show_ai_suggestion)
         quick_ai_button.clicked.connect(show_quick_ai_suggestion)
+        
+        # AI CHECKボタンのコールバック関数
+        def check_description_quality():
+            """説明文の簡易品質チェック（AIテスト2と同じロジック）"""
+            try:
+                # データセットが選択されているかチェック
+                current_index = existing_dataset_combo.currentIndex()
+                if current_index <= 0:
+                    QMessageBox.warning(widget, "警告", "データセットを選択してください")
+                    return
+                
+                selected_dataset = existing_dataset_combo.itemData(current_index)
+                if not selected_dataset:
+                    QMessageBox.warning(widget, "警告", "無効なデータセットが選択されています")
+                    return
+                
+                dataset_id = selected_dataset.get("id")
+                if not dataset_id:
+                    QMessageBox.warning(widget, "警告", "データセットIDが取得できません")
+                    return
+                
+                # 説明文が入力されているかチェック
+                current_description = edit_description_edit.toPlainText().strip()
+                if not current_description:
+                    QMessageBox.warning(widget, "警告", "説明文を入力してください")
+                    return
+                
+                # スピナー開始
+                ai_check_button.start_loading("チェック中")
+                QApplication.processEvents()
+                
+                # コンテキスト収集
+                context_data = {
+                    'dataset_id': dataset_id,
+                    'name': selected_dataset.get("attributes", {}).get("name", ""),
+                    'description': current_description
+                }
+                
+                logger.info("AI CHECKボタン: dataset_id=%s", dataset_id)
+                
+                # AIテスト2と同じパターンでAI実行
+                from classes.ai.core.ai_manager import AIManager
+                from classes.dataset.util.ai_extension_helper import load_ai_extension_config
+                from config.common import get_dynamic_file_path
+                
+                ai_manager = AIManager()
+                ai_ext_config = load_ai_extension_config()
+                
+                # 設定から "json_check_dataset_summary_simple_quality" を取得
+                button_config = None
+                for entry in ai_ext_config.get("buttons", []):
+                    if entry.get("id") == "json_check_dataset_summary_simple_quality":
+                        button_config = entry
+                        break
+                
+                if not button_config:
+                    QMessageBox.critical(widget, "エラー", "品質チェック設定が見つかりません")
+                    ai_check_button.stop_loading()
+                    return
+                
+                # プロンプトファイルを読み込み
+                prompt_file = button_config.get("prompt_file")
+                prompt_path = get_dynamic_file_path(prompt_file)
+                
+                with open(prompt_path, 'r', encoding='utf-8') as f:
+                    prompt_template = f.read()
+                
+                # コンテキストをプロンプトに適用（AIテスト2と同じ）
+                from classes.dataset.util.ai_extension_helper import format_prompt_with_context
+                
+                # 完全コンテキスト収集
+                from classes.dataset.util.dataset_context_collector import get_dataset_context_collector
+                context_collector = get_dataset_context_collector()
+                full_context = context_collector.collect_full_context(
+                    dataset_id=dataset_id,
+                    name=context_data['name'],
+                    type=selected_dataset.get("attributes", {}).get("datasetType", ""),
+                    existing_description=current_description,
+                    grant_number=selected_dataset.get("attributes", {}).get("grantNumber", "")
+                )
+                
+                # プロンプトテンプレートで {description} が使用されているため、エイリアスを設定
+                full_context['description'] = current_description
+                
+                prompt = format_prompt_with_context(prompt_template, full_context)
+                
+                # プロンプトをログ出力（デバッグ用）
+                logger.debug("AI CHECKボタン: プロンプト長=%s文字", len(prompt))
+                logger.debug("AI CHECKボタン: コンテキストキー=%s", list(full_context.keys()))
+                
+                # AI実行スレッド
+                from classes.dataset.ui.ai_suggestion_dialog import AIRequestThread
+                
+                def _show_ai_check_details(prompt_text: str, response_text: str):
+                    """問い合わせ内容とレスポンスを詳細表示するダイアログ（非モーダル）"""
+                    from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, QSplitter
+                    from PySide6.QtCore import Qt
+                    
+                    detail_dialog = QDialog(widget)
+                    detail_dialog.setWindowTitle("AI チェック詳細内容")
+                    detail_dialog.setGeometry(150, 150, 1200, 700)
+                    detail_dialog.setModal(False)  # 非モーダルで表示
+                    
+                    layout = QVBoxLayout()
+                    
+                    # スプリッターで左右分割
+                    splitter = QSplitter(Qt.Horizontal)
+                    
+                    # 左側: 問い合わせ内容
+                    left_container = QVBoxLayout()
+                    left_label = QLabel("【問い合わせ内容】")
+                    left_label.setStyleSheet("font-weight: bold; font-size: 12px;")
+                    left_container.addWidget(left_label)
+                    prompt_edit = QTextEdit()
+                    prompt_edit.setPlainText(prompt_text)
+                    prompt_edit.setReadOnly(True)
+                    prompt_edit.setStyleSheet("QTextEdit { font-family: Courier; font-size: 11px; line-height: 1.5; }")
+                    left_container.addWidget(prompt_edit)
+                    
+                    left_widget = QWidget()
+                    left_widget.setLayout(left_container)
+                    splitter.addWidget(left_widget)
+                    
+                    # 右側: レスポンス
+                    right_container = QVBoxLayout()
+                    right_label = QLabel("【AI レスポンス】")
+                    right_label.setStyleSheet("font-weight: bold; font-size: 12px;")
+                    right_container.addWidget(right_label)
+                    response_edit = QTextEdit()
+                    response_edit.setPlainText(response_text)
+                    response_edit.setReadOnly(True)
+                    response_edit.setStyleSheet("QTextEdit { font-family: Courier; font-size: 11px; line-height: 1.5; }")
+                    right_container.addWidget(response_edit)
+                    
+                    right_widget = QWidget()
+                    right_widget.setLayout(right_container)
+                    splitter.addWidget(right_widget)
+                    
+                    splitter.setStretchFactor(0, 1)
+                    splitter.setStretchFactor(1, 1)
+                    layout.addWidget(splitter)
+                    
+                    # 閉じるボタン
+                    close_btn = QPushButton("閉じる")
+                    close_btn.clicked.connect(detail_dialog.close)
+                    layout.addWidget(close_btn)
+                    
+                    detail_dialog.setLayout(layout)
+                    detail_dialog.show()  # exec() ではなく show() を使用（非モーダル）
+                
+                def on_check_success(result):
+                    """チェック完了"""
+                    response_text = result.get('response', '')
+                    
+                    # JSON検証・修正
+                    try:
+                        import json
+                        # JSON抽出（「```json」などの囲みがあれば除去）
+                        json_str = response_text
+                        if '```json' in json_str:
+                            json_str = json_str.split('```json')[1].split('```')[0].strip()
+                        elif '```' in json_str:
+                            json_str = json_str.split('```')[1].split('```')[0].strip()
+                        
+                        # JSONパース検証
+                        check_result = json.loads(json_str)
+                        
+                        # 情報抽出
+                        score = check_result.get('score', 'N/A')
+                        judge = check_result.get('judge', '判定不能')
+                        reason = check_result.get('reason', '理由なし')
+                        char_count = check_result.get('char_count', 'N/A')
+                        judge_comment = check_result.get('judge_comment', '')
+                        
+                        # 見やすいカスタムダイアログを作成
+                        from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton
+                        from PySide6.QtGui import QFont, QColor
+                        from PySide6.QtCore import Qt
+                        
+                        result_dialog = QDialog(widget)
+                        result_dialog.setWindowTitle("AI チェック結果")
+                        result_dialog.setGeometry(200, 200, 700, 600)
+                        result_dialog.setModal(True)
+                        
+                        main_layout = QVBoxLayout()
+                        
+                        # ============ ヘッダ: 評価概要 ============
+                        header_layout = QHBoxLayout()
+                        
+                        # スコア表示
+                        score_label = QLabel(f"スコア")
+                        score_label.setStyleSheet("font-weight: bold; font-size: 13px;")
+                        score_value = QLabel(f"{score}/10")
+                        score_value.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {'green' if score in ['8', '9', '10'] or (isinstance(score, (int, float)) and score >= 8) else 'orange' if score in ['6', '7'] or (isinstance(score, (int, float)) and 6 <= score < 8) else 'red'};")
+                        header_layout.addWidget(score_label)
+                        header_layout.addWidget(score_value)
+                        header_layout.addSpacing(20)
+                        
+                        # 文字数表示
+                        char_label = QLabel(f"文字数")
+                        char_label.setStyleSheet("font-weight: bold; font-size: 13px;")
+                        char_value = QLabel(f"{char_count}字")
+                        char_value.setStyleSheet("font-size: 20px; font-weight: bold;")
+                        header_layout.addWidget(char_label)
+                        header_layout.addWidget(char_value)
+                        header_layout.addStretch()
+                        
+                        main_layout.addLayout(header_layout)
+                        main_layout.addSpacing(10)
+                        
+                        # ============ 判定結果 ============
+                        judge_header = QLabel("【判定結果】")
+                        judge_header.setStyleSheet("font-weight: bold; font-size: 13px;")
+                        main_layout.addWidget(judge_header)
+                        
+                        judge_value = QLabel(judge)
+                        judge_color = 'green' if judge in ['合格', '微修正推奨（合格）'] else 'red' if judge in ['要修正（不合格）', '判定不能（不合格）'] else 'orange'
+                        judge_value.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {judge_color}; padding: 10px; background-color: #f0f0f0; border-radius: 4px;")
+                        main_layout.addWidget(judge_value)
+                        main_layout.addSpacing(10)
+                        
+                        # ============ 判定コメント ============
+                        if judge_comment:
+                            comment_header = QLabel("【判定コメント】")
+                            comment_header.setStyleSheet("font-weight: bold; font-size: 12px;")
+                            main_layout.addWidget(comment_header)
+                            
+                            comment_text = QTextEdit()
+                            comment_text.setPlainText(judge_comment)
+                            comment_text.setReadOnly(True)
+                            comment_text.setMaximumHeight(120)
+                            comment_text.setStyleSheet("QTextEdit { font-size: 11px; line-height: 1.5; }")
+                            main_layout.addWidget(comment_text)
+                            main_layout.addSpacing(10)
+                        
+                        # ============ 評価理由 ============
+                        reason_header = QLabel("【評価理由】")
+                        reason_header.setStyleSheet("font-weight: bold; font-size: 12px;")
+                        main_layout.addWidget(reason_header)
+                        
+                        reason_text = QTextEdit()
+                        reason_text.setPlainText(reason)
+                        reason_text.setReadOnly(True)
+                        reason_text.setStyleSheet("QTextEdit { font-size: 11px; line-height: 1.5; }")
+                        main_layout.addWidget(reason_text)
+                        main_layout.addSpacing(10)
+                        
+                        # ============ ボタン ============
+                        button_layout = QHBoxLayout()
+                        
+                        detail_btn = QPushButton("詳細を表示")
+                        detail_btn.setMinimumWidth(100)
+                        detail_btn.setMinimumHeight(36)
+                        detail_btn.setStyleSheet("QPushButton { font-size: 12px; }")
+                        detail_btn.clicked.connect(lambda: _show_ai_check_details(prompt, response_text))
+                        button_layout.addWidget(detail_btn)
+                        
+                        button_layout.addStretch()
+                        
+                        ok_btn = QPushButton("閉じる")
+                        ok_btn.setMinimumWidth(80)
+                        ok_btn.setMinimumHeight(36)
+                        ok_btn.setStyleSheet("QPushButton { font-size: 12px; }")
+                        ok_btn.clicked.connect(result_dialog.close)
+                        button_layout.addWidget(ok_btn)
+                        
+                        main_layout.addLayout(button_layout)
+                        
+                        result_dialog.setLayout(main_layout)
+                        result_dialog.exec()
+                        
+                        logger.info("AI CHECKボタン: チェック完了, verdict=%s, score=%s", judge, score)
+                        
+                    except json.JSONDecodeError as json_err:
+                        logger.error("JSON解析エラー: %s", json_err)
+                        error_msg = f"AI応答のJSON解析に失敗しました\n{str(json_err)}\n\nレスポンス内容:\n{response_text[:500]}"
+                        
+                        msg_box = QMessageBox(widget)
+                        msg_box.setWindowTitle("エラー")
+                        msg_box.setText(error_msg)
+                        msg_box.setIcon(QMessageBox.Critical)
+                        
+                        detail_btn = msg_box.addButton("レスポンスを表示", QMessageBox.ActionRole)
+                        ok_btn = msg_box.addButton(QMessageBox.Ok)
+                        msg_box.setDefaultButton(ok_btn)
+                        msg_box.exec()
+                        
+                        if msg_box.clickedButton() == detail_btn:
+                            _show_ai_check_details(prompt, response_text)
+                    finally:
+                        ai_check_button.stop_loading()
+                        # スレッド参照をクリア
+                        widget._ai_check_thread = None
+                
+                def on_check_error(error_msg):
+                    """エラー処理"""
+                    logger.error("AI CHECKボタン: エラー = %s", error_msg)
+                    QMessageBox.critical(widget, "AIエラー", f"品質チェック実行中にエラーが発生しました\n{error_msg}")
+                    ai_check_button.stop_loading()
+                    # スレッド参照をクリア
+                    widget._ai_check_thread = None
+                
+                # AIスレッド実行 - widget に参照を保持
+                ai_thread = AIRequestThread(prompt, full_context)
+                widget._ai_check_thread = ai_thread  # スレッド参照を保持
+                ai_thread.result_ready.connect(on_check_success)
+                ai_thread.error_occurred.connect(on_check_error)
+                ai_thread.start()
+                
+            except Exception as e:
+                logger.error("AI CHECKボタン: 予期しないエラー = %s", e)
+                QMessageBox.critical(widget, "エラー", f"予期しないエラーが発生しました\n{str(e)}")
+                ai_check_button.stop_loading()
+        
+        ai_check_button.clicked.connect(check_description_quality)
         
         # ボタンレイアウトをウィジェット化
         ai_buttons_widget = QWidget()

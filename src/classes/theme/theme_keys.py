@@ -105,6 +105,7 @@ class ThemeKey(str, Enum):
     # インフォボタン（水色 - 情報）
     BUTTON_INFO_BACKGROUND = "button.info.background"
     BUTTON_INFO_BACKGROUND_HOVER = "button.info.background.hover"
+    BUTTON_INFO_BACKGROUND_PRESSED = "button.info.background.pressed"
     BUTTON_INFO_TEXT = "button.info.text"
     BUTTON_INFO_BORDER = "button.info.border"
     

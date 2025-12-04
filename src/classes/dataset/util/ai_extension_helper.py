@@ -110,8 +110,11 @@ def format_prompt_with_context(prompt_template, context_data):
         try:
             if 'type' not in enhanced_context and 'dataset_type' in enhanced_context:
                 enhanced_context['type'] = enhanced_context.get('dataset_type') or ''
+            # description と existing_description の相互エイリアス
             if 'existing_description' not in enhanced_context and 'description' in enhanced_context:
                 enhanced_context['existing_description'] = enhanced_context.get('description') or ''
+            if 'description' not in enhanced_context and 'existing_description' in enhanced_context:
+                enhanced_context['description'] = enhanced_context.get('existing_description') or ''
             if 'llm_model_name' not in enhanced_context:
                 provider = enhanced_context.get('llm_provider') or ''
                 model = enhanced_context.get('llm_model') or ''

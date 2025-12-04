@@ -108,6 +108,7 @@ class DarkTheme:
         # インフォボタン（Blue 400→300）
         ThemeKey.BUTTON_INFO_BACKGROUND: "#42a5f5",  # Blue 400
         ThemeKey.BUTTON_INFO_BACKGROUND_HOVER: "#90caf9",  # Blue 200 - much lighter for visibility
+        ThemeKey.BUTTON_INFO_BACKGROUND_PRESSED: "#90caf9",  # Same as hover for pressed state
         ThemeKey.BUTTON_INFO_TEXT: "#000000",
         ThemeKey.BUTTON_INFO_BORDER: "#64b5f6",
         

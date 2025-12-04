@@ -108,6 +108,7 @@ class LightTheme:
         # インフォボタン（水色）
         ThemeKey.BUTTON_INFO_BACKGROUND: "#2196F3",
         ThemeKey.BUTTON_INFO_BACKGROUND_HOVER: "#0d47a1",  # Much darker for visibility
+        ThemeKey.BUTTON_INFO_BACKGROUND_PRESSED: "#0d47a1",  # Same as hover for pressed state
         ThemeKey.BUTTON_INFO_TEXT: "#ffffff",
         ThemeKey.BUTTON_INFO_BORDER: "#1976D2",
         
