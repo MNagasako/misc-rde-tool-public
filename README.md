@@ -26,6 +26,7 @@
 - インストーラー更新: `dist/arim_rde_tool_setup.2.1.16.exe`
 
 ---
+**[クイックスタート(書きかけ)](https://cuddly-stinger-40d.notion.site/QuickStart-2befc2cb5fc380f09d0dd4595b767f4d?source=copy_link)**
 
 ## 📥 ダウンロードとインストール
 
