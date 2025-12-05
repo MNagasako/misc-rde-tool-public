@@ -4,6 +4,35 @@
 
 ---
 
+## v2.1.24 (2025-12-06) - サブグループ完全性チェック・UI安定化
+
+### 🔄 サブグループ完全性チェックと自動再取得
+
+- `groupOrgnizations` と `subGroups` の差分を検出し、欠損があれば再取得ループを必ず実行
+- 欠損IDをログに出力し、再取得対象を明示
+
+### 📊 取得ループの詳細ログ強化
+
+- 成功/失敗/スキップ件数を逐次記録し、force_download有無と処理時間をログ化
+- API呼び出し直前にファイル有無を判定し、スキップ/再取得を決定
+
+### 🛠️ グループ選択ダイアログのUIスレッド固定
+
+- 選択ダイアログをUIスレッド同期実行に統一し、基本情報取得時のクラッシュを解消
+- `--force-dialog` やプロジェクト単一ケースでも安全にダイアログを表示
+
+### 🧰 その他
+
+- データセットフィルタの既定プログラムを `all` に統一して初期表示を安定化
+- 認証情報保存を `encrypted_data` キーでラップし、既存フォーマットも後方互換で読み込み
+
+### 🧪 テスト
+
+- `./.venv/Scripts/python.exe -m pytest -q tests/unit/test_show_group_selection_if_needed.py` — 6 passed
+- `./.venv/Scripts/python.exe -m pytest -q -k 'data_fetch2_dataset_combo_behavior or file_filter_widget_layout'` — 2 passed, 2 skipped, 678 deselected
+
+---
+
 ## v2.1.16 (2025-12-04) - 説明文品質チェック機能・フォント可読性向上
 
 ### 🔍 データセット修正タブ: 説明文品質チェック機能
