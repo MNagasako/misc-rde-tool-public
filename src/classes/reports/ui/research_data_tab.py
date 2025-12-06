@@ -6,9 +6,10 @@
 
 import os
 import logging
-from typing import Optional
 from datetime import datetime
-from config.common import OUTPUT_DIR
+
+from classes.equipment.util.output_paths import get_equipment_root_dir
+from classes.reports.util.output_paths import get_reports_root_dir
 
 logger = logging.getLogger(__name__)
 
@@ -220,41 +221,47 @@ class ResearchDataTab(QWidget):
     
     def load_default_files(self):
         """デフォルトファイルを読み込み"""
-        reports_dir = os.path.join(OUTPUT_DIR, "arim-site", "reports")
-        facilities_dir = os.path.join(OUTPUT_DIR, "arim-site", "facilities")
-        
-        # 報告書Excelを検索（converted.xlsx）
-        if os.path.exists(reports_dir):
-            # converted.xlsxファイルを検索
-            converted_excel = os.path.join(reports_dir, "converted.xlsx")
-            if os.path.exists(converted_excel):
-                self.excel_path = converted_excel
-                self.excel_path_edit.setText(converted_excel)
-                self.log_message(f"✅ 報告書Excel設定: converted.xlsx")
-        
-        # 設備データJSONを検索（merged_data2.json優先）
-        if os.path.exists(facilities_dir):
-            merged_json = os.path.join(facilities_dir, "merged_data2.json")
-            if os.path.exists(merged_json):
-                self.merged_data_path = merged_json
-                self.merged_path_edit.setText(merged_json)
-                self.log_message(f"✅ 設備データJSON設定: merged_data2.json")
-        
-        # 出力ファイルを自動設定
-        if os.path.exists(reports_dir):
-            self.output_path = os.path.join(reports_dir, "research_data.json")
-            self.output_path_edit.setText(self.output_path)
-        
-        # ボタン有効化チェック
+        self.refresh_from_disk()
+
+    def refresh_from_disk(self):
+        """ディスク上の最新ファイルを反映"""
+        reports_dir = get_reports_root_dir()
+        equipment_dir = get_equipment_root_dir()
+
+        converted_path = reports_dir / "converted.xlsx"
+        if converted_path.exists():
+            converted_str = str(converted_path)
+            if self.excel_path != converted_str:
+                self.log_message("✅ 報告書Excel設定: converted.xlsx")
+            self.excel_path = converted_str
+            self.excel_path_edit.setText(converted_str)
+        else:
+            self.excel_path = None
+            self.excel_path_edit.clear()
+
+        merged_path = equipment_dir / "merged_data2.json"
+        if merged_path.exists():
+            merged_str = str(merged_path)
+            if self.merged_data_path != merged_str:
+                self.log_message("✅ 設備データJSON設定: merged_data2.json")
+            self.merged_data_path = merged_str
+            self.merged_path_edit.setText(merged_str)
+        else:
+            self.merged_data_path = None
+            self.merged_path_edit.clear()
+
+        output_path = reports_dir / "research_data.json"
+        self.output_path = str(output_path)
+        self.output_path_edit.setText(self.output_path)
         self.check_enable_generate()
     
     def on_excel_browse_clicked(self):
         """変換済みExcel参照ボタンクリック"""
-        reports_dir = os.path.join(OUTPUT_DIR, "arim-site", "reports")
+        reports_dir = get_reports_root_dir()
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "変換済みExcelファイルを選択",
-            reports_dir,
+            str(reports_dir),
             "Excel Files (*.xlsx);;All Files (*)"
         )
         
@@ -266,11 +273,11 @@ class ResearchDataTab(QWidget):
     
     def on_merged_browse_clicked(self):
         """設備データJSON参照ボタンクリック"""
-        facilities_dir = os.path.join(OUTPUT_DIR, "arim-site", "facilities")
+        facilities_dir = get_equipment_root_dir()
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "設備データJSONファイルを選択",
-            facilities_dir,
+            str(facilities_dir),
             "JSON Files (*.json);;All Files (*)"
         )
         
@@ -282,11 +289,11 @@ class ResearchDataTab(QWidget):
     
     def on_output_browse_clicked(self):
         """出力JSON参照ボタンクリック"""
-        reports_dir = os.path.join(OUTPUT_DIR, "arim-site", "reports")
+        reports_dir = get_reports_root_dir()
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "出力JSONファイルを指定",
-            os.path.join(reports_dir, "research_data.json"),
+            str(reports_dir / "research_data.json"),
             "JSON Files (*.json);;All Files (*)"
         )
         
@@ -297,34 +304,29 @@ class ResearchDataTab(QWidget):
     
     def on_auto_detect_clicked(self):
         """自動検出ボタンクリック"""
-        reports_dir = os.path.join(OUTPUT_DIR, "arim-site", "reports")
-        facilities_dir = os.path.join(OUTPUT_DIR, "arim-site", "facilities")
-        
-        # converted.xlsx を検索
-        excel_path = os.path.join(reports_dir, "converted.xlsx")
-        if os.path.exists(excel_path):
-            self.excel_path = excel_path
-            self.excel_path_edit.setText(excel_path)
-            self.log_message(f"🔍 変換済みExcelを検出: {os.path.basename(excel_path)}")
+        reports_dir = get_reports_root_dir()
+        equipment_dir = get_equipment_root_dir()
+
+        excel_path = reports_dir / "converted.xlsx"
+        if excel_path.exists():
+            self.excel_path = str(excel_path)
+            self.excel_path_edit.setText(self.excel_path)
+            self.log_message(f"🔍 変換済みExcelを検出: {excel_path.name}")
         else:
             QMessageBox.warning(self, "エラー", f"converted.xlsx が見つかりません:\n{reports_dir}")
             return
-        
-        # merged_data2.json を検索
-        merged_path = os.path.join(facilities_dir, "merged_data2.json")
-        if os.path.exists(merged_path):
-            self.merged_data_path = merged_path
-            self.merged_path_edit.setText(merged_path)
-            self.log_message(f"🔍 設備データJSONを検出: {os.path.basename(merged_path)}")
+
+        merged_path = equipment_dir / "merged_data2.json"
+        if merged_path.exists():
+            self.merged_data_path = str(merged_path)
+            self.merged_path_edit.setText(self.merged_data_path)
+            self.log_message(f"🔍 設備データJSONを検出: {merged_path.name}")
         else:
-            QMessageBox.warning(self, "エラー", f"merged_data2.json が見つかりません:\n{facilities_dir}")
+            QMessageBox.warning(self, "エラー", f"merged_data2.json が見つかりません:\n{equipment_dir}")
             return
-        
-        # 出力ファイルを自動設定
-        self.output_path = os.path.join(reports_dir, "research_data.json")
+
+        self.output_path = str(reports_dir / "research_data.json")
         self.output_path_edit.setText(self.output_path)
-        
-        # 生成ボタン有効化
         self.check_enable_generate()
     
     def check_enable_generate(self):
@@ -332,8 +334,8 @@ class ResearchDataTab(QWidget):
         if self.excel_path and self.merged_data_path:
             # 出力パスが未設定の場合は自動設定
             if not self.output_path:
-                reports_dir = os.path.join(OUTPUT_DIR, "arim-site", "reports")
-                self.output_path = os.path.join(reports_dir, "research_data.json")
+                reports_dir = get_reports_root_dir()
+                self.output_path = str(reports_dir / "research_data.json")
                 self.output_path_edit.setText(self.output_path)
             
             self.generate_button.setEnabled(True)
@@ -432,9 +434,9 @@ class ResearchDataTab(QWidget):
     
     def on_open_folder_clicked(self):
         """フォルダを開くボタンクリック"""
-        folder_path = os.path.join(OUTPUT_DIR, "arim-site", "reports")
-        if os.path.exists(folder_path):
-            os.startfile(folder_path)
+        folder_path = get_reports_root_dir()
+        if folder_path.exists():
+            os.startfile(str(folder_path))
         else:
             QMessageBox.warning(self, "エラー", f"フォルダが存在しません:\n{folder_path}")
     

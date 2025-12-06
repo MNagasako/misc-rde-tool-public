@@ -154,13 +154,8 @@ class DataRegisterWidget(QWidget):
         layout.addWidget(self.register_btn)
         
         # ここからタブ構成に切り替え: データ登録タブ + 登録状況タブ
-        # RegistrationStatusWidget の取得時に MagicMock 汚染を避ける
         try:
-            from classes.data_entry.ui.registration_status_widget import RegistrationStatusWidget as _RSW
-            from unittest.mock import MagicMock
-            if isinstance(_RSW, MagicMock):
-                raise ImportError("RegistrationStatusWidget is MagicMock")
-            RegistrationStatusWidget = _RSW
+            from classes.data_entry.ui.registration_status_widget import RegistrationStatusWidget
         except Exception:
             # フォールバック: 直接PySide6実体に依存するモジュールを再インポート
             import importlib
@@ -170,11 +165,7 @@ class DataRegisterWidget(QWidget):
         register_page.setLayout(layout)
         self.tabs = QTabWidget(self)
         self.tabs.addTab(register_page, "データ登録")
-        from unittest.mock import MagicMock
         self.status_widget = RegistrationStatusWidget(self)
-        if isinstance(self.status_widget, MagicMock):
-            # 汚染検出時はプレースホルダーを使用
-            self.status_widget = QWidget()
         self.tabs.addTab(self.status_widget, "登録状況")
         root_layout = QVBoxLayout()
         root_layout.addWidget(self.tabs)

@@ -25,12 +25,37 @@ import logging
 import sys
 import traceback
 import glob
+import shutil
+from pathlib import Path
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Callable, Dict, List, Optional
+from urllib.parse import quote, urlencode
+
 from dateutil.parser import parse as parse_datetime  # ISO8601対応のため
 from ..util.xlsx_exporter import apply_basic_info_to_Xlsx_logic, summary_basic_info_to_Xlsx_logic
 from classes.utils.api_request_helper import api_request  # refactored to use api_request_helper
-from config.common import SUBGROUP_JSON_PATH, get_dynamic_file_path
+from classes.basic.core.api_recording_wrapper import record_api_call_for_dataset_list
+from config.common import (
+    DATASET_JSON_PATH,
+    DATASET_JSON_CHUNKS_DIR,
+    GROUP_DETAIL_JSON_PATH,
+    GROUP_JSON_PATH,
+    GROUP_ORGNIZATION_DIR,
+    GROUP_PROJECT_DIR,
+    INFO_JSON_PATH,
+    INSTRUMENTS_JSON_PATH,
+    INSTRUMENT_TYPE_JSON_PATH,
+    LEGACY_SUBGROUP_DETAILS_DIR,
+    LICENSES_JSON_PATH,
+    ORGANIZATION_JSON_PATH,
+    SELF_JSON_PATH,
+    SUBGROUP_DETAILS_DIR,
+    SUBGROUP_JSON_PATH,
+    TEMPLATE_JSON_PATH,
+    get_dynamic_file_path,
+)
 
 # ロガー設定（標準出力にも出す）
 logging.basicConfig(
@@ -42,6 +67,15 @@ logger = logging.getLogger(__name__)
 
 # === 設定値 ===
 OUTPUT_DIR = "output"
+
+PROGRAM_SELECTION_CONTEXT = "basic.program.root"
+PROJECT_SELECTION_CONTEXT = "basic.project.detail"
+SUBGROUP_SELECTION_CONTEXT = "basic.project.subgroup"
+
+DATASET_LIST_PAGE_SIZE = 1000
+DATASET_LIST_REQUEST_TIMEOUT = 30  # seconds
+DATASET_CHUNK_FILE_TEMPLATE = "dataset_chunk_{:04d}.json"
+_DATASET_RESERVED_KEYS = {"data", "included", "meta", "links"}
 
 def stage_error_handler(operation_name: str):
     """
@@ -77,6 +111,83 @@ def save_json(data, *path):
         logger.error(f"JSONファイル保存失敗: {filepath}, error={e}")
         raise
 
+
+def _subgroups_folder_complete() -> bool:
+    """サブグループ詳細フォルダの完全性をチェックする共通ヘルパー"""
+    try:
+        expected_ids = set()
+        logger.info("\n[フォルダ完全性チェック開始] v2.1.24")
+
+        org_dir = Path(GROUP_ORGNIZATION_DIR)
+        if not org_dir.exists():
+            logger.info(f"  ❌ groupOrgnizations/ディレクトリが存在しません: {org_dir}")
+            return True  # フォルダがなければチェック対象外
+
+        logger.info(f"  📂 groupOrgnizations/ディレクトリをスキャン: {org_dir}")
+
+        org_json_files = list(org_dir.glob("*.json"))
+        logger.info(f"  📋 プロジェクトJSONファイル数: {len(org_json_files)}個")
+
+        for json_file in org_json_files:
+            try:
+                with open(json_file, 'r', encoding='utf-8') as f:
+                    proj_data = json.load(f)
+
+                included = proj_data.get("included", [])
+                subgroup_count = 0
+                for item in included:
+                    if (
+                        item.get("type") == "group" and
+                        item.get("attributes", {}).get("groupType") == "TEAM"
+                    ):
+                        item_id = item.get("id")
+                        expected_ids.add(item_id)
+                        subgroup_count += 1
+
+                logger.debug(f"    ✓ {json_file.name}: {subgroup_count}個のサブグループを抽出")
+            except Exception as e:
+                logger.warning(f"    ❌ プロジェクトJSON読み込みエラー（{json_file.name}）: {e}")
+                continue
+
+        if not expected_ids:
+            logger.info("  ℹ️  サブグループIDが見つかりません（チェック対象外）")
+            return True
+
+        expected_count = len(expected_ids)
+        logger.info(f"  📊 期待されるサブグループ総数: {expected_count}個")
+        logger.debug(f"  📋 期待されるID一覧（最初10個）: {list(expected_ids)[:10]}")
+
+        subgroups_dir = Path(SUBGROUP_DETAILS_DIR)
+        if not subgroups_dir.exists():
+            logger.warning(f"  ❌ subGroups/ディレクトリが存在しません: {subgroups_dir}")
+            logger.warning(f"     期待: {expected_count}件のサブグループファイル")
+            return False
+
+        logger.info(f"  📂 subGroups/ディレクトリを確認: {subgroups_dir}")
+        json_files = list(subgroups_dir.glob("*.json"))
+        actual_count = len(json_files)
+
+        logger.info(f"  📊 実際の保存ファイル数: {actual_count}個")
+
+        actual_ids = {json_file.stem for json_file in json_files}
+        missing_ids = expected_ids - actual_ids
+        if missing_ids:
+            logger.warning("\n  ⚠️  [欠損検出] subGroups/フォルダに欠損ファイル!")
+            logger.warning(
+                f"     期待: {expected_count}個 | 実際: {actual_count}個 | 欠損: {len(missing_ids)}個"
+            )
+            logger.warning(f"     欠損ID一覧（最初10個）: {list(missing_ids)[:10]}")
+            if len(missing_ids) > 10:
+                logger.debug(f"     欠損ID一覧（すべて）: {sorted(list(missing_ids))}")
+            return False
+
+        logger.info(f"  ✅ subGroups/フォルダの完全性確認完了: {actual_count}個すべて揃っている")
+        logger.info("[フォルダ完全性チェック終了] 欠損なし\n")
+        return True
+    except Exception as e:
+        logger.debug(f"subGroups/フォルダチェックエラー（取得を続行）: {e}")
+        return False
+
 def _make_headers(bearer_token, host, origin, referer):
     """API リクエスト用ヘッダーを生成"""
     return {
@@ -97,6 +208,198 @@ def _make_headers(bearer_token, host, origin, referer):
         "sec-ch-ua-platform": '"Windows"',
     }
 
+
+def _prepare_dataset_chunk_directory() -> Path:
+    """dataset.jsonチャンク保存用ディレクトリを初期化して返す"""
+    chunk_dir = Path(DATASET_JSON_CHUNKS_DIR)
+    if chunk_dir.exists():
+        for entry in chunk_dir.iterdir():
+            try:
+                if entry.is_file():
+                    entry.unlink()
+                elif entry.is_dir():
+                    shutil.rmtree(entry)
+            except Exception as cleanup_error:
+                logger.warning("チャンクファイルの削除に失敗しました (%s): %s", entry, cleanup_error)
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    logger.debug("datasetJsonChunksディレクトリを初期化しました: %s", chunk_dir)
+    return chunk_dir
+
+
+def _build_dataset_list_query_params(page_size: int, offset: int, search_words: Optional[str]) -> Dict[str, str]:
+    params = {
+        "sort": "-modified",
+        "page[limit]": str(page_size),
+        "page[offset]": str(offset),
+        "include": "manager,releases",
+        "fields[user]": "id,userName,organizationName,isDeleted",
+        "fields[release]": "version,releaseNumber",
+    }
+    if search_words is not None:
+        params["searchWords"] = search_words
+    return params
+
+
+def _build_dataset_list_url(query_params: Dict[str, str]) -> str:
+    query = urlencode(query_params, quote_via=quote)
+    return f"https://rde-api.nims.go.jp/datasets?{query}"
+
+
+def _record_dataset_list_api_call(
+    url: str,
+    headers: Dict[str, str],
+    status_code: int,
+    elapsed_ms: float,
+    query_params: Dict[str, str],
+    success: bool,
+    error: Optional[str] = None,
+):
+    try:
+        record_api_call_for_dataset_list(
+            url,
+            headers,
+            status_code,
+            elapsed_ms,
+            query_params=query_params,
+            success=success,
+            error=error,
+        )
+    except Exception as record_error:
+        logger.debug("データセット一覧API記録に失敗しました: %s", record_error)
+
+
+def _merge_dataset_chunk_payloads(chunks: List[Dict]) -> Dict:
+    if not chunks:
+        return {"data": []}
+
+    merged: Dict = {}
+    first_chunk = chunks[0]
+    for key, value in first_chunk.items():
+        if key not in _DATASET_RESERVED_KEYS:
+            merged[key] = value
+
+    combined_data: List[Dict] = []
+    included_map: Dict[tuple, Dict] = {}
+    include_present = False
+
+    for chunk in chunks:
+        chunk_data = chunk.get("data", [])
+        if chunk_data:
+            combined_data.extend(chunk_data)
+
+        included_section = chunk.get("included")
+        if included_section is not None:
+            include_present = True
+            for item in included_section:
+                item_id = item.get("id")
+                item_type = item.get("type")
+                if not item_id or not item_type:
+                    continue
+                key = (item_type, item_id)
+                if key not in included_map:
+                    included_map[key] = item
+
+    merged["data"] = combined_data
+    if include_present:
+        merged["included"] = list(included_map.values())
+
+    latest_meta = None
+    latest_links = None
+    for chunk in reversed(chunks):
+        if latest_meta is None and chunk.get("meta") is not None:
+            latest_meta = chunk.get("meta")
+        if latest_links is None and chunk.get("links"):
+            latest_links = chunk.get("links")
+        if latest_meta is not None and latest_links is not None:
+            break
+
+    if latest_meta is not None:
+        merged["meta"] = latest_meta
+    if latest_links is not None:
+        merged["links"] = latest_links
+
+    return merged
+
+
+def _download_dataset_list_in_chunks(
+    bearer_token: Optional[str],
+    headers: Dict[str, str],
+    search_words: Optional[str] = None,
+    page_size: int = DATASET_LIST_PAGE_SIZE,
+) -> Dict:
+    import time
+
+    chunk_dir = _prepare_dataset_chunk_directory()
+    offset = 0
+    chunk_index = 1
+    total_expected = None
+    total_processed = 0
+    chunk_payloads: List[Dict] = []
+
+    while True:
+        query_params = _build_dataset_list_query_params(page_size, offset, search_words)
+        url = _build_dataset_list_url(query_params)
+        start_time = time.time()
+        resp = api_request(
+            "GET",
+            url,
+            bearer_token=bearer_token,
+            headers=headers,
+            timeout=DATASET_LIST_REQUEST_TIMEOUT,
+        )
+        elapsed_ms = (time.time() - start_time) * 1000
+
+        if resp is None:
+            error_msg = "APIリクエストがNoneを返しました"
+            _record_dataset_list_api_call(url, headers, 0, elapsed_ms, query_params, False, error_msg)
+            raise RuntimeError(f"データセット一覧の取得に失敗しました: {error_msg}")
+
+        try:
+            resp.raise_for_status()
+        except Exception as http_error:
+            status_code = getattr(resp, "status_code", 500)
+            _record_dataset_list_api_call(url, headers, status_code, elapsed_ms, query_params, False, str(http_error))
+            raise
+
+        _record_dataset_list_api_call(url, headers, resp.status_code, elapsed_ms, query_params, True)
+
+        payload = resp.json()
+        chunk_payloads.append(payload)
+        chunk_path = chunk_dir / DATASET_CHUNK_FILE_TEMPLATE.format(chunk_index)
+        with open(chunk_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+
+        chunk_count = len(payload.get("data", []))
+        total_processed += chunk_count
+        if total_expected is None:
+            total_expected = payload.get("meta", {}).get("totalCounts")
+
+        logger.info(
+            "データセット一覧: チャンク%04dを取得 (件数=%d, offset=%d)",
+            chunk_index,
+            chunk_count,
+            offset,
+        )
+
+        if total_expected is not None and total_processed >= total_expected:
+            break
+        if chunk_count == 0:
+            break
+        if total_expected is None and chunk_count < page_size:
+            break
+
+        offset += page_size
+        chunk_index += 1
+
+    merged_payload = _merge_dataset_chunk_payloads(chunk_payloads)
+    logger.info(
+        "データセット一覧: チャンク分割取得完了 (chunks=%d, records=%d, expected=%s)",
+        len(chunk_payloads),
+        total_processed,
+        total_expected if total_expected is not None else "unknown",
+    )
+    return merged_payload
+
 def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
     """
     template.jsonの全テンプレートIDについてinvoiceSchemasを取得し保存する
@@ -106,7 +409,7 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
         from net.http_helpers import parallel_download
         
         if progress_callback:
-            if not progress_callback(0, 100, "invoiceSchemas取得を開始しています..."):
+            if not progress_callback(0, 100, "invoiceSchemas取得を開始しています... (並列: 有効)"):
                 return "キャンセルされました"
                 
         os.makedirs(os.path.join(output_dir, "invoiceSchemas"), exist_ok=True)
@@ -114,7 +417,7 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
         log_path = os.path.join(output_dir, "invoiceSchemas", "invoiceSchemas_fetch.log")
 
         if progress_callback:
-            if not progress_callback(5, 100, "template.jsonを読み込み中..."):
+            if not progress_callback(5, 100, "template.jsonを読み込み中... (並列: 有効)"):
                 return "キャンセルされました"
 
         try:
@@ -127,7 +430,7 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
             template_ids = []
 
         if progress_callback:
-            if not progress_callback(10, 100, f"取得対象: {len(template_ids)}件のテンプレート"):
+            if not progress_callback(10, 100, f"取得対象: {len(template_ids)}件のテンプレート (並列: 有効)"):
                 return "キャンセルされました"
 
         summary_path = os.path.join(output_dir, "invoiceSchemas", "summary.json")
@@ -158,7 +461,7 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
         def adjusted_progress_callback(current, total, message):
             if progress_callback:
                 progress_percent = 10 + int((current / 100) * 85)  # 10-95%
-                return progress_callback(progress_percent, 100, message)
+                return progress_callback(progress_percent, 100, f"並列invoiceSchema取得中: {message}")
             return True
         
         result = parallel_download(
@@ -174,7 +477,7 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
             json.dump(summary, f, ensure_ascii=False, indent=2)
 
         if progress_callback:
-            progress_callback(100, 100, "invoiceSchema取得完了")
+            progress_callback(100, 100, "invoiceSchema取得完了 (並列: 有効)")
             
         success_count = len(summary.get("success", []))
         failed_count = len(summary.get("failed", {}))
@@ -233,29 +536,67 @@ def fetch_self_info_from_api(bearer_token=None, output_dir="output/rde/data", pa
         "Origin": "https://rde.nims.go.jp",
         "Referer": "https://rde.nims.go.jp/"
     }
+    
+    # API記録機能の初期化
+    import time
+    start_time = time.time()
+    
     try:
         logger.info("ユーザー情報取得開始")
         # v1.18.4: bearer_token=Noneで自動選択させる
         resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
+        elapsed_ms = (time.time() - start_time) * 1000
         
         # レスポンスチェック
         if resp is None:
             error_msg = "ユーザー情報取得失敗: APIリクエストがNoneを返しました（ネットワークエラーまたはタイムアウト）"
             logger.error(error_msg)
+            
+            # API記録を追加（失敗）
+            try:
+                from classes.basic.core.api_recording_wrapper import record_api_call_for_self_info
+                record_api_call_for_self_info(url, headers, 0, elapsed_ms, False, "APIリクエスト失敗")
+            except Exception as e:
+                logger.debug(f"API記録追加失敗: {e}")
+            
             raise Exception(error_msg)
         
         # HTTPステータスコードチェック（v2.0.1改善）
         if resp.status_code == 401:
             error_msg = "認証エラー（401）: Bearer Tokenが無効または期限切れです。再ログインしてください。"
             logger.error(error_msg)
+            
+            # API記録を追加（401）
+            try:
+                from classes.basic.core.api_recording_wrapper import record_api_call_for_self_info
+                record_api_call_for_self_info(url, headers, 401, elapsed_ms, False, error_msg)
+            except Exception as e:
+                logger.debug(f"API記録追加失敗: {e}")
+            
             raise Exception(error_msg)
         elif resp.status_code == 403:
             error_msg = "アクセス拒否（403）: このユーザーにはユーザー情報取得の権限がありません。"
             logger.error(error_msg)
+            
+            # API記録を追加（403）
+            try:
+                from classes.basic.core.api_recording_wrapper import record_api_call_for_self_info
+                record_api_call_for_self_info(url, headers, 403, elapsed_ms, False, error_msg)
+            except Exception as e:
+                logger.debug(f"API記録追加失敗: {e}")
+            
             raise Exception(error_msg)
         elif resp.status_code != 200:
             error_msg = f"ユーザー情報取得失敗: HTTPステータス {resp.status_code}"
             logger.error(error_msg)
+            
+            # API記録を追加（その他エラー）
+            try:
+                from classes.basic.core.api_recording_wrapper import record_api_call_for_self_info
+                record_api_call_for_self_info(url, headers, resp.status_code, elapsed_ms, False, error_msg)
+            except Exception as e:
+                logger.debug(f"API記録追加失敗: {e}")
+            
             raise Exception(error_msg)
         
         # JSONパース
@@ -264,6 +605,14 @@ def fetch_self_info_from_api(bearer_token=None, output_dir="output/rde/data", pa
         except Exception as json_error:
             error_msg = f"ユーザー情報のJSONパース失敗: {json_error}"
             logger.error(error_msg)
+            
+            # API記録を追加（パースエラー）
+            try:
+                from classes.basic.core.api_recording_wrapper import record_api_call_for_self_info
+                record_api_call_for_self_info(url, headers, resp.status_code, elapsed_ms, False, f"JSON解析エラー: {json_error}")
+            except Exception as e:
+                logger.debug(f"API記録追加失敗: {e}")
+            
             raise Exception(error_msg)
         
         # ファイル保存
@@ -272,6 +621,14 @@ def fetch_self_info_from_api(bearer_token=None, output_dir="output/rde/data", pa
         with open(save_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         logger.info(f"self.json取得・保存完了: {save_path}")
+        
+        # API記録を追加（成功）
+        try:
+            from classes.basic.core.api_recording_wrapper import record_api_call_for_self_info
+            record_api_call_for_self_info(url, headers, 200, elapsed_ms, True)
+        except Exception as e:
+            logger.debug(f"API記録追加失敗: {e}")
+        
         return True
         
     except Exception as e:
@@ -280,7 +637,7 @@ def fetch_self_info_from_api(bearer_token=None, output_dir="output/rde/data", pa
         raise
 
 
-def fetch_all_data_entrys_info(bearer_token, output_dir="output/rde/data", progress_callback=None):
+def fetch_all_data_entrys_info(bearer_token, output_dir="output/rde/data", progress_callback=None, parallel_threshold: int = 50, max_workers: int = 10):
     """
     dataset.json内の全データセットIDでfetch_data_entry_info_from_apiを呼び出す
     
@@ -291,6 +648,8 @@ def fetch_all_data_entrys_info(bearer_token, output_dir="output/rde/data", progr
         bearer_token: 認証トークン
         output_dir: 出力ディレクトリ
         progress_callback: プログレスコールバック関数 (current, total, message) -> bool
+        parallel_threshold: 並列化閾値（デフォルト: 50件）
+        max_workers: 最大並列ワーカー数（デフォルト: 10）
     """
     try:
         from net.http_helpers import parallel_download
@@ -340,9 +699,9 @@ def fetch_all_data_entrys_info(bearer_token, output_dir="output/rde/data", progr
         result = parallel_download(
             tasks=tasks,
             worker_function=worker,
-            max_workers=10,
+            max_workers=max_workers,
             progress_callback=adjusted_progress_callback,
-            threshold=50
+            threshold=parallel_threshold
         )
         
         result_msg = (f"データエントリ情報取得完了: "
@@ -466,7 +825,7 @@ def fetch_all_invoices_info(bearer_token, output_dir="output/rde/data", progress
         
         # === 事前カウント：総予定取得数を計算 ===
         if progress_callback:
-            if not progress_callback(0, 100, "インボイス総数を計算中..."):
+            if not progress_callback(0, 100, "インボイス総数を計算中... (並列: 有効)"):
                 return "キャンセルされました"
         
         dataentry_files = glob.glob(os.path.join(dataentry_dir, "*.json"))
@@ -494,7 +853,7 @@ def fetch_all_invoices_info(bearer_token, output_dir="output/rde/data", progress
         logger.info(f"インボイス取得計画: 総数={total_entries}件")
         
         if progress_callback:
-            msg = f"インボイス取得開始 (データセット: {len(dataentry_files)}件, タイル総数: {total_entries}件)"
+            msg = f"インボイス取得開始 (データセット: {len(dataentry_files)}件, タイル総数: {total_entries}件, 並列: 有効)"
             if not progress_callback(5, 100, msg):
                 return "キャンセルされました"
         
@@ -515,7 +874,7 @@ def fetch_all_invoices_info(bearer_token, output_dir="output/rde/data", progress
         def adjusted_progress_callback(current, total, message):
             if progress_callback:
                 progress_percent = 5 + int((current / 100) * 90)  # 5-95%
-                return progress_callback(progress_percent, 100, message)
+                return progress_callback(progress_percent, 100, f"並列インボイス取得中: {message}")
             return True
         
         result = parallel_download(
@@ -577,71 +936,164 @@ def fetch_dataset_info_respectively_from_api(bearer_token, dataset_id, output_di
         raise
 
 # --- API取得系 ---
-def fetch_all_dataset_info(bearer_token, output_dir="output/rde/data",onlySelf=False,searchWords=None):
-    """データセット情報をAPIから取得し、dataset.jsonとして保存"""
-    # デフォルト引数のパス区切りを修正（バックスラッシュ→スラッシュ）
-    # output_dir="output/rde/data" に変更
-    #url = "https://rde-api.nims.go.jp/datasets?sort=-modified&include=manager%2Creleases&fields%5Buser%5D=id%2CuserName%2CorganizationName%2CisDeleted&fields%5Brelease%5D=version%2CreleaseNumber"
-    userName = get_self_username_from_json()
-    
+def fetch_all_dataset_info(
+    bearer_token,
+    output_dir="output/rde/data",
+    onlySelf=False,
+    searchWords=None,
+    progress_callback: Optional[Callable[[int, int, str], bool]] = None,
+    parallel_threshold: int = 20,
+    max_workers: int = 8,
+):
+    """データセット情報をAPIから取得し、dataset.jsonとして保存しつつ進捗を通知する"""
+    user_name = get_self_username_from_json()
+
     # パス区切りを統一
     output_dir = os.path.normpath(output_dir)
+    detail_dir = os.path.join(output_dir, "datasets")
+
+    search_query = None
     if onlySelf is True:
-        if searchWords and len(searchWords) > 0 :
+        if searchWords and len(searchWords) > 0:
             logger.debug("searchWords: %s", searchWords)
-            escapedUserName = searchWords.replace(" ", "%20").replace(",", "%2C")
+            search_query = searchWords
         else:
-            logger.debug("UserName: %s", userName)
-            escapedUserName = userName.replace(" ", "%20").replace(",", "%2C")
-        url = f"https://rde-api.nims.go.jp/datasets?searchWords={escapedUserName}&sort=-modified&page%5Blimit%5D=5000&include=manager%2Creleases&fields%5Buser%5D=id%2CuserName%2CorganizationName%2CisDeleted&fields%5Brelease%5D=version%2CreleaseNumber"
-    else:
-        url = "https://rde-api.nims.go.jp/datasets?sort=-modified&page%5Blimit%5D=5000&include=manager%2Creleases&fields%5Buser%5D=id%2CuserName%2CorganizationName%2CisDeleted&fields%5Brelease%5D=version%2CreleaseNumber"
+            logger.debug("UserName: %s", user_name)
+            search_query = user_name
 
     headers = _make_headers(bearer_token, host="rde-api.nims.go.jp", origin="https://rde.nims.go.jp", referer="https://rde.nims.go.jp/")
+    dataset_payload: Dict = {}
+    emit_progress = progress_callback if progress_callback else lambda *_args, **_kwargs: True
     try:
-        resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=10)  # refactored to use api_request_helper
-        if resp is None:
-            logger.error("データセット一覧取得失敗")
-            return
-        resp.raise_for_status()
-        data = resp.json()
-        
+        if not emit_progress(0, 100, "データセット一覧取得を開始しています (並列: 自動)"):
+            return "キャンセルされました"
+
+        dataset_payload = _download_dataset_list_in_chunks(
+            bearer_token=bearer_token,
+            headers=headers,
+            search_words=search_query,
+        )
+
         os.makedirs(output_dir, exist_ok=True)
         save_path = os.path.join(output_dir, "dataset.json")
         with open(save_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-            
+            json.dump(dataset_payload, f, ensure_ascii=False, indent=2)
+
         logger.info("データセット情報(dataset.json)取得・保存完了")
-        
+
     except Exception as e:
-        logger.error(f"データセット情報取得・保存失敗: {e}, URL: {url}")
+        logger.error("データセット情報取得・保存失敗: %s (searchWords=%s)", e, search_query)
         raise
 
-    with open(save_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    datasets = data.get("data", [])
+    datasets = dataset_payload.get("data", [])
+    total_datasets = len(datasets)
+    if not emit_progress(5, 100, f"データセット一覧取得完了 (計画: {total_datasets}件, 並列: 自動)"):
+        return "キャンセルされました"
 
+    datasets_with_meta = []
     for ds in datasets:
         ds_id = ds.get("id")
         attr = ds.get("attributes", {})
-        modifiedAt = attr.get("modified", "")
-        filePath = os.path.join("output/rde/data/datasets", f"{ds_id}.json")
+        modified_at = attr.get("modified", "")
+        modified_dt = parse_datetime(modified_at) if modified_at else None
+        datasets_with_meta.append((ds_id, modified_dt))
 
-        if not ds_id or not modifiedAt:
+    # 取得が必要なデータセット件数を先に数える（キャッシュ利用時も総数表示用）
+    fetch_targets = []
+    for ds_id, modified_dt in datasets_with_meta:
+        if not ds_id or not modified_dt:
             continue
 
+        detail_path = os.path.join(detail_dir, f"{ds_id}.json")
+        file_mtime = datetime.fromtimestamp(os.path.getmtime(detail_path), timezone.utc) if os.path.exists(detail_path) else None
+        needs_fetch = file_mtime is None or file_mtime < modified_dt
+        fetch_targets.append((ds_id, modified_dt, detail_path, needs_fetch))
+
+    total_targets = len(fetch_targets)
+    total_fetch_targets = sum(1 for _ds_id, _modified_dt, _path, need in fetch_targets if need)
+    parallel_enabled = total_fetch_targets >= parallel_threshold and total_fetch_targets > 0
+
+    if not emit_progress(
+        6,
+        100,
+        f"データセット詳細取得準備 (計画: {total_targets}件, 取得対象: {total_fetch_targets}件, 並列: {'有効' if parallel_enabled else '無効'})",
+    ):
+        return "キャンセルされました"
+
+    fetched_count = 0
+
+    if parallel_enabled:
+        tasks = [
+            (bearer_token, ds_id, detail_dir)
+            for ds_id, _modified_dt, _path, needs_fetch in fetch_targets
+            if needs_fetch and ds_id
+        ]
+
+        def detail_worker(token, ds_id, out_dir):
+            try:
+                fetch_dataset_info_respectively_from_api(token, ds_id, output_dir=out_dir)
+                return "success"
+            except Exception as worker_error:
+                logger.error("データセット詳細取得失敗 (並列): %s", worker_error)
+                return "failed"
+
+        def detail_progress(current, total, message):
+            mapped = 5 + int((current / 100) * 90)
+            mapped = max(5, min(95, mapped))
+            return emit_progress(mapped, 100, f"データセット詳細取得中 (並列: 有効) {message}")
+
         try:
-            modified_dt = parse_datetime(modifiedAt)
-            file_mtime = datetime.fromtimestamp(os.path.getmtime(filePath), timezone.utc) if os.path.exists(filePath) else None
+            from net.http_helpers import parallel_download
 
-            # ファイルが存在しない、または更新日時より古いなら取得
-            if file_mtime is None or file_mtime < modified_dt:
-                fetch_dataset_info_respectively_from_api(bearer_token, ds_id)
-            else:
-                logger.info("%s.jsonは最新です。再取得は行いません。", ds_id)
+            result = parallel_download(
+                tasks=tasks,
+                worker_function=detail_worker,
+                max_workers=max_workers,
+                progress_callback=detail_progress,
+                threshold=1,
+            )
+        except Exception as parallel_error:
+            logger.error("データセット詳細並列取得でエラー: %s", parallel_error)
+            result = {"success_count": 0, "failed_count": total_fetch_targets, "cancelled": False}
 
-        except Exception as e:
-            logger.error("ds_id=%s の処理中にエラー: %s", ds_id, e)
+        if result.get("cancelled"):
+            return "キャンセルされました"
+
+        fetched_count = result.get("success_count", 0)
+        if not emit_progress(95, 100, f"データセット詳細取得完了 (並列: 有効, 成功: {fetched_count}/{total_fetch_targets})"):
+            return "キャンセルされました"
+    else:
+        processed_count = 0
+        for ds_id, modified_dt, detail_path, needs_fetch in fetch_targets:
+            processed_count += 1
+            if not ds_id:
+                continue
+
+            try:
+                if needs_fetch:
+                    fetch_dataset_info_respectively_from_api(bearer_token, ds_id, output_dir=detail_dir)
+                    fetched_count += 1
+                else:
+                    logger.info("%s.jsonは最新です。再取得は行いません。", ds_id)
+            except Exception as e:
+                logger.error("ds_id=%s の処理中にエラー: %s", ds_id, e)
+
+            denominator = total_targets if total_targets else 1
+            progress_percent = 5 + int((processed_count / denominator) * 90)
+            status_message = (
+                f"データセット詳細処理 {processed_count}/{denominator}"
+                f" (取得対象: {fetched_count}/{total_fetch_targets}, 並列: 無効)"
+            )
+            if not emit_progress(progress_percent, 100, status_message):
+                return "キャンセルされました"
+
+    final_parallel = "有効" if parallel_enabled else "無効"
+    if not emit_progress(
+        100,
+        100,
+        f"データセット処理完了 (計画: {total_datasets}件, 実行: {fetched_count}件, 並列: {final_parallel})",
+    ):
+        return "キャンセルされました"
 
 
 def fetch_instrument_type_info_from_api(bearer_token, save_path):
@@ -649,6 +1101,9 @@ def fetch_instrument_type_info_from_api(bearer_token, save_path):
     装置タイプ情報をAPIから取得し、instrumentType.jsonとして保存
     v1.18.4: Bearer Token自動選択対応
     """
+    import time
+    start_time = time.time()
+    
     url = "https://rde-instrument-api.nims.go.jp/typeTerms?programId=4bbf62be-f270-4a46-9682-38cd064607ba"
     headers = {
         "Accept": "application/vnd.api+json",
@@ -659,14 +1114,40 @@ def fetch_instrument_type_info_from_api(bearer_token, save_path):
     try:
         # v1.18.4: bearer_token=Noneで自動選択させる
         resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
+        elapsed_ms = (time.time() - start_time) * 1000
+        
         if resp is None:
+            # API記録を追加（失敗）
+            try:
+                from classes.basic.core.api_recording_wrapper import record_api_call_for_instrument_type
+                record_api_call_for_instrument_type(url, headers, 0, elapsed_ms, False, "APIリクエスト失敗")
+            except Exception as e:
+                logger.debug(f"API記録追加失敗: {e}")
+            
             logger.error("装置タイプ情報の取得に失敗しました: リクエストエラー")
             return
+        
         resp.raise_for_status()
         data = resp.json()
         save_json(data, *save_path)
         logger.info("装置タイプ情報の取得・保存に成功しました: %s", os.path.join(*save_path))
+        
+        # API記録を追加（成功）
+        try:
+            from classes.basic.core.api_recording_wrapper import record_api_call_for_instrument_type
+            record_api_call_for_instrument_type(url, headers, 200, elapsed_ms, True)
+        except Exception as e:
+            logger.debug(f"API記録追加失敗: {e}")
     except Exception as e:
+        elapsed_ms = (time.time() - start_time) * 1000
+        
+        # API記録を追加（エラー）
+        try:
+            from classes.basic.core.api_recording_wrapper import record_api_call_for_instrument_type
+            record_api_call_for_instrument_type(url, headers, 500, elapsed_ms, False, str(e))
+        except Exception as e2:
+            logger.debug(f"API記録追加失敗: {e2}")
+        
         logger.error("装置タイプ情報の取得・保存に失敗しました: %s", e)
 
 def fetch_organization_info_from_api(bearer_token, save_path):
@@ -674,6 +1155,9 @@ def fetch_organization_info_from_api(bearer_token, save_path):
     組織情報をAPIから取得し、organization.jsonとして保存
     v1.18.4: Bearer Token自動選択対応
     """
+    import time
+    start_time = time.time()
+    
     url = "https://rde-instrument-api.nims.go.jp/organizations"
     headers = {
         "Accept": "application/vnd.api+json",
@@ -684,14 +1168,40 @@ def fetch_organization_info_from_api(bearer_token, save_path):
     try:
         # v1.18.4: bearer_token=Noneで自動選択させる
         resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
+        elapsed_ms = (time.time() - start_time) * 1000
+        
         if resp is None:
+            # API記録を追加（失敗）
+            try:
+                from classes.basic.core.api_recording_wrapper import record_api_call_for_organization
+                record_api_call_for_organization(url, headers, 0, elapsed_ms, False, "APIリクエスト失敗")
+            except Exception as e:
+                logger.debug(f"API記録追加失敗: {e}")
+            
             logger.error("組織情報の取得に失敗しました: リクエストエラー")
             return
+        
         resp.raise_for_status()
         data = resp.json()
         save_json(data, *save_path)
         logger.info("組織情報の取得・保存に成功しました: %s", os.path.join(*save_path))
+        
+        # API記録を追加（成功）
+        try:
+            from classes.basic.core.api_recording_wrapper import record_api_call_for_organization
+            record_api_call_for_organization(url, headers, 200, elapsed_ms, True)
+        except Exception as e:
+            logger.debug(f"API記録追加失敗: {e}")
     except Exception as e:
+        elapsed_ms = (time.time() - start_time) * 1000
+        
+        # API記録を追加（エラー）
+        try:
+            from classes.basic.core.api_recording_wrapper import record_api_call_for_organization
+            record_api_call_for_organization(url, headers, 500, elapsed_ms, False, str(e))
+        except Exception as e2:
+            logger.debug(f"API記録追加失敗: {e2}")
+        
         logger.error("組織情報の取得・保存に失敗しました: %s", e)
 
 
@@ -700,6 +1210,9 @@ def fetch_template_info_from_api(bearer_token, output_dir="output/rde/data"):
     テンプレート情報をAPIから取得し、template.jsonとして保存
     v1.18.4: Bearer Token自動選択対応
     """
+    import time
+    start_time = time.time()
+    
     url = "https://rde-api.nims.go.jp/datasetTemplates?programId=4bbf62be-f270-4a46-9682-38cd064607ba&teamId=22398c55-8620-430e-afa5-2405c57dd03c&sort=id&page[limit]=10000&page[offset]=0&include=instruments&fields[instrument]=nameJa%2CnameEn"
     headers = {
         "Accept": "application/vnd.api+json",
@@ -710,7 +1223,14 @@ def fetch_template_info_from_api(bearer_token, output_dir="output/rde/data"):
     try:
         # v1.18.4: bearer_token=Noneで自動選択させる
         resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=30)  # datasetTemplates は重い処理のためタイムアウト延長
+        elapsed_ms = (time.time() - start_time) * 1000
+        
         if resp is None:
+            try:
+                from classes.basic.core.api_recording_wrapper import record_api_call_for_template
+                record_api_call_for_template(url, headers, 0, elapsed_ms, False, "APIリクエスト失敗")
+            except Exception as e:
+                logger.debug(f"API記録追加失敗: {e}")
             logger.error("テンプレート情報の取得に失敗しました: リクエストエラー")
             return
         resp.raise_for_status()
@@ -719,7 +1239,18 @@ def fetch_template_info_from_api(bearer_token, output_dir="output/rde/data"):
         with open(os.path.join(output_dir, "template.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         logger.info("テンプレート(template.json)の取得・保存に成功しました。")
+        try:
+            from classes.basic.core.api_recording_wrapper import record_api_call_for_template
+            record_api_call_for_template(url, headers, 200, elapsed_ms, True)
+        except Exception as e:
+            logger.debug(f"API記録追加失敗: {e}")
     except Exception as e:
+        elapsed_ms = (time.time() - start_time) * 1000
+        try:
+            from classes.basic.core.api_recording_wrapper import record_api_call_for_template
+            record_api_call_for_template(url, headers, 500, elapsed_ms, False, str(e))
+        except Exception as e2:
+            logger.debug(f"API記録追加失敗: {e2}")
         logger.error("テンプレートの取得・保存に失敗しました: %s", e)
 
 def fetch_instruments_info_from_api(bearer_token, output_dir="output/rde/data"):
@@ -727,6 +1258,9 @@ def fetch_instruments_info_from_api(bearer_token, output_dir="output/rde/data"):
     設備リスト情報をAPIから取得し、instruments.jsonとして保存
     v1.18.4: Bearer Token自動選択対応
     """
+    import time
+    start_time = time.time()
+    
     url = "https://rde-instrument-api.nims.go.jp/instruments?programId=4bbf62be-f270-4a46-9682-38cd064607ba&page%5Blimit%5D=10000&sort=id&page%5Boffset%5D=0"
     headers = {
         "Accept": "application/vnd.api+json",
@@ -737,7 +1271,14 @@ def fetch_instruments_info_from_api(bearer_token, output_dir="output/rde/data"):
     try:
         # v1.18.4: bearer_token=Noneで自動選択させる
         resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
+        elapsed_ms = (time.time() - start_time) * 1000
+        
         if resp is None:
+            try:
+                from classes.basic.core.api_recording_wrapper import record_api_call_for_instruments
+                record_api_call_for_instruments(url, headers, 0, elapsed_ms, False, "APIリクエスト失敗")
+            except Exception as e:
+                logger.debug(f"API記録追加失敗: {e}")
             logger.error("装置情報の取得に失敗しました: リクエストエラー")
             return
         resp.raise_for_status()
@@ -746,7 +1287,18 @@ def fetch_instruments_info_from_api(bearer_token, output_dir="output/rde/data"):
         with open(os.path.join(output_dir, "instruments.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         logger.info("設備情報(instruments.json)の取得・保存に成功しました。")
+        try:
+            from classes.basic.core.api_recording_wrapper import record_api_call_for_instruments
+            record_api_call_for_instruments(url, headers, 200, elapsed_ms, True)
+        except Exception as e:
+            logger.debug(f"API記録追加失敗: {e}")
     except Exception as e:
+        elapsed_ms = (time.time() - start_time) * 1000
+        try:
+            from classes.basic.core.api_recording_wrapper import record_api_call_for_instruments
+            record_api_call_for_instruments(url, headers, 500, elapsed_ms, False, str(e))
+        except Exception as e2:
+            logger.debug(f"API記録追加失敗: {e2}")
         logger.error("設備情報の取得・保存に失敗しました: %s", e)
 
 def fetch_licenses_info_from_api(bearer_token, output_dir="output/rde/data"):
@@ -754,6 +1306,9 @@ def fetch_licenses_info_from_api(bearer_token, output_dir="output/rde/data"):
     利用ライセンスマスタ情報をAPIから取得し、licenses.jsonとして保存
     v1.18.4: Bearer Token自動選択対応
     """
+    import time
+    start_time = time.time()
+    
     url = "https://rde-api.nims.go.jp/licenses"
     headers = {
         "Accept": "application/vnd.api+json",
@@ -764,7 +1319,14 @@ def fetch_licenses_info_from_api(bearer_token, output_dir="output/rde/data"):
     try:
         # v1.18.4: bearer_token=Noneで自動選択させる
         resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
+        elapsed_ms = (time.time() - start_time) * 1000
+        
         if resp is None:
+            try:
+                from classes.basic.core.api_recording_wrapper import record_api_call_for_licenses
+                record_api_call_for_licenses(url, headers, 0, elapsed_ms, False, "APIリクエスト失敗")
+            except Exception as e:
+                logger.debug(f"API記録追加失敗: {e}")
             logger.error("利用ライセンス情報の取得に失敗しました: リクエストエラー")
             return
         resp.raise_for_status()
@@ -774,27 +1336,532 @@ def fetch_licenses_info_from_api(bearer_token, output_dir="output/rde/data"):
             json.dump(data, f, ensure_ascii=False, indent=2)
         logger.info("利用ライセンス情報(licenses.json)の取得・保存に成功しました。")
         logger.info(f"利用ライセンス情報取得完了: {len(data.get('data', []))}件のライセンス")
+        try:
+            from classes.basic.core.api_recording_wrapper import record_api_call_for_licenses
+            record_api_call_for_licenses(url, headers, 200, elapsed_ms, True)
+        except Exception as e:
+            logger.debug(f"API記録追加失敗: {e}")
     except Exception as e:
+        elapsed_ms = (time.time() - start_time) * 1000
+        try:
+            from classes.basic.core.api_recording_wrapper import record_api_call_for_licenses
+            record_api_call_for_licenses(url, headers, 500, elapsed_ms, False, str(e))
+        except Exception as e2:
+            logger.debug(f"API記録追加失敗: {e2}")
         logger.error("利用ライセンス情報の取得・保存に失敗しました: %s", e)
         logger.error(f"利用ライセンス情報取得失敗: {e}")
 
 
 # --- グループ情報取得・WebView・info生成 ---
 def fetch_group_info_from_api(url, headers, save_path, bearer_token=None):
-    resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=10)  # refactored to use api_request_helper
-    if resp is None:
-        raise Exception("グループ情報取得失敗: リクエストエラー")
-    resp.raise_for_status()
-    data = resp.json()
-    save_json(data, *save_path)
-    return data
+    import time
+    start_time = time.time()
+    
+    try:
+        resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=10)  # refactored to use api_request_helper
+        elapsed_ms = (time.time() - start_time) * 1000
+        
+        if resp is None:
+            # API記録を追加（失敗）
+            try:
+                from classes.basic.core.api_recording_wrapper import record_api_call_for_group
+                group_type = "subgroup" if "project_group_id" in url else ("detail" if "groupDetail" in str(save_path) else "root")
+                record_api_call_for_group(url, headers, 0, elapsed_ms, group_type, False, "APIリクエスト失敗")
+            except Exception as e:
+                logger.debug(f"API記録追加失敗: {e}")
+            
+            raise Exception("グループ情報取得失敗: リクエストエラー")
+        
+        resp.raise_for_status()
+        data = resp.json()
+        save_json(data, *save_path)
+        
+        # API記録を追加（成功）
+        try:
+            from classes.basic.core.api_recording_wrapper import record_api_call_for_group
+            group_type = "subgroup" if "project_group_id" in url else ("detail" if "groupDetail" in str(save_path) else "root")
+            record_api_call_for_group(url, headers, 200, elapsed_ms, group_type, True)
+        except Exception as e:
+            logger.debug(f"API記録追加失敗: {e}")
+        
+        return data
+    except Exception as e:
+        elapsed_ms = (time.time() - start_time) * 1000
+        
+        # API記録を追加（エラー）
+        try:
+            from classes.basic.core.api_recording_wrapper import record_api_call_for_group
+            group_type = "subgroup" if "project_group_id" in url else ("detail" if "groupDetail" in str(save_path) else "root")
+            record_api_call_for_group(url, headers, 500, elapsed_ms, group_type, False, str(e))
+        except Exception as e2:
+            logger.debug(f"API記録追加失敗: {e2}")
+        
+        raise
 
-def parse_group_id_from_data(data):
+
+@dataclass
+class GroupFetchResult:
+    group_data: Dict
+    program_details: Dict[str, Dict]
+    project_details: Dict[str, Dict]
+    project_groups_by_program: Dict[str, List[Dict]]
+    selected_program_id: Optional[str]
+    selected_project_id: Optional[str]
+    selected_program_data: Optional[Dict]
+    selected_project_data: Optional[Dict]
+    subgroup_summary: Dict[str, Dict[str, int]]
+
+
+class GroupFetchCancelled(Exception):
+    """グループ階層取得処理がユーザー操作で中断されたことを示す内部例外"""
+
+
+def _extract_group_items(payload: Dict) -> List[Dict]:
+    return [item for item in payload.get("included", []) if item.get("type") == "group"]
+
+
+def run_group_hierarchy_pipeline(
+    bearer_token: str,
+    parent_widget=None,
+    preferred_program_id: Optional[str] = None,
+    progress_callback: Optional[Callable[[int, int, str], bool]] = None,
+    headers: Optional[Dict[str, str]] = None,
+    force_project_dialog: bool = False,
+    force_program_dialog: bool = False,
+    force_download: bool = False,
+) -> GroupFetchResult:
+    """root→program→project→subgroup の取得フローを共通実装で実行する
+    
+    v2.1.22追加:
+    - force_download引数を追加（subGroups個別ファイルの強制取得対応）
+    """
+    from classes.basic.ui.group_selection_dialog import show_group_selection_if_needed
+
+    def emit_progress(percent: int, total_or_message: str, message: str = None):
+        """Progress emitter supporting both 2 and 3 argument calls.
+        - emit_progress(percent, message) 
+        - emit_progress(percent, total, message)
+        """
+        actual_message = message if message is not None else total_or_message
+        if progress_callback and not progress_callback(percent, 100, actual_message):
+            raise GroupFetchCancelled("キャンセルされました")
+
+    headers = headers or _make_headers(
+        bearer_token,
+        host="rde-api.nims.go.jp",
+        origin="https://rde.nims.go.jp",
+        referer="https://rde.nims.go.jp/",
+    )
+
+    emit_progress(5, "ルートグループ取得中...")
+    group_url = "https://rde-api.nims.go.jp/groups/root?include=children%2Cmembers"
+    group_json_path = [OUTPUT_DIR, "rde", "data", "group.json"]
+    group_data = fetch_group_info_from_api(group_url, headers, group_json_path)
+
+    program_groups = _extract_group_items(group_data)
+    if not program_groups:
+        raise Exception("Rootレスポンスに参照可能なプログラムが含まれていません。")
+
+    program_ids = {item.get("id") for item in program_groups if item.get("id")}
+    selected_program_id = preferred_program_id if preferred_program_id in program_ids else None
+    if not selected_program_id:
+        selection = show_group_selection_if_needed(
+            program_groups,
+            parent_widget,
+            context_name="プログラム（Root Group）",
+            force_dialog=force_program_dialog,
+            preferred_group_id=preferred_program_id,
+            remember_context=PROGRAM_SELECTION_CONTEXT,
+            auto_select_saved=not force_program_dialog,
+        )
+        if not selection:
+            raise GroupFetchCancelled("プログラム選択がキャンセルされました")
+        selected_program_id = selection["id"]
+
+    emit_progress(15, "プログラム詳細取得中...")
+    program_details: Dict[str, Dict] = {}
+    selected_program_data: Optional[Dict] = None
+    total_programs = max(len(program_groups), 1)
+    for idx, program in enumerate(program_groups, 1):
+        program_id = program.get("id")
+        if not program_id:
+            continue
+        program_name = program.get("attributes", {}).get("name", "名称不明")
+        detail_url = f"https://rde-api.nims.go.jp/groups/{program_id}?include=children%2Cmembers"
+        save_path = [GROUP_PROJECT_DIR, f"{program_id}.json"]
+        emit_progress(15 + int((idx / total_programs) * 15), f"プログラム取得: {program_name[:30]}...")
+        detail_data = fetch_group_info_from_api(detail_url, headers, save_path)
+        program_details[program_id] = detail_data
+        if program_id == selected_program_id:
+            selected_program_data = detail_data
+
+    if not selected_program_data:
+        selected_program_data = program_details.get(next(iter(program_details.keys()), ""))
+    if not selected_program_data:
+        raise Exception("プログラム詳細の取得に失敗しました。")
+
+    save_json(selected_program_data, GROUP_DETAIL_JSON_PATH)
+
+
+    project_groups_by_program: Dict[str, List[Dict]] = {}
+    project_candidates: List[Dict] = []
+    for program_id, detail_data in program_details.items():
+        groups = _extract_group_items(detail_data)
+        project_groups_by_program[program_id] = groups
+        for group in groups:
+            metadata = dict(group)
+            metadata["program_id"] = program_id
+            project_candidates.append(metadata)
+
+    if not project_groups_by_program.get(selected_program_id):
+        raise Exception("選択されたプログラムに紐づくプロジェクトが見つかりません。")
+
+    emit_progress(35, "プロジェクト詳細取得中...")
+    project_details: Dict[str, Dict] = {}
+    project_meta: Dict[str, Dict[str, str]] = {}
+    processed_ids = set()
+    total_projects = max(len(project_candidates), 1)
+    for idx, candidate in enumerate(project_candidates, 1):
+        project_id = candidate.get("id")
+        if not project_id or project_id in processed_ids:
+            continue
+        processed_ids.add(project_id)
+        project_name = candidate.get("attributes", {}).get("name", "名称不明")
+        detail_url = f"https://rde-api.nims.go.jp/groups/{project_id}?include=children%2Cmembers"
+        save_path = [GROUP_ORGNIZATION_DIR, f"{project_id}.json"]
+        emit_progress(35 + int((idx / total_projects) * 25), f"プロジェクト取得: {project_name[:30]}...")
+        project_data = fetch_group_info_from_api(detail_url, headers, save_path)
+        project_details[project_id] = project_data
+        project_meta[project_id] = {
+            "name": project_name,
+            "program_id": candidate.get("program_id", "")
+        }
+
+    program_projects = project_groups_by_program.get(selected_program_id, [])
+    selection = show_group_selection_if_needed(
+        program_projects,
+        parent_widget,
+        context_name="プロジェクトグループ（Detail）",
+        force_dialog=force_project_dialog,
+        remember_context=PROJECT_SELECTION_CONTEXT,
+    )
+    if not selection:
+        raise GroupFetchCancelled("プロジェクト選択がキャンセルされました")
+    selected_project_id = selection["id"]
+
+    selected_project_data = project_details.get(selected_project_id)
+    if not selected_project_data:
+        detail_url = f"https://rde-api.nims.go.jp/groups/{selected_project_id}?include=children%2Cmembers"
+        selected_project_data = fetch_group_info_from_api(detail_url, headers, [GROUP_ORGNIZATION_DIR, f"{selected_project_id}.json"])
+        project_details[selected_project_id] = selected_project_data
+
+    save_json(selected_project_data, SUBGROUP_JSON_PATH)
+
+    emit_progress(65, "サブグループ詳細取得中...")
+    subgroup_summary: Dict[str, Dict[str, int]] = {}
+    total_project_details = max(len(project_details), 1)
+    for idx, (project_id, project_data) in enumerate(project_details.items(), 1):
+        project_name = project_meta.get(project_id, {}).get("name", "名称不明")
+        emit_progress(65 + int((idx / total_project_details) * 30), f"サブグループ展開: {project_name[:30]}...")
+        success, fail, errors = fetch_all_subgroups(
+            bearer_token=bearer_token,
+            sub_group_data=project_data,
+            headers=headers,
+            progress_callback=emit_progress,
+            destination_dir=SUBGROUP_DETAILS_DIR,
+            legacy_dir=LEGACY_SUBGROUP_DETAILS_DIR,
+            project_group_id=project_id,
+            project_group_name=project_name,
+            force_download=force_download,
+        )
+        subgroup_summary[project_id] = {
+            "success": success,
+            "fail": fail,
+            "errors": len(errors)
+        }
+
+    emit_progress(100, "グループ階層取得完了")
+
+    return GroupFetchResult(
+        group_data=group_data,
+        program_details=program_details,
+        project_details=project_details,
+        project_groups_by_program=project_groups_by_program,
+        selected_program_id=selected_program_id,
+        selected_project_id=selected_project_id,
+        selected_program_data=selected_program_data,
+        selected_project_data=selected_project_data,
+        subgroup_summary=subgroup_summary,
+    )
+def parse_group_id_from_data_old(data, preferred_program_id=None):
+    """
+    included配列からグループIDを抽出
+    
+    Args:
+        data: group.json等のレスポンスデータ
+        preferred_program_id: 優先するプログラムID (None時は最初のgroupを返す)
+    
+    Returns:
+        str: グループID
+    """
     included = data.get("included", [])
+    
+    # 優先IDが指定されている場合は検索
+    if preferred_program_id:
+        for item in included:
+            if (item.get("type") == "group" and 
+                item.get("id") == preferred_program_id):
+                return item["id"]
+        
+        # 見つからない場合は警告
+        logger.warning(f"指定されたプログラムID '{preferred_program_id[:20]}...' が見つかりません。最初のgroupを使用します。")
+    
+    # デフォルト: 最初のgroupを返す
     for item in included:
         if item.get("type") == "group" and "id" in item:
             return item["id"]
+    
     return None
+
+
+def fetch_all_subgroups(
+    bearer_token: str,
+    sub_group_data: dict,
+    headers: dict,
+    progress_callback=None,
+    base_progress: int = 70,
+    progress_range: int = 30,
+    destination_dir: Optional[str] = None,
+    legacy_dir: Optional[str] = None,
+    project_group_id: Optional[str] = None,
+    project_group_name: Optional[str] = None,
+    force_download: bool = False,
+):
+    """
+    複数サブグループの個別詳細を一括取得して保存（v2.1.19改修）
+    
+    subGroup.jsonのincluded配列から全サブグループIDを抽出し、
+    各サブグループの詳細情報を個別にAPIで取得して
+    output/rde/data/subGroups/{subgroup_id}.json に保存します（legacy互換でsubgroups/にも保存可能）。
+    
+    v2.1.21改修:
+    - force_download引数を追加。False時は既存ファイルがあればスキップ（個別ファイル確認）
+    
+    Args:
+        bearer_token: 認証トークン
+        sub_group_data: subGroup.jsonのデータ
+        headers: HTTPヘッダ
+        progress_callback: プログレスコールバック関数
+        base_progress: プログレスバーの開始位置（%）
+        progress_range: プログレスバーの範囲（%）
+        force_download: True時は既存ファイルを上書き、False時はスキップ
+    
+    Returns:
+        tuple: (成功数, 失敗数, エラーメッセージリスト)
+    """
+    import time
+    from pathlib import Path
+    
+    resolved_dir = destination_dir
+    if not resolved_dir:
+        try:
+            resolved_dir = get_dynamic_file_path("subgroups")
+        except Exception:
+            resolved_dir = SUBGROUP_DETAILS_DIR
+
+    target_dir = Path(resolved_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    legacy_target = None
+    if legacy_dir:
+        legacy_target = Path(legacy_dir)
+        legacy_target.mkdir(parents=True, exist_ok=True)
+    
+    # included配列から type="group" かつ groupType="TEAM" を抽出（v2.1.17修正：TEAMはサブグループを示す）
+    included = sub_group_data.get("included", [])
+    subgroups = [
+        item for item in included 
+        if item.get("type") == "group" 
+        and item.get("attributes", {}).get("groupType") == "TEAM"
+    ]
+    
+    if not subgroups:
+        logger.info("サブグループが見つかりませんでした。")
+        return (0, 0, [])
+    
+    logger.info(f"\n[サブグループ個別取得ループ開始] v2.1.24")
+    logger.info(f"  🔄 ループ処理対象: {len(subgroups)}件のサブグループ")
+    logger.info(f"  🔧 force_download: {force_download}")
+    logger.info(f"  💾 保存先: {target_dir}\n")
+    
+    success_count = 0
+    fail_count = 0
+    skipped_count = 0
+    error_messages = []
+    
+    for i, subgroup in enumerate(subgroups, 1):
+        subgroup_id = subgroup.get("id", "")
+        subgroup_name = subgroup.get("attributes", {}).get("name", "名称不明")
+        
+        if not subgroup_id:
+            logger.warning(f"サブグループ {i}/{len(subgroups)}: IDが見つかりません。スキップします。")
+            fail_count += 1
+            continue
+        
+        # 保存先パスを確認
+        save_path = target_dir / f"{subgroup_id}.json"
+        
+        # v2.1.24: 個別ファイル存在確認（ログ強化版）
+        file_exists = save_path.exists()
+        logger.debug(f"\n  [{i:3d}/{len(subgroups)}] サブグループ: {subgroup_name}")
+        logger.debug(f"       ID: {subgroup_id}")
+        logger.debug(f"       保存先: {save_path}")
+        logger.debug(f"       ファイル存在: {file_exists}")
+        
+        if not force_download and file_exists:
+            skipped_count += 1
+            logger.info(f"  [{i:3d}] [スキップ] {subgroup_name} (既存ファイルを使用)")
+            if progress_callback:
+                current_progress = base_progress + int((i / len(subgroups)) * progress_range)
+                message = f"サブグループ確認中 ({i}/{len(subgroups)}): {subgroup_name[:30]}... [スキップ済み]"
+                if not progress_callback(current_progress, 100, message):
+                    logger.warning("ユーザーによりキャンセルされました")
+                    return (success_count, fail_count, error_messages)
+            continue
+        
+        if force_download and file_exists:
+            logger.info(f"  [{i:3d}] [上書き予定] {subgroup_name} (force_download=True)")
+        
+        # プログレス更新
+        if progress_callback:
+            current_progress = base_progress + int((i / len(subgroups)) * progress_range)
+            message = f"サブグループ取得中 ({i}/{len(subgroups)}): {subgroup_name[:30]}..."
+            if not progress_callback(current_progress, 100, message):
+                logger.warning("ユーザーによりキャンセルされました")
+                return (success_count, fail_count, error_messages)
+        
+        # API呼び出し
+        subgroup_url = f"https://rde-api.nims.go.jp/groups/{subgroup_id}?include=children%2Cmembers"
+        logger.info(f"  [{i:3d}] [API取得開始] {subgroup_name}")
+        logger.debug(f"       URL: {subgroup_url}")
+
+        
+        start_time = time.time()
+        try:
+            resp = api_request("GET", subgroup_url, bearer_token=bearer_token, headers=headers, timeout=10)
+            elapsed_ms = (time.time() - start_time) * 1000
+            
+            if resp is None:
+                logger.warning(f"  [{i:3d}] [API失敗] {subgroup_name} - リクエスト失敗")
+                error_msg = f"サブグループ {subgroup_name}: リクエスト失敗"
+                logger.warning(error_msg)
+                error_messages.append(error_msg)
+                fail_count += 1
+                
+                # API記録（失敗）
+                try:
+                    from classes.basic.core.api_recording_wrapper import record_api_call_for_subgroup_detail
+                    record_api_call_for_subgroup_detail(
+                        subgroup_url, headers, 0, elapsed_ms, subgroup_id, subgroup_name,
+                        step_index=1, success=False, error="APIリクエスト失敗"
+                    )
+                except Exception as e:
+                    logger.debug(f"API記録追加失敗: {e}")
+                
+                continue
+            
+            resp.raise_for_status()
+            subgroup_detail = resp.json()
+            
+            # ファイル保存
+            with open(save_path, "w", encoding="utf-8") as f:
+                json.dump(subgroup_detail, f, ensure_ascii=False, indent=2)
+            if legacy_target:
+                legacy_path = legacy_target / f"{subgroup_id}.json"
+                with open(legacy_path, "w", encoding="utf-8") as f:
+                    json.dump(subgroup_detail, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"  [{i:3d}] [保存完了] {subgroup_name} ({elapsed_ms:.0f}ms)")
+            logger.debug(f"       保存先: {save_path.name}")
+            success_count += 1
+            
+            # API記録（成功）
+            try:
+                from classes.basic.core.api_recording_wrapper import record_api_call_for_subgroup_detail
+                record_api_call_for_subgroup_detail(
+                    subgroup_url, headers, 200, elapsed_ms, subgroup_id, subgroup_name,
+                    step_index=1, success=True
+                )
+            except Exception as e:
+                logger.debug(f"API記録追加失敗: {e}")
+        
+        except Exception as e:
+            elapsed_ms = (time.time() - start_time) * 1000
+            logger.warning(f"  [{i:3d}] [API例外] {subgroup_name} - {str(e)[:80]}")
+            error_msg = f"サブグループ {subgroup_name}: {str(e)[:100]}"
+            logger.error(error_msg)
+            error_messages.append(error_msg)
+            fail_count += 1
+            
+            # API記録（エラー）
+            try:
+                from classes.basic.core.api_recording_wrapper import record_api_call_for_subgroup_detail
+                record_api_call_for_subgroup_detail(
+                    subgroup_url, headers, 500, elapsed_ms, subgroup_id, subgroup_name,
+                    step_index=1, success=False, error=str(e)
+                )
+            except Exception as e2:
+                logger.debug(f"API記録追加失敗: {e2}")
+    
+    # 結果サマリー
+    logger.info(f"\n[サブグループ個別取得ループ完了] v2.1.24")
+    logger.info(f"  ✅ 成功: {success_count}件")
+    logger.info(f"  ❌ 失敗: {fail_count}件")
+    logger.info(f"  ⏭️  スキップ: {skipped_count}件")
+    logger.info(f"  📊 合計: {success_count + fail_count + skipped_count}件")
+    
+    if error_messages:
+        logger.warning(f"  失敗したサブグループ（最初3件）:")
+        for err in error_messages[:3]:
+            logger.warning(f"    - {err}")
+        if len(error_messages) > 3:
+            logger.warning(f"    ... 他 {len(error_messages) - 3}件")
+    
+    logger.info("[サブグループ個別取得ループ終了]\n")
+    
+    return (success_count, fail_count, error_messages)
+
+
+def parse_group_id_from_data(data, preferred_program_id=None):
+    """
+    included配列からグループIDを抽出
+    
+    Args:
+        data: group.json等のレスポンスデータ
+        preferred_program_id: 優先するプログラムID (None時は最初のgroupを返す)
+    
+    Returns:
+        str: グループID
+    """
+    included = data.get("included", [])
+    
+    # 優先IDが指定されている場合は検索
+    if preferred_program_id:
+        for item in included:
+            if (item.get("type") == "group" and 
+                item.get("id") == preferred_program_id):
+                return item["id"]
+        
+        # 見つからない場合は警告
+        logger.warning(f"指定されたプログラムID '{preferred_program_id[:20]}...' が見つかりません。最初のgroupを使用します。")
+    
+    # デフォルト: 最初のgroupを返す
+    for item in included:
+        if item.get("type") == "group" and "id" in item:
+            return item["id"]
+    
+    return None
+
 
 def move_webview_to_group(webview, project_group_id):
     import traceback
@@ -1007,56 +2074,78 @@ def fetch_user_info_stage(bearer_token=None, progress_callback=None, parent_widg
     return "ユーザー情報取得が完了しました"
 
 @stage_error_handler("グループ関連情報取得")
-def fetch_group_info_stage(bearer_token, progress_callback=None):
-    """段階2: グループ関連情報取得（グループ・詳細・サブグループ）"""
+def fetch_group_info_stage(
+    bearer_token,
+    progress_callback=None,
+    program_id=None,
+    parent_widget=None,
+    force_program_dialog: bool = False,
+    force_download: bool = False,
+):
+    """
+    段階2: グループ関連情報取得（グループ・詳細・サブグループ）
+    
+    v2.1.16追加:
+    - program_id引数を追加（グループ選択機能対応）
+    
+    v2.1.17追加:
+    - parent_widget引数を追加（グループ選択ダイアログ表示用）
+    - group.json/groupDetail.json取得後にグループ選択ダイアログ統合
+    - 複数サブグループの個別詳細取得機能（output/rde/data/subGroups/）
+
+    v2.1.20追加:
+    - force_program_dialog引数を追加（UX-GROUP-SEL-ALL-FLOWS対応。プログラム選択を必ず表示）
+    
+    v2.1.22追加:
+    - subGroups/ディレクトリの個別ファイル欠損検出機能
+    """
     try:
-        headers = _make_headers(bearer_token, host="rde-api.nims.go.jp", origin="https://rde.nims.go.jp", referer="https://rde.nims.go.jp/")
+        force_project_dialog = os.environ.get('FORCE_PROJECT_GROUP_DIALOG', '0') == '1'
+
+        def stage_progress(percent: int, total: int, message: str):
+            if progress_callback:
+                return progress_callback(percent, total, message)
+            return True
+
+        # 3つのメインファイル + subGroups/フォルダの完全性をチェック
+        group_files_ready = all(
+            Path(path).exists() for path in (GROUP_JSON_PATH, GROUP_DETAIL_JSON_PATH, SUBGROUP_JSON_PATH)
+        )
+        subgroups_complete = _subgroups_folder_complete() if group_files_ready else False
         
+        if not force_download and group_files_ready and subgroups_complete:
+            logger.info("グループ関連情報: 既存ファイルは完全。取得をスキップします")
+            if progress_callback:
+                progress_callback(100, 100, "既存ファイルを再利用しました")
+            return "グループ関連情報: 既存ファイルを再利用しました"
+
+        result = run_group_hierarchy_pipeline(
+            bearer_token=bearer_token,
+            parent_widget=parent_widget,
+            preferred_program_id=program_id,
+            progress_callback=stage_progress,
+            force_project_dialog=force_project_dialog,
+            force_program_dialog=force_program_dialog,
+            force_download=force_download,
+        )
+
+        total_success = sum(item.get("success", 0) for item in result.subgroup_summary.values())
+        total_fail = sum(item.get("fail", 0) for item in result.subgroup_summary.values())
+        result_msg = (
+            f"グループ関連情報取得が完了しました（サブグループ: 成功 {total_success}件, 失敗 {total_fail}件）"
+        )
+        logger.info(result_msg)
         if progress_callback:
-            if not progress_callback(10, 100, "グループ情報取得中..."):
-                return "キャンセルされました"
-        
-        # グループ情報取得
-        group_url = "https://rde-api.nims.go.jp/groups/root?include=children%2Cmembers"
-        group_json_path = [OUTPUT_DIR, "rde", "data", "group.json"]
-        group_data = fetch_group_info_from_api(group_url, headers, group_json_path)
-        
-        if progress_callback:
-            if not progress_callback(40, 100, "グループ詳細情報取得中..."):
-                return "キャンセルされました"
-        
-        # グループIDを解析
-        group_id = parse_group_id_from_data(group_data)
-        if not group_id:
-            return "グループIDが見つかりません"
-        
-        # グループ詳細情報取得
-        detail_url = f"https://rde-api.nims.go.jp/groups/{group_id}?include=children%2Cmembers"
-        detail_json_path = [OUTPUT_DIR, "rde", "data", "groupDetail.json"]
-        detail_data = fetch_group_info_from_api(detail_url, headers, detail_json_path)
-        
-        if progress_callback:
-            if not progress_callback(70, 100, "サブグループ情報取得中..."):
-                return "キャンセルされました"
-        
-        # プロジェクトグループIDを解析
-        project_group_id = parse_group_id_from_data(detail_data)
-        if not project_group_id:
-            return "プロジェクトグループIDが見つかりません"
-        
-        # サブグループ情報取得
-        sub_group_url = f"https://rde-api.nims.go.jp/groups/{project_group_id}?include=children%2Cmembers"
-        sub_group_json_path = [OUTPUT_DIR, "rde", "data", "subGroup.json"]
-        sub_group_data = fetch_group_info_from_api(sub_group_url, headers, sub_group_json_path)
-        
-        if progress_callback:
-            if not progress_callback(100, 100, "グループ関連情報取得完了"):
-                return "キャンセルされました"
-        
-        return "グループ関連情報取得が完了しました"
+            progress_callback(100, 100, "グループ関連情報取得完了")
+        return result_msg
+
+    except GroupFetchCancelled:
+        logger.info("グループ関連情報取得はキャンセルされました")
+        return "キャンセルされました"
     except Exception as e:
         error_msg = f"グループ関連情報取得でエラーが発生しました: {e}"
         logger.error(error_msg)
+        logger.error(traceback.format_exc())
         return error_msg
 
 @stage_error_handler("組織・装置情報取得")
@@ -1223,6 +2312,61 @@ def _fetch_single_sample_worker(material_token, group_id_sample, sample_dir):
         logger.error(f"サンプル情報({group_id_sample})の取得に失敗: {e}")
         return "failed"
 
+
+def _fetch_single_sample_worker_force(material_token, group_id_sample, sample_dir, force_download=False):
+    """force_download対応版のサンプル取得ワーカー"""
+    try:
+        if not group_id_sample:
+            return "skipped"
+
+        sample_json_path = os.path.join(sample_dir, f"{group_id_sample}.json")
+
+        if force_download and os.path.exists(sample_json_path):
+            try:
+                os.remove(sample_json_path)
+            except Exception as remove_error:
+                logger.debug(f"既存サンプルファイル削除失敗を無視: {remove_error}")
+        elif not force_download and os.path.exists(sample_json_path):
+            logger.debug(f"既存ファイルをスキップ: {sample_json_path}")
+            return "skipped"
+
+        url = (
+            "https://rde-material-api.nims.go.jp/samples?"
+            f"groupId={group_id_sample}&page%5Blimit%5D=1000&page%5Boffset%5D=0&fields%5Bsample%5D=names%2Cdescription%2Ccomposition"
+        )
+        headers_sample = _make_headers(
+            material_token,
+            host="rde-material-api.nims.go.jp",
+            origin="https://rde-entry-arim.nims.go.jp",
+            referer="https://rde-entry-arim.nims.go.jp/",
+        )
+
+        resp = api_request("GET", url, bearer_token=material_token, headers=headers_sample, timeout=10)
+        if resp is None:
+            logger.warning(f"サンプル情報取得失敗 (リクエスト失敗): {group_id_sample}")
+            return "failed"
+
+        if resp.status_code == 404:
+            logger.debug(f"サンプル情報が見つかりません: {group_id_sample}")
+            return "skipped"
+
+        if resp.status_code != 200:
+            logger.warning(f"サンプル情報取得失敗 (HTTP {resp.status_code}): {group_id_sample}")
+            return "failed"
+
+        resp.raise_for_status()
+        data = resp.json()
+
+        with open(sample_json_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"サンプル情報保存完了: {sample_json_path}")
+        return "success"
+
+    except Exception as e:
+        logger.error(f"サンプル情報({group_id_sample})の取得・保存に失敗しました: {e}")
+        return f"failed: {e}"
+
 @stage_error_handler("データセット情報取得")
 def fetch_dataset_info_stage(bearer_token, onlySelf=False, searchWords=None, progress_callback=None):
     """段階5: データセット情報取得"""
@@ -1323,7 +2467,7 @@ def finalize_basic_info_stage(webview=None, progress_callback=None):
             with open(SUBGROUP_JSON_PATH, "r", encoding="utf-8") as f:
                 sub_group_data = json.load(f)
             
-            # グループIDの解析
+            # グループIDの解析（v2.1.16: program_id優先対応）
             group_path = os.path.join(OUTPUT_DIR, "rde", "data", "group.json")
             group_detail_path = os.path.join(OUTPUT_DIR, "rde", "data", "groupDetail.json")
             
@@ -1376,6 +2520,9 @@ def finalize_basic_info_stage(webview=None, progress_callback=None):
 def auto_refresh_subgroup_json(bearer_token, progress_callback=None):
     """
     サブグループ作成成功後にsubGroup.jsonを自動再取得する
+    
+    v2.1.17更新:
+    - parent_widget=None を渡す（自動更新のためダイアログ表示なし）
     """
     try:
         if progress_callback:
@@ -1383,7 +2530,7 @@ def auto_refresh_subgroup_json(bearer_token, progress_callback=None):
                 return "キャンセルされました"
         
         logger.info("サブグループ作成成功 - subGroup.json自動更新開始")
-        result = fetch_group_info_stage(bearer_token, progress_callback)
+        result = fetch_group_info_stage(bearer_token, progress_callback, program_id=None, parent_widget=None)
         
         if progress_callback:
             if not progress_callback(100, 100, "サブグループ情報自動更新完了"):
@@ -1440,7 +2587,17 @@ STAGE_FUNCTIONS = {
     "dataset.json自動更新": auto_refresh_dataset_json
 }
 
-def execute_individual_stage(stage_name, bearer_token, webview=None, onlySelf=False, searchWords=None, progress_callback=None):
+def execute_individual_stage(
+    stage_name,
+    bearer_token,
+    webview=None,
+    onlySelf=False,
+    searchWords=None,
+    progress_callback=None,
+    parent_widget=None,
+    force_program_dialog: bool = False,
+    force_download: bool = False,
+):
     """指定された段階を個別実行する"""
     if stage_name not in STAGE_FUNCTIONS:
         return f"不正な段階名です: {stage_name}"
@@ -1456,9 +2613,25 @@ def execute_individual_stage(stage_name, bearer_token, webview=None, onlySelf=Fa
         
         # 関数のシグネチャに応じて引数を調整
         if stage_name == "データセット情報":
-            result = func(bearer_token, onlySelf=onlySelf, searchWords=searchWords, progress_callback=progress_callback)
+            result = func(
+                bearer_token,
+                onlySelf=onlySelf,
+                searchWords=searchWords,
+                progress_callback=progress_callback,
+            )
         elif stage_name == "統合情報生成":
             result = func(webview=webview, progress_callback=progress_callback)
+        elif stage_name == "ユーザー情報":
+            result = func(bearer_token, progress_callback=progress_callback, parent_widget=parent_widget)
+        elif stage_name == "グループ関連情報":
+            result = func(
+                bearer_token,
+                progress_callback=progress_callback,
+                program_id=None,
+                parent_widget=parent_widget,
+                force_program_dialog=force_program_dialog,
+                force_download=force_download,
+            )
         elif stage_name in ["subGroup.json自動更新", "dataset.json自動更新"]:
             # 自動更新関数は bearer_token と progress_callback のみ
             result = func(bearer_token, progress_callback=progress_callback)
@@ -1473,7 +2646,17 @@ def execute_individual_stage(stage_name, bearer_token, webview=None, onlySelf=Fa
         traceback.print_exc()
         return error_msg
 
-def fetch_basic_info_logic(bearer_token, parent=None, webview=None, onlySelf=False, searchWords=None, skip_confirmation=False, progress_callback=None):
+def fetch_basic_info_logic(
+    bearer_token,
+    parent=None,
+    webview=None,
+    onlySelf=False,
+    searchWords=None,
+    skip_confirmation=False,
+    progress_callback=None,
+    program_id=None,
+    force_download: bool = False,
+):
     """
     基本情報取得・保存・WebView遷移（開発用）
     
@@ -1481,8 +2664,16 @@ def fetch_basic_info_logic(bearer_token, parent=None, webview=None, onlySelf=Fal
     - 事前トークン検証の追加
     - 認証エラー時の再ログイン促進
     - エラーメッセージの明確化
+    
+    v2.1.16追加:
+    - program_id引数を追加（グループ選択機能対応）
+
+    v2.1.20追加:
+    - force_download引数を追加。False時は既存JSONを優先利用し、欠損分のみ取得
     """
     import traceback
+    import json
+    from pathlib import Path
     from core.bearer_token_manager import BearerTokenManager
     from qt_compat.widgets import QMessageBox
     
@@ -1539,6 +2730,32 @@ def fetch_basic_info_logic(bearer_token, parent=None, webview=None, onlySelf=Fal
             return "キャンセルされました"
     
     logger.info("基本情報取得処理を開始します")
+
+    def _exists(path: str) -> bool:
+        return Path(path).exists()
+
+    def _folder_has_files(folder_path: str, expected_count: Optional[int] = None) -> tuple[bool, int]:
+        """フォルダ内のJSONファイル数をチェック。existsは常に確認。
+        
+        Returns:
+            (has_any_files, actual_count): ファイルがあるか、実際のファイル数
+        """
+        folder = Path(folder_path)
+        # フォルダの存在確認はスキップしない（v2.1.21）
+        if not folder.exists():
+            logger.debug(f"フォルダが存在しません: {folder_path}")
+            return False, 0
+        
+        # *.json ファイルをカウント
+        json_files = list(folder.glob("*.json"))
+        actual_count = len(json_files)
+        
+        # expected_countが指定されている場合は欠損判定
+        if expected_count is not None and actual_count < expected_count:
+            logger.info(f"フォルダ内に欠損ファイルあり: {folder_path} (期待: {expected_count}件, 実際: {actual_count}件)")
+            return True, actual_count  # 欠損があってもファイルが1つでもあればTrue
+        
+        return actual_count > 0, actual_count
     
     try:
         # プログレス管理
@@ -1580,76 +2797,104 @@ def fetch_basic_info_logic(bearer_token, parent=None, webview=None, onlySelf=Fal
         # 1. ユーザー自身情報取得
         if not update_stage_progress(0, 0, "開始"):
             return "キャンセルされました"
-        
+
         logger.debug("fetch_self_info_from_api")
-        if not fetch_self_info_from_api(bearer_token, parent_widget=parent):
+        try:
+            if force_download or not _exists(SELF_JSON_PATH):
+                fetch_self_info_from_api(bearer_token, parent_widget=parent)
+            else:
+                logger.info("ユーザー情報: 既存の self.json を利用するため取得をスキップします")
+        except Exception as fetch_error:
+            logger.error(f"ユーザー情報取得エラー: {fetch_error}")
             return "ユーザー情報取得に失敗しました"
         
         if not update_stage_progress(0, 100, "完了"):
             return "キャンセルされました"
 
-        # 2. グループ情報取得
+        group_id = None
+        project_group_id = None
+        sub_group_data = None
+
+        # 2-4. グループ関連情報取得（統合パイプライン）
         if not update_stage_progress(1, 0, "開始"):
             return "キャンセルされました"
-            
-        logger.debug("fetch_group_info_from_api: group")
-        headers = _make_headers(bearer_token, host="rde-api.nims.go.jp", origin="https://rde.nims.go.jp", referer="https://rde.nims.go.jp/")
-        group_url = "https://rde-api.nims.go.jp/groups/root?include=children%2Cmembers"
-        group_json_path = [OUTPUT_DIR, "rde", "data", "group.json"]
-        group_data = fetch_group_info_from_api(group_url, headers, group_json_path)
-        logger.info("グループ情報の取得・保存に成功しました。")
-        
-        if not update_stage_progress(1, 100, "完了"):
+        if not update_stage_progress(2, 0, "準備中"):
+            return "キャンセルされました"
+        if not update_stage_progress(3, 0, "準備中"):
             return "キャンセルされました"
 
-        # グループIDを解析
-        logger.debug("parse_group_id_from_data: group")
-        group_id = parse_group_id_from_data(group_data)
-        if not group_id:
-            error_msg = "included配列にgroup idが見つかりません。"
-            logger.error(error_msg)
-            return error_msg
+        force_project_dialog = os.environ.get('FORCE_PROJECT_GROUP_DIALOG', '0') == '1'
 
-        # 3. グループ詳細情報取得
-        if not update_stage_progress(2, 0, "開始"):
-            return "キャンセルされました"
-            
-        logger.debug("fetch_group_info_from_api: detail")
-        detail_url = f"https://rde-api.nims.go.jp/groups/{group_id}?include=children%2Cmembers"
-        detail_json_path = [OUTPUT_DIR, "rde", "data", "groupDetail.json"]
-        detail_data = fetch_group_info_from_api(detail_url, headers, detail_json_path)
-        logger.info(f"グループ詳細情報({group_id})の取得・保存に成功しました。")
-        
-        if not update_stage_progress(2, 100, "完了"):
-            return "キャンセルされました"
+        def pipeline_progress_adapter(current_percent, total, message):
+            percent = max(0, min(100, current_percent))
+            if percent <= 34:
+                mapped = min(100, int((percent / 34) * 100))
+                return update_stage_progress(1, mapped, message)
+            if percent <= 67:
+                mapped = min(100, int(((percent - 34) / 33) * 100))
+                return update_stage_progress(2, mapped, message)
+            mapped = min(100, int(((percent - 67) / 33) * 100))
+            return update_stage_progress(3, mapped, message)
+        group_files_ready = all(
+            _exists(path) for path in (GROUP_JSON_PATH, GROUP_DETAIL_JSON_PATH, SUBGROUP_JSON_PATH)
+        )
+        subgroups_complete = _subgroups_folder_complete() if group_files_ready else False
+        if group_files_ready and not subgroups_complete and not force_download:
+            logger.info("サブグループ詳細に欠損があるためグループ関連情報を再取得します")
+        use_cache = (not force_download) and group_files_ready and subgroups_complete
+        group_pipeline = None
 
-        # プロジェクトグループIDを解析
-        logger.debug("parse_group_id_from_data: detail")
-        project_group_id = parse_group_id_from_data(detail_data)
-        if not project_group_id:
-            error_msg = "groupDetail.jsonのincluded配列にproject group idが見つかりません。"
-            logger.error(error_msg)
-            return error_msg
+        if use_cache:
+            try:
+                with open(GROUP_DETAIL_JSON_PATH, "r", encoding="utf-8") as f:
+                    cached_program_data = json.load(f)
+                with open(SUBGROUP_JSON_PATH, "r", encoding="utf-8") as f:
+                    cached_project_data = json.load(f)
+                group_id = cached_program_data.get("data", {}).get("id")
+                project_group_id = cached_project_data.get("data", {}).get("id")
+                sub_group_data = cached_project_data
+                if not group_id or not project_group_id:
+                    raise ValueError("キャッシュに必要なグループIDが含まれていません")
+                logger.info("グループ関連情報: 既存ファイルを再利用しました")
+            except Exception as cache_error:
+                logger.warning("グループ関連JSONの読み込みに失敗したため再取得を実行します: %s", cache_error)
+                use_cache = False
 
-        # 4. サブグループ情報取得
-        if not update_stage_progress(3, 0, "開始"):
-            return "キャンセルされました"
-            
-        logger.debug("fetch_group_info_from_api: sub_group")
-        sub_group_url = f"https://rde-api.nims.go.jp/groups/{project_group_id}?include=children%2Cmembers"
-        sub_group_json_path = [OUTPUT_DIR, "rde", "data", "subGroup.json"]
-        try:
-            sub_group_data = fetch_group_info_from_api(sub_group_url, headers, sub_group_json_path)
-            logger.info(f"サブグループ情報({project_group_id})の取得・保存に成功しました。")
-        except Exception as e:
-            logger.error(f"サブグループ情報の取得・保存に失敗しました: {e}")
-            sub_group_data = None
-            
-        if not update_stage_progress(3, 100, "完了"):
-            return "キャンセルされました"
+        if not use_cache:
+            try:
+                group_pipeline = run_group_hierarchy_pipeline(
+                    bearer_token=bearer_token,
+                    parent_widget=parent,
+                    preferred_program_id=program_id,
+                    progress_callback=pipeline_progress_adapter,
+                    force_project_dialog=force_project_dialog,
+                )
+            except GroupFetchCancelled:
+                return "キャンセルされました"
+
+            group_id = group_pipeline.selected_program_id
+            project_group_id = group_pipeline.selected_project_id
+            sub_group_data = group_pipeline.selected_project_data
+
+            if not sub_group_data or not project_group_id:
+                logger.error("サブグループデータを正常に取得できませんでした")
+                return "サブグループ情報を取得できませんでした"
+
+            total_success = sum(item.get("success", 0) for item in group_pipeline.subgroup_summary.values())
+            total_fail = sum(item.get("fail", 0) for item in group_pipeline.subgroup_summary.values())
+            logger.info(
+                "グループ関連情報取得完了（サブグループ: 成功 %s件, 失敗 %s件）",
+                total_success,
+                total_fail,
+            )
+
+        for stage_idx in (1, 2, 3):
+            sub_message = "キャッシュ再利用" if use_cache else "完了"
+            if not update_stage_progress(stage_idx, 100, sub_message):
+                return "キャンセルされました"
 
         # 5. サンプル情報取得
-        if not update_stage_progress(4, 0, "開始"):
+        if not update_stage_progress(4, 0, "サンプル取得準備中"):
             return "キャンセルされました"
             
         logger.debug("fetch_sample_info_from_api")
@@ -1661,73 +2906,159 @@ def fetch_basic_info_logic(bearer_token, parent=None, webview=None, onlySelf=Fal
         os.makedirs(sample_dir, exist_ok=True)
         
         total_samples = len(sub_group_included)
-        processed_samples = 0
-        skipped_samples = 0
-        
-        for idx, included in enumerate(sub_group_included):
-            sample_progress = int((idx / total_samples) * 100) if total_samples > 0 else 100
-            group_id_sample = included.get("id", "")
-            sample_json_path = os.path.join(sample_dir, f"{group_id_sample}.json")
-            
-            # 既存ファイルがある場合はスキップ
-            if os.path.exists(sample_json_path):
-                skipped_samples += 1
-                if not update_stage_progress(4, sample_progress, f"サンプル情報確認中 ({idx + 1}/{total_samples}) - スキップ済み: {skipped_samples}"):
-                    return "キャンセルされました"
-                logger.debug(f"サンプル情報({group_id_sample})は既に存在するためスキップしました: {sample_json_path}")
-                continue
-                
-            if not update_stage_progress(4, sample_progress, f"サンプル情報取得中 ({idx + 1}/{total_samples}) - 処理済み: {processed_samples}"):
-                return "キャンセルされました"
-                
-            url = f"https://rde-material-api.nims.go.jp/samples?groupId={group_id_sample}&page%5Blimit%5D=1000&page%5Boffset%5D=0&fields%5Bsample%5D=names%2Cdescription%2Ccomposition"
-            try:
-                # Material API用のトークンを明示的に取得
-                from config.common import load_bearer_token
-                material_token = load_bearer_token('rde-material.nims.go.jp')
-                headers_sample = _make_headers(material_token, host="rde-material-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
-                resp = api_request("GET", url, bearer_token=material_token, headers=headers_sample, timeout=10)
-                if resp is None:
-                    logger.error(f"サンプル情報({group_id_sample})の取得に失敗しました: リクエストエラー")
-                    continue
-                resp.raise_for_status()
-                data = resp.json()
-                with open(sample_json_path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
-                processed_samples += 1
-                logger.info(f"サンプル情報({group_id_sample})の取得・保存に成功しました: {sample_json_path}")
-            except Exception as e:
-                logger.error(f"サンプル情報({group_id_sample})の取得・保存に失敗しました: {e}")
-                
-        logger.info(f"サンプル情報取得完了: 処理済み {processed_samples}件, スキップ済み {skipped_samples}件")
-        if not update_stage_progress(4, 100, "完了"):
+        if not update_stage_progress(4, 0, f"サンプル取得準備: 計画 {total_samples}件 (並列閾値: 50件)"):
             return "キャンセルされました"
+        
+        # サンプル フォルダ内のファイル数をチェック（v2.1.21: 欠損判定）
+        sample_has_files, sample_actual_count = _folder_has_files(sample_dir, expected_count=total_samples)
+        
+        skip_sample_fetch = not force_download and sample_has_files and sample_actual_count == total_samples
+        
+        if skip_sample_fetch:
+            logger.info(f"サンプル情報: 既存フォルダ({sample_actual_count}件)を利用するため取得をスキップします")
+            if not update_stage_progress(4, 100, f"キャッシュ完了 (計画: {total_samples}件)"):
+                return "キャンセルされました"
+        else:
+            processed_samples = 0
+            skipped_samples = 0
+            failed_samples = 0
+
+            if total_samples >= 50:
+                from config.common import load_bearer_token
+                from net.http_helpers import parallel_download
+
+                material_token = load_bearer_token('rde-material.nims.go.jp')
+                tasks = [
+                    (material_token, included.get("id", ""), sample_dir, force_download)
+                    for included in sub_group_included
+                    if included.get("id")
+                ]
+
+                def sample_parallel_progress(current, total, message):
+                    mapped = 5 + int((current / 100.0) * 90)
+                    mapped = min(95, max(5, mapped))
+                    text = f"並列サンプル取得中 (計画: {total_samples}件, {message})"
+                    return update_stage_progress(4, mapped, text)
+
+                result = parallel_download(
+                    tasks=tasks,
+                    worker_function=_fetch_single_sample_worker_force,
+                    max_workers=10,
+                    progress_callback=sample_parallel_progress,
+                    threshold=1,
+                )
+
+                if result.get("cancelled"):
+                    logger.warning("サンプル情報取得がユーザーによりキャンセルされました")
+                    return "キャンセルされました"
+
+                processed_samples = result.get("success_count", 0)
+                skipped_samples = result.get("skipped_count", 0)
+                failed_samples = result.get("failed_count", 0)
+            else:
+                from config.common import load_bearer_token
+
+                material_token = load_bearer_token('rde-material.nims.go.jp')
+                for idx, included in enumerate(sub_group_included):
+                    current_index = idx + 1
+                    sample_progress = int((current_index / total_samples) * 100) if total_samples > 0 else 100
+                    group_id_sample = included.get("id", "")
+                    sample_json_path = os.path.join(sample_dir, f"{group_id_sample}.json")
+                    
+                    if not force_download and os.path.exists(sample_json_path):
+                        skipped_samples += 1
+                        if not update_stage_progress(4, sample_progress, f"サンプル確認 {current_index}/{total_samples} - スキップ済み: {skipped_samples}"):
+                            return "キャンセルされました"
+                        logger.debug(f"サンプル情報({group_id_sample})は既に存在するためスキップしました: {sample_json_path}")
+                        continue
+                        
+                    if not update_stage_progress(4, sample_progress, f"サンプル取得中 {current_index}/{total_samples} - 完了: {processed_samples}"):
+                        return "キャンセルされました"
+                    
+                    url = f"https://rde-material-api.nims.go.jp/samples?groupId={group_id_sample}&page%5Blimit%5D=1000&page%5Boffset%5D=0&fields%5Bsample%5D=names%2Cdescription%2Ccomposition"
+                    try:
+                        headers_sample = _make_headers(material_token, host="rde-material-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
+                        resp = api_request("GET", url, bearer_token=material_token, headers=headers_sample, timeout=10)
+                        if resp is None:
+                            logger.error(f"サンプル情報({group_id_sample})の取得に失敗しました: リクエストエラー")
+                            failed_samples += 1
+                            continue
+                        resp.raise_for_status()
+                        data = resp.json()
+                        with open(sample_json_path, "w", encoding="utf-8") as f:
+                            json.dump(data, f, ensure_ascii=False, indent=2)
+                        processed_samples += 1
+                        logger.info(f"サンプル情報({group_id_sample})の取得・保存に成功しました: {sample_json_path}")
+                    except Exception as e:
+                        failed_samples += 1
+                        logger.error(f"サンプル情報({group_id_sample})の取得・保存に失敗しました: {e}")
+
+            logger.info(
+                "サンプル情報取得完了: 処理済み %s件, スキップ済み %s件, 失敗 %s件 (計画 %s件)",
+                processed_samples,
+                skipped_samples,
+                failed_samples,
+                total_samples,
+            )
+            final_message = (
+                f"完了 (計画: {total_samples}件, 成功: {processed_samples}, スキップ: {skipped_samples}, 失敗: {failed_samples}, "
+                f"並列: {'有効' if total_samples >= 50 else '無効'})"
+            )
+            if not update_stage_progress(4, 100, final_message):
+                return "キャンセルされました"
 
         # 6. 組織・装置情報取得
-        if not update_stage_progress(5, 0, "組織情報取得中"):
+        total_org_tasks = 2
+        if not update_stage_progress(5, 0, f"組織・装置情報取得準備 (計画: {total_org_tasks}件, 並列: なし)"):
             return "キャンセルされました"
             
         logger.debug("fetch_organization_info_from_api")
         org_json_path = [OUTPUT_DIR, "rde", "data", "organization.json"]
-        fetch_organization_info_from_api(bearer_token, org_json_path)
+        if force_download or not _exists(ORGANIZATION_JSON_PATH):
+            fetch_organization_info_from_api(bearer_token, org_json_path)
+            if not update_stage_progress(5, 50, "組織情報取得完了 (1/2)"):
+                return "キャンセルされました"
+        else:
+            logger.info("組織情報: 既存の organization.json を利用するため取得をスキップします")
+            if not update_stage_progress(5, 50, "組織情報キャッシュ完了 (1/2)"):
+                return "キャンセルされました"
         
-        if not update_stage_progress(5, 50, "装置タイプ情報取得中"):
-            return "キャンセルされました"
-            
         logger.debug("fetch_instrument_type_info_from_api")
         instrument_type_json_path = [OUTPUT_DIR, "rde", "data", "instrumentType.json"]
-        fetch_instrument_type_info_from_api(bearer_token, instrument_type_json_path)
-        
-        if not update_stage_progress(5, 100, "完了"):
-            return "キャンセルされました"
+        if force_download or not _exists(INSTRUMENT_TYPE_JSON_PATH):
+            fetch_instrument_type_info_from_api(bearer_token, instrument_type_json_path)
+            if not update_stage_progress(5, 100, "装置タイプ情報取得完了 (2/2)"):
+                return "キャンセルされました"
+        else:
+            logger.info("装置タイプ情報: 既存の instrumentType.json を利用するため取得をスキップします")
+            if not update_stage_progress(5, 100, "装置タイプ情報キャッシュ完了 (2/2)"):
+                return "キャンセルされました"
 
         # 7. データセット情報取得
         if not update_stage_progress(6, 0, "開始"):
             return "キャンセルされました"
             
         logger.debug("fetch_all_dataset_info")
-        fetch_all_dataset_info(bearer_token, output_dir=os.path.join(OUTPUT_DIR, "rde", "data"), onlySelf=onlySelf, searchWords=searchWords)
-        
+
+        def dataset_progress_adapter(current, total, message):
+            return update_stage_progress(6, current, message)
+
+        if force_download or not _exists(DATASET_JSON_PATH):
+            dataset_result = fetch_all_dataset_info(
+                bearer_token,
+                output_dir=os.path.join(OUTPUT_DIR, "rde", "data"),
+                onlySelf=onlySelf,
+                searchWords=searchWords,
+                progress_callback=dataset_progress_adapter,
+            )
+            if dataset_result == "キャンセルされました":
+                return "キャンセルされました"
+        else:
+            cache_message = "データセット一覧: 既存の dataset.json を利用するため取得をスキップします"
+            logger.info(cache_message)
+            if not update_stage_progress(6, 100, f"キャッシュ完了 (計画: 不明件, 並列: なし)"):
+                return "キャンセルされました"
+
         if not update_stage_progress(6, 100, "完了"):
             return "キャンセルされました"
 
@@ -1737,13 +3068,24 @@ def fetch_basic_info_logic(bearer_token, parent=None, webview=None, onlySelf=Fal
             
         logger.debug("fetch_all_data_entrys_info")
         
-        # プログレスコールバックを作成（ステージ7の0-100%をマッピング）
-        def dataentry_progress_callback(current, total, message):
-            return update_stage_progress(7, current, message)
+        # dataEntry フォルダ内のファイル数をチェック（v2.1.21: 欠損判定）
+        dataentry_dir = os.path.join(OUTPUT_DIR, "rde", "data", "dataEntry")
+        dataentry_has_files, dataentry_count = _folder_has_files(dataentry_dir)
         
-        result = fetch_all_data_entrys_info(bearer_token, progress_callback=dataentry_progress_callback)
-        if result == "キャンセルされました":
-            return "キャンセルされました"
+        skip_dataentry_fetch = not force_download and dataentry_has_files
+        
+        if skip_dataentry_fetch:
+            logger.info(f"データエントリ情報: 既存フォルダ({dataentry_count}件)を利用するため取得をスキップします")
+            if not update_stage_progress(7, 100, "キャッシュ完了"):
+                return "キャンセルされました"
+        else:
+            # プログレスコールバックを作成（ステージ7の0-100%をマッピング）
+            def dataentry_progress_callback(current, total, message):
+                return update_stage_progress(7, current, message)
+            
+            result = fetch_all_data_entrys_info(bearer_token, progress_callback=dataentry_progress_callback)
+            if result == "キャンセルされました":
+                return "キャンセルされました"
         
         if not update_stage_progress(7, 100, "データエントリ情報取得完了"):
             return "キャンセルされました"
@@ -1754,15 +3096,24 @@ def fetch_basic_info_logic(bearer_token, parent=None, webview=None, onlySelf=Fal
             
         logger.debug("fetch_all_invoices_info")
         
-        # プログレスコールバックを作成（ステージ8の0-100%をマッピング）
-        def invoice_progress_callback(current, total, message):
-            # current, totalは fetch_all_invoices_info 内部の進捗（0-100%）
-            # これをステージ8の進捗にマッピング
-            return update_stage_progress(8, current, message)
+        # invoice フォルダ内のファイル数をチェック（v2.1.21: 欠損判定）
+        invoice_dir = os.path.join(OUTPUT_DIR, "rde", "data", "invoice")
+        invoice_has_files, invoice_count = _folder_has_files(invoice_dir)
         
-        result = fetch_all_invoices_info(bearer_token, progress_callback=invoice_progress_callback)
-        if result == "キャンセルされました":
-            return "キャンセルされました"
+        skip_invoice_fetch = not force_download and invoice_has_files
+        
+        if skip_invoice_fetch:
+            logger.info(f"インボイス情報: 既存フォルダ({invoice_count}件)を利用するため取得をスキップします")
+            if not update_stage_progress(8, 100, "キャッシュ完了"):
+                return "キャンセルされました"
+        else:
+            # プログレスコールバックを作成（ステージ8の0-100%をマッピング）
+            def invoice_progress_callback(current, total, message):
+                return update_stage_progress(8, current, message)
+            
+            result = fetch_all_invoices_info(bearer_token, progress_callback=invoice_progress_callback)
+            if result == "キャンセルされました":
+                return "キャンセルされました"
         
         if not update_stage_progress(8, 100, "インボイス情報取得完了"):
             return "キャンセルされました"
@@ -1772,33 +3123,64 @@ def fetch_basic_info_logic(bearer_token, parent=None, webview=None, onlySelf=Fal
             return "キャンセルされました"
             
         logger.debug("fetch_invoice_schemas")
-        try:
-            output_dir = "output/rde/data"
-            fetch_invoice_schemas(bearer_token, output_dir)
-        except Exception as e:
-            logger.warning(f"invoiceSchema取得でエラーが発生しましたが処理を続行します: {e}")
         
-        if not update_stage_progress(9, 100, "完了"):
-            return "キャンセルされました"
+        # invoiceSchemas フォルダ内のファイル数をチェック（v2.1.21: 欠損判定）
+        invoiceschemas_dir = os.path.join(OUTPUT_DIR, "rde", "data", "invoiceSchemas")
+        invoiceschemas_has_files, invoiceschemas_count = _folder_has_files(invoiceschemas_dir)
+        
+        skip_invoiceschema_fetch = not force_download and invoiceschemas_has_files
+        
+        if skip_invoiceschema_fetch:
+            logger.info(f"invoiceSchema情報: 既存フォルダ({invoiceschemas_count}件)を利用するため取得をスキップします")
+            if not update_stage_progress(9, 100, f"キャッシュ完了 (既存: {invoiceschemas_count}件)"):
+                return "キャンセルされました"
+        else:
+            try:
+                output_dir = os.path.join(OUTPUT_DIR, "rde", "data")
+
+                def invoiceschema_progress_adapter(current, total, message):
+                    return update_stage_progress(9, current, message)
+
+                invoice_schema_result = fetch_invoice_schemas(
+                    bearer_token,
+                    output_dir,
+                    progress_callback=invoiceschema_progress_adapter,
+                )
+                if invoice_schema_result == "キャンセルされました":
+                    return "キャンセルされました"
+            except Exception as e:
+                logger.warning(f"invoiceSchema取得でエラーが発生しましたが処理を続行します: {e}")
+        
+            if not update_stage_progress(9, 100, "完了"):
+                return "キャンセルされました"
 
         # 11. テンプレート・設備・ライセンス情報取得
         if not update_stage_progress(10, 0, "テンプレート情報取得中"):
             return "キャンセルされました"
             
         logger.debug("fetch_template_info_from_api")
-        fetch_template_info_from_api(bearer_token)
+        if force_download or not _exists(TEMPLATE_JSON_PATH):
+            fetch_template_info_from_api(bearer_token)
+        else:
+            logger.info("テンプレート情報: 既存の template.json を利用するため取得をスキップします")
         
         if not update_stage_progress(10, 33, "設備情報取得中"):
             return "キャンセルされました"
             
         logger.debug("fetch_instruments_info_from_api")
-        fetch_instruments_info_from_api(bearer_token)
+        if force_download or not _exists(INSTRUMENTS_JSON_PATH):
+            fetch_instruments_info_from_api(bearer_token)
+        else:
+            logger.info("設備情報: 既存の instruments.json を利用するため取得をスキップします")
         
         if not update_stage_progress(10, 66, "利用ライセンス情報取得中"):
             return "キャンセルされました"
             
         logger.debug("fetch_licenses_info_from_api")
-        fetch_licenses_info_from_api(bearer_token)
+        if force_download or not _exists(LICENSES_JSON_PATH):
+            fetch_licenses_info_from_api(bearer_token)
+        else:
+            logger.info("利用ライセンス情報: 既存の licenses.json を利用するため取得をスキップします")
         
         if not update_stage_progress(10, 100, "完了"):
             return "キャンセルされました"
@@ -2130,7 +3512,14 @@ def fetch_sample_info_for_dataset_only(bearer_token, dataset_id, output_dir="out
         logger.error(error_msg)
         return error_msg
 
-def fetch_common_info_only_logic(bearer_token, parent=None, webview=None, progress_callback=None):
+def fetch_common_info_only_logic(
+    bearer_token,
+    parent=None,
+    webview=None,
+    progress_callback=None,
+    program_id=None,
+    force_download=False,
+):
     """
     7種類の共通情報JSONのみを取得・保存（個別データセットJSONは取得しない）
     
@@ -2138,10 +3527,23 @@ def fetch_common_info_only_logic(bearer_token, parent=None, webview=None, progre
     - 事前トークン検証の追加
     - 認証エラー時の再ログイン促進
     - エラーメッセージの明確化
+    
+    v2.1.16追加:
+    - program_id引数を追加（グループ選択機能対応）
     """
     import traceback
+    from datetime import datetime
     from core.bearer_token_manager import BearerTokenManager
     from qt_compat.widgets import QMessageBox
+    
+    # ===== API記録初期化（v2.1.16新規追加） =====
+    try:
+        from net.api_call_recorder import reset_global_recorder
+        session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        reset_global_recorder(session_id=session_id)
+        logger.debug(f"APIコール記録を初期化しました: session_id={session_id}")
+    except Exception as e:
+        logger.debug(f"API記録初期化失敗（非致命的）: {e}")
     
     # ===== 1. トークン検証（v2.0.1新規追加） =====
     logger.info("共通情報取得開始: トークン検証")
@@ -2189,6 +3591,37 @@ def fetch_common_info_only_logic(bearer_token, parent=None, webview=None, progre
     
     logger.info(f"トークン検証成功: {bearer_token[:20]}...")
     logger.info("共通情報取得処理を開始します")
+
+    group_id = None
+    project_group_id = None
+    sub_group_data = None
+    group_stage_executed = False
+
+    def _exists(path: str) -> bool:
+        return Path(path).exists()
+
+    def _folder_has_files(folder_path: str, expected_count: Optional[int] = None) -> tuple[bool, int]:
+        """フォルダ内のJSONファイル数をチェック。existsは常に確認。
+        
+        Returns:
+            (has_any_files, actual_count): ファイルがあるか、実際のファイル数
+        """
+        folder = Path(folder_path)
+        # フォルダの存在確認はスキップしない（v2.1.21）
+        if not folder.exists():
+            logger.debug(f"フォルダが存在しません: {folder_path}")
+            return False, 0
+        
+        # *.json ファイルをカウント
+        json_files = list(folder.glob("*.json"))
+        actual_count = len(json_files)
+        
+        # expected_countが指定されている場合は欠損判定
+        if expected_count is not None and actual_count < expected_count:
+            logger.info(f"フォルダ内に欠損ファイルあり: {folder_path} (期待: {expected_count}件, 実際: {actual_count}件)")
+            return True, actual_count  # 欠損があってもファイルが1つでもあればTrue
+        
+        return actual_count > 0, actual_count
     
     try:
         # プログレス管理 - 7段階の共通情報取得
@@ -2224,64 +3657,81 @@ def fetch_common_info_only_logic(bearer_token, parent=None, webview=None, progre
         # 1. ユーザー自身情報取得
         if not update_stage_progress(0, 0, "開始"):
             return "キャンセルされました"
-            
-        logger.debug("fetch_self_info_from_api")
-        if not fetch_self_info_from_api(bearer_token, parent_widget=parent):
+
+        try:
+            if force_download or not Path(SELF_JSON_PATH).exists():
+                logger.debug("fetch_self_info_from_api")
+                fetch_self_info_from_api(bearer_token, parent_widget=parent)
+            else:
+                logger.info("ユーザー情報: 既存の self.json を利用するため取得をスキップします")
+        except Exception as fetch_error:
+            logger.error(f"ユーザー情報取得エラー: {fetch_error}")
             return "ユーザー情報取得に失敗しました"
         
         if not update_stage_progress(0, 100, "完了"):
             return "キャンセルされました"
 
         # 2. グループ関連情報取得（グループ、グループ詳細、サブグループ）
-        if not update_stage_progress(1, 0, "グループ情報取得中"):
-            return "キャンセルされました"
-            
-        logger.debug("fetch_group_info_from_api: group")
-        headers = _make_headers(bearer_token, host="rde-api.nims.go.jp", origin="https://rde.nims.go.jp", referer="https://rde.nims.go.jp/")
-        group_url = "https://rde-api.nims.go.jp/groups/root?include=children%2Cmembers"
-        group_json_path = [OUTPUT_DIR, "rde", "data", "group.json"]
-        group_data = fetch_group_info_from_api(group_url, headers, group_json_path)
-        logger.info("グループ情報の取得・保存に成功しました。")
-        
-        if not update_stage_progress(1, 33, "グループ詳細情報取得中"):
+        if not update_stage_progress(1, 0, "グループ情報取得開始"):
             return "キャンセルされました"
 
-        logger.debug("parse_group_id_from_data: group")
-        group_id = parse_group_id_from_data(group_data)
-        if not group_id:
-            error_msg = "included配列にgroup idが見つかりません。"
-            logger.error(error_msg)
-            return error_msg
+        import os
+        force_project_dialog = os.environ.get('FORCE_PROJECT_GROUP_DIALOG', '0') == '1'
 
-        # グループ詳細情報取得
-        logger.debug("fetch_group_info_from_api: detail")
-        detail_url = f"https://rde-api.nims.go.jp/groups/{group_id}?include=children%2Cmembers"
-        detail_json_path = [OUTPUT_DIR, "rde", "data", "groupDetail.json"]
-        detail_data = fetch_group_info_from_api(detail_url, headers, detail_json_path)
-        logger.info(f"グループ詳細情報({group_id})の取得・保存に成功しました。")
-        
-        if not update_stage_progress(1, 67, "サブグループ情報取得中"):
-            return "キャンセルされました"
+        def pipeline_progress_callback(current, total, message):
+            total = total or 100
+            mapped = int((current / total) * 100)
+            mapped = max(0, min(100, mapped))
+            return update_stage_progress(1, mapped, message)
 
-        logger.debug("parse_group_id_from_data: detail")
-        project_group_id = parse_group_id_from_data(detail_data)
-        if not project_group_id:
-            error_msg = "groupDetail.jsonのincluded配列にproject group idが見つかりません。"
-            logger.error(error_msg)
-            return error_msg
+        group_files_ready = all(
+            _exists(path) for path in (GROUP_JSON_PATH, GROUP_DETAIL_JSON_PATH, SUBGROUP_JSON_PATH)
+        )
+        subgroups_complete = _subgroups_folder_complete() if group_files_ready else False
+        if group_files_ready and not subgroups_complete and not force_download:
+            logger.info("サブグループ詳細に欠損があるためグループ関連情報を再取得します")
+        use_cache = (not force_download) and group_files_ready and subgroups_complete
+        group_pipeline = None
 
-        # サブグループ情報取得
-        logger.debug("fetch_group_info_from_api: sub_group")
-        sub_group_url = f"https://rde-api.nims.go.jp/groups/{project_group_id}?include=children%2Cmembers"
-        sub_group_json_path = [OUTPUT_DIR, "rde", "data", "subGroup.json"]
-        try:
-            sub_group_data = fetch_group_info_from_api(sub_group_url, headers, sub_group_json_path)
-            logger.info(f"サブグループ情報({project_group_id})の取得・保存に成功しました。")
-        except Exception as e:
-            logger.error(f"サブグループ情報の取得・保存に失敗しました: {e}")
-            sub_group_data = None
-            
-        if not update_stage_progress(1, 100, "完了"):
+        if use_cache:
+            try:
+                with open(GROUP_DETAIL_JSON_PATH, "r", encoding="utf-8") as f:
+                    cached_program_data = json.load(f)
+                with open(SUBGROUP_JSON_PATH, "r", encoding="utf-8") as f:
+                    cached_project_data = json.load(f)
+                group_id = cached_program_data.get("data", {}).get("id")
+                project_group_id = cached_project_data.get("data", {}).get("id")
+                sub_group_data = cached_project_data
+                if not group_id or not project_group_id:
+                    raise ValueError("キャッシュに必要なグループIDが含まれていません")
+                logger.info("グループ関連情報: 既存ファイルを再利用しました")
+            except Exception as cache_error:
+                logger.warning("グループ関連JSONの読み込みに失敗したため再取得を実行します: %s", cache_error)
+                use_cache = False
+
+        if not use_cache:
+            try:
+                group_pipeline = run_group_hierarchy_pipeline(
+                    bearer_token=bearer_token,
+                    parent_widget=parent,
+                    preferred_program_id=program_id,
+                    progress_callback=pipeline_progress_callback,
+                    force_project_dialog=force_project_dialog,
+                    force_download=force_download,
+                )
+                group_stage_executed = True
+            except GroupFetchCancelled:
+                logger.info("共通情報取得: グループ階層取得がキャンセルされました")
+                return "キャンセルされました"
+            except Exception as pipeline_error:
+                logger.error("共通情報取得: グループ階層取得に失敗", exc_info=True)
+                return f"グループ関連情報取得に失敗しました: {pipeline_error}"
+
+            group_id = group_pipeline.selected_program_id
+            project_group_id = group_pipeline.selected_project_id
+            sub_group_data = group_pipeline.selected_project_data
+
+        if not update_stage_progress(1, 100, "完了" if not use_cache else "キャッシュ完了"):
             return "キャンセルされました"
 
         # 3. 組織・装置情報取得
@@ -2290,14 +3740,20 @@ def fetch_common_info_only_logic(bearer_token, parent=None, webview=None, progre
             
         logger.debug("fetch_organization_info_from_api")
         org_json_path = [OUTPUT_DIR, "rde", "data", "organization.json"]
-        fetch_organization_info_from_api(bearer_token, org_json_path)
+        if force_download or not _exists(ORGANIZATION_JSON_PATH):
+            fetch_organization_info_from_api(bearer_token, org_json_path)
+        else:
+            logger.info("組織情報: 既存の organization.json を利用するため取得をスキップします")
         
         if not update_stage_progress(2, 50, "装置タイプ情報取得中"):
             return "キャンセルされました"
             
         logger.debug("fetch_instrument_type_info_from_api")
         instrument_type_json_path = [OUTPUT_DIR, "rde", "data", "instrumentType.json"]
-        fetch_instrument_type_info_from_api(bearer_token, instrument_type_json_path)
+        if force_download or not _exists(INSTRUMENT_TYPE_JSON_PATH):
+            fetch_instrument_type_info_from_api(bearer_token, instrument_type_json_path)
+        else:
+            logger.info("装置タイプ情報: 既存の instrumentType.json を利用するため取得をスキップします")
         
         if not update_stage_progress(2, 100, "完了"):
             return "キャンセルされました"
@@ -2307,7 +3763,10 @@ def fetch_common_info_only_logic(bearer_token, parent=None, webview=None, progre
             return "キャンセルされました"
             
         logger.debug("fetch_dataset_list_only")
-        fetch_dataset_list_only(bearer_token, output_dir=os.path.join(OUTPUT_DIR, "rde", "data"))
+        if force_download or not _exists(DATASET_JSON_PATH):
+            fetch_dataset_list_only(bearer_token, output_dir=os.path.join(OUTPUT_DIR, "rde", "data"))
+        else:
+            logger.info("データセット一覧: 既存の dataset.json を利用するため取得をスキップします")
         
         if not update_stage_progress(3, 100, "完了"):
             return "キャンセルされました"
@@ -2317,19 +3776,28 @@ def fetch_common_info_only_logic(bearer_token, parent=None, webview=None, progre
             return "キャンセルされました"
             
         logger.debug("fetch_template_info_from_api")
-        fetch_template_info_from_api(bearer_token)
+        if force_download or not _exists(TEMPLATE_JSON_PATH):
+            fetch_template_info_from_api(bearer_token)
+        else:
+            logger.info("テンプレート情報: 既存の template.json を利用するため取得をスキップします")
         
         if not update_stage_progress(4, 33, "設備情報取得中"):
             return "キャンセルされました"
             
         logger.debug("fetch_instruments_info_from_api")
-        fetch_instruments_info_from_api(bearer_token)
+        if force_download or not _exists(INSTRUMENTS_JSON_PATH):
+            fetch_instruments_info_from_api(bearer_token)
+        else:
+            logger.info("設備情報: 既存の instruments.json を利用するため取得をスキップします")
         
         if not update_stage_progress(4, 66, "利用ライセンス情報取得中"):
             return "キャンセルされました"
             
         logger.debug("fetch_licenses_info_from_api")
-        fetch_licenses_info_from_api(bearer_token)
+        if force_download or not _exists(LICENSES_JSON_PATH):
+            fetch_licenses_info_from_api(bearer_token)
+        else:
+            logger.info("利用ライセンス情報: 既存の licenses.json を利用するため取得をスキップします")
         
         if not update_stage_progress(4, 100, "完了"):
             return "キャンセルされました"
@@ -2339,7 +3807,10 @@ def fetch_common_info_only_logic(bearer_token, parent=None, webview=None, progre
             return "キャンセルされました"
             
         # info.json生成
-        if sub_group_data:
+        should_generate_info = sub_group_data and (
+            force_download or group_stage_executed or not _exists(INFO_JSON_PATH)
+        )
+        if should_generate_info:
             try:
                 logger.debug("extract_users_and_subgroups")
                 users, subgroups = extract_users_and_subgroups(sub_group_data)
@@ -2355,6 +3826,8 @@ def fetch_common_info_only_logic(bearer_token, parent=None, webview=None, progre
             except Exception as e:
                 logger.error(f"subGroup.jsonの解析・表示に失敗しました: {e}")
                 traceback.print_exc()
+        elif sub_group_data:
+            logger.info("info.json: 既存ファイルを利用するため生成をスキップします")
                 
         if not update_stage_progress(5, 100, "完了"):
             return "キャンセルされました"
@@ -2371,39 +3844,36 @@ def fetch_common_info_only_logic(bearer_token, parent=None, webview=None, progre
 
 def fetch_dataset_list_only(bearer_token, output_dir="output/rde/data"):
     """データセット一覧のみを取得し、dataset.jsonとして保存（個別JSONは取得しない）"""
-    userName = get_self_username_from_json()
-    
     # パス区切りを統一
     output_dir = os.path.normpath(output_dir)
-    url = "https://rde-api.nims.go.jp/datasets?sort=-modified&page%5Blimit%5D=5000&include=manager%2Creleases&fields%5Buser%5D=id%2CuserName%2CorganizationName%2CisDeleted&fields%5Brelease%5D=version%2CreleaseNumber"
 
     headers = _make_headers(bearer_token, host="rde-api.nims.go.jp", origin="https://rde.nims.go.jp", referer="https://rde.nims.go.jp/")
-    try:
-        resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=10)  # refactored to use api_request_helper
-        if resp is None:
-            logger.error("データセット一覧の取得に失敗しました: リクエストエラー")
-            return
-        data = resp.json()
-        os.makedirs(output_dir, exist_ok=True)
-        save_path = os.path.join(output_dir, "dataset.json")
-        
-        # 既存ファイルのバックアップを作成
-        if os.path.exists(save_path):
-            import shutil
-            backup_path = save_path + ".backup"
-            try:
-                shutil.copy2(save_path, backup_path)
-                logger.info("既存ファイルのバックアップを作成: %s", backup_path)
-            except Exception as backup_error:
-                logger.warning("バックアップ作成に失敗: %s", backup_error)
-        
-        # 新しいファイルを書き込み
-        with open(save_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        logger.info("データセット一覧(dataset.json)の取得・保存に成功しました。")
-    except Exception as e:
-        logger.error("データセット一覧の取得・保存に失敗しました: %s URL: %s", e, url)
 
+    try:
+        dataset_payload = _download_dataset_list_in_chunks(
+            bearer_token=bearer_token,
+            headers=headers,
+            search_words=None,
+        )
+    except Exception as e:
+        logger.error("データセット一覧の取得に失敗しました: %s", e)
+
+
+    os.makedirs(output_dir, exist_ok=True)
+    save_path = os.path.join(output_dir, "dataset.json")
+
+    # 既存ファイルのバックアップを作成
+    if os.path.exists(save_path):
+        backup_path = save_path + ".backup"
+        try:
+            shutil.copy2(save_path, backup_path)
+            logger.info("既存ファイルのバックアップを作成: %s", backup_path)
+        except Exception as backup_error:
+            logger.warning("バックアップ作成に失敗: %s", backup_error)
+
+    with open(save_path, "w", encoding="utf-8") as f:
+        json.dump(dataset_payload, f, ensure_ascii=False, indent=2)
+    logger.info("データセット一覧(dataset.json)の取得・保存に成功しました。")
 def get_json_status_info():
     """
     JSONファイルの取得状況（日時、ファイル数等）を取得

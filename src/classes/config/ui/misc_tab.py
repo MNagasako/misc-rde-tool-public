@@ -116,13 +116,14 @@ class MiscTab(QWidget):
     def open_install_directory(self):
         """インストールディレクトリを開く"""
         try:
+            from config.common import get_base_dir
             # アプリケーションのルートディレクトリを取得
             if getattr(sys, 'frozen', False):
                 # PyInstallerでバイナリ化されている場合
                 app_dir = Path(sys.executable).parent
             else:
                 # 開発環境（ソースから実行）の場合
-                app_dir = Path(__file__).parent.parent.parent.parent.parent
+                app_dir = Path(get_base_dir())
                 
             logger.info(f"インストールディレクトリを開く: {app_dir}")
             

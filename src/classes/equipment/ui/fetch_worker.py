@@ -5,9 +5,10 @@
 """
 
 import logging
-from typing import Optional
 from datetime import datetime
-from config.common import OUTPUT_DIR
+from typing import Optional
+
+from classes.equipment.util.output_paths import get_equipment_root_dir
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,8 @@ class FacilityFetchWorker(QThread):
             from classes.equipment.core.data_processor import FacilityDataProcessor
             from classes.equipment.core.file_exporter import FacilityExporter
             
-            self.log_message.emit(f"📂 OUTPUT_DIRを確認: {OUTPUT_DIR}")
+            equipment_dir = get_equipment_root_dir()
+            self.log_message.emit(f"📂 設備出力先: {equipment_dir}")
             
             # 連続不在判定モードかどうか
             if self.consecutive_not_found_limit:

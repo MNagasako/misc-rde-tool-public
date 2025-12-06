@@ -1807,6 +1807,17 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                     grant_number=selected_dataset.get("attributes", {}).get("grantNumber", "")
                 )
                 
+                # AI設定を取得（llm_model_name プレースホルダ置換用）
+                from classes.ai.core.ai_manager import AIManager
+                ai_manager = AIManager()
+                provider = ai_manager.get_default_provider()
+                model = ai_manager.get_default_model(provider)
+                
+                # AI設定をコンテキストに追加
+                full_context['llm_provider'] = provider
+                full_context['llm_model'] = model
+                full_context['llm_model_name'] = f"{provider}:{model}"
+                
                 # プロンプトテンプレートで {description} が使用されているため、エイリアスを設定
                 full_context['description'] = current_description
                 
@@ -1819,15 +1830,16 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 # AI実行スレッド
                 from classes.dataset.ui.ai_suggestion_dialog import AIRequestThread
                 
-                def _show_ai_check_details(prompt_text: str, response_text: str):
-                    """問い合わせ内容とレスポンスを詳細表示するダイアログ（非モーダル）"""
+                def _show_ai_check_details(prompt_text: str, response_text: str, parent_dialog=None):
+                    """問い合わせ内容とレスポンスを詳細表示するモーダルダイアログ"""
                     from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton, QSplitter
                     from PySide6.QtCore import Qt
                     
                     detail_dialog = QDialog(widget)
                     detail_dialog.setWindowTitle("AI チェック詳細内容")
                     detail_dialog.setGeometry(150, 150, 1200, 700)
-                    detail_dialog.setModal(False)  # 非モーダルで表示
+                    detail_dialog.setModal(True)
+                    detail_dialog.setWindowModality(Qt.ApplicationModal)
                     
                     layout = QVBoxLayout()
                     
@@ -1874,7 +1886,16 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                     layout.addWidget(close_btn)
                     
                     detail_dialog.setLayout(layout)
-                    detail_dialog.show()  # exec() ではなく show() を使用（非モーダル）
+
+                    if parent_dialog is not None:
+                        parent_dialog.setEnabled(False)
+
+                        def restore_parent():
+                            parent_dialog.setEnabled(True)
+                            parent_dialog.activateWindow()
+                        detail_dialog.finished.connect(restore_parent)
+                    
+                    detail_dialog.exec()
                 
                 def on_check_success(result):
                     """チェック完了"""
@@ -1980,7 +2001,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                         detail_btn.setMinimumWidth(100)
                         detail_btn.setMinimumHeight(36)
                         detail_btn.setStyleSheet("QPushButton { font-size: 12px; }")
-                        detail_btn.clicked.connect(lambda: _show_ai_check_details(prompt, response_text))
+                        detail_btn.clicked.connect(lambda: _show_ai_check_details(prompt, response_text, result_dialog))
                         button_layout.addWidget(detail_btn)
                         
                         button_layout.addStretch()
@@ -2425,10 +2446,6 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     # MagicMock汚染の影響を避けるため、ここで動的に実体クラスを解決
     try:
         from qt_compat.widgets import QTableWidget as _QTableWidget, QTableWidgetItem as _QTableWidgetItem, QPushButton as _QPushButton, QHeaderView as _QHeaderView
-        from unittest.mock import MagicMock
-        # qt_compat が MagicMock を返している場合は PySide6 実体へフォールバック
-        if any(isinstance(cls, MagicMock) for cls in (_QTableWidget, _QTableWidgetItem, _QPushButton, _QHeaderView)):
-            raise ImportError("qt_compat widgets contaminated by MagicMock")
     except Exception:
         from PySide6.QtWidgets import QTableWidget as _QTableWidget, QTableWidgetItem as _QTableWidgetItem, QPushButton as _QPushButton, QHeaderView as _QHeaderView
 

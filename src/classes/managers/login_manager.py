@@ -1210,7 +1210,7 @@ class LoginManager:
             
             # ディスプレイマネージャーに通知
             if hasattr(self.browser, 'display_manager'):
-                self.browser.display_manager.set_message("ログイン完了 - 全機能が利用可能です")
+                self.browser.display_manager.set_message("RDEへのログイン完了しました。")
                 
         except Exception as e:
             logger.error(f"[TOKEN] ログイン完了通知エラー: {e}", exc_info=True)

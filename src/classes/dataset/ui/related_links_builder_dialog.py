@@ -11,10 +11,6 @@ try:
         QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox
     )
     from qt_compat.core import Qt, Signal
-    from unittest.mock import MagicMock
-    # qt_compatがMagicMockを返している場合はPySide6実体へフォールバック
-    if isinstance(QDialog, MagicMock):
-        raise ImportError("qt_compat contaminated by MagicMock")
 except Exception:
     from PySide6.QtWidgets import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,

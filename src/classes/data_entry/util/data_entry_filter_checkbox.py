@@ -18,11 +18,6 @@ from qt_compat.gui import QFont
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
 
-# 親ディレクトリのsrcをPythonパスに追加
-current_dir = Path(__file__).parent
-src_dir = current_dir.parent.parent.parent
-sys.path.insert(0, str(src_dir))
-
 from config.common import SELF_JSON_PATH, DATASET_JSON_PATH
 
 # 元のフィルタユーティリティから必要な関数をインポート

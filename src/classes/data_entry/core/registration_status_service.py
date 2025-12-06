@@ -1,7 +1,7 @@
 import json
 import logging
-from datetime import datetime, timedelta
-from typing import List, Dict, Optional
+from datetime import datetime, timedelta, timezone
+from typing import List, Dict, Optional, Any
 
 # ルール遵守: パスは config.common を使用
 from config.common import OUTPUT_RDE_DIR, get_dynamic_file_path
@@ -19,6 +19,7 @@ _ALL_FILE = get_dynamic_file_path('output/rde/entries_all.json')
 
 # キャッシュTTL: 最大1日
 _CACHE_TTL = timedelta(days=1)
+_UTC = timezone.utc
 
 
 class EntrySummary:
@@ -110,6 +111,39 @@ def clear_cache() -> None:
 def has_valid_cache() -> bool:
 	"""いずれかのキャッシュがTTL内で有効か判定"""
 	return _is_cache_valid(_LATEST_FILE) or _is_cache_valid(_ALL_FILE)
+
+
+def _collect_cache_metadata(cache_type: str, path: str) -> Optional[Dict[str, Any]]:
+	"""キャッシュファイルのメタ情報を収集"""
+	import os
+
+	if not os.path.exists(path):
+		return None
+	try:
+		updated_at = datetime.fromtimestamp(os.path.getmtime(path), tz=_UTC)
+		size = os.path.getsize(path)
+		entries = _load_cache(path)
+		count = len(entries)
+		return {
+			"type": cache_type,
+			"path": path,
+			"updated_at": updated_at,
+			"size": size,
+			"count": count,
+		}
+	except Exception as exc:
+		logger.debug("キャッシュメタ情報の収集に失敗: path=%s err=%s", path, exc)
+		return None
+
+
+def get_cache_metadata() -> List[Dict[str, Any]]:
+	"""現在のキャッシュ状態を返す"""
+	metadata: List[Dict[str, Any]] = []
+	for cache_type, path in (("latest", _LATEST_FILE), ("all", _ALL_FILE)):
+		info = _collect_cache_metadata(cache_type, path)
+		if info:
+			metadata.append(info)
+	return metadata
 
 
 def _build_entries_url(limit: int, offset: int) -> str:

@@ -1,13 +1,11 @@
 try:
     from qt_compat.widgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QLabel, QLineEdit, QComboBox
     from qt_compat.core import Qt
-    from unittest.mock import MagicMock
-    if any(isinstance(cls, MagicMock) for cls in (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QLabel, QLineEdit, QComboBox)):
-        raise ImportError("qt_compat widgets contaminated by MagicMock")
 except Exception:
     from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget, QTableWidgetItem, QLabel, QLineEdit, QComboBox
     from PySide6.QtCore import Qt
 import logging
+from datetime import datetime, timezone, timedelta
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtCore import QUrl
 
@@ -15,6 +13,7 @@ import classes.data_entry.core.registration_status_service as regsvc
 from classes.managers.token_manager import TokenManager
 
 logger = logging.getLogger(__name__)
+JST = timezone(timedelta(hours=9))
 
 class RegistrationStatusWidget(QWidget):
     def __init__(self, parent=None):
@@ -52,6 +51,11 @@ class RegistrationStatusWidget(QWidget):
         filters.addWidget(self.filter_inst)
         layout.addLayout(filters)
 
+        self.cache_info_label = QLabel("キャッシュ情報: なし")
+        self.cache_info_label.setAlignment(Qt.AlignLeft)
+        self.cache_info_label.setWordWrap(True)
+        layout.addWidget(self.cache_info_label)
+
         # Table
         self.table = QTableWidget(0, 8, self)
         self.table.setHorizontalHeaderLabels(["開始時刻","データ名","データセット","ステータス","作成者","装置","ID","リンク"])
@@ -81,6 +85,8 @@ class RegistrationStatusWidget(QWidget):
                 self._populate(entries)
         except Exception as ex:
             logger.warning(f"[登録状況] 自動表示で例外: {ex}")
+        finally:
+            self.update_cache_info_label()
 
     def clear_cache(self):
         try:
@@ -91,6 +97,8 @@ class RegistrationStatusWidget(QWidget):
         except Exception as ex:
             logger.exception(f"キャッシュ削除に失敗: {ex}")
             self.lbl_summary.setText("キャッシュ削除に失敗しました。ログをご確認ください。")
+        finally:
+            self.update_cache_info_label()
 
     def _populate(self, entries):
         self.table.setRowCount(0)
@@ -125,6 +133,35 @@ class RegistrationStatusWidget(QWidget):
         if idx >= 0:
             self.filter_status.setCurrentIndex(idx)
         self.filter_status.blockSignals(False)
+
+    def update_cache_info_label(self):
+        try:
+            metadata = regsvc.get_cache_metadata()
+        except AttributeError:
+            self.cache_info_label.setText("キャッシュ情報: 取得できません")
+            return
+        except Exception as exc:
+            logger.warning("[登録状況] キャッシュ情報取得に失敗: %s", exc)
+            self.cache_info_label.setText("キャッシュ情報: 取得に失敗しました")
+            return
+
+        if not metadata:
+            self.cache_info_label.setText("キャッシュ情報: なし")
+            return
+
+        parts = []
+        for info in metadata:
+            label = "最新100件" if info.get("type") == "latest" else "全件"
+            updated = info.get("updated_at")
+            if isinstance(updated, datetime):
+                updated_local = updated.astimezone(JST)
+                timestamp = updated_local.strftime("%Y-%m-%d %H:%M:%S JST")
+            else:
+                timestamp = "時刻不明"
+            count = info.get("count", 0)
+            parts.append(f"{label}: {count}件 ({timestamp})")
+
+        self.cache_info_label.setText("キャッシュ情報: " + " | ".join(parts))
 
     def _open_entry(self, entry_id: str):
         if not entry_id:
@@ -182,6 +219,7 @@ class RegistrationStatusWidget(QWidget):
         finally:
             self.btn_latest.setEnabled(True)
             self.btn_all.setEnabled(True)
+            self.update_cache_info_label()
 
     def load_all(self):
         try:
@@ -206,3 +244,4 @@ class RegistrationStatusWidget(QWidget):
         finally:
             self.btn_latest.setEnabled(True)
             self.btn_all.setEnabled(True)
+            self.update_cache_info_label()

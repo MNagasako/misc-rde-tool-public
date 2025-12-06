@@ -6,9 +6,16 @@
 
 import os
 import logging
+from pathlib import Path
 from typing import Optional
 from datetime import datetime
-from config.common import OUTPUT_DIR
+
+from classes.reports.util.output_paths import (
+    find_latest_child_directory,
+    find_latest_matching_file,
+    get_reports_backups_root,
+    get_reports_root_dir,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -508,52 +515,59 @@ class ReportFetchTab(QWidget):
         # ファイル情報更新
         self.update_file_info()
     
-    def update_file_info(self):
+    def update_file_info(self, show_empty: bool = False):
         """ファイル情報表示更新"""
-        if not self.latest_excel_path:
-            return
-        
-        # ファイル情報取得
-        info_text = "📁 出力ファイル:\n"
-        
-        if self.latest_excel_path and os.path.exists(self.latest_excel_path):
-            mtime = os.path.getmtime(self.latest_excel_path)
-            mtime_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
-            size = os.path.getsize(self.latest_excel_path) / 1024  # KB
-            info_text += f"  📊 Excel: {os.path.basename(self.latest_excel_path)} ({size:.1f} KB, {mtime_str})\n"
+        self.open_folder_button.setEnabled(True)
+        info_lines = ["📁 出力ファイル:"]
+        found = False
+
+        excel_path = self._path_if_exists(self.latest_excel_path)
+        if excel_path:
+            info_lines.append(self._format_file_info("📊 Excel", excel_path))
             self.open_latest_excel_button.setEnabled(True)
-        
-        if self.latest_json_path and os.path.exists(self.latest_json_path):
-            mtime = os.path.getmtime(self.latest_json_path)
-            mtime_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
-            size = os.path.getsize(self.latest_json_path) / 1024  # KB
-            info_text += f"  📄 JSON: {os.path.basename(self.latest_json_path)} ({size:.1f} KB, {mtime_str})\n"
+            found = True
+        else:
+            self.open_latest_excel_button.setEnabled(False)
+
+        json_path = self._path_if_exists(self.latest_json_path)
+        if json_path:
+            info_lines.append(self._format_file_info("📄 JSON", json_path))
             self.open_latest_json_button.setEnabled(True)
-        
+            found = True
+        else:
+            self.open_latest_json_button.setEnabled(False)
+
         if self.latest_backup_dir:
-            info_text += f"  💾 バックアップ: {os.path.basename(self.latest_backup_dir)}\n"
-        
-        self.file_info_label.setText(info_text)
+            info_lines.append(f"  💾 バックアップ: {os.path.basename(self.latest_backup_dir)}")
+            found = True
+
+        if not found:
+            if show_empty:
+                self.file_info_label.setText("📁 出力ファイル: 見つかりません")
+            return
+
+        self.file_info_label.setText("\n".join(info_lines))
         self.open_folder_button.setEnabled(True)
     
     def on_open_folder_clicked(self):
         """フォルダを開くボタンクリック"""
-        folder_path = os.path.join(OUTPUT_DIR, "arim-site", "reports")
-        # フォルダが存在しない場合は作成
-        os.makedirs(folder_path, exist_ok=True)
-        os.startfile(folder_path)
+        folder_path = get_reports_root_dir()
+        folder_path.mkdir(parents=True, exist_ok=True)
+        os.startfile(str(folder_path))
     
     def on_open_latest_excel_clicked(self):
         """最新Excelを開くボタンクリック"""
-        if self.latest_excel_path and os.path.exists(self.latest_excel_path):
-            os.startfile(self.latest_excel_path)
+        excel_path = self._path_if_exists(self.latest_excel_path)
+        if excel_path:
+            os.startfile(str(excel_path))
         else:
             QMessageBox.warning(self, "エラー", "Excelファイルが見つかりません。")
     
     def on_open_latest_json_clicked(self):
         """最新JSONを開くボタンクリック"""
-        if self.latest_json_path and os.path.exists(self.latest_json_path):
-            os.startfile(self.latest_json_path)
+        json_path = self._path_if_exists(self.latest_json_path)
+        if json_path:
+            os.startfile(str(json_path))
         else:
             QMessageBox.warning(self, "エラー", "JSONファイルが見つかりません。")
     
@@ -684,3 +698,34 @@ class ReportFetchTab(QWidget):
             "エラー",
             f"一括処理でエラーが発生しました。\n\n{error_message}"
         )
+
+    def refresh_from_disk(self):
+        """ディスク上の最新出力を反映"""
+        base_dir = get_reports_root_dir()
+        self.latest_excel_path = self._path_to_str(
+            find_latest_matching_file(base_dir, ["ARIM-extracted2*.xlsx"])
+        )
+        self.latest_json_path = self._path_to_str(
+            find_latest_matching_file(base_dir, ["ARIM-extracted2*.json"])
+        )
+        backups_dir = get_reports_backups_root()
+        latest_backup = find_latest_child_directory(backups_dir)
+        self.latest_backup_dir = self._path_to_str(latest_backup)
+        self.update_file_info(show_empty=True)
+
+    @staticmethod
+    def _path_to_str(path: Optional[Path]) -> Optional[str]:
+        return str(path) if path else None
+
+    @staticmethod
+    def _path_if_exists(path_str: Optional[str]) -> Optional[Path]:
+        if not path_str:
+            return None
+        path = Path(path_str)
+        return path if path.exists() else None
+
+    @staticmethod
+    def _format_file_info(label: str, path: Path) -> str:
+        mtime_str = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        size_kb = path.stat().st_size / 1024
+        return f"  {label}: {path.name} ({size_kb:.1f} KB, {mtime_str})"

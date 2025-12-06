@@ -818,6 +818,7 @@ def main():
         parser.add_argument('--auto-close', action='store_true', help='自動終了を有効にする（デフォルト: 手動終了）')
         parser.add_argument('--test', action='store_true', help='テストモードで自動ログイン・自動検索・自動終了')
         parser.add_argument('--keep-tokens', action='store_true', help='開発モード: トークン・認証情報を起動/終了時に削除しない')
+        parser.add_argument('--force-dialog', action='store_true', help='v2.1.17: 単一プロジェクトグループの場合でもダイアログを表示')
         parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], default='INFO', help='ログレベルを指定 (デフォルト: INFO)')
         parser.add_argument('--version', '-v', action='store_true', help='バージョン情報を表示して終了')
         parser.add_argument('--version-all', action='store_true', help='全バージョン記載箇所をまとめて表示して終了')
@@ -828,6 +829,15 @@ def main():
             config_manager = get_config_manager()
             config_manager.set("logging.level", args.log_level)
             logger.info("ログレベルを %s に設定しました", args.log_level)
+    
+        # v2.1.17: 単一プロジェクトグループでもダイアログを表示するフラグ
+        if args.force_dialog:
+            os.environ['FORCE_PROJECT_GROUP_DIALOG'] = '1'
+            logger.info("[v2.1.17] --force-dialog オプション有効 - 単一プロジェクトグループでもダイアログを表示")
+            print("="*80)
+            print("📋 --force-dialog オプション有効")
+            print("   単一プロジェクトグループの場合でもダイアログを表示します")
+            print("="*80)
     
         # 開発モード: トークン保持フラグを環境変数に設定
         if args.keep_tokens:
@@ -841,7 +851,8 @@ def main():
 
         if args.version:
             try:
-                with open(os.path.join(os.path.dirname(__file__), '../VERSION.txt'), encoding='utf-8') as f:
+                version_path = get_static_resource_path('../VERSION.txt')
+                with open(version_path, encoding='utf-8') as f:
                     version = f.readline().strip()
                 print(version)
             except Exception:
@@ -852,7 +863,8 @@ def main():
             logger.debug("--- バージョン情報一覧 ---")
             # VERSION.txt
             try:
-                with open(os.path.join(os.path.dirname(__file__), '../VERSION.txt'), encoding='utf-8') as f:
+                version_path = get_static_resource_path('../VERSION.txt')
+                with open(version_path, encoding='utf-8') as f:
                     logger.debug("VERSION.txt: %s", f.readline().strip())
             except Exception:
                 logger.debug("VERSION.txt: 取得失敗")
@@ -864,7 +876,8 @@ def main():
                 logger.debug("config/common.py REVISION: 取得失敗")
             # arim_rde_tool.py ヘッダー
             try:
-                with open(__file__, encoding='utf-8') as f:
+                tool_path = get_static_resource_path('arim_rde_tool.py')
+                with open(tool_path, encoding='utf-8') as f:
                     for i in range(10):
                         line = f.readline()
                         if 'ARIM RDE Tool v' in line:
@@ -874,7 +887,7 @@ def main():
                 logger.debug("arim_rde_tool.py header: 取得失敗")
             # README.md
             try:
-                readme_path = os.path.join(os.path.dirname(__file__), '../README.md')
+                readme_path = get_static_resource_path('../README.md')
                 with open(readme_path, encoding='utf-8') as f:
                     for i in range(10):
                         line = f.readline()
@@ -885,7 +898,7 @@ def main():
                 logger.debug("README.md: 取得失敗")
             # docs/ARCHITECTURE_FEATURE_MAP_v1.17.2.md
             try:
-                arch_path = os.path.join(os.path.dirname(__file__), '../docs/ARCHITECTURE_FEATURE_MAP_v1.17.2.md')
+                arch_path = get_static_resource_path('../docs/archive/ARCHITECTURE_FEATURE_MAP_v1.17.2.md')
                 with open(arch_path, encoding='utf-8') as f:
                     line = f.readline()
                     logger.debug("ARCHITECTURE_FEATURE_MAP_v1.17.2.md: %s", line.strip())
@@ -896,7 +909,7 @@ def main():
             import re
             import glob
             version_matches = []
-            src_dir = os.path.join(os.path.dirname(__file__), '.')
+            src_dir = os.path.join(get_base_dir(), 'src')
             for pyfile in glob.glob(os.path.join(src_dir, '**', '*.py'), recursive=True):
                 try:
                     with open(pyfile, encoding='utf-8') as f:

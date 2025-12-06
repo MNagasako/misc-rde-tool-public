@@ -93,12 +93,18 @@ def _build_ai_prompt(dataset_id: str, category: str) -> Tuple[Optional[str], Opt
         logger.warning(f"プロンプトテンプレートが読み込めません: {prompt_file}")
         return None, None
 
-    # DatasetContextCollectorで完全なコンテキストを収集（AI説明文提案と同じフロー）
+    # DatasetContextCollectorで完全なコンテキストを収集(AI説明文提案と同じフロー)
     from classes.dataset.util.dataset_context_collector import get_dataset_context_collector
     context_collector = get_dataset_context_collector()
     
     # 基本コンテキストを読み込み
     base_ctx = _load_dataset_basic_context(dataset_id)
+    
+    # AI設定を取得（llm_model_name プレースホルダ置換用）
+    from classes.ai.core.ai_manager import AIManager
+    ai_manager = AIManager()
+    provider = ai_manager.get_default_provider()
+    model = ai_manager.get_default_model(provider)
     
     # collect_full_contextでARIM情報・実験データ・ファイルツリー等を統合
     full_context = context_collector.collect_full_context(
@@ -108,6 +114,11 @@ def _build_ai_prompt(dataset_id: str, category: str) -> Tuple[Optional[str], Opt
         existing_description=base_ctx.get('existing_description', ''),
         grant_number=base_ctx.get('grant_number', '')
     )
+    
+    # AI設定をコンテキストに追加（{llm_provider}, {llm_model}, {llm_model_name} プレースホルダ用）
+    full_context['llm_provider'] = provider
+    full_context['llm_model'] = model
+    full_context['llm_model_name'] = f"{provider}:{model}"
     
     logger.debug(f"完全コンテキスト収集完了: {list(full_context.keys())}")
     

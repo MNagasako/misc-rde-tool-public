@@ -76,10 +76,17 @@ def fetch_basic_info(controller):
     - トークン検証の追加
     - エラーメッセージの明確化
     - 再ログイン促進機能の統合
+    
+    v2.1.16追加:
+    - グループ選択ダイアログの統合
     """
     try:
+        import json
+        from pathlib import Path
         from ..core.basic_info_logic import fetch_basic_info_logic, show_fetch_confirmation_dialog
         from core.bearer_token_manager import BearerTokenManager
+        from config.common import get_dynamic_file_path
+        from .group_selection_dialog import show_group_selection_dialog
         
         # トークン取得（v2.0.1: BearerTokenManagerを使用）
         bearer_token = BearerTokenManager.get_token_with_relogin_prompt(controller.parent)
@@ -101,6 +108,62 @@ def fetch_basic_info(controller):
         if not show_fetch_confirmation_dialog(controller.parent, onlySelf=False, searchWords=None):
             logger.info("基本情報取得処理はユーザーによりキャンセルされました")
             return
+
+        # 既存ファイルの有無を確認し、上書き可否をユーザーに確認
+        target_files = [
+            get_dynamic_file_path("output/rde/data/self.json"),
+            get_dynamic_file_path("output/rde/data/group.json"),
+            get_dynamic_file_path("output/rde/data/groupDetail.json"),
+            get_dynamic_file_path("output/rde/data/subGroup.json"),
+            get_dynamic_file_path("output/rde/data/organization.json"),
+            get_dynamic_file_path("output/rde/data/instrumentType.json"),
+            get_dynamic_file_path("output/rde/data/template.json"),
+            get_dynamic_file_path("output/rde/data/instruments.json"),
+            get_dynamic_file_path("output/rde/data/licenses.json"),
+            get_dynamic_file_path("output/rde/data/dataset.json"),
+        ]
+        existing_files = [path for path in target_files if Path(path).exists()]
+        force_download = False
+
+        if existing_files:
+            overwrite_reply = QMessageBox.question(
+                controller.parent,
+                "上書き取得の確認",
+                "既存の基本情報JSONが見つかりました。\n"
+                "再取得して上書き保存しますか？\n\n"
+                "• はい: すべて再取得して最新データで上書き\n"
+                "• いいえ: 新規ファイルのみ取得し、既存ファイルは維持",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            force_download = overwrite_reply == QMessageBox.Yes
+        else:
+            force_download = True  # 取得対象が存在しない場合は強制取得
+        
+        # === グループ選択ダイアログ（v2.1.16追加） ===
+        selected_program_id = None
+        group_json_path = get_dynamic_file_path("output/rde/data/group.json")
+        
+        if Path(group_json_path).exists():
+            try:
+                with open(group_json_path, "r", encoding="utf-8") as f:
+                    group_data = json.load(f)
+                
+                # included配列からtype="group"を抽出
+                groups = [item for item in group_data.get("included", []) 
+                         if item.get("type") == "group"]
+                
+                if groups:
+                    # 1件でも選択ダイアログを表示
+                    selected_group = show_group_selection_dialog(groups, controller.parent)
+                    if not selected_group:  # キャンセル時
+                        logger.info("グループ選択がキャンセルされました")
+                        return
+                    selected_program_id = selected_group["id"]
+                    logger.info(f"選択されたプログラム: {selected_group['name']}")
+            except Exception as e:
+                logger.warning(f"group.json の読み込みに失敗: {e}")
+                # group.jsonが読めない場合はデフォルト値を使用（後続処理で設定）
         
         # プログレス表示付きワーカーを作成
         worker = ProgressWorker(
@@ -111,7 +174,8 @@ def fetch_basic_info(controller):
                 'webview': webview,
                 'onlySelf': False,
                 'searchWords': None,
-                'skip_confirmation': True
+                'skip_confirmation': True,
+                'force_download': force_download,
             },
             task_name="基本情報取得"
         )
@@ -133,10 +197,17 @@ def fetch_basic_info_self(controller):
     - トークン検証の追加
     - エラーメッセージの明確化
     - 再ログイン促進機能の統合
+    
+    v2.1.16追加:
+    - グループ選択ダイアログの統合
     """
     try:
+        import json
+        from pathlib import Path
         from ..core.basic_info_logic import fetch_basic_info_logic, show_fetch_confirmation_dialog
         from core.bearer_token_manager import BearerTokenManager
+        from config.common import get_dynamic_file_path
+        from .group_selection_dialog import show_group_selection_dialog
         
         # トークン取得（v2.0.1: BearerTokenManagerを使用）
         bearer_token = BearerTokenManager.get_token_with_relogin_prompt(controller.parent)
@@ -159,6 +230,61 @@ def fetch_basic_info_self(controller):
         if not show_fetch_confirmation_dialog(controller.parent, onlySelf=True, searchWords=searchWords):
             logger.info("基本情報取得処理はユーザーによりキャンセルされました。")
             return
+
+        # 既存ファイルの有無を確認し、上書き可否をユーザーに確認
+        target_files = [
+            get_dynamic_file_path("output/rde/data/self.json"),
+            get_dynamic_file_path("output/rde/data/group.json"),
+            get_dynamic_file_path("output/rde/data/groupDetail.json"),
+            get_dynamic_file_path("output/rde/data/subGroup.json"),
+            get_dynamic_file_path("output/rde/data/organization.json"),
+            get_dynamic_file_path("output/rde/data/instrumentType.json"),
+            get_dynamic_file_path("output/rde/data/template.json"),
+            get_dynamic_file_path("output/rde/data/instruments.json"),
+            get_dynamic_file_path("output/rde/data/licenses.json"),
+            get_dynamic_file_path("output/rde/data/dataset.json"),
+        ]
+        existing_files = [path for path in target_files if Path(path).exists()]
+        force_download = False
+
+        if existing_files:
+            overwrite_reply = QMessageBox.question(
+                controller.parent,
+                "上書き取得の確認",
+                "既存の基本情報JSONが見つかりました。\n"
+                "再取得して上書き保存しますか？\n\n"
+                "• はい: すべて再取得して最新データで上書き\n"
+                "• いいえ: 新規ファイルのみ取得し、既存ファイルは維持",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            force_download = overwrite_reply == QMessageBox.Yes
+        else:
+            force_download = True  # 取得対象が存在しない場合は強制取得
+        
+        # === グループ選択ダイアログ（v2.1.16追加） ===
+        selected_program_id = None
+        group_json_path = get_dynamic_file_path("output/rde/data/group.json")
+        
+        if Path(group_json_path).exists():
+            try:
+                with open(group_json_path, "r", encoding="utf-8") as f:
+                    group_data = json.load(f)
+                
+                # included配列からtype="group"を抽出
+                groups = [item for item in group_data.get("included", []) 
+                         if item.get("type") == "group"]
+                
+                if groups:
+                    # 1件でも選択ダイアログを表示
+                    selected_group = show_group_selection_dialog(groups, controller.parent)
+                    if not selected_group:  # キャンセル時
+                        logger.info("グループ選択がキャンセルされました")
+                        return
+                    selected_program_id = selected_group["id"]
+                    logger.info(f"選択されたプログラム: {selected_group['name']}")
+            except Exception as e:
+                logger.warning(f"group.json の読み込みに失敗: {e}")
         
         # プログレス表示付きワーカーを作成
         worker = ProgressWorker(
@@ -169,7 +295,9 @@ def fetch_basic_info_self(controller):
                 'webview': webview,
                 'onlySelf': True,
                 'searchWords': searchWords,
-                'skip_confirmation': True
+                'skip_confirmation': True,
+                'program_id': selected_program_id,
+                'force_download': force_download,
             },
             task_name="自分の基本情報取得"
         )
@@ -378,9 +506,16 @@ def fetch_common_info_only(controller):
     - トークン検証の追加
     - エラーメッセージの明確化
     - 再ログイン促進機能の統合
+    
+    v2.1.16追加:
+    - グループ選択ダイアログの統合
     """
+    import json
+    from pathlib import Path
     from ..core.basic_info_logic import fetch_common_info_only_logic
     from core.bearer_token_manager import BearerTokenManager
+    from config.common import get_dynamic_file_path
+    from .group_selection_dialog import show_group_selection_dialog
     
     # トークン取得（v2.0.1: BearerTokenManagerを使用）
     bearer_token = BearerTokenManager.get_token_with_relogin_prompt(controller.parent)
@@ -411,13 +546,67 @@ def fetch_common_info_only(controller):
         logger.info("共通情報取得処理はユーザーによりキャンセルされました。")
         return
     
+    target_files = [
+        get_dynamic_file_path("output/rde/data/self.json"),
+        get_dynamic_file_path("output/rde/data/group.json"),
+        get_dynamic_file_path("output/rde/data/groupDetail.json"),
+        get_dynamic_file_path("output/rde/data/subGroup.json"),
+        get_dynamic_file_path("output/rde/data/organization.json"),
+        get_dynamic_file_path("output/rde/data/instrumentType.json"),
+        get_dynamic_file_path("output/rde/data/template.json"),
+        get_dynamic_file_path("output/rde/data/instruments.json"),
+        get_dynamic_file_path("output/rde/data/licenses.json"),
+        get_dynamic_file_path("output/rde/data/dataset.json"),
+    ]
+    existing_files = [path for path in target_files if Path(path).exists()]
+    force_download = False
+
+    if existing_files:
+        overwrite_reply = QMessageBox.question(
+            controller.parent,
+            "上書き取得の確認",
+            "既存の共通情報JSONが見つかりました。\n"
+            "再取得して上書き保存しますか？\n\n"
+            "• はい: すべて再取得して最新データで上書き\n"
+            "• いいえ: 新規ファイルのみ取得し、既存ファイルは維持",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        force_download = overwrite_reply == QMessageBox.Yes
+
+    # === グループ選択ダイアログ（v2.1.16追加） ===
+    selected_program_id = None
+    group_json_path = get_dynamic_file_path("output/rde/data/group.json")
+    
+    if Path(group_json_path).exists():
+        try:
+            with open(group_json_path, "r", encoding="utf-8") as f:
+                group_data = json.load(f)
+            
+            # included配列からtype="group"を抽出
+            groups = [item for item in group_data.get("included", []) 
+                     if item.get("type") == "group"]
+            
+            if groups:
+                # 1件でも選択ダイアログを表示
+                selected_group = show_group_selection_dialog(groups, controller.parent)
+                if not selected_group:  # キャンセル時
+                    logger.info("グループ選択がキャンセルされました")
+                    return
+                selected_program_id = selected_group["id"]
+                logger.info(f"選択されたプログラム: {selected_group['name']}")
+        except Exception as e:
+            logger.warning(f"group.json の読み込みに失敗: {e}")
+    
     # プログレス表示付きワーカーを作成
     worker = ProgressWorker(
         task_func=fetch_common_info_only_logic,
         task_kwargs={
             'bearer_token': bearer_token,
             'parent': controller.parent,
-            'webview': webview
+            'webview': webview,
+            'program_id': selected_program_id,
+            'force_download': force_download,
         },
         task_name="共通情報取得"
     )
@@ -470,6 +659,9 @@ def create_json_status_widget(parent=None):
             #title_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: #2E86AB;")
             #layout.addWidget(title_label)
             
+            # ボタンレイアウト（更新・デバッグ）
+            btn_layout = QHBoxLayout()
+            
             # 更新ボタン
             refresh_btn = QPushButton("状況更新")
             refresh_btn.setMaximumWidth(100)
@@ -489,7 +681,31 @@ def create_json_status_widget(parent=None):
                 }}
             """)
             refresh_btn.clicked.connect(self.update_status)
-            layout.addWidget(refresh_btn)
+            btn_layout.addWidget(refresh_btn)
+            
+            # API デバッグボタン
+            debug_btn = QPushButton("🔍 API Debug")
+            debug_btn.setMaximumWidth(120)
+            debug_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: #6F42C1;
+                    color: white;
+                    border: 1px solid #5A32A3;
+                    border-radius: 4px;
+                    padding: 5px;
+                }}
+                QPushButton:hover {{
+                    background-color: #7A52D5;
+                }}
+                QPushButton:pressed {{
+                    background-color: #5A32A3;
+                }}
+            """)
+            debug_btn.clicked.connect(self.show_api_debug)
+            btn_layout.addWidget(debug_btn)
+            
+            btn_layout.addStretch()
+            layout.addLayout(btn_layout)
             
             # ステータス表示エリア
             self.status_text = QTextEdit()
@@ -563,6 +779,44 @@ def create_json_status_widget(parent=None):
                 self.refresh_theme()
             except Exception as e:
                 logger.debug("JsonStatusWidget theme signal connect failed: %s", e)
+        
+        def show_api_debug(self):
+            """APIアクセス履歴ダイアログを表示"""
+            try:
+                from .api_history_dialog import APIAccessHistoryDialog
+                from net.api_call_recorder import get_global_recorder
+                
+                # グローバルレコーダーを取得
+                recorder = get_global_recorder()
+                
+                # 記録がない場合は警告
+                if not recorder.get_records():
+                    QMessageBox.information(
+                        self,
+                        "APIアクセス履歴",
+                        "まだAPIアクセス記録がありません。\n\n"
+                        "基本情報取得などを実行すると、\n"
+                        "APIアクセス履歴が記録されます。"
+                    )
+                    return
+                
+                # ダイアログを表示
+                dialog = APIAccessHistoryDialog(recorder=recorder, parent=self)
+                dialog.exec()
+            except ImportError as e:
+                logger.error(f"API Debug Dialog import error: {e}")
+                QMessageBox.critical(
+                    self,
+                    "エラー",
+                    f"APIデバッグ機能の読み込みに失敗しました:\n{e}"
+                )
+            except Exception as e:
+                logger.error(f"show_api_debug error: {e}")
+                QMessageBox.critical(
+                    self,
+                    "エラー",
+                    f"APIデバッグ機能でエラーが発生しました:\n{e}"
+                )
     
     return JsonStatusWidget(parent)
 
@@ -619,6 +873,32 @@ def execute_individual_stage_ui(controller, stage_name):
         if search_text:
             onlySelf = True
             searchWords = search_text
+
+    force_download = False
+    if stage_name == "グループ関連情報":
+        from pathlib import Path
+        from config.common import get_dynamic_file_path
+
+        target_files = [
+            get_dynamic_file_path("output/rde/data/group.json"),
+            get_dynamic_file_path("output/rde/data/groupDetail.json"),
+            get_dynamic_file_path("output/rde/data/subGroup.json"),
+        ]
+        existing_files = [path for path in target_files if Path(path).exists()]
+
+        if existing_files:
+            overwrite_reply = QMessageBox.question(
+                controller.parent,
+                "上書き取得の確認",
+                "既存のグループ関連JSONが見つかりました。\n"
+                "再取得して上書き保存しますか？\n\n"
+                "• はい: 再取得して上書き\n"
+                "• いいえ: 既存ファイルを維持",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            force_download = overwrite_reply == QMessageBox.Yes
+
     
     # プログレス表示付きワーカーを作成
     worker = ProgressWorker(
@@ -628,7 +908,10 @@ def execute_individual_stage_ui(controller, stage_name):
             'bearer_token': bearer_token,
             'webview': webview,
             'onlySelf': onlySelf,
-            'searchWords': searchWords
+            'searchWords': searchWords,
+            'parent_widget': controller.parent,
+            'force_program_dialog': (stage_name == "グループ関連情報"),
+            'force_download': force_download,
         },
         task_name=f"{stage_name}実行"
     )
@@ -827,3 +1110,4 @@ def create_individual_execution_widget(parent=None):
                 logger.error(traceback.format_exc())
     
     return IndividualExecutionWidget(parent)
+

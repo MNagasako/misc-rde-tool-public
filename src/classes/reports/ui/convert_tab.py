@@ -6,9 +6,14 @@ ARIM-extracted2フォーマットから標準フォーマットへの変換機�
 
 import os
 import logging
+from pathlib import Path
 from typing import Optional
 from datetime import datetime
-from config.common import OUTPUT_DIR
+
+from classes.reports.util.output_paths import (
+    find_latest_matching_file,
+    get_reports_root_dir,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -212,39 +217,15 @@ class ReportConvertTab(QWidget):
     
     def load_default_files(self):
         """デフォルトファイルを読み込み"""
-        reports_dir = os.path.join(OUTPUT_DIR, "arim-site", "reports")
-        
-        if not os.path.exists(reports_dir):
-            return
-        
-        # Excelファイルを検索（ARIM-extracted2*.xlsxを検索）
-        excel_files = []
-        for file in os.listdir(reports_dir):
-            if file.startswith('ARIM-extracted2') and file.endswith('.xlsx') and not file.startswith('~'):
-                excel_files.append(os.path.join(reports_dir, file))
-        
-        if excel_files:
-            # 最新のファイルを取得
-            latest_file = max(excel_files, key=os.path.getmtime)
-            self.input_path = latest_file
-            self.input_path_edit.setText(latest_file)
-            
-            # 出力ファイルを自動設定
-            self.output_path = os.path.join(reports_dir, "converted.xlsx")
-            self.output_path_edit.setText(self.output_path)
-            
-            # 変換ボタン有効化
-            self.convert_button.setEnabled(True)
-            
-            self.log_message(f"✅ デフォルトファイル設定: {os.path.basename(latest_file)}")
+        self.refresh_from_disk()
     
     def on_input_browse_clicked(self):
         """入力ファイル参照ボタンクリック"""
-        reports_dir = os.path.join(OUTPUT_DIR, "arim-site", "reports")
+        reports_dir = get_reports_root_dir()
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "入力Excelファイルを選択",
-            reports_dir,
+            str(reports_dir),
             "Excel Files (*.xlsx);;All Files (*)"
         )
         
@@ -254,8 +235,8 @@ class ReportConvertTab(QWidget):
             
             # 出力ファイルを自動設定
             if not self.output_path:
-                output_dir = os.path.dirname(file_path)
-                self.output_path = os.path.join(output_dir, "converted.xlsx")
+                output_dir = Path(file_path).parent
+                self.output_path = str(output_dir / "converted.xlsx")
                 self.output_path_edit.setText(self.output_path)
             
             # 変換ボタン有効化
@@ -264,11 +245,11 @@ class ReportConvertTab(QWidget):
     
     def on_output_browse_clicked(self):
         """出力ファイル参照ボタンクリック"""
-        reports_dir = os.path.join(OUTPUT_DIR, "arim-site", "reports")
+        reports_dir = get_reports_root_dir()
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "出力Excelファイルを指定",
-            os.path.join(reports_dir, "converted.xlsx"),
+            str(reports_dir / "converted.xlsx"),
             "Excel Files (*.xlsx);;All Files (*)"
         )
         
@@ -279,36 +260,24 @@ class ReportConvertTab(QWidget):
     
     def on_auto_detect_clicked(self):
         """自動検出ボタンクリック"""
-        reports_dir = os.path.join(OUTPUT_DIR, "arim-site", "reports")
-        
-        if not os.path.exists(reports_dir):
-            QMessageBox.warning(self, "エラー", f"報告書フォルダが見つかりません:\n{reports_dir}")
-            return
-        
-        # Excelファイルを検索（ARIM-extracted2*.xlsx）
-        excel_files = []
-        for file in os.listdir(reports_dir):
-            if file.startswith('ARIM-extracted2') and file.endswith('.xlsx') and not file.startswith('~'):
-                excel_files.append(os.path.join(reports_dir, file))
-        
-        if not excel_files:
+        reports_dir = get_reports_root_dir()
+        latest_file = find_latest_matching_file(reports_dir, ["ARIM-extracted2*.xlsx"])
+
+        if not latest_file:
             QMessageBox.information(self, "結果", "Excelファイルが見つかりませんでした。")
             return
-        
-        # 最新のファイルを取得
-        latest_file = max(excel_files, key=os.path.getmtime)
-        self.input_path = latest_file
-        self.input_path_edit.setText(latest_file)
-        
-        # 出力ファイルを自動設定
-        self.output_path = os.path.join(reports_dir, "converted.xlsx")
+
+        latest_str = str(latest_file)
+        self.input_path = latest_str
+        self.input_path_edit.setText(latest_str)
+
+        self.output_path = str(reports_dir / "converted.xlsx")
         self.output_path_edit.setText(self.output_path)
-        
-        # 変換ボタン有効化
+
         self.convert_button.setEnabled(True)
-        
-        self.log_message(f"🔍 最新ファイルを検出: {os.path.basename(latest_file)}")
-        self.log_message(f"  更新日時: {datetime.fromtimestamp(os.path.getmtime(latest_file)).strftime('%Y-%m-%d %H:%M:%S')}")
+        mtime = datetime.fromtimestamp(latest_file.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+        self.log_message(f"🔍 最新ファイルを検出: {latest_file.name}")
+        self.log_message(f"  更新日時: {mtime}")
     
     def on_convert_clicked(self):
         """変換開始ボタンクリック"""
@@ -387,11 +356,33 @@ class ReportConvertTab(QWidget):
     
     def on_open_folder_clicked(self):
         """フォルダを開くボタンクリック"""
-        folder_path = os.path.join(OUTPUT_DIR, "arim-site", "reports")
-        if os.path.exists(folder_path):
-            os.startfile(folder_path)
+        folder_path = get_reports_root_dir()
+        if folder_path.exists():
+            os.startfile(str(folder_path))
         else:
             QMessageBox.warning(self, "エラー", f"フォルダが存在しません:\n{folder_path}")
+
+    def refresh_from_disk(self):
+        """ディスク上の最新ファイルを参照"""
+        reports_dir = get_reports_root_dir()
+        latest_file = find_latest_matching_file(reports_dir, ["ARIM-extracted2*.xlsx"])
+
+        if latest_file:
+            latest_str = str(latest_file)
+            if self.input_path != latest_str:
+                mtime = datetime.fromtimestamp(latest_file.stat().st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+                self.log_message(f"✅ 入力Excel検出: {latest_file.name} ({mtime})")
+            self.input_path = latest_str
+            self.input_path_edit.setText(latest_str)
+            self.convert_button.setEnabled(True)
+        else:
+            self.input_path = None
+            self.input_path_edit.clear()
+            self.convert_button.setEnabled(False)
+
+        output_path = reports_dir / "converted.xlsx"
+        self.output_path = str(output_path)
+        self.output_path_edit.setText(self.output_path)
     
     def log_message(self, message: str):
         """ログメッセージ追加"""

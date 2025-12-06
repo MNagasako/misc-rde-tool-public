@@ -118,8 +118,19 @@ def format_prompt_with_context(prompt_template, context_data):
             if 'llm_model_name' not in enhanced_context:
                 provider = enhanced_context.get('llm_provider') or ''
                 model = enhanced_context.get('llm_model') or ''
-                if provider or model:
-                    enhanced_context['llm_model_name'] = f"{provider}:{model}".strip(':')
+                # provider/model が両方空の場合、AIManagerからデフォルト設定を取得
+                if not provider and not model:
+                    try:
+                        from classes.ai.core.ai_manager import AIManager
+                        ai_mgr = AIManager()
+                        provider = ai_mgr.get_default_provider()
+                        model = ai_mgr.get_default_model(provider)
+                        logger.debug(f"llm_model_name未設定のため、AIManagerからデフォルト取得: {provider}:{model}")
+                    except Exception as e:
+                        logger.debug(f"AIManager設定取得失敗、デフォルト値を使用: {e}")
+                        provider = 'gemini'
+                        model = 'gemini-2.0-flash'
+                enhanced_context['llm_model_name'] = f"{provider}:{model}".strip(':')
             # プレースホルダに空文字を入れて未置換を防ぐ
             for k in ['material_index_data', 'equipment_data', 'file_tree', 'text_from_structured_files']:
                 if k not in enhanced_context:

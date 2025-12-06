@@ -8,13 +8,21 @@ Version: 2.1.0
 
 import json
 import glob
-import pandas as pd
-import re
 import os
 import logging
-from typing import Dict, Any, Optional, List
+import re
 from datetime import datetime
-from config.common import OUTPUT_DIR, CONFIG_DIR
+from pathlib import Path
+from typing import Dict, Any, List, Optional
+
+import pandas as pd
+
+from config.common import CONFIG_DIR
+from classes.equipment.util.output_paths import (
+    get_equipment_root_dir,
+    get_equipment_backups_root,
+    get_equipment_entries_dir,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -244,15 +252,14 @@ class CatalogConverter:
                 final_json.update(sheet_data)
             
             # 出力パス設定
-            output_dir = os.path.join(OUTPUT_DIR, 'arim-site', 'facilities')
-            os.makedirs(output_dir, exist_ok=True)
-            output_path = os.path.join(output_dir, output_filename)
+            output_dir = get_equipment_root_dir()
+            output_path = output_dir / output_filename
             
             # JSONファイル保存
-            with open(output_path, 'w', encoding='utf-8') as f:
+            with output_path.open('w', encoding='utf-8') as f:
                 json.dump(final_json, f, ensure_ascii=False, indent=4)
             
-            logger.info(f"JSON出力完了: {output_path}")
+            logger.info("JSON出力完了: %s", output_path)
             
             # エントリーデータ作成
             entry_data = {
@@ -265,26 +272,25 @@ class CatalogConverter:
             }
             
             # JSONエントリー保存
-            json_entries_dir = os.path.join(output_dir, 'json_entries')
-            os.makedirs(json_entries_dir, exist_ok=True)
+            json_entries_dir = get_equipment_entries_dir()
             entry_filename = f"catalog_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            entry_path = os.path.join(json_entries_dir, entry_filename)
+            entry_path = json_entries_dir / entry_filename
             
-            with open(entry_path, 'w', encoding='utf-8') as f:
+            with entry_path.open('w', encoding='utf-8') as f:
                 json.dump(entry_data, f, ensure_ascii=False, indent=4)
             
-            logger.info(f"JSONエントリー保存: {entry_path}")
+            logger.info("JSONエントリー保存: %s", entry_path)
             
             # バックアップ作成
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            backup_dir = os.path.join(OUTPUT_DIR, 'arim-site', 'facilities', 'backups', timestamp)
-            os.makedirs(backup_dir, exist_ok=True)
-            backup_path = os.path.join(backup_dir, output_filename)
+            backup_dir = get_equipment_backups_root() / timestamp
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            backup_path = backup_dir / output_filename
             
-            with open(backup_path, 'w', encoding='utf-8') as f:
+            with backup_path.open('w', encoding='utf-8') as f:
                 json.dump(final_json, f, ensure_ascii=False, indent=4)
             
-            logger.info(f"バックアップ作成: {backup_path}")
+            logger.info("バックアップ作成: %s", backup_path)
             
             # 完了通知
             if progress_callback:

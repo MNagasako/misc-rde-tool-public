@@ -6,9 +6,10 @@
 
 import os
 import logging
-from typing import Optional
 from datetime import datetime
-from config.common import OUTPUT_DIR
+
+from classes.equipment.util.output_paths import get_equipment_root_dir
+from classes.reports.util.output_paths import get_reports_root_dir
 
 logger = logging.getLogger(__name__)
 
@@ -51,8 +52,8 @@ class ReportBatchWorker(QThread):
     def run(self):
         """一括処理実行"""
         try:
-            reports_dir = os.path.join(OUTPUT_DIR, "arim-site", "reports")
-            facilities_dir = os.path.join(OUTPUT_DIR, "arim-site", "facilities")
+            reports_dir = get_reports_root_dir()
+            equipment_dir = get_equipment_root_dir()
             
             # ========================================
             # Step 1: 報告書データ取得
@@ -122,7 +123,7 @@ class ReportBatchWorker(QThread):
             from classes.reports.core.report_converter import ReportConverter
             
             converter = ReportConverter()
-            converted_excel = os.path.join(reports_dir, "converted.xlsx")
+            converted_excel = reports_dir / "converted.xlsx"
             
             self.log_message.emit(f"🔄 変換開始: {os.path.basename(extracted_excel)} → converted.xlsx")
             
@@ -134,7 +135,7 @@ class ReportBatchWorker(QThread):
             
             result = converter.convert_report_data(
                 input_path=extracted_excel,
-                output_path=converted_excel
+                output_path=str(converted_excel)
             )
             
             if not result.success:
@@ -152,10 +153,10 @@ class ReportBatchWorker(QThread):
             self.log_message.emit("🔗 Step 3/3: 研究データ生成（設備別研究情報JSON）")
             self.log_message.emit("=" * 60)
             
-            merged_json = os.path.join(facilities_dir, "merged_data2.json")
-            output_json = os.path.join(reports_dir, "research_data.json")
+            merged_json = equipment_dir / "merged_data2.json"
+            output_json = reports_dir / "research_data.json"
             
-            if not os.path.exists(merged_json):
+            if not merged_json.exists():
                 self.log_message.emit(f"⚠️ 設備データが見つかりません: {merged_json}")
                 self.log_message.emit("⚠️ 研究データ生成をスキップします")
                 self.log_message.emit("💡 設備タブで設備データ（merged_data2.json）を先に取得してください")
@@ -168,9 +169,9 @@ class ReportBatchWorker(QThread):
                 self.log_message.emit("🔄 研究データ生成開始...")
                 
                 result = generator.generate_research_data(
-                    excel_path=converted_excel,  # 変換後のファイルを使用
-                    merged_data_path=merged_json,
-                    output_path=output_json
+                    excel_path=str(converted_excel),  # 変換後のファイルを使用
+                    merged_data_path=str(merged_json),
+                    output_path=str(output_json)
                 )
                 
                 if not result.success:
@@ -193,8 +194,8 @@ class ReportBatchWorker(QThread):
             results = {
                 'success_count': success_count,
                 'error_count': error_count,
-                'output_excel': converted_excel,  # 変換後ファイル
-                'output_json': output_json
+                'output_excel': str(converted_excel),  # 変換後ファイル
+                'output_json': str(output_json) if output_json else None
             }
             
             self.completed.emit(results)

@@ -6,7 +6,15 @@ import time
 import logging
 import openpyxl
 from dateutil.parser import parse as parse_datetime
-from config.common import get_dynamic_file_path, INPUT_DIR, OUTPUT_DIR, OUTPUT_RDE_DIR, DATAFILES_DIR, SUBGROUP_JSON_PATH
+from config.common import (
+    get_dynamic_file_path,
+    INPUT_DIR,
+    OUTPUT_DIR,
+    OUTPUT_RDE_DIR,
+    DATAFILES_DIR,
+    SUBGROUP_JSON_PATH,
+    GROUP_ORGNIZATION_DIR,
+)
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -492,17 +500,40 @@ def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callbac
             return json.load(f)
 
     # 各種JSONロード（静的定数を使用）
-    from config.common import SUBGROUP_JSON_PATH, DATASET_JSON_PATH, INSTRUMENTS_JSON_PATH, TEMPLATE_JSON_PATH
+    from config.common import DATASET_JSON_PATH, INSTRUMENTS_JSON_PATH, TEMPLATE_JSON_PATH
+    from pathlib import Path
     
-    sub_group_json = load_json(SUBGROUP_JSON_PATH)
+    # groupOrgnizationsフォルダ内の全ファイルを読み込んで統合
+    project_groups_dir = Path(GROUP_ORGNIZATION_DIR)
+    subGroup_included = []
+    
+    if project_groups_dir.exists():
+        logger.info(f"[v2.1.17] groupOrgnizationsフォルダからサブグループ情報を読み込み: {project_groups_dir}")
+        subgroup_files = list(project_groups_dir.glob("*.json"))
+        logger.info(f"[v2.1.17] 検出されたサブグループファイル数: {len(subgroup_files)}件")
+        
+        for subgroup_file in subgroup_files:
+            try:
+                with open(subgroup_file, "r", encoding="utf-8") as f:
+                    subgroup_data = json.load(f)
+                    # included配列を統合
+                    included_items = subgroup_data.get("included", [])
+                    subGroup_included.extend(included_items)
+                    logger.info(f"[v2.1.17] {subgroup_file.name}: {len(included_items)}件のアイテムを読み込み")
+            except Exception as e:
+                logger.error(f"[v2.1.17] サブグループファイル読み込みエラー: {subgroup_file.name} - {e}")
+        
+        logger.info(f"[v2.1.17] 統合後のsubGroup_included総数: {len(subGroup_included)}件")
+    else:
+        logger.warning(f"[v2.1.17] groupOrgnizationsフォルダが存在しません: {project_groups_dir}")
+    
     dataset_json = load_json(DATASET_JSON_PATH)
     instruments_json = load_json(INSTRUMENTS_JSON_PATH)
     templates_json = load_json(TEMPLATE_JSON_PATH)
-    if not all([sub_group_json, dataset_json, instruments_json, templates_json]):
+    if not all([dataset_json, instruments_json, templates_json]):
         print
         return
-
-    subGroup_included = sub_group_json.get("included", [])
+    
     dataset_data = dataset_json.get("data", [])
     instruments_data = instruments_json.get("data", [])
 
@@ -885,12 +916,28 @@ def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callbac
 # --- 各シート出力関数 ---
 def write_members_sheet(wb, parent):
     import json, os
-    abs_json = os.path.abspath(SUBGROUP_JSON_PATH)
-    if not os.path.exists(abs_json):
+    from pathlib import Path
+    
+    # groupOrgnizationsフォルダ内の全ファイルから全ユーザーを統合
+    project_groups_dir = Path(GROUP_ORGNIZATION_DIR)
+    users = []
+    
+    if project_groups_dir.exists():
+        subgroup_files = list(project_groups_dir.glob("*.json"))
+        logger.info(f"[v2.1.17] member シート: {len(subgroup_files)}件のサブグループファイルから読み込み")
+        
+        for subgroup_file in subgroup_files:
+            try:
+                with open(subgroup_file, "r", encoding="utf-8") as f:
+                    sub_group = json.load(f)
+                    file_users = [item for item in sub_group.get("included", []) if item.get("type") == "user"]
+                    users.extend(file_users)
+            except Exception as e:
+                logger.error(f"[v2.1.17] member シート: ファイル読み込みエラー - {subgroup_file.name}: {e}")
+    else:
+        logger.warning(f"[v2.1.17] member シート: groupOrgnizationsフォルダが存在しません")
         return
-    with open(abs_json, "r", encoding="utf-8") as f:
-        sub_group = json.load(f)
-    users = [item for item in sub_group.get("included", []) if item.get("type") == "user"]
+    
     HEADER_ROW = ["userId", "userName", "familyName", "givenName", "familyNameKanji", "givenNameKanji", "organizationName", "emailAddress", "isDeleted"]
     if "member" in wb.sheetnames:
         ws = wb["member"]
@@ -1196,13 +1243,29 @@ def write_licenses_sheet(wb, parent):
 
 def write_subgroups_sheet(wb, parent):
     import json, os
-    abs_json = os.path.abspath(SUBGROUP_JSON_PATH)
-    if not os.path.exists(abs_json):
+    from pathlib import Path
+    
+    # groupOrgnizationsフォルダ内の全ファイルから全サブグループを統合
+    project_groups_dir = Path(GROUP_ORGNIZATION_DIR)
+    subgroups = []
+    
+    if project_groups_dir.exists():
+        subgroup_files = list(project_groups_dir.glob("*.json"))
+        logger.info(f"[v2.1.17] subgroups シート: {len(subgroup_files)}件のサブグループファイルから読み込み")
+        
+        for subgroup_file in subgroup_files:
+            try:
+                with open(subgroup_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    included = data.get("included", [])
+                    file_subgroups = [item for item in included if item.get("type") == "group"]
+                    subgroups.extend(file_subgroups)
+            except Exception as e:
+                logger.error(f"[v2.1.17] subgroups シート: ファイル読み込みエラー - {subgroup_file.name}: {e}")
+    else:
+        logger.warning(f"[v2.1.17] subgroups シート: groupOrgnizationsフォルダが存在しません")
         return
-    with open(abs_json, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    included = data.get("included", [])
-    subgroups = [item for item in included if item.get("type") == "group"]
+    
     HEADER_ROW = ["groupId", "name", "groupType", "description", "ownerId"]
     SHEET_NAME = "subgroups"
     if SHEET_NAME in wb.sheetnames:

@@ -7,12 +7,18 @@ Version: 2.1.0
 """
 
 import json
-import pandas as pd
-import os
 import logging
-from typing import Dict, Any, Optional
 from datetime import datetime
-from config.common import OUTPUT_DIR
+from pathlib import Path
+from typing import Dict, Any, Optional
+
+import pandas as pd
+
+from classes.equipment.util.output_paths import (
+    get_equipment_root_dir,
+    get_equipment_backups_root,
+    get_equipment_entries_dir,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,19 +58,17 @@ class DataMerger:
         
         try:
             # 入出力パス設定
-            input_dir = os.path.join(OUTPUT_DIR, 'arim-site', 'facilities')
-            output_dir = input_dir
-            
-            xlsx_path = os.path.join(input_dir, excel_filename)
-            json_path = os.path.join(input_dir, json_filename)
-            output_path = os.path.join(output_dir, output_filename)
+            output_dir = get_equipment_root_dir()
+            xlsx_path = output_dir / excel_filename
+            json_path = output_dir / json_filename
+            output_path = output_dir / output_filename
             
             # プログレス通知
             if progress_callback:
                 progress_callback(0, 3, "ファイル存在チェック中...")
             
             # ファイル存在チェック
-            if not os.path.exists(xlsx_path):
+            if not xlsx_path.exists():
                 error_msg = f"Excelファイルが見つかりません: {xlsx_path}"
                 logger.error(error_msg)
                 return {
@@ -72,7 +76,7 @@ class DataMerger:
                     'error': error_msg
                 }
             
-            if not os.path.exists(json_path):
+            if not json_path.exists():
                 error_msg = f"JSONファイルが見つかりません: {json_path}"
                 logger.error(error_msg)
                 return {
@@ -87,9 +91,9 @@ class DataMerger:
                 progress_callback(1, 3, "データ読み込み中...")
             
             # データ読み込み
-            xlsx_df = pd.read_excel(xlsx_path)
+            xlsx_df = pd.read_excel(str(xlsx_path))
             
-            with open(json_path, "r", encoding="utf-8") as json_file:
+            with json_path.open("r", encoding="utf-8") as json_file:
                 json_data = json.load(json_file)
             
             logger.info(f"Excel行数: {len(xlsx_df)}, JSON件数: {len(json_data)}")
@@ -135,7 +139,7 @@ class DataMerger:
             # JSON形式で保存
             final_merged_json = merged_df.to_json(orient='records', force_ascii=False)
             
-            with open(output_path, 'w', encoding='utf-8') as f:
+            with output_path.open('w', encoding='utf-8') as f:
                 f.write(final_merged_json)
             
             logger.info(f"マージ結果保存: {output_path}")
@@ -150,23 +154,22 @@ class DataMerger:
                 'methods_matched': methods_matched
             }
             
-            json_entries_dir = os.path.join(output_dir, 'json_entries')
-            os.makedirs(json_entries_dir, exist_ok=True)
+            json_entries_dir = get_equipment_entries_dir()
             entry_filename = f"merge_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-            entry_path = os.path.join(json_entries_dir, entry_filename)
+            entry_path = json_entries_dir / entry_filename
             
-            with open(entry_path, 'w', encoding='utf-8') as f:
+            with entry_path.open('w', encoding='utf-8') as f:
                 json.dump(entry_data, f, ensure_ascii=False, indent=4)
             
             logger.info(f"マージログエントリー保存: {entry_path}")
             
             # バックアップ作成
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            backup_dir = os.path.join(OUTPUT_DIR, 'arim-site', 'facilities', 'backups', timestamp)
-            os.makedirs(backup_dir, exist_ok=True)
-            backup_path = os.path.join(backup_dir, output_filename)
+            backup_dir = get_equipment_backups_root() / timestamp
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            backup_path = backup_dir / output_filename
             
-            with open(backup_path, 'w', encoding='utf-8') as f:
+            with backup_path.open('w', encoding='utf-8') as f:
                 f.write(final_merged_json)
             
             logger.info(f"バックアップ作成: {backup_path}")

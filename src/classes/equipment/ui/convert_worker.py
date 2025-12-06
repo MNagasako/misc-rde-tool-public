@@ -6,7 +6,8 @@
 
 import logging
 from typing import Optional
-from config.common import OUTPUT_DIR
+
+from classes.equipment.util.output_paths import get_equipment_root_dir
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ class CatalogConvertWorker(QThread):
         try:
             from classes.equipment.core.catalog_converter import CatalogConverter
             
-            self.progress.emit(f"📂 OUTPUT_DIRを確認: {OUTPUT_DIR}")
+            self.progress.emit(f"📂 OUTPUT_DIRを確認: {get_equipment_root_dir()}")
             
             # コンバータ初期化
             converter = CatalogConverter()

@@ -6,9 +6,16 @@
 
 import os
 import logging
-from typing import Optional
 from datetime import datetime
-from config.common import OUTPUT_DIR
+from pathlib import Path
+from typing import Optional
+
+from classes.equipment.util.output_paths import (
+    find_latest_child_directory,
+    find_latest_matching_file,
+    get_equipment_backups_root,
+    get_equipment_root_dir,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -485,33 +492,38 @@ class FetchTab(QWidget):
         # ファイル情報更新
         self.update_file_info()
     
-    def update_file_info(self):
+    def update_file_info(self, show_empty: bool = False):
         """ファイル情報表示更新"""
-        if not self.latest_excel_path and not self.latest_json_path:
-            return
+        info_lines = ["📁 出力ファイル:"]
+        found = False
         
-        # ファイル情報取得
-        info_text = "📁 出力ファイル:\n"
-        
-        if self.latest_excel_path and os.path.exists(self.latest_excel_path):
-            mtime = os.path.getmtime(self.latest_excel_path)
-            mtime_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
-            size = os.path.getsize(self.latest_excel_path) / 1024  # KB
-            info_text += f"  📊 Excel: {os.path.basename(self.latest_excel_path)} ({size:.1f} KB, {mtime_str})\n"
+        excel_path = self._path_if_exists(self.latest_excel_path)
+        if excel_path:
+            info_lines.append(self._format_file_info("📊 Excel", excel_path))
             self.open_latest_excel_button.setEnabled(True)
+            found = True
+        else:
+            self.open_latest_excel_button.setEnabled(False)
         
-        if self.latest_json_path and os.path.exists(self.latest_json_path):
-            mtime = os.path.getmtime(self.latest_json_path)
-            mtime_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
-            size = os.path.getsize(self.latest_json_path) / 1024  # KB
-            info_text += f"  📄 JSON: {os.path.basename(self.latest_json_path)} ({size:.1f} KB, {mtime_str})\n"
+        json_path = self._path_if_exists(self.latest_json_path)
+        if json_path:
+            info_lines.append(self._format_file_info("📄 JSON", json_path))
             self.open_latest_json_button.setEnabled(True)
+            found = True
+        else:
+            self.open_latest_json_button.setEnabled(False)
         
         if self.latest_backup_dir:
-            info_text += f"  💾 バックアップ: {os.path.basename(self.latest_backup_dir)}\n"
-            self.open_folder_button.setEnabled(True)
+            info_lines.append(f"  💾 バックアップ: {os.path.basename(self.latest_backup_dir)}")
+            found = True
         
-        self.file_info_label.setText(info_text)
+        if not found and show_empty:
+            self.file_info_label.setText("📁 出力ファイル: 見つかりません")
+            return
+        elif not found:
+            return
+        
+        self.file_info_label.setText("\n".join(info_lines))
     
     def log_message(self, message: str):
         """ログメッセージ追加"""
@@ -523,10 +535,9 @@ class FetchTab(QWidget):
     
     def on_open_folder_clicked(self):
         """フォルダを開くボタンクリック"""
-        folder_path = os.path.join(OUTPUT_DIR, "arim-site", "facilities")
-        # フォルダが存在しない場合は作成
-        os.makedirs(folder_path, exist_ok=True)
-        os.startfile(folder_path)
+        folder_path = get_equipment_root_dir()
+        folder_path.mkdir(parents=True, exist_ok=True)
+        os.startfile(str(folder_path))
     
     def on_open_latest_excel_clicked(self):
         """最新Excelを開くボタンクリック"""
@@ -537,6 +548,37 @@ class FetchTab(QWidget):
         """最新JSONを開くボタンクリック"""
         if self.latest_json_path and os.path.exists(self.latest_json_path):
             os.startfile(self.latest_json_path)
+
+    def refresh_from_disk(self):
+        """ディスク上の最新ファイル情報を読み取り"""
+        base_dir = get_equipment_root_dir()
+        self.latest_excel_path = self._path_to_str(
+            find_latest_matching_file(base_dir, ["facilities_*.xlsx", "facilities_full.xlsx"])
+        )
+        self.latest_json_path = self._path_to_str(
+            find_latest_matching_file(base_dir, ["facilities_*.json"])
+        )
+        backups_dir = get_equipment_backups_root()
+        latest_backup = find_latest_child_directory(backups_dir)
+        self.latest_backup_dir = self._path_to_str(latest_backup)
+        self.update_file_info(show_empty=True)
+
+    @staticmethod
+    def _path_to_str(path: Optional[Path]) -> Optional[str]:
+        return str(path) if path else None
+
+    @staticmethod
+    def _path_if_exists(path_str: Optional[str]) -> Optional[Path]:
+        if not path_str:
+            return None
+        path = Path(path_str)
+        return path if path.exists() else None
+
+    @staticmethod
+    def _format_file_info(label: str, path: Path) -> str:
+        mtime_str = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
+        size_kb = path.stat().st_size / 1024
+        return f"  {label}: {path.name} ({size_kb:.1f} KB, {mtime_str})"
     
     def on_batch_process_clicked(self):
         """一括処理ボタンクリック（取得→変換→マージ）"""

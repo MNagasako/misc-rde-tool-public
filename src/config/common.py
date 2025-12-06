@@ -44,7 +44,14 @@ logger = logging.getLogger(__name__)
 # 2025-11-15: v2.1.3 - データ取得2機能ファイル単位プログレス表示・粒度改善・スレッドセーフ実装
 # 2025-11-15: v2.1.2 - プログレス表示随時更新修正・スレッド安全性向上・repaint実装
 # 2025-11-14: v2.0.8 - プロキシ設定完全修正・接続テストUI設定反映・truststore/CA設定統合
-REVISION = "2.1.16"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+REVISION = "2.2.0"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+# 2025-12-06: v2.2.0 - メジャーアップデート（包括的改善リリース）
+#   - Basic Info: サブグループ完全性チェック・プログレス表示改善・並列化対応
+#   - AI機能: llm_model_nameプレースホルダ置換修正・AI CHECK安定化
+#   - データセット: 関連データビルダー・JST時間表示・RDE存在確認
+#   - 設定: UI整理・暗号化保存・ログレベルCLI・ウィンドウ位置ポリシー
+#   - テスト: ユニットテスト拡充（458件全合格）・バグ修正多数
+# 2025-12-06: v2.1.24 - サブグループ完全性チェック再取得・グループ選択ダイアログのUIスレッド固定
 # 2025-12-04: v2.1.16 - AI CHECKボタン追加・結果ダイアログフォント改善・可読性向上
 # 2025-12-03: v2.1.15 - AI応答JSON引用除去・MItree階層表示・プレースホルダ完全解決
 # 2025-11-11: v2.0.3 - ログインUI完全簡素化・手動ログイン実行機能・トークン管理2ホスト固定
@@ -171,6 +178,7 @@ OUTPUT_RDE_DIR = get_dynamic_file_path('output/rde')
 DATAFILES_DIR = get_dynamic_file_path('output/rde/data/dataFiles')
 # samplesディレクトリの定数
 SAMPLES_DIR = get_dynamic_file_path('output/rde/data/samples')
+DATASET_JSON_CHUNKS_DIR = get_dynamic_file_path('output/rde/data/datasetJsonChunks')
 
 # ディレクトリの自動作成
 for dir_path in [INPUT_DIR, OUTPUT_DIR, OUTPUT_LOG_DIR, HIDDEN_DIR, CONFIG_DIR]:
@@ -219,10 +227,16 @@ DATATREE_FILE_PATH = os.path.join(DATASET_DETAILS_DIR, NEW_DATATREE_FILE_NAME)
 
 # RDEデータファイル
 OUTPUT_RDE_DATA_DIR = get_dynamic_file_path('output/rde/data')
+GROUP_JSON_PATH = get_dynamic_file_path('output/rde/data/group.json')
+GROUP_PROJECT_DIR = get_dynamic_file_path('output/rde/data/groupProject')
+GROUP_ORGNIZATION_DIR = get_dynamic_file_path('output/rde/data/groupOrgnizations')  # 仕様上のスペルを維持
+SUBGROUP_DETAILS_DIR = get_dynamic_file_path('output/rde/data/subGroups')
+LEGACY_SUBGROUP_DETAILS_DIR = get_dynamic_file_path('output/rde/data/subgroups')  # 互換目的
 DATASET_JSON_PATH = get_dynamic_file_path('output/rde/data/dataset.json')
 INFO_JSON_PATH = get_dynamic_file_path('output/rde/data/info.json')
 SELF_JSON_PATH = get_dynamic_file_path('output/rde/data/self.json')
 SUBGROUP_JSON_PATH = get_dynamic_file_path('output/rde/data/subGroup.json')
+GROUP_SELECTION_HISTORY_FILE = get_dynamic_file_path('output/.private/group_selection_history.json')
 TEMPLATE_JSON_PATH = get_dynamic_file_path('output/rde/data/template.json')
 INSTRUMENTS_JSON_PATH = get_dynamic_file_path('output/rde/data/instruments.json')
 LICENSES_JSON_PATH = get_dynamic_file_path('output/rde/data/licenses.json')
@@ -239,7 +253,20 @@ PROXY_IMAGE_DIR = get_dynamic_file_path('output/proxy_images')
 SEARCH_RESULTS_DIR = get_dynamic_file_path('output/search_results')
 
 # 動的ディレクトリの自動作成
-for dir_path in [WEBVIEW_HTML_DIR, DATASETS_DIR, DYNAMIC_IMAGE_DIR, PROXY_IMAGE_DIR, SEARCH_RESULTS_DIR, OUTPUT_RDE_DATA_DIR, DATA_ENTRY_DIR]:
+for dir_path in [
+    WEBVIEW_HTML_DIR,
+    DATASETS_DIR,
+    DYNAMIC_IMAGE_DIR,
+    PROXY_IMAGE_DIR,
+    SEARCH_RESULTS_DIR,
+    OUTPUT_RDE_DATA_DIR,
+    DATA_ENTRY_DIR,
+    GROUP_PROJECT_DIR,
+    GROUP_ORGNIZATION_DIR,
+    SUBGROUP_DETAILS_DIR,
+    LEGACY_SUBGROUP_DETAILS_DIR,
+    DATASET_JSON_CHUNKS_DIR,
+]:
     if not os.path.exists(dir_path):
         os.makedirs(dir_path, exist_ok=True)
         

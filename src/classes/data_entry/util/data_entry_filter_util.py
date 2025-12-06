@@ -8,11 +8,6 @@ import time
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
-# 親ディレクトリのsrcをPythonパスに追加
-current_dir = Path(__file__).parent
-src_dir = current_dir.parent.parent.parent
-sys.path.insert(0, str(src_dir))
-
 from config.common import SELF_JSON_PATH, DATASET_JSON_PATH
 
 # キャッシュ機能は削除済み - 高速検索機能で十分な性能を実現

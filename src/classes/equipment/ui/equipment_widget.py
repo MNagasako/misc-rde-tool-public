@@ -5,7 +5,8 @@ ARIM設備データの並列取得・処理・出力機能を提供するUIで�
 """
 
 import logging
-from config.common import OUTPUT_DIR
+
+from classes.equipment.util.output_paths import ensure_equipment_output_dirs
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class EquipmentWidget(QWidget):
     
     def setup_ui(self):
         """UI構築"""
+        ensure_equipment_output_dirs(logger)
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         
@@ -51,4 +53,22 @@ class EquipmentWidget(QWidget):
         self.tab_widget.addTab(self.convert_tab, "🔄 カタログ変換")
         self.tab_widget.addTab(self.merge_tab, "🔗 データマージ")
         
+        self.tab_widget.currentChanged.connect(self.on_tab_changed)
+        self.refresh_all_tabs()
+        
         main_layout.addWidget(self.tab_widget)
+
+    def on_tab_changed(self, index: int):
+        """タブ切り替え時に最新状態へ更新"""
+        tab = self.tab_widget.widget(index)
+        self._refresh_tab(tab)
+
+    def refresh_all_tabs(self):
+        for tab in (self.fetch_tab, self.convert_tab, self.merge_tab):
+            self._refresh_tab(tab)
+
+    @staticmethod
+    def _refresh_tab(tab):
+        refresh = getattr(tab, "refresh_from_disk", None)
+        if callable(refresh):
+            refresh()

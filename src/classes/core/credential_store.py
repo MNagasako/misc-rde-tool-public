@@ -366,8 +366,8 @@ class EncryptedFileCredentialStore(BaseCredentialStore):
     """暗号化ファイル使用の認証情報ストア"""
     
     def __init__(self):
-        from config.common import get_dynamic_file_path
-        self.creds_file = get_dynamic_file_path('output/.private/creds.enc.json')
+        from config.common import HIDDEN_DIR
+        self.creds_file = os.path.join(HIDDEN_DIR, 'creds.enc.json')
         self._crypto = None
         self._init_crypto()
     
@@ -491,8 +491,9 @@ class EncryptedFileCredentialStore(BaseCredentialStore):
                 "version": "1.0"
             }
             
+            payload = {"encrypted_data": encrypted_data}
             with open(self.creds_file, 'w', encoding='utf-8') as f:
-                json.dump(encrypted_data, f)
+                json.dump(payload, f)
             
             # 鍵をメモリから削除
             key = b'\x00' * len(key)
@@ -512,7 +513,8 @@ class EncryptedFileCredentialStore(BaseCredentialStore):
         try:
             # ファイル読み込み
             with open(self.creds_file, 'r', encoding='utf-8') as f:
-                encrypted_data = json.load(f)
+                loaded_data = json.load(f)
+                encrypted_data = loaded_data.get("encrypted_data", loaded_data)
             
             # 鍵の復号
             protected_key = bytes.fromhex(encrypted_data["protected_key"])

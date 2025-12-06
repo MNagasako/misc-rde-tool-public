@@ -9,9 +9,6 @@ try:
             QHeaderView, QLineEdit, QHBoxLayout
         )
         from qt_compat.core import Qt
-        from unittest.mock import MagicMock
-        if any(isinstance(cls, MagicMock) for cls in (QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QHeaderView, QLineEdit, QHBoxLayout)):
-            raise ImportError("qt_compat widgets contaminated by MagicMock")
     except Exception:
         from PySide6.QtWidgets import (
             QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem,

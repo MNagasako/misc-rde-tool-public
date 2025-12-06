@@ -9,6 +9,9 @@ Version: 2.1.0
 
 import logging
 
+from classes.equipment.util.output_paths import ensure_equipment_output_dirs
+from classes.reports.util.output_paths import get_reports_root_dir
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -56,6 +59,8 @@ class ReportWidget(QWidget):
         """タブ設定"""
         try:
             logger.info("報告書タブの初期化を開始...")
+            get_reports_root_dir()
+            ensure_equipment_output_dirs(logger)
             
             # データ取得タブ
             logger.info("データ取得タブをインポート中...")
@@ -82,6 +87,8 @@ class ReportWidget(QWidget):
             logger.info("✅ 研究データ生成タブ追加完了")
             
             logger.info(f"✅ 全タブ追加完了: {self.tab_widget.count()}個のタブ")
+            self.tab_widget.currentChanged.connect(self.on_tab_changed)
+            self.refresh_all_tabs()
             
         except ImportError as e:
             logger.error(f"タブのインポートエラー: {e}", exc_info=True)
@@ -113,3 +120,19 @@ class ReportWidget(QWidget):
             logger.debug("ReportWidget: テーマ更新完了")
         except Exception as e:
             logger.error(f"ReportWidget: テーマ更新エラー: {e}")
+
+    def on_tab_changed(self, index: int):
+        """タブ切り替え時に最新状態へ更新"""
+        tab = self.tab_widget.widget(index)
+        self._refresh_tab(tab)
+
+    def refresh_all_tabs(self):
+        """全タブをディスク上の最新状態へ更新"""
+        for tab in (getattr(self, 'fetch_tab', None), getattr(self, 'convert_tab', None), getattr(self, 'research_data_tab', None)):
+            self._refresh_tab(tab)
+
+    @staticmethod
+    def _refresh_tab(tab):
+        refresh = getattr(tab, "refresh_from_disk", None)
+        if callable(refresh):
+            refresh()

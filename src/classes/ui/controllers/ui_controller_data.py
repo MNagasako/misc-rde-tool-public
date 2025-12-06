@@ -72,7 +72,7 @@ class UIControllerData:
         bearer_tokenを渡す
         """
         try:
-            from classes.data.logic.dataset_open_logic import run_dataset_open_logic
+            from classes.dataset.core.dataset_open_logic import run_dataset_open_logic
             
             # 親ウィジェットからbearer_tokenを取得
             bearer_token = None
@@ -296,7 +296,7 @@ class UIControllerData:
     def fetch_basic_info(self):
         """基本情報取得"""
         try:
-            from .ui_basic_info import fetch_basic_info
+            from classes.basic.ui.ui_basic_info import fetch_basic_info
             fetch_basic_info(self.ui_controller)
         except Exception as e:
             self._handle_operation_error("基本情報取得", e)
@@ -304,7 +304,7 @@ class UIControllerData:
     def fetch_basic_info_self(self):
         """基本情報取得（検索）"""
         try:
-            from .ui_basic_info import fetch_basic_info_self
+            from classes.basic.ui.ui_basic_info import fetch_basic_info_self
             fetch_basic_info_self(self.ui_controller)
         except Exception as e:
             self._handle_operation_error("基本情報取得（検索）", e)
@@ -312,7 +312,7 @@ class UIControllerData:
     def summary_basic_info_to_Xlsx(self):
         """基本情報のExcelサマリー作成"""
         try:
-            from .ui_basic_info import summary_basic_info_to_Xlsx
+            from classes.basic.ui.ui_basic_info import summary_basic_info_to_Xlsx
             summary_basic_info_to_Xlsx(self.ui_controller)
         except Exception as e:
             self._handle_operation_error("基本情報Excelサマリー作成", e)
@@ -320,7 +320,7 @@ class UIControllerData:
     def apply_basic_info_to_Xlsx(self):
         """基本情報のExcel適用"""
         try:
-            from .ui_basic_info import apply_basic_info_to_Xlsx
+            from classes.basic.ui.ui_basic_info import apply_basic_info_to_Xlsx
             apply_basic_info_to_Xlsx(self.ui_controller)
         except Exception as e:
             self._handle_operation_error("基本情報Excel適用", e)
@@ -328,7 +328,7 @@ class UIControllerData:
     def fetch_common_info_only(self):
         """共通情報のみ取得"""
         try:
-            from .ui_basic_info import fetch_common_info_only
+            from classes.basic.ui.ui_basic_info import fetch_common_info_only
             fetch_common_info_only(self.ui_controller)
         except Exception as e:
             self._handle_operation_error("共通情報取得", e)
@@ -336,7 +336,7 @@ class UIControllerData:
     def fetch_invoice_schema(self):
         """インボイススキーマ取得"""
         try:
-            from .ui_basic_info import fetch_invoice_schema
+            from classes.basic.ui.ui_basic_info import fetch_invoice_schema
             fetch_invoice_schema(self.ui_controller)
         except Exception as e:
             self._handle_operation_error("インボイススキーマ取得", e)
@@ -344,7 +344,7 @@ class UIControllerData:
     def fetch_sample_info_only(self):
         """サンプル情報のみ取得"""
         try:
-            from .ui_basic_info import fetch_sample_info_only
+            from classes.basic.ui.ui_basic_info import fetch_sample_info_only
             fetch_sample_info_only(self.ui_controller)
         except Exception as e:
             self._handle_operation_error("サンプル情報取得", e)
@@ -398,3 +398,4 @@ class UIControllerData:
         except Exception as e:
             self.logger.error(f"データセット情報表示エラー: {e}")
             self.ui_controller.show_error(f"データセット情報表示エラー: {e}")
+    

@@ -7,6 +7,7 @@ import os
 import datetime
 import json
 import logging
+from typing import Optional
 from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QListWidget, QListWidgetItem, QTextEdit, QProgressBar,
@@ -17,6 +18,7 @@ from qt_compat.core import Qt, QThread, Signal, QTimer
 from classes.ai.core.ai_manager import AIManager
 from classes.theme import ThemeKey
 from classes.theme.theme_manager import get_color
+from classes.utils.dataset_filter_fetcher import DatasetFilterFetcher
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -30,17 +32,11 @@ from classes.dataset.ui.spinner_overlay import SpinnerOverlay
 try:
     from qt_compat.widgets import QDialog as _QCDialog
     # QDialogクラス自体に cancel_ai_button を定義しておくと、
-    # MagicMock環境での属性探索時にも isVisible() が False を返せる
-    try:
-        from unittest.mock import MagicMock  # type: ignore
-        _cb = MagicMock()
-        _cb.isVisible.return_value = False
-        setattr(_QCDialog, 'cancel_ai_button', _cb)
-    except Exception:
-        class _CancelButtonShim:
-            def isVisible(self):
-                return False
-        setattr(_QCDialog, 'cancel_ai_button', _CancelButtonShim())
+    # テスト環境での属性探索時にも isVisible() が False を返せる
+    class _CancelButtonShim:
+        def isVisible(self):
+            return False
+    setattr(_QCDialog, 'cancel_ai_button', _CancelButtonShim())
 except Exception:
     pass
 
@@ -121,6 +117,9 @@ class AISuggestionDialog(QDialog):
         self.auto_generate = auto_generate  # 自動生成フラグ
         self.last_used_prompt = None  # 最後に使用したプロンプトを保存
         self.mode = mode  # 表示モード: "dataset_suggestion" または "ai_extension"
+        self._dataset_filter_fetcher: Optional[DatasetFilterFetcher] = None
+        self._dataset_filter_widget: Optional[QWidget] = None
+        self._dataset_combo_connected = False
         
         # AI拡張機能を取得
         self.ai_extension = AIExtensionRegistry.get(extension_name)
@@ -1012,6 +1011,7 @@ class AISuggestionDialog(QDialog):
         dataset_select_widget = QWidget()
         dataset_select_layout = QVBoxLayout(dataset_select_widget)
         dataset_select_layout.setContentsMargins(10, 5, 10, 5)
+        self.dataset_select_layout = dataset_select_layout
         
         # データセット選択ラベル
         dataset_select_label = QLabel("分析対象データセットを選択:")
@@ -1353,9 +1353,7 @@ class AISuggestionDialog(QDialog):
         # データセット選択の初期化
         self.initialize_dataset_dropdown()
         
-        # データセット選択のシグナル接続
-        if hasattr(self, 'extension_dataset_combo'):
-            self.extension_dataset_combo.currentTextChanged.connect(self.on_dataset_selection_changed)
+        # データセット選択のシグナル接続は初期化処理内で設定
         
     def setup_extraction_settings_tab(self, tab_widget):
         """ファイル抽出設定タブのセットアップ"""
@@ -2021,6 +2019,20 @@ class AISuggestionDialog(QDialog):
             except Exception as context_error:
                 logger.warning("拡張コンテキスト収集でエラー: %s", context_error)
                 # エラーが発生してもbase contextで続行
+            
+                # AI設定からプロバイダー/モデル情報を付与
+                try:
+                    ai_manager = AIManager()
+                    provider = ai_manager.get_default_provider()
+                    model = ai_manager.get_default_model(provider)
+                    if provider:
+                        context_data['llm_provider'] = provider
+                    if model:
+                        context_data['llm_model'] = model
+                    if provider or model:
+                        context_data['llm_model_name'] = f"{provider}:{model}".strip(':')
+                except Exception as ai_err:
+                    logger.warning("AI設定の取得に失敗しました: %s", ai_err)
             
             return context_data
             
@@ -2996,91 +3008,37 @@ class AISuggestionDialog(QDialog):
             
         try:
             from config.common import get_dynamic_file_path
-            from classes.dataset.util.dataset_dropdown_util import load_dataset_list
-            import os
-            
-            logger.debug("データセット選択初期化を開始")
-            
-            # dataset.jsonのパス
+
             dataset_json_path = get_dynamic_file_path('output/rde/data/dataset.json')
             info_json_path = get_dynamic_file_path('output/rde/data/info.json')
-            
-            logger.debug("dataset.jsonパス: %s", dataset_json_path)
-            logger.debug("ファイル存在確認: %s", os.path.exists(dataset_json_path))
-            
-            # データセット一覧を読み込み
-            self.load_datasets_to_combo(dataset_json_path, info_json_path)
-            
-            # 現在のコンテキストに基づいて選択
+
+            logger.debug("データセット選択初期化を開始: %s", dataset_json_path)
+
+            self._dataset_filter_fetcher = DatasetFilterFetcher(
+                dataset_json_path=dataset_json_path,
+                info_json_path=info_json_path,
+                combo=self.extension_dataset_combo,
+                parent=self,
+            )
+
+            filter_widget = self._dataset_filter_fetcher.build_filter_panel(parent=self)
+
+            if self._dataset_filter_widget:
+                self._dataset_filter_widget.setParent(None)
+            if hasattr(self, 'dataset_select_layout'):
+                self.dataset_select_layout.insertWidget(1, filter_widget)
+            self._dataset_filter_widget = filter_widget
+
+            if not self._dataset_combo_connected:
+                self.extension_dataset_combo.currentIndexChanged.connect(self.on_dataset_selection_changed)
+                self._dataset_combo_connected = True
+
             self.select_current_dataset()
-            
+
             logger.debug("データセット選択初期化完了")
-            
+
         except Exception as e:
             logger.error("データセット選択初期化エラー: %s", e)
-            import traceback
-            traceback.print_exc()
-    
-    def load_datasets_to_combo(self, dataset_json_path, info_json_path):
-        """データセット一覧をコンボボックスに読み込み（検索補完機能付き）"""
-        try:
-            from classes.dataset.util.dataset_dropdown_util import load_dataset_list
-            
-            # データセット一覧を取得
-            datasets = load_dataset_list(dataset_json_path)
-            
-            # コンボボックスをクリア
-            self.extension_dataset_combo.clear()
-            
-            # 既存のCompleterがあればクリア
-            if self.extension_dataset_combo.completer():
-                self.extension_dataset_combo.completer().deleteLater()
-            
-            # 表示名のリストを作成（検索補完用）
-            display_names = []
-            
-            # データセット一覧を追加
-            for dataset_info in datasets:
-                dataset_id = dataset_info.get('id', '')
-                display_name = dataset_info.get('display', '名前なし')
-                
-                # アイテムを追加
-                self.extension_dataset_combo.addItem(display_name, dataset_info)
-                display_names.append(display_name)
-            
-            # QCompleterを設定（修正タブと同じ実装）
-            from qt_compat.widgets import QCompleter
-            from qt_compat.core import Qt
-            
-            completer = QCompleter(display_names, self.extension_dataset_combo)
-            completer.setCaseSensitivity(Qt.CaseInsensitive)
-            completer.setFilterMode(Qt.MatchContains)
-            
-            # 検索時の補完リスト（popup）の高さを12行分に制限
-            popup_view = completer.popup()
-            popup_view.setMinimumHeight(240)
-            popup_view.setMaximumHeight(240)
-            
-            self.extension_dataset_combo.setCompleter(completer)
-            
-            # データセットキャッシュを保存（修正タブと同様）
-            self.extension_dataset_combo._datasets_cache = datasets
-            self.extension_dataset_combo._display_names_cache = display_names
-            
-            # プレースホルダーテキストを更新
-            if self.extension_dataset_combo.lineEdit():
-                self.extension_dataset_combo.lineEdit().setPlaceholderText(f"データセット ({len(datasets)}件) から検索・選択してください")
-            
-            # マウスクリック時の全件表示機能を追加（修正タブと同様）
-            self.setup_mouse_click_handler()
-            
-            logger.debug("データセット %s件を読み込みました", len(datasets))
-            
-            # データセット選択変更のイベントハンドラを接続
-            self.extension_dataset_combo.currentIndexChanged.connect(self.on_dataset_selection_changed)
-            
-        except Exception as e:
-            logger.error("データセット読み込みエラー: %s", e)
             import traceback
             traceback.print_exc()
     
@@ -3115,18 +3073,18 @@ class AISuggestionDialog(QDialog):
         except Exception as e:
             logger.error("データセット自動選択エラー: %s", e)
     
-    def on_dataset_selection_changed(self, text):
+    def on_dataset_selection_changed(self, index: int):
         """データセット選択変更時の処理"""
         try:
             if not hasattr(self, 'extension_dataset_combo'):
                 return
                 
-            current_index = self.extension_dataset_combo.currentIndex()
-            if current_index <= 0:  # "選択してください"が選択された場合
+            if index is None:
                 return
-            
-            # 選択されたデータセットを取得
-            dataset_info = self.extension_dataset_combo.itemData(current_index)
+            if index < 0:
+                return
+
+            dataset_info = self.extension_dataset_combo.itemData(index)
             if not dataset_info:
                 return
             
@@ -3136,7 +3094,8 @@ class AISuggestionDialog(QDialog):
             # データセット情報表示を更新
             self.update_dataset_info_display()
             
-            logger.debug("データセット選択変更: %s", text)
+            display_text = self.extension_dataset_combo.itemText(index)
+            logger.debug("データセット選択変更: %s", display_text)
             
         except Exception as e:
             logger.error("データセット選択変更エラー: %s", e)
@@ -3222,42 +3181,9 @@ class AISuggestionDialog(QDialog):
     def show_all_datasets(self):
         """全データセット表示（▼ボタン用）"""
         try:
-            if hasattr(self, 'extension_dataset_combo'):
+            if self._dataset_filter_fetcher:
+                self._dataset_filter_fetcher.show_all()
+            elif hasattr(self, 'extension_dataset_combo'):
                 self.extension_dataset_combo.showPopup()
         except Exception as e:
             logger.error("全データセット表示エラー: %s", e)
-    
-    def setup_mouse_click_handler(self):
-        """マウスクリック時の全件表示機能を設定（修正タブと同様）"""
-        try:
-            if not hasattr(self.extension_dataset_combo, '_mouse_press_event_set'):
-                orig_mouse_press = self.extension_dataset_combo.mousePressEvent
-                
-                def combo_mouse_press_event(event):
-                    if not self.extension_dataset_combo.lineEdit().text():
-                        # コンボボックスをクリア
-                        self.extension_dataset_combo.clear()
-                        
-                        # キャッシュされたデータセット一覧と表示名を使用
-                        cached_datasets = getattr(self.extension_dataset_combo, '_datasets_cache', [])
-                        cached_display_names = getattr(self.extension_dataset_combo, '_display_names_cache', [])
-                        
-                        logger.debug("AI拡張 - コンボボックス展開: %s件のデータセット", len(cached_datasets))
-                        
-                        # データセット一覧を再設定
-                        if cached_datasets and cached_display_names:
-                            for i, dataset_info in enumerate(cached_datasets):
-                                display_name = cached_display_names[i] if i < len(cached_display_names) else '名前なし'
-                                self.extension_dataset_combo.addItem(display_name, dataset_info)
-                        else:
-                            # フォールバック：キャッシュがない場合
-                            self.extension_dataset_combo.addItem("-- データセットを選択してください --", None)
-                    
-                    self.extension_dataset_combo.showPopup()
-                    orig_mouse_press(event)
-                
-                self.extension_dataset_combo.mousePressEvent = combo_mouse_press_event
-                self.extension_dataset_combo._mouse_press_event_set = True
-                
-        except Exception as e:
-            logger.error("マウスクリックハンドラ設定エラー: %s", e)

@@ -1229,6 +1229,8 @@ class UIController(UIControllerCore):
             self.show_error(f"基本情報画面の2行目ボタン作成でエラーが発生しました: {e}")
             layout.addWidget(QLabel("基本情報のサブ機能が利用できません"))
 
+        # JSON個別取得ボタンは廃止された（v2.1.20）
+
         try:
             # XLSX関連機能セクション（データ取得機能と区別）
             xlsx_label = QLabel("📊 Excel関連機能:")
@@ -4035,26 +4037,6 @@ class UIController(UIControllerCore):
         except Exception as e:
             self.show_error(f"サンプル情報取得でエラーが発生しました: {e}")
     
-    def apply_basic_info_to_Xlsx(self):
-        """XLSX反映 - basicパッケージに委譲"""
-        try:
-            from classes.basic.util.xlsx_exporter import apply_basic_info_to_xlsx
-            apply_basic_info_to_xlsx(self)
-        except ImportError as e:
-            self.show_error(f"XLSX出力モジュールのインポートに失敗しました: {e}")
-        except Exception as e:
-            self.show_error(f"XLSX反映でエラーが発生しました: {e}")
-    
-    def summary_basic_info_to_Xlsx(self):
-        """まとめXLSX作成 - basicパッケージに委譲"""
-        try:
-            from classes.basic.util.xlsx_exporter import summary_basic_info_to_xlsx
-            summary_basic_info_to_xlsx(self)
-        except ImportError as e:
-            self.show_error(f"XLSX出力モジュールのインポートに失敗しました: {e}")
-        except Exception as e:
-            self.show_error(f"まとめXLSX作成でエラーが発生しました: {e}")
-
     def _create_fallback_settings_widget(self):
         """フォールバック：従来の設定ダイアログを開くボタンを含むウィジェット"""
         from qt_compat.widgets import QWidget, QVBoxLayout, QPushButton, QLabel

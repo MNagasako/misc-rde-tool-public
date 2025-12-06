@@ -5,8 +5,10 @@
 """
 
 import logging
+from pathlib import Path
 from typing import Optional
-from config.common import OUTPUT_DIR
+
+from classes.equipment.util.output_paths import get_equipment_root_dir
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +55,8 @@ class DataMergeWorker(QThread):
             from classes.equipment.core.data_merger import DataMerger
             from pathlib import Path
             
-            self.progress.emit(f"📂 OUTPUT_DIRを確認: {OUTPUT_DIR}")
+            equipment_dir = get_equipment_root_dir()
+            self.progress.emit(f"📂 OUTPUT_DIRを確認: {equipment_dir}")
             
             # マージャー初期化
             merger = DataMerger()
@@ -61,7 +64,7 @@ class DataMergeWorker(QThread):
             self.progress.emit("🔍 入力ファイル確認中...")
             
             # ファイル存在確認
-            facilities_dir = Path(OUTPUT_DIR) / "facilities"
+            facilities_dir = equipment_dir
             excel_path = facilities_dir / self.excel_filename
             json_path = facilities_dir / self.json_filename
             

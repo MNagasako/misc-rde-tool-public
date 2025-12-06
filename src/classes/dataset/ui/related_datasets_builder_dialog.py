@@ -6,17 +6,12 @@ import os
 import json
 import logging
 
-# MagicMock汚染回避のため、PySide6から直接インポート
 try:
     from qt_compat.widgets import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
         QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QCompleter
     )
     from qt_compat.core import Qt, Signal
-    from unittest.mock import MagicMock
-    # qt_compatがMagicMockを返している場合はPySide6実体へフォールバック
-    if isinstance(QDialog, MagicMock):
-        raise ImportError("qt_compat contaminated by MagicMock")
 except Exception:
     from PySide6.QtWidgets import (
         QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox,
