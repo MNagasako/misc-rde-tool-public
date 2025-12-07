@@ -2,8 +2,10 @@
 
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
-**[ツール概要(こちらのほうが更新頻度高いです)](https://cuddly-stinger-40d.notion.site/QuickStart-2befc2cb5fc380f09d0dd4595b767f4d?source=copy_link)**
+
 **ARIM事業 RDE→ARIMデータポータル移行ツール v2.2.1** のバイナリ配布およびドキュメント公開用リポジトリです。
+
+**[ツール概要(こちらのほうが更新頻度高いです)](https://cuddly-stinger-40d.notion.site/QuickStart-2befc2cb5fc380f09d0dd4595b767f4d?source=copy_link)**
 
 > ⚠ 本ツールは単独の個人開発による非公式ツールです。ARIM事業 / RDE / ARIMデータポータルの公式サポート対象ではありません。開発チーム・ロードマップ・将来計画の事前告知は一切行いません。ここに記載しているのは現行バージョンで提供中の機能のみです。
 > RDEサイトおよびデータポータルの画面・通信挙動を独自解析し再現しているため、サイト側の仕様変更で予告なく動作しなくなる・誤作動する可能性があります。利用は自己責任で行ってください。
