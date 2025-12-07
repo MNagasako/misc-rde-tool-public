@@ -761,7 +761,6 @@ class UIControllerCore:
         try:
             import os
             from config.common import DEBUG_INFO_FILE, LOGIN_FILE
-            from functions.common_funcs import external_path
             
             self.parent.show()
             self.center_window()
@@ -775,12 +774,13 @@ class UIControllerCore:
             webview_width = getattr(self.parent, '_webview_fixed_width', 900)
             self.parent.setMinimumWidth(webview_width + menu_width + margin)
 
-            # login.txtのパス情報をinfo.txtに出力
-            info_path = external_path(DEBUG_INFO_FILE)
-            login_path = external_path(LOGIN_FILE)
+            # login.txtのパス情報をinfo.txtに出力（ユーザーディレクトリ配下）
+            info_path = DEBUG_INFO_FILE
+            login_path = LOGIN_FILE
             login_info = f"login.txt path : {os.path.abspath(login_path)}"
 
             try:
+                os.makedirs(os.path.dirname(info_path), exist_ok=True)
                 with open(info_path, 'w', encoding='utf-8') as infof:
                     infof.write(f"{login_info}\n")
             except Exception as e:

@@ -36,6 +36,9 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     # メインコンテナ
     main_widget = QWidget()
     main_layout = QVBoxLayout()
+    # タブ管理用のリファレンスを保持（クリーンアップや再生成時に使用）
+    main_widget._dataset_tab_widget = None  # type: ignore[attr-defined]
+    main_widget._dataset_create_tab = None  # type: ignore[attr-defined]
     
     # タイトル
     label = QLabel(f"{title}機能")
@@ -44,12 +47,14 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     
     # タブウィジェット
     tab_widget = QTabWidget()
+    main_widget._dataset_tab_widget = tab_widget  # type: ignore[attr-defined]
     
     # 新規開設タブ
     try:
         create_tab_result = create_group_select_widget(parent)
         if create_tab_result and len(create_tab_result) >= 1:
             create_tab = create_tab_result[0]  # containerウィジェットを取得
+            main_widget._dataset_create_tab = create_tab  # type: ignore[attr-defined]
             tab_widget.addTab(create_tab, "新規開設")
             # 新しい戻り値形式に対応: container, team_groups, combo, grant_combo, open_btn, name_edit, embargo_edit, template_combo, template_list
         else:

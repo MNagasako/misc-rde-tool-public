@@ -5,7 +5,7 @@ AI拡張機能のボタン設定とプロンプトファイルの管理を行う
 
 import os
 import json
-from config.common import get_base_dir
+from config.common import get_dynamic_file_path
 
 import logging
 
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 def load_ai_extension_config():
     """AI拡張設定ファイルを読み込む"""
     try:
-        config_path = os.path.join(get_base_dir(), "input", "ai", "ai_ext_conf.json")
+        config_path = get_dynamic_file_path("input/ai/ai_ext_conf.json")
         
         if os.path.exists(config_path):
             with open(config_path, 'r', encoding='utf-8') as f:
@@ -64,8 +64,8 @@ def load_prompt_file(prompt_file_path):
         if os.path.isabs(prompt_file_path):
             full_path = prompt_file_path
         else:
-            # 相対パスの場合はベースディレクトリから構築
-            full_path = os.path.join(get_base_dir(), prompt_file_path)
+            # 相対パスは動的パスとして解決（バイナリ時はユーザーディレクトリを使用）
+            full_path = get_dynamic_file_path(prompt_file_path)
         
         logger.debug("プロンプトファイル読み込み試行: %s", full_path)
         
@@ -85,7 +85,7 @@ def load_prompt_file(prompt_file_path):
 def save_prompt_file(prompt_file_path, content):
     """プロンプトファイルを保存する"""
     try:
-        full_path = os.path.join(get_base_dir(), prompt_file_path)
+        full_path = get_dynamic_file_path(prompt_file_path)
         
         # ディレクトリが存在しない場合は作成
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
@@ -212,8 +212,8 @@ def load_dataportal_master_data():
     for placeholder_key, file_prefix in master_types:
         try:
             # production優先、なければtestを使用
-            production_path = os.path.join(get_base_dir(), 'input', 'master_data', f'{file_prefix}_production.json')
-            test_path = os.path.join(get_base_dir(), 'input', 'master_data', f'{file_prefix}_test.json')
+            production_path = get_dynamic_file_path(f'input/master_data/{file_prefix}_production.json')
+            test_path = get_dynamic_file_path(f'input/master_data/{file_prefix}_test.json')
             
             target_path = None
             if os.path.exists(production_path):
@@ -249,7 +249,7 @@ def load_static_material_index():
         dict: { 'static_material_index': '<JSON文字列>' }
     """
     try:
-        mi_path = os.path.join(get_base_dir(), 'input', 'ai', 'MI.json')
+        mi_path = get_dynamic_file_path('input/ai/MI.json')
         if not os.path.exists(mi_path):
             logger.info("MI.jsonが見つかりません: %s", mi_path)
             # テストの安定性のため、空配列のJSONを返す

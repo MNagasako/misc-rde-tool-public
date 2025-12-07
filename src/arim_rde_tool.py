@@ -812,6 +812,10 @@ class Browser(QWidget):
         self.event_handler_manager._on_batch_error(error_message)
 
 def main():
+    # ディレクトリの初期化（遅延初期化）
+    from config.common import initialize_directories
+    initialize_directories()
+    
     try:
         parser = argparse.ArgumentParser()
         parser.add_argument('--logout', action='store_true', help='古いCookieを削除しRDEから完全ログアウトしてから開始')

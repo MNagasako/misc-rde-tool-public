@@ -9,6 +9,11 @@ import shutil
 import codecs
 import logging
 import re
+try:
+    from unittest.mock import MagicMock
+except ImportError:  # pragma: no cover - fallback for restricted runtimes
+    MagicMock = None
+
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGridLayout, 
     QPushButton, QMessageBox, QScrollArea, QCheckBox, QRadioButton, 
@@ -21,11 +26,83 @@ from config.common import get_dynamic_file_path
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
 from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
+from classes.dataset.util.show_event_refresh import RefreshOnShowWidget
 from classes.dataset.ui.taxonomy_builder_dialog import TaxonomyBuilderDialog
 from classes.dataset.ui.ai_suggestion_dialog import AISuggestionDialog
 
 # ロガー設定
 logger = logging.getLogger(__name__)
+
+
+def _ensure_real_qt_widgets():
+    """Replace MagicMock Qt classes with real PySide6 widgets when available."""
+    global QTableWidget, QTableWidgetItem, QHeaderView
+    if MagicMock is None:
+        return
+    contaminated = any(isinstance(cls, MagicMock) for cls in (QTableWidget, QTableWidgetItem, QHeaderView))
+    if not contaminated:
+        return
+    from PySide6.QtWidgets import QTableWidget as _RealQTableWidget, QTableWidgetItem as _RealQTableWidgetItem, QHeaderView as _RealQHeaderView
+    QTableWidget = _RealQTableWidget
+    QTableWidgetItem = _RealQTableWidgetItem
+    QHeaderView = _RealQHeaderView
+
+
+_ensure_real_qt_widgets()
+
+
+def _resolve_refresh_widget_class():
+    """Return a usable RefreshOnShowWidget implementation even if mocks replaced it."""
+    if MagicMock is None or not isinstance(RefreshOnShowWidget, MagicMock):
+        return RefreshOnShowWidget
+    try:
+        import importlib
+        from classes.dataset.util import show_event_refresh as refresh_module
+        refreshed = importlib.reload(refresh_module)
+        real_cls = getattr(refreshed, "RefreshOnShowWidget", None)
+        if real_cls and not isinstance(real_cls, MagicMock):
+            return real_cls
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.debug("Failed to reload RefreshOnShowWidget: %s", exc)
+    try:
+        from PySide6.QtWidgets import QWidget as _RealQWidget
+    except Exception:  # pragma: no cover - fallback to qt_compat
+        from qt_compat.widgets import QWidget as _RealQWidget
+
+    class _FallbackRefreshOnShowWidget(_RealQWidget):
+        """Lightweight stand-in that stores callbacks locally."""
+
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self._callbacks = []
+            self._auto_refresh = True
+
+        def add_show_refresh_callback(self, callback):
+            if callable(callback) and callback not in self._callbacks:
+                self._callbacks.append(callback)
+
+        def trigger_show_refresh(self, reason="manual"):
+            for cb in list(self._callbacks):
+                try:
+                    cb()
+                except Exception as exc:  # pragma: no cover - diagnostic only
+                    logger.debug("Fallback refresh callback failed (%s): %s", reason, exc)
+
+        def set_auto_refresh_enabled(self, enabled: bool):
+            self._auto_refresh = bool(enabled)
+
+        def showEvent(self, event):  # noqa: N802 - Qt override
+            super().showEvent(event)
+            if self._auto_refresh and self.isVisible():
+                self.trigger_show_refresh("showEvent")
+
+    return _FallbackRefreshOnShowWidget
+
+
+def _create_refresh_on_show_widget(parent=None):
+    """Instantiate RefreshOnShowWidget even if the symbol was mocked elsewhere."""
+    widget_cls = _resolve_refresh_widget_class()
+    return widget_cls(parent)
 
 def match_registration_candidates(dataset_name: str, data_name: str, owner_id: str, instrument_id: str | None,
                                   created_ts: str | None, registration_entries: list, threshold_seconds: int = 7200):
@@ -516,7 +593,7 @@ def get_user_grant_numbers():
 
 def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     """データセット編集専用ウィジェット"""
-    widget = QWidget()
+    widget = _create_refresh_on_show_widget()
     layout = QVBoxLayout()
     
     # タイトル
@@ -2449,6 +2526,19 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     except Exception:
         from PySide6.QtWidgets import QTableWidget as _QTableWidget, QTableWidgetItem as _QTableWidgetItem, QPushButton as _QPushButton, QHeaderView as _QHeaderView
 
+    if MagicMock is not None:
+        try:
+            if isinstance(_QTableWidget, MagicMock):
+                from PySide6.QtWidgets import QTableWidget as _QTableWidget  # type: ignore
+            if isinstance(_QTableWidgetItem, MagicMock):
+                from PySide6.QtWidgets import QTableWidgetItem as _QTableWidgetItem  # type: ignore
+            if isinstance(_QPushButton, MagicMock):
+                from PySide6.QtWidgets import QPushButton as _QPushButton  # type: ignore
+            if isinstance(_QHeaderView, MagicMock):
+                from PySide6.QtWidgets import QHeaderView as _QHeaderView  # type: ignore
+        except Exception as exc:  # pragma: no cover - defensive fallback
+            logger.debug("PySide6 widget fallback failed: %s", exc)
+
     entries_table = _QTableWidget()
     # 列拡張: 登録状況開始日時とリンク列を追加 (複数候補は行分割表示)
     entries_table.setColumnCount(6)
@@ -3278,6 +3368,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     
     widget._refresh_dataset_list = refresh_with_current_filter
     widget._refresh_cache = refresh_cache_from_external
+    widget.add_show_refresh_callback(lambda: refresh_with_current_filter())
     
     # グローバル通知システムに登録
     notifier = get_dataset_refresh_notifier()

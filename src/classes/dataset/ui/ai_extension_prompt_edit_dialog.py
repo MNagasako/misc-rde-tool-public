@@ -14,6 +14,7 @@ from qt_compat.core import Qt, Signal
 from classes.dataset.util.ai_extension_helper import load_prompt_file, save_prompt_file
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
+from config.common import get_dynamic_file_path
 
 class AIExtensionPromptEditDialog(QDialog):
     """AI拡張プロンプト編集ダイアログ"""
@@ -343,24 +344,22 @@ class AIExtensionPromptEditDialog(QDialog):
             # 設定ファイルの更新（ai_ext_conf.json の対象ボタンの output_format）
             try:
                 from classes.dataset.util.ai_extension_helper import load_ai_extension_config
+                import json
+
                 config = load_ai_extension_config()
-                # 該当ボタンIDで更新
                 btn_id = self.button_config.get('id')
+
                 if btn_id and 'buttons' in config:
                     for btn in config['buttons']:
                         if btn.get('id') == btn_id:
                             btn['output_format'] = selected_fmt
                             break
-                    # 保存
-                    from config.common import get_base_dir
-                    import os, json
-                    conf_path = os.path.join(get_base_dir(), 'input', 'ai', 'ai_ext_conf.json')
+
+                    conf_path = get_dynamic_file_path('input/ai/ai_ext_conf.json')
                     os.makedirs(os.path.dirname(conf_path), exist_ok=True)
                     with open(conf_path, 'w', encoding='utf-8') as f:
                         json.dump(config, f, ensure_ascii=False, indent=2)
-                else:
-                    # 該当が無ければ無視（情報ログ）
-                    pass
+                # 該当が無い場合は後続処理のみ行う（情報ログ扱い）
             except Exception as e:
                 # フォーマット保存失敗は致命的ではないため警告のみ
                 QMessageBox.warning(self, "警告", f"出力フォーマットの保存に失敗しました: {e}")

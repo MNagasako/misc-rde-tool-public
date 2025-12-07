@@ -6,7 +6,6 @@ import os
 import sys
 import logging
 from config.common import DEBUG_INFO_FILE, LOGIN_FILE, WEBVIEW_MESSAGE_LOG
-from functions.common_funcs import external_path
 from classes.managers.display_manager import DisplayManager
 from classes.data_fetch.core.data_manager import DataManager  # 新構造に修正
 from classes.utils import HtmlLogger
@@ -104,12 +103,13 @@ class AppInitializer:
     @debug_log
     def setup_login_info(self):
         """ログイン情報とinfo.txtの設定"""
-        # login.txtのパス情報をinfo.txtに出力
-        info_path = external_path(DEBUG_INFO_FILE)
-        login_path = external_path(LOGIN_FILE)
+        # login.txtのパス情報をinfo.txtに出力（バイナリ時はユーザーディレクトリ配下）
+        info_path = DEBUG_INFO_FILE
+        login_path = LOGIN_FILE
         login_info = f"login.txt path : {os.path.abspath(login_path)}"
 
         try:
+            os.makedirs(os.path.dirname(info_path), exist_ok=True)
             with open(info_path, 'w', encoding='utf-8') as infof:
                 infof.write(f"{login_info}\n")
         except Exception as e:

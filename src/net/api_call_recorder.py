@@ -257,11 +257,10 @@ class APICallRecorder:
         Returns:
             保存されたファイルパス
         """
-        from config.common import get_base_dir
+        from config.common import get_dynamic_file_path
         
         if output_path is None:
-            project_root = Path(get_base_dir())
-            output_dir = project_root / "output" / "api_call_history"
+            output_dir = Path(get_dynamic_file_path('output/api_call_history'))
             output_dir.mkdir(parents=True, exist_ok=True)
             output_path = output_dir / f"api_calls_{self.session_id}.json"
         

@@ -19,6 +19,7 @@ from classes.ai.core.ai_manager import AIManager
 from classes.theme import ThemeKey
 from classes.theme.theme_manager import get_color
 from classes.utils.dataset_filter_fetcher import DatasetFilterFetcher
+from config.common import get_dynamic_file_path
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -2512,7 +2513,7 @@ class AISuggestionDialog(QDialog):
             from classes.dataset.ui.ai_extension_prompt_edit_dialog import AIExtensionPromptEditDialog
             
             # 設定ファイルのパスを取得
-            config_path = "input/ai/ai_ext_conf.json"
+            config_path = get_dynamic_file_path("input/ai/ai_ext_conf.json")
             
             # プロンプト編集ダイアログを表示（設定ファイル編集モード）
             dialog = AIExtensionPromptEditDialog(

@@ -5,6 +5,8 @@ import json
 from qt_compat.widgets import QComboBox, QLabel, QVBoxLayout, QHBoxLayout, QWidget
 from classes.utils.api_request_helper import api_request  # refactored to use api_request_helper
 from core.bearer_token_manager import BearerTokenManager
+from config.common import OUTPUT_RDE_DATA_DIR
+from classes.dataset.util.show_event_refresh import RefreshOnShowWidget
 
 import logging
 
@@ -244,6 +246,10 @@ def create_group_select_widget(parent=None):
     
     logger.debug("データセット開設機能：パス確認完了")
     
+    user_id = None
+    all_team_groups = []
+    data_load_failed = False
+    data_warning_message = None
     team_groups_raw = []
     try:
         # ログインユーザーID取得
@@ -256,7 +262,6 @@ def create_group_select_widget(parent=None):
             sub_group_data = json.load(f)
         
         # 全てのTEAMグループを取得（フィルタ前）
-        all_team_groups = []
         for item in sub_group_data.get("included", []):
             if item.get("type") == "group" and item.get("attributes", {}).get("groupType") == "TEAM":
                 all_team_groups.append(item)
@@ -265,15 +270,13 @@ def create_group_select_widget(parent=None):
         team_groups_raw = filter_groups_by_role(all_team_groups, "owner_assistant", user_id)
     except Exception as e:
         logger.error("subGroup.json/self.jsonの読み込み・フィルタに失敗: %s", e)
-        # ファイルが見つからない場合の詳細情報
-        if "No such file or directory" in str(e) or "FileNotFoundError" in str(type(e).__name__):
-            error_widget = QWidget(parent)
-            error_layout = QVBoxLayout()
-            error_layout.addWidget(QLabel("データセット開設機能が利用できません"))
-            error_layout.addWidget(QLabel("必要なデータファイルが見つかりません。"))
-            error_layout.addWidget(QLabel("先にデータ取得を実行してください。"))
-            error_widget.setLayout(error_layout)
-            return error_widget, [], None, None, None, None, None, []
+        data_load_failed = True
+        all_team_groups = []
+        team_groups_raw = []
+        if isinstance(e, FileNotFoundError) or "No such file or directory" in str(e):
+            data_warning_message = "サブグループ情報が見つかりません。先にデータ取得を実行してください。"
+        else:
+            data_warning_message = "サブグループ情報の読み込みに失敗しました。データ取得後に再試行してください。"
     
     # フィルタ選択UI
     filter_combo = QComboBox(parent)
@@ -305,7 +308,7 @@ def create_group_select_widget(parent=None):
         grant_count = len(subjects) if subjects else 0
         group_names.append(f"{name} ({grant_count}件の課題)")
     
-    if not team_groups:
+    if not team_groups and not data_load_failed:
         error_widget = QWidget(parent)
         error_layout = QVBoxLayout()
         error_layout.addWidget(QLabel("利用可能なグループが見つかりません"))
@@ -659,7 +662,32 @@ def create_group_select_widget(parent=None):
     open_btn.setProperty("variant", "primary")
     open_btn.setStyleSheet("font-size: 13px; padding: 8px 20px; border-radius: 6px;")
     form_layout.addRow(open_btn)
-    container = QWidget(parent)
+
+    warning_label = QLabel("", parent)
+    warning_label.setObjectName("datasetOpenWarningLabel")
+    warning_label.setWordWrap(True)
+    warning_label.setStyleSheet("color: #d9534f; font-weight: bold;")
+    warning_label.setVisible(False)
+    form_layout.addRow(warning_label)
+
+    def _apply_warning_state(message):
+        if message:
+            warning_label.setText(str(message))
+            warning_label.setVisible(True)
+            combo.setEnabled(False)
+            grant_combo.setEnabled(False)
+            open_btn.setEnabled(False)
+        else:
+            warning_label.clear()
+            warning_label.setVisible(False)
+            combo.setEnabled(True)
+            grant_combo.setEnabled(True)
+            open_btn.setEnabled(True)
+
+    if data_warning_message:
+        _apply_warning_state(data_warning_message)
+
+    container = RefreshOnShowWidget(parent)
     container.setLayout(form_layout)
 
     # テーマ再適用（ダーク/ライト切替時に背景色が逆転しないよう強制再指定）
@@ -812,8 +840,10 @@ def create_group_select_widget(parent=None):
                     new_all_team_groups.append(item)
             
             # グローバル変数を更新
-            nonlocal all_team_groups, team_groups, group_names
+            nonlocal all_team_groups, team_groups, group_names, data_load_failed
             all_team_groups = new_all_team_groups
+            data_load_failed = False
+            _apply_warning_state(None)
             
             # 現在のフィルタを適用して更新
             current_filter = filter_combo.currentData()
@@ -845,6 +875,9 @@ def create_group_select_widget(parent=None):
             
         except Exception as e:
             logger.error("サブグループ情報更新に失敗: %s", e)
+            data_load_failed = True
+            message = f"サブグループ情報の更新に失敗しました: {e}"
+            _apply_warning_state(message)
     
     # サブグループ更新通知システムに登録
     try:
@@ -865,10 +898,11 @@ def create_group_select_widget(parent=None):
 
     # 外部から呼び出し可能にする
     container._refresh_subgroup_data = refresh_subgroup_data
+    container.add_show_refresh_callback(refresh_subgroup_data)
 
     return container, team_groups, combo, grant_combo, open_btn, name_edit, embargo_edit, template_combo, template_list, filter_combo
 
-def create_dataset(bearer_token, payload, output_dir="output/rde/data"):
+def create_dataset(bearer_token, payload, output_dir=None):
     """
     データセット開設API実行
     Bearer Token統一管理システム対応済み
@@ -909,8 +943,9 @@ def create_dataset(bearer_token, payload, output_dir="output/rde/data"):
             return False, None
         resp.raise_for_status()
         data = resp.json()
-        os.makedirs(output_dir, exist_ok=True)
-        with open(os.path.join(output_dir, "create_dataset.json"), "w", encoding="utf-8") as f:
+        target_dir = output_dir or OUTPUT_RDE_DATA_DIR
+        os.makedirs(target_dir, exist_ok=True)
+        with open(os.path.join(target_dir, "create_dataset.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         logger.info("設備情報(create_dataset.json)の取得・保存に成功しました。")
         
@@ -935,7 +970,7 @@ def create_dataset(bearer_token, payload, output_dir="output/rde/data"):
 
     
 
-def update_dataset(bearer_token, output_dir="output/rde/data"):
+def update_dataset(bearer_token, output_dir=None):
     """
     データセット更新処理（Bearer Token統一管理システム対応済み）
     """

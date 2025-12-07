@@ -10,16 +10,8 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from pathlib import Path
 
-# プロジェクトルート取得
-try:
-    from config.common import get_project_root
-    PROJECT_ROOT = get_project_root()
-except ImportError:
-    PROJECT_ROOT = Path(__file__).parent.parent.parent
-
-# ログディレクトリ
-API_LOG_DIR = PROJECT_ROOT / "output" / "log" / "api"
-API_LOG_DIR.mkdir(parents=True, exist_ok=True)
+# ログディレクトリ（遅延初期化）
+_API_LOG_DIR: Optional[Path] = None
 
 # 日次ログファイル名フォーマット
 LOG_FILE_FORMAT = "api_access_%Y%m%d.log"
@@ -32,10 +24,20 @@ _current_log_date: Optional[str] = None
 _module_logger = logging.getLogger(__name__)
 
 
+def _get_api_log_dir() -> Path:
+    """APIログディレクトリを取得（遅延初期化）"""
+    global _API_LOG_DIR
+    if _API_LOG_DIR is None:
+        from config.common import get_dynamic_file_path
+        _API_LOG_DIR = Path(get_dynamic_file_path('output/log/api'))
+        _API_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    return _API_LOG_DIR
+
+
 def _get_today_log_file() -> Path:
     """今日のログファイルパスを取得"""
     today = datetime.now().strftime("%Y%m%d")
-    return API_LOG_DIR / f"api_access_{today}.log"
+    return _get_api_log_dir() / f"api_access_{today}.log"
 
 
 def _cleanup_old_logs():
@@ -43,7 +45,8 @@ def _cleanup_old_logs():
     today = datetime.now().strftime("%Y%m%d")
     
     try:
-        for log_file in API_LOG_DIR.glob("api_access_*.log"):
+        api_log_dir = _get_api_log_dir()
+        for log_file in api_log_dir.glob("api_access_*.log"):
             # ファイル名から日付を抽出
             filename = log_file.stem  # api_access_20251112
             date_str = filename.split("_")[-1]  # 20251112

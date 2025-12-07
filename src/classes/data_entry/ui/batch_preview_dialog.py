@@ -1484,9 +1484,9 @@ API情報:
             # レスポンスをファイルに保存（デバッグ用）
             try:
                 from config.common import OUTPUT_RDE_DIR
-                output_dir = os.path.join(OUTPUT_RDE_DIR, "data")
+                output_dir = get_dynamic_file_path('output/rde/data')
                 os.makedirs(output_dir, exist_ok=True)
-                output_path = os.path.join(output_dir, f"upload_response_{upload_id}.json")
+                output_path = get_dynamic_file_path(f'output/rde/data/upload_response_{upload_id}.json')
                 import json
                 with open(output_path, "w", encoding="utf-8") as outf:
                     json.dump(response_data, outf, ensure_ascii=False, indent=2)
@@ -2101,9 +2101,9 @@ API情報:
             
             # レスポンス保存
             from config.common import OUTPUT_RDE_DIR
-            output_dir = os.path.join(OUTPUT_RDE_DIR, "data")
+            output_dir = get_dynamic_file_path('output/rde/data')
             os.makedirs(output_dir, exist_ok=True)
-            output_path = os.path.join(output_dir, f"upload_response_{upload_id}.json")
+            output_path = get_dynamic_file_path(f'output/rde/data/upload_response_{upload_id}.json')
             with open(output_path, "w", encoding="utf-8") as outf:
                 json.dump(data, outf, ensure_ascii=False, indent=2)
             
@@ -3107,9 +3107,9 @@ class BatchRegisterPreviewDialog(QDialog):
             
             # レスポンス保存
             from config.common import OUTPUT_RDE_DIR
-            output_dir = os.path.join(OUTPUT_RDE_DIR, "data")
+            output_dir = get_dynamic_file_path('output/rde/data')
             os.makedirs(output_dir, exist_ok=True)
-            output_path = os.path.join(output_dir, f"upload_response_{upload_id}.json")
+            output_path = get_dynamic_file_path(f'output/rde/data/upload_response_{upload_id}.json')
             with open(output_path, "w", encoding="utf-8") as outf:
                 json.dump(data, outf, ensure_ascii=False, indent=2)
             

@@ -833,10 +833,17 @@ class UIController(UIControllerCore):
                     top_level._fixed_aspect_ratio = 1.0
 
 
+
+        should_recreate_dataset_widget = mode == "dataset_open"
+
         """
         モード切り替え処理
         Args:
             mode: 切り替え先のモード ('data_fetch', 'dataset_open', 'data_register', 'settings')
+
+        # データセットボタン押下時はウィジェットを再生成するために破棄
+        if mode == "dataset_open":
+            self._dispose_dataset_open_widget()
         """
 
         # WebView関連の初期化（モード間移動時のデザイン崩れを防止）
@@ -878,6 +885,9 @@ class UIController(UIControllerCore):
                 child = self.parent.menu_area_layout.takeAt(i)
                 if child.widget():
                     child.widget().setParent(None)
+
+            if should_recreate_dataset_widget:
+                self._dispose_dataset_open_widget()
 
             # 対応するウィジェットを表示
             widget = self.get_mode_widget(mode)
@@ -1491,6 +1501,33 @@ class UIController(UIControllerCore):
             from qt_compat.widgets import QLabel
             self.show_error(f"データセットタブ画面の作成でエラーが発生しました: {e}")
             layout.addWidget(QLabel("データセットタブUIにエラーが発生しました"))
+
+    def _dispose_dataset_open_widget(self):
+        """既存のデータセットウィジェットを破棄して次回生成時に再作成させる"""
+        existing_widget = getattr(self, 'dataset_open_widget', None)
+        if not existing_widget:
+            return
+
+        # サブグループ更新通知の登録解除
+        try:
+            create_tab = getattr(existing_widget, '_dataset_create_tab', None)
+            cleanup_cb = getattr(create_tab, '_cleanup_subgroup_callback', None)
+            if callable(cleanup_cb):
+                cleanup_cb()
+        except Exception as cleanup_error:  # pragma: no cover - defensive logging
+            logger.debug("データセットウィジェットのクリーンアップに失敗: %s", cleanup_error)
+
+        # レイアウトから切り離して破棄
+        try:
+            existing_widget.setParent(None)
+        except Exception:
+            pass
+        try:
+            existing_widget.deleteLater()
+        except Exception:
+            pass
+
+        self.dataset_open_widget = None
 
     def _create_dummy_ui(self, layout, title, button_style):
         """

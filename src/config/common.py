@@ -44,7 +44,11 @@ logger = logging.getLogger(__name__)
 # 2025-11-15: v2.1.3 - データ取得2機能ファイル単位プログレス表示・粒度改善・スレッドセーフ実装
 # 2025-11-15: v2.1.2 - プログレス表示随時更新修正・スレッド安全性向上・repaint実装
 # 2025-11-14: v2.0.8 - プロキシ設定完全修正・接続テストUI設定反映・truststore/CA設定統合
-REVISION = "2.2.0"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+REVISION = "2.2.1"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+# 2025-12-07: v2.2.1 - テンプレート/装置チャンク永続化と整合性検証リリース
+#   - Basic Info: テンプレート/装置チャンク保存先の事前生成とクリーンアップ処理を実装
+#   - API: ページネーションヘルパーでチャンクファイル出力をサポート
+#   - テスト: チャンク処理ユニットテストを追加し、リビジョン同期を更新
 # 2025-12-06: v2.2.0 - メジャーアップデート（包括的改善リリース）
 #   - Basic Info: サブグループ完全性チェック・プログレス表示改善・並列化対応
 #   - AI機能: llm_model_nameプレースホルダ置換修正・AI CHECK安定化
@@ -85,32 +89,92 @@ USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTM
 
 # パス管理システム（ソース時=メインコード基準 / バイナリ時=EXE基準・CWD非依存）
 
+# Debug flag（環境変数で制御）
+def _debug_enabled():
+    """ARIM_PATH_DEBUG フラグをチェック"""
+    return os.environ.get('ARIM_PATH_DEBUG', '').lower() in ('1', 'true', 'yes')
+
+def _env_flag_true(var_name: str) -> bool:
+    return os.environ.get(var_name, '').lower() in ('1', 'true', 'yes')
+
+
+def _resolve_user_dir_root() -> str:
+    """Compute the default USERDIRROOTPATH for Windows."""
+    if sys.platform.startswith("win"):
+        # {localappdata} ≒ 環境変数 %LOCALAPPDATA%
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "ARIM-RDE-TOOL")
+    # 非Windowsは旧仕様に合わせる例
+    return os.path.join(os.path.expanduser("~"), ".arim_rde_tool")
+
+
+USERDIRROOTPATH = _resolve_user_dir_root()
+
+
 def is_binary_execution():
-    """
-    バイナリ実行かソース実行かを判定
-    Returns:
-        bool: バイナリ実行時True, ソース実行時False
-    """
-    return hasattr(sys, '_MEIPASS')
+    """バイナリ実行かソース実行かを判定"""
+    if _env_flag_true('ARIM_FORCE_BINARY'):
+        if _debug_enabled():
+            logger.debug('[PATH_DEBUG] is_binary_execution forced via ARIM_FORCE_BINARY=1')
+        return True
+    if _env_flag_true('ARIM_FORCE_SOURCE'):
+        if _debug_enabled():
+            logger.debug('[PATH_DEBUG] is_binary_execution forced via ARIM_FORCE_SOURCE=1')
+        return False
+    frozen = getattr(sys, 'frozen', False)
+    if frozen and _debug_enabled():
+        logger.debug('[PATH_DEBUG] sys.frozen detected -> binary execution')
+    if hasattr(sys, '_MEIPASS') and _debug_enabled():
+        logger.debug('[PATH_DEBUG] sys._MEIPASS detected -> binary execution')
+    return frozen or hasattr(sys, '_MEIPASS')
 
 def get_base_dir():
     """
     実行環境に応じた基準ディレクトリを取得（CWD非依存）
     - ソース実行時: メインソースファイル（arim_rde_tool.py）を基準
-    - バイナリ実行時: 実行ファイル（arim_rde_tool.exe）を基準
+    - バイナリ実行時: ユーザーディレクトリ配下の.arim_rde_toolを基準
     
     Returns:
         str: 基準ディレクトリの絶対パス
+        
+    Raises:
+        RuntimeError: バイナリ実行時にユーザーディレクトリの作成に失敗した場合
     """
     if is_binary_execution():
-        # バイナリ実行時: 実行ファイル（arim_rde_tool.exe）のディレクトリ
-        return os.path.dirname(os.path.abspath(sys.argv[0]))
+        # バイナリ実行時: ユーザーディレクトリ配下に.arim_rde_toolフォルダを使用
+        # これにより、Program Files等の書き込み保護されたディレクトリにインストールされても
+        # config/input/outputフォルダへの書き込みが可能
+        user_data_dir = USERDIRROOTPATH
+        
+        # ディレクトリが存在しない場合は作成
+        try:
+            os.makedirs(user_data_dir, exist_ok=True)
+            if _debug_enabled():
+                logger.debug(f"[PATH_DEBUG] get_base_dir (binary): {user_data_dir}")
+            return user_data_dir
+        except (OSError, PermissionError) as e:
+            # エラー: ユーザーディレクトリへの書き込みが失敗 → ダイアログ表示して中止
+            error_msg = f"Failed to create user data directory: {e}\n\nPath: {user_data_dir}"
+            logger.critical(error_msg)
+            # GUI表示が可能な場合はダイアログ表示
+            try:
+                from PySide6.QtWidgets import QMessageBox, QApplication
+                app = QApplication.instance()
+                if app:
+                    QMessageBox.critical(None, "ARIM RDE Tool - Critical Error", 
+                        f"ユーザーディレクトリの作成に失敗しました。\n\n{error_msg}\n\nアプリケーションを終了します。")
+            except Exception as gui_error:
+                logger.error(f"Failed to show dialog: {gui_error}")
+            # フォールバックなし：エラー送出
+            raise RuntimeError(error_msg)
     else:
         # ソース実行時: メインソースファイル（arim_rde_tool.py）のディレクトリの親
         # src/config/common.py -> src -> project_root（arim_rde_tool.pyの親）
         current_file_dir = os.path.dirname(os.path.abspath(__file__))  # src/config
         src_dir = os.path.dirname(current_file_dir)  # src
         project_root = os.path.dirname(src_dir)  # project_root
+        if _debug_enabled():
+            logger.debug(f"[PATH_DEBUG] get_base_dir (source): {project_root}")
         return project_root
 
 def get_static_resource_path(relative_path):
@@ -149,7 +213,7 @@ def get_dynamic_file_path(relative_path):
     """
     動的フォルダ（input/output）のパスを取得
     - ソース実行時: project_root/相対パスで参照
-    - バイナリ実行時: exe_dir/相対パスで参照
+    - バイナリ実行時: ユーザーディレクトリ（~/.arim_rde_tool）配下で参照
     
     Args:
         relative_path (str): 動的フォルダへの相対パス（例: "input/data.xlsx"）
@@ -159,14 +223,17 @@ def get_dynamic_file_path(relative_path):
     """
     # パスセパレータを正規化
     path_parts = relative_path.replace('/', os.sep).replace('\\', os.sep).split(os.sep)
-    return os.path.join(get_base_dir(), *path_parts)
+    result = os.path.join(get_base_dir(), *path_parts)
+    if _debug_enabled():
+        logger.debug(f"[PATH_DEBUG] get_dynamic_file_path: {relative_path} -> {result}")
+    return result
 
 # ディレクトリ自動作成とパス定義
 
 # 基準ディレクトリの取得
 BASE_DIR = get_base_dir()
 
-# 入力・出力・設定ディレクトリの定義と自動作成
+# 入力・出力・設定ディレクトリの定義
 INPUT_DIR = get_dynamic_file_path('input')
 OUTPUT_DIR = get_dynamic_file_path('output')
 OUTPUT_LOG_DIR = get_dynamic_file_path('output/log')
@@ -179,11 +246,65 @@ DATAFILES_DIR = get_dynamic_file_path('output/rde/data/dataFiles')
 # samplesディレクトリの定数
 SAMPLES_DIR = get_dynamic_file_path('output/rde/data/samples')
 DATASET_JSON_CHUNKS_DIR = get_dynamic_file_path('output/rde/data/datasetJsonChunks')
+TEMPLATE_JSON_CHUNKS_DIR = get_dynamic_file_path('output/rde/data/templateJsonChunks')
+INSTRUMENT_JSON_CHUNKS_DIR = get_dynamic_file_path('output/rde/data/instrumentJsonChunks')
 
-# ディレクトリの自動作成
-for dir_path in [INPUT_DIR, OUTPUT_DIR, OUTPUT_LOG_DIR, HIDDEN_DIR, CONFIG_DIR]:
+# ディレクトリの初期化フラグ
+_directories_initialized = False
+
+def initialize_directories():
+    """
+    必要なディレクトリを初期化する（遅延初期化）
+    アプリケーション起動時に1度だけ呼び出される
+    """
+    global _directories_initialized
+    if _directories_initialized:
+        return
+    
+    # 基本ディレクトリの作成
+    required_dirs = [
+        INPUT_DIR,
+        OUTPUT_DIR,
+        OUTPUT_LOG_DIR,
+        HIDDEN_DIR,
+        CONFIG_DIR,
+        DATASET_JSON_CHUNKS_DIR,
+        TEMPLATE_JSON_CHUNKS_DIR,
+        INSTRUMENT_JSON_CHUNKS_DIR,
+    ]
+
+    for dir_path in required_dirs:
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path, exist_ok=True)
+    
+    _directories_initialized = True
+
+def ensure_directory_exists(dir_path: str) -> str:
+    """
+    ディレクトリが存在しない場合は作成する
+    
+    Args:
+        dir_path: ディレクトリパス
+    
+    Returns:
+        ディレクトリパス（そのまま返す）
+    """
     if not os.path.exists(dir_path):
         os.makedirs(dir_path, exist_ok=True)
+    
+    # パス検証: ディレクトリがベースディレクトリ配下にあるかチェック（デバッグ用）
+    if _debug_enabled():
+        try:
+            base = os.path.normpath(get_base_dir())
+            normalized = os.path.normpath(dir_path)
+            if not normalized.startswith(base):
+                logger.warning(f"[PATH_DEBUG] WARNING: Directory escapes base_dir: base={base}, dir={normalized}")
+            else:
+                logger.debug(f"[PATH_DEBUG] ensure_directory_exists: {dir_path} OK")
+        except Exception as e:
+            logger.error(f"[PATH_DEBUG] Path validation error: {e}")
+    
+    return dir_path
 
 # 便利関数: output ディレクトリパスを取得
 def get_output_directory():
@@ -244,6 +365,7 @@ INSTRUMENT_TYPE_JSON_PATH = get_dynamic_file_path('output/rde/data/instrumentTyp
 ORGANIZATION_JSON_PATH = get_dynamic_file_path('output/rde/data/organization.json')
 GROUP_DETAIL_JSON_PATH = get_dynamic_file_path('output/rde/data/groupDetail.json')
 DATA_ENTRY_DIR = get_dynamic_file_path('output/rde/data/dataEntry')
+INVOICE_DIR = get_dynamic_file_path('output/rde/data/invoice')
 
 # 画像ディレクトリ（動的生成）
 DYNAMIC_IMAGE_DIR = get_dynamic_file_path('output/images')
@@ -252,23 +374,7 @@ PROXY_IMAGE_DIR = get_dynamic_file_path('output/proxy_images')
 # 検索結果ディレクトリ
 SEARCH_RESULTS_DIR = get_dynamic_file_path('output/search_results')
 
-# 動的ディレクトリの自動作成
-for dir_path in [
-    WEBVIEW_HTML_DIR,
-    DATASETS_DIR,
-    DYNAMIC_IMAGE_DIR,
-    PROXY_IMAGE_DIR,
-    SEARCH_RESULTS_DIR,
-    OUTPUT_RDE_DATA_DIR,
-    DATA_ENTRY_DIR,
-    GROUP_PROJECT_DIR,
-    GROUP_ORGNIZATION_DIR,
-    SUBGROUP_DETAILS_DIR,
-    LEGACY_SUBGROUP_DETAILS_DIR,
-    DATASET_JSON_CHUNKS_DIR,
-]:
-    if not os.path.exists(dir_path):
-        os.makedirs(dir_path, exist_ok=True)
+# 動的ディレクトリは使用時に ensure_directory_exists() で作成される
         
 # アプリケーション設定パラメータ
 

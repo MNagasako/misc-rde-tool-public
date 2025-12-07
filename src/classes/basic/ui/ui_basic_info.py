@@ -7,6 +7,7 @@ from qt_compat.widgets import QProgressDialog, QMessageBox
 import threading
 from classes.utils.progress_worker import ProgressWorker, SimpleProgressWorker
 from classes.theme import get_color, ThemeKey
+from config.common import get_dynamic_file_path
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -432,7 +433,7 @@ def fetch_invoice_schema(controller):
         )
         return
     
-    output_dir = "output/rde/data"  # 必要に応じて動的に
+    output_dir = get_dynamic_file_path("output/rde/data")
 
     # プログレス表示付きワーカーを作成
     worker = ProgressWorker(
@@ -490,7 +491,7 @@ def fetch_sample_info_only(controller):
         task_func=fetch_sample_info_only_logic,
         task_kwargs={
             'bearer_token': bearer_token,
-            'output_dir': "output/rde/data"
+            'output_dir': get_dynamic_file_path("output/rde/data")
         },
         task_name="サンプル情報強制取得"
     )

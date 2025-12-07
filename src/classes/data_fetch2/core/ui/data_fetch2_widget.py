@@ -23,7 +23,7 @@ import json
 from qt_compat.widgets import QVBoxLayout, QLabel, QWidget, QMessageBox, QProgressDialog, QComboBox, QPushButton
 from qt_compat.core import QTimer, Qt, QMetaObject, Q_ARG, QUrl, Signal, QObject
 from qt_compat.gui import QDesktopServices
-from config.common import OUTPUT_DIR, DATAFILES_DIR
+from config.common import OUTPUT_DIR, DATAFILES_DIR, get_dynamic_file_path
 from classes.theme import ThemeKey
 from classes.theme.theme_manager import get_color
 from classes.utils.label_style import apply_label_style
@@ -678,7 +678,7 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
         pass
 
     # dataset.jsonのパス
-    dataset_json_path = os.path.normpath(os.path.join(OUTPUT_DIR, 'rde/data/dataset.json'))
+    dataset_json_path = get_dynamic_file_path('output/rde/data/dataset.json')
 
     # dataset.jsonの絶対パスを表示
     dataset_json_abspath = os.path.abspath(dataset_json_path)

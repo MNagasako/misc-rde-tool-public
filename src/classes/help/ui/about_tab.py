@@ -106,7 +106,7 @@ class AboutTab(QWidget):
                 with open(md_path, 'r', encoding='utf-8') as f:
                     about_text = f.read()
             else:
-                about_text = "# ARIM RDE Tool について\n\nAbout情報ファイルが見つかりません。"
+                about_text = f"# ARIM RDE Tool について\n\nAbout情報ファイル{md_path}が見つかりません。"
             
             # Markdownレンダリング
             from classes.help.util.markdown_renderer import render_markdown_to_html

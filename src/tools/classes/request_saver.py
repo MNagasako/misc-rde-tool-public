@@ -8,7 +8,8 @@ class RequestSaver:
         """リクエスト結果をファイルに保存"""
         try:
             # 出力ディレクトリを確保
-            output_dir = "output/log"
+            from config.common import get_dynamic_file_path
+            output_dir = get_dynamic_file_path('output/log')
             os.makedirs(output_dir, exist_ok=True)
 
             # ファイル名生成（タイムスタンプ付き）

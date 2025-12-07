@@ -308,7 +308,7 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
     """
     エントリー作成
     """
-    output_dir=os.path.join(OUTPUT_RDE_DIR, "data")
+    output_dir=get_dynamic_file_path('output/rde/data')
     # 注意: Bearer Tokenは不要（API呼び出し時に自動選択される）
     # 古いチェックを削除: if not bearer_token: return
     
@@ -613,7 +613,7 @@ def select_and_save_files_to_temp(parent=None):
     """
     複数ファイル選択ダイアログを開き、選択ファイルを一時フォルダに保存してパスリストを返す
     """
-    temp_dir = os.path.join(OUTPUT_RDE_DIR, "temp", "arim_upload")
+    temp_dir = get_dynamic_file_path('output/rde/temp/arim_upload')
     os.makedirs(temp_dir, exist_ok=True)
     file_paths, _ = QFileDialog.getOpenFileNames(parent, "アップロードするファイルを選択", "", "すべてのファイル (*)")
     if not file_paths:
@@ -636,7 +636,7 @@ def upload_file(bearer_token, datasetId="a74b58c0-9907-40e7-a261-a75519730d82", 
     if not bearer_token:
         logger.error("Bearerトークン未取得のためアップロード不可。ログイン状態を確認してください。")
         return None
-    output_dir = os.path.join(OUTPUT_RDE_DIR, "data")
+    output_dir = get_dynamic_file_path('output/rde/data')
     if not file_path:
         file_path = os.path.join(INPUT_DIR, "file", "test.dm4")  # フォールバックテストファイル
     url = f"https://rde-entry-api-arim.nims.go.jp/uploads?datasetId={datasetId}"

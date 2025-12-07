@@ -26,7 +26,7 @@ def get_current_user_id():
     
     try:
         # self.jsonのパスを取得
-        self_json_path = os.path.join('output', 'rde', 'data', 'self.json')
+        self_json_path = get_dynamic_file_path('output/rde/data/self.json')
         
         if not os.path.exists(self_json_path):
             return None

@@ -1,5 +1,6 @@
 import json
 import os
+from config.common import get_dynamic_file_path
 import logging
 from qt_compat.widgets import QMessageBox
 from qt_compat.core import QMetaObject, Qt, Q_ARG, QTimer
@@ -76,7 +77,7 @@ def get_dataset_filetype_counts(dataset_obj: dict, bearer_token: str, file_filte
         grantNumber = dataset_attributes.get('grantNumber', '')
 
         # dataEntry ローカルファイル有無を確認（ダウンロード処理に合わせる）
-        entry_path = os.path.normpath(os.path.join(OUTPUT_DIR, f'rde/data/dataEntry/{dataset_id}.json'))
+        entry_path = get_dynamic_file_path(f'output/rde/data/dataEntry/{dataset_id}.json')
 
         counts: dict = {}
 
@@ -130,8 +131,8 @@ def download_all_files_from_files_json(data_id, bearer_token=None, parent=None, 
             safe_show_message(parent, "認証エラー", "Bearer Tokenが取得できません。ログインを確認してください。", "critical")
             return False
     
-    files_json_path = os.path.normpath(os.path.join(OUTPUT_DIR, f'rde/data/dataFiles/{data_id}.json'))
-    save_dir = os.path.normpath(os.path.join(OUTPUT_DIR, f'rde/data/dataFiles/{data_id}'))
+    files_json_path = get_dynamic_file_path(f'output/rde/data/dataFiles/{data_id}.json')
+    save_dir = get_dynamic_file_path(f'output/rde/data/dataFiles/{data_id}')
     
     if not os.path.exists(files_json_path):
         error_msg = f"ファイルが存在しません: {files_json_path}"
@@ -444,7 +445,7 @@ def _process_data_entry_for_parallel(bearer_token, data_entry, save_dir_base, gr
             return {"status": "skipped", "downloaded_count": 0}
         
         # 1. files API (json)を従来通り保存
-        files_dir = os.path.normpath(os.path.join(OUTPUT_DIR, f'rde/data/dataFiles/sub'))
+        files_dir = get_dynamic_file_path(f'output/rde/data/dataFiles/sub')
         os.makedirs(files_dir, exist_ok=True)
         
         files_url = (
@@ -497,7 +498,7 @@ def _process_data_entry_for_parallel(bearer_token, data_entry, save_dir_base, gr
             json.dump(files_data, outf, ensure_ascii=False, indent=2)
         
         # 2. ファイル本体も取得して保存
-        save_dir_base_full = os.path.join(os.path.join(OUTPUT_DIR,"rde","data","dataFiles"))
+        save_dir_base_full = get_dynamic_file_path("output/rde/data/dataFiles")
         logger.debug(f"save_path: {save_path}, data_id: {data_id}")
         
         # files_dataはdict型のはずなのでdataキーを直接参照
@@ -644,8 +645,8 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
                 return None
         
         # dataset_obj を　保存
-        dataset_dir=os.path.join(OUTPUT_DIR, "rde", "data", "dataFiles",grantNumber,safe_dataset_name)
-        original_dataset_dir = os.path.join(OUTPUT_DIR, "rde", "data", "datasets")
+        dataset_dir=get_dynamic_file_path(f"output/rde/data/dataFiles/{grantNumber}/{safe_dataset_name}")
+        original_dataset_dir = get_dynamic_file_path("output/rde/data/datasets")
         os.makedirs(dataset_dir, exist_ok=True)
         dataset_json_path = os.path.join(dataset_dir, f"{dataset_id}.json") 
         original_dataset_json_path = os.path.join(original_dataset_dir, f"{dataset_id}.json")
@@ -675,7 +676,7 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
                 return None
 
         # 1. dataEntry/{dataset_id}.jsonを読む
-        entry_path = os.path.normpath(os.path.join(OUTPUT_DIR, f'rde/data/dataEntry/{dataset_id}.json'))
+        entry_path = get_dynamic_file_path(f'output/rde/data/dataEntry/{dataset_id}.json')
         if not os.path.exists(entry_path):
             logger.warning(f"{entry_path} が存在しません。APIから直接取得を試行します。")
             
@@ -803,7 +804,7 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
         from net.http_helpers import parallel_download
         import threading
         
-        files_dir = os.path.normpath(os.path.join(OUTPUT_DIR, f'rde/data/dataFiles/sub'))
+        files_dir = get_dynamic_file_path(f'output/rde/data/dataFiles/sub')
         os.makedirs(files_dir, exist_ok=True)
         
         # プログレス管理変数

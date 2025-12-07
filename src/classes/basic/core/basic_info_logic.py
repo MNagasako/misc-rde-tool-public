@@ -36,23 +36,33 @@ from urllib.parse import quote, urlencode
 from dateutil.parser import parse as parse_datetime  # ISO8601対応のため
 from ..util.xlsx_exporter import apply_basic_info_to_Xlsx_logic, summary_basic_info_to_Xlsx_logic
 from classes.utils.api_request_helper import api_request  # refactored to use api_request_helper
-from classes.basic.core.api_recording_wrapper import record_api_call_for_dataset_list
+from classes.basic.core.api_recording_wrapper import (
+    record_api_call_for_dataset_list,
+    record_api_call_for_instruments,
+    record_api_call_for_template,
+)
 from config.common import (
-    DATASET_JSON_PATH,
+    DATA_ENTRY_DIR,
     DATASET_JSON_CHUNKS_DIR,
+    DATASET_JSON_PATH,
     GROUP_DETAIL_JSON_PATH,
     GROUP_JSON_PATH,
     GROUP_ORGNIZATION_DIR,
     GROUP_PROJECT_DIR,
     INFO_JSON_PATH,
-    INSTRUMENTS_JSON_PATH,
-    INSTRUMENT_TYPE_JSON_PATH,
-    LEGACY_SUBGROUP_DETAILS_DIR,
     LICENSES_JSON_PATH,
     ORGANIZATION_JSON_PATH,
+    INSTRUMENT_JSON_CHUNKS_DIR,
+    INSTRUMENTS_JSON_PATH,
+    INSTRUMENT_TYPE_JSON_PATH,
+    INVOICE_DIR,
+    LEGACY_SUBGROUP_DETAILS_DIR,
+    OUTPUT_DIR as COMMON_OUTPUT_DIR,
+    OUTPUT_RDE_DATA_DIR,
     SELF_JSON_PATH,
     SUBGROUP_DETAILS_DIR,
     SUBGROUP_JSON_PATH,
+    TEMPLATE_JSON_CHUNKS_DIR,
     TEMPLATE_JSON_PATH,
     get_dynamic_file_path,
 )
@@ -66,7 +76,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # === 設定値 ===
-OUTPUT_DIR = "output"
+OUTPUT_DIR = COMMON_OUTPUT_DIR
 
 PROGRAM_SELECTION_CONTEXT = "basic.program.root"
 PROJECT_SELECTION_CONTEXT = "basic.project.detail"
@@ -76,6 +86,20 @@ DATASET_LIST_PAGE_SIZE = 1000
 DATASET_LIST_REQUEST_TIMEOUT = 30  # seconds
 DATASET_CHUNK_FILE_TEMPLATE = "dataset_chunk_{:04d}.json"
 _DATASET_RESERVED_KEYS = {"data", "included", "meta", "links"}
+TEMPLATE_CHUNK_FILE_TEMPLATE = "template_chunk_{:04d}.json"
+INSTRUMENT_CHUNK_FILE_TEMPLATE = "instrument_chunk_{:04d}.json"
+
+# 他エンドポイントでも同一閾値を用いる（ユーザー要望: 1000件単位）
+DEFAULT_CHUNK_PAGE_SIZE = 1000
+TEMPLATE_PAGE_SIZE = DEFAULT_CHUNK_PAGE_SIZE
+INSTRUMENT_PAGE_SIZE = DEFAULT_CHUNK_PAGE_SIZE
+TEMPLATE_REQUEST_TIMEOUT = 30
+INSTRUMENT_REQUEST_TIMEOUT = 10
+
+TEMPLATE_API_BASE_URL = "https://rde-api.nims.go.jp/datasetTemplates"
+INSTRUMENT_API_BASE_URL = "https://rde-instrument-api.nims.go.jp/instruments"
+DEFAULT_PROGRAM_ID = "4bbf62be-f270-4a46-9682-38cd064607ba"
+DEFAULT_TEAM_ID = "22398c55-8620-430e-afa5-2405c57dd03c"
 
 def stage_error_handler(operation_name: str):
     """
@@ -102,6 +126,9 @@ def stage_error_handler(operation_name: str):
 def save_json(data, *path):
     """JSONファイルを保存する共通関数"""
     filepath = os.path.join(*path)
+    # 相対パスで渡された場合でも、動的パス解決でユーザーディレクトリ配下に保存する
+    if not os.path.isabs(filepath):
+        filepath = get_dynamic_file_path(filepath)
     try:
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, "w", encoding="utf-8") as f:
@@ -226,6 +253,40 @@ def _prepare_dataset_chunk_directory() -> Path:
     return chunk_dir
 
 
+def _prepare_template_chunk_directory() -> Path:
+    """template.json用チャンクディレクトリを初期化"""
+    chunk_dir = Path(TEMPLATE_JSON_CHUNKS_DIR)
+    if chunk_dir.exists():
+        for entry in chunk_dir.iterdir():
+            try:
+                if entry.is_file():
+                    entry.unlink()
+                elif entry.is_dir():
+                    shutil.rmtree(entry)
+            except Exception as cleanup_error:
+                logger.warning("テンプレートチャンクファイルの削除に失敗しました (%s): %s", entry, cleanup_error)
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    logger.debug("templateJsonChunksディレクトリを初期化しました: %s", chunk_dir)
+    return chunk_dir
+
+
+def _prepare_instrument_chunk_directory() -> Path:
+    """instruments.json用チャンクディレクトリを初期化"""
+    chunk_dir = Path(INSTRUMENT_JSON_CHUNKS_DIR)
+    if chunk_dir.exists():
+        for entry in chunk_dir.iterdir():
+            try:
+                if entry.is_file():
+                    entry.unlink()
+                elif entry.is_dir():
+                    shutil.rmtree(entry)
+            except Exception as cleanup_error:
+                logger.warning("設備チャンクファイルの削除に失敗しました (%s): %s", entry, cleanup_error)
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    logger.debug("instrumentJsonChunksディレクトリを初期化しました: %s", chunk_dir)
+    return chunk_dir
+
+
 def _build_dataset_list_query_params(page_size: int, offset: int, search_words: Optional[str]) -> Dict[str, str]:
     params = {
         "sort": "-modified",
@@ -319,6 +380,121 @@ def _merge_dataset_chunk_payloads(chunks: List[Dict]) -> Dict:
         merged["links"] = latest_links
 
     return merged
+
+
+def _download_paginated_resource(
+    *,
+    base_url: str,
+    base_params: Dict[str, str],
+    headers: Dict[str, str],
+    bearer_token: Optional[str],
+    page_size: int,
+    timeout: int,
+    record_callback: Optional[Callable[..., None]] = None,
+    chunk_label: str,
+    chunk_dir_factory: Optional[Callable[[], Path]] = None,
+    chunk_file_template: Optional[str] = None,
+) -> Dict:
+    """共通のページング取得ロジック（1000件単位の分割取得用）"""
+    import time
+
+    chunk_dir: Optional[Path] = None
+    if chunk_dir_factory:
+        chunk_dir = chunk_dir_factory()
+
+    offset = 0
+    chunk_index = 1
+    total_expected = None
+    total_processed = 0
+    chunk_payloads: List[Dict] = []
+
+    while True:
+        params = dict(base_params or {})
+        params["page[limit]"] = str(page_size)
+        params["page[offset]"] = str(offset)
+        query = urlencode(params, quote_via=quote)
+        url = f"{base_url}?{query}"
+
+        start_time = time.time()
+        resp = api_request(
+            "GET",
+            url,
+            bearer_token=bearer_token,
+            headers=headers,
+            timeout=timeout,
+        )
+        elapsed_ms = (time.time() - start_time) * 1000
+
+        if resp is None:
+            error_msg = "APIリクエストがNoneを返しました"
+            if record_callback:
+                record_callback(url, headers, 0, elapsed_ms, success=False, error=error_msg)
+            raise RuntimeError(f"{chunk_label}: {error_msg}")
+
+        try:
+            resp.raise_for_status()
+        except Exception as http_error:
+            status_code = getattr(resp, "status_code", 500)
+            if record_callback:
+                record_callback(
+                    url,
+                    headers,
+                    status_code,
+                    elapsed_ms,
+                    success=False,
+                    error=str(http_error),
+                )
+            raise
+
+        if record_callback:
+            record_callback(url, headers, resp.status_code, elapsed_ms, success=True)
+
+        payload = resp.json()
+        chunk_payloads.append(payload)
+
+        if chunk_dir and chunk_file_template:
+            chunk_path = chunk_dir / chunk_file_template.format(chunk_index)
+            try:
+                with open(chunk_path, "w", encoding="utf-8") as f:
+                    json.dump(payload, f, ensure_ascii=False, indent=2)
+            except Exception as write_error:
+                logger.warning("%s: チャンクファイル書き込みに失敗しました (%s): %s", chunk_label, chunk_path, write_error)
+
+        chunk_count = len(payload.get("data", []))
+        total_processed += chunk_count
+        if total_expected is None:
+            total_expected = payload.get("meta", {}).get("totalCounts")
+
+        logger.info(
+            "%s: チャンク%04dを取得 (件数=%d, offset=%d)",
+            chunk_label,
+            chunk_index,
+            chunk_count,
+            offset,
+        )
+
+        if total_expected is not None and total_processed >= total_expected:
+            break
+        if chunk_count == 0:
+            break
+        if total_expected is None and chunk_count < page_size:
+            break
+
+        offset += page_size
+        chunk_index += 1
+
+    if not chunk_payloads:
+        return {"data": []}
+
+    merged_payload = _merge_dataset_chunk_payloads(chunk_payloads)
+    logger.info(
+        "%s: チャンク分割取得完了 (chunks=%d, records=%d, expected=%s)",
+        chunk_label,
+        len(chunk_payloads),
+        total_processed,
+        total_expected if total_expected is not None else "unknown",
+    )
+    return merged_payload
 
 
 def _download_dataset_list_in_chunks(
@@ -496,9 +672,10 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
             progress_callback(100, 100, f"エラー: {error_msg}")
         return error_msg
 
-def get_self_username_from_json(json_path="output/rde/data/self.json"):
+def get_self_username_from_json(json_path=None):
     """self.json から userName を取得して返す。存在しない場合は空文字列。"""
-    abs_json = os.path.abspath(json_path)
+    resolved_path = json_path or get_dynamic_file_path("output/rde/data/self.json")
+    abs_json = os.path.abspath(resolved_path)
     if not os.path.exists(abs_json):
         logger.warning(f"self.jsonが存在しません: {abs_json}")
         return ""
@@ -512,7 +689,7 @@ def get_self_username_from_json(json_path="output/rde/data/self.json"):
         logger.error(f"self.jsonのuserName取得失敗: {e}")
         return ""
 # --- ユーザー自身情報取得 ---
-def fetch_self_info_from_api(bearer_token=None, output_dir="output/rde/data", parent_widget=None):
+def fetch_self_info_from_api(bearer_token=None, output_dir=None, parent_widget=None):
     """
     https://rde-user-api.nims.go.jp/users/self からユーザー情報を取得し、self.jsonとして保存
     
@@ -616,6 +793,7 @@ def fetch_self_info_from_api(bearer_token=None, output_dir="output/rde/data", pa
             raise Exception(error_msg)
         
         # ファイル保存
+        output_dir = output_dir or OUTPUT_RDE_DATA_DIR
         os.makedirs(output_dir, exist_ok=True)
         save_path = os.path.join(output_dir, "self.json")
         with open(save_path, "w", encoding="utf-8") as f:
@@ -637,7 +815,7 @@ def fetch_self_info_from_api(bearer_token=None, output_dir="output/rde/data", pa
         raise
 
 
-def fetch_all_data_entrys_info(bearer_token, output_dir="output/rde/data", progress_callback=None, parallel_threshold: int = 50, max_workers: int = 10):
+def fetch_all_data_entrys_info(bearer_token, output_dir=None, progress_callback=None, parallel_threshold: int = 50, max_workers: int = 10):
     """
     dataset.json内の全データセットIDでfetch_data_entry_info_from_apiを呼び出す
     
@@ -654,6 +832,7 @@ def fetch_all_data_entrys_info(bearer_token, output_dir="output/rde/data", progr
     try:
         from net.http_helpers import parallel_download
         
+        output_dir = output_dir or OUTPUT_RDE_DATA_DIR
         os.makedirs(output_dir, exist_ok=True)
         dataset_json = os.path.join(output_dir, "dataset.json")
         
@@ -729,13 +908,14 @@ def fetch_all_data_entrys_info(bearer_token, output_dir="output/rde/data", progr
 
 
 
-def fetch_data_entry_info_from_api(bearer_token, dataset_id, output_dir="output/rde/data/dataEntry"):
+def fetch_data_entry_info_from_api(bearer_token, dataset_id, output_dir=None):
     """
     指定データセットIDのデータエントリ情報をAPIから取得し、dataEntry.jsonとして保存
     v1.18.4: Bearer Token自動選択対応
     """
     url = f"https://rde-api.nims.go.jp/data?filter%5Bdataset.id%5D={dataset_id}&sort=-created&page%5Boffset%5D=0&page%5Blimit%5D=24&include=owner%2Csample%2CthumbnailFile%2Cfiles"
-    save_path = os.path.join(output_dir, f"{dataset_id}.json")
+    target_dir = output_dir or DATA_ENTRY_DIR
+    save_path = os.path.join(target_dir, f"{dataset_id}.json")
     
     if os.path.exists(save_path):
         logger.info(f"データエントリファイル既存のためスキップ: {dataset_id}.json")
@@ -758,7 +938,7 @@ def fetch_data_entry_info_from_api(bearer_token, dataset_id, output_dir="output/
         resp.raise_for_status()
         data = resp.json()
         
-        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(target_dir, exist_ok=True)
         with open(save_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
             
@@ -769,10 +949,11 @@ def fetch_data_entry_info_from_api(bearer_token, dataset_id, output_dir="output/
         raise
 
 
-def fetch_invoice_info_from_api(bearer_token, entry_id, output_dir="output/rde/data/invoice"):
+def fetch_invoice_info_from_api(bearer_token, entry_id, output_dir=None):
     """指定エントリIDのインボイス情報をAPIから取得し、invoice.jsonとして保存"""
     url = f"https://rde-api.nims.go.jp/invoices/{entry_id}?include=submittedBy%2CdataOwner%2Cinstrument"
-    save_path = os.path.join(output_dir, f"{entry_id}.json")
+    target_dir = output_dir or INVOICE_DIR
+    save_path = os.path.join(target_dir, f"{entry_id}.json")
     
     if os.path.exists(save_path):
         logger.info(f"インボイスファイル既存のためスキップ: {entry_id}.json")
@@ -789,7 +970,7 @@ def fetch_invoice_info_from_api(bearer_token, entry_id, output_dir="output/rde/d
         resp.raise_for_status()
         data = resp.json()
         
-        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(target_dir, exist_ok=True)
         with open(save_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
             
@@ -800,7 +981,7 @@ def fetch_invoice_info_from_api(bearer_token, entry_id, output_dir="output/rde/d
         raise
 
 
-def fetch_all_invoices_info(bearer_token, output_dir="output/rde/data", progress_callback=None):
+def fetch_all_invoices_info(bearer_token, output_dir=None, progress_callback=None):
     """
     dataEntry.json内の全エントリIDでfetch_invoice_info_from_apiを呼び出す
     
@@ -816,8 +997,9 @@ def fetch_all_invoices_info(bearer_token, output_dir="output/rde/data", progress
     try:
         from net.http_helpers import parallel_download
         
-        dataentry_dir = os.path.join(output_dir, "dataEntry")
-        invoice_dir = os.path.join(output_dir, "invoice")
+        resolved_root = output_dir or OUTPUT_RDE_DATA_DIR
+        dataentry_dir = os.path.join(resolved_root, "dataEntry")
+        invoice_dir = os.path.join(resolved_root, "invoice")
         
         if not os.path.exists(dataentry_dir):
             logger.error(f"dataEntryディレクトリが存在しません: {dataentry_dir}")
@@ -909,7 +1091,7 @@ def fetch_all_invoices_info(bearer_token, output_dir="output/rde/data", progress
         raise
 
 
-def fetch_dataset_info_respectively_from_api(bearer_token, dataset_id, output_dir="output/rde/data/datasets"):
+def fetch_dataset_info_respectively_from_api(bearer_token, dataset_id, output_dir=None):
     """指定データセットIDのエントリ情報をAPIから取得し、{dataset_id}.jsonとして保存"""
     url = f"https://rde-api.nims.go.jp/datasets/{dataset_id}?updateViews=true&include=releases%2Capplicant%2Cprogram%2Cmanager%2CrelatedDatasets%2Ctemplate%2Cinstruments%2Clicense%2CsharingGroups&fields%5Brelease%5D=id%2CreleaseNumber%2Cversion%2Cdoi%2Cnote%2CreleaseTime&fields%5Buser%5D=id%2CuserName%2CorganizationName%2CisDeleted&fields%5Bgroup%5D=id%2Cname&fields%5BdatasetTemplate%5D=id%2CnameJa%2CnameEn%2Cversion%2CdatasetType%2CisPrivate%2CworkflowEnabled&fields%5Binstrument%5D=id%2CnameJa%2CnameEn%2Cstatus&fields%5Blicense%5D=id%2Curl%2CfullName"
 
@@ -924,8 +1106,9 @@ def fetch_dataset_info_respectively_from_api(bearer_token, dataset_id, output_di
         resp.raise_for_status()
         data = resp.json()
         
-        os.makedirs(output_dir, exist_ok=True)
-        save_path = os.path.join(output_dir, f"{dataset_id}.json")
+        target_dir = output_dir or get_dynamic_file_path("output/rde/data/datasets")
+        os.makedirs(target_dir, exist_ok=True)
+        save_path = os.path.join(target_dir, f"{dataset_id}.json")
         with open(save_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
             
@@ -938,7 +1121,7 @@ def fetch_dataset_info_respectively_from_api(bearer_token, dataset_id, output_di
 # --- API取得系 ---
 def fetch_all_dataset_info(
     bearer_token,
-    output_dir="output/rde/data",
+    output_dir=None,
     onlySelf=False,
     searchWords=None,
     progress_callback: Optional[Callable[[int, int, str], bool]] = None,
@@ -949,7 +1132,7 @@ def fetch_all_dataset_info(
     user_name = get_self_username_from_json()
 
     # パス区切りを統一
-    output_dir = os.path.normpath(output_dir)
+    output_dir = os.path.normpath(output_dir or OUTPUT_RDE_DATA_DIR)
     detail_dir = os.path.join(output_dir, "datasets")
 
     search_query = None
@@ -1205,15 +1388,11 @@ def fetch_organization_info_from_api(bearer_token, save_path):
         logger.error("組織情報の取得・保存に失敗しました: %s", e)
 
 
-def fetch_template_info_from_api(bearer_token, output_dir="output/rde/data"):
+def fetch_template_info_from_api(bearer_token, output_dir=None):
     """
     テンプレート情報をAPIから取得し、template.jsonとして保存
     v1.18.4: Bearer Token自動選択対応
     """
-    import time
-    start_time = time.time()
-    
-    url = "https://rde-api.nims.go.jp/datasetTemplates?programId=4bbf62be-f270-4a46-9682-38cd064607ba&teamId=22398c55-8620-430e-afa5-2405c57dd03c&sort=id&page[limit]=10000&page[offset]=0&include=instruments&fields[instrument]=nameJa%2CnameEn"
     headers = {
         "Accept": "application/vnd.api+json",
         "Host": "rde-api.nims.go.jp",
@@ -1221,47 +1400,45 @@ def fetch_template_info_from_api(bearer_token, output_dir="output/rde/data"):
         "Referer": "https://rde.nims.go.jp/"
     }
     try:
-        # v1.18.4: bearer_token=Noneで自動選択させる
-        resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=30)  # datasetTemplates は重い処理のためタイムアウト延長
-        elapsed_ms = (time.time() - start_time) * 1000
-        
-        if resp is None:
-            try:
-                from classes.basic.core.api_recording_wrapper import record_api_call_for_template
-                record_api_call_for_template(url, headers, 0, elapsed_ms, False, "APIリクエスト失敗")
-            except Exception as e:
-                logger.debug(f"API記録追加失敗: {e}")
-            logger.error("テンプレート情報の取得に失敗しました: リクエストエラー")
-            return
-        resp.raise_for_status()
-        data = resp.json()
-        os.makedirs(output_dir, exist_ok=True)
-        with open(os.path.join(output_dir, "template.json"), "w", encoding="utf-8") as f:
+        base_params = {
+            "programId": DEFAULT_PROGRAM_ID,
+            "teamId": DEFAULT_TEAM_ID,
+            "sort": "id",
+            "include": "instruments",
+            "fields[instrument]": "nameJa,nameEn",
+        }
+        data = _download_paginated_resource(
+            base_url=TEMPLATE_API_BASE_URL,
+            base_params=base_params,
+            headers=headers,
+            bearer_token=None,
+            page_size=TEMPLATE_PAGE_SIZE,
+            timeout=TEMPLATE_REQUEST_TIMEOUT,
+            record_callback=lambda url, hdrs, status_code, elapsed_ms, success, error=None: record_api_call_for_template(
+                url,
+                hdrs,
+                status_code,
+                elapsed_ms,
+                success=success,
+                error=error,
+            ),
+            chunk_label="テンプレート情報",
+            chunk_dir_factory=_prepare_template_chunk_directory,
+            chunk_file_template=TEMPLATE_CHUNK_FILE_TEMPLATE,
+        )
+        target_dir = output_dir or OUTPUT_RDE_DATA_DIR
+        os.makedirs(target_dir, exist_ok=True)
+        with open(os.path.join(target_dir, "template.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         logger.info("テンプレート(template.json)の取得・保存に成功しました。")
-        try:
-            from classes.basic.core.api_recording_wrapper import record_api_call_for_template
-            record_api_call_for_template(url, headers, 200, elapsed_ms, True)
-        except Exception as e:
-            logger.debug(f"API記録追加失敗: {e}")
     except Exception as e:
-        elapsed_ms = (time.time() - start_time) * 1000
-        try:
-            from classes.basic.core.api_recording_wrapper import record_api_call_for_template
-            record_api_call_for_template(url, headers, 500, elapsed_ms, False, str(e))
-        except Exception as e2:
-            logger.debug(f"API記録追加失敗: {e2}")
         logger.error("テンプレートの取得・保存に失敗しました: %s", e)
 
-def fetch_instruments_info_from_api(bearer_token, output_dir="output/rde/data"):
+def fetch_instruments_info_from_api(bearer_token, output_dir=None):
     """
     設備リスト情報をAPIから取得し、instruments.jsonとして保存
     v1.18.4: Bearer Token自動選択対応
     """
-    import time
-    start_time = time.time()
-    
-    url = "https://rde-instrument-api.nims.go.jp/instruments?programId=4bbf62be-f270-4a46-9682-38cd064607ba&page%5Blimit%5D=10000&sort=id&page%5Boffset%5D=0"
     headers = {
         "Accept": "application/vnd.api+json",
         "Host": "rde-instrument-api.nims.go.jp",
@@ -1269,39 +1446,38 @@ def fetch_instruments_info_from_api(bearer_token, output_dir="output/rde/data"):
         "Referer": "https://rde.nims.go.jp/"
     }
     try:
-        # v1.18.4: bearer_token=Noneで自動選択させる
-        resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
-        elapsed_ms = (time.time() - start_time) * 1000
-        
-        if resp is None:
-            try:
-                from classes.basic.core.api_recording_wrapper import record_api_call_for_instruments
-                record_api_call_for_instruments(url, headers, 0, elapsed_ms, False, "APIリクエスト失敗")
-            except Exception as e:
-                logger.debug(f"API記録追加失敗: {e}")
-            logger.error("装置情報の取得に失敗しました: リクエストエラー")
-            return
-        resp.raise_for_status()
-        data = resp.json()
-        os.makedirs(output_dir, exist_ok=True)
-        with open(os.path.join(output_dir, "instruments.json"), "w", encoding="utf-8") as f:
+        base_params = {
+            "programId": DEFAULT_PROGRAM_ID,
+            "sort": "id",
+        }
+        data = _download_paginated_resource(
+            base_url=INSTRUMENT_API_BASE_URL,
+            base_params=base_params,
+            headers=headers,
+            bearer_token=None,
+            page_size=INSTRUMENT_PAGE_SIZE,
+            timeout=INSTRUMENT_REQUEST_TIMEOUT,
+            record_callback=lambda url, hdrs, status_code, elapsed_ms, success, error=None: record_api_call_for_instruments(
+                url,
+                hdrs,
+                status_code,
+                elapsed_ms,
+                success=success,
+                error=error,
+            ),
+            chunk_label="設備情報",
+            chunk_dir_factory=_prepare_instrument_chunk_directory,
+            chunk_file_template=INSTRUMENT_CHUNK_FILE_TEMPLATE,
+        )
+        target_dir = output_dir or OUTPUT_RDE_DATA_DIR
+        os.makedirs(target_dir, exist_ok=True)
+        with open(os.path.join(target_dir, "instruments.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         logger.info("設備情報(instruments.json)の取得・保存に成功しました。")
-        try:
-            from classes.basic.core.api_recording_wrapper import record_api_call_for_instruments
-            record_api_call_for_instruments(url, headers, 200, elapsed_ms, True)
-        except Exception as e:
-            logger.debug(f"API記録追加失敗: {e}")
     except Exception as e:
-        elapsed_ms = (time.time() - start_time) * 1000
-        try:
-            from classes.basic.core.api_recording_wrapper import record_api_call_for_instruments
-            record_api_call_for_instruments(url, headers, 500, elapsed_ms, False, str(e))
-        except Exception as e2:
-            logger.debug(f"API記録追加失敗: {e2}")
         logger.error("設備情報の取得・保存に失敗しました: %s", e)
 
-def fetch_licenses_info_from_api(bearer_token, output_dir="output/rde/data"):
+def fetch_licenses_info_from_api(bearer_token, output_dir=None):
     """
     利用ライセンスマスタ情報をAPIから取得し、licenses.jsonとして保存
     v1.18.4: Bearer Token自動選択対応
@@ -1331,8 +1507,9 @@ def fetch_licenses_info_from_api(bearer_token, output_dir="output/rde/data"):
             return
         resp.raise_for_status()
         data = resp.json()
-        os.makedirs(output_dir, exist_ok=True)
-        with open(os.path.join(output_dir, "licenses.json"), "w", encoding="utf-8") as f:
+        target_dir = output_dir or OUTPUT_RDE_DATA_DIR
+        os.makedirs(target_dir, exist_ok=True)
+        with open(os.path.join(target_dir, "licenses.json"), "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         logger.info("利用ライセンス情報(licenses.json)の取得・保存に成功しました。")
         logger.info(f"利用ライセンス情報取得完了: {len(data.get('data', []))}件のライセンス")
@@ -1999,7 +2176,7 @@ def show_fetch_confirmation_dialog(parent, onlySelf, searchWords):
         "取得項目": expected_actions,
         "警告": warning_text,
         "処理時間": time_estimate,
-        "出力先": "output/rde/data/",
+        "出力先": OUTPUT_RDE_DATA_DIR,
         "API呼び出し先": [
             "https://rde-user-api.nims.go.jp/users/self",
             "https://rde-api.nims.go.jp/groups/root",
@@ -2446,7 +2623,7 @@ def fetch_invoice_schema_stage(bearer_token, progress_callback=None):
         if not progress_callback(10, 100, "invoiceSchema情報取得中..."):
             return "キャンセルされました"
     
-    output_dir = "output/rde/data"
+    output_dir = OUTPUT_RDE_DATA_DIR
     result = fetch_invoice_schemas(bearer_token, output_dir, progress_callback)
     
     if progress_callback:
@@ -3227,7 +3404,7 @@ def fetch_basic_info_logic(
         traceback.print_exc()
         return error_msg
 
-def fetch_sample_info_only(bearer_token, output_dir="output/rde/data", progress_callback=None):
+def fetch_sample_info_only(bearer_token, output_dir=None, progress_callback=None):
     """
     サンプル情報のみを強制取得・保存（既存ファイルも上書き）
     v2.1.0: 並列ダウンロード対応（50件以上で自動並列化）
@@ -3247,7 +3424,8 @@ def fetch_sample_info_only(bearer_token, output_dir="output/rde/data", progress_
                 return "キャンセルされました"
         
         # サブグループ情報から対象グループIDを取得
-        sub_group_path = os.path.join(output_dir, "subGroup.json")
+        root_dir = output_dir or OUTPUT_RDE_DATA_DIR
+        sub_group_path = os.path.join(root_dir, "subGroup.json")
         if not os.path.exists(sub_group_path):
             error_msg = "subGroup.jsonが存在しません。先に基本情報取得または共通情報取得を実行してください。"
             logger.error(error_msg)
@@ -3266,7 +3444,7 @@ def fetch_sample_info_only(bearer_token, output_dir="output/rde/data", progress_
             if not progress_callback(10, 100, f"対象グループ数: {len(sub_group_included)}"):
                 return "キャンセルされました"
         
-        sample_dir = os.path.join(output_dir, "samples")
+        sample_dir = os.path.join(root_dir, "samples")
         os.makedirs(sample_dir, exist_ok=True)
         
         total_samples = len(sub_group_included)
@@ -3348,7 +3526,7 @@ def fetch_sample_info_only(bearer_token, output_dir="output/rde/data", progress_
         traceback.print_exc()
         return error_msg
 
-def fetch_sample_info_from_subgroup_ids_only(bearer_token, output_dir="output/rde/data"):
+def fetch_sample_info_from_subgroup_ids_only(bearer_token, output_dir=None):
     r"""
     subGroup.jsonの各IDについてoutput\rde\data\samples\{id}.jsonのみを軽量取得
     データ登録後の自動取得用に最適化された関数
@@ -3360,7 +3538,8 @@ def fetch_sample_info_from_subgroup_ids_only(bearer_token, output_dir="output/rd
     
     try:
         # サブグループ情報から対象グループIDを取得
-        sub_group_path = os.path.join(output_dir, "subGroup.json")
+        root_dir = output_dir or OUTPUT_RDE_DATA_DIR
+        sub_group_path = os.path.join(root_dir, "subGroup.json")
         if not os.path.exists(sub_group_path):
             error_msg = "subGroup.jsonが存在しません"
             logger.error(error_msg)
@@ -3375,7 +3554,7 @@ def fetch_sample_info_from_subgroup_ids_only(bearer_token, output_dir="output/rd
             logger.error(error_msg)
             return error_msg
         
-        sample_dir = os.path.join(output_dir, "samples")
+        sample_dir = os.path.join(root_dir, "samples")
         os.makedirs(sample_dir, exist_ok=True)
         
         total_samples = len(sub_group_included)
@@ -3428,7 +3607,7 @@ def fetch_sample_info_from_subgroup_ids_only(bearer_token, output_dir="output/rd
         logger.error(error_msg)
         return error_msg
 
-def fetch_sample_info_for_dataset_only(bearer_token, dataset_id, output_dir="output/rde/data"):
+def fetch_sample_info_for_dataset_only(bearer_token, dataset_id, output_dir=None):
     """
     指定されたデータセットIDの個別データセットJSONからグループIDを取得し、
     そのグループのサンプル情報のみを取得する（データ登録後の自動取得用）
@@ -3444,7 +3623,8 @@ def fetch_sample_info_for_dataset_only(bearer_token, dataset_id, output_dir="out
     
     try:
         # 個別データセットJSONからグループIDを取得
-        dataset_json_path = os.path.join(output_dir, "datasets", f"{dataset_id}.json")
+        root_dir = output_dir or OUTPUT_RDE_DATA_DIR
+        dataset_json_path = os.path.join(root_dir, "datasets", f"{dataset_id}.json")
         if not os.path.exists(dataset_json_path):
             error_msg = f"個別データセットJSONが存在しません: {dataset_json_path}"
             logger.error(error_msg)
@@ -3465,7 +3645,7 @@ def fetch_sample_info_for_dataset_only(bearer_token, dataset_id, output_dir="out
         logger.info(f"データセット{dataset_id}のグループID取得: {group_id}")
         
         # サンプル情報を取得
-        sample_dir = os.path.join(output_dir, "samples")
+        sample_dir = os.path.join(root_dir, "samples")
         os.makedirs(sample_dir, exist_ok=True)
         
         url = f"https://rde-material-api.nims.go.jp/samples?groupId={group_id}&page%5Blimit%5D=1000&page%5Boffset%5D=0&fields%5Bsample%5D=names%2Cdescription%2Ccomposition"
@@ -3842,10 +4022,10 @@ def fetch_common_info_only_logic(
         traceback.print_exc()
         return error_msg
 
-def fetch_dataset_list_only(bearer_token, output_dir="output/rde/data"):
+def fetch_dataset_list_only(bearer_token, output_dir=None):
     """データセット一覧のみを取得し、dataset.jsonとして保存（個別JSONは取得しない）"""
     # パス区切りを統一
-    output_dir = os.path.normpath(output_dir)
+    output_dir = os.path.normpath(output_dir or OUTPUT_RDE_DATA_DIR)
 
     headers = _make_headers(bearer_token, host="rde-api.nims.go.jp", origin="https://rde.nims.go.jp", referer="https://rde.nims.go.jp/")
 
@@ -4138,7 +4318,7 @@ def get_stage_completion_status():
                 instrument_local_id = instrument_id_to_localid.get(ds_info["instrument_id"], "")
                 dataset_url = f"https://rde.nims.go.jp/datasets/rde/{ds_info['id']}"
 
-                dataEntry_path = os.path.join("output", "rde", "data", "dataEntry", f"{ds_info['id']}.json")
+                dataEntry_path = get_dynamic_file_path(f"output/rde/data/dataEntry/{ds_info['id']}.json")
                 dataEntry_json = load_json(dataEntry_path)
                 if not dataEntry_json:
                     print(f"[ERROR] dataEntry JSONが存在しません: {dataEntry_path} for dataset_id={ds_info['id']}" )

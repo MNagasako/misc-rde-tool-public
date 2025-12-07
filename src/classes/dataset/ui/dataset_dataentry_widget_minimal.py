@@ -21,6 +21,7 @@ from config.common import get_dynamic_file_path
 from core.bearer_token_manager import BearerTokenManager
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
+from classes.dataset.util.show_event_refresh import RefreshOnShowWidget
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     """データセット データエントリー専用ウィジェット（最小版）"""
-    widget = QWidget()
+    widget = RefreshOnShowWidget()
     layout = QVBoxLayout()
     
     # フィルタ設定エリア（修正タブと同じ構成）
@@ -92,6 +93,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     dataset_label = QLabel("データエントリーを表示するデータセット:")
     dataset_label.setMinimumWidth(200)
     dataset_combo = QComboBox()
+    dataset_combo.setObjectName("datasetDataEntryCombo")
     dataset_combo.setMinimumWidth(650)
     dataset_combo.setEditable(True)
     dataset_combo.setInsertPolicy(QComboBox.NoInsert)
@@ -455,6 +457,12 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             logger.error("dataset.json読み込みエラー: %s", e)
             dataset_combo.clear()
             dataset_combo.addItem("-- データセット読み込みエラー --", "")
+
+    def refresh_dataset_sources(reason="manual"):
+        """サブグループとデータセット一覧をまとめて再読み込みする"""
+        logger.debug("データエントリータブ: refresh_dataset_sources reason=%s", reason)
+        load_subgroups()
+        populate_dataset_combo_with_filter()
     
     def get_selected_dataset_id():
         """選択されたデータセットのIDを取得"""
@@ -547,43 +555,33 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             load_and_display_dataentry_info(dataset_id)
             
         except Exception as e:
-            logger.error("データエントリー取得エラー: %s", e)
+            logger.error("データエントリー取得エラー: %s", e, exc_info=True)
             if progress:
                 progress.close()
-            logger.error("データエントリー取得エラー: %s", e)
             dataset_info_label.setText(f"データセット: {dataset_id} (取得エラー)")
             entry_count_label.setText("データエントリー件数: エラー")
             last_updated_label.setText("最終取得: エラー")
-            # 基本情報取得機能を使用してデータエントリー情報を取得
-            bearer_token = BearerTokenManager.get_token_with_relogin_prompt(parent)
-            if not bearer_token:
-                QMessageBox.warning(widget, "エラー", "Bearer Tokenが取得できません。ログインを確認してください。")
-                return
-            
-            # 既存の fetch_data_entry_info_from_api を使用
-            from classes.basic.core.basic_info_logic import fetch_data_entry_info_from_api
-            
-            output_dir = get_dynamic_file_path("output/rde/data/dataEntry")
-            
-            # 強制更新の場合は既存ファイルを削除
-            if force_refresh:
-                dataentry_file = os.path.join(output_dir, f"{dataset_id}.json")
-                if os.path.exists(dataentry_file):
-                    os.remove(dataentry_file)
-                    logger.info("強制更新のため既存ファイルを削除: %s", dataentry_file)
-            
-            # データエントリー情報を取得
-            fetch_data_entry_info_from_api(bearer_token, dataset_id, output_dir)
-            
-            # 取得完了後、表示を更新
-            QTimer.singleShot(500, lambda: load_and_display_dataentry_info(dataset_id))
-            
-        except Exception as e:
-            logger.error("データエントリー取得エラー: %s", e)
-            QMessageBox.critical(widget, "エラー", f"データエントリー情報の取得に失敗しました:\n{e}")
-            dataset_info_label.setText(f"データセット: {dataset_id} (取得エラー)")
-            entry_count_label.setText("データエントリー件数: エラー")
-            last_updated_label.setText("最終取得: エラー")
+
+            try:
+                bearer_token = BearerTokenManager.get_token_with_relogin_prompt(parent)
+                if not bearer_token:
+                    QMessageBox.warning(widget, "エラー", "Bearer Tokenが取得できません。ログインを確認してください。")
+                    return
+
+                from classes.basic.core.basic_info_logic import fetch_data_entry_info_from_api
+                output_dir = get_dynamic_file_path("output/rde/data/dataEntry")
+
+                if force_refresh:
+                    dataentry_file = os.path.join(output_dir, f"{dataset_id}.json")
+                    if os.path.exists(dataentry_file):
+                        os.remove(dataentry_file)
+                        logger.info("強制更新のため既存ファイルを削除: %s", dataentry_file)
+
+                fetch_data_entry_info_from_api(bearer_token, dataset_id, output_dir)
+                QTimer.singleShot(500, lambda: load_and_display_dataentry_info(dataset_id))
+            except Exception as fallback_error:
+                logger.error("データエントリー取得フォールバックも失敗: %s", fallback_error, exc_info=True)
+                QMessageBox.critical(widget, "エラー", f"データエントリー情報の取得に失敗しました:\n{fallback_error}")
     
     def load_and_display_dataentry_info(dataset_id):
         """JSONファイルからデータエントリー情報を読み込んで表示"""
@@ -694,34 +692,11 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
                 
            
         except Exception as e:
-            logger.error("データエントリー情報表示エラー: %s", e)
-            dataset_info_label.setText(f"データセット: {dataset_id} (表示エラー)")
-            entry_count_label.setText("データエントリー件数: エラー")
-            last_updated_label.setText("最終取得: エラー")
-            
-        except Exception as e:
-            logger.error("データエントリー表示エラー: %s", e)
+            logger.error("データエントリー情報表示エラー: %s", e, exc_info=True)
             QMessageBox.critical(widget, "エラー", f"データエントリー情報の表示に失敗しました:\n{e}")
             dataset_info_label.setText(f"データセット: {dataset_id} (表示エラー)")
             entry_count_label.setText("データエントリー件数: エラー")
             last_updated_label.setText("最終取得: エラー")
-    
-    # イベントハンドラー設定
-    def on_dataset_selection_changed():
-        """データセット選択変更時の処理"""
-        dataset_id = get_selected_dataset_id()
-        if dataset_id:
-            update_dataentry_display(dataset_id, False)
-    
-    def on_fetch_button_clicked():
-        """取得ボタンクリック時の処理"""
-        dataset_id = get_selected_dataset_id()
-        if not dataset_id:
-            QMessageBox.warning(widget, "警告", "データセットを選択してください。")
-            return
-        
-        force_refresh = force_refresh_checkbox.isChecked()
-        update_dataentry_display(dataset_id, force_refresh)
     
     def show_all_entries():
         """全データエントリーを表示"""
@@ -850,8 +825,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     
     def on_refresh_dataset_clicked():
         """データセット一覧更新ボタンクリック時のハンドラー"""
-        load_subgroups()
-        populate_dataset_combo_with_filter()
+        refresh_dataset_sources("button")
     
     def on_filter_changed():
         """フィルタ変更時のハンドラー"""
@@ -870,9 +844,12 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     # サブグループフィルタ除去
     grant_filter_input.textChanged.connect(on_filter_changed)
     
-    # 初期データ読み込み
-    QTimer.singleShot(100, load_subgroups)
-    QTimer.singleShot(200, populate_dataset_combo_with_filter)
+    # 初期データ読み込みと表示時の自動更新をセット
+    QTimer.singleShot(100, lambda: refresh_dataset_sources("initial"))
+
+    # 他タブから明示的に再利用できるように属性公開
+    widget.refresh_dataset_combo = refresh_dataset_sources
+    widget.add_show_refresh_callback(lambda: refresh_dataset_sources("showEvent"))
     
     widget.setLayout(layout)
     return widget
