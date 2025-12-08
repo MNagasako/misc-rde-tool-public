@@ -206,47 +206,11 @@ class AISuggestionDialog(QDialog):
         
         self.generate_button = SpinnerButton("🚀 AI提案生成")
         self.generate_button.setMinimumHeight(35)
-        self.generate_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-size: 12px;
-                font-weight: bold;
-                border: none;
-                border-radius: 5px;
-                padding: 8px 16px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:disabled {
-                background-color: #81C784;
-                color: #E8F5E9;
-            }
-        """)
         
         # キャンセルボタン（AI実行中のみ表示・有効）
         self.cancel_ai_button = QPushButton("⏹ キャンセル")
         self.cancel_ai_button.setMinimumHeight(35)
         self.cancel_ai_button.setVisible(False)  # 初期状態は非表示
-        self.cancel_ai_button.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                font-size: 12px;
-                font-weight: bold;
-                border: none;
-                border-radius: 5px;
-                padding: 8px 16px;
-            }
-            QPushButton:hover {
-                background-color: #d32f2f;
-            }
-            QPushButton:disabled {
-                background-color: #BDBDBD;
-                color: #E0E0E0;
-            }
-        """)
         # 一部のテスト環境でウィジェットがMagicMock化されるケースへの防御
         try:
             if hasattr(self.cancel_ai_button, 'isVisible') and hasattr(self.cancel_ai_button.isVisible, 'return_value'):
@@ -288,6 +252,9 @@ class AISuggestionDialog(QDialog):
             ThemeManager.instance().theme_changed.connect(self.refresh_theme)
         except Exception:
             pass
+
+        # 初期テーマ適用
+        self.refresh_theme()
         
     def setup_main_tab(self, tab_widget):
         """メインタブのセットアップ"""
@@ -1582,64 +1549,19 @@ class AISuggestionDialog(QDialog):
         button_layout = QHBoxLayout()
         
         # 設定を読み込みボタン
-        load_settings_button = QPushButton("📂 設定を読み込み")
-        load_settings_button.clicked.connect(self.load_extraction_settings)
-        load_settings_button.setStyleSheet("""
-            QPushButton {
-                background-color: #17a2b8;
-                color: white;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #138496;
-            }
-        """)
-        button_layout.addWidget(load_settings_button)
+        self.load_settings_button = QPushButton("📂 設定を読み込み")
+        self.load_settings_button.clicked.connect(self.load_extraction_settings)
+        button_layout.addWidget(self.load_settings_button)
         
         # 設定を保存ボタン
-        save_settings_button = QPushButton("💾 設定を保存")
-        save_settings_button.clicked.connect(self.save_extraction_settings)
-        save_settings_button.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
-                border: 1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)};
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 11px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
-            }}
-            QPushButton:pressed {{
-                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_PRESSED)};
-            }}
-        """)
-        button_layout.addWidget(save_settings_button)
+        self.save_settings_button = QPushButton("💾 設定を保存")
+        self.save_settings_button.clicked.connect(self.save_extraction_settings)
+        button_layout.addWidget(self.save_settings_button)
         
         # デフォルトに戻すボタン
-        reset_settings_button = QPushButton("🔄 デフォルトに戻す")
-        reset_settings_button.clicked.connect(self.reset_extraction_settings)
-        reset_settings_button.setStyleSheet("""
-            QPushButton {
-                background-color: #ffc107;
-                color: #212529;
-                border: none;
-                border-radius: 4px;
-                padding: 8px 16px;
-                font-size: 11px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #e0a800;
-            }
-        """)
-        button_layout.addWidget(reset_settings_button)
+        self.reset_settings_button = QPushButton("🔄 デフォルトに戻す")
+        self.reset_settings_button.clicked.connect(self.reset_extraction_settings)
+        button_layout.addWidget(self.reset_settings_button)
         
         button_layout.addStretch()
         
@@ -1701,42 +1623,91 @@ class AISuggestionDialog(QDialog):
                 )
 
             # アクションボタン群（色再適用）
+            button_variants = {
+                'primary': {
+                    'bg': ThemeKey.BUTTON_PRIMARY_BACKGROUND,
+                    'text': ThemeKey.BUTTON_PRIMARY_TEXT,
+                    'border': ThemeKey.BUTTON_PRIMARY_BORDER,
+                    'hover': ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER,
+                    'pressed': ThemeKey.BUTTON_PRIMARY_BACKGROUND_PRESSED,
+                },
+                'success': {
+                    'bg': ThemeKey.BUTTON_SUCCESS_BACKGROUND,
+                    'text': ThemeKey.BUTTON_SUCCESS_TEXT,
+                    'border': ThemeKey.BUTTON_SUCCESS_BORDER,
+                    'hover': ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER,
+                    'pressed': ThemeKey.BUTTON_SUCCESS_BACKGROUND_PRESSED,
+                },
+                'danger': {
+                    'bg': ThemeKey.BUTTON_DANGER_BACKGROUND,
+                    'text': ThemeKey.BUTTON_DANGER_TEXT,
+                    'border': ThemeKey.BUTTON_DANGER_BORDER,
+                    'hover': ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER,
+                    'pressed': ThemeKey.BUTTON_DANGER_BACKGROUND_PRESSED,
+                },
+                'info': {
+                    'bg': ThemeKey.BUTTON_INFO_BACKGROUND,
+                    'text': ThemeKey.BUTTON_INFO_TEXT,
+                    'border': ThemeKey.BUTTON_INFO_BORDER,
+                    'hover': ThemeKey.BUTTON_INFO_BACKGROUND_HOVER,
+                    'pressed': ThemeKey.BUTTON_INFO_BACKGROUND_PRESSED,
+                },
+                'warning': {
+                    'bg': ThemeKey.BUTTON_WARNING_BACKGROUND,
+                    'text': ThemeKey.BUTTON_WARNING_TEXT,
+                    'border': ThemeKey.BUTTON_WARNING_BORDER,
+                    'hover': ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER,
+                    'pressed': ThemeKey.BUTTON_WARNING_BACKGROUND_PRESSED,
+                },
+                'neutral': {
+                    'bg': ThemeKey.BUTTON_NEUTRAL_BACKGROUND,
+                    'text': ThemeKey.BUTTON_NEUTRAL_TEXT,
+                    'border': ThemeKey.BUTTON_NEUTRAL_BORDER,
+                    'hover': ThemeKey.BUTTON_NEUTRAL_BACKGROUND_HOVER,
+                },
+            }
+
             def _apply_btn(btn, variant):
                 try:
-                    if not btn: return
-                    if variant == 'danger':
-                        btn.setStyleSheet(
-                            f"QPushButton {{ background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)}; border:1px solid {get_color(ThemeKey.BUTTON_DANGER_BORDER)}; border-radius:4px; padding:6px 12px; font-weight:bold; }}"
-                            f"QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)}; }}"
-                            f"QPushButton:pressed {{ background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_PRESSED)}; }}"
-                        )
-                    elif variant == 'success':
-                        btn.setStyleSheet(
-                            f"QPushButton {{ background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)}; border:1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)}; border-radius:4px; padding:6px 12px; font-weight:bold; }}"
-                            f"QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)}; }}"
-                            f"QPushButton:pressed {{ background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_PRESSED)}; }}"
-                        )
-                    elif variant == 'info':
-                        btn.setStyleSheet(
-                            f"QPushButton {{ background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_INFO_TEXT)}; border:1px solid {get_color(ThemeKey.BUTTON_INFO_BORDER)}; border-radius:4px; padding:6px 12px; font-weight:bold; }}"
-                            f"QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)}; }}"
-                            f"QPushButton:pressed {{ background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_PRESSED)}; }}"
-                        )
-                    elif variant == 'warning':
-                        btn.setStyleSheet(
-                            f"QPushButton {{ background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)}; border:1px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)}; border-radius:4px; padding:6px 12px; font-weight:bold; }}"
-                            f"QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)}; }}"
-                            f"QPushButton:pressed {{ background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_PRESSED)}; }}"
-                        )
+                    if not btn:
+                        return
+                    config = button_variants.get(variant)
+                    if not config:
+                        return
+                    style = (
+                        f"QPushButton {{ background-color: {get_color(config['bg'])}; color: {get_color(config['text'])}; "
+                        f"border: 1px solid {get_color(config['border'])}; border-radius:4px; padding:6px 12px; font-weight:bold; }}"
+                    )
+                    hover_key = config.get('hover')
+                    if hover_key:
+                        style += f"QPushButton:hover {{ background-color: {get_color(hover_key)}; }}"
+                    pressed_key = config.get('pressed')
+                    if pressed_key:
+                        style += f"QPushButton:pressed {{ background-color: {get_color(pressed_key)}; }}"
+                    style += (
+                        f"QPushButton:disabled {{ background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)}; "
+                        f"color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)}; border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)}; }}"
+                    )
+                    btn.setStyleSheet(style)
                 except Exception as _e:
                     logger.debug(f"Button theme apply failed: {_e}")
 
+            _apply_btn(getattr(self, 'generate_button', None), 'success')
+            _apply_btn(getattr(self, 'cancel_ai_button', None), 'danger')
+            _apply_btn(getattr(self, 'apply_button', None), 'primary')
+            _apply_btn(getattr(self, 'cancel_button', None), 'neutral')
             _apply_btn(getattr(self, 'clear_response_button', None), 'danger')
             _apply_btn(getattr(self, 'copy_response_button', None), 'success')
             _apply_btn(getattr(self, 'show_prompt_button', None), 'info')
             _apply_btn(getattr(self, 'load_settings_button', None), 'info')
             _apply_btn(getattr(self, 'save_settings_button', None), 'success')
             _apply_btn(getattr(self, 'reset_settings_button', None), 'warning')
+
+            if hasattr(self, 'spinner_overlay') and self.spinner_overlay:
+                try:
+                    self.spinner_overlay.refresh_theme()
+                except Exception:
+                    pass
 
         except Exception as e:
             logger.debug("refresh_theme failed: %s", e)

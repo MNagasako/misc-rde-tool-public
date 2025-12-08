@@ -70,7 +70,7 @@ from qt_compat.webengine_page import WebEnginePageWithConsole
 from qt_compat.core import QTimer
 from qt_compat.gui import QIcon
 # 設定・関数モジュール
-from config.common import REVISION, OUTPUT_DIR, DYNAMIC_IMAGE_DIR, get_static_resource_path
+from config.common import REVISION, OUTPUT_DIR, DYNAMIC_IMAGE_DIR, get_static_resource_path,get_base_dir
 from functions.common_funcs import read_login_info
 # テーマ管理
 from classes.theme import get_color, ThemeKey, ThemeManager, ThemeMode

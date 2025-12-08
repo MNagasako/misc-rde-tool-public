@@ -13,7 +13,7 @@ from qt_compat.widgets import (
     QPushButton, QMessageBox, QComboBox, 
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
     QCheckBox, QRadioButton, QProgressDialog, QApplication,
-    QLineEdit, QButtonGroup
+    QLineEdit, QButtonGroup, QGridLayout
 )
 from qt_compat.core import Qt, QTimer, QUrl
 from qt_compat.gui import QDesktopServices
@@ -31,67 +31,69 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     """データセット データエントリー専用ウィジェット（最小版）"""
     widget = RefreshOnShowWidget()
     layout = QVBoxLayout()
-    
-    # フィルタ設定エリア（修正タブと同じ構成）
+
+    # フィルタUI
     filter_widget = QWidget()
     filter_layout = QVBoxLayout()
     filter_layout.setContentsMargins(0, 0, 0, 0)
-    
-    # フィルタタイプ選択（ラジオボタン）
+
     filter_type_widget = QWidget()
     filter_type_layout = QHBoxLayout()
     filter_type_layout.setContentsMargins(0, 0, 0, 0)
-    
-    filter_type_label = QLabel("表示データセット:")
+
+    filter_type_label = QLabel("表示対象:")
     filter_type_label.setMinimumWidth(120)
     filter_type_label.setStyleSheet("font-weight: bold;")
-    
-    filter_user_only_radio = QRadioButton("ユーザー所属のみ")
+
+    filter_user_only_radio = QRadioButton("所属のみ")
     filter_others_only_radio = QRadioButton("その他のみ")
     filter_all_radio = QRadioButton("すべて")
-    filter_user_only_radio.setChecked(True)  # デフォルトは「ユーザー所属のみ」
-    
+    filter_user_only_radio.setChecked(True)
+
+    filter_button_group = QButtonGroup(widget)
+    filter_button_group.addButton(filter_user_only_radio)
+    filter_button_group.addButton(filter_others_only_radio)
+    filter_button_group.addButton(filter_all_radio)
+
     filter_type_layout.addWidget(filter_type_label)
     filter_type_layout.addWidget(filter_user_only_radio)
     filter_type_layout.addWidget(filter_others_only_radio)
     filter_type_layout.addWidget(filter_all_radio)
     filter_type_layout.addStretch()
-    
+
     filter_type_widget.setLayout(filter_type_layout)
     filter_layout.addWidget(filter_type_widget)
-    
-    # サブグループフィルタは除去（grantNumberのみでフィルタ）
-    
-    # グラント番号フィルタ（修正タブと同様）
+
     grant_filter_widget = QWidget()
     grant_filter_layout = QHBoxLayout()
     grant_filter_layout.setContentsMargins(0, 0, 0, 0)
-    
-    grant_filter_label = QLabel("課題番号:")
+
+    grant_filter_label = QLabel("課題番号フィルタ:")
     grant_filter_label.setMinimumWidth(120)
     grant_filter_label.setStyleSheet("font-weight: bold;")
-    
+
     grant_filter_input = QLineEdit()
-    grant_filter_input.setPlaceholderText("課題番号で絞り込み（部分一致）")
+    grant_filter_input.setPlaceholderText("課題番号 (例: 22XXXXXX)")
     grant_filter_input.setMinimumWidth(200)
-    
+
     grant_filter_layout.addWidget(grant_filter_label)
     grant_filter_layout.addWidget(grant_filter_input)
     grant_filter_layout.addStretch()
-    
+
     grant_filter_widget.setLayout(grant_filter_layout)
     filter_layout.addWidget(grant_filter_widget)
-    
+
     filter_widget.setLayout(filter_layout)
     layout.addWidget(filter_widget)
-    
-    # データセット選択
+
+    # データセット選択UI
     dataset_selection_widget = QWidget()
     dataset_selection_layout = QHBoxLayout()
     dataset_selection_layout.setContentsMargins(0, 0, 0, 0)
-    
-    dataset_label = QLabel("データエントリーを表示するデータセット:")
+
+    dataset_label = QLabel("データエントリー対象データセット:")
     dataset_label.setMinimumWidth(200)
+
     dataset_combo = QComboBox()
     dataset_combo.setObjectName("datasetDataEntryCombo")
     dataset_combo.setMinimumWidth(650)
@@ -99,7 +101,6 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     dataset_combo.setInsertPolicy(QComboBox.NoInsert)
     dataset_combo.setMaxVisibleItems(12)
 
-    # ▼ボタン追加
     show_all_btn = QPushButton("▼")
     show_all_btn.setToolTip("全件リスト表示")
     show_all_btn.setFixedWidth(28)
@@ -107,15 +108,15 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
 
     dataset_selection_layout.addWidget(dataset_label)
     dataset_selection_layout.addWidget(dataset_combo)
-    dataset_selection_layout.addWidget(show_all_btn)  # ←ここを追加
+    dataset_selection_layout.addWidget(show_all_btn)
     dataset_selection_widget.setLayout(dataset_selection_layout)
     layout.addWidget(dataset_selection_widget)
-    
-    # データエントリー取得・表示コントロール
+
+    # 操作ボタン
     control_widget = QWidget()
     control_layout = QHBoxLayout()
     control_layout.setContentsMargins(0, 0, 0, 0)
-    
+
     fetch_button = QPushButton("データエントリー取得")
     refresh_dataset_button = QPushButton("データセット一覧更新")
     info_bg = get_color(ThemeKey.BUTTON_INFO_BACKGROUND)
@@ -146,7 +147,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     """.strip()
     fetch_button.setStyleSheet(common_button_style)
     refresh_dataset_button.setStyleSheet(common_button_style)
-    
+
     show_all_entries_button = QPushButton("全エントリー表示")
     show_all_entries_button.setStyleSheet(f"""
         background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
@@ -155,33 +156,17 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         border-radius: 6px;
         padding: 8px 16px;
     """)
-    
+
     control_layout.addWidget(fetch_button)
-                    # サブグループフィルタ除去
-    
-    control_widget.setLayout(control_layout)
-    layout.addWidget(control_widget)
-    
-    # 強制更新チェックボックス
-    force_refresh_checkbox = QCheckBox("強制更新（既存のキャッシュを無視）")
-    force_refresh_checkbox.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_WARNING)}; font-weight: bold;")
-    layout.addWidget(force_refresh_checkbox)
-    fetch_button.setMaximumWidth(150)
-    fetch_button.setStyleSheet(f"""
-        background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
-        color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
-        font-weight: bold;
-        border-radius: 4px;
-        padding: 8px;
-    """)
-    
+    control_layout.addWidget(refresh_dataset_button)
+    control_layout.addWidget(show_all_entries_button)
+
     force_refresh_checkbox = QCheckBox("強制更新")
     force_refresh_checkbox.setToolTip("既存のJSONファイルが5分以内でも強制的に再取得します")
-    
-    control_layout.addWidget(fetch_button)
+    force_refresh_checkbox.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_WARNING)}; font-weight: bold;")
     control_layout.addWidget(force_refresh_checkbox)
     control_layout.addStretch()
-    
+
     control_widget.setLayout(control_layout)
     layout.addWidget(control_widget)
     
@@ -224,15 +209,17 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         "THUMBNAIL": "THUMB",
         "OTHER": "OTHER"
     }
+    DISPLAY_FILE_TYPES = FILE_TYPES + (["OTHER"] if "OTHER" not in FILE_TYPES else [])
+    IMAGE_FILE_TYPES = {"MAIN_IMAGE", "THUMBNAIL"}
     base_headers = ["No", "名前", "説明", "ファイル", "画像", "作成日"]
-    filetype_headers = [f"{FILE_TYPE_LABELS.get(ft, ft)}" for ft in FILE_TYPES]
+    filetype_headers = [f"{FILE_TYPE_LABELS.get(ft, ft)}" for ft in DISPLAY_FILE_TYPES]
     all_headers = base_headers + filetype_headers + ["ブラウザ"]
-    entry_table = QTableWidget()
+    base_col_count = len(base_headers)
+    browser_column_index = len(all_headers) - 1
+    entry_table = EntryTableWidget()
     entry_table.setColumnCount(len(all_headers))
     entry_table.setHorizontalHeaderLabels(all_headers)
-    # テーブルの設定
     header = entry_table.horizontalHeader()
-    # 各列の幅を内容に応じて自動調整（可変）
     for col in range(len(all_headers)):
         header.setSectionResizeMode(col, QHeaderView.ResizeToContents)
     header.setStretchLastSection(False)
@@ -240,15 +227,250 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     entry_table.setSelectionBehavior(QTableWidget.SelectRows)
     entry_table.setSortingEnabled(True)
     entry_table.setMinimumHeight(300)
-    # 列ヘッダの折り返し表示（word-wrap）
     entry_table.horizontalHeader().setDefaultAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
     entry_table.setWordWrap(True)
-    # ヘッダのスタイルで折り返しを強制
     entry_table.setStyleSheet("QHeaderView::section { padding: 4px; white-space: normal; }")
-    
     info_layout.addWidget(entry_table)
     info_group.setLayout(info_layout)
     layout.addWidget(info_group)
+
+    summary_group = QGroupBox("データエントリー情報集計")
+    summary_layout = QGridLayout()
+    summary_layout.addWidget(QLabel("項目"), 0, 0)
+    summary_layout.addWidget(QLabel("ファイル数"), 0, 1)
+    summary_layout.addWidget(QLabel("サイズ合計"), 0, 2)
+    summary_value_labels = {}
+    summary_rows = [
+        ("files", "ファイル"),
+        ("images", "画像"),
+    ] + [(ft, FILE_TYPE_LABELS.get(ft, ft)) for ft in DISPLAY_FILE_TYPES] + [
+        ("total", "総計"),
+        ("shared1", "共用合計１"),
+        ("shared2", "共用合計２(〇非共有構造化ファイル＆サムネ除外)"),
+        ("shared3", "共用合計３"),
+    ]
+    for row_idx, (key, label_text) in enumerate(summary_rows, start=1):
+        summary_layout.addWidget(QLabel(label_text), row_idx, 0)
+        count_label = QLabel("-")
+        size_label = QLabel("-")
+        count_label.setObjectName(f"summary_{key}_count")
+        size_label.setObjectName(f"summary_{key}_size")
+        summary_layout.addWidget(count_label, row_idx, 1)
+        summary_layout.addWidget(size_label, row_idx, 2)
+        summary_value_labels[key] = (count_label, size_label)
+    summary_group.setLayout(summary_layout)
+    layout.addWidget(summary_group)
+
+    def safe_int(value):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    def format_size_short(num_bytes):
+        if not num_bytes:
+            return "0 B"
+        units = ["B", "KB", "MB", "GB", "TB", "PB"]
+        size = float(num_bytes)
+        idx = 0
+        while size >= 1024 and idx < len(units) - 1:
+            size /= 1024
+            idx += 1
+        return f"{size:.2f} {units[idx]}"
+
+    def format_size_with_bytes(num_bytes):
+        formatted = format_size_short(num_bytes)
+        return f"{formatted} ({num_bytes:,} B)"
+
+    def reset_summary_display():
+        for count_label, size_label in summary_value_labels.values():
+            count_label.setText("-")
+            size_label.setText("-")
+
+    def create_empty_summary():
+        return {
+            "files": {"count": 0, "bytes": 0},
+            "images": {"count": 0, "bytes": 0},
+            "filetypes": {ft: {"count": 0, "bytes": 0} for ft in DISPLAY_FILE_TYPES},
+            "total": {"count": 0, "bytes": 0},
+            "shared1": {"count": 0, "bytes": 0},
+            "shared2": {"count": 0, "bytes": 0},
+            "shared3": {"count": 0, "bytes": 0},
+        }
+
+    def finalize_summary(summary):
+        total_count = sum(item["count"] for item in summary["filetypes"].values())
+        total_bytes = sum(item["bytes"] for item in summary["filetypes"].values())
+        summary["total"]["count"] = total_count
+        summary["total"]["bytes"] = total_bytes
+        shared_sets = {
+            "shared1": {"exclude": {"NONSHARED_RAW"}},
+            "shared2": {"exclude": {"NONSHARED_RAW", "THUMBNAIL"}},
+            "shared3": {"exclude": {"NONSHARED_RAW", "THUMBNAIL", "OTHER"}},
+        }
+
+        def accumulate_shared(key, exclude_types):
+            include_types = [ft for ft in DISPLAY_FILE_TYPES if ft not in exclude_types]
+            summary[key]["count"] = sum(summary["filetypes"][ft]["count"] for ft in include_types)
+            summary[key]["bytes"] = sum(summary["filetypes"][ft]["bytes"] for ft in include_types)
+
+        for shared_key, config in shared_sets.items():
+            accumulate_shared(shared_key, config["exclude"])
+
+        summary["files"]["bytes"] = total_bytes
+        return summary
+
+    def update_summary_display(summary):
+        if not summary:
+            reset_summary_display()
+            return
+
+        def set_labels(key, data):
+            count_label, size_label = summary_value_labels[key]
+            count_label.setText(f"{data['count']:,}")
+            size_label.setText(format_size_with_bytes(data["bytes"]))
+
+        set_labels("files", summary["files"])
+        set_labels("images", summary["images"])
+        for ft in DISPLAY_FILE_TYPES:
+            set_labels(ft, summary["filetypes"][ft])
+        set_labels("total", summary["total"])
+        set_labels("shared1", summary["shared1"])
+        set_labels("shared2", summary["shared2"])
+        set_labels("shared3", summary["shared3"])
+
+    def clear_entry_table_widgets():
+        for row in range(entry_table.rowCount()):
+            for col in range(entry_table.columnCount()):
+                widget = entry_table.cellWidget(row, col)
+                if widget is not None:
+                    widget.deleteLater()
+                    entry_table.setCellWidget(row, col, None)
+
+    def classify_file_type(raw_type):
+        if raw_type in DISPLAY_FILE_TYPES:
+            return raw_type
+        return "OTHER"
+
+    def analyze_entry_files(entry, file_lookup):
+        rel_files = entry.get("relationships", {}).get("files", {}).get("data", [])
+        counts = {ft: 0 for ft in DISPLAY_FILE_TYPES}
+        sizes = {ft: 0 for ft in DISPLAY_FILE_TYPES}
+        image_bytes = 0
+        for rel in rel_files:
+            file_id = rel.get("id")
+            file_info = file_lookup.get(file_id)
+            if not file_info:
+                continue
+            file_attr = file_info.get("attributes", {})
+            raw_type = file_attr.get("fileType")
+            ft_key = classify_file_type(raw_type)
+            file_size = safe_int(file_attr.get("fileSize", 0))
+            counts[ft_key] += 1
+            sizes[ft_key] += file_size
+            is_image = file_attr.get("isImageFile")
+            if is_image is None:
+                is_image = raw_type in IMAGE_FILE_TYPES
+            if is_image:
+                image_bytes += file_size
+        return counts, sizes, image_bytes
+
+    def open_entry_in_browser(entry_id):
+        url = f"https://rde.nims.go.jp/rde/datasets/data/{entry_id}"
+        QDesktopServices.openUrl(QUrl(url))
+
+    def populate_entry_row(row_index, context, summary):
+        entry = context["entry"]
+        dataset_id = context["dataset_id"]
+        prefix_dataset = context["prefix_dataset"]
+        file_lookup = context["file_lookup"]
+        attributes = entry.get("attributes", {})
+        data_number = str(attributes.get("dataNumber", ""))
+        if prefix_dataset:
+            data_number = f"{dataset_id}-{data_number}"
+        entry_table.setItem(row_index, 0, QTableWidgetItem(data_number))
+        entry_table.setItem(row_index, 1, QTableWidgetItem(attributes.get("name", "")))
+        entry_table.setItem(row_index, 2, QTableWidgetItem(attributes.get("description", "")))
+        num_files = safe_int(attributes.get("numberOfFiles", 0))
+        entry_table.setItem(row_index, 3, QTableWidgetItem(str(num_files)))
+        num_image_files = safe_int(attributes.get("numberOfImageFiles", 0))
+        entry_table.setItem(row_index, 4, QTableWidgetItem(str(num_image_files)))
+        created_at = attributes.get("createdAt") or attributes.get("created") or ""
+        if created_at:
+            try:
+                dt = datetime.datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                formatted_date = dt.strftime('%Y-%m-%d')
+            except Exception:
+                formatted_date = created_at
+        else:
+            formatted_date = "--"
+        entry_table.setItem(row_index, 5, QTableWidgetItem(formatted_date))
+
+        filetype_counts, filetype_sizes, image_bytes = analyze_entry_files(entry, file_lookup)
+        for i, ft in enumerate(DISPLAY_FILE_TYPES):
+            entry_table.setItem(row_index, base_col_count + i, QTableWidgetItem(str(filetype_counts[ft])))
+            summary["filetypes"][ft]["count"] += filetype_counts[ft]
+            summary["filetypes"][ft]["bytes"] += filetype_sizes[ft]
+
+        summary["files"]["count"] += num_files
+        summary["files"]["bytes"] += sum(filetype_sizes.values())
+        summary["images"]["count"] += num_image_files
+        summary["images"]["bytes"] += image_bytes
+
+        entry_id = entry.get("id", "")
+        link_button = QPushButton("開く")
+        link_button.setStyleSheet(f"""
+            background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+            color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+        """)
+        link_button.clicked.connect(lambda _, eid=entry_id: open_entry_in_browser(eid))
+        entry_table.setCellWidget(row_index, browser_column_index, link_button)
+
+    def create_bold_item(text=""):
+        item = QTableWidgetItem(text)
+        font = item.font()
+        font.setBold(True)
+        item.setFont(font)
+        item.setTextAlignment(Qt.AlignCenter)
+        item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+        return item
+
+    def add_total_row(row_index, summary):
+        entry_table.setItem(row_index, 0, create_bold_item("合計"))
+        entry_table.setItem(row_index, 1, create_bold_item())
+        entry_table.setItem(row_index, 2, create_bold_item())
+        entry_table.setItem(row_index, 3, create_bold_item(str(summary["files"]["count"])))
+        entry_table.setItem(row_index, 4, create_bold_item(str(summary["images"]["count"])))
+        entry_table.setItem(row_index, 5, create_bold_item())
+        for i, ft in enumerate(DISPLAY_FILE_TYPES):
+            entry_table.setItem(row_index, base_col_count + i, create_bold_item(str(summary["filetypes"][ft]["count"])))
+        entry_table.setItem(row_index, browser_column_index, create_bold_item())
+        entry_table.set_footer_row_index(row_index)
+
+    def populate_entry_table_rows(entry_contexts):
+        entry_table.setSortingEnabled(False)
+        clear_entry_table_widgets()
+        entry_table.clear_footer_row()
+        summary = create_empty_summary()
+        if not entry_contexts:
+            entry_table.setRowCount(0)
+            entry_table.clear_footer_row()
+            finalize_summary(summary)
+            update_summary_display(summary)
+            entry_table.setSortingEnabled(True)
+            return summary
+
+        entry_table.setRowCount(len(entry_contexts) + 1)
+        for row_index, context in enumerate(entry_contexts):
+            populate_entry_row(row_index, context, summary)
+        finalize_summary(summary)
+        add_total_row(len(entry_contexts), summary)
+        update_summary_display(summary)
+        entry_table.setSortingEnabled(True)
+        return summary
     
     # データセットキャッシュシステム（最小版）
     dataset_cache = {
@@ -477,7 +699,10 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             dataset_info_label.setText("データセット: 未選択")
             entry_count_label.setText("データエントリー件数: -")
             last_updated_label.setText("最終取得: -")
+            clear_entry_table_widgets()
             entry_table.setRowCount(0)
+            entry_table.clear_footer_row()
+            update_summary_display(finalize_summary(create_empty_summary()))
             return
         
         # JSONファイルの存在確認と更新チェック
@@ -587,116 +812,51 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         """JSONファイルからデータエントリー情報を読み込んで表示"""
         try:
             dataentry_file = get_dynamic_file_path(f"output/rde/data/dataEntry/{dataset_id}.json")
-            
+
             if not os.path.exists(dataentry_file):
                 dataset_info_label.setText(f"データセット: {dataset_id} (データなし)")
                 entry_count_label.setText("データエントリー件数: 0")
                 last_updated_label.setText("最終取得: なし")
+                clear_entry_table_widgets()
                 entry_table.setRowCount(0)
+                entry_table.clear_footer_row()
+                update_summary_display(finalize_summary(create_empty_summary()))
                 return
-            
-            # JSONファイルを読み込み
+
             with open(dataentry_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
-            # 基本情報を更新
+
             entry_count = len(data.get('data', []))
             file_mtime = os.path.getmtime(dataentry_file)
             last_updated = datetime.datetime.fromtimestamp(file_mtime).strftime('%Y-%m-%d %H:%M:%S')
-            
+
             dataset_info_label.setText(f"データセット: {dataset_id}")
             entry_count_label.setText(f"データエントリー件数: {entry_count}件")
             last_updated_label.setText(f"最終取得: {last_updated} path: {dataentry_file}")
-            
-            # テーブルにデータを設定
-            entry_table.setRowCount(entry_count)
-            from classes.data_fetch2.conf.file_filter_config import FILE_TYPES
-            base_col_count = 6  # データ番号, 名前, 説明, ファイル数, 画像ファイル数, 作成日
-            for row, entry in enumerate(data.get('data', [])):
-                attributes = entry.get('attributes', {})
-                data_number = str(attributes.get('dataNumber', ''))
-                entry_table.setItem(row, 0, QTableWidgetItem(data_number))
-                name = attributes.get('name', '')
-                entry_table.setItem(row, 1, QTableWidgetItem(name))
-                description = attributes.get('description', '')
-                entry_table.setItem(row, 2, QTableWidgetItem(description))
-                num_files = str(attributes.get('numberOfFiles', 0))
-                entry_table.setItem(row, 3, QTableWidgetItem(num_files))
-                num_image_files = str(attributes.get('numberOfImageFiles', 0))
-                entry_table.setItem(row, 4, QTableWidgetItem(num_image_files))
-                # 作成日: 'createdAt' または 'created' を参照
-                created_at = attributes.get('createdAt') or attributes.get('created') or ''
-                if created_at:
-                    try:
-                        dt = datetime.datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                        formatted_date = dt.strftime('%Y-%m-%d')
-                    except Exception:
-                        formatted_date = created_at
-                else:
-                    formatted_date = '--'
-                entry_table.setItem(row, 5, QTableWidgetItem(formatted_date))
-                # --- fileTypeごとのファイル数集計 ---
-                included = data.get('included', [])
-                entry_id = entry.get('id', '')
-                # entryのrelationships.files.dataからファイルIDリストを取得
-                file_ids = set()
-                rel_files = entry.get('relationships', {}).get('files', {}).get('data', [])
-                for fobj in rel_files:
-                    if isinstance(fobj, dict) and fobj.get('type') == 'file' and fobj.get('id'):
-                        file_ids.add(fobj['id'])
-                # included配列からidがfile_idsに含まれるfile要素を抽出
-                files_for_entry = [f for f in included if f.get('type') == 'file' and f.get('id') in file_ids]
-                # デバッグ出力
-                #print(f"[DEBUG] entry_id={entry_id} name={name} data_number={data_number} file_ids={list(file_ids)}")
-                #print(f"  [DEBUG] files_for_entry count={len(files_for_entry)} ids={[f.get('id') for f in files_for_entry]}")
-                filetype_counts = {ft: 0 for ft in FILE_TYPES}
-                for f in files_for_entry:
-                    ft = f.get('attributes', {}).get('fileType')
-                    # print(f"    [DEBUG] file id={f.get('id')} fileType={ft}")
-                    if ft in filetype_counts:
-                        filetype_counts[ft] += 1
-                #print(f"  [DEBUG] filetype_counts={filetype_counts}")
-                # fileTypeカウント列はすべてsetItemで数値のみ（ボタン禁止）
-                for i, ft in enumerate(FILE_TYPES):
-                    item = QTableWidgetItem(str(filetype_counts[ft]))
-                    entry_table.setItem(row, base_col_count + i, item)
-                # 「ブラウザ」列のみ setCellWidget でボタン
-                browser_col = base_col_count + len(FILE_TYPES)
-                link_button = QPushButton("開く")
-                link_button.setStyleSheet(f"""
-                    background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
-                    color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
-                    font-size: 10px;
-                    padding: 2px 6px;
-                    border-radius: 3px;
-                """)
-                def create_link_handler(entry_id):
-                    def on_link_click():
-                        url = f"https://rde.nims.go.jp/rde/datasets/data/{entry_id}"
-                        QDesktopServices.openUrl(QUrl(url))
-                    return on_link_click
-                link_button.clicked.connect(create_link_handler(entry_id))
-                entry_table.setCellWidget(row, browser_col, link_button)
-                
-                # 説明
-                description = attributes.get('description', '')
-                entry_table.setItem(row, 2, QTableWidgetItem(description))
-                
-                # ファイル数
-                num_files = str(attributes.get('numberOfFiles', 0))
-                entry_table.setItem(row, 3, QTableWidgetItem(num_files))
-                
-                # 画像ファイル数
-                num_image_files = str(attributes.get('numberOfImageFiles', 0))
-                entry_table.setItem(row, 4, QTableWidgetItem(num_image_files))
-                
-           
+
+            included_files = {
+                item.get('id'): item
+                for item in data.get('included', [])
+                if item.get('type') == 'file' and item.get('id')
+            }
+            entry_contexts = [
+                {
+                    "entry": entry,
+                    "dataset_id": dataset_id,
+                    "file_lookup": included_files,
+                    "prefix_dataset": False,
+                }
+                for entry in data.get('data', [])
+            ]
+            populate_entry_table_rows(entry_contexts)
+
         except Exception as e:
             logger.error("データエントリー情報表示エラー: %s", e, exc_info=True)
             QMessageBox.critical(widget, "エラー", f"データエントリー情報の表示に失敗しました:\n{e}")
             dataset_info_label.setText(f"データセット: {dataset_id} (表示エラー)")
             entry_count_label.setText("データエントリー件数: エラー")
             last_updated_label.setText("最終取得: エラー")
+            update_summary_display(finalize_summary(create_empty_summary()))
     
     def show_all_entries():
         """全データエントリーを表示"""
@@ -706,107 +866,37 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
                 QMessageBox.warning(widget, "警告", "データエントリーディレクトリが見つかりません。")
                 return
             
-            # すべてのデータエントリーJSONファイルを読み込み
-            all_entries = []
+            entry_contexts = []
             json_files = [f for f in os.listdir(dataentry_dir) if f.endswith('.json')]
-            
             for json_file in json_files:
-                dataset_id = json_file[:-5]  # .jsonを除去
+                dataset_id = json_file[:-5]
                 filepath = os.path.join(dataentry_dir, json_file)
-                
                 try:
                     with open(filepath, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                    
+                    included_files = {
+                        item.get('id'): item
+                        for item in data.get('included', [])
+                        if item.get('type') == 'file' and item.get('id')
+                    }
                     for entry in data.get('data', []):
-                        entry['dataset_id'] = dataset_id  # データセットID情報を追加
-                        all_entries.append(entry)
-                        
+                        entry_contexts.append({
+                            "entry": entry,
+                            "dataset_id": dataset_id,
+                            "file_lookup": included_files,
+                            "prefix_dataset": True,
+                        })
                 except Exception as e:
                     logger.error("%s 読み込みエラー: %s", json_file, e)
-            
-            # テーブル表示を更新
-            dataset_info_label.setText("データセット: 全エントリー表示")
-            entry_count_label.setText(f"データエントリー件数: {len(all_entries)}件")
-            last_updated_label.setText("最終取得: 全ファイル統合")
-            
-            entry_table.setRowCount(len(all_entries))
-            
-            from classes.data_fetch2.conf.file_filter_config import FILE_TYPES
-            FILE_TYPE_LABELS = {
-                "MAIN_IMAGE": "MAIN",
-                "STRUCTURED": "STRCT",
-                "NONSHARED_RAW": "NOSHARE",
-                "RAW": "RAW",
-                "META": "META",
-                "ATTACHEMENT": "ATTACH",
-                "THUMBNAIL": "THUMB",
-                "OTHER": "OTHER"
-            }
-            base_col_count = 6
-            for row, entry in enumerate(all_entries):
-                attributes = entry.get('attributes', {})
-                data_number = f"{entry.get('dataset_id', '')}-{attributes.get('dataNumber', '')}"
-                entry_table.setItem(row, 0, QTableWidgetItem(data_number))
-                name = attributes.get('name', '')
-                entry_table.setItem(row, 1, QTableWidgetItem(name))
-                description = attributes.get('description', '')
-                entry_table.setItem(row, 2, QTableWidgetItem(description))
-                num_files = str(attributes.get('numberOfFiles', 0))
-                entry_table.setItem(row, 3, QTableWidgetItem(num_files))
-                num_image_files = str(attributes.get('numberOfImageFiles', 0))
-                entry_table.setItem(row, 4, QTableWidgetItem(num_image_files))
-                # 作成日: 'createdAt' または 'created' を参照
-                created_at = attributes.get('createdAt') or attributes.get('created') or ''
-                if created_at:
-                    try:
-                        dt = datetime.datetime.fromisoformat(created_at.replace('Z', '+00:00'))
-                        formatted_date = dt.strftime('%Y-%m-%d')
-                    except Exception:
-                        formatted_date = created_at
-                else:
-                    formatted_date = '----'
-                entry_table.setItem(row, 5, QTableWidgetItem(formatted_date))
 
-                # --- fileTypeごとのファイル数集計 ---
-                included = entry.get('included', []) if 'included' in entry else []
-                entry_id = entry.get('id', '')
-                file_ids = set()
-                rel_files = entry.get('relationships', {}).get('files', {}).get('data', [])
-                for fobj in rel_files:
-                    if isinstance(fobj, dict) and fobj.get('type') == 'file' and fobj.get('id'):
-                        file_ids.add(fobj['id'])
-                files_for_entry = [f for f in included if f.get('type') == 'file' and f.get('id') in file_ids]
-                filetype_counts = {ft: 0 for ft in FILE_TYPES}
-                for f in files_for_entry:
-                    ft = f.get('attributes', {}).get('fileType')
-                    if ft in filetype_counts:
-                        filetype_counts[ft] += 1
-                # fileTypeカウント列はすべてsetItemで数値のみ（ボタン禁止）
-                for i, ft in enumerate(FILE_TYPES):
-                    item = QTableWidgetItem(str(filetype_counts[ft]))
-                    entry_table.setItem(row, base_col_count + i, item)
-                # 「ブラウザ」列のみ setCellWidget でボタン
-                browser_col = base_col_count + len(FILE_TYPES)
-                link_button = QPushButton("開く")
-                link_button.setStyleSheet(f"""
-                    background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
-                    color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
-                    font-size: 10px;
-                    padding: 2px 6px;
-                    border-radius: 3px;
-                """)
-                entry_id = entry.get('id', '')
-                def create_link_handler(entry_id):
-                    def on_link_click():
-                        url = f"https://rde.nims.go.jp/rde/datasets/data/{entry_id}"
-                        QDesktopServices.openUrl(QUrl(url))
-                    return on_link_click
-                link_button.clicked.connect(create_link_handler(entry_id))
-                entry_table.setCellWidget(row, browser_col, link_button)
+            dataset_info_label.setText("データセット: 全エントリー表示")
+            entry_count_label.setText(f"データエントリー件数: {len(entry_contexts)}件")
+            last_updated_label.setText("最終取得: 全ファイル統合")
+            populate_entry_table_rows(entry_contexts)
             
         except Exception as e:
             QMessageBox.critical(widget, "エラー", f"全エントリー表示中にエラーが発生しました:\n{e}")
+            update_summary_display(finalize_summary(create_empty_summary()))
     
     # イベントハンドラー
     def on_dataset_selection_changed():
@@ -885,3 +975,35 @@ class DatasetDataEntryWidget(QWidget):
 
         # ボタン押下時にドロップダウンを開く
         self.show_all_btn.clicked.connect(self.dataset_combo.showPopup)
+
+
+class EntryTableWidget(QTableWidget):
+    """データエントリー表示用テーブル（フッタ保持対応）"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._footer_row_index = None
+
+    def set_footer_row_index(self, row_index):
+        self._footer_row_index = row_index
+
+    def clear_footer_row(self):
+        self._footer_row_index = None
+
+    def sortItems(self, column, order=Qt.AscendingOrder):
+        footer_items = None
+        if self._footer_row_index is not None and 0 <= self._footer_row_index < self.rowCount():
+            footer_items = []
+            for col in range(self.columnCount()):
+                footer_items.append(self.takeItem(self._footer_row_index, col))
+            self.removeRow(self._footer_row_index)
+            self._footer_row_index = None
+        super().sortItems(column, order)
+        if footer_items is not None:
+            new_row = self.rowCount()
+            self.insertRow(new_row)
+            for col, item in enumerate(footer_items):
+                if item is None:
+                    item = QTableWidgetItem("")
+                self.setItem(new_row, col, item)
+            self._footer_row_index = new_row

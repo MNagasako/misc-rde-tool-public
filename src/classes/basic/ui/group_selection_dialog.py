@@ -13,13 +13,14 @@ from pathlib import Path
 from typing import List, Dict, Optional
 
 from qt_compat.widgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QRadioButton, 
+    QDialog, QVBoxLayout, QHBoxLayout, QRadioButton,
     QPushButton, QLabel, QScrollArea, QWidget, QButtonGroup
 )
 from qt_compat import QtCore
 from qt_compat.core import QCoreApplication, QEventLoop, QThread, QTimer
 
 from config.common import GROUP_SELECTION_HISTORY_FILE
+from classes.theme import ThemeManager, ThemeKey, get_color
 
 logger = logging.getLogger(__name__)
 
@@ -143,6 +144,12 @@ class GroupSelectionDialog(QDialog):
         self.selected_group_id: Optional[str] = None
         self.selected_group_name: Optional[str] = None
         self.default_group_id = default_group_id
+        self._info_label: Optional[QLabel] = None
+        self._scroll_area: Optional[QScrollArea] = None
+        self._row_entries: List[Dict[str, object]] = []
+        self._ok_button: Optional[QPushButton] = None
+        self._cancel_button: Optional[QPushButton] = None
+        self._theme_manager = ThemeManager.instance()
         
         # デフォルト選択の決定
         if groups:
@@ -158,6 +165,8 @@ class GroupSelectionDialog(QDialog):
                 self.selected_group_name = groups[0].get("attributes", {}).get("name", "")
         
         self.setup_ui()
+        self._theme_manager.theme_changed.connect(self._apply_theme)
+        self._apply_theme(self._theme_manager.get_mode())
         
         logger.debug(f"グループ選択ダイアログ初期化: {len(groups)}件のグループ")
     
@@ -166,6 +175,7 @@ class GroupSelectionDialog(QDialog):
         self.setWindowTitle("プログラム選択")
         self.setMinimumWidth(600)
         self.setMinimumHeight(400)
+        self._row_entries = []
         
         layout = QVBoxLayout()
         
@@ -178,21 +188,19 @@ class GroupSelectionDialog(QDialog):
                 "基本情報を取得する対象プログラムを選択してください。"
             )
         
-        info_label = QLabel(info_text)
-        info_label.setWordWrap(True)
-        info_label.setStyleSheet("padding: 10px; background-color: #e7f3ff; border-radius: 5px;")
-        layout.addWidget(info_label)
+        self._info_label = QLabel(info_text)
+        self._info_label.setWordWrap(True)
+        layout.addWidget(self._info_label)
         
         # スクロールエリア
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet("QScrollArea { border: 1px solid #ccc; }")
+        self._scroll_area = QScrollArea()
+        self._scroll_area.setWidgetResizable(True)
         
         # グループリスト用コンテナ
         container = QWidget()
         container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(10, 10, 10, 10)
-        container_layout.setSpacing(10)
+        container_layout.setContentsMargins(4, 4, 4, 4)
+        container_layout.setSpacing(4)
         
         # ラジオボタングループ
         self.button_group = QButtonGroup(self)
@@ -220,101 +228,118 @@ class GroupSelectionDialog(QDialog):
             
             self.button_group.addButton(radio, i)
             
-            # グループ情報表示レイアウト
-            group_layout = QVBoxLayout()
-            group_layout.setSpacing(5)
-            
-            # グループ名（太字・大きめ）
-            name_label = QLabel(f"<b>{group_name}</b>")
-            name_label.setWordWrap(True)
-            name_label.setStyleSheet("font-size: 14px;")
-            
-            # グループID・タイプ（小さめ・グレー）
-            id_text = f"<span style='color: #666; font-size: 11px;'>ID: {group_id[:20]}...</span>"
-            if group_type:
-                id_text += f" <span style='color: #666; font-size: 11px;'>| Type: {group_type}</span>"
-            id_label = QLabel(id_text)
-            id_label.setTextFormat(QtCore.Qt.TextFormat.RichText)
-            
-            # 説明文（ある場合のみ）
-            if description:
-                desc_label = QLabel(description)
-                desc_label.setWordWrap(True)
-                desc_label.setStyleSheet("color: #555; font-size: 12px; margin-top: 5px;")
-            
-            group_layout.addWidget(name_label)
-            group_layout.addWidget(id_label)
-            if description:
-                group_layout.addWidget(desc_label)
-            
-            # ラジオボタンと情報を横並び
+            # 1行表示のシンプルな行レイアウト
             row_layout = QHBoxLayout()
-            row_layout.addWidget(radio)
-            row_layout.addLayout(group_layout, 1)
+            row_layout.setContentsMargins(8, 6, 8, 6)
+            row_layout.setSpacing(12)
+
+            name_label = QLabel(group_name)
+            name_label.setWordWrap(False)
+            name_label.setMinimumHeight(20)
+            name_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignVCenter | QtCore.Qt.AlignmentFlag.AlignLeft)
+
+            row_layout.addWidget(radio, 0, QtCore.Qt.AlignmentFlag.AlignVCenter)
+            row_layout.addWidget(name_label, 1)
+            row_layout.addStretch()
             
             # 背景色付きコンテナ
             row_widget = QWidget()
             row_widget.setLayout(row_layout)
-            row_widget.setStyleSheet("""
-                QWidget {
-                    background-color: #f9f9f9;
-                    border: 1px solid #ddd;
-                    border-radius: 5px;
-                    padding: 10px;
-                }
-                QWidget:hover {
-                    background-color: #f0f0f0;
-                }
-            """)
+            row_widget.setProperty("groupRow", True)
             
+            tooltip_lines = []
+            if group_id:
+                tooltip_lines.append(f"ID: {group_id}")
+            if group_type:
+                tooltip_lines.append(f"Type: {group_type}")
+            if description:
+                desc_text = description.strip()
+                if desc_text:
+                    if tooltip_lines:
+                        tooltip_lines.append("")
+                    tooltip_lines.append(desc_text)
+            tooltip_text = "\n".join([line for line in tooltip_lines if line]) or group_name
+            row_widget.setToolTip(tooltip_text)
+            name_label.setToolTip(tooltip_text)
+            radio.setToolTip(tooltip_text)
             container_layout.addWidget(row_widget)
+            
+            self._row_entries.append({
+                "widget": row_widget,
+                "name_label": name_label,
+                "tooltip": tooltip_text,
+                "radio": radio,
+            })
         
         container_layout.addStretch()
-        scroll_area.setWidget(container)
-        layout.addWidget(scroll_area, 1)
+        self._scroll_area.setWidget(container)
+        layout.addWidget(self._scroll_area, 1)
         
         # ボタン
         button_layout = QHBoxLayout()
         button_layout.addStretch()
         
-        ok_button = QPushButton("OK")
-        ok_button.setDefault(True)
-        ok_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                padding: 8px 20px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
-        ok_button.clicked.connect(self.accept)
+        self._ok_button = QPushButton("OK")
+        self._ok_button.setDefault(True)
+        self._ok_button.clicked.connect(self.accept)
         
-        cancel_button = QPushButton("キャンセル")
-        cancel_button.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                padding: 8px 20px;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #da190b;
-            }
-        """)
-        cancel_button.clicked.connect(self.reject)
+        self._cancel_button = QPushButton("キャンセル")
+        self._cancel_button.clicked.connect(self.reject)
         
-        button_layout.addWidget(ok_button)
-        button_layout.addWidget(cancel_button)
+        button_layout.addWidget(self._ok_button)
+        button_layout.addWidget(self._cancel_button)
         
         layout.addLayout(button_layout)
         
         self.setLayout(layout)
+    
+    def _apply_theme(self, *_):
+        """テーマ変更時に背景・文字色を再適用"""
+        info_bg = get_color(ThemeKey.PANEL_INFO_BACKGROUND)
+        info_text = get_color(ThemeKey.PANEL_INFO_TEXT)
+        info_border = get_color(ThemeKey.PANEL_INFO_BORDER)
+        panel_bg = get_color(ThemeKey.TABLE_ROW_BACKGROUND)
+        panel_border = get_color(ThemeKey.TABLE_BORDER)
+        hover_bg = get_color(ThemeKey.TABLE_ROW_BACKGROUND_HOVER)
+        primary_text = get_color(ThemeKey.TEXT_PRIMARY)
+        
+        if self._info_label:
+            self._info_label.setStyleSheet(
+                f"padding: 10px; border-radius: 5px; border: 1px solid {info_border}; "
+                f"background-color: {info_bg}; color: {info_text};"
+            )
+        
+        if self._scroll_area:
+            self._scroll_area.setStyleSheet(
+                f"QScrollArea {{ border: 1px solid {panel_border}; background-color: {panel_bg}; }}"
+                f" QScrollArea > QWidget > QWidget {{ background-color: {panel_bg}; }}"
+            )
+        
+        for entry in self._row_entries:
+            row_widget: QWidget = entry["widget"]  # type: ignore[assignment]
+            name_label: QLabel = entry["name_label"]  # type: ignore[assignment]
+            
+            row_widget.setStyleSheet(
+                f"QWidget[groupRow=\"true\"] {{ background-color: {panel_bg}; border: 1px solid {panel_border}; "
+                f"border-radius: 4px; }}"
+                f" QWidget[groupRow=\"true\"]:hover {{ background-color: {hover_bg}; }}"
+            )
+            name_label.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {primary_text};")
+        
+        if self._ok_button:
+            self._ok_button.setStyleSheet(
+                f"QPushButton {{ background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)}; "
+                f"color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)}; padding: 8px 20px; border-radius: 4px; "
+                f"border: 1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)}; font-weight: bold; }}"
+                f" QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)}; }}"
+            )
+        if self._cancel_button:
+            self._cancel_button.setStyleSheet(
+                f"QPushButton {{ background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)}; "
+                f"color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)}; padding: 8px 20px; border-radius: 4px; "
+                f"border: 1px solid {get_color(ThemeKey.BUTTON_DANGER_BORDER)}; }}"
+                f" QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)}; }}"
+            )
     
     def _on_group_selected(self, checked: bool, group_id: str, group_name: str):
         """
@@ -346,8 +371,8 @@ class GroupSelectionDialog(QDialog):
 
 
 def show_group_selection_dialog(
-    groups: List[Dict], 
-    parent=None, 
+    groups: List[Dict],
+    parent=None,
     context_name: str = "グループ",
     force_dialog: bool = True,
     default_group_id: Optional[str] = None,
@@ -394,8 +419,8 @@ def show_group_selection_dialog(
 
 
 def show_group_selection_if_needed(
-    groups: List[Dict], 
-    parent=None, 
+    groups: List[Dict],
+    parent=None,
     context_name: str = "グループ",
     force_dialog: bool = False,
     preferred_group_id: Optional[str] = None,

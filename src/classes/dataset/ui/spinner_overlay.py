@@ -8,6 +8,9 @@ from qt_compat.widgets import QWidget, QLabel, QVBoxLayout, QPushButton
 from qt_compat.core import Qt, QTimer, Signal
 from qt_compat.gui import QFont
 
+from classes.theme import ThemeKey
+from classes.theme.theme_manager import ThemeManager, get_color
+
 
 class SpinnerOverlay(QWidget):
     """スピナーアニメーション付きオーバーレイウィジェット"""
@@ -31,8 +34,12 @@ class SpinnerOverlay(QWidget):
         self._show_cancel = show_cancel
         self._cancel_text = cancel_text
         
-        # 半透明の白背景
-        self.setStyleSheet("background-color: rgba(255, 255, 255, 200);")
+        self._theme_manager = None
+        try:
+            self._theme_manager = ThemeManager.instance()
+            self._theme_manager.theme_changed.connect(self.refresh_theme)
+        except Exception:
+            self._theme_manager = None
         
         # レイアウト
         layout = QVBoxLayout(self)
@@ -59,22 +66,6 @@ class SpinnerOverlay(QWidget):
         if self._show_cancel:
             self.cancel_button = QPushButton(self._cancel_text, self)
             self.cancel_button.setCursor(Qt.PointingHandCursor)
-            self.cancel_button.setStyleSheet(
-                """
-                QPushButton {
-                    background-color: #f44336;
-                    color: white;
-                    font-size: 12px;
-                    font-weight: bold;
-                    border: none;
-                    border-radius: 5px;
-                    padding: 6px 12px;
-                    min-width: 100px;
-                }
-                QPushButton:hover { background-color: #d32f2f; }
-                QPushButton:disabled { background-color: #BDBDBD; color: #E0E0E0; }
-                """
-            )
             self.cancel_button.clicked.connect(self.cancel_requested.emit)
             layout.addWidget(self.cancel_button)
         
@@ -85,6 +76,9 @@ class SpinnerOverlay(QWidget):
         
         # 初期状態は非表示
         self.hide()
+
+        # 初期テーマ適用
+        self._apply_theme()
         
         # 親のサイズに合わせて初期化
         if parent:
@@ -133,3 +127,58 @@ class SpinnerOverlay(QWidget):
         if self.parent():
             self.resize(self.parent().size())
         super().resizeEvent(event)
+
+    def refresh_theme(self, *_):
+        """外部からテーマ更新要求を受けた際の再描画"""
+        self._apply_theme()
+
+    def _apply_theme(self):
+        """現在のテーマに沿って色を適用"""
+        try:
+            overlay_bg = get_color(ThemeKey.OVERLAY_BACKGROUND)
+            overlay_text = get_color(ThemeKey.OVERLAY_TEXT)
+            self.setStyleSheet(f"background-color: {overlay_bg};")
+            self.spinner_label.setStyleSheet(f"color: {overlay_text};")
+            self.message_label.setStyleSheet(f"color: {overlay_text}; font-weight: bold; padding: 4px 12px;")
+            if self.cancel_button:
+                self.cancel_button.setStyleSheet(
+                    f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
+                        border: 1px solid {get_color(ThemeKey.BUTTON_DANGER_BORDER)};
+                        border-radius: 5px;
+                        padding: 6px 12px;
+                        min-width: 100px;
+                        font-weight: bold;
+                    }}
+                    QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)}; }}
+                    QPushButton:pressed {{ background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_PRESSED)}; }}
+                    QPushButton:disabled {{
+                        background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                        border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+                    }}
+                    """
+                )
+        except Exception:
+            # テーマ取得失敗時はデフォルトスタイルにフォールバック
+            self.setStyleSheet("background-color: rgba(255, 255, 255, 200);")
+            self.spinner_label.setStyleSheet("color: #333333;")
+            self.message_label.setStyleSheet("color: #333333;")
+            if self.cancel_button:
+                self.cancel_button.setStyleSheet(
+                    """
+                    QPushButton {
+                        background-color: #f44336;
+                        color: white;
+                        border: none;
+                        border-radius: 5px;
+                        padding: 6px 12px;
+                        min-width: 100px;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover { background-color: #d32f2f; }
+                    QPushButton:disabled { background-color: #BDBDBD; color: #E0E0E0; }
+                    """
+                )

@@ -41,10 +41,10 @@ QScrollBar::handle:vertical:hover {{ background-color: {get_color(ThemeKey.SCROL
 QPushButton {{ background-color: {get_color(ThemeKey.BUTTON_DEFAULT_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_DEFAULT_TEXT)}; border: 1px solid {get_color(ThemeKey.BUTTON_DEFAULT_BORDER)}; border-radius: 4px; padding: 4px 8px; }}
 QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_DEFAULT_BACKGROUND_HOVER)}; }}
 QPushButton:disabled {{ background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)}; border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)}; }}
-QLineEdit, QTextEdit {{ background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; border: 1px solid {get_color(ThemeKey.INPUT_BORDER)}; border-radius: 4px; padding: 4px; }}
-QLineEdit:focus, QTextEdit:focus {{ background-color: {get_color(ThemeKey.INPUT_BACKGROUND_FOCUS)}; border: 1px solid {get_color(ThemeKey.INPUT_BORDER_FOCUS)}; }}
-QLineEdit:disabled, QTextEdit:disabled {{ background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)}; color: {get_color(ThemeKey.INPUT_TEXT_DISABLED)}; border: 1px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)}; }}
-QLineEdit::placeholder {{ color: {get_color(ThemeKey.TEXT_PLACEHOLDER)}; }}
+QLineEdit, QTextEdit, QPlainTextEdit, QTextBrowser {{ background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; border: 1px solid {get_color(ThemeKey.INPUT_BORDER)}; border-radius: 4px; padding: 4px; }}
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QTextBrowser:focus {{ background-color: {get_color(ThemeKey.INPUT_BACKGROUND_FOCUS)}; border: 1px solid {get_color(ThemeKey.INPUT_BORDER_FOCUS)}; }}
+QLineEdit:disabled, QTextEdit:disabled, QPlainTextEdit:disabled, QTextBrowser:disabled {{ background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)}; color: {get_color(ThemeKey.INPUT_TEXT_DISABLED)}; border: 1px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)}; }}
+QLineEdit::placeholder, QPlainTextEdit::placeholder, QTextEdit::placeholder {{ color: {get_color(ThemeKey.TEXT_PLACEHOLDER)}; }}
 QComboBox QLineEdit::placeholder {{ color: {get_color(ThemeKey.TEXT_PLACEHOLDER)}; }}
 QCheckBox, QRadioButton {{ color: {get_color(ThemeKey.TEXT_PRIMARY)}; spacing: 4px; }}
 QCheckBox::indicator, QRadioButton::indicator {{ width: 14px; height: 14px; border: 1px solid {get_color(ThemeKey.INPUT_BORDER)}; background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)}; }}
@@ -59,8 +59,9 @@ QLabel {{ color: {get_color(ThemeKey.TEXT_PRIMARY)}; }}
 QLabel[muted="true"] {{ color: {get_color(ThemeKey.TEXT_MUTED)}; }}
 QDialog {{ background-color: {get_color(ThemeKey.PANEL_BACKGROUND)}; color: {get_color(ThemeKey.TEXT_PRIMARY)}; }}
 QDialog QLabel {{ color: {get_color(ThemeKey.TEXT_PRIMARY)}; }}
-QListView::item:selected, QTreeWidget::item:selected, QTableWidget::item:selected {{ background: {get_color(ThemeKey.TABLE_ROW_BACKGROUND_SELECTED)}; color: {get_color(ThemeKey.TABLE_ROW_TEXT_SELECTED)}; }}
-QListView::item:hover, QTreeWidget::item:hover, QTableWidget::item:hover {{ background: {get_color(ThemeKey.TABLE_ROW_BACKGROUND_HOVER)}; }}
+QTreeWidget, QTreeView, QListWidget, QListView, QTableWidget, QTableView {{ background-color: {get_color(ThemeKey.TABLE_BACKGROUND)}; color: {get_color(ThemeKey.TABLE_ROW_TEXT)}; border: 1px solid {get_color(ThemeKey.TABLE_BORDER)}; alternate-background-color: {get_color(ThemeKey.TABLE_ROW_BACKGROUND_ALTERNATE)}; selection-background-color: {get_color(ThemeKey.TABLE_ROW_BACKGROUND_SELECTED)}; selection-color: {get_color(ThemeKey.TABLE_ROW_TEXT_SELECTED)}; gridline-color: {get_color(ThemeKey.TABLE_BORDER)}; }}
+QListView::item:selected, QListWidget::item:selected, QTreeWidget::item:selected, QTreeView::item:selected, QTableWidget::item:selected, QTableView::item:selected {{ background: {get_color(ThemeKey.TABLE_ROW_BACKGROUND_SELECTED)}; color: {get_color(ThemeKey.TABLE_ROW_TEXT_SELECTED)}; }}
+QListView::item:hover, QListWidget::item:hover, QTreeWidget::item:hover, QTreeView::item:hover, QTableWidget::item:hover, QTableView::item:hover {{ background: {get_color(ThemeKey.TABLE_ROW_BACKGROUND_HOVER)}; }}
 QMenu {{ background-color: {get_color(ThemeKey.MENU_BACKGROUND)}; color: {get_color(ThemeKey.TEXT_PRIMARY)}; border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; }}
 QMenu::item:selected {{ background-color: {get_color(ThemeKey.TABLE_ROW_BACKGROUND_SELECTED)}; color: {get_color(ThemeKey.TABLE_ROW_TEXT_SELECTED)}; }}
 QMenu::item:hover {{ background-color: {get_color(ThemeKey.TABLE_ROW_BACKGROUND_HOVER)}; }}
