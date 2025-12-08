@@ -977,7 +977,7 @@ def update_dataset(bearer_token, output_dir=None):
     if not bearer_token:
         logger.error("Bearer Tokenが取得できません。ログイン状態を確認してください。")
         return
-    #url = "https://rde-api.nims.go.jp/datasetTemplates?programId=4bbf62be-f270-4a46-9682-38cd064607ba&teamId=22398c55-8620-430e-afa5-2405c57dd03c&sort=id&page[limit]=10000&page[offset]=0&include=instruments&fields[instrument]=nameJa%2CnameEn"
+    #url = "https://rde-api.nims.go.jp/datasetTemplates?programId=4bbf62be-f270-4a46-9682-38cd064607ba&teamId=1e44cefd-85ba-49cb-bc7e-196a0ef379b0&sort=id&page[limit]=10000&page[offset]=0&include=instruments&fields[instrument]=nameJa%2CnameEn"
     url = "https://rde-api.nims.go.jp/datasets/5bfd6602-41c2-423a-8652-e9cbab71a172"
 
     return  # 一時的にAPI呼び出しを停止

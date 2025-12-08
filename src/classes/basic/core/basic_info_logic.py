@@ -99,7 +99,7 @@ INSTRUMENT_REQUEST_TIMEOUT = 10
 TEMPLATE_API_BASE_URL = "https://rde-api.nims.go.jp/datasetTemplates"
 INSTRUMENT_API_BASE_URL = "https://rde-instrument-api.nims.go.jp/instruments"
 DEFAULT_PROGRAM_ID = "4bbf62be-f270-4a46-9682-38cd064607ba"
-DEFAULT_TEAM_ID = "22398c55-8620-430e-afa5-2405c57dd03c"
+DEFAULT_TEAM_ID = "1e44cefd-85ba-49cb-bc7e-196a0ef379b0"
 
 def stage_error_handler(operation_name: str):
     """
@@ -285,6 +285,81 @@ def _prepare_instrument_chunk_directory() -> Path:
     chunk_dir.mkdir(parents=True, exist_ok=True)
     logger.debug("instrumentJsonChunksディレクトリを初期化しました: %s", chunk_dir)
     return chunk_dir
+
+
+def _load_json_if_exists(path: str) -> Optional[Dict]:
+    """存在する場合のみJSONを読み込む"""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        logger.debug("JSONファイルが存在しません: %s", path)
+    except Exception as exc:
+        logger.warning("JSONファイルの読み込みに失敗しました (%s): %s", path, exc)
+    return None
+
+
+def _resolve_program_id_for_templates(
+    default_program_id: str = DEFAULT_PROGRAM_ID,
+    output_dir: Optional[str] = None,
+) -> str:
+    """テンプレート取得用のprogramIdを決定"""
+    candidate_paths = []
+    if output_dir:
+        candidate_paths.append(os.path.join(output_dir, "group.json"))
+    candidate_paths.append(GROUP_JSON_PATH)
+
+    for path in candidate_paths:
+        group_data = _load_json_if_exists(path)
+        if group_data:
+            program_id = parse_group_id_from_data(group_data, preferred_program_id=default_program_id)
+            if program_id:
+                return program_id
+    return default_program_id
+
+
+def _iterate_template_team_ids(output_dir: Optional[str] = None) -> List[str]:
+    """テンプレート取得に使用するteamId候補を順序付きで返す"""
+    env_override = os.environ.get("RDE_TEMPLATE_TEAM_ID") or os.environ.get("ARIM_TEMPLATE_TEAM_ID")
+    if env_override:
+        team_id = env_override.strip()
+        if team_id:
+            logger.info("テンプレート取得: 環境変数からteamId=%sのみを候補として使用", team_id[:12])
+            return [team_id]
+
+    candidate_paths: List[str] = []
+    if output_dir:
+        candidate_paths.append(os.path.join(output_dir, "subGroup.json"))
+    candidate_paths.append(SUBGROUP_JSON_PATH)
+
+    team_ids: List[str] = []
+    for path in candidate_paths:
+        sub_group_data = _load_json_if_exists(path)
+        if not sub_group_data:
+            continue
+        for item in sub_group_data.get("included", []):
+            attrs = item.get("attributes", {})
+            if attrs.get("groupType") == "TEAM":
+                team_id = item.get("id")
+                if team_id and team_id not in team_ids:
+                    team_ids.append(team_id)
+        if team_ids:
+            logger.debug("テンプレート取得: %s から %d 件のteamId候補を抽出", os.path.basename(path), len(team_ids))
+            break
+
+    if not team_ids:
+        logger.info("テンプレート取得: teamId候補が見つからなかったためデフォルト%sのみを使用", DEFAULT_TEAM_ID)
+        team_ids.append(DEFAULT_TEAM_ID)
+
+    return team_ids
+
+
+def _template_payload_is_preferred(payload: Dict) -> bool:
+    data_items = payload.get("data") or []
+    if data_items:
+        return True
+    total_counts = payload.get("meta", {}).get("totalCounts")
+    return isinstance(total_counts, int) and total_counts > 0
 
 
 def _build_dataset_list_query_params(page_size: int, offset: int, search_words: Optional[str]) -> Dict[str, str]:
@@ -1400,37 +1475,73 @@ def fetch_template_info_from_api(bearer_token, output_dir=None):
         "Referer": "https://rde.nims.go.jp/"
     }
     try:
-        base_params = {
-            "programId": DEFAULT_PROGRAM_ID,
-            "teamId": DEFAULT_TEAM_ID,
-            "sort": "id",
-            "include": "instruments",
-            "fields[instrument]": "nameJa,nameEn",
-        }
-        data = _download_paginated_resource(
-            base_url=TEMPLATE_API_BASE_URL,
-            base_params=base_params,
-            headers=headers,
-            bearer_token=None,
-            page_size=TEMPLATE_PAGE_SIZE,
-            timeout=TEMPLATE_REQUEST_TIMEOUT,
-            record_callback=lambda url, hdrs, status_code, elapsed_ms, success, error=None: record_api_call_for_template(
-                url,
-                hdrs,
-                status_code,
-                elapsed_ms,
-                success=success,
-                error=error,
-            ),
-            chunk_label="テンプレート情報",
-            chunk_dir_factory=_prepare_template_chunk_directory,
-            chunk_file_template=TEMPLATE_CHUNK_FILE_TEMPLATE,
-        )
         target_dir = output_dir or OUTPUT_RDE_DATA_DIR
+        program_id = _resolve_program_id_for_templates(output_dir=target_dir)
+        team_candidates = _iterate_template_team_ids(output_dir=target_dir)
+
+        selected_payload: Optional[Dict] = None
+        selected_team_id: Optional[str] = None
+        last_payload: Optional[Dict] = None
+
+        for idx, team_id in enumerate(team_candidates, 1):
+            logger.info("テンプレート取得: teamId候補(%d/%d)=%s を試行します", idx, len(team_candidates), team_id)
+            base_params = {
+                "programId": program_id,
+                "teamId": team_id,
+                "sort": "id",
+                "include": "instruments",
+                "fields[instrument]": "nameJa,nameEn",
+            }
+            chunk_dir = _prepare_template_chunk_directory()
+
+            def _reuse_chunk_dir(chunk_dir=chunk_dir):
+                return chunk_dir
+
+            payload = _download_paginated_resource(
+                base_url=TEMPLATE_API_BASE_URL,
+                base_params=base_params,
+                headers=headers,
+                bearer_token=None,
+                page_size=TEMPLATE_PAGE_SIZE,
+                timeout=TEMPLATE_REQUEST_TIMEOUT,
+                record_callback=lambda url, hdrs, status_code, elapsed_ms, success, error=None: record_api_call_for_template(
+                    url,
+                    hdrs,
+                    status_code,
+                    elapsed_ms,
+                    success=success,
+                    error=error,
+                ),
+                chunk_label="テンプレート情報",
+                chunk_dir_factory=_reuse_chunk_dir,
+                chunk_file_template=TEMPLATE_CHUNK_FILE_TEMPLATE,
+            )
+
+            last_payload = payload
+            if _template_payload_is_preferred(payload):
+                selected_payload = payload
+                selected_team_id = team_id
+                logger.info("テンプレート取得: teamId=%s のレスポンスを採用しました", team_id)
+                break
+
+            logger.info("テンプレート取得: teamId=%s では有意なデータが得られませんでした。次の候補を試行します。", team_id)
+
+        if selected_payload is None:
+            selected_payload = last_payload or {"data": []}
+            selected_team_id = team_candidates[-1] if team_candidates else DEFAULT_TEAM_ID
+            logger.info(
+                "テンプレート取得: 有意なデータが得られなかったため最後のレスポンスを採用します (teamId=%s)",
+                selected_team_id,
+            )
+
         os.makedirs(target_dir, exist_ok=True)
         with open(os.path.join(target_dir, "template.json"), "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        logger.info("テンプレート(template.json)の取得・保存に成功しました。")
+            json.dump(selected_payload, f, ensure_ascii=False, indent=2)
+        logger.info(
+            "テンプレート(template.json)の取得・保存に成功しました (teamId=%s, 候補数=%d)。",
+            selected_team_id,
+            len(team_candidates),
+        )
     except Exception as e:
         logger.error("テンプレートの取得・保存に失敗しました: %s", e)
 
