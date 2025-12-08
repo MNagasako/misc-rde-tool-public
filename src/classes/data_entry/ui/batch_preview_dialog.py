@@ -20,6 +20,7 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt, Signal, QThread, Slot
 from qt_compat.gui import QFont, QColor
+from config.common import get_dynamic_file_path
 
 from classes.data_entry.core.file_set_manager import FileSet, FileItem, FileType, PathOrganizeMethod, FileItemType
 

@@ -10,7 +10,7 @@ from qt_compat.core import QCoreApplication
 from config.common import OUTPUT_RDE_DIR, INPUT_DIR
 from classes.utils.api_request_helper import api_request, post_form, post_binary  # refactored to use api_request_helper
 from core.bearer_token_manager import BearerTokenManager
-
+from config.common import get_dynamic_file_path
 # ロガー設定
 logger = logging.getLogger(__name__)
 
