@@ -6,6 +6,8 @@ ARIM課題データ（実験データ・拡張情報・実験データ）も統�
 
 import os
 import json
+import csv
+from datetime import date, datetime
 from typing import Dict, List, Optional, Any
 from config.common import get_dynamic_file_path
 from .arim_data_collector import get_arim_data_collector
@@ -78,11 +80,23 @@ class DatasetContextCollector:
             else:
                 context['text_from_structured_files'] = details.get('file_contents', '（STRUCTUREDファイルのテキスト抽出に失敗しました）')
                 logger.debug("file_contents が空またはFalsy - text_from_structured_files = '%s...'", context['text_from_structured_files'][:50])
+
+            json_payload = details.get('file_contents_json')
+            if json_payload:
+                context['json_from_structured_files'] = json_payload
+            else:
+                fallback_json = self._build_structured_json_payload(None, context['text_from_structured_files'])
+                context['json_from_structured_files'] = fallback_json
+                logger.debug("file_contents_json が空 - json_from_structured_files にフォールバックメッセージを設定")
         else:
             # 新規作成時はフォームデータのみ
             context.update(self._collect_general_data())
             context['file_tree'] = '（新規作成のためファイルツリー情報なし）'
             context['text_from_structured_files'] = '（新規作成のためSTRUCTUREDファイル情報なし）'
+            context['json_from_structured_files'] = self._build_structured_json_payload(
+                None,
+                '（新規作成のためSTRUCTUREDファイル情報なし）'
+            )
             
         # ARIM課題データを収集（課題番号が存在する場合）
         if grant_number:
@@ -186,7 +200,12 @@ class DatasetContextCollector:
             details['related_datasets'] = self._get_related_datasets(dataset_id)
             
             # STRUCTUREDファイルのテキスト内容を取得
-            details['file_contents'] = self._get_file_contents(dataset_id)
+            file_contents_result = self._get_file_contents(dataset_id, include_json=True)
+            if isinstance(file_contents_result, tuple):
+                details['file_contents'], details['file_contents_json'] = file_contents_result
+            else:
+                details['file_contents'] = file_contents_result
+                details['file_contents_json'] = self._build_structured_json_payload(None, file_contents_result)
             
         except Exception as e:
             logger.warning("データセット詳細取得エラー: %s", e)
@@ -194,6 +213,7 @@ class DatasetContextCollector:
             details['metadata'] = '（メタデータ取得失敗）'
             details['related_datasets'] = '（関連データセット取得失敗）'
             details['file_contents'] = '（ファイル内容取得失敗）'
+            details['file_contents_json'] = self._build_structured_json_payload(None, details['file_contents'])
             
         return details
         
@@ -473,15 +493,16 @@ class DatasetContextCollector:
             logger.warning("関連データセット取得エラー: %s", e)
             return ''
     
-    def _get_file_contents(self, dataset_id: str) -> str:
+    def _get_file_contents(self, dataset_id: str, include_json: bool = False):
         """
         データセット内のSTRUCTUREDファイルからテキスト内容を抽出
         
         Args:
             dataset_id: データセットID
+            include_json: Trueの場合はJSON文字列も同時に返す
             
         Returns:
-            抽出されたテキスト内容（プロンプトテンプレート用にフォーマット済み）
+            抽出されたテキスト内容、または (テキスト, JSON文字列) のタプル
         """
         try:
             logger.debug("ファイル内容抽出開始: dataset_id=%s", dataset_id)
@@ -489,6 +510,14 @@ class DatasetContextCollector:
             from net.http_helpers import proxy_get
             from classes.dataset.util.file_text_extractor import get_file_text_extractor, format_extracted_files_for_prompt
             import tempfile
+            
+            def _finalize_response(text_value: str, contents: Optional[Dict[str, str]] = None, json_ready: Optional[Dict[str, Any]] = None):
+                """テキストとJSONの返却形式を整形"""
+                if include_json:
+                    payload_source = json_ready or contents
+                    json_payload = self._build_structured_json_payload(payload_source, text_value)
+                    return text_value, json_payload
+                return text_value
             
             # Bearer Token取得（既存ファイル使用時は不要だが、API呼び出し用に試行）
             bearer_token = BearerTokenManager.get_token_with_relogin_prompt()
@@ -591,7 +620,8 @@ class DatasetContextCollector:
                 logger.info(f"既存ファイルから抽出可能ファイル検出: {len(structured_files)}件")
             
             if not structured_files:
-                return '（このデータセットにはSTRUCTUREDタイプのファイルが含まれていません。また、既存のダウンロード済みファイルも見つかりませんでした）'
+                no_structured_msg = '（このデータセットにはSTRUCTUREDタイプのファイルが含まれていません。また、既存のダウンロード済みファイルも見つかりませんでした）'
+                return _finalize_response(no_structured_msg)
             
             # テキスト抽出器を取得
             extractor = get_file_text_extractor()
@@ -602,6 +632,7 @@ class DatasetContextCollector:
             import glob
             
             extracted_contents = {}
+            json_ready_contents = {}
             max_files = 10
             
             # 既存ダウンロード済みファイルの検索パターン: output/rde/data/dataFiles/{dataset_id}/**/*
@@ -670,6 +701,12 @@ class DatasetContextCollector:
                     
                     try:
                         extracted_text = extractor.extract_text(file_path, file_name)
+                        json_ready_contents[file_name] = self._create_json_ready_entry(
+                            file_path,
+                            file_name,
+                            extracted_text,
+                            extractor
+                        )
                         
                         if extracted_text:
                             extracted_contents[file_name] = extracted_text
@@ -694,14 +731,103 @@ class DatasetContextCollector:
             formatted_result = format_extracted_files_for_prompt(extracted_contents)
             logger.info(f"ファイル内容抽出完了: {len(extracted_contents)}件のファイルから {len(formatted_result)}文字を抽出")
             
-            return formatted_result
+            return _finalize_response(formatted_result, extracted_contents, json_ready_contents)
             
         except Exception as e:
             error_msg = f"（ファイル内容取得中にエラーが発生: {str(e)}）"
             logger.warning("%s", error_msg)
             import traceback
             traceback.print_exc()
-            return error_msg
+            return _finalize_response(error_msg)
+
+    def _create_json_ready_entry(self, file_path: Optional[str], file_name: str, extracted_text: Optional[str], extractor) -> Any:
+        """構造化JSON用の値を生成（CSV/XLSXは配列化、それ以外はテキスト）"""
+        try:
+            if not file_path or not os.path.exists(file_path):
+                return extracted_text or ''
+            _, ext = os.path.splitext(file_path)
+            ext_lower = ext.lower()
+            if ext_lower in {'.csv', '.tsv'}:
+                delimiter = ',' if ext_lower == '.csv' else '\t'
+                rows = self._load_csv_rows_for_json(file_path, delimiter, getattr(extractor, 'excel_max_rows', 1000))
+                if rows:
+                    return rows
+            if ext_lower in {'.xlsx', '.xls', '.xlsm'}:
+                sheets = self._load_excel_rows_for_json(file_path, extractor)
+                if sheets:
+                    return sheets
+        except Exception as exc:
+            logger.warning("構造化JSON変換エラー (%s): %s", file_name, exc)
+        return extracted_text or ''
+
+    def _load_csv_rows_for_json(self, file_path: str, delimiter: str, max_rows: int) -> List[List[str]]:
+        rows: List[List[str]] = []
+        for encoding in self._get_text_encodings():
+            try:
+                with open(file_path, 'r', encoding=encoding, newline='') as fp:
+                    reader = csv.reader(fp, delimiter=delimiter)
+                    for row in reader:
+                        rows.append(row)
+                        if len(rows) >= max_rows:
+                            break
+                if rows:
+                    return rows
+            except UnicodeDecodeError:
+                continue
+            except Exception as exc:
+                logger.debug("CSV構造化読み込みエラー (%s, %s): %s", file_path, encoding, exc)
+                break
+        return rows
+
+    def _load_excel_rows_for_json(self, file_path: str, extractor) -> List[Dict[str, Any]]:
+        sheets: List[Dict[str, Any]] = []
+        try:
+            import warnings
+            import openpyxl
+            with warnings.catch_warnings():
+                warnings.filterwarnings('ignore', category=UserWarning, module='openpyxl')
+                wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+            try:
+                process_all = getattr(extractor, 'excel_all_sheets', True)
+                sheet_names = wb.sheetnames if process_all else [wb.sheetnames[0]] if wb.sheetnames else []
+                max_rows = getattr(extractor, 'excel_max_rows', 1000)
+                for sheet_name in sheet_names:
+                    sheet = wb[sheet_name]
+                    rows: List[List[Any]] = []
+                    for row in sheet.iter_rows(min_row=1, max_row=max_rows, values_only=True):
+                        if not any(row):
+                            continue
+                        rows.append([self._convert_cell_value_for_json(cell) for cell in row])
+                        if len(rows) >= max_rows:
+                            break
+                    if rows:
+                        sheets.append({'name': sheet_name, 'rows': rows})
+            finally:
+                wb.close()
+        except ImportError:
+            logger.error("openpyxlがインストールされていません (構造化JSON)")
+        except Exception as exc:
+            logger.warning("Excel構造化JSON変換エラー (%s): %s", file_path, exc)
+        return sheets
+
+    def _convert_cell_value_for_json(self, value: Any) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, (int, float, bool)):
+            return value
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        return str(value)
+
+    def _get_text_encodings(self) -> List[str]:
+        return ['utf-8', 'utf-8-sig', 'cp932', 'shift-jis', 'euc-jp', 'iso-2022-jp']
+
+    def _build_structured_json_payload(self, file_contents: Optional[Dict[str, Any]], fallback_message: str) -> str:
+        """STRUCTUREDファイル内容をJSON文字列として整形"""
+        if file_contents:
+            return json.dumps(file_contents, ensure_ascii=False, indent=2)
+        safe_message = fallback_message or '（STRUCTUREDファイルのテキスト抽出に失敗しました）'
+        return json.dumps({'message': safe_message}, ensure_ascii=False)
 
 
 # グローバルインスタンス

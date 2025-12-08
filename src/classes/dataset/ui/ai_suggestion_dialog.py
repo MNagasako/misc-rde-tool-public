@@ -657,14 +657,20 @@ class AISuggestionDialog(QDialog):
             # 置換前に重要キーの収集状況をログ
             ft_len = len(full_context.get('file_tree', '') or '')
             ts_len = len(full_context.get('text_from_structured_files', '') or '')
+            jf_len = len(full_context.get('json_from_structured_files', '') or '')
             logger.debug("テンプレート: %s / 出力形式: %s", prompt_file, self._expected_output_format)
-            logger.debug("context[file_tree] 長さ: %s, context[text_from_structured_files] 長さ: %s", ft_len, ts_len)
+            logger.debug(
+                "context[file_tree] 長さ: %s, context[text_from_structured_files] 長さ: %s, context[json_from_structured_files] 長さ: %s",
+                ft_len,
+                ts_len,
+                jf_len
+            )
 
             prompt = format_prompt_with_context(template_text, context)
 
             # 置換後に未解決プレースホルダが残っていないか確認
             unresolved_keys = []
-            for key in ['file_tree', 'text_from_structured_files', 'name', 'type', 'grant_number', 'existing_description', 'llm_model_name']:
+            for key in ['file_tree', 'text_from_structured_files', 'json_from_structured_files', 'name', 'type', 'grant_number', 'existing_description', 'llm_model_name']:
                 if '{' + key + '}' in prompt:
                     unresolved_keys.append(key)
             if unresolved_keys:

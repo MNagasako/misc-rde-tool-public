@@ -132,7 +132,7 @@ def format_prompt_with_context(prompt_template, context_data):
                         model = 'gemini-2.0-flash'
                 enhanced_context['llm_model_name'] = f"{provider}:{model}".strip(':')
             # プレースホルダに空文字を入れて未置換を防ぐ
-            for k in ['material_index_data', 'equipment_data', 'file_tree', 'text_from_structured_files']:
+            for k in ['material_index_data', 'equipment_data', 'file_tree', 'text_from_structured_files', 'json_from_structured_files']:
                 if k not in enhanced_context:
                     enhanced_context[k] = ''
         except Exception as _alias_err:

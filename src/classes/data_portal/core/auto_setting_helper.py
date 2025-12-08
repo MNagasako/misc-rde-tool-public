@@ -114,6 +114,7 @@ def _build_ai_prompt(dataset_id: str, category: str) -> Tuple[Optional[str], Opt
         existing_description=base_ctx.get('existing_description', ''),
         grant_number=base_ctx.get('grant_number', '')
     )
+    full_context.setdefault('json_from_structured_files', '')
     
     # AI設定をコンテキストに追加（{llm_provider}, {llm_model}, {llm_model_name} プレースホルダ用）
     full_context['llm_provider'] = provider
@@ -127,7 +128,7 @@ def _build_ai_prompt(dataset_id: str, category: str) -> Tuple[Optional[str], Opt
     
     # 未解決プレースホルダの確認
     unresolved = []
-    for key in ['file_tree', 'text_from_structured_files', 'arim_extension_data', 'arim_experiment_data', 'experiment_summary', 'dataset_existing_info']:
+    for key in ['file_tree', 'text_from_structured_files', 'json_from_structured_files', 'arim_extension_data', 'arim_experiment_data', 'experiment_summary', 'dataset_existing_info']:
         if '{' + key + '}' in prompt:
             unresolved.append(key)
     if unresolved:

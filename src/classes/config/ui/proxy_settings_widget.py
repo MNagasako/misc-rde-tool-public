@@ -1807,7 +1807,7 @@ class ProxySettingsWidget(QWidget):
             QMessageBox.critical(self, "エラー", f"WebViewテストでエラーが発生しました:\n{str(e)}")
     
     def run_integrated_diagnostics(self):
-        """統合診断を実行（v2.2.0導入・v2.2.1検証済み）"""
+        """統合診断を実行（v2.2.0導入・v2.2.2検証済み）"""
         try:
             from classes.config.core.diagnostic_runner import DiagnosticRunner
             from classes.config.ui.diagnostic_result_dialog import DiagnosticResultDialog

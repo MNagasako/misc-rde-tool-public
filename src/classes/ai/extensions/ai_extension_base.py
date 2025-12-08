@@ -181,7 +181,7 @@ class DatasetDescriptionExtension(AIExtensionBase):
                         template = AIPromptTemplate(
                             template_name,
                             template_data.get("prompt", ""),
-                            ["name", "type", "grant_number", "existing_description", "dataset_existing_info", "arim_extension_data", "arim_experiment_data", "arim_detailed_experiment", "experiment_summary", "material_index_data", "equipment_data", "file_info", "metadata", "related_datasets"]
+                            ["name", "type", "grant_number", "existing_description", "dataset_existing_info", "arim_extension_data", "arim_experiment_data", "arim_detailed_experiment", "experiment_summary", "material_index_data", "equipment_data", "file_info", "metadata", "related_datasets", "json_from_structured_files"]
                         )
                         self.register_template(template)
                     return  # 保存されたテンプレートを使用
@@ -323,7 +323,7 @@ ARIM課題データ:
 
 出力: 詳細な説明文（500文字以内）
 """,
-            ["name", "type", "grant_number", "existing_description", "dataset_existing_info", "arim_extension_data", "arim_experiment_data", "arim_detailed_experiment", "material_index_data", "equipment_data", "file_info", "metadata", "related_datasets"]
+            ["name", "type", "grant_number", "existing_description", "dataset_existing_info", "arim_extension_data", "arim_experiment_data", "arim_detailed_experiment", "material_index_data", "equipment_data", "file_info", "metadata", "related_datasets", "json_from_structured_files"]
         )
         
         self.register_template(detailed_template)
@@ -365,7 +365,7 @@ STRUCTUREDファイルのテキスト内容:
 
 出力: 簡潔な説明文のみ（見出しや形式マーカーなし）
 """,
-            ["name", "type", "grant_number", "existing_description", "dataset_existing_info", "arim_extension_data", "arim_experiment_data", "experiment_summary", "material_index_data", "equipment_data", "file_tree", "text_from_structured_files"]
+            ["name", "type", "grant_number", "existing_description", "dataset_existing_info", "arim_extension_data", "arim_experiment_data", "experiment_summary", "material_index_data", "equipment_data", "file_tree", "text_from_structured_files", "json_from_structured_files"]
         )
         
         self.register_template(quick_template)
@@ -413,6 +413,7 @@ STRUCTUREDファイルのテキスト内容:
         context['file_info'] = kwargs.get('file_info', '')
         context['file_tree'] = kwargs.get('file_tree', '')  # テンプレートで使用されるキー
         context['text_from_structured_files'] = kwargs.get('text_from_structured_files', '')  # STRUCTUREDファイルのテキスト内容
+        context['json_from_structured_files'] = kwargs.get('json_from_structured_files', '')  # STRUCTUREDファイルのJSON表現
         context['metadata'] = kwargs.get('metadata', '')
         context['related_datasets'] = kwargs.get('related_datasets', '')
         
@@ -431,6 +432,14 @@ STRUCTUREDファイルのテキスト内容:
             logger.debug("text_from_structured_files の先頭100文字: %s", context['text_from_structured_files'][:100])
         else:
             logger.debug("text_from_structured_files が空です")
+        
+        # デバッグ: json_from_structured_files の内容を確認
+        logger.debug("collect_context_data: json_from_structured_files キー追加")
+        if context['json_from_structured_files']:
+            logger.debug("json_from_structured_files の長さ: %s 文字", len(context['json_from_structured_files']))
+            logger.debug("json_from_structured_files の先頭100文字: %s", context['json_from_structured_files'][:100])
+        else:
+            logger.debug("json_from_structured_files が空です")
         
         return context
         

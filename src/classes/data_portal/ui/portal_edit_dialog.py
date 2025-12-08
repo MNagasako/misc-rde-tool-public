@@ -19,6 +19,12 @@ from classes.theme import get_color, ThemeKey
 
 from classes.managers.log_manager import get_logger
 from classes.data_portal.ui.widgets import FilterableCheckboxTable
+from classes.dataset.util.data_entry_summary import (
+    get_shared2_stats,
+    format_size_with_bytes,
+)
+from classes.dataset.core.dataset_dataentry_logic import fetch_dataset_dataentry
+from core.bearer_token_manager import BearerTokenManager
 
 logger = get_logger("DataPortal.PortalEditDialog")
 
@@ -46,6 +52,7 @@ class PortalEditDialog(QDialog):
         self.portal_client = portal_client
         self.metadata = metadata or {}
         self.field_widgets = {}
+        self.file_stats_auto_button = None
         
         self.setWindowTitle(f"データポータル修正 - {dataset_id[:8]}...")
         self.setMinimumWidth(800)
@@ -614,6 +621,29 @@ class PortalEditDialog(QDialog):
             # その他のチェックボックス配列（既に上記で処理済み）
             elif field_data['type'] == 'checkbox_array':
                 continue
+
+        # ファイル数 / 全ファイルサイズ 自動設定ボタン
+        file_count_widget = self.field_widgets.get('t_file_count')
+        filesize_widget = self.field_widgets.get('t_meta_totalfilesize') or self.field_widgets.get('t_meta_totalfilesizeinthisversion')
+        if file_count_widget and filesize_widget:
+            auto_file_stats_btn = QPushButton("🤖 ファイル数/サイズ 自動設定")
+            auto_file_stats_btn.clicked.connect(self._on_auto_set_file_stats)
+            auto_file_stats_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                    padding: 6px 12px;
+                    border: none;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+                }}
+            """)
+            auto_file_stats_btn.setToolTip("データエントリー情報から共用合計２の統計を推定し、ファイル数と全ファイルサイズを更新します")
+            layout.addRow("", auto_file_stats_btn)
+            self.file_stats_auto_button = auto_file_stats_btn
         
         group.setLayout(layout)
         return group
@@ -1463,6 +1493,125 @@ class PortalEditDialog(QDialog):
                 "エラー",
                 f"自動設定中にエラーが発生しました:\n{e}"
             )
+
+    def _on_auto_set_file_stats(self):
+        """ファイル数 / 全ファイルサイズを共用合計2の統計から自動設定"""
+        try:
+            stats = self._load_shared2_summary()
+            if not stats:
+                QMessageBox.warning(
+                    self,
+                    "データなし",
+                    "データエントリー情報からファイル統計を取得できませんでした。\n"
+                    "基本情報タブでデータエントリーを取得済みか確認してください。"
+                )
+                return
+
+            formatted_size = format_size_with_bytes(stats.bytes)
+            message = (
+                "データエントリー情報集計（共用合計２: 非共有RAW/サムネイル除外）に基づく推定値です。\n\n"
+                f"ファイル数: {stats.count:,} 件\n"
+                f"全ファイルサイズ: {formatted_size}\n\n"
+                "これらの値を適用しますか?"
+            )
+            reply = QMessageBox.question(
+                self,
+                "ファイル統計の適用",
+                message,
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+
+            if self._apply_file_stats(stats.count, stats.bytes):
+                QMessageBox.information(
+                    self,
+                    "適用完了",
+                    "ファイル数と全ファイルサイズを更新しました。"
+                )
+        except Exception as exc:  # pragma: no cover
+            logger.error(f"ファイル統計自動設定エラー: {exc}", exc_info=True)
+            QMessageBox.critical(
+                self,
+                "エラー",
+                f"ファイル統計の取得中にエラーが発生しました:\n{exc}"
+            )
+
+    def _load_shared2_summary(self, allow_fetch: bool = True):
+        """Load shared2 stats; optionally fetch dataEntry JSON when missing."""
+        stats = get_shared2_stats(self.dataset_id)
+        if stats or not allow_fetch:
+            return stats
+
+        reply = QMessageBox.question(
+            self,
+            "データエントリー取得",
+            "データエントリー情報が見つかりません。\n"
+            "APIから最新情報を取得して推定値を計算しますか?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return None
+
+        bearer_token = BearerTokenManager.get_token_with_relogin_prompt(self)
+        if not bearer_token:
+            QMessageBox.warning(
+                self,
+                "認証エラー",
+                "Bearer Tokenを取得できませんでした。ログイン状態を確認してください。"
+            )
+            return None
+
+        progress = QProgressDialog("データエントリー情報を取得中...", None, 0, 0, self)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setCancelButton(None)
+        progress.setMinimumDuration(0)
+        progress.show()
+        QApplication.processEvents()
+
+        try:
+            success = fetch_dataset_dataentry(self.dataset_id, bearer_token=bearer_token, force_refresh=True)
+        finally:
+            progress.close()
+
+        if not success:
+            QMessageBox.warning(
+                self,
+                "取得失敗",
+                "データエントリー情報の取得に失敗しました。\n"
+                "基本情報タブで先に取得できているか確認してください。"
+            )
+            return None
+
+        return get_shared2_stats(self.dataset_id)
+
+    def _apply_file_stats(self, file_count: int, total_bytes: int) -> bool:
+        """Apply calculated stats to corresponding widgets."""
+        updated = False
+
+        target_widgets = [
+            ('t_file_count', str(file_count)),
+            ('t_meta_totalfilesize', str(total_bytes)),
+            ('t_meta_totalfilesizeinthisversion', str(total_bytes)),
+        ]
+
+        for field_name, value in target_widgets:
+            widget = self.field_widgets.get(field_name)
+            if isinstance(widget, QLineEdit):
+                widget.setText(value)
+                updated = True
+            elif isinstance(widget, QTextEdit):
+                widget.setPlainText(value)
+                updated = True
+
+        if not updated:
+            QMessageBox.warning(
+                self,
+                "適用不可",
+                "ファイル数または全ファイルサイズの入力フィールドが見つかりませんでした。"
+            )
+
+        return updated
 
     def _on_ai_suggest_checkbox_array(self, field_key: str, category: str):
         """AIで提案を取得し、チェックボックス配列に適用（設備/MI/タグ）"""
