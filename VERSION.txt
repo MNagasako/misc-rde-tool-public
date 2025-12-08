@@ -1,5 +1,11 @@
-2.2.1
+2.2.2
 
+
+2025-12-08 v2.2.2
+	- データエントリー統計: `data_entry_summary` ヘルパーで dataEntry JSON を集計し、DatasetタブとPortal編集ダイアログで同じ統計を参照できるよう統一
+	- データポータル: PortalEditDialog に共用合計２のファイル数/総サイズを自動適用するボタンを追加し、API再取得フローとプレビュー確認を実装
+	- AI/AutoSetting: DatasetContextCollector が STRUCTUREDファイルを JSON へ変換し `{json_from_structured_files}` プレースホルダに投入、テンプレート/ポータルで利用可能に
+	- テスト: data_entry_summary shared2集計・STRUCTURED JSON生成・ポータル自動入力ボタンのユニット/ウィジェットテストを追加
 
 2025-12-08 v2.2.1
 	- 基本情報タブ: テンプレート/装置チャンクの保存先を事前生成し、不要ファイルを自動クリーンアップ

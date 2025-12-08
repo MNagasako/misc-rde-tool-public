@@ -4,6 +4,29 @@
 
 ---
 
+## v2.2.2 (2025-12-08) - データエントリー統計共有 & STRUCTURED JSON強化
+
+### 📊 データエントリー統計の共通化
+
+- `classes/dataset/util/data_entry_summary.py` を追加し、dataEntry API レスポンスを解析してファイルタイプ別件数/サイズと shared1/2/3 の統計を共通ヘルパーで管理。
+- データセットタブの統計ラベルと PortalEditDialog の自動入力ボタンが同じ値を参照することで画面間の整合性を確保。
+
+### 🪄 データポータルのファイル統計自動入力
+
+- PortalEditDialog に「共用合計２から適用」ボタンを実装し、shared2統計からファイル数・総サイズをそのままフォームへ反映。
+- dataEntry JSON が不足している場合は API 再取得を促すダイアログを表示し、値のプレビュー後に Yes/No で適用可否を判断可能。
+
+### 🧠 STRUCTUREDファイルのJSONコンテキスト
+
+- DatasetContextCollector が STRUCTUREDファイルを JSON 文字列へ整形し、`{json_from_structured_files}` プレースホルダを AI/AutoSetting から利用できるように更新。
+- CSV/Excel などの表構造を維持したままプロンプトへ渡せるため、説明文生成やデータポータルテンプレートの精度を向上。
+
+### 🧪 テスト
+
+- `pytest -q -k "data_entry_summary or dataset_context_structured_json or portal_file_stats_button"` を開発リポジトリで実行し、追加ユニット/ウィジェットテストが全て合格。
+
+---
+
 ## v2.2.1 (2025-12-08) - テンプレート/装置チャンク整合性
 
 ### 📦 基本情報タブのチャンク永続化

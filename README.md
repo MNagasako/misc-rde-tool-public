@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル移行ツール v2.2.1** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル移行ツール v2.2.2** のバイナリ配布およびドキュメント公開用リポジトリです。
 
 **[ツール概要(こちらのほうが更新頻度高いです)](https://cuddly-stinger-40d.notion.site/QuickStart-2befc2cb5fc380f09d0dd4595b767f4d?source=copy_link)**
 
@@ -16,16 +16,15 @@
 
 ## 🚀 最新情報
 
-**2025-12-08 最新リリース**: バージョン2.2.1（テンプレート/装置チャンク整合性リリース）
+**2025-12-08 最新リリース**: バージョン2.2.2（データエントリー統計共有 & STRUCTURED JSONリリース）
 
-### v2.2.1 の主な改善
+### v2.2.2 の主な改善
 
-- 基本情報タブがテンプレート/装置チャンク用の保存先を自動生成し、古いチャンクを安全にクリーンアップ
-- APIページネーションヘルパーがチャンクファイルを書き出してリトライ時に再利用できるように改善
-- バイナリ版では `config/`, `input/`, `output/` を `%LOCALAPPDATA%/ARIM-RDE-TOOL/` 配下に作成し、Program Files 配置時でも確実に書き込み可能
-- チャンク処理のユニットテストを追加し、開発リポジトリで合格を確認
+- `data_entry_summary` ヘルパーが dataEntry JSON を解析し、データセットタブとPortal編集ダイアログの統計ラベルが同じ集計結果を参照できるようになりました。
+- PortalEditDialog に「共用合計２からファイル数/総サイズを適用」ボタンを追加し、shared2統計の自動反映とプレビュー確認、必要に応じたAPI再取得フローを実装しました。
+- DatasetContextCollector が STRUCTUREDファイルを JSON 化して `{json_from_structured_files}` プレースホルダへ埋め込み、AIテンプレートやデータポータル自動設定で直接参照できるようになりました。
 
-> ℹ️ バイナリ版のフォルダ配置がユーザーディレクトリ（`%LOCALAPPDATA%/ARIM-RDE-TOOL/`）に変更されました。既存の `config/`, `input/`, `output/` の内容を移行する場合は、このディレクトリにコピーしてください。
+> ℹ️ PortalEditDialog の自動入力ボタンは最新の dataEntry JSON を `output/rde/data/dataEntry/` に保存していることが前提です。データが見つからない場合は案内に従って再取得を実行してから適用してください。
 
 ---
 
@@ -388,7 +387,7 @@ Windowsのセキュリティ警告やアンチウイルスによりブロック�
 
 ## 🔢 バージョン情報
 
-現在配布バージョン: `v2.1.8` （`VERSION.txt` に基づく）
+現在配布バージョン: `v2.2.2` （`VERSION.txt` に基づく）
 
 更新履歴の詳細は `docs/CHANGELOG.md` を参照してください。
 
