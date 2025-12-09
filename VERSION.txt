@@ -1,5 +1,11 @@
-2.2.2
+2.2.3
 
+
+2025-12-09 v2.2.3 - まとめXLSXの選択的出力・Explorer連携・テスト強化
+	- Basic Info: groupOrganizationsとgroupProjectsを含むJSONをRichTextTableBuilderに渡すかを選べるダイアログを追加し、既定/カスタムファイルの分割出力に対応
+	- まとめXLSX: 出力後に生成されたファイルを一覧表示して直接開けるUIを追加し、履歴からの再オープンとエラー通知を実装
+	- Explorer連携: まとめフォルダをエクスプローラーで即座に開くボタンと、生成後に自動でフォーカスするショートカットを追加
+	- テスト/サンプル: groupProjects・subGroupsを含むサンプルJSONを追加し、選択的出力とExplorerボタンを検証するユニット/ウィジェットテストを拡充
 
 2025-12-08 v2.2.2
 	- データエントリー統計: `data_entry_summary` ヘルパーで dataEntry JSON を集計し、DatasetタブとPortal編集ダイアログで同じ統計を参照できるよう統一

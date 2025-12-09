@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル移行ツール v2.2.2** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル移行ツール v2.2.3** のバイナリ配布およびドキュメント公開用リポジトリです。
 
 **[ツール概要(こちらのほうが更新頻度高いです)](https://cuddly-stinger-40d.notion.site/QuickStart-2befc2cb5fc380f09d0dd4595b767f4d?source=copy_link)**
 
@@ -16,15 +16,15 @@
 
 ## 🚀 最新情報
 
-**2025-12-08 最新リリース**: バージョン2.2.2（データエントリー統計共有 & STRUCTURED JSONリリース）
+**2025-12-09 最新リリース**: バージョン2.2.3（まとめXLSX選択出力 & Explorerショートカット）
 
-### v2.2.2 の主な改善
+### v2.2.3 の主な改善
 
-- `data_entry_summary` ヘルパーが dataEntry JSON を解析し、データセットタブとPortal編集ダイアログの統計ラベルが同じ集計結果を参照できるようになりました。
-- PortalEditDialog に「共用合計２からファイル数/総サイズを適用」ボタンを追加し、shared2統計の自動反映とプレビュー確認、必要に応じたAPI再取得フローを実装しました。
-- DatasetContextCollector が STRUCTUREDファイルを JSON 化して `{json_from_structured_files}` プレースホルダへ埋め込み、AIテンプレートやデータポータル自動設定で直接参照できるようになりました。
+- まとめXLSX出力前に `groupOrganizations` / `groupProjects` / 外部JSONを個別に選べるダイアログを追加し、既定レイアウトから分割テンプレートまで柔軟に生成できるようになりました。
+- 出力完了後は生成された複数ファイルをテーブルで一覧表示し、任意の行を即座に開ける履歴ビューを実装しました。エラー行のみ再出力する動線も備えています。
+- Explorerショートカットを新設し、`output/basic_info/summary/` をワンクリックで開けるほか、まとめ完了時に自動フォーカスさせるオプションも追加しました。
 
-> ℹ️ PortalEditDialog の自動入力ボタンは最新の dataEntry JSON を `output/rde/data/dataEntry/` に保存していることが前提です。データが見つからない場合は案内に従って再取得を実行してから適用してください。
+> ℹ️ JSON選択ダイアログは `output/basic_info/json/` に最新データがそろっていることを前提としています。欠損が表示された場合は Basic Info タブで再取得してからまとめXLSXを実行してください。
 
 ---
 
@@ -387,7 +387,7 @@ Windowsのセキュリティ警告やアンチウイルスによりブロック�
 
 ## 🔢 バージョン情報
 
-現在配布バージョン: `v2.2.2` （`VERSION.txt` に基づく）
+現在配布バージョン: `v2.2.3` （`VERSION.txt` に基づく）
 
 更新履歴の詳細は `docs/CHANGELOG.md` を参照してください。
 

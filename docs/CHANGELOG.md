@@ -4,6 +4,30 @@
 
 ---
 
+## v2.2.3 (2025-12-09) - まとめXLSX選択出力 & Explorer連携
+
+### 📂 プロジェクトJSONの選択制御
+
+- まとめXLSX出力前に `groupOrganizations` / `groupProjects` / 外部JSON を個別に選べるダイアログを実装し、既定レイアウトから分割テンプレートまで柔軟に生成可能に。
+- 欠損しているJSONはその場で警告し、Basic Info タブでの再取得導線を表示して空のまま出力される事故を防止。
+
+### 📁 出力結果一覧ビュー
+
+- 1回の実行で複数ファイルを生成した場合に出力結果をテーブルで一覧表示し、ファイル名・サイズ・更新時刻・ステータスを可視化。
+- 行をダブルクリックまたはボタンクリックで対象ファイルをすぐに開けるほか、失敗行のみ再出力する操作も提供。
+
+### 🗂 Explorerショートカット & フォーカス制御
+
+- まとめ完了後に `output/basic_info/summary/` をエクスプローラーで即座に開くショートカットと、自動フォーカスのオン/オフを追加。
+- フォルダが存在しない場合でも再生成してから開くため、事前にパスを整える必要がない。
+
+### 🧪 テスト
+
+- `./.venv/Scripts/python.exe -m pytest -q -k "summary_xlsx or explorer_shortcut_dialog"` — JSON選択ロジックと出力一覧ダイアログのユニット/ウィジェットテストが合格。
+- `./.venv/Scripts/python.exe -m pytest -q tests/widgets/test_basic_info_summary_explorer.py` — Explorerショートカットのウィジェットテスト 4 passed。
+
+---
+
 ## v2.2.2 (2025-12-08) - データエントリー統計共有 & STRUCTURED JSON強化
 
 ### 📊 データエントリー統計の共通化
