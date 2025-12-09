@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル移行ツール v2.2.3** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル移行ツール v2.2.4** のバイナリ配布およびドキュメント公開用リポジトリです。
 
 **[ツール概要(こちらのほうが更新頻度高いです)](https://cuddly-stinger-40d.notion.site/QuickStart-2befc2cb5fc380f09d0dd4595b767f4d?source=copy_link)**
 
@@ -16,15 +16,16 @@
 
 ## 🚀 最新情報
 
-**2025-12-09 最新リリース**: バージョン2.2.3（まとめXLSX選択出力 & Explorerショートカット）
+**2025-12-10 最新リリース**: バージョン2.2.4（設備/報告書リスティング + キャッシュ/検索強化）
 
-### v2.2.3 の主な改善
+### v2.2.4 の主な改善
 
-- まとめXLSX出力前に `groupOrganizations` / `groupProjects` / 外部JSONを個別に選べるダイアログを追加し、既定レイアウトから分割テンプレートまで柔軟に生成できるようになりました。
-- 出力完了後は生成された複数ファイルをテーブルで一覧表示し、任意の行を即座に開ける履歴ビューを実装しました。エラー行のみ再出力する動線も備えています。
-- Explorerショートカットを新設し、`output/basic_info/summary/` をワンクリックで開けるほか、まとめ完了時に自動フォーカスさせるオプションも追加しました。
+- Equipment / Reports タブにフィルタ/ソート可能な共通テーブルウィジェット（ListingTabBase）を追加し、最新JSONをアプリ内で即ブラウズ・再読込できるリスティングタブを実装しました。
+- ReportCacheManager + キャッシュモード切替UIで、取得済みレポートを再利用する高速モードと常に再取得するモードを選択でき、ログにもキャッシュポリシーを明示します。
+- Basic Info に検索設定ダイアログを追加し、「自分のデータセット」「キーワード直接指定」「機関ID+年度レンジ」から検索キューを構成するバッチ検索が容易になりました。
+- FacilityListingScraper による設備一覧スクレイプとID収集を導入し、全件取得や欠損検知フローをUIからワンクリックで実行できます。
 
-> ℹ️ JSON選択ダイアログは `output/basic_info/json/` に最新データがそろっていることを前提としています。欠損が表示された場合は Basic Info タブで再取得してからまとめXLSXを実行してください。
+> ℹ️ リスティングタブは `output/arim-site/{equipment|reports}_latest.json` など最新エクスポートを前提とします。再読込前に各タブで「JSON再取得」を実行し、キャッシュディレクトリ（`output/arim-site/reports/cache/`）の残量にも留意してください。
 
 ---
 
@@ -387,7 +388,7 @@ Windowsのセキュリティ警告やアンチウイルスによりブロック�
 
 ## 🔢 バージョン情報
 
-現在配布バージョン: `v2.2.3` （`VERSION.txt` に基づく）
+現在配布バージョン: `v2.2.4` （`VERSION.txt` に基づく）
 
 更新履歴の詳細は `docs/CHANGELOG.md` を参照してください。
 

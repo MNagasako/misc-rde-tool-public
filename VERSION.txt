@@ -1,5 +1,11 @@
-2.2.3
+2.2.4
 
+
+2025-12-10 v2.2.4 - 設備/報告書リスティングとキャッシュ・検索の刷新
+	- Listing Tabs: フィルタ/ソート可能な共通テーブルウィジェット（ListingTabBase）を実装し、設備タブ/報告書タブから最新JSONを即座にブラウズ・再読込できるように改善。
+	- Report Fetcher: ReportCacheManagerとキャッシュモード切替UIを追加し、取得済みレコードをスキップする高速モードと強制再取得モードを選択可能に（ログ・ワーカーも更新）。
+	- Basic Info: 検索設定ダイアログを新設し、ユーザー名/手動キーワード/機関ID+年度レンジの一括生成から検索バッチを構成できるようにして連続実行を支援。
+	- Equipment Scraper: facility.phpの一覧スクレイプとID収集ロジックを追加し、全件取得や連続不在検知を通じて設備キャッシュの欠損を自動把握。
 
 2025-12-09 v2.2.3 - まとめXLSXの選択的出力・Explorer連携・テスト強化
 	- Basic Info: groupOrganizationsとgroupProjectsを含むJSONをRichTextTableBuilderに渡すかを選べるダイアログを追加し、既定/カスタムファイルの分割出力に対応

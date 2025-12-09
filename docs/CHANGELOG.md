@@ -4,6 +4,36 @@
 
 ---
 
+## v2.2.4 (2025-12-10) - 設備/報告書リスティング + キャッシュ/検索強化
+
+### 🧾 フィルタ可能なリスティングタブ
+
+- Equipment / Reports タブ向けに `ListingTabBase` と `ListingFilterProxyModel` を実装し、列フィルタ・ソート・件数表示・再読込を共通UIとして提供。
+- 最新JSONを読み込んで長文列のトリミングやツールチップ表示を行い、ステータスラベルに読み込み元ファイルとJST時刻を表示して検証作業を簡素化。
+
+### 💾 ReportCacheManager とキャッシュモード切替
+
+- 新しい `ReportCacheManager` / `ReportCacheMode` が取得済みレポートの再利用（SKIP）と強制上書き（OVERWRITE）を切り替え可能にし、ワーカー・ログ・バッチ処理を統合。
+- キャッシュ命中数をUIとログで可視化し、長時間ジョブの途中再実行を高速化。キャッシュディレクトリは `output/arim-site/reports/cache/` に配置。
+
+### 🔍 Basic Info 検索設定ダイアログ
+
+- `BasicInfoSearchDialog` を新設し、「自分のデータセット」「キーワード直接指定」「機関ID+年度レンジ」の3モードで検索キューを構築可能に。
+- 助成番号プレフィックスと年度レンジからキーワードを自動生成し、プレビューで確認してからバッチ登録できるため、連続検索ジョブを安全に実行。
+
+### 🛰 設備一覧スクレイパーと欠損検知
+
+- `FacilityListingScraper` が `facility.php?mode=search` を巡回して設備IDを収集し、全件取得や連続不在検知を自動化。
+- 設備タブから全件取得モードを実行し、最新キャッシュJSONに欠損がある場合もワンクリックで再取得できるように改善。
+
+### 🧪 テスト
+
+- `pytest -q -k "listing_support or equipment_tabs_refresh or report_tabs_refresh"`
+- `pytest -q -k "report_cache_manager or report_cache_mode"`
+- `pytest -q -k "basic_info_search_dialog"`
+
+---
+
 ## v2.2.3 (2025-12-09) - まとめXLSX選択出力 & Explorer連携
 
 ### 📂 プロジェクトJSONの選択制御
