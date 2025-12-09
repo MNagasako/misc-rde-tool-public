@@ -5,7 +5,10 @@
 """
 
 import logging
-from typing import Optional, Callable
+from typing import Optional, Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from classes.reports.core.report_cache_manager import ReportCacheMode
 
 logger = logging.getLogger(__name__)
 
@@ -26,30 +29,56 @@ class ReportFetchWorker(QThread):
     log_message = Signal(str)
     results = Signal(dict)
     
-    def __init__(self, start_page: int, page_count: int, max_workers: int):
+    def __init__(
+        self,
+        start_page: int,
+        page_count: Optional[int],
+        max_workers: int,
+        cache_mode: 'ReportCacheMode',
+    ):
         super().__init__()
         self.start_page = start_page
         self.page_count = page_count
         self.max_workers = max_workers
         self.cancel_requested = False
+        self.cache_mode = cache_mode
     
     def run(self):
         """スレッド実行"""
         try:
             from classes.reports.core.parallel_fetcher import ParallelReportFetcher
+            from classes.reports.core.report_cache_manager import ReportCacheManager
             from classes.reports.core.report_data_processor import ReportDataProcessor
             from classes.reports.core.report_file_exporter import ReportFileExporter
             
             # コンポーネント初期化
             self.log_message.emit("=" * 60)
             self.log_message.emit("📦 コンポーネント初期化...")
-            fetcher = ParallelReportFetcher(max_workers=self.max_workers)
+            cache_manager = ReportCacheManager()
+            fetcher = ParallelReportFetcher(
+                max_workers=self.max_workers,
+                cache_manager=cache_manager,
+                cache_mode=self.cache_mode,
+            )
             processor = ReportDataProcessor()
             exporter = ReportFileExporter()
+
+            cache_mode_label = (
+                "既存キャッシュを再利用"
+                if self.cache_mode.value == "skip"
+                else "常に再取得(上書き)"
+            )
+            self.log_message.emit(f"💾 キャッシュモード: {cache_mode_label}")
             
             # 全件取得モードのログ
             if self.page_count is None:
                 self.log_message.emit("🔍 全件取得モード: 最大ページ数を自動取得します")
+                summary = fetcher.scraper.get_listing_summary()
+                if summary:
+                    self.log_message.emit(
+                        f"📄 報告書総件数: {summary.total_count}件 "
+                        f"(全{summary.final_page}ページ / 100件表示)"
+                    )
             
             # 並列取得
             self.log_message.emit("=" * 60)

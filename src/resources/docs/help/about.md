@@ -4,8 +4,8 @@
 
 **ARIM RDE Tool** は DICE/RDE システムと ARIM データポータルを統合的に操作するためのデスクトップアプリケーションです。RDE からの情報取得、ポータルへの登録、AI を用いたテキスト支援、診断ツール群など、日常業務をまとめてカバーします。
 
-- **現在のバージョン**: v2.2.3
-- **最終更新日**: 2025-12-09
+- **現在のバージョン**: v2.2.4
+- **最終更新日**: 2025-12-10
 - **対応 OS**: Windows 10 / 11 (FHD 1920×1080 推奨)
 
 ## 主な機能
@@ -39,14 +39,14 @@
 - メニュー / ボタン / プログレスバーの統一スタイル
 - Markdown で記述したヘルプドキュメントをそのまま表示
 
-## v2.2.3 の主な更新点
+## v2.2.4 の主な更新点
 
 | 分類 | 内容 |
 | --- | --- |
-| Basic Info | groupOrganizations / groupProjects JSON を選べるまとめXLSX用ダイアログを実装 |
-| Basic Info | 出力した複数のまとめXLSXを一覧し、任意のファイルを即オープン可能に改善 |
-| Common | 出力フォルダをExplorerで開くショートカットと自動フォーカスを追加 |
-| Testing | groupProjects/subGroupsを含むダミーデータとまとめXLSXテストを拡充 |
+| UI | Equipment/Reports 各タブにフィルタ可能な Listing テーブルを追加し、最新JSONの再読込・件数表示・ツールチップ展開を実装 |
+| Reports | ReportCacheManager/Mode を導入し、取得済みレポートのキャッシュ再利用と強制再取得をUIから切り替え可能に |
+| Basic Info | `BasicInfoSearchDialog` で自分のデータセット/キーワード/機関ID+年度レンジの3モード検索を統合し、バッチ生成を高速化 |
+| Equipment | FacilityListingScraper による全件ID収集と連続不在検知を実装し、設備JSON欠損の自動検出と再取得連携を強化 |
 
 ## 技術スタック
 

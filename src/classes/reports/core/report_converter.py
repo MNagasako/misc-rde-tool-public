@@ -5,12 +5,14 @@ ARIM-extracted2フォーマットから標準フォーマットへのExcel変換
 カラムマッピング、設備列の変換、チャンク処理、レジューム対応を含む。
 """
 
-import pandas as pd
-import numpy as np
 import ast
-import os
 import json
+import os
+import re
 from typing import Optional, Dict, Any, List, Callable
+
+import numpy as np
+import pandas as pd
 from dataclasses import dataclass
 
 
@@ -122,12 +124,21 @@ class ReportConverter:
         Returns:
             評価結果のリスト（失敗時は空リスト）
         """
+        if not isinstance(literal_str, str):
+            return []
+
+        candidate = literal_str.strip()
+        if not candidate:
+            return []
+
         try:
-            if isinstance(literal_str, str):
-                return ast.literal_eval(literal_str)
-            return []
+            return ast.literal_eval(candidate)
         except (ValueError, SyntaxError):
-            return []
+            # フォールバック: カンマまたは改行で区切られた文字列をリスト化
+            if "," in candidate or "\n" in candidate:
+                parts = [part.strip() for part in re.split(r"[,\n]", candidate)]
+                return [part for part in parts if part]
+            return [candidate]
     
     def _transform_chunk(self, chunk_df: pd.DataFrame) -> pd.DataFrame:
         """データチャンクの変換処理

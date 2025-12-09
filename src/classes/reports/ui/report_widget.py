@@ -29,6 +29,7 @@ class ReportWidget(QWidget):
     
     各機能を個別タブとして提供：
     - データ取得タブ
+    - 一覧表示タブ
     - Excel変換タブ
     - 研究データ生成タブ
     """
@@ -69,6 +70,14 @@ class ReportWidget(QWidget):
             self.fetch_tab = ReportFetchTab()
             self.tab_widget.addTab(self.fetch_tab, "📊 データ取得")
             logger.info("✅ データ取得タブ追加完了")
+
+            # 一覧タブ
+            logger.info("一覧タブをインポート中...")
+            from classes.reports.ui.listing_tab import ReportListingTab
+            logger.info("ReportListingTabを作成中...")
+            self.listing_tab = ReportListingTab()
+            self.tab_widget.addTab(self.listing_tab, "📋 一覧表示")
+            logger.info("✅ 一覧タブ追加完了")
             
             # Excel変換タブ
             logger.info("Excel変換タブをインポート中...")
@@ -110,6 +119,8 @@ class ReportWidget(QWidget):
             # 各タブのrefresh_theme()を呼び出し
             if hasattr(self, 'fetch_tab') and hasattr(self.fetch_tab, 'refresh_theme'):
                 self.fetch_tab.refresh_theme()
+            if hasattr(self, 'listing_tab') and hasattr(self.listing_tab, 'refresh_theme'):
+                self.listing_tab.refresh_theme()
             if hasattr(self, 'convert_tab') and hasattr(self.convert_tab, 'refresh_theme'):
                 self.convert_tab.refresh_theme()
             if hasattr(self, 'research_data_tab') and hasattr(self.research_data_tab, 'refresh_theme'):
@@ -128,7 +139,12 @@ class ReportWidget(QWidget):
 
     def refresh_all_tabs(self):
         """全タブをディスク上の最新状態へ更新"""
-        for tab in (getattr(self, 'fetch_tab', None), getattr(self, 'convert_tab', None), getattr(self, 'research_data_tab', None)):
+        for tab in (
+            getattr(self, 'fetch_tab', None),
+            getattr(self, 'listing_tab', None),
+            getattr(self, 'convert_tab', None),
+            getattr(self, 'research_data_tab', None),
+        ):
             self._refresh_tab(tab)
 
     @staticmethod

@@ -23,7 +23,7 @@ except ImportError as e:
 class EquipmentWidget(QWidget):
     """設備タブWidget
     
-    データ取得、カタログ変換、データマージの3つのタブを提供するコンテナ
+    データ取得、一覧表示、カタログ変換、データマージの4タブを提供するコンテナ
     """
     
     def __init__(self, parent=None):
@@ -42,14 +42,17 @@ class EquipmentWidget(QWidget):
         
         # 各タブ追加
         from classes.equipment.ui.fetch_tab import FetchTab
+        from classes.equipment.ui.listing_tab import EquipmentListingTab
         from classes.equipment.ui.convert_tab import ConvertTab
         from classes.equipment.ui.merge_tab import MergeTab
         
         self.fetch_tab = FetchTab(self)
+        self.listing_tab = EquipmentListingTab(self)
         self.convert_tab = ConvertTab(self)
         self.merge_tab = MergeTab(self)
         
         self.tab_widget.addTab(self.fetch_tab, "📊 データ取得")
+        self.tab_widget.addTab(self.listing_tab, "📋 一覧表示")
         self.tab_widget.addTab(self.convert_tab, "🔄 カタログ変換")
         self.tab_widget.addTab(self.merge_tab, "🔗 データマージ")
         
@@ -64,7 +67,7 @@ class EquipmentWidget(QWidget):
         self._refresh_tab(tab)
 
     def refresh_all_tabs(self):
-        for tab in (self.fetch_tab, self.convert_tab, self.merge_tab):
+        for tab in (self.fetch_tab, self.listing_tab, self.convert_tab, self.merge_tab):
             self._refresh_tab(tab)
 
     @staticmethod

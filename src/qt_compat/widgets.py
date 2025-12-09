@@ -55,6 +55,7 @@ QSplitter = QtWidgets.QSplitter
 QGroupBox = QtWidgets.QGroupBox
 QFrame = QtWidgets.QFrame
 QTabWidget = QtWidgets.QTabWidget
+QStackedWidget = QtWidgets.QStackedWidget
 
 # ダイアログ
 QDialog = QtWidgets.QDialog
@@ -113,6 +114,7 @@ __all__ = [
     'QGroupBox',
     'QFrame',
     'QTabWidget',
+    'QStackedWidget',
     'QDialog',
     'QMessageBox',
     'QFileDialog',

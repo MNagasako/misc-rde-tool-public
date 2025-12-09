@@ -17,6 +17,7 @@ from openpyxl import Workbook, load_workbook
 
 from config.common import OUTPUT_DIR
 from ..conf.field_definitions import EXCEL_COLUMNS
+from .report_cache_manager import ReportCacheManager
 
 
 logger = logging.getLogger(__name__)
@@ -255,7 +256,13 @@ class ReportFileExporter:
         logger.info(f"個別JSONエントリ作成: {json_entries_dir}")
         
         # ========================================
-        # 5. 結果を返す
+        # 5. キャッシュにも反映
+        # ========================================
+        cache_manager = ReportCacheManager()
+        cache_manager.save_entries(reports)
+
+        # ========================================
+        # 6. 結果を返す
         # ========================================
         result = {
             "latest_excel": latest_excel_path,

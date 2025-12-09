@@ -7,9 +7,13 @@
 import os
 import logging
 from datetime import datetime
+from typing import Optional, TYPE_CHECKING
 
 from classes.equipment.util.output_paths import get_equipment_root_dir
 from classes.reports.util.output_paths import get_reports_root_dir
+
+if TYPE_CHECKING:
+    from classes.reports.core.report_cache_manager import ReportCacheMode
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +41,9 @@ class ReportBatchWorker(QThread):
     def __init__(
         self,
         start_page: int,
-        page_count: int,
+        page_count: Optional[int],
         max_workers: int = 5,
+        cache_mode: 'ReportCacheMode' = None,
         parent=None
     ):
         super().__init__(parent)
@@ -46,6 +51,11 @@ class ReportBatchWorker(QThread):
         self.start_page = start_page
         self.page_count = page_count
         self.max_workers = max_workers
+        if cache_mode is None:
+            from classes.reports.core.report_cache_manager import ReportCacheMode
+
+            cache_mode = ReportCacheMode.SKIP
+        self.cache_mode = cache_mode
         
         self.cancel_requested = False
     
@@ -63,13 +73,37 @@ class ReportBatchWorker(QThread):
             self.log_message.emit("=" * 60)
             
             from classes.reports.core.parallel_fetcher import ParallelReportFetcher
+            from classes.reports.core.report_cache_manager import ReportCacheManager
             from classes.reports.core.report_data_processor import ReportDataProcessor
             from classes.reports.core.report_file_exporter import ReportFileExporter
             
-            self.log_message.emit(f"🔄 {self.page_count}ページの報告書データを取得開始...")
+            if self.page_count is None:
+                self.log_message.emit("🔄 全ページの報告書データを取得開始...")
+            else:
+                self.log_message.emit(f"🔄 {self.page_count}ページの報告書データを取得開始...")
             
             # 並列取得
-            fetcher = ParallelReportFetcher(max_workers=self.max_workers)
+            cache_manager = ReportCacheManager()
+            fetcher = ParallelReportFetcher(
+                max_workers=self.max_workers,
+                cache_manager=cache_manager,
+                cache_mode=self.cache_mode,
+            )
+
+            if self.page_count is None:
+                summary = fetcher.scraper.get_listing_summary()
+                if summary:
+                    self.log_message.emit(
+                        f"📄 報告書総件数: {summary.total_count}件 "
+                        f"(全{summary.final_page}ページ / 100件表示)"
+                    )
+
+            cache_mode_label = (
+                "既存キャッシュを再利用"
+                if self.cache_mode and self.cache_mode.value == "skip"
+                else "常に再取得(上書き)"
+            )
+            self.log_message.emit(f"💾 キャッシュモード: {cache_mode_label}")
             
             def fetch_progress_callback(current, total, message):
                 """取得プログレスコールバック"""

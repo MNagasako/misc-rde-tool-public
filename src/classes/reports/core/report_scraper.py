@@ -7,9 +7,11 @@ Version: 2.1.0
 """
 
 import re
+import math
 import logging
+from dataclasses import dataclass
 from typing import Dict, List, Optional
-from urllib.parse import urlparse, parse_qs
+from urllib.parse import urlparse, parse_qs, urlencode
 from bs4 import BeautifulSoup
 
 # HTTPヘルパー（本アプリの統一されたrequests機能）
@@ -22,6 +24,8 @@ from ..conf.field_definitions import (
     REPORT_LIST_URL,
     REPORT_DETAIL_URL,
     PAGINATION_SELECTOR,
+    REPORT_LIST_DEFAULT_QUERY,
+    REPORTS_PER_PAGE,
 )
 from ..util.html_parser import (
     safe_extract_text,
@@ -30,6 +34,14 @@ from ..util.html_parser import (
     extract_list_items,
     clean_html_text,
 )
+
+
+@dataclass
+class ReportListingSummary:
+    """報告書一覧のサマリ情報"""
+
+    total_count: int
+    final_page: int
 
 
 class ReportScraper:
@@ -45,6 +57,8 @@ class ReportScraper:
         self.base_url = BASE_URL
         self.list_url = REPORT_LIST_URL
         self.detail_url_template = REPORT_DETAIL_URL
+        self.list_query = REPORT_LIST_DEFAULT_QUERY.copy()
+        self.per_page = REPORTS_PER_PAGE
     
     def get_report_list(
         self,
@@ -67,19 +81,29 @@ class ReportScraper:
         """
         self.logger.info(f"報告書一覧取得開始: start_page={start_page}, max_pages={max_pages}")
         
-        # 最終ページ数を取得
-        final_page = self._get_final_page_number()
-        if final_page is None:
-            self.logger.warning("最終ページ数の取得に失敗しました")
+        summary = self._get_listing_summary()
+        if summary:
+            final_page = summary.final_page
+            total_count = summary.total_count
+        else:
             final_page = 1
-        
+            total_count = 0
+            self.logger.warning("一覧サマリの取得に失敗したため、1ページのみ処理します")
+
         # max_pagesが指定されている場合は制限
         if max_pages:
             end_page = min(start_page + max_pages - 1, final_page)
         else:
             end_page = final_page
-        
-        self.logger.info(f"ページ範囲: {start_page} - {end_page} (最終: {final_page})")
+
+        if total_count:
+            self.logger.info(
+                f"総件数 {total_count} 件 / ページ範囲: {start_page} - {end_page} (最終: {final_page})"
+            )
+        else:
+            self.logger.info(
+                f"ページ範囲: {start_page} - {end_page} (最終: {final_page})"
+            )
         
         # 各ページから報告書リンクを取得
         all_links = []
@@ -94,6 +118,10 @@ class ReportScraper:
         
         self.logger.info(f"報告書一覧取得完了: 合計 {len(all_links)} 件")
         return all_links
+
+    def get_listing_summary(self) -> Optional[ReportListingSummary]:
+        """外部向けの一覧サマリAPI"""
+        return self._get_listing_summary()
     
     def search_reports_by_keyword(self, keyword: str) -> List[Dict[str, str]]:
         """
@@ -322,31 +350,82 @@ class ReportScraper:
     # プライベートメソッド
     # ========================================
     
-    def _get_final_page_number(self) -> Optional[int]:
-        """最終ページ番号を取得"""
+    def _get_listing_summary(self) -> Optional[ReportListingSummary]:
+        """報告書一覧ページのサマリ情報を取得"""
         try:
-            self.logger.info("最終ページ番号取得中...")
-            response = proxy_get(self.list_url)
+            self.logger.info("一覧サマリ取得中...")
+            response = proxy_get(self._build_list_url())
             if response.status_code != 200:
-                self.logger.warning(f"最終ページ番号取得失敗: ステータス{response.status_code}")
+                self.logger.warning(
+                    f"一覧サマリ取得失敗: ステータス{response.status_code}"
+                )
                 return None
-            
+
+            response.encoding = 'utf-8'
             soup = BeautifulSoup(response.text, 'html.parser')
-            page_links = soup.select(PAGINATION_SELECTOR)
-            
-            if not page_links:
-                self.logger.info("ページネーションなし（1ページのみ）")
-                return 1  # ページネーションなし = 1ページのみ
-            
-            # 最終ページのリンクを取得（最後から2番目が最終ページ番号）
-            final_page_link = page_links[-2].get('href')
-            final_page_number = int(final_page_link.split('page=')[1].split('&')[0])
-            self.logger.info(f"最終ページ番号: {final_page_number}")
-            return final_page_number
-            
+
+            total_count = self._extract_total_count(soup)
+            final_page = self._extract_final_page(soup)
+
+            if total_count is None and final_page is None:
+                self.logger.warning("総件数・最終ページの特定に失敗しました")
+                return None
+
+            if total_count is None and final_page is not None:
+                total_count = final_page * self.per_page
+            if final_page is None and total_count is not None:
+                final_page = max(1, math.ceil(total_count / self.per_page))
+
+            summary = ReportListingSummary(
+                total_count=total_count or 0,
+                final_page=final_page or 1
+            )
+            self.logger.info(
+                f"一覧サマリ: 総件数={summary.total_count}, 最終ページ={summary.final_page}"
+            )
+            return summary
+
         except Exception as e:
-            self.logger.error(f"最終ページ番号の取得エラー: {e}")
+            self.logger.error(f"一覧サマリ取得エラー: {e}")
             return None
+
+    def _extract_total_count(self, soup: BeautifulSoup) -> Optional[int]:
+        dt_tag = soup.select_one('.pageNavBox dt')
+        if not dt_tag:
+            return None
+        text = dt_tag.get_text(strip=True)
+        match = re.search(r"(\d+)件中", text)
+        if match:
+            try:
+                return int(match.group(1))
+            except ValueError:
+                return None
+        return None
+
+    def _extract_final_page(self, soup: BeautifulSoup) -> Optional[int]:
+        page_links = soup.select(PAGINATION_SELECTOR)
+        if not page_links:
+            return None
+
+        max_page = 0
+        for link in page_links:
+            href = link.get('href', '')
+            if 'page=' not in href:
+                continue
+            try:
+                page_value = int(href.split('page=')[1].split('&')[0])
+                max_page = max(max_page, page_value)
+            except (ValueError, IndexError):
+                continue
+
+        return max_page or None
+
+    def _build_list_url(self, page: Optional[int] = None) -> str:
+        params = self.list_query.copy()
+        if page is not None:
+            params['page'] = str(page)
+        query = urlencode(params)
+        return f"{self.list_url}?{query}"
     
     def _get_links_from_page(self, page_num: int) -> List[Dict[str, str]]:
         """
@@ -359,7 +438,7 @@ class ReportScraper:
             報告書リンク情報のリスト
             [{"code": "...", "key": "...", "url": "...", "title": "..."}, ...]
         """
-        url = f"{self.list_url}?page={page_num}"
+        url = self._build_list_url(page_num)
         
         try:
             response = proxy_get(url)

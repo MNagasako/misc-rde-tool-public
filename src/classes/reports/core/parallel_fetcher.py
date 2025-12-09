@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 
 from .report_scraper import ReportScraper
+from .report_cache_manager import ReportCacheManager, ReportCacheMode
 
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,12 @@ class ParallelReportFetcher:
     設備タブのParallelFacilityFetcherパターンを踏襲しています。
     """
     
-    def __init__(self, max_workers: int = 5):
+    def __init__(
+        self,
+        max_workers: int = 5,
+        cache_manager: Optional[ReportCacheManager] = None,
+        cache_mode: ReportCacheMode = ReportCacheMode.SKIP,
+    ):
         """
         初期化
         
@@ -34,7 +40,13 @@ class ParallelReportFetcher:
         """
         self.max_workers = max_workers
         self.scraper = ReportScraper()
-        logger.info(f"ParallelReportFetcher初期化: max_workers={max_workers}")
+        self.cache_manager = cache_manager or ReportCacheManager()
+        self.cache_mode = cache_mode
+        logger.info(
+            "ParallelReportFetcher初期化: max_workers=%s, cache_mode=%s",
+            max_workers,
+            self.cache_mode.value,
+        )
     
     def fetch_reports(
         self,
@@ -62,85 +74,88 @@ class ParallelReportFetcher:
             >>> print(f"成功: {len(success)}, 失敗: {len(errors)}")
         """
         logger.info(f"並列取得開始: {len(report_links)} 件")
-        
-        success_data = []
-        error_data = []
+
+        success_data: List[Dict] = []
+        error_data: List[Dict] = []
         total = len(report_links)
-        
-        # プログレス初期化
-        if progress_callback:
-            progress_callback(0, total, "並列取得を開始します...")
-        
-        # 並列実行
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            # 全タスクを投入
-            futures = {
-                executor.submit(self._fetch_single, link): link
-                for link in report_links
-            }
-            
-            # 完了したタスクから順次処理
-            completed = 0
-            for future in as_completed(futures):
-                link = futures[future]
-                completed += 1
-                
-                try:
-                    result = future.result()
-                    
-                    if result:
-                        success_data.append(result)
-                        
-                        # プログレス通知（成功）
-                        if progress_callback:
+
+        self._safe_progress(progress_callback, 0, total, "並列取得を開始します...")
+
+        pending_links, cache_hits = self._apply_cache_hits(
+            report_links,
+            success_data,
+            total,
+            progress_callback,
+        )
+        completed = len(success_data)
+
+        if pending_links:
+            with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
+                futures = {
+                    executor.submit(self._fetch_single, link): link
+                    for link in pending_links
+                }
+
+                for future in as_completed(futures):
+                    link = futures[future]
+                    completed += 1
+
+                    try:
+                        result = future.result()
+
+                        if result:
+                            success_data.append(result)
+                            self._save_to_cache(result)
                             code = link.get('code', 'unknown')
-                            progress_callback(
+                            self._safe_progress(
+                                progress_callback,
                                 completed,
                                 total,
-                                f"✓ 取得成功: code={code} ({completed}/{total})"
+                                f"✓ 取得成功: code={code} ({completed}/{total})",
                             )
-                    else:
-                        # 取得失敗
+                        else:
+                            error_data.append({
+                                "link": link,
+                                "error": "Failed to fetch report",
+                            })
+                            code = link.get('code', 'unknown')
+                            self._safe_progress(
+                                progress_callback,
+                                completed,
+                                total,
+                                f"✗ 取得失敗: code={code} ({completed}/{total})",
+                            )
+
+                    except Exception as e:
+                        logger.error(f"タスク実行エラー ({link}): {e}")
                         error_data.append({
                             "link": link,
-                            "error": "Failed to fetch report"
+                            "error": str(e),
                         })
-                        
-                        # プログレス通知（失敗）
-                        if progress_callback:
-                            code = link.get('code', 'unknown')
-                            progress_callback(
-                                completed,
-                                total,
-                                f"✗ 取得失敗: code={code} ({completed}/{total})"
-                            )
-                
-                except Exception as e:
-                    logger.error(f"タスク実行エラー ({link}): {e}")
-                    error_data.append({
-                        "link": link,
-                        "error": str(e)
-                    })
-                    
-                    # プログレス通知（エラー）
-                    if progress_callback:
                         code = link.get('code', 'unknown')
-                        progress_callback(
+                        self._safe_progress(
+                            progress_callback,
                             completed,
                             total,
-                            f"⚠ エラー: code={code} - {str(e)[:50]}"
+                            f"⚠ エラー: code={code} - {str(e)[:50]}",
                         )
-        
-        logger.info(f"並列取得完了: 成功={len(success_data)}, 失敗={len(error_data)}")
-        
-        # 最終プログレス通知
-        if progress_callback:
-            progress_callback(
-                total,
-                total,
-                f"完了: 成功={len(success_data)}, 失敗={len(error_data)}"
-            )
-        
+        else:
+            logger.info("取得対象は全件キャッシュ再利用されました")
+
+        logger.info(
+            "並列取得完了: 成功=%s, 失敗=%s, キャッシュ再利用=%s",
+            len(success_data),
+            len(error_data),
+            cache_hits,
+        )
+
+        self._safe_progress(
+            progress_callback,
+            total,
+            total,
+            f"完了: 成功={len(success_data)}, 失敗={len(error_data)}",
+        )
+
         return success_data, error_data
     
     def fetch_range(
@@ -195,6 +210,67 @@ class ParallelReportFetcher:
     # ========================================
     # プライベートメソッド
     # ========================================
+
+    def _apply_cache_hits(
+        self,
+        report_links: List[Dict[str, str]],
+        success_data: List[Dict],
+        total: int,
+        progress_callback: Optional[Callable[[int, int, str], None]],
+    ) -> Tuple[List[Dict[str, str]], int]:
+        if not self.cache_manager or self.cache_mode != ReportCacheMode.SKIP:
+            return list(report_links), 0
+
+        pending_links: List[Dict[str, str]] = []
+        cache_hits = 0
+
+        for link in report_links:
+            cached = self._load_from_cache(link)
+            if cached:
+                success_data.append(cached)
+                cache_hits += 1
+                code = link.get('code', 'unknown')
+                self._safe_progress(
+                    progress_callback,
+                    len(success_data),
+                    total,
+                    f"↺ キャッシュ再利用: code={code} ({len(success_data)}/{total})",
+                )
+            else:
+                pending_links.append(link)
+
+        if cache_hits:
+            logger.info("キャッシュ再利用件数: %s/%s", cache_hits, total or cache_hits)
+
+        return pending_links, cache_hits
+
+    def _load_from_cache(self, link: Dict[str, str]) -> Optional[Dict]:
+        if not self.cache_manager:
+            return None
+        code = link.get('code') if link else None
+        if not code:
+            return None
+        return self.cache_manager.load_entry(code)
+
+    def _save_to_cache(self, report: Optional[Dict]) -> None:
+        if not report or not self.cache_manager:
+            return
+        # SKIP/OVERWRITE いずれの場合も最新データを保存しておく
+        self.cache_manager.save_entry(report)
+
+    def _safe_progress(
+        self,
+        progress_callback: Optional[Callable[[int, int, str], None]],
+        current: int,
+        total: int,
+        message: str,
+    ) -> None:
+        if not progress_callback:
+            return
+        try:
+            progress_callback(current, total, message)
+        except Exception as exc:  # pragma: no cover - コールバック例外は通知のみ
+            logger.debug("progress_callback実行中に例外が発生: %s", exc)
     
     def _fetch_single(self, link: Dict[str, str]) -> Optional[Dict]:
         """

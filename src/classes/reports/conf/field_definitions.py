@@ -49,6 +49,14 @@ BASE_URL = "https://nanonet.go.jp"
 # 報告書一覧ページ（既存実装と整合: user_report.php）
 REPORT_LIST_URL = f"{BASE_URL}/user_report.php"
 
+# 報告書一覧ページのデフォルトクエリ（100件表示モード）
+REPORT_LIST_DEFAULT_QUERY = {
+    "mode": "",
+    "mode2": "",
+    "code": "0",
+    "display_result": "2",
+}
+
 # 報告書詳細ページ（パラメータ: code, key）
 REPORT_DETAIL_URL = f"{BASE_URL}/user_report.php?mode=detail&code={{code}}&key={{key}}"
 
@@ -64,6 +72,9 @@ SAVE_CHUNK_SIZE = 10
 
 # ページネーションのCSSセレクタ
 PAGINATION_SELECTOR = ".pageNavBox .pageNav a[href*='page=']"
+
+# 1ページあたりの表示件数（display_result=2 => 100件）
+REPORTS_PER_PAGE = 100
 
 # ========================================
 # 出力設定

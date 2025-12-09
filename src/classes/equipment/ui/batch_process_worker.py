@@ -7,7 +7,8 @@
 import logging
 from typing import Optional
 from datetime import datetime
-from config.common import OUTPUT_DIR
+from classes.equipment.core.fetch_range_builder import collect_valid_facility_ids
+from classes.equipment.core.facility_listing import FacilityListingScraper
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,9 @@ class BatchProcessWorker(QThread):
         start_id: int,
         end_id: int,
         max_workers: int = 5,
+        fetch_all: bool = False,
+        consecutive_not_found_limit: Optional[int] = None,
+        fetch_all_chunk_size: Optional[int] = None,
         parent=None
     ):
         super().__init__(parent)
@@ -44,6 +48,9 @@ class BatchProcessWorker(QThread):
         self.start_id = start_id
         self.end_id = end_id
         self.max_workers = max_workers
+        self.fetch_all = fetch_all
+        self.consecutive_not_found_limit = consecutive_not_found_limit
+        self.fetch_all_chunk_size = fetch_all_chunk_size
         
         self.cancel_requested = False
     
@@ -62,9 +69,29 @@ class BatchProcessWorker(QThread):
             from classes.equipment.core.file_exporter import FacilityExporter
             
             # 取得範囲生成
-            facility_ids = list(range(self.start_id, self.end_id + 1))
+            if (
+                self.fetch_all
+                and self.consecutive_not_found_limit
+                and self.fetch_all_chunk_size
+            ):
+                facility_ids = collect_valid_facility_ids(
+                    start_id=self.start_id,
+                    end_id=self.end_id,
+                    chunk_size=self.fetch_all_chunk_size,
+                    stop_threshold=self.consecutive_not_found_limit,
+                    log_callback=self.log_message.emit,
+                    cancel_checker=lambda: self.cancel_requested,
+                    listing_scraper=FacilityListingScraper()
+                )
+            else:
+                facility_ids = list(range(self.start_id, self.end_id + 1))
+
+            if not facility_ids:
+                self.log_message.emit("⚠ 取得する設備IDがありません")
+                self.completed.emit(False, "取得対象が見つかりませんでした。")
+                return
+
             total_count = len(facility_ids)
-            
             self.log_message.emit(f"🔄 {total_count}件の設備データを取得開始...")
             
             # 並列取得

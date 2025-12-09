@@ -8,6 +8,12 @@ import threading
 from classes.utils.progress_worker import ProgressWorker, SimpleProgressWorker
 from classes.theme import get_color, ThemeKey
 from config.common import get_dynamic_file_path
+from .basic_info_search_dialog import (
+    BasicInfoSearchSelection,
+    PATTERN_INSTITUTION,
+    PATTERN_MANUAL,
+    prompt_basic_info_search_options,
+)
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -106,7 +112,7 @@ def fetch_basic_info(controller):
         webview = getattr(controller.parent, 'webview', controller.parent)
         
         # 確認ダイアログをメインスレッドで表示
-        if not show_fetch_confirmation_dialog(controller.parent, onlySelf=False, searchWords=None):
+        if not show_fetch_confirmation_dialog(controller.parent, onlySelf=False, searchWords=None, searchWordsList=None):
             logger.info("基本情報取得処理はユーザーによりキャンセルされました")
             return
 
@@ -225,10 +231,41 @@ def fetch_basic_info_self(controller):
             return
         
         webview = getattr(controller.parent, 'webview', controller.parent)
-        searchWords = controller.basic_info_input.text() if hasattr(controller, 'basic_info_input') else None
-        
+        default_keyword = controller.basic_info_input.text().strip() if hasattr(controller, 'basic_info_input') else ""
+        previous_selection = getattr(controller, '_basic_info_search_state', None)
+        if not isinstance(previous_selection, BasicInfoSearchSelection):
+            previous_selection = None
+
+        selection = prompt_basic_info_search_options(
+            controller.parent,
+            default_keyword=default_keyword,
+            previous_state=previous_selection,
+        )
+        if not selection:
+            logger.info("基本情報取得(検索)はユーザーによりキャンセルされました。(ダイアログ)")
+            return
+
+        controller._basic_info_search_state = selection
+        searchWords = selection.manual_keyword or None
+        searchWordsBatch = selection.keyword_batch or None
+        keyword_preview = selection.display_keywords()
+
+        if hasattr(controller, 'basic_info_input'):
+            if selection.mode == PATTERN_MANUAL and searchWords:
+                controller.basic_info_input.setText(searchWords)
+            elif selection.mode == PATTERN_INSTITUTION and searchWordsBatch:
+                controller.basic_info_input.setText(searchWordsBatch[0])
+            elif selection.mode == "self":
+                controller.basic_info_input.clear()
+
         # 確認ダイアログをメインスレッドで表示
-        if not show_fetch_confirmation_dialog(controller.parent, onlySelf=True, searchWords=searchWords):
+        preview_list = keyword_preview if keyword_preview else None
+        if not show_fetch_confirmation_dialog(
+            controller.parent,
+            onlySelf=True,
+            searchWords=searchWords,
+            searchWordsList=preview_list,
+        ):
             logger.info("基本情報取得処理はユーザーによりキャンセルされました。")
             return
 
@@ -296,11 +333,12 @@ def fetch_basic_info_self(controller):
                 'webview': webview,
                 'onlySelf': True,
                 'searchWords': searchWords,
+                'searchWordsBatch': searchWordsBatch,
                 'skip_confirmation': True,
                 'program_id': selected_program_id,
                 'force_download': force_download,
             },
-            task_name="自分の基本情報取得"
+            task_name="検索付き基本情報取得"
         )
         
         # プログレス表示
@@ -876,11 +914,19 @@ def execute_individual_stage_ui(controller, stage_name):
     # データセット情報の場合は検索条件を取得
     onlySelf = False
     searchWords = None
-    if stage_name == "データセット情報" and hasattr(controller, 'basic_info_input'):
-        search_text = controller.basic_info_input.text().strip()
-        if search_text:
-            onlySelf = True
-            searchWords = search_text
+    searchWordsBatch = None
+    if stage_name == "データセット情報":
+        selection = getattr(controller, '_basic_info_search_state', None)
+        if isinstance(selection, BasicInfoSearchSelection):
+            onlySelf = selection.mode in ("self", PATTERN_MANUAL, PATTERN_INSTITUTION)
+            searchWords = selection.manual_keyword or None
+            if selection.keyword_batch:
+                searchWordsBatch = list(selection.keyword_batch)
+        elif hasattr(controller, 'basic_info_input'):
+            search_text = controller.basic_info_input.text().strip()
+            if search_text:
+                onlySelf = True
+                searchWords = search_text
 
     force_download = False
     if stage_name == "グループ関連情報":
@@ -917,6 +963,7 @@ def execute_individual_stage_ui(controller, stage_name):
             'webview': webview,
             'onlySelf': onlySelf,
             'searchWords': searchWords,
+            'searchWordsBatch': searchWordsBatch,
             'parent_widget': controller.parent,
             'force_program_dialog': (stage_name == "グループ関連情報"),
             'force_download': force_download,

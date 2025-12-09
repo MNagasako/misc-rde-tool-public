@@ -19,6 +19,11 @@ from classes.equipment.util.output_paths import (
 
 logger = logging.getLogger(__name__)
 
+FETCH_ALL_START_ID = 1
+FETCH_ALL_END_ID = 99999
+FETCH_ALL_CHUNK_SIZE = 100
+FETCH_ALL_STOP_LIMIT = 200
+
 try:
     from qt_compat.widgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
@@ -154,10 +159,11 @@ class FetchTab(QWidget):
         
         self.consecutive_not_found_spinbox = QSpinBox()
         self.consecutive_not_found_spinbox.setMinimum(1)
-        self.consecutive_not_found_spinbox.setMaximum(100)
-        self.consecutive_not_found_spinbox.setValue(20)
+        self.consecutive_not_found_spinbox.setMaximum(500)
+        self.consecutive_not_found_spinbox.setValue(FETCH_ALL_STOP_LIMIT)
         self.consecutive_not_found_spinbox.setToolTip(
             "全件取得時、この件数連続でデータが見つからなかった場合に取得を停止します"
+            "（100件単位のスキャンを実施）"
         )
         stop_condition_layout.addWidget(self.consecutive_not_found_spinbox)
         
@@ -340,15 +346,16 @@ class FetchTab(QWidget):
         max_workers = self.max_workers_spinbox.value()
         
         if fetch_all:
-            # 全件取得（固定範囲: 1～9999）
+            # 全件取得（固定範囲 + 連続不在判定）
             reply = QMessageBox.question(
                 self,
                 "確認",
-                f"設備の全件取得を実行します。\n"
-                f"ID範囲: 1 ～ 9999（存在しないIDはスキップされます）\n"
+                "設備の全件取得を実行します。\n"
+                f"ID範囲: {FETCH_ALL_START_ID} ～ {FETCH_ALL_END_ID}\n"
+                f"検索単位: {FETCH_ALL_CHUNK_SIZE}件 / 停止条件: 連続{FETCH_ALL_STOP_LIMIT}件不在\n"
                 f"並列数: {max_workers}\n\n"
-                f"※大量のデータ取得となるため、時間がかかる場合があります。\n"
-                f"よろしいですか？",
+                "※大量のデータ取得となるため、時間がかかる場合があります。\n"
+                "よろしいですか？",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.No
             )
@@ -357,7 +364,12 @@ class FetchTab(QWidget):
                 return
             
             # 全件取得開始（1～9999）
-            self.start_fetch(start_id=1, end_id=9999, max_workers=max_workers)
+            self.start_fetch(
+                start_id=FETCH_ALL_START_ID,
+                end_id=FETCH_ALL_END_ID,
+                max_workers=max_workers,
+                fetch_all=True
+            )
         else:
             # 範囲指定モード
             start_id = self.start_id_spinbox.value()
@@ -386,7 +398,7 @@ class FetchTab(QWidget):
             # 取得開始
             self.start_fetch(start_id, end_id, max_workers)
     
-    def start_fetch(self, start_id: int, end_id: int, max_workers: int):
+    def start_fetch(self, start_id: int, end_id: int, max_workers: int, fetch_all: bool = False):
         """取得開始
         
         Args:
@@ -394,15 +406,21 @@ class FetchTab(QWidget):
             end_id: 終了ID
             max_workers: 並列数
         """
-        # 全件取得モード判定
-        fetch_all = self.fetch_all_checkbox.isChecked()
-        consecutive_not_found_limit = self.consecutive_not_found_spinbox.value()
+        consecutive_not_found_limit = (
+            FETCH_ALL_STOP_LIMIT if fetch_all else self.consecutive_not_found_spinbox.value()
+        )
+        chunk_size = FETCH_ALL_CHUNK_SIZE if fetch_all else None
         
         self.log_message(f"=" * 60)
         if fetch_all:
             self.log_message(f"設備データ全件取得開始")
-            self.log_message(f"  ID範囲: 全件（1～9999、存在しないIDはスキップ）")
-            self.log_message(f"  停止条件: 連続{consecutive_not_found_limit}件不在で停止")
+            self.log_message(
+                f"  ID範囲: 全件（{FETCH_ALL_START_ID}～{FETCH_ALL_END_ID}、存在しないIDはスキップ）"
+            )
+            self.log_message(
+                f"  検索単位: {FETCH_ALL_CHUNK_SIZE}件 / "
+                f"停止条件: 連続{consecutive_not_found_limit}件不在"
+            )
         else:
             self.log_message(f"設備データ取得開始")
             self.log_message(f"  開始ID: {start_id}")
@@ -420,7 +438,10 @@ class FetchTab(QWidget):
         
         # ワーカースレッド起動
         from classes.equipment.ui.fetch_worker import FacilityFetchWorker
-        
+
+        worker_consecutive_limit = consecutive_not_found_limit if fetch_all else None
+        worker_chunk_size = chunk_size if fetch_all else None
+
         self.worker_thread = FacilityFetchWorker(
             start_id=start_id,
             end_id=end_id,
@@ -428,7 +449,8 @@ class FetchTab(QWidget):
             export_excel=self.export_excel_checkbox.isChecked(),
             export_json=self.export_json_checkbox.isChecked(),
             export_entries=self.export_entries_checkbox.isChecked(),
-            consecutive_not_found_limit=consecutive_not_found_limit if fetch_all else None
+            consecutive_not_found_limit=worker_consecutive_limit,
+            fetch_all_chunk_size=worker_chunk_size
         )
         
         self.worker_thread.progress.connect(self.fetch_progress.emit)
@@ -585,17 +607,41 @@ class FetchTab(QWidget):
         if self.is_fetching:
             return
         
-        # 設定取得
+        fetch_all = self.fetch_all_checkbox.isChecked()
+        max_workers = self.max_workers_spinbox.value()
+
+        if fetch_all:
+            reply = QMessageBox.question(
+                self,
+                "確認",
+                "設備の全件取得を含む一括処理を実行します。\n"
+                f"ID範囲: {FETCH_ALL_START_ID} ～ {FETCH_ALL_END_ID}\n"
+                f"検索単位: {FETCH_ALL_CHUNK_SIZE}件 / 停止条件: 連続{FETCH_ALL_STOP_LIMIT}件不在\n\n"
+                "処理には時間がかかる場合があります。\n"
+                "よろしいですか？",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+
+            if reply != QMessageBox.Yes:
+                return
+
+            self.start_batch_process(
+                FETCH_ALL_START_ID,
+                FETCH_ALL_END_ID,
+                max_workers,
+                fetch_all=True
+            )
+            return
+
+        # 範囲指定モード
         start_id = self.start_id_spinbox.value()
         end_id = self.end_id_spinbox.value()
-        max_workers = self.max_workers_spinbox.value()
-        
-        # 検証
+
         if start_id > end_id:
             QMessageBox.warning(self, "エラー", "開始IDは終了IDより小さくしてください。")
             return
-        
-        # 確認
+
         count = end_id - start_id + 1
         reply = QMessageBox.question(
             self,
@@ -609,18 +655,31 @@ class FetchTab(QWidget):
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
-        
+
         if reply != QMessageBox.Yes:
             return
-        
-        # 一括処理開始
+
         self.start_batch_process(start_id, end_id, max_workers)
     
-    def start_batch_process(self, start_id: int, end_id: int, max_workers: int):
+    def start_batch_process(
+        self,
+        start_id: int,
+        end_id: int,
+        max_workers: int,
+        fetch_all: bool = False
+    ):
         """一括処理開始"""
         self.log_message(f"=" * 60)
         self.log_message(f"🚀 一括処理開始（取得→変換→マージ）")
-        self.log_message(f"  設備ID範囲: {start_id}～{end_id}")
+        if fetch_all:
+            self.log_message(
+                f"  設備ID範囲: {FETCH_ALL_START_ID}～{FETCH_ALL_END_ID}"
+            )
+            self.log_message(
+                f"  検索単位: {FETCH_ALL_CHUNK_SIZE}件 / 停止条件: 連続{FETCH_ALL_STOP_LIMIT}件不在"
+            )
+        else:
+            self.log_message(f"  設備ID範囲: {start_id}～{end_id}")
         self.log_message(f"=" * 60)
         
         # 状態更新
@@ -634,10 +693,16 @@ class FetchTab(QWidget):
         # ワーカースレッド起動
         from classes.equipment.ui.batch_process_worker import BatchProcessWorker
         
+        worker_consecutive_limit = FETCH_ALL_STOP_LIMIT if fetch_all else None
+        worker_chunk_size = FETCH_ALL_CHUNK_SIZE if fetch_all else None
+
         self.worker_thread = BatchProcessWorker(
             start_id=start_id,
             end_id=end_id,
-            max_workers=max_workers
+            max_workers=max_workers,
+            fetch_all=fetch_all,
+            consecutive_not_found_limit=worker_consecutive_limit,
+            fetch_all_chunk_size=worker_chunk_size
         )
         
         self.worker_thread.progress.connect(self.fetch_progress.emit)

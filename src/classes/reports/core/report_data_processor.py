@@ -6,11 +6,15 @@
 Version: 2.1.0
 """
 
+import json
 import logging
-from typing import Dict, List, Tuple
 import re
+from typing import Dict, List, Tuple
 
 from ..conf.field_definitions import EXCEL_COLUMNS
+
+# ResearchDataGenerator expects this field to remain a list literal (JSON string)
+EQUIPMENT_FIELD = "利用した主な設備 / Equipment Used in This Project"
 
 
 class ReportDataProcessor:
@@ -196,7 +200,10 @@ class ReportDataProcessor:
                 
                 # リストは文字列に変換
                 if isinstance(value, list):
-                    formatted[field] = ", ".join(value) if value else ""
+                    if field == EQUIPMENT_FIELD:
+                        formatted[field] = json.dumps(value, ensure_ascii=False)
+                    else:
+                        formatted[field] = ", ".join(value) if value else ""
                 else:
                     formatted[field] = value
             else:

@@ -9,6 +9,8 @@ from datetime import datetime
 from typing import Optional
 
 from classes.equipment.util.output_paths import get_equipment_root_dir
+from classes.equipment.core.fetch_range_builder import collect_valid_facility_ids
+from classes.equipment.core.facility_listing import FacilityListingScraper
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,7 @@ class FacilityFetchWorker(QThread):
         export_json: bool = True,
         export_entries: bool = True,
         consecutive_not_found_limit: Optional[int] = None,
+        fetch_all_chunk_size: Optional[int] = None,
         parent=None
     ):
         super().__init__(parent)
@@ -53,6 +56,7 @@ class FacilityFetchWorker(QThread):
         self.export_json = export_json
         self.export_entries = export_entries
         self.consecutive_not_found_limit = consecutive_not_found_limit
+        self.fetch_all_chunk_size = fetch_all_chunk_size
         
         self.cancel_requested = False
     
@@ -68,8 +72,16 @@ class FacilityFetchWorker(QThread):
             
             # 連続不在判定モードかどうか
             if self.consecutive_not_found_limit:
-                # 全件取得モード: 連続不在判定あり
-                facility_ids = self._fetch_with_consecutive_check()
+                chunk_size = self.fetch_all_chunk_size or 1
+                facility_ids = collect_valid_facility_ids(
+                    start_id=self.start_id,
+                    end_id=self.end_id,
+                    chunk_size=chunk_size,
+                    stop_threshold=self.consecutive_not_found_limit,
+                    log_callback=self.log_message.emit,
+                    cancel_checker=lambda: self.cancel_requested,
+                    listing_scraper=FacilityListingScraper()
+                )
             else:
                 # 通常モード: 指定範囲すべて
                 facility_ids = list(range(self.start_id, self.end_id + 1))
@@ -165,50 +177,6 @@ class FacilityFetchWorker(QThread):
             logger.exception("設備データ取得エラー")
             self.log_message.emit(f"❌ エラー: {str(e)}")
             self.completed.emit(0, 0)
-    
-    def _fetch_with_consecutive_check(self) -> list[int]:
-        """連続不在判定付き取得（全件取得モード用）
-        
-        Returns:
-            list[int]: 取得対象の設備IDリスト
-        """
-        from classes.equipment.core.facility_scraper import FacilityScraper
-        
-        # 型安全性チェック
-        if not self.consecutive_not_found_limit:
-            logger.warning("consecutive_not_found_limitがNoneです")
-            return []
-        
-        limit = self.consecutive_not_found_limit
-        self.log_message.emit(f"🔍 連続不在判定モード: 連続{limit}件不在で停止")
-        
-        scraper = FacilityScraper()
-        valid_ids = []
-        consecutive_not_found = 0
-        
-        for facility_id in range(self.start_id, self.end_id + 1):
-            if self.cancel_requested:
-                self.log_message.emit("⚠ キャンセルされました")
-                break
-            
-            # データ存在チェック（軽量）
-            data = scraper.fetch_facility(facility_id)
-            
-            if data:
-                valid_ids.append(facility_id)
-                consecutive_not_found = 0
-                if len(valid_ids) % 10 == 0:
-                    self.log_message.emit(f"  {len(valid_ids)}件の設備を発見（ID: {facility_id}）")
-            else:
-                consecutive_not_found += 1
-                if consecutive_not_found >= limit:
-                    self.log_message.emit(
-                        f"✋ 連続{consecutive_not_found}件不在のため停止（最終ID: {facility_id}）"
-                    )
-                    break
-        
-        self.log_message.emit(f"✅ 有効な設備ID: {len(valid_ids)}件")
-        return valid_ids
     
     def cancel(self):
         """キャンセル要求"""

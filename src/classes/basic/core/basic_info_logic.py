@@ -457,6 +457,42 @@ def _merge_dataset_chunk_payloads(chunks: List[Dict]) -> Dict:
     return merged
 
 
+def _merge_dataset_search_payloads(payloads: List[Dict]) -> Dict:
+    """Merge multiple dataset payloads produced by different search words."""
+    if not payloads:
+        return {"data": []}
+
+    merged_data: List[Dict] = []
+    seen_ids = set()
+    included_map: Dict[tuple, Dict] = {}
+
+    for payload in payloads:
+        for item in payload.get("data", []) or []:
+            ds_id = item.get("id")
+            if ds_id and ds_id not in seen_ids:
+                merged_data.append(item)
+                seen_ids.add(ds_id)
+
+        for inc in payload.get("included", []) or []:
+            inc_id = inc.get("id")
+            inc_type = inc.get("type")
+            if inc_id and inc_type:
+                key = (inc_type, inc_id)
+                if key not in included_map:
+                    included_map[key] = inc
+
+    base_payload = payloads[-1]
+    merged: Dict = {k: v for k, v in base_payload.items() if k not in ("data", "included")}
+    merged["data"] = merged_data
+    if included_map:
+        merged["included"] = list(included_map.values())
+
+    meta = dict(base_payload.get("meta", {}) or {})
+    meta["totalCounts"] = len(merged_data)
+    merged["meta"] = meta
+    return merged
+
+
 def _download_paginated_resource(
     *,
     base_url: str,
@@ -1199,6 +1235,7 @@ def fetch_all_dataset_info(
     output_dir=None,
     onlySelf=False,
     searchWords=None,
+    searchWordsBatch: Optional[List[str]] = None,
     progress_callback: Optional[Callable[[int, int, str], bool]] = None,
     parallel_threshold: int = 20,
     max_workers: int = 8,
@@ -1219,18 +1256,62 @@ def fetch_all_dataset_info(
             logger.debug("UserName: %s", user_name)
             search_query = user_name
 
+    sanitized_batch: List[str] = []
+    if searchWordsBatch:
+        seen = set()
+        for word in searchWordsBatch:
+            normalized = (word or "").strip()
+            if normalized and normalized not in seen:
+                sanitized_batch.append(normalized)
+                seen.add(normalized)
+
+    search_targets: List[Optional[str]] = []
+    if sanitized_batch:
+        search_targets.extend(sanitized_batch)
+    elif search_query is not None:
+        search_targets.append(search_query)
+    else:
+        search_targets.append(None)
+
     headers = _make_headers(bearer_token, host="rde-api.nims.go.jp", origin="https://rde.nims.go.jp", referer="https://rde.nims.go.jp/")
     dataset_payload: Dict = {}
     emit_progress = progress_callback if progress_callback else lambda *_args, **_kwargs: True
     try:
-        if not emit_progress(0, 100, "データセット一覧取得を開始しています (並列: 自動)"):
+        start_detail = f"検索セット: {len(search_targets)}件, " if len(search_targets) > 1 else ""
+        start_message = f"データセット一覧取得を開始しています ({start_detail}並列: 自動)"
+        if not emit_progress(0, 100, start_message):
             return "キャンセルされました"
 
-        dataset_payload = _download_dataset_list_in_chunks(
-            bearer_token=bearer_token,
-            headers=headers,
-            search_words=search_query,
-        )
+        target_payloads: List[Dict] = []
+        for idx, target in enumerate(search_targets, start=1):
+            if target:
+                label = target
+            else:
+                label = "ユーザー名" if onlySelf else "全件"
+            logger.info(
+                "データセット一覧: 検索%02d/%02dを実行中 (条件=%s)",
+                idx,
+                len(search_targets),
+                label,
+            )
+            chunk_payload = _download_dataset_list_in_chunks(
+                bearer_token=bearer_token,
+                headers=headers,
+                search_words=target,
+            )
+            target_payloads.append(chunk_payload)
+
+        if len(target_payloads) == 1:
+            dataset_payload = target_payloads[0]
+        else:
+            dataset_payload = _merge_dataset_search_payloads(target_payloads)
+
+        meta = dict(dataset_payload.get("meta") or {})
+        if sanitized_batch:
+            meta["searchWordsBatch"] = sanitized_batch
+        elif search_query:
+            meta["searchWords"] = search_query
+        dataset_payload["meta"] = meta
 
         os.makedirs(output_dir, exist_ok=True)
         save_path = os.path.join(output_dir, "dataset.json")
@@ -1240,7 +1321,7 @@ def fetch_all_dataset_info(
         logger.info("データセット情報(dataset.json)取得・保存完了")
 
     except Exception as e:
-        logger.error("データセット情報取得・保存失敗: %s (searchWords=%s)", e, search_query)
+        logger.error("データセット情報取得・保存失敗: %s (searchTargets=%s)", e, search_targets)
         raise
 
     datasets = dataset_payload.get("data", [])
@@ -2241,7 +2322,7 @@ def extract_users_and_subgroups(sub_data):
             })
     return users, subgroups
 
-def show_fetch_confirmation_dialog(parent, onlySelf, searchWords):
+def show_fetch_confirmation_dialog(parent, onlySelf, searchWords, searchWordsList: Optional[List[str]] = None):
     """
     基本情報取得の確認ダイアログを表示
     """
@@ -2250,7 +2331,24 @@ def show_fetch_confirmation_dialog(parent, onlySelf, searchWords):
     
     # 取得対象の情報を生成
     fetch_mode = "検索モード" if onlySelf else "全データセット取得モード"
-    search_text = f"検索キーワード: {searchWords}" if searchWords else "検索キーワード: 自分のユーザー名"
+    keyword_lines = None
+    if searchWordsList:
+        trimmed = [word for word in searchWordsList if word]
+        if trimmed:
+            limit = 10
+            preview = trimmed[:limit]
+            keyword_lines = "\n".join(f"• {word}" for word in preview)
+            if len(trimmed) > limit:
+                keyword_lines += f"\n• ... (他{len(trimmed) - limit}件)"
+            search_text = f"検索キーワード({len(trimmed)}件):\n{keyword_lines}"
+        elif searchWords:
+            search_text = f"検索キーワード: {searchWords}"
+        else:
+            search_text = "検索キーワード: 自分のユーザー名"
+    elif searchWords:
+        search_text = f"検索キーワード: {searchWords}"
+    else:
+        search_text = "検索キーワード: 自分のユーザー名"
     
     # 予想される処理内容
     expected_actions = {
@@ -2299,6 +2397,9 @@ def show_fetch_confirmation_dialog(parent, onlySelf, searchWords):
             "https://rde-api.nims.go.jp/invoices"
         ]
     }
+
+    if searchWordsList:
+        payload_info["検索キーワード一覧"] = searchWordsList
     
     # 確認メッセージ
     confirmation_text = f"""本当に基本情報取得を実行しますか？
@@ -2656,13 +2757,25 @@ def _fetch_single_sample_worker_force(material_token, group_id_sample, sample_di
         return f"failed: {e}"
 
 @stage_error_handler("データセット情報取得")
-def fetch_dataset_info_stage(bearer_token, onlySelf=False, searchWords=None, progress_callback=None):
+def fetch_dataset_info_stage(
+    bearer_token,
+    onlySelf=False,
+    searchWords=None,
+    searchWordsBatch: Optional[List[str]] = None,
+    progress_callback=None,
+):
     """段階5: データセット情報取得"""
     if progress_callback:
         if not progress_callback(10, 100, "データセット情報取得中..."):
             return "キャンセルされました"
     
-    fetch_all_dataset_info(bearer_token, output_dir=os.path.join(OUTPUT_DIR, "rde", "data"), onlySelf=onlySelf, searchWords=searchWords)
+    fetch_all_dataset_info(
+        bearer_token,
+        output_dir=os.path.join(OUTPUT_DIR, "rde", "data"),
+        onlySelf=onlySelf,
+        searchWords=searchWords,
+        searchWordsBatch=searchWordsBatch,
+    )
     
     if progress_callback:
         if not progress_callback(100, 100, "データセット情報取得完了"):
@@ -2881,6 +2994,7 @@ def execute_individual_stage(
     webview=None,
     onlySelf=False,
     searchWords=None,
+    searchWordsBatch: Optional[List[str]] = None,
     progress_callback=None,
     parent_widget=None,
     force_program_dialog: bool = False,
@@ -2905,6 +3019,7 @@ def execute_individual_stage(
                 bearer_token,
                 onlySelf=onlySelf,
                 searchWords=searchWords,
+                 searchWordsBatch=searchWordsBatch,
                 progress_callback=progress_callback,
             )
         elif stage_name == "統合情報生成":
@@ -2940,6 +3055,7 @@ def fetch_basic_info_logic(
     webview=None,
     onlySelf=False,
     searchWords=None,
+    searchWordsBatch: Optional[List[str]] = None,
     skip_confirmation=False,
     progress_callback=None,
     program_id=None,
@@ -3013,7 +3129,8 @@ def fetch_basic_info_logic(
     
     # ===== 2. 確認ダイアログ表示 =====
     if not skip_confirmation:
-        if not show_fetch_confirmation_dialog(parent, onlySelf, searchWords):
+        preview_words = list(searchWordsBatch) if searchWordsBatch else None
+        if not show_fetch_confirmation_dialog(parent, onlySelf, searchWords, searchWordsList=preview_words):
             logger.info("基本情報取得処理はユーザーによりキャンセルされました。")
             return "キャンセルされました"
     
@@ -3337,6 +3454,7 @@ def fetch_basic_info_logic(
                 output_dir=os.path.join(OUTPUT_DIR, "rde", "data"),
                 onlySelf=onlySelf,
                 searchWords=searchWords,
+                searchWordsBatch=searchWordsBatch,
                 progress_callback=dataset_progress_adapter,
             )
             if dataset_result == "キャンセルされました":

@@ -23,7 +23,7 @@ try:
     from qt_compat.widgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
         QPushButton, QLineEdit, QTextEdit, QProgressBar,
-        QGroupBox, QSpinBox, QCheckBox, QMessageBox
+        QGroupBox, QSpinBox, QCheckBox, QMessageBox, QRadioButton
     )
     from qt_compat.gui import QTextCursor
     from qt_compat.core import Signal, QThread
@@ -162,8 +162,36 @@ class ReportFetchTab(QWidget):
         
         output_layout.addStretch()
         layout.addLayout(output_layout)
+
+        # キャッシュ設定
+        cache_group = QGroupBox("キャッシュ設定")
+        cache_layout = QVBoxLayout(cache_group)
+
+        self.cache_skip_radio = QRadioButton("既存キャッシュを再利用（取得済みをスキップ）")
+        self.cache_skip_radio.setChecked(True)
+        cache_layout.addWidget(self.cache_skip_radio)
+
+        self.cache_overwrite_radio = QRadioButton("常に再取得してキャッシュを上書き保存")
+        cache_layout.addWidget(self.cache_overwrite_radio)
+
+        layout.addWidget(cache_group)
         
         return group
+
+    def current_cache_mode(self):
+        """選択中のキャッシュモードを取得"""
+        from classes.reports.core.report_cache_manager import ReportCacheMode
+
+        return (
+            ReportCacheMode.SKIP
+            if self.cache_skip_radio.isChecked()
+            else ReportCacheMode.OVERWRITE
+        )
+
+    def cache_mode_description(self) -> str:
+        if self.cache_skip_radio.isChecked():
+            return "既存キャッシュを再利用（取得済みをスキップ）"
+        return "常に再取得してキャッシュを上書き"
     
     def create_button_area(self) -> QHBoxLayout:
         """ボタンエリア作成"""
@@ -426,7 +454,7 @@ class ReportFetchTab(QWidget):
             self.log_message(f"=" * 60)
             self.log_message(f"報告書全件取得開始")
             self.log_message(f"  開始ページ: {start_page}")
-            self.log_message(f"  ページ数: 全件（自動取得）")
+            self.log_message(f"  ページ数: 全件（100件/ページ・display_result=2）")
             self.log_message(f"  並列数: {max_workers}")
             self.log_message(f"=" * 60)
         else:
@@ -436,6 +464,7 @@ class ReportFetchTab(QWidget):
             self.log_message(f"  ページ数: {page_count}")
             self.log_message(f"  並列数: {max_workers}")
             self.log_message(f"=" * 60)
+        self.log_message(f"  キャッシュ: {self.cache_mode_description()}")
         
         # 状態更新
         self.is_fetching = True
@@ -451,7 +480,8 @@ class ReportFetchTab(QWidget):
         self.worker_thread = ReportFetchWorker(
             start_page=start_page,
             page_count=page_count,
-            max_workers=max_workers
+            max_workers=max_workers,
+            cache_mode=self.current_cache_mode()
         )
         
         self.worker_thread.progress.connect(self.fetch_progress.emit)
@@ -585,17 +615,36 @@ class ReportFetchTab(QWidget):
         if self.is_fetching:
             return
         
-        # 設定取得
+        fetch_all = self.fetch_all_checkbox.isChecked()
+        max_workers = self.max_workers_spinbox.value()
+
+        if fetch_all:
+            reply = QMessageBox.question(
+                self,
+                "確認",
+                "報告書の全件取得を含む一括処理を実行します。\n"
+                "表示件数: 100件/ページ (display_result=2)\n"
+                "全ページを自動で取得し、変換・研究データ生成まで実行します。\n\n"
+                "処理には時間がかかる場合があります。\n"
+                "よろしいですか？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
+            self.start_batch_process(start_page=1, page_count=None, max_workers=max_workers)
+            return
+
+        # 設定取得（範囲指定）
         start_page = self.start_page_spinbox.value()
         page_count = self.end_page_spinbox.value() - start_page + 1
-        max_workers = self.max_workers_spinbox.value()
         
-        # 検証
         if start_page > self.end_page_spinbox.value():
             QMessageBox.warning(self, "エラー", "開始ページは終了ページより小さくしてください。")
             return
         
-        # 確認
         reply = QMessageBox.question(
             self,
             "確認",
@@ -611,15 +660,23 @@ class ReportFetchTab(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
         
-        # 一括処理開始
         self.start_batch_process(start_page, page_count, max_workers)
     
-    def start_batch_process(self, start_page: int, page_count: int, max_workers: int):
+    def start_batch_process(
+        self,
+        start_page: int,
+        page_count: Optional[int],
+        max_workers: int
+    ):
         """一括処理開始"""
         self.log_message(f"=" * 60)
         self.log_message(f"🚀 一括処理開始（取得→研究データ生成）")
-        self.log_message(f"  ページ範囲: {start_page}～{start_page + page_count - 1}")
+        if page_count is None:
+            self.log_message("  ページ範囲: 全件取得（100件/ページ）")
+        else:
+            self.log_message(f"  ページ範囲: {start_page}～{start_page + page_count - 1}")
         self.log_message(f"=" * 60)
+        self.log_message(f"  キャッシュ: {self.cache_mode_description()}")
         
         # 状態更新
         self.is_fetching = True
@@ -632,10 +689,13 @@ class ReportFetchTab(QWidget):
         # ワーカースレッド作成・開始
         from classes.reports.ui.batch_process_worker import ReportBatchWorker
         
+        cache_mode = self.current_cache_mode()
+
         self.worker_thread = ReportBatchWorker(
             start_page=start_page,
             page_count=page_count,
-            max_workers=max_workers
+            max_workers=max_workers,
+            cache_mode=cache_mode
         )
         
         # シグナル接続
