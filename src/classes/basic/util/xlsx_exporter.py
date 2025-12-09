@@ -4,8 +4,14 @@ XLSX書き出し専用ロジック
 import os
 import time
 import logging
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, List, Optional, Sequence, Set
+
 import openpyxl
 from dateutil.parser import parse as parse_datetime
+
+from classes.basic.conf.summary_export_options import SummaryExportMode, SummaryExportOptions
 from config.common import (
     get_dynamic_file_path,
     INPUT_DIR,
@@ -14,10 +20,316 @@ from config.common import (
     DATAFILES_DIR,
     SUBGROUP_JSON_PATH,
     GROUP_ORGNIZATION_DIR,
+    DATASET_JSON_PATH,
+    INSTRUMENTS_JSON_PATH,
 )
 
 # ロガー設定
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class GroupPayload:
+    path: Path
+    included: List[dict]
+    group_ids: Set[str]
+    display_name: str
+
+
+@dataclass
+class SummaryExportJob:
+    label: str
+    output_path: str
+    included_items: List[dict]
+    allowed_group_ids: Optional[Set[str]] = None
+
+
+def _load_group_payloads(
+    additional_paths: Optional[Sequence[str]] = None,
+    selected_default_files: Optional[Sequence[str]] = None,
+) -> List[GroupPayload]:
+    payloads: List[GroupPayload] = []
+    candidate_paths: List[Path] = []
+
+    group_dir = Path(GROUP_ORGNIZATION_DIR)
+    selected_file_map: Optional[Set[str]] = None
+    if selected_default_files:
+        selected_file_map = {Path(path).name.lower() for path in selected_default_files if path}
+
+    if group_dir.exists():
+        for file_path in sorted(group_dir.glob("*.json")):
+            if selected_file_map and file_path.name.lower() not in selected_file_map:
+                continue
+            candidate_paths.append(file_path)
+
+    if additional_paths:
+        for raw_path in additional_paths:
+            if not raw_path:
+                continue
+            candidate_paths.append(Path(raw_path))
+
+    if not candidate_paths:
+        return payloads
+
+    seen_paths: Set[str] = set()
+    for json_path in candidate_paths:
+        normalized = os.path.abspath(str(json_path))
+        key = normalized.lower()
+        if key in seen_paths:
+            continue
+        seen_paths.add(key)
+        if not os.path.exists(normalized):
+            logger.warning("[XLSX] プロジェクトファイルが見つかりません: %s", normalized)
+            continue
+        data = load_json(normalized)
+        if not data:
+            continue
+        included = data.get("included", []) or []
+        group_ids = {
+            item.get("id")
+            for item in included
+            if isinstance(item, dict) and item.get("type") == "group" and item.get("id")
+        }
+        display_name = next(
+            (
+                item.get("attributes", {}).get("name")
+                for item in included
+                if isinstance(item, dict)
+                and item.get("type") == "group"
+                and item.get("attributes", {}).get("name")
+            ),
+            Path(normalized).stem,
+        )
+        payloads.append(
+            GroupPayload(
+                path=Path(normalized),
+                included=list(included),
+                group_ids=set(group_ids),
+                display_name=display_name,
+            )
+        )
+    return payloads
+
+
+def _combine_included(payloads: Sequence[GroupPayload]) -> List[dict]:
+    combined: List[dict] = []
+    for payload in payloads:
+        combined.extend(payload.included)
+    return combined
+
+
+def _build_summary_jobs(
+    options: SummaryExportOptions,
+    default_output_path: str,
+    payloads: Sequence[GroupPayload],
+) -> List[SummaryExportJob]:
+    jobs: List[SummaryExportJob] = []
+    used_labels: Set[str] = set()
+
+    def _make_output_path(base_label: str) -> str:
+        label = base_label
+        counter = 1
+        lowered = label.lower()
+        while lowered in used_labels:
+            label = f"{base_label}_{counter}"
+            lowered = label.lower()
+            counter += 1
+        used_labels.add(lowered)
+        return os.path.abspath(os.path.join(OUTPUT_DIR, f"{label}.xlsx"))
+
+    if not payloads:
+        jobs.append(
+            SummaryExportJob(
+                label="summary",
+                output_path=default_output_path,
+                included_items=[],
+                allowed_group_ids=None,
+            )
+        )
+        return jobs
+
+    mode = options.mode
+    if mode == SummaryExportMode.PER_FILE:
+        for payload in payloads:
+            suffix = SummaryExportOptions.sanitize_suffix(payload.display_name) or payload.path.stem
+            base_label = f"summary_{suffix}" if suffix else f"summary_{payload.path.stem}"
+            jobs.append(
+                SummaryExportJob(
+                    label=base_label,
+                    output_path=_make_output_path(base_label),
+                    included_items=list(payload.included),
+                    allowed_group_ids=None,
+                )
+            )
+        return jobs
+
+    if mode == SummaryExportMode.CUSTOM_SELECTION:
+        target_ids = [gid for gid in options.selected_group_ids if gid]
+        if target_ids:
+            target_set = set(target_ids)
+            relevant_payloads = [payload for payload in payloads if payload.group_ids & target_set]
+            if relevant_payloads:
+                suffix = options.custom_suffix or "selection"
+                suffix = SummaryExportOptions.sanitize_suffix(suffix) or "selection"
+                base_label = f"summary_{suffix}"
+                jobs.append(
+                    SummaryExportJob(
+                        label=base_label,
+                        output_path=_make_output_path(base_label),
+                        included_items=_combine_included(relevant_payloads),
+                        allowed_group_ids=target_set,
+                    )
+                )
+                return jobs
+        # Fallback to merged output if selection is empty or not found.
+        mode = SummaryExportMode.MERGED
+
+    if mode == SummaryExportMode.MERGED:
+        jobs.append(
+            SummaryExportJob(
+                label="summary",
+                output_path=_make_output_path("summary"),
+                included_items=_combine_included(payloads),
+                allowed_group_ids=None,
+            )
+        )
+        return jobs
+
+    # Safety fallback
+    jobs.append(
+        SummaryExportJob(
+            label="summary",
+            output_path=default_output_path,
+            included_items=_combine_included(payloads),
+            allowed_group_ids=None,
+        )
+    )
+    return jobs
+
+
+def _ensure_summary_workbook(abs_path: str):
+    if os.path.exists(abs_path):
+        return
+    wb = openpyxl.Workbook()
+    ws1 = wb.active
+    ws1.title = "概要"
+    wb.create_sheet("データ")
+    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
+    wb.save(abs_path)
+
+
+def _is_xlsx_writable(path: str) -> bool:
+    try:
+        with open(path, "a"):
+            pass
+        return True
+    except PermissionError:
+        return False
+    except Exception:
+        # Treat other errors (e.g., file missing) as writable so caller can handle.
+        return True
+
+
+def _wrap_job_progress(job_index: int, job_total: int, callback):
+    if not callback:
+        return None
+
+    def _wrapped(current: int, total: int, message: str):
+        prefixed = f"[{job_index}/{job_total}] {message}"
+        return callback(current, total, prefixed)
+
+    return _wrapped
+
+
+def _run_single_summary_job(
+    job: SummaryExportJob,
+    parent,
+    dataset_data: List[dict],
+    instruments_data: List[dict],
+    progress_callback,
+):
+    from qt_compat.widgets import QMessageBox
+
+    abs_xlsx = job.output_path
+    _ensure_summary_workbook(abs_xlsx)
+
+    def emit_progress(current: int, total: int, message: str) -> bool:
+        if progress_callback:
+            return progress_callback(current, total, message)
+        return True
+
+    def show_retry_dialog_sync():
+        msg = (
+            "Excelファイルが他で開かれているため書き込みできません。\n"
+            "Excel等を閉じてから[再開]を押してください。\n"
+            f"対象: {abs_xlsx}"
+        )
+        mbox = QMessageBox(parent)
+        mbox.setIcon(QMessageBox.Warning)
+        mbox.setWindowTitle("書き込みエラー")
+        mbox.setText(msg)
+        retry_btn = mbox.addButton("再開", QMessageBox.AcceptRole)
+        cancel_btn = mbox.addButton("キャンセル", QMessageBox.RejectRole)
+        mbox.setDefaultButton(retry_btn)
+        mbox.exec()
+        return "cancel" if mbox.clickedButton() == cancel_btn else "retry"
+
+    while True:
+        if not os.path.exists(abs_xlsx) or _is_xlsx_writable(abs_xlsx):
+            try:
+                wb = openpyxl.load_workbook(abs_xlsx)
+                summary_context = {
+                    "subGroup_included": job.included_items,
+                    "dataset_data": dataset_data,
+                    "instruments_data": instruments_data,
+                    "allowed_group_ids": job.allowed_group_ids,
+                }
+                write_summary_sheet(
+                    wb,
+                    parent,
+                    False,
+                    progress_callback if progress_callback else None,
+                    summary_context=summary_context,
+                )
+
+                if not emit_progress(0, 1, "各シートの書き出しを実行中..."):
+                    return False
+
+                write_members_sheet(wb, parent)
+                write_organization_sheet(wb, parent)
+                write_instrumentType_sheet(wb, parent)
+                write_datasets_sheet(wb, parent)
+                write_subgroups_sheet(wb, parent)
+                write_groupDetail_sheet(wb, parent)
+                write_templates_sheet(wb, parent)
+                write_instruments_sheet(wb, parent)
+                write_licenses_sheet(wb, parent)
+                write_entries_sheet(wb, parent)
+
+                if not emit_progress(0, 1, "ファイル保存中..."):
+                    return False
+                wb.save(abs_xlsx)
+                emit_progress(1, 1, "XLSX書き出し完了")
+                return True
+            except PermissionError:
+                msg = (
+                    "Excelファイルが他で開かれているため書き込みできません。\n"
+                    "Excelを閉じてから再実行してください。\n"
+                    f"対象: {abs_xlsx}"
+                )
+                QMessageBox.critical(parent, "書き込みエラー", msg)
+            except Exception as e:  # noqa: BLE001
+                import traceback
+
+                tb = traceback.format_exc()
+                msg = f"XLSX書き込み時に予期せぬエラーが発生しました:\n{e}\n{tb}"
+                QMessageBox.critical(parent, "書き込みエラー", msg)
+                return False
+
+        result = show_retry_dialog_sync()
+        if result == "cancel":
+            QMessageBox.critical(parent, "書き込みエラー", "書き込みを中止しました。")
+            return False
 
 def load_json(path):
     import json
@@ -65,159 +377,88 @@ def apply_basic_info_to_Xlsx_logic(bearer_token, parent=None, webview=None, ui_c
         raise
 
 
-def summary_basic_info_to_Xlsx_logic(bearer_token, parent=None, webview=None, ui_callback=None, progress_callback=None):
-    
-    """
-    各種JSONを読み込み、XLSXの対応シートに反映（責務分離構造）
-    """
-    import openpyxl
+def summary_basic_info_to_Xlsx_logic(
+    bearer_token,
+    parent=None,
+    webview=None,
+    ui_callback=None,
+    progress_callback=None,
+    export_options=None,
+):
+    """Generate summary.xlsx files based on the selected export mode."""
+
     from qt_compat.widgets import QMessageBox
-    
-    if progress_callback:
-        if not progress_callback(0, 1, "XLSX書き出しを開始しています..."):
-            return "キャンセルされました"
-    
-    XLSX_PATH = os.path.join(OUTPUT_DIR, "summary.xlsx")
-    abs_xlsx = os.path.abspath(XLSX_PATH)
-    logger.info(f"XLSX書き出し開始: {abs_xlsx}")
-    
-    def show_messagebox(method, *args, **kwargs):
-        method(*args, **kwargs)
-        
-    if progress_callback:
-        if not progress_callback(0, 1, "XLSXファイル準備中..."):
-            return "キャンセルされました"
-            
-    if not os.path.exists(abs_xlsx):
-        logger.info(f"ファイルが存在しないため新規作成: {abs_xlsx}")
-        # ファイルがなければ新規作成し、シート1:概要、シート2:データ
-        import openpyxl
-        wb = openpyxl.Workbook()
-        # 既定のシート名を「概要」に変更
-        ws1 = wb.active
-        ws1.title = "概要"
-        # 2枚目「データ」
-        ws2 = wb.create_sheet("データ")
-        wb.save(abs_xlsx)
-        msg = f"XLSXファイルが存在しなかったため新規作成しました: {abs_xlsx}\nシート: 概要, データ"
-        #show_messagebox(QMessageBox.information, parent, "新規作成", msg)
-        
-    if progress_callback:
-        if not progress_callback(0, 1, "ファイルアクセス権限チェック中..."):
-            return "キャンセルされました"
-    from qt_compat.widgets import QMessageBox
-    import time
-    def is_xlsx_writable(path):
-        try:
-            # 書き込みモードで一時的に開いてすぐ閉じる
-            with open(path, 'a'):
-                pass
-            return True
-        except PermissionError:
-            return False
-        except Exception:
-            return True  # 存在しない場合などは書き込み可能とみなす
 
-    def show_retry_dialog_sync():
-        msg = f"Excelファイルが他で開かれているため書き込みできません。\nExcel等を閉じてから[再開]を押してください。\n対象: {abs_xlsx}"
-        mbox = QMessageBox(parent)
-        mbox.setIcon(QMessageBox.Warning)
-        mbox.setWindowTitle("書き込みエラー")
-        mbox.setText(msg)
-        retry_btn = mbox.addButton("再開", QMessageBox.AcceptRole)
-        cancel_btn = mbox.addButton("キャンセル", QMessageBox.RejectRole)
-        mbox.setDefaultButton(retry_btn)
-        mbox.exec()
-        if mbox.clickedButton() == cancel_btn:
-            return 'cancel'
-        else:
-            return 'retry'
+    options = SummaryExportOptions.from_payload(export_options).with_sanitized_suffix()
 
-    try:
-        logger.debug("[XLSX] 書き込み処理開始: %s", abs_xlsx)
-        while True:
-            if not os.path.exists(abs_xlsx) or is_xlsx_writable(abs_xlsx):
-                logger.debug("[XLSX] 書き込み可能: %s", abs_xlsx)
-                # 書き込み可能になったら本処理へ
-                try:
-                    logger.debug("[XLSX] openpyxlでワークブック読込: %s", abs_xlsx)
-                    wb = openpyxl.load_workbook(abs_xlsx)
-                    # 各種JSON→シート出力
-                    logger.debug("[XLSX] write_summary_sheet 実行")
-                    write_summary_sheet(wb, parent, False, progress_callback)  # 概要シートの書き込み
+    default_xlsx = os.path.abspath(os.path.join(OUTPUT_DIR, "summary.xlsx"))
+    group_payloads = _load_group_payloads(
+        additional_paths=options.extra_project_files,
+        selected_default_files=options.project_files or None,
+    )
+    jobs = _build_summary_jobs(options, default_xlsx, group_payloads)
+    total_jobs = len(jobs)
+    if total_jobs == 0:
+        jobs = _build_summary_jobs(SummaryExportOptions(), default_xlsx, group_payloads)
+        total_jobs = len(jobs)
 
-                    if progress_callback:
-                        if not progress_callback(0, 1, "各シートの書き出しを実行中..."):
-                            return "キャンセルされました"
-                    
-                    logger.debug("[XLSX] write_members_sheet 実行")
-                    write_members_sheet(wb, parent)
-                    logger.debug("[XLSX] write_organization_sheet 実行")
-                    write_organization_sheet(wb, parent)
-                    logger.debug("[XLSX] write_instrumentType_sheet 実行")
-                    write_instrumentType_sheet(wb, parent)
-                    logger.debug("[XLSX] write_datasets_sheet 実行")
-                    write_datasets_sheet(wb, parent)
-                    logger.debug("[XLSX] write_subgroups_sheet 実行")
-                    write_subgroups_sheet(wb, parent)
-                    logger.debug("[XLSX] write_groupDetail_sheet 実行")
-                    write_groupDetail_sheet(wb, parent)
-
-                    logger.debug("[XLSX] write_templates_sheet 実行")
-                    write_templates_sheet(wb, parent)
-                    logger.debug("[XLSX] write_instruments_sheet 実行")
-                    write_instruments_sheet(wb, parent)
-                    logger.debug("[XLSX] write_licenses_sheet 実行")
-                    write_licenses_sheet(wb, parent)
-                    logger.debug("[XLSX] write_entries_sheet 実行")
-                    write_entries_sheet(wb, parent)
-
-                    if progress_callback:
-                        if not progress_callback(0, 1, "ファイル保存中..."):
-                            return "キャンセルされました"
-
-                    logger.debug("[XLSX] wb.save 実行: %s", abs_xlsx)
-                    wb.save(abs_xlsx)
-                    
-                    if progress_callback:
-                        if not progress_callback(1, 1, "XLSX書き出し完了"):
-                            return "キャンセルされました"
-                    
-                    # 完了メッセージはUI層で表示するためここでは出さない
-                    logger.debug("[XLSX] summary_basic_info_to_Xlsx_logic: 正常終了")
-                    return True
-                except PermissionError:
-                    logger.error("[XLSX] PermissionError: ファイルが開かれている %s", abs_xlsx)
-                    msg = f"Excelファイルが他で開かれているため書き込みできません。\nExcelを閉じてから再実行してください。\n対象: {abs_xlsx}"
-                    show_messagebox(QMessageBox.critical, parent, "書き込みエラー", msg)
-                except Exception as e:
-                    logger.error("[XLSX] 予期せぬエラー: %s", e)
-                    import traceback
-                    tb = traceback.format_exc()
-                    msg = f"XLSX書き込み時に予期せぬエラーが発生しました:\n{e}\n{tb}"
-                    show_messagebox(QMessageBox.critical, parent, "書き込みエラー", msg)
-                    return False
-                break
-            # 開かれている場合はアラート
-            logger.debug("[XLSX] ファイルが開かれているためリトライダイアログ表示: %s", abs_xlsx)
-            result = show_retry_dialog_sync()
-            if result == 'cancel':
-                logger.debug("[XLSX] ユーザーがキャンセルを選択: %s", abs_xlsx)
-                show_messagebox(QMessageBox.critical, parent, "書き込みエラー", "書き込みを中止しました。")
-                return False
-    except Exception as e:
-        logger.error("[XLSX] 致命的エラー: %s", e)
-        import traceback
-        tb = traceback.format_exc()
-        msg = f"まとめXLSX処理で致命的なエラーが発生しました:\n{e}\n{tb}"
-        QMessageBox.critical(parent, "致命的エラー", msg)
+    dataset_json = load_json(DATASET_JSON_PATH)
+    instruments_json = load_json(INSTRUMENTS_JSON_PATH)
+    if not dataset_json or not instruments_json:
+        msg = "必要なJSONデータが不足しています。基本情報を取得してから再実行してください。"
+        QMessageBox.critical(parent, "データ不足", msg)
         return False
 
+    dataset_data = dataset_json.get("data", [])
+    instruments_data = instruments_json.get("data", [])
 
-def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callback=None):
+    if total_jobs == 0:
+        QMessageBox.information(parent, "処理対象なし", "出力対象となるサブグループが見つかりませんでした。")
+        return False
+
+    results: List[str] = []
+    for idx, job in enumerate(jobs, start=1):
+        job_progress = _wrap_job_progress(idx, total_jobs, progress_callback)
+        if job_progress:
+            if not job_progress(0, 1, f"{job.label} | XLSX書き出しを開始しています..."):
+                return "キャンセルされました"
+
+        success = _run_single_summary_job(
+            job,
+            parent,
+            dataset_data,
+            instruments_data,
+            job_progress,
+        )
+        if not success:
+            return False
+        results.append(job.output_path)
+
+    if results:
+        display_paths = []
+        for path in results:
+            try:
+                display_paths.append(os.path.relpath(path, OUTPUT_DIR))
+            except ValueError:
+                display_paths.append(path)
+        return "出力完了: " + ", ".join(display_paths)
+
+    return True
+
+
+def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callback=None, summary_context=None):
     import json, os
     logger.info("write_summary_sheet called start")
     load_data_entry_json=False
+    summary_context = summary_context or {}
+    context_subgroups = summary_context.get("subGroup_included") if isinstance(summary_context, dict) else None
+    context_dataset = summary_context.get("dataset_data") if isinstance(summary_context, dict) else None
+    context_instruments = summary_context.get("instruments_data") if isinstance(summary_context, dict) else None
+    allowed_group_ids = summary_context.get("allowed_group_ids") if isinstance(summary_context, dict) else None
+    if allowed_group_ids:
+        allowed_group_ids = set(allowed_group_ids)
+    else:
+        allowed_group_ids = None
     
     if progress_callback:
         if not progress_callback(0, 1, "JSONファイル読み込み中..."):
@@ -284,9 +525,10 @@ def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callbac
     # 必要なデータのロード（parentから渡される想定。なければ適宜修正）
     # 例: subGroup_included, dataset_data, user_id_to_name, instrument_id_to_name, instrument_id_to_localid, manual_data_map, id_to_label
     # ここでは仮にparentから取得する例
-    subGroup_included = getattr(parent, 'subGroup_included', [])
-    dataset_data = getattr(parent, 'dataset_data', [])
+    subGroup_included = context_subgroups if context_subgroups is not None else getattr(parent, 'subGroup_included', [])
+    dataset_data = context_dataset if context_dataset is not None else getattr(parent, 'dataset_data', [])
     user_id_to_name = getattr(parent, 'user_id_to_name', {})
+    instruments_data = context_instruments if context_instruments is not None else getattr(parent, 'instruments_data', [])
     instrument_id_to_name = getattr(parent, 'instrument_id_to_name', {})
     instrument_id_to_localid = getattr(parent, 'instrument_id_to_localid', {})
     manual_data_map = getattr(parent, 'manual_data_map', {})
@@ -382,6 +624,8 @@ def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callbac
     start_time = time.time()
     for subGroup in subGroup_included:
         if subGroup.get("type") != "group":
+            continue
+        if allowed_group_ids and subGroup.get("id") not in allowed_group_ids:
             continue
         subGroup_attr = subGroup.get("attributes", {})
         subGroup_name = subGroup_attr.get("name", "")
@@ -499,43 +743,41 @@ def write_summary_sheet(wb, parent, load_data_entry_json=False, progress_callbac
             logger.info("[XLSX] JSONロード成功: %s", abs_path)
             return json.load(f)
 
-    # 各種JSONロード（静的定数を使用）
-    from config.common import DATASET_JSON_PATH, INSTRUMENTS_JSON_PATH, TEMPLATE_JSON_PATH
-    from pathlib import Path
-    
     # groupOrgnizationsフォルダ内の全ファイルを読み込んで統合
-    project_groups_dir = Path(GROUP_ORGNIZATION_DIR)
-    subGroup_included = []
+    if not subGroup_included:
+        project_groups_dir = Path(GROUP_ORGNIZATION_DIR)
+        subGroup_included = []
+        if project_groups_dir.exists():
+            logger.info(f"[v2.1.17] groupOrgnizationsフォルダからサブグループ情報を読み込み: {project_groups_dir}")
+            subgroup_files = list(project_groups_dir.glob("*.json"))
+            logger.info(f"[v2.1.17] 検出されたサブグループファイル数: {len(subgroup_files)}件")
+            
+            for subgroup_file in subgroup_files:
+                try:
+                    with open(subgroup_file, "r", encoding="utf-8") as f:
+                        subgroup_data = json.load(f)
+                        # included配列を統合
+                        included_items = subgroup_data.get("included", [])
+                        subGroup_included.extend(included_items)
+                        logger.info(f"[v2.1.17] {subgroup_file.name}: {len(included_items)}件のアイテムを読み込み")
+                except Exception as e:
+                    logger.error(f"[v2.1.17] サブグループファイル読み込みエラー: {subgroup_file.name} - {e}")
+            
+            logger.info(f"[v2.1.17] 統合後のsubGroup_included総数: {len(subGroup_included)}件")
+        else:
+            logger.warning(f"[v2.1.17] groupOrgnizationsフォルダが存在しません: {project_groups_dir}")
     
-    if project_groups_dir.exists():
-        logger.info(f"[v2.1.17] groupOrgnizationsフォルダからサブグループ情報を読み込み: {project_groups_dir}")
-        subgroup_files = list(project_groups_dir.glob("*.json"))
-        logger.info(f"[v2.1.17] 検出されたサブグループファイル数: {len(subgroup_files)}件")
-        
-        for subgroup_file in subgroup_files:
-            try:
-                with open(subgroup_file, "r", encoding="utf-8") as f:
-                    subgroup_data = json.load(f)
-                    # included配列を統合
-                    included_items = subgroup_data.get("included", [])
-                    subGroup_included.extend(included_items)
-                    logger.info(f"[v2.1.17] {subgroup_file.name}: {len(included_items)}件のアイテムを読み込み")
-            except Exception as e:
-                logger.error(f"[v2.1.17] サブグループファイル読み込みエラー: {subgroup_file.name} - {e}")
-        
-        logger.info(f"[v2.1.17] 統合後のsubGroup_included総数: {len(subGroup_included)}件")
-    else:
-        logger.warning(f"[v2.1.17] groupOrgnizationsフォルダが存在しません: {project_groups_dir}")
-    
-    dataset_json = load_json(DATASET_JSON_PATH)
-    instruments_json = load_json(INSTRUMENTS_JSON_PATH)
-    templates_json = load_json(TEMPLATE_JSON_PATH)
-    if not all([dataset_json, instruments_json, templates_json]):
-        print
-        return
-    
-    dataset_data = dataset_json.get("data", [])
-    instruments_data = instruments_json.get("data", [])
+    if not dataset_data:
+        dataset_json = load_json(DATASET_JSON_PATH)
+        if not dataset_json:
+            return
+        dataset_data = dataset_json.get("data", [])
+
+    if not instruments_data:
+        instruments_json = load_json(INSTRUMENTS_JSON_PATH)
+        if not instruments_json:
+            return
+        instruments_data = instruments_json.get("data", [])
 
     # --- 3層構造ヘッダ定義 ---
     HEADER_DEF = [

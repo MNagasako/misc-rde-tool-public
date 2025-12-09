@@ -44,7 +44,11 @@ logger = logging.getLogger(__name__)
 # 2025-11-15: v2.1.3 - データ取得2機能ファイル単位プログレス表示・粒度改善・スレッドセーフ実装
 # 2025-11-15: v2.1.2 - プログレス表示随時更新修正・スレッド安全性向上・repaint実装
 # 2025-11-14: v2.0.8 - プロキシ設定完全修正・接続テストUI設定反映・truststore/CA設定統合
-REVISION = "2.2.2"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+REVISION = "2.2.3"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+# 2025-12-09: v2.2.3 - まとめXLSXの選択的出力・Explorer連携・テスト強化
+#   - Basic Info: groupOrgnizationsごとに対象JSONを選べる「プロジェクトファイル選択」ダイアログを追加し、既定/外部ファイルの個別制御を実装
+#   - Basic Info: まとめXLSXを複数生成した場合に選択して開けるダイアログと、出力フォルダをエクスプローラーで開くショートカットボタンを追加
+#   - テスト/開発: groupProject・subGroupsを含むダミーデータ一式とsummary用ユニットテストを拡充し、選択的分割のリグレッションを自動検証
 # 2025-12-08: v2.2.2 - データエントリー統計共有とSTRUCTURED JSONコンテキスト更新
 #   - data_entry_summaryヘルパーでshared1/2/3集計を標準化し、ポータルのファイル統計自動設定を実装
 #   - DatasetContextCollectorがjson_from_structured_filesを生成し、AIテンプレート/AutoSettingが構造化JSONを扱えるように調整

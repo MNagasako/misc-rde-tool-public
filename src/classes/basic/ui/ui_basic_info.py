@@ -323,6 +323,7 @@ def summary_basic_info_to_Xlsx(controller):
     try:
         from ..util.xlsx_exporter import summary_basic_info_to_Xlsx_logic
         from core.bearer_token_manager import BearerTokenManager
+        from .summary_xlsx_options_dialog import prompt_summary_export_options
         
         # トークン取得
         bearer_token = BearerTokenManager.get_token_with_relogin_prompt(controller.parent)
@@ -339,6 +340,11 @@ def summary_basic_info_to_Xlsx(controller):
             return
         
         webview = getattr(controller.parent, 'webview', controller.parent)
+
+        export_options = prompt_summary_export_options(controller.parent)
+        if export_options is None:
+            logger.info("まとめXLSX作成: ユーザーが出力設定ダイアログをキャンセルしました")
+            return
         
         # プログレス表示付きワーカーを作成（詳細プログレス対応）
         worker = ProgressWorker(
@@ -346,7 +352,8 @@ def summary_basic_info_to_Xlsx(controller):
             task_kwargs={
                 'bearer_token': bearer_token,
                 'parent': controller.parent,
-                'webview': webview
+                'webview': webview,
+                'export_options': export_options.to_payload()
             },
             task_name="まとめXLSX作成"
         )

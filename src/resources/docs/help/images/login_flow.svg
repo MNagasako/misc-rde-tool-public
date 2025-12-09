@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="560" height="180" viewBox="0 0 560 180" xmlns="http://www.w3.org/2000/svg">
+  <style>
+    .box { fill: #f4f6fb; stroke: #4a5dff; stroke-width: 2; rx: 12; ry: 12; }
+    .text { font-family: 'Yu Gothic UI', 'Meiryo', sans-serif; font-size: 14px; fill: #1f2a44; }
+    .arrow { stroke: #4a5dff; stroke-width: 2; marker-end: url(#arrowhead); }
+  </style>
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#4a5dff" />
+    </marker>
+  </defs>
+  <rect class="box" x="20" y="45" width="150" height="90" />
+  <rect class="box" x="205" y="45" width="150" height="90" />
+  <rect class="box" x="390" y="45" width="150" height="90" />
+  <text class="text" x="40" y="90">アプリ起動</text>
+  <text class="text" x="40" y="115">WebView 初期化</text>
+  <text class="text" x="225" y="90">ログイン UI 表示</text>
+  <text class="text" x="225" y="115">自動ログイン開始</text>
+  <text class="text" x="410" y="90">トークン取得</text>
+  <text class="text" x="410" y="115">Basic/Material 両方</text>
+  <line class="arrow" x1="170" y1="90" x2="205" y2="90" />
+  <line class="arrow" x1="355" y1="90" x2="390" y2="90" />
+</svg>

@@ -138,8 +138,9 @@ def format_prompt_with_context(prompt_template, context_data):
         except Exception as _alias_err:
             logger.debug("テンプレート置換のエイリアス適用で警告: %s", _alias_err)
         grant_number = context_data.get('grant_number')
+        offline_mode = os.environ.get('ARIM_FETCHER_OFFLINE', '').lower() in ('1', 'true', 'yes')
         
-        if grant_number and grant_number != "未設定":
+        if grant_number and grant_number != "未設定" and not offline_mode:
             logger.debug("ARIM報告書データ取得開始: %s", grant_number)
             try:
                 from classes.dataset.util.arim_report_fetcher import fetch_arim_report_data
@@ -157,6 +158,8 @@ def format_prompt_with_context(prompt_template, context_data):
             except Exception as e:
                 logger.warning("ARIM報告書取得でエラー: %s", e)
                 # エラーがあってもベースのコンテキストで続行
+        elif offline_mode:
+            logger.info("ARIM報告書取得をスキップしました（ARIM_FETCHER_OFFLINE モード）")
         
         # データポータルマスタデータを取得・統合
         try:

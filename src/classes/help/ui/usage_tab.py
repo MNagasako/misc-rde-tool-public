@@ -4,7 +4,7 @@
 """
 
 import logging
-from pathlib import Path
+from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +18,8 @@ try:
 except ImportError:
     PYQT5_AVAILABLE = False
     class QWidget: pass
+
+from classes.help.util.markdown_renderer import load_help_markdown, set_markdown_document
 
 
 # ダミーの使用方法テキスト（後で実際の内容に置き換え）
@@ -104,37 +106,23 @@ class UsageTab(QWidget):
         self.usage_browser.document().setDocumentMargin(8)
         
         # 使用方法テキストを読み込み
-        usage_text = self.load_usage_text()
-        
-        # Markdownレンダリング
-        try:
-            from classes.help.util.markdown_renderer import render_markdown_to_html
-            html = render_markdown_to_html(usage_text)
-            self.usage_browser.setHtml(html)
-        except ImportError:
-            # フォールバック: プレーンテキスト
-            self.usage_browser.setPlainText(usage_text)
+        usage_text, base_dir = self.load_usage_text()
+
+        # Markdownを直接適用
+        set_markdown_document(self.usage_browser, usage_text, base_dir)
         
         layout.addWidget(self.usage_browser)
     
-    def load_usage_text(self) -> str:
+    def load_usage_text(self) -> Tuple[str, Optional[str]]:
         """使用方法テキストを読み込み"""
         try:
-            # Markdownファイルから読み込み
-            from config.common import get_base_dir
-            import os
-            
-            md_path = os.path.join(get_base_dir(), 'docs', 'help', 'usage.md')
-            
-            if os.path.exists(md_path):
-                with open(md_path, 'r', encoding='utf-8') as f:
-                    return f.read()
-            else:
-                logger.warning(f"使用方法ファイルが見つかりません: {md_path}")
-                return DEFAULT_USAGE_TEXT
+            return load_help_markdown('usage.md')
+        except FileNotFoundError as e:
+            logger.warning("使用方法ファイルが見つかりません: %s", e)
+            return DEFAULT_USAGE_TEXT, None
         except Exception as e:
             logger.error(f"使用方法ファイル読み込みエラー: {e}")
-            return DEFAULT_USAGE_TEXT
+            return DEFAULT_USAGE_TEXT, None
 
 
 def create_usage_tab(parent=None):

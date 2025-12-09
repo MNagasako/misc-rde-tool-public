@@ -1,16 +1,17 @@
-"""
-Markdownレンダリングユーティリティ - ARIM RDE Tool v2.1.3
-"""
+"""Markdownレンダリングユーティリティ - ARIM RDE Tool v2.1.3"""
 
 import logging
+import os
 from pathlib import Path
 from typing import Optional
+
+from config.common import get_base_dir, get_static_resource_path
 
 logger = logging.getLogger(__name__)
 
 try:
     from qt_compat.widgets import QTextBrowser
-    from qt_compat.core import Qt
+    from qt_compat.core import QUrl
     PYQT5_AVAILABLE = True
 except ImportError:
     PYQT5_AVAILABLE = False
@@ -170,6 +171,26 @@ def render_markdown_to_html(markdown_text: str) -> str:
     return '\n'.join(html_parts)
 
 
+def set_markdown_document(
+    text_browser: QTextBrowser,
+    markdown_text: str,
+    base_path: Optional[str] = None,
+) -> None:
+    """Apply markdown text directly to a QTextBrowser with optional base path."""
+
+    if not PYQT5_AVAILABLE:
+        return
+
+    document = text_browser.document()
+    if base_path:
+        base_dir = base_path if os.path.isdir(base_path) else os.path.dirname(base_path)
+        if base_dir:
+            document.setBaseUrl(QUrl.fromLocalFile(base_dir))
+
+    safe_text = markdown_text if markdown_text.strip() else "内容がありません"
+    document.setMarkdown(safe_text)
+
+
 def load_markdown_file(file_path: Path) -> str:
     """Markdownファイルを読み込む"""
     try:
@@ -180,16 +201,33 @@ def load_markdown_file(file_path: Path) -> str:
         return f"# エラー\n\nファイルの読み込みに失敗しました: {file_path}"
 
 
-def create_markdown_viewer(markdown_text: str, parent=None) -> Optional[QTextBrowser]:
+def load_help_markdown(filename: str) -> tuple[str, Optional[str]]:
+    """Load help markdown from the bundled resources (with legacy fallback)."""
+
+    candidates: list[str] = []
+    try:
+        candidates.append(get_static_resource_path(os.path.join('resources', 'docs', 'help', filename)))
+    except Exception as exc:  # pragma: no cover - diagnostic logging only
+        logger.debug("静的リソースパスの解決に失敗: %s", exc)
+
+    legacy_path = os.path.join(get_base_dir(), 'docs', 'help', filename)
+    candidates.append(legacy_path)
+
+    for path in candidates:
+        if path and os.path.exists(path):
+            with open(path, 'r', encoding='utf-8') as handle:
+                return handle.read(), os.path.dirname(path)
+
+    raise FileNotFoundError(f"help markdown not found: {filename}")
+
+
+def create_markdown_viewer(markdown_text: str, parent=None, base_path: Optional[str] = None) -> Optional[QTextBrowser]:
     """Markdown表示用のTextBrowserを作成"""
     if not PYQT5_AVAILABLE:
         return None
     
     viewer = QTextBrowser(parent)
     viewer.setOpenExternalLinks(True)
-    
-    # HTMLに変換して表示
-    html = render_markdown_to_html(markdown_text)
-    viewer.setHtml(html)
+    set_markdown_document(viewer, markdown_text, base_path)
     
     return viewer

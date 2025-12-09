@@ -21,6 +21,8 @@ except ImportError:
     PYQT5_AVAILABLE = False
     class QWidget: pass
 
+from classes.help.util.markdown_renderer import load_help_markdown, set_markdown_document
+
 
 class AboutTab(QWidget):
     """Aboutタブ - アプリケーション情報とライセンス表示"""
@@ -96,23 +98,11 @@ class AboutTab(QWidget):
         about_browser.document().setDocumentMargin(8)
         
         try:
-            # Markdownファイルから読み込み
-            from config.common import get_base_dir
-            import os
-            
-            md_path = os.path.join(get_base_dir(), 'docs', 'help', 'about.md')
-            
-            if os.path.exists(md_path):
-                with open(md_path, 'r', encoding='utf-8') as f:
-                    about_text = f.read()
-            else:
-                about_text = f"# ARIM RDE Tool について\n\nAbout情報ファイル{md_path}が見つかりません。"
-            
-            # Markdownレンダリング
-            from classes.help.util.markdown_renderer import render_markdown_to_html
-            html = render_markdown_to_html(about_text)
-            about_browser.setHtml(html)
-            
+            about_text, base_dir = load_help_markdown('about.md')
+            set_markdown_document(about_browser, about_text, base_dir)
+        except FileNotFoundError as e:
+            logger.warning("About情報ファイルが見つかりません: %s", e)
+            about_browser.setPlainText("About情報ファイルが見つかりませんでした。docs/help/about.md を確認してください。")
         except Exception as e:
             logger.error(f"About情報読み込みエラー: {e}")
             about_browser.setPlainText(f"About情報の読み込みに失敗しました。\n\nエラー: {e}")

@@ -17,6 +17,7 @@ from .theme_keys import ThemeKey
 from .theme_manager import ThemeManager, ThemeMode, get_theme_manager, get_color
 from .light_theme import LightTheme
 from .dark_theme import DarkTheme
+from .window_frame import apply_window_frame_theme
 
 __all__ = [
     'ThemeKey',
@@ -26,6 +27,7 @@ __all__ = [
     'get_color',
     'LightTheme',
     'DarkTheme',
+    'apply_window_frame_theme',
 ]
 
 __version__ = '1.0.0'

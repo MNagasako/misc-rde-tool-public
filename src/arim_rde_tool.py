@@ -73,7 +73,7 @@ from qt_compat.gui import QIcon
 from config.common import REVISION, OUTPUT_DIR, DYNAMIC_IMAGE_DIR, get_static_resource_path,get_base_dir
 from functions.common_funcs import read_login_info
 # テーマ管理
-from classes.theme import get_color, ThemeKey, ThemeManager, ThemeMode
+from classes.theme import get_color, ThemeKey, ThemeManager, ThemeMode, apply_window_frame_theme
 from classes.utils.button_styles import get_button_style
 # クラス群
 from classes.core import AppInitializer
@@ -119,6 +119,7 @@ class Browser(QWidget):
         theme_manager = ThemeManager.instance()
         detected = theme_manager.detect_system_theme()
         theme_manager.set_mode(detected)
+        theme_manager.theme_changed.connect(self._on_theme_mode_changed)
         logger.info(f"[Theme] 初期テーマモード (OS検出): {detected.value}")
         
         # 基本属性の初期化
@@ -314,6 +315,8 @@ class Browser(QWidget):
     def _finalize_window_setup(self):
         """ウィンドウの表示と最終設定"""
         self.ui_controller.finalize_window_setup()
+        # 標準ウィンドウ枠のカラーも現在のテーマに追従させる
+        QTimer.singleShot(0, self._apply_native_titlebar_theme)
 
     def _show_proxy_startup_notification(self):
         """プロキシ起動時通知を表示"""
@@ -357,6 +360,17 @@ class Browser(QWidget):
             logger.warning(f"プロキシ起動時通知エラー: {e}")
             import traceback
             logger.debug(traceback.format_exc())
+
+    def _on_theme_mode_changed(self, _mode):
+        """テーマ変更時にタイトルバー配色を更新"""
+        QTimer.singleShot(0, self._apply_native_titlebar_theme)
+
+    def _apply_native_titlebar_theme(self):
+        """OS標準ウィンドウ枠にテーマを適用"""
+        try:
+            apply_window_frame_theme(self)
+        except Exception as err:
+            logger.debug("タイトルバーのテーマ適用に失敗しました: %s", err)
     
     # v2.1.0: TokenManager Signal Handlers
     def _on_token_refreshed(self, host):
@@ -900,9 +914,9 @@ def main():
                             break
             except Exception:
                 logger.debug("README.md: 取得失敗")
-            # docs/ARCHITECTURE_FEATURE_MAP_v1.17.2.md
+            # doc_archives/ARCHITECTURE_FEATURE_MAP_v1.17.2.md
             try:
-                arch_path = get_static_resource_path('../docs/archive/ARCHITECTURE_FEATURE_MAP_v1.17.2.md')
+                arch_path = get_static_resource_path('../doc_archives/ARCHITECTURE_FEATURE_MAP_v1.17.2.md')
                 with open(arch_path, encoding='utf-8') as f:
                     line = f.readline()
                     logger.debug("ARCHITECTURE_FEATURE_MAP_v1.17.2.md: %s", line.strip())

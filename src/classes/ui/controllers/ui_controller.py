@@ -12,7 +12,8 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import QTimer
 
-from config.common import INPUT_DIR, get_dynamic_file_path
+from config.common import INPUT_DIR, OUTPUT_DIR, SUMMARY_XLSX_PATH, ensure_directory_exists, get_dynamic_file_path
+from classes.basic.util.summary_file_utils import list_summary_workbooks
 from classes.theme import get_color, ThemeKey
 from classes.utils.button_styles import get_menu_button_style
 
@@ -1155,7 +1156,7 @@ class UIController(UIControllerCore):
         Step 2.5.2.1: 基本情報UI構築層の分離
         データ取得・Excel・段階実行・ステータス表示の統合UI構築
         """
-        from qt_compat.widgets import QLabel, QHBoxLayout, QVBoxLayout, QLineEdit, QMessageBox
+        from qt_compat.widgets import QLabel, QHBoxLayout, QVBoxLayout, QLineEdit, QMessageBox, QInputDialog
         from classes.theme.theme_manager import ThemeManager
         
         try:
@@ -1268,18 +1269,59 @@ class UIController(UIControllerCore):
             # まとめXLSXを開くボタン
             self.open_summary_xlsx_btn = self.create_auto_resize_button("📂 まとめXLSXを開く", 200, 40, xlsx_button_style)
             open_summary_xlsx_btn = self.open_summary_xlsx_btn
+
             def open_summary_xlsx():
                 import os
-                from config.common import SUMMARY_XLSX_PATH
-                if os.path.exists(SUMMARY_XLSX_PATH):
-                    try:
-                        os.startfile(SUMMARY_XLSX_PATH)
-                    except Exception as e:
-                        QMessageBox.warning(self.parent, "ファイルを開けません", f"Excelファイルを開けませんでした:\n{e}")
-                else:
-                    QMessageBox.warning(self.parent, "ファイルがありません", f"ファイルが存在しません:\n{SUMMARY_XLSX_PATH}")
+
+                summary_files = list_summary_workbooks(OUTPUT_DIR, SUMMARY_XLSX_PATH)
+                if not summary_files:
+                    QMessageBox.warning(self.parent, "ファイルがありません", "出力済みのまとめXLSXが見つかりません。")
+                    return
+
+                target_path = summary_files[0]
+                if len(summary_files) > 1:
+                    items = [path.name for path in summary_files]
+                    selection, ok = QInputDialog.getItem(
+                        self.parent,
+                        "まとめXLSXを選択",
+                        "開くファイルを選択してください",
+                        items,
+                        0,
+                        False,
+                    )
+                    if not ok:
+                        return
+                    name_to_path = {path.name: path for path in summary_files}
+                    target_path = name_to_path.get(selection)
+                    if not target_path:
+                        QMessageBox.warning(self.parent, "ファイルが見つかりません", "選択したファイルを検出できませんでした。")
+                        return
+
+                try:
+                    os.startfile(str(target_path))
+                except Exception as e:
+                    QMessageBox.warning(self.parent, "ファイルを開けません", f"Excelファイルを開けませんでした:\n{e}")
+
             open_summary_xlsx_btn.clicked.connect(open_summary_xlsx)
             btn_layout2.addWidget(open_summary_xlsx_btn)
+
+            self.open_output_dir_btn = self.create_auto_resize_button("📁 XLSXフォルダを開く", 210, 40, xlsx_button_style)
+            open_output_dir_btn = self.open_output_dir_btn
+
+            def open_output_dir():
+                import os
+
+                directory = ensure_directory_exists(OUTPUT_DIR)
+                if not os.path.isdir(directory):
+                    QMessageBox.warning(self.parent, "フォルダがありません", f"ディレクトリを作成できませんでした:\n{directory}")
+                    return
+                try:
+                    os.startfile(directory)
+                except Exception as e:
+                    QMessageBox.warning(self.parent, "フォルダを開けません", f"エクスプローラーで開けませんでした:\n{e}")
+
+            open_output_dir_btn.clicked.connect(open_output_dir)
+            btn_layout2.addWidget(open_output_dir_btn)
             
             layout.addLayout(btn_layout2)
         except Exception as e:
