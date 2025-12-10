@@ -4,7 +4,7 @@
 
 # アプリケーション情報
 APP_NAME = "ARIM RDE Tool"
-APP_VERSION = "v2.1.12"
+APP_VERSION = "v2.2.5"
 APP_DESCRIPTION = "ARIM事業 RDEシステム/データポータル の 操作支援ツール"
 APP_AUTHOR = "MNagasako"
 APP_COPYRIGHT = "Copyright © 2024-2025 MNagasako"
