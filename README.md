@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル移行ツール v2.2.4** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.2.4** のバイナリ配布およびドキュメント公開用リポジトリです。
 
 **[ツール概要(こちらのほうが更新頻度高いです)](https://cuddly-stinger-40d.notion.site/QuickStart-2befc2cb5fc380f09d0dd4595b767f4d?source=copy_link)**
 
