@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.2.4** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.2.5** のバイナリ配布およびドキュメント公開用リポジトリです。
 
 **[ツール概要(こちらのほうが更新頻度高いです)](https://cuddly-stinger-40d.notion.site/QuickStart-2befc2cb5fc380f09d0dd4595b767f4d?source=copy_link)**
 
@@ -16,14 +16,14 @@
 
 ## 🚀 最新情報
 
-**2025-12-10 最新リリース**: バージョン2.2.4（設備/報告書リスティング + キャッシュ/検索強化）
+**2025-12-10 最新リリース**: バージョン2.2.5（AIサジェスト管理の安定化 + バージョンドキュメント統一）
 
-### v2.2.4 の主な改善
+### v2.2.5 の主な改善
 
-- Equipment / Reports タブにフィルタ/ソート可能な共通テーブルウィジェット（ListingTabBase）を追加し、最新JSONをアプリ内で即ブラウズ・再読込できるリスティングタブを実装しました。
-- ReportCacheManager + キャッシュモード切替UIで、取得済みレポートを再利用する高速モードと常に再取得するモードを選択でき、ログにもキャッシュポリシーを明示します。
-- Basic Info に検索設定ダイアログを追加し、「自分のデータセット」「キーワード直接指定」「機関ID+年度レンジ」から検索キューを構成するバッチ検索が容易になりました。
-- FacilityListingScraper による設備一覧スクレイプとID収集を導入し、全件取得や欠損検知フローをUIからワンクリックで実行できます。
+- AIサジェスト管理ダイアログのレイアウト再構築を見直し、スペーサやストレッチ項目を安全に破棄してからウィジェットを再生成することで「AI拡張設定の読み込みエラー」を解消しました。
+- AI拡張タブのボタンキャッシュをリフレッシュする処理を調整し、設定ダイアログを閉じた直後でも説明文提案タブが安定して再描画されるようになりました。
+- `test_extension_buttons_reload_without_error` を追加し、設定保存→再読込のシーケンスをQtウィジェットテストで自動検証して恒常的なリグレッションを防いでいます。
+- README / ヘルプ / セットアップ付属文書のバージョンを2.2.5へ統一し、旧版リリースノートを `docs/archive/` 系列へ整理してドキュメントの差分追跡を明確化しました。
 
 > ℹ️ リスティングタブは `output/arim-site/{equipment|reports}_latest.json` など最新エクスポートを前提とします。再読込前に各タブで「JSON再取得」を実行し、キャッシュディレクトリ（`output/arim-site/reports/cache/`）の残量にも留意してください。
 
@@ -388,7 +388,7 @@ Windowsのセキュリティ警告やアンチウイルスによりブロック�
 
 ## 🔢 バージョン情報
 
-現在配布バージョン: `v2.2.4` （`VERSION.txt` に基づく）
+現在配布バージョン: `v2.2.5` （`VERSION.txt` に基づく）
 
 更新履歴の詳細は `docs/CHANGELOG.md` を参照してください。
 

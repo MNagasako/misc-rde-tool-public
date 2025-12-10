@@ -4,6 +4,30 @@
 
 ---
 
+## v2.2.5 (2025-12-10) - AIサジェスト管理の安定化 + ドキュメント更新
+
+### 🧠 AIサジェスト管理ダイアログ
+
+- `AIExtensionConfigDialog` のレイアウトクリア処理を刷新し、`takeAt()` でスペーサやストレッチを必ず破棄してからウィジェットを再構築することで、設定ダイアログ終了直後に発生していた「AI拡張設定の読み込みエラー」を解消。
+- 再描画後に `SpinnerButton` リストと内部キャッシュを同期し、AI説明文提案タブへ戻った際もボタン数・状態が常に一致するように改善。
+
+### 🧪 信頼性検証
+
+- `tests/widgets/test_ai_extension_spinner.py` に `test_extension_buttons_reload_without_error` を追加し、設定保存→再読込フローで例外が発生しないこととボタン構成が完全に再生成されることを自動検証。
+- 既存のスピナービュー系テストと組み合わせ、AI拡張タブのロードシーケンス全体を網羅するリグレッション対策を整備。
+
+### 📚 ドキュメント整備
+
+- README / readme.txt / LICENSE-dist / ヘルプ群 / セットアップスクリプトを含む各種ドキュメントのバージョンを 2.2.5 へ統一し、ユーザー向け表記ゆれを解消。
+- v2.2.4 リリースノートを `docs/archive/` 配下へ退避し、新しい `docs/RELEASE_NOTES_v2.2.5.md` を追加して履歴管理を継続。
+
+### 🧪 テスト
+
+- `./.venv/Scripts/python.exe -m pytest -q tests/widgets/test_ai_extension_spinner.py -k reload`
+- `./.venv/Scripts/python.exe -m pytest -q tests/unit/test_revision_sync.py`
+
+---
+
 ## v2.2.4 (2025-12-10) - 設備/報告書リスティング + キャッシュ/検索強化
 
 ### 🧾 フィルタ可能なリスティングタブ
