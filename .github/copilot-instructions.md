@@ -7,7 +7,7 @@ https://code.visualstudio.com/docs/copilot/copilot-customization#_use-a-githubco
 
 # ARIM RDE Tool 公開配布リポジトリ (v2.1.13)
 
-このリポジトリは、**ARIM事業 RDE→ARIMデータポータル移行ツール**の「バイナリ配布専用リポジトリ」です。
+このリポジトリは、**DICE/RDEシステム**及び**ARIMデータポータル**の統合UIとして動作し操作支援を行うPythonアプリケーションの「バイナリ配布専用リポジトリ」です。
 ソースコード編集は禁止、ドキュメント・設定ファイルのみ操作可能です。
 
 ---
