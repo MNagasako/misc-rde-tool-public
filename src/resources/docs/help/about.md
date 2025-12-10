@@ -66,8 +66,7 @@
 
 ## プロジェクト体制
 
-- **開発**: ARIM 事業 RDE チーム
-- **ライセンス**: Proprietary / © 2024-2025 ARIM
+- **開発**: 個人開発 (MNagasako)
 - **リポジトリ**: [MNagasako/misc-rde-access](https://github.com/MNagasako/misc-rde-access)
 
 ### 問い合わせ
