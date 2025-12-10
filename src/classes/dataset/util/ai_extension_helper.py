@@ -5,6 +5,7 @@ AI拡張機能のボタン設定とプロンプトファイルの管理を行う
 
 import os
 import json
+from typing import Dict
 from config.common import get_dynamic_file_path
 
 import logging
@@ -30,6 +31,20 @@ def load_ai_extension_config():
         logger.error("AI拡張設定読み込みエラー: %s", e)
         logger.info("デフォルト設定を使用します")
         return get_default_ai_extension_config()
+
+
+def save_ai_extension_config(config: Dict):
+    """AI拡張設定ファイルを保存する"""
+    try:
+        config_path = get_dynamic_file_path("input/ai/ai_ext_conf.json")
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        logger.info("AI拡張設定ファイルを保存しました: %s", config_path)
+        return True
+    except Exception as e:
+        logger.error("AI拡張設定保存エラー: %s", e)
+        return False
 
 def get_default_ai_extension_config():
     """デフォルトのAI拡張設定を取得"""

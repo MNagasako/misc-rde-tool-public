@@ -4,6 +4,7 @@
 """
 
 import json
+import re
 from typing import Dict, Any, Optional
 from classes.ai.core.ai_manager import AIManager
 from classes.ai.extensions import AIExtensionRegistry, DatasetDescriptionExtension
@@ -102,11 +103,13 @@ def generate_quick_suggestion(context_data: Dict[str, Any]) -> Optional[str]:
         if result.get('success', False):
             response_text = result.get('response') or result.get('content', '')
             logger.info("AIリクエスト成功: %s文字の応答", len(response_text))
-            
-            # クイック版は1つの説明文のみを期待
-            # 不要な形式マーカーを削除してクリーンアップ
+
+            json_explanation = _extract_explain_normal(response_text)
+            if json_explanation:
+                logger.debug("JSON形式の応答を解析して説明文を抽出しました")
+                return json_explanation
+
             cleaned_response = _clean_quick_response(response_text)
-            
             return cleaned_response
         else:
             error_msg = result.get('error', '不明なエラー')
@@ -160,6 +163,53 @@ def _clean_quick_response(response_text: str) -> str:
     
     # フォールバック: 全文を返す
     return cleaned
+
+
+_CODE_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.IGNORECASE)
+
+
+def _extract_explain_normal(response_text: str) -> Optional[str]:
+    """JSON形式の応答から説明文（explain_normal）を抽出"""
+    payload = _parse_json_payload(response_text)
+    if not isinstance(payload, dict):
+        return None
+    explain_normal = payload.get('explain_normal')
+    if isinstance(explain_normal, str) and explain_normal.strip():
+        return explain_normal.strip()
+    # バックアップ: 他のキーに説明がある場合
+    for fallback_key in ('explain_full', 'explain_simple'):
+        candidate = payload.get(fallback_key)
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate.strip()
+    return None
+
+
+def _parse_json_payload(response_text: str) -> Optional[Dict[str, Any]]:
+    """AI応答からJSON辞書を抽出"""
+    if not response_text:
+        return None
+    text = response_text.strip()
+
+    match = _CODE_BLOCK_PATTERN.search(text)
+    if match:
+        text = match.group(1).strip()
+
+    for candidate in _yield_json_candidates(text):
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError as exc:
+            logger.debug("JSON解析失敗: %s", exc)
+            continue
+    return None
+
+
+def _yield_json_candidates(text: str):
+    """応答文字列からJSON解析候補を生成"""
+    yield text
+    first_brace = text.find('{')
+    last_brace = text.rfind('}')
+    if first_brace != -1 and last_brace > first_brace:
+        yield text[first_brace:last_brace + 1]
 
 
 def test_quick_suggestion():

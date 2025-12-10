@@ -5,6 +5,7 @@ AI拡張機能基盤
 
 import os
 import json
+import re
 from typing import Dict, List, Optional, Any
 from abc import ABC, abstractmethod
 
@@ -66,7 +67,17 @@ class AIPromptTemplate:
             if 'file_tree' in safe_context:
                 logger.debug("safe_context['file_tree']: %s", safe_context['file_tree'][:100] if len(safe_context['file_tree']) > 100 else safe_context['file_tree'])
             
-            return self.base_prompt.format(**safe_context)
+            rendered_prompt = self.base_prompt
+            for key, value in safe_context.items():
+                placeholder = f"{{{key}}}"
+                if placeholder in rendered_prompt:
+                    rendered_prompt = rendered_prompt.replace(placeholder, str(value))
+
+            missing_placeholders = re.findall(r"{([A-Za-z0-9_]+)}", rendered_prompt)
+            if missing_placeholders:
+                raise ValueError(f"プロンプトテンプレートに必要なキー '{missing_placeholders[0]}' が不足しています")
+
+            return rendered_prompt
             
         except KeyError as e:
             # 必要なキーが不足している場合
@@ -395,6 +406,10 @@ STRUCTUREDファイルのテキスト内容:
         except Exception as e:
             logger.warning("MI情報取得エラー: %s", e)
             context['material_index_data'] = '[MI情報取得エラー]'
+
+        # 静的マテリアルインデックス（テンプレートquick用）
+        static_mi = kwargs.get('static_material_index') or context.get('material_index_data', '')
+        context['static_material_index'] = static_mi if static_mi else '[static_material_index未設定]'
         
         # 装置情報を追加（設備IDが指定されている場合）
         equipment_ids = kwargs.get('equipment_ids', [])

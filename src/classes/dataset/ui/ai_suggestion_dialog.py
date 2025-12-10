@@ -25,9 +25,9 @@ from config.common import get_dynamic_file_path
 logger = logging.getLogger(__name__)
 from classes.ai.extensions import AIExtensionRegistry, DatasetDescriptionExtension
 from classes.dataset.util.dataset_context_collector import get_dataset_context_collector
-from classes.dataset.ui.prompt_template_edit_dialog import PromptTemplateEditDialog
 from classes.dataset.util.dataset_context_collector import get_dataset_context_collector
 from classes.dataset.ui.spinner_overlay import SpinnerOverlay
+from classes.dataset.ui.ai_extension_config_dialog import AIExtensionConfigDialog
 
 # 一部のテスト環境でQDialogがMagicMock化され、インスタンス属性参照が困難な場合のフォールバック
 try:
@@ -1724,9 +1724,17 @@ class AISuggestionDialog(QDialog):
             from classes.dataset.util.ai_extension_helper import load_ai_extension_config
             config = load_ai_extension_config()
             
-            # 既存のボタンをクリア
-            for i in reversed(range(self.buttons_layout.count())):
-                self.buttons_layout.itemAt(i).widget().setParent(None)
+            # 既存のボタンをクリア（ストレッチやスペーサにも対応）
+            while self.buttons_layout.count():
+                item = self.buttons_layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    widget.setParent(None)
+                    widget.deleteLater()
+                # QSpacerItem など widget を持たない要素は takeAt の時点で除去済み
+
+            # 旧ボタン参照を破棄
+            self.extension_buttons.clear()
             
             ui_settings = config.get('ui_settings', {})
             buttons_per_row = ui_settings.get('buttons_per_row', 3)
@@ -2487,24 +2495,8 @@ class AISuggestionDialog(QDialog):
     def edit_extension_config(self):
         """AI拡張設定ファイルを編集"""
         try:
-            from classes.dataset.ui.ai_extension_prompt_edit_dialog import AIExtensionPromptEditDialog
-            
-            # 設定ファイルのパスを取得
-            config_path = get_dynamic_file_path("input/ai/ai_ext_conf.json")
-            
-            # プロンプト編集ダイアログを表示（設定ファイル編集モード）
-            dialog = AIExtensionPromptEditDialog(
-                parent=self,
-                prompt_file_path=config_path,
-                button_config={
-                    'label': 'AI拡張設定',
-                    'description': 'AI拡張機能の設定ファイル'
-                }
-            )
-            
-            # 更新時にボタンを再読み込み
-            dialog.prompt_updated.connect(lambda: self.load_extension_buttons())
-            
+            dialog = AIExtensionConfigDialog(self)
+            dialog.config_saved.connect(self.load_extension_buttons)
             dialog.exec()
             
         except Exception as e:

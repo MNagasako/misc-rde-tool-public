@@ -616,14 +616,38 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     filter_type_label.setStyleSheet("font-weight: bold;")
     
     filter_user_only_radio = QRadioButton("ユーザー所属のみ")
+    filter_user_only_radio.setObjectName("dataset_filter_user_only_radio")
     filter_others_only_radio = QRadioButton("その他のみ")
+    filter_others_only_radio.setObjectName("dataset_filter_others_radio")
     filter_all_radio = QRadioButton("すべて")
+    filter_all_radio.setObjectName("dataset_filter_all_radio")
     filter_user_only_radio.setChecked(True)  # デフォルトは「ユーザー所属のみ」
     
     filter_type_layout.addWidget(filter_type_label)
     filter_type_layout.addWidget(filter_user_only_radio)
     filter_type_layout.addWidget(filter_others_only_radio)
     filter_type_layout.addWidget(filter_all_radio)
+    enable_update_override_button = QPushButton("更新有効化")
+    enable_update_override_button.setObjectName("dataset_update_override_button")
+    enable_update_override_button.setEnabled(False)
+    enable_update_override_button.setMaximumWidth(130)
+    enable_update_override_button.setStyleSheet(f"""
+        QPushButton {{
+            background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+            color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
+            font-weight: bold;
+            border-radius: 4px;
+            padding: 4px 8px;
+            border: 1px solid {get_color(ThemeKey.BUTTON_DANGER_BORDER)};
+        }}
+        QPushButton:disabled {{
+            background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+            border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+        }}
+    """)
+    enable_update_override_button.setToolTip("ユーザー所属のみ、課題番号フィルタなしの状態では常に更新できます")
+    filter_type_layout.addWidget(enable_update_override_button)
     filter_type_layout.addStretch()  # 右側にスペースを追加
     
     filter_type_widget.setLayout(filter_type_layout)
@@ -949,39 +973,95 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             if progress:
                 progress.close()
 
+    update_override_state = {"enabled": False}
+
+    UPDATE_BUTTON_ENABLED_STYLE = f"""
+        QPushButton {{
+            background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
+            color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
+            font-weight: bold;
+            border-radius: 6px;
+            border: 1px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)};
+        }}
+        QPushButton:hover {{
+            background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
+        }}
+        QPushButton:pressed {{
+            background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_PRESSED)};
+        }}
+    """
+
+    UPDATE_BUTTON_DISABLED_STYLE = f"""
+        QPushButton {{
+            background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+            font-weight: bold;
+            border-radius: 6px;
+            border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+        }}
+    """
+
+    def get_current_filter_type():
+        if filter_user_only_radio.isChecked():
+            return "user_only"
+        if filter_others_only_radio.isChecked():
+            return "others_only"
+        if filter_all_radio.isChecked():
+            return "all"
+        return "user_only"
+
+    def _is_default_filter_state(filter_type, grant_number_filter):
+        normalized_filter = grant_number_filter or ""
+        return filter_type == "user_only" and not normalized_filter
+
+    def apply_update_button_state(filter_type, grant_number_filter):
+        is_default_filter = _is_default_filter_state(filter_type, grant_number_filter)
+
+        if is_default_filter and update_override_state["enabled"]:
+            logger.info("フィルタがデフォルトに戻ったため手動有効化を解除します")
+            update_override_state["enabled"] = False
+
+        effective_enabled = is_default_filter or update_override_state["enabled"]
+        update_button.setEnabled(effective_enabled)
+
+        if effective_enabled:
+            update_button.setStyleSheet(UPDATE_BUTTON_ENABLED_STYLE)
+            if is_default_filter:
+                update_button.setToolTip("")
+            else:
+                update_button.setToolTip("手動で更新制限を解除しています。権限がないデータセットはRDE側で拒否されます")
+        else:
+            update_button.setToolTip("デフォルト設定（ユーザー所属のみ、課題番号フィルタなし）でのみ更新可能です")
+            update_button.setStyleSheet(UPDATE_BUTTON_DISABLED_STYLE)
+
+        if is_default_filter:
+            enable_update_override_button.setEnabled(False)
+            enable_update_override_button.setText("更新有効化")
+            enable_update_override_button.setToolTip("ユーザー所属のみ、課題番号フィルタなしの状態では常に更新できます")
+        else:
+            if update_override_state["enabled"]:
+                enable_update_override_button.setEnabled(False)
+                enable_update_override_button.setText("更新有効化済")
+            else:
+                enable_update_override_button.setEnabled(True)
+                enable_update_override_button.setText("更新有効化")
+            enable_update_override_button.setToolTip("安全確保のため更新が無効です。自己責任で一時的に有効化できます")
+
+    def refresh_update_controls(filter_type=None, grant_number_filter=None):
+        current_filter_type = filter_type if filter_type is not None else get_current_filter_type()
+        current_grant_filter = (grant_number_filter if grant_number_filter is not None
+                                else grant_number_filter_edit.text().strip())
+        apply_update_button_state(current_filter_type, current_grant_filter)
+
+    def reset_update_override(reason="", filter_type=None, grant_number_filter=None):
+        if update_override_state["enabled"]:
+            logger.info("更新ボタンの手動有効化を解除: %s", reason or "理由未指定")
+            update_override_state["enabled"] = False
+        refresh_update_controls(filter_type, grant_number_filter)
+
     def update_combo_box_ui(datasets, display_names, filter_type, grant_number_filter, dataset_count):
         """コンボボックスのUIを更新する"""
-        # 更新ボタンの有効/無効を制御
-        is_default_filter = (filter_type == "user_only" and not grant_number_filter)
-        update_button.setEnabled(is_default_filter)
-        if not is_default_filter:
-            update_button.setToolTip("デフォルト設定（ユーザー所属のみ、課題番号フィルタなし）でのみ更新可能です")
-            update_button.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-                    color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
-                    font-weight: bold;
-                    border-radius: 6px;
-                    border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
-                }}
-            """)
-        else:
-            update_button.setToolTip("")
-            update_button.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
-                    color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
-                    font-weight: bold;
-                    border-radius: 6px;
-                    border: 1px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)};
-                }}
-                QPushButton:hover {{
-                    background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
-                }}
-                QPushButton:pressed {{
-                    background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_PRESSED)};
-                }}
-            """)
+        refresh_update_controls(filter_type, grant_number_filter)
         
         # コンボボックスを完全にクリア（キャッシュも含む）
         existing_dataset_combo.clear()
@@ -3023,6 +3103,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     def on_dataset_selection_changed():
         current_index = existing_dataset_combo.currentIndex()
         logger.debug("データセット選択変更: インデックス=%s", current_index)
+        reset_update_override("データセット選択変更")
         
         if current_index <= 0:  # 最初のアイテム（"-- データセットを選択してください --"）または無効な選択
             logger.debug("データセット未選択状態 - フォームをクリアします")
@@ -3068,6 +3149,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             dataset_id = dataset_dict.get("id", "")
             dataset_name = dataset_dict.get("attributes", {}).get("name", "不明")
             logger.info("Completer選択成功: id=%s name=%s", dataset_id, dataset_name)
+            reset_update_override("Completerによるデータセット選択")
             
             # コンボボックスが空の場合はキャッシュから復元
             if existing_dataset_combo.count() == 0:
@@ -3128,16 +3210,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     def apply_filter(force_reload=False):
         """フィルタを適用してデータセット一覧を更新"""
         # 現在のフィルタ設定を取得
-        if filter_user_only_radio.isChecked():
-            filter_type = "user_only"
-        elif filter_others_only_radio.isChecked():
-            filter_type = "others_only"
-        elif filter_all_radio.isChecked():
-            filter_type = "all"
-        else:
-            filter_type = "user_only"  # デフォルト
-        
+        filter_type = get_current_filter_type()
         grant_number_filter = grant_number_filter_edit.text().strip()
+        reset_update_override("フィルタ変更", filter_type, grant_number_filter)
         
         if force_reload:
             logger.info("キャッシュ更新: タイプ=%s, 課題番号='%s'", filter_type, grant_number_filter)
@@ -3166,12 +3241,44 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         filter_timer.stop()  # 既存のタイマーを停止
         filter_timer.start(500)  # 500ms後にフィルタを実行
     
+    def on_enable_update_override():
+        """安全ロック解除ボタンの処理"""
+        if not enable_update_override_button.isEnabled():
+            return
+
+        current_filter_type = get_current_filter_type()
+        current_grant_filter = grant_number_filter_edit.text().strip()
+
+        if _is_default_filter_state(current_filter_type, current_grant_filter):
+            refresh_update_controls(current_filter_type, current_grant_filter)
+            return
+
+        message = (
+            "データセット更新ボタンを一時的に有効化します。\n"
+            "ユーザー所属以外や課題番号で絞り込んだ状態でも更新できます。\n"
+            "権限がない場合はRDE側で拒否されます。\n"
+            "※ データセットを切り替えると自動で無効化されます。"
+        )
+        reply = QMessageBox.question(
+            widget,
+            "更新有効化の確認",
+            message,
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            update_override_state["enabled"] = True
+            logger.info("更新ボタンを手動で有効化: filter=%s grant='%s'", current_filter_type, current_grant_filter or "なし")
+            refresh_update_controls(current_filter_type, current_grant_filter)
+
     # フィルタイベントを接続
     cache_refresh_button.clicked.connect(refresh_cache)
     filter_user_only_radio.toggled.connect(lambda: apply_filter() if filter_user_only_radio.isChecked() else None)
     filter_others_only_radio.toggled.connect(lambda: apply_filter() if filter_others_only_radio.isChecked() else None)
     filter_all_radio.toggled.connect(lambda: apply_filter() if filter_all_radio.isChecked() else None)
     grant_number_filter_edit.textChanged.connect(on_filter_text_changed)  # リアルタイム絞り込み
+    enable_update_override_button.clicked.connect(on_enable_update_override)
     
     # ボタンエリア
     button_layout = QHBoxLayout()
@@ -3237,15 +3344,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             try:
                 logger.info("データセット更新後のUI再読み込みを開始")
                 # 現在のフィルタ設定でデータセットリストを再読み込み（強制再読み込み）
-                if filter_user_only_radio.isChecked():
-                    filter_type = "user_only"
-                elif filter_others_only_radio.isChecked():
-                    filter_type = "others_only"
-                elif filter_all_radio.isChecked():
-                    filter_type = "all"
-                else:
-                    filter_type = "user_only"
-                
+                filter_type = get_current_filter_type()
                 grant_number_filter = grant_number_filter_edit.text().strip()
                 # キャッシュをクリアして強制再読み込み
                 clear_cache()
@@ -3345,15 +3444,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     # 外部からリフレッシュできるように関数を属性として追加
     def refresh_with_current_filter(force_reload=False):
         """現在のフィルタ設定でリフレッシュ"""
-        if filter_user_only_radio.isChecked():
-            filter_type = "user_only"
-        elif filter_others_only_radio.isChecked():
-            filter_type = "others_only"
-        elif filter_all_radio.isChecked():
-            filter_type = "all"
-        else:
-            filter_type = "user_only"
-        
+        filter_type = get_current_filter_type()
         grant_number_filter = grant_number_filter_edit.text().strip()
         
         if force_reload:
