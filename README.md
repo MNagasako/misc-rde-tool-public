@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.2.5** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.2.6** のバイナリ配布およびドキュメント公開用リポジトリです。
 
 **[ツール概要(こちらのほうが更新頻度高いです)](https://cuddly-stinger-40d.notion.site/QuickStart-2befc2cb5fc380f09d0dd4595b767f4d?source=copy_link)**
 
@@ -16,14 +16,14 @@
 
 ## 🚀 最新情報
 
-**2025-12-10 最新リリース**: バージョン2.2.5（AIサジェスト管理の安定化 + バージョンドキュメント統一）
+**2025-12-13 最新リリース**: バージョン2.2.6（データポータルアップロードUI改善 + TAGビルダーAI提案）
 
-### v2.2.5 の主な改善
+### v2.2.6 の主な改善
 
-- AIサジェスト管理ダイアログのレイアウト再構築を見直し、スペーサやストレッチ項目を安全に破棄してからウィジェットを再生成することで「AI拡張設定の読み込みエラー」を解消しました。
-- AI拡張タブのボタンキャッシュをリフレッシュする処理を調整し、設定ダイアログを閉じた直後でも説明文提案タブが安定して再描画されるようになりました。
-- `test_extension_buttons_reload_without_error` を追加し、設定保存→再読込のシーケンスをQtウィジェットテストで自動検証して恒常的なリグレッションを防いでいます。
-- README / ヘルプ / セットアップ付属文書のバージョンを2.2.5へ統一し、旧版リリースノートを `docs/archive/` 系列へ整理してドキュメントの差分追跡を明確化しました。
+- データポータルのデータセットアップロード画面で、取得済み画像一覧を4列テーブル化（選択/ファイル名/キャプション/アップロード）し、キャプション編集・ヘッダ固定・ソート・Up済表示に対応しました。
+- アップロード時にキャプションを反映（空の場合はファイル名を使用）し、アップ済みファイルは一覧で区別できるようになりました。
+- データセット編集のTAGビルダーに「AI提案」タブを追加し、AI問い合わせ→候補表示→採用/全て採用、リトライ提案、プロンプト全文/回答全文確認を実装しました。
+- README / VERSION.txt / CHANGELOG / リリースノート等のバージョン表記を2.2.6へ統一しました。
 
 > ℹ️ リスティングタブは `output/arim-site/{equipment|reports}_latest.json` など最新エクスポートを前提とします。再読込前に各タブで「JSON再取得」を実行し、キャッシュディレクトリ（`output/arim-site/reports/cache/`）の残量にも留意してください。
 
