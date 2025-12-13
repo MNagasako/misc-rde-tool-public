@@ -7,7 +7,7 @@ JSONファイルをデータポータルにアップロードする機能を提�
 import os
 import json
 from pathlib import Path
-from typing import Tuple, Any
+from typing import Tuple, Any, Dict, Set, Optional
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QComboBox,
@@ -76,6 +76,8 @@ class DatasetUploadTab(QWidget):
         self.current_environment = None  # 現在の環境（production/test）
         self.current_public_code = None  # 公開ページURL用 code
         self.current_public_key = None   # 公開ページURL用 key
+        self._existing_images_cache: Dict[str, Set[str]] = {}
+        self._image_caption_cache: Dict[str, str] = {}
         
         self._init_ui()
         logger.info("データセットアップロードタブ初期化完了")
@@ -369,39 +371,50 @@ class DatasetUploadTab(QWidget):
         checkbox_button_layout.addStretch()
         file_list_left_layout.addLayout(checkbox_button_layout)
         
-        # ファイルリストウィジェット（チェックボックス付き）
-        from qt_compat.widgets import QListWidget, QListWidgetItem, QCheckBox, QLabel as QListLabel
+        # ファイルリスト（ヘッダ付き・ソート可能・キャプション編集可）
+        from qt_compat.widgets import QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
         from qt_compat.core import Qt
-        
-        self.file_list_widget = QListWidget()
+
+        self.file_list_widget = QTableWidget()
+        self.file_list_widget.setColumnCount(4)
+        self.file_list_widget.setHorizontalHeaderLabels(["選択", "ファイル名", "キャプション", "アップロード"])
+        self.file_list_widget.setSortingEnabled(True)
+        self.file_list_widget.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.file_list_widget.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.file_list_widget.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.EditKeyPressed)
+        self.file_list_widget.verticalHeader().setVisible(False)
+        self.file_list_widget.setAlternatingRowColors(True)
+        self.file_list_widget.installEventFilter(self)  # キーボードイベント（スペース）
+        self.file_list_widget.currentCellChanged.connect(self._on_file_table_current_cell_changed)
+        self.file_list_widget.itemChanged.connect(self._on_file_table_item_changed)
+
+        header = self.file_list_widget.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+
         self.file_list_widget.setMaximumHeight(300)
-        self.file_list_widget.setMaximumWidth(500)  # 幅を制限
-        self.file_list_widget.itemClicked.connect(self._on_file_item_clicked)  # クリックイベント
-        self.file_list_widget.currentItemChanged.connect(self._on_file_item_selection_changed)  # カーソルキー対応
-        self.file_list_widget.installEventFilter(self)  # キーボードイベントフィルタ
-        # スタイルシート: フォントが隠れないようパディングとサイズを調整
         self.file_list_widget.setStyleSheet(f"""
-            QListWidget {{
+            QTableWidget {{
                 background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
-                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
-            }}
-            QListWidget::item {{
-                padding: 2px;
-                border-radius: 2px;
-                min-height: 32px;
                 color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                gridline-color: {get_color(ThemeKey.BORDER_DEFAULT)};
             }}
-            QListWidget::item:hover {{
-                background-color: {get_color(ThemeKey.TABLE_ROW_BACKGROUND_HOVER)};
+            QHeaderView::section {{
+                background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_SECONDARY)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                padding: 4px 6px;
+                font-weight: bold;
             }}
-            QListWidget::item:selected {{
+            QTableWidget::item:selected {{
                 background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
                 color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
             }}
-            QListWidget::item:selected:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
-            }}
         """)
+
         file_list_left_layout.addWidget(self.file_list_widget)
         
         file_list_main_layout.addWidget(file_list_left_container)
@@ -518,7 +531,7 @@ class DatasetUploadTab(QWidget):
         layout.addWidget(self.upload_btn)
         
         # データポータル修正ボタン
-        self.edit_portal_btn = QPushButton("✏️ データポータル修正")
+        self.edit_portal_btn = QPushButton("✏️ データカタログ修正")
         self.edit_portal_btn.setEnabled(False)
         self.edit_portal_btn.clicked.connect(self._on_edit_portal)
         self.edit_portal_btn.setToolTip("データポータルに登録済みのエントリを修正します")
@@ -620,6 +633,7 @@ class DatasetUploadTab(QWidget):
         
         # 現在の環境を保持
         self.current_environment = environment
+        self._existing_images_cache.clear()
         
         # PortalClientを作成（環境が変わったら再作成）
         self.portal_client = PortalClient(environment=environment)
@@ -839,7 +853,7 @@ class DatasetUploadTab(QWidget):
                     self.toggle_status_btn.setEnabled(False)
                     
                     # ファイルリストも非表示
-                    self.file_list_widget.clear()
+                    self._clear_file_list_table()
                     self.file_list_group.setVisible(False)
                     self.thumbnail_label.setText("ファイルにマウスオーバーで\nプレビューを表示")
                     
@@ -856,7 +870,7 @@ class DatasetUploadTab(QWidget):
                     self.file_list_group.setVisible(True)
                 else:
                     # 既存ファイルがない場合はリストをクリアして非表示
-                    self.file_list_widget.clear()
+                    self._clear_file_list_table()
                     self.file_list_group.setVisible(False)
                     self.thumbnail_label.setText("ファイルにマウスオーバーで\nプレビューを表示")
                     # 画像アップロードボタンも無効化
@@ -885,7 +899,7 @@ class DatasetUploadTab(QWidget):
         dataset_data = self.dataset_combo.itemData(index)
         if not dataset_data:
             self.upload_btn.setEnabled(False)
-            self.file_list_widget.clear()
+            self._clear_file_list_table()
             self.file_list_group.setVisible(False)
             return
         
@@ -929,14 +943,14 @@ class DatasetUploadTab(QWidget):
                 self.open_files_folder_btn.setEnabled(folder_exists)
             
             info_text = (
-                f"データセット: {dataset_name}\n"
+            #    f"データセット: {dataset_name}\n"
                 f"ID: {dataset_id}\n"
-                f"JSONファイル: {Path(json_path).name}\n"
-                f"画像ファイル: {'取得済み' if files_exist else '未取得'}"
+            #    f"JSONファイル: {Path(json_path).name}\n"
+            #    f"画像ファイル: {'取得済み' if files_exist else '未取得'}"
             )
             if files_exist:
-                info_text += f" ({file_count}件)"
-            
+                #info_text += f" ({file_count}件)"
+                pass
             self.dataset_info_label.setText(info_text)
             self._log_status(f"データセット選択: {dataset_name}")
             
@@ -964,7 +978,7 @@ class DatasetUploadTab(QWidget):
                 self.toggle_status_btn.setEnabled(False)
                 
                 # ファイルリストも非表示
-                self.file_list_widget.clear()
+                self._clear_file_list_table()
                 self.file_list_group.setVisible(False)
                 self.thumbnail_label.setText("ファイルにマウスオーバーで\nプレビューを表示")
                 
@@ -976,7 +990,7 @@ class DatasetUploadTab(QWidget):
                 self.file_list_group.setVisible(True)
             else:
                 # 既存ファイルがない場合はリストをクリアして非表示
-                self.file_list_widget.clear()
+                self._clear_file_list_table()
                 self.file_list_group.setVisible(False)
                 self.thumbnail_label.setText("ファイルにマウスオーバーで\nプレビューを表示")
                 # 画像アップロードボタンも無効化
@@ -987,12 +1001,12 @@ class DatasetUploadTab(QWidget):
             self.upload_btn.setEnabled(False)
             self.bulk_download_btn.setEnabled(False)
             self.open_files_folder_btn.setEnabled(False)
-            self.file_list_widget.clear()
+            self._clear_file_list_table()
             self.file_list_group.setVisible(False)
             # 画像アップロードボタンも無効化
             self._update_image_upload_button_state()
     
-    def _get_dataset_info_from_json(self, dataset_id: str) -> dict:
+    def _get_dataset_info_from_json(self, dataset_id: str) -> Optional[Dict[str, Any]]:
         """dataset.jsonからデータセット情報を取得"""
         try:
             dataset_json_path = get_dynamic_file_path("output/rde/data/dataset.json")
@@ -1341,7 +1355,7 @@ class DatasetUploadTab(QWidget):
             logger.error(traceback.format_exc())
             return []
     
-    def _find_dataset_json(self, dataset_id: str, grant_number: str = None) -> str:
+    def _find_dataset_json(self, dataset_id: str, grant_number: str = None) -> Optional[str]:
         """データセットIDからJSONファイルを探す"""
         from config.common import get_dynamic_file_path
         
@@ -1440,7 +1454,7 @@ class DatasetUploadTab(QWidget):
         # アップロード実行
         self._execute_upload(environment, credentials, upload_json_path)
     
-    def _anonymize_json(self, json_path: str) -> str:
+    def _anonymize_json(self, json_path: str) -> Optional[str]:
         """
         JSON匿名化（既存のARIMAnonymizer実装に準拠）
         課題番号はJSONから自動取得
@@ -1930,74 +1944,145 @@ class DatasetUploadTab(QWidget):
             file_list: ファイル情報リスト [{'name': ..., 'size': ..., 'path': ..., 'relative_path': ...}, ...]
         """
         try:
-            from qt_compat.widgets import QListWidgetItem, QCheckBox, QWidget, QHBoxLayout
             from qt_compat.core import Qt
-            
-            self.file_list_widget.clear()
-            
+            from qt_compat.widgets import QTableWidgetItem
+
+            self._clear_file_list_table()
+
             if not file_list:
                 self.file_list_group.setVisible(False)
                 return
-            
+
             self.file_list_group.setVisible(True)
-            
-            for file_info in file_list:
-                # カスタムウィジェット作成（チェックボックス + ファイル名）
-                item = QListWidgetItem()
-                item_widget = QWidget()
-                item_layout = QHBoxLayout()
-                item_layout.setContentsMargins(6, 2, 6, 2)
-                item_layout.setSpacing(8)
-                
-                # チェックボックス - サイズ調整
-                checkbox = QCheckBox()
-                checkbox.setChecked(False)  # デフォルトで未チェックに変更
-                checkbox.setStyleSheet(f"""
-                    QCheckBox {{
-                        spacing: 6px;
-                    }}
-                    QCheckBox::indicator {{
-                        width: 16px;
-                        height: 16px;
-                    }}
-                """)
-                # チェックボックス変更時にプレビュー表示
-                checkbox.stateChanged.connect(lambda state, itm=item: self._on_checkbox_changed(itm))
-                item_layout.addWidget(checkbox)
-                
-                # ファイル名ラベル - ファイル名のみ表示（相対パスではなく）
-                file_label = QLabel(file_info['name'])
-                file_label.setStyleSheet(f"""
-                    QLabel {{
-                        padding: 2px;
-                        font-size: 11pt;
-                        color: {get_color(ThemeKey.TEXT_PRIMARY)};
-                    }}
-                """)
-                # 相対パスをツールチップに設定
-                file_label.setToolTip(f"相対パス: {file_info['relative_path']}\nフルパス: {file_info['path']}\nサイズ: {file_info['size']:,} bytes")
-                item_layout.addWidget(file_label, stretch=1)
-                
-                item_widget.setLayout(item_layout)
-                
-                # アイテムのサイズ調整
-                item.setSizeHint(item_widget.sizeHint())
-                
-                # カスタムデータとして情報を保存
-                item.setData(Qt.UserRole, file_info)
-                
-                self.file_list_widget.addItem(item)
-                self.file_list_widget.setItemWidget(item, item_widget)
-                
+
+            status_available, existing_images = self._get_existing_image_names()
+
+            self.file_list_widget.blockSignals(True)
+            self.file_list_widget.setSortingEnabled(False)
+            self.file_list_widget.setRowCount(len(file_list))
+
+            for row, file_info in enumerate(file_list):
+                # 0: チェック
+                check_item = QTableWidgetItem("")
+                check_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsUserCheckable)
+                check_item.setCheckState(Qt.Unchecked)
+                self.file_list_widget.setItem(row, 0, check_item)
+
+                # 1: ファイル名
+                name_item = QTableWidgetItem(str(file_info.get('name', '')))
+                name_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                name_item.setData(Qt.UserRole, file_info)
+                name_item.setToolTip(
+                    f"相対パス: {file_info.get('relative_path', '')}\n"
+                    f"フルパス: {file_info.get('path', '')}\n"
+                    f"サイズ: {file_info.get('size', 0):,} bytes"
+                )
+                self.file_list_widget.setItem(row, 1, name_item)
+
+                # 2: キャプション（編集可）
+                cached_caption = self._image_caption_cache.get(str(file_info.get('path', '')), "")
+                caption_item = QTableWidgetItem(cached_caption)
+                caption_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
+                self.file_list_widget.setItem(row, 2, caption_item)
+
+                # 3: アップロード表示（Up済のみ）
+                caption_to_check = self._decide_image_caption(name_item.text(), caption_item.text())
+                upload_text = "Up済" if (status_available and caption_to_check in existing_images) else ""
+                upload_item = QTableWidgetItem(upload_text)
+                upload_item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable)
+                self.file_list_widget.setItem(row, 3, upload_item)
+
+            self.file_list_widget.setSortingEnabled(True)
+            self.file_list_widget.blockSignals(False)
+
             self._log_status(f"ファイルリスト表示: {len(file_list)}件")
-            
-            # 画像アップロードボタンの状態を更新
             self._update_image_upload_button_state()
-            
+
         except Exception as e:
             logger.error(f"ファイルリスト表示エラー: {e}")
             import traceback
             logger.error(traceback.format_exc())
+        finally:
+            try:
+                self.file_list_widget.blockSignals(False)
+            except Exception:
+                pass
+
+    def _clear_file_list_table(self):
+        """取得済みファイル一覧テーブルをクリア（ヘッダは保持）"""
+        try:
+            self.file_list_widget.setSortingEnabled(False)
+            self.file_list_widget.clearContents()
+            self.file_list_widget.setRowCount(0)
+        finally:
+            self.file_list_widget.setSortingEnabled(True)
+
+    def _on_file_table_item_changed(self, item):
+        """キャプション編集をキャッシュし、アップロード表示も更新"""
+        try:
+            from qt_compat.core import Qt
+
+            if item is None:
+                return
+            if item.column() != 2:
+                return
+
+            row = item.row()
+            name_item = self.file_list_widget.item(row, 1)
+            if name_item is None:
+                return
+            file_info = name_item.data(Qt.UserRole)
+            if not file_info:
+                return
+
+            file_path = str(file_info.get('path', ''))
+            self._image_caption_cache[file_path] = item.text()
+
+            # キャプション変更により既存画像判定が変わるのでアップロード表示を更新
+            self._refresh_upload_status_for_row(row)
+
+        except Exception as e:
+            logger.debug(f"file table itemChanged handling failed: {e}")
+
+    def _refresh_upload_status_for_row(self, row: int):
+        try:
+            from qt_compat.core import Qt
+
+            name_item = self.file_list_widget.item(row, 1)
+            caption_item = self.file_list_widget.item(row, 2)
+            status_item = self.file_list_widget.item(row, 3)
+            if name_item is None or caption_item is None or status_item is None:
+                return
+
+            status_available, existing_images = self._get_existing_image_names()
+            caption_to_check = self._decide_image_caption(name_item.text(), caption_item.text())
+            status_item.setText("Up済" if (status_available and caption_to_check in existing_images) else "")
+
+        except Exception as e:
+            logger.debug(f"refresh upload status failed: {e}")
+
+    @staticmethod
+    def _decide_image_caption(filename: str, caption_text: Optional[str]) -> str:
+        caption = (caption_text or "").strip()
+        return caption if caption else filename
+    
+    def _get_existing_image_names(self, force_refresh: bool = False) -> Tuple[bool, Set[str]]:
+        """データポータル上の既存画像名を取得しキャッシュする"""
+        dataset_id = self.current_dataset_id
+        if not dataset_id:
+            return False, set()
+        if not force_refresh and dataset_id in self._existing_images_cache:
+            return True, self._existing_images_cache[dataset_id]
+        if not self.portal_client:
+            logger.debug("portal_clientが未初期化のため既存画像を確認できません")
+            return False, set()
+        t_code = self._get_t_code_for_dataset(dataset_id)
+        if not t_code:
+            logger.warning(f"t_code未取得のため既存画像を確認できません: {dataset_id}")
+            return False, set()
+        existing_images = self._get_existing_images(t_code)
+        self._existing_images_cache[dataset_id] = existing_images
+        return True, existing_images
     
     def _update_image_upload_button_state(self):
         """
@@ -2007,7 +2092,7 @@ class DatasetUploadTab(QWidget):
         - JSONアップロード完了済み OR データポータル修正ボタンが有効（エントリ登録済み）
         - ファイルリストに1件以上のファイルがある
         """
-        has_files = self.file_list_widget.count() > 0
+        has_files = self.file_list_widget.rowCount() > 0
         # JSONアップロード済み、またはデータポータル修正ボタンが有効（既存エントリ）
         entry_exists = self.json_uploaded or self.edit_portal_btn.isEnabled()
         can_upload = entry_exists and has_files
@@ -2040,67 +2125,37 @@ class DatasetUploadTab(QWidget):
             if obj == self.file_list_widget and event.type() == QEvent.KeyPress:
                 key_event = event
                 if key_event.key() == Qt.Key_Space:
-                    # 現在選択されているアイテムのチェックボックスをトグル
-                    current_item = self.file_list_widget.currentItem()
-                    if current_item:
-                        item_widget = self.file_list_widget.itemWidget(current_item)
-                        if item_widget:
-                            checkbox = item_widget.findChild(QCheckBox)
-                            if checkbox:
-                                checkbox.setChecked(not checkbox.isChecked())
-                                logger.debug(f"スペースキーでチェックボックスをトグル: {checkbox.isChecked()}")
-                        return True  # イベントを処理済みとしてマーク
+                    row = self.file_list_widget.currentRow()
+                    if row >= 0:
+                        check_item = self.file_list_widget.item(row, 0)
+                        if check_item is not None:
+                            new_state = Qt.Unchecked if check_item.checkState() == Qt.Checked else Qt.Checked
+                            check_item.setCheckState(new_state)
+                            logger.debug(f"スペースキーでチェックをトグル: row={row}, checked={new_state == Qt.Checked}")
+                        return True
             
         except Exception as e:
             logger.error(f"イベントフィルタエラー: {e}")
         
         return super().eventFilter(obj, event)
     
-    def _on_file_item_selection_changed(self, current, previous):
-        """
-        ファイルアイテムの選択が変更された時の処理（カーソルキー対応）
-        
-        Args:
-            current: 現在選択されているアイテム (QListWidgetItem)
-            previous: 前に選択されていたアイテム (QListWidgetItem)
-        """
-        if current:
-            self._show_file_preview(current)
-    
-    def _on_checkbox_changed(self, item):
-        """
-        チェックボックスの状態が変更された時の処理
-        
-        Args:
-            item: QListWidgetItem
-        """
-        # チェックボックスをクリックした時もプレビューを表示
-        # アイテムを選択状態にしてからプレビュー表示
-        self.file_list_widget.setCurrentItem(item)
-        self._show_file_preview(item)
-    
-    def _on_file_item_clicked(self, item):
-        """
-        ファイルアイテムがクリックされた時の処理（選択してプレビュー表示）
-        
-        Args:
-            item: QListWidgetItem
-        """
-        # アイテムを選択状態にする（currentItemChangedが発火してプレビュー表示される）
-        self.file_list_widget.setCurrentItem(item)
-    
-    def _show_file_preview(self, item):
-        """
-        ファイルのプレビューを表示（共通処理）
-        
-        Args:
-            item: QListWidgetItem
-        """
+    def _on_file_table_current_cell_changed(self, current_row: int, current_col: int, previous_row: int, previous_col: int):
+        """ファイル一覧の選択変更時にプレビューを更新"""
+        if current_row >= 0:
+            self._show_file_preview_for_row(current_row)
+
+    def _show_file_preview_for_row(self, row: int):
+        """テーブル行からファイル情報を取得してプレビュー表示"""
         try:
             from qt_compat.gui import QPixmap
             from qt_compat.core import Qt
-            
-            file_info = item.data(Qt.UserRole)
+
+            name_item = self.file_list_widget.item(row, 1)
+            if name_item is None:
+                self.thumbnail_label.setText("ファイル情報が見つかりません")
+                return
+
+            file_info = name_item.data(Qt.UserRole)
             if not file_info:
                 self.thumbnail_label.setText("ファイル情報が見つかりません")
                 return
@@ -2134,14 +2189,12 @@ class DatasetUploadTab(QWidget):
     def _on_select_all_files(self):
         """全選択ボタンの処理"""
         try:
-            for i in range(self.file_list_widget.count()):
-                item = self.file_list_widget.item(i)
-                item_widget = self.file_list_widget.itemWidget(item)
-                if item_widget:
-                    # チェックボックスを探して全てチェック
-                    checkbox = item_widget.findChild(QCheckBox)
-                    if checkbox:
-                        checkbox.setChecked(True)
+            from qt_compat.core import Qt
+
+            for row in range(self.file_list_widget.rowCount()):
+                check_item = self.file_list_widget.item(row, 0)
+                if check_item is not None:
+                    check_item.setCheckState(Qt.Checked)
             
             self._log_status("全ファイルを選択しました")
             
@@ -2151,14 +2204,12 @@ class DatasetUploadTab(QWidget):
     def _on_deselect_all_files(self):
         """全解除ボタンの処理"""
         try:
-            for i in range(self.file_list_widget.count()):
-                item = self.file_list_widget.item(i)
-                item_widget = self.file_list_widget.itemWidget(item)
-                if item_widget:
-                    # チェックボックスを探して全て解除
-                    checkbox = item_widget.findChild(QCheckBox)
-                    if checkbox:
-                        checkbox.setChecked(False)
+            from qt_compat.core import Qt
+
+            for row in range(self.file_list_widget.rowCount()):
+                check_item = self.file_list_widget.item(row, 0)
+                if check_item is not None:
+                    check_item.setCheckState(Qt.Unchecked)
             
             self._log_status("全ファイルの選択を解除しました")
             
@@ -2229,14 +2280,24 @@ class DatasetUploadTab(QWidget):
         try:
             # チェックされたファイルを取得
             checked_files = []
-            for i in range(self.file_list_widget.count()):
-                item = self.file_list_widget.item(i)
-                item_widget = self.file_list_widget.itemWidget(item)
-                if item_widget:
-                    checkbox = item_widget.findChild(QCheckBox)
-                    if checkbox and checkbox.isChecked():
-                        file_info = item.data(Qt.UserRole)
-                        checked_files.append(file_info)
+            for row in range(self.file_list_widget.rowCount()):
+                check_item = self.file_list_widget.item(row, 0)
+                name_item = self.file_list_widget.item(row, 1)
+                caption_item = self.file_list_widget.item(row, 2)
+                if check_item is None or name_item is None:
+                    continue
+                if check_item.checkState() != Qt.Checked:
+                    continue
+
+                file_info = name_item.data(Qt.UserRole)
+                if not file_info:
+                    continue
+                caption_text = caption_item.text() if caption_item is not None else ""
+                upload_caption = self._decide_image_caption(str(file_info.get('name', '')), caption_text)
+
+                merged = dict(file_info)
+                merged['caption'] = upload_caption
+                checked_files.append(merged)
             
             if not checked_files:
                 self._show_warning("アップロードするファイルが選択されていません。\nチェックボックスでファイルを選択してください。")
@@ -2306,7 +2367,8 @@ class DatasetUploadTab(QWidget):
             new_files = []
             
             for file_info in checked_files:
-                if file_info['name'] in existing_images:
+                caption = file_info.get('caption')
+                if caption and caption in existing_images:
                     duplicate_files.append(file_info)
                 else:
                     new_files.append(file_info)
@@ -2387,7 +2449,8 @@ class DatasetUploadTab(QWidget):
                 success, message = self._upload_single_image(
                     t_code=t_code,
                     file_path=file_info['path'],
-                    original_filename=file_info['name']
+                    original_filename=file_info['name'],
+                    caption=file_info.get('caption') or file_info['name']
                 )
                 
                 if success:
@@ -2409,6 +2472,10 @@ class DatasetUploadTab(QWidget):
                 
                 self._log_status(f"✅ 画像アップロード完了: {upload_count}/{len(files_to_upload)}件")
                 self._show_info(result_msg)
+                if self.current_dataset_id:
+                    self._existing_images_cache.pop(self.current_dataset_id, None)
+                    _, _, refreshed_files = self._check_files_exist(self.current_dataset_id)
+                    self._update_file_list_display(refreshed_files)
             else:
                 self._log_status("⚠️ 画像アップロードに失敗しました", error=True)
                 self._show_warning("画像をアップロードできませんでした")
@@ -2644,7 +2711,7 @@ class DatasetUploadTab(QWidget):
             logger.error(f"画像新規登録画面遷移エラー: {e}")
             return False, str(e)
     
-    def _upload_single_image(self, t_code: str, file_path: str, original_filename: str) -> Tuple[bool, str]:
+    def _upload_single_image(self, t_code: str, file_path: str, original_filename: str, caption: str) -> Tuple[bool, str]:
         """
         単一の画像ファイルをアップロード
         
@@ -2656,12 +2723,13 @@ class DatasetUploadTab(QWidget):
             t_code: テーマコード（数値）
             file_path: アップロードするファイルのパス
             original_filename: オリジナルのファイル名
+            caption: データポータルに登録するキャプション
         
         Returns:
             Tuple[bool, str]: (成功フラグ, メッセージ)
         """
         try:
-            logger.info(f"[STEP4] 画像アップロード開始: {original_filename}, t_code={t_code}")
+            logger.info(f"[STEP4] 画像アップロード開始: {original_filename}, t_code={t_code}, caption={caption}")
             
             # Step 1: ファイルをアップロードして確認画面へ (mode4=conf)
             with open(file_path, 'rb') as f:
@@ -2675,7 +2743,7 @@ class DatasetUploadTab(QWidget):
                     'mode3': 'regist',
                     'mode4': 'conf',  # 確認画面へ
                     'ti_code': '0',
-                    'ti_title': original_filename,  # キャプション
+                    'ti_title': caption,  # キャプション
                     't_code': t_code,  # 数値のt_code
                     'keyword': '',
                     'page': '1'
@@ -2720,7 +2788,7 @@ class DatasetUploadTab(QWidget):
                 'mode3': 'regist',
                 'mode4': 'rec',  # 登録確定
                 'ti_code': '0',
-                'ti_title': original_filename,  # キャプション
+                'ti_title': caption,  # キャプション
                 'ti_file': temp_filename,  # 一時ファイル名
                 'original_filename': original_filename,
                 'old_filename': '',
@@ -2731,7 +2799,7 @@ class DatasetUploadTab(QWidget):
                 'page': '1'
             }
             
-            logger.info(f"[STEP4-2] 画像登録確定: ti_title={original_filename}, ti_file={temp_filename}, t_code={t_code}")
+            logger.info(f"[STEP4-2] 画像登録確定: ti_title={caption}, ti_file={temp_filename}, t_code={t_code}")
             success, response = self.portal_client.post("main.php", data=data)
             
             # デバッグ: レスポンスを保存

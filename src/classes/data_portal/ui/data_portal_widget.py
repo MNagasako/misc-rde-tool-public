@@ -64,7 +64,7 @@ class DataPortalWidget(QWidget):
         
         # データセットJSONアップロードタブ
         self.dataset_upload_tab = DatasetUploadTab(self)
-        self.tab_widget.addTab(self.dataset_upload_tab, "📤 データセット")
+        self.tab_widget.addTab(self.dataset_upload_tab, "📤 データカタログ")
         
         layout.addWidget(self.tab_widget)
     

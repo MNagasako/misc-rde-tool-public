@@ -17,6 +17,7 @@ from qt_compat.gui import QFont
 from qt_compat.core import QTimer, Qt
 from config.common import get_dynamic_file_path
 from classes.data_entry.util.template_format_validator import TemplateFormatValidator
+from classes.utils.dataset_launch_manager import DatasetLaunchManager, DatasetPayload
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -276,10 +277,66 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
         if hasattr(parent_controller, 'selected_register_files') and parent_controller.selected_register_files:
             update_file_validation()
 
+    def _relax_dataset_filters_for_launch() -> None:
+        dropdown_widget = getattr(parent_controller, 'dataset_dropdown', None)
+        relax_fn = getattr(dropdown_widget, 'relax_filters_for_launch', None)
+        if callable(relax_fn):
+            try:
+                relax_fn()
+            except Exception:
+                logger.debug("data_register: relax_filters_for_launch failed", exc_info=True)
 
+    def _format_dataset_display(dataset_dict: dict, fallback: str | None = None) -> str:
+        if not isinstance(dataset_dict, dict):
+            return fallback or ""
+        attrs = dataset_dict.get('attributes', {})
+        grant = attrs.get('grantNumber') or ""
+        name = attrs.get('name') or ""
+        parts = [part for part in (grant, name) if part]
+        if parts:
+            return " - ".join(parts)
+        return fallback or dataset_dict.get('id', '') or ''
+
+    def _find_dataset_index(dataset_id: str) -> int:
+        if combo is None or not dataset_id:
+            return -1
+        for idx in range(combo.count()):
+            data = combo.itemData(idx, 0x0100)
+            if isinstance(data, dict) and data.get('id') == dataset_id:
+                return idx
+        return -1
+
+    def _ensure_dataset_entry(payload: DatasetPayload) -> int:
+        if combo is None or not payload.raw:
+            return -1
+        display_text = payload.display_text or _format_dataset_display(payload.raw, payload.id)
+        combo.blockSignals(True)
+        combo.addItem(display_text, payload.raw)
+        combo.blockSignals(False)
+        return combo.count() - 1
+
+    def _apply_dataset_launch_payload(payload: DatasetPayload) -> bool:
+        if combo is None or payload is None or not payload.id:
+            return False
+        _relax_dataset_filters_for_launch()
+        target_index = _find_dataset_index(payload.id)
+        if target_index < 0 and payload.raw:
+            target_index = _ensure_dataset_entry(payload)
+        if target_index < 0:
+            logger.debug("data_register: dataset not found for launch id=%s", payload.id)
+            return False
+        previous_index = combo.currentIndex()
+        combo.setCurrentIndex(target_index)
+        if previous_index == target_index:
+            try:
+                on_dataset_changed(target_index)
+            except Exception:
+                logger.debug("data_register: manual dataset refresh failed", exc_info=True)
+        return True
 
     if combo is not None:
         combo.currentIndexChanged.connect(on_dataset_changed)
+        DatasetLaunchManager.instance().register_receiver("data_register", _apply_dataset_launch_payload)
 
     # ファイル選択・登録実行ボタンを分離
     btn_layout = QHBoxLayout()

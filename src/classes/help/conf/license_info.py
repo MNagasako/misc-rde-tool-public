@@ -1,10 +1,13 @@
+"""ライセンス情報定義 - ARIM RDE Tool
+
+バージョン番号は config.common.REVISION を参照して統一する。
 """
-ライセンス情報定義 - ARIM RDE Tool v2.1.12
-"""
+
+from config.common import REVISION
 
 # アプリケーション情報
 APP_NAME = "ARIM RDE Tool"
-APP_VERSION = "v2.2.5"
+APP_VERSION = f"v{REVISION}"
 APP_DESCRIPTION = "ARIM事業 RDEシステム/データポータル の 操作支援ツール"
 APP_AUTHOR = "MNagasako"
 APP_COPYRIGHT = "Copyright © 2024-2025 MNagasako"

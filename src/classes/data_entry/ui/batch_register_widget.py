@@ -13,6 +13,8 @@ from pathlib import Path
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
 from classes.data_entry.util.template_format_validator import TemplateFormatValidator
+from config.common import get_dynamic_file_path
+from classes.utils.dataset_launch_manager import DatasetLaunchManager, DatasetPayload
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -1854,6 +1856,7 @@ class BatchRegisterWidget(QWidget):
         self.batch_logic = BatchRegisterLogic(self)
         self.temp_folder_manager = TempFolderManager()  # 一時フォルダ管理
         self.datasets = []  # データセット一覧
+        self._dataset_lookup: Dict[str, dict] = {}
         
         # ファイルセット復元処理中フラグ（自動設定適用を防ぐため）
         self._restoring_fileset = False
@@ -1883,6 +1886,10 @@ class BatchRegisterWidget(QWidget):
             theme_manager.theme_changed.connect(self.refresh_theme)
         except Exception as e:
             logger.warning("BatchRegisterWidget: テーマ変更シグナル接続失敗: %s", e)
+
+        DatasetLaunchManager.instance().register_receiver(
+            "data_register_batch", self._apply_dataset_launch_payload
+        )
         
     def setup_ui(self):
         """UIセットアップ"""
@@ -2267,6 +2274,67 @@ class BatchRegisterWidget(QWidget):
             dataset_layout.addWidget(self.dataset_combo)
         
         detail_layout.addLayout(dataset_layout)
+
+        launch_controls_widget = QWidget()
+        launch_controls_layout = QHBoxLayout()
+        launch_controls_layout.setContentsMargins(0, 0, 0, 0)
+        launch_label = QLabel("他機能連携:")
+        launch_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-weight: bold;")
+        launch_controls_layout.addWidget(launch_label)
+
+        launch_button_style = f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)};
+                border-radius: 4px;
+                padding: 4px 10px;
+                border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)};
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+            }}
+        """
+
+        launch_targets = [
+            ("data_fetch2", "データ取得2"),
+        #    ("dataset_edit", "データセット修正"),
+        #    ("dataset_dataentry", "データエントリー"),
+        ]
+
+        self._launch_buttons = []
+
+        def _has_dataset_selection() -> bool:
+            return bool(self.get_selected_dataset_id())
+
+        def _update_launch_buttons_state() -> None:
+            enabled = _has_dataset_selection()
+            for button in self._launch_buttons:
+                button.setEnabled(enabled)
+
+        self._update_launch_buttons_state = _update_launch_buttons_state
+
+        for target_key, caption in launch_targets:
+            btn = QPushButton(caption)
+            btn.setStyleSheet(launch_button_style)
+            btn.clicked.connect(lambda _=None, key=target_key: self._handle_dataset_launch(key))
+            launch_controls_layout.addWidget(btn)
+            self._launch_buttons.append(btn)
+
+        launch_controls_layout.addStretch()
+        launch_controls_widget.setLayout(launch_controls_layout)
+        detail_layout.addWidget(launch_controls_widget)
+
+        if self.dataset_combo is not None:
+            try:
+                self.dataset_combo.currentIndexChanged.connect(lambda *_: self._update_launch_buttons_state())
+            except Exception:
+                logger.debug("dataset_combo currentIndexChanged connection failed", exc_info=True)
+        self._update_launch_buttons_state()
         
         # --- テンプレート対応拡張子表示ラベル ---
         self.batch_template_format_label = QLabel("データセットを選択してください")
@@ -4485,6 +4553,126 @@ class BatchRegisterWidget(QWidget):
         
         logger.debug("get_selected_dataset_id: データセットIDを取得できませんでした")
         return None
+
+    def _relax_dataset_dropdown_filters(self) -> bool:
+        """Ensure dropdown-level filters are reset before applying payload."""
+        dropdown_widget = getattr(self, 'dataset_dropdown_widget', None)
+        if dropdown_widget is None:
+            return False
+
+        relax_fn = getattr(dropdown_widget, 'relax_filters_for_launch', None)
+        update_fn = getattr(dropdown_widget, 'update_datasets', None)
+
+        try:
+            if callable(relax_fn):
+                relax_fn()
+                return True
+            if callable(update_fn):
+                update_fn()
+                return True
+        except Exception:
+            logger.debug("BatchRegisterWidget: dropdown filter relax failed", exc_info=True)
+        return False
+
+    def _load_dataset_record(self, dataset_id: str) -> Optional[dict]:
+        if not dataset_id:
+            return None
+        dataset_path = get_dynamic_file_path("output/rde/data/dataset.json")
+        if not os.path.exists(dataset_path):
+            return None
+        try:
+            with open(dataset_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            items = data.get('data') if isinstance(data, dict) else data
+            for dataset in items or []:
+                if isinstance(dataset, dict) and dataset.get('id') == dataset_id:
+                    return dataset
+        except Exception as exc:
+            logger.debug("BatchRegisterWidget: dataset.json読み込み失敗 %s", exc)
+        return None
+
+    def _get_dataset_record(self, dataset_id: str) -> Optional[dict]:
+        if not dataset_id:
+            return None
+        for dataset in self.datasets or []:
+            if isinstance(dataset, dict) and dataset.get('id') == dataset_id:
+                return dataset
+        cached = self._dataset_lookup.get(dataset_id)
+        if cached:
+            return cached
+        record = self._load_dataset_record(dataset_id)
+        if record:
+            self._dataset_lookup[dataset_id] = record
+        return record
+
+    def _format_dataset_display(self, dataset_dict: Optional[dict], fallback: str) -> str:
+        if not isinstance(dataset_dict, dict):
+            return fallback
+        attrs = dataset_dict.get('attributes', {})
+        grant = attrs.get('grantNumber') or ""
+        name = attrs.get('name') or attrs.get('title') or ""
+        parts = [part for part in (grant, name) if part]
+        return " - ".join(parts) if parts else fallback
+
+    def _ensure_dataset_in_combo(self, dataset_id: str, dataset_dict: Optional[dict], display_text: Optional[str]) -> int:
+        if not dataset_id:
+            return -1
+        for idx in range(self.dataset_combo.count()):
+            item_data = self.dataset_combo.itemData(idx)
+            if isinstance(item_data, dict) and item_data.get('id') == dataset_id:
+                return idx
+            if isinstance(item_data, str) and item_data == dataset_id:
+                return idx
+        text = display_text or self._format_dataset_display(dataset_dict, dataset_id)
+        self.dataset_combo.blockSignals(True)
+        self.dataset_combo.addItem(text, dataset_id if not isinstance(dataset_dict, dict) else dataset_dict)
+        self.dataset_combo.blockSignals(False)
+        return self.dataset_combo.count() - 1
+
+    def _get_dataset_launch_payload(self) -> Optional[dict]:
+        dataset_id = self.get_selected_dataset_id()
+        if not dataset_id:
+            QMessageBox.warning(self, "データセット未選択", "連携するデータセットを選択してください。")
+            return None
+        dataset_dict = self._get_dataset_record(dataset_id)
+        display_text = self.dataset_combo.currentText() or dataset_id
+        return {
+            "dataset_id": dataset_id,
+            "display_text": display_text,
+            "raw_dataset": dataset_dict,
+        }
+
+    def _handle_dataset_launch(self, target_key: str) -> None:
+        payload = self._get_dataset_launch_payload()
+        if not payload:
+            return
+        DatasetLaunchManager.instance().request_launch(
+            target_key=target_key,
+            dataset_id=payload["dataset_id"],
+            display_text=payload["display_text"],
+            raw_dataset=payload["raw_dataset"],
+            source_name="data_register_batch",
+        )
+
+    def _apply_dataset_launch_payload(self, payload: DatasetPayload) -> bool:
+        if not payload or not payload.id:
+            return False
+        self._relax_dataset_dropdown_filters()
+        dataset_dict = payload.raw or self._get_dataset_record(payload.id)
+        if dataset_dict:
+            self._dataset_lookup[payload.id] = dataset_dict
+        index = self._ensure_dataset_in_combo(payload.id, dataset_dict, payload.display_text)
+        if index < 0:
+            return False
+        previous_index = self.dataset_combo.currentIndex()
+        self.dataset_combo.setCurrentIndex(index)
+        if previous_index == index:
+            try:
+                self.on_dataset_changed(index)
+            except Exception:
+                logger.debug("BatchRegisterWidget: manual dataset refresh failed", exc_info=True)
+        self._update_launch_buttons_state()
+        return True
     
     def adjust_window_size(self):
         """一括登録用にウィンドウサイズを調整（通常登録と同等機能）"""
@@ -4896,6 +5084,7 @@ class BatchRegisterWidget(QWidget):
     def on_dataset_changed(self, index):
         """データセット選択変更時の処理"""
         try:
+            self._update_launch_buttons_state()
             logger.debug("データセット選択変更: index=%s", index)
             logger.debug("コンボボックス状態: currentText='%s', totalItems=%s", self.dataset_combo.currentText(), self.dataset_combo.count())
             

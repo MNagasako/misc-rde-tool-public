@@ -8,20 +8,95 @@ TAGビルダーダイアログ
 """
 
 import json
-import os
 import logging
+import re
+from typing import Any, Dict, List, Optional
 from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGridLayout, QPushButton, QLabel, 
     QListWidget, QListWidgetItem, QTextEdit, QGroupBox, QCheckBox,
     QMessageBox, QScrollArea, QWidget, QSplitter, QLineEdit, QTreeWidget,
-    QTreeWidgetItem, QTabWidget, QComboBox
+    QTreeWidgetItem, QTabWidget, QComboBox, QTableWidget, QTableWidgetItem,
+    QAbstractItemView, QHeaderView, QProgressBar
 )
-from qt_compat.core import Qt, Signal
-from qt_compat.gui import QFont
+from qt_compat.core import Qt, Signal, QThread
 from classes.theme import get_color, ThemeKey
+from classes.ai.core.ai_manager import AIManager
+from classes.dataset.util.dataset_context_collector import get_dataset_context_collector
+from classes.dataset.util.ai_extension_helper import load_prompt_file, format_prompt_with_context
 
 # ロガー設定
 logger = logging.getLogger(__name__)
+
+
+_CODE_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*([\s\S]*?)\s*```", re.IGNORECASE)
+
+
+def parse_tag_suggestion_response(response_text: str) -> List[Dict[str, Any]]:
+    """AI応答テキストからタグ提案(JSON配列)を抽出して返す。"""
+    if not response_text:
+        return []
+    text = response_text.strip()
+
+    match = _CODE_BLOCK_PATTERN.search(text)
+    if match:
+        text = match.group(1).strip()
+
+    candidates = [text]
+    first_bracket = text.find('[')
+    last_bracket = text.rfind(']')
+    if first_bracket != -1 and last_bracket > first_bracket:
+        candidates.append(text[first_bracket:last_bracket + 1])
+
+    parsed: Any = None
+    for candidate in candidates:
+        try:
+            parsed = json.loads(candidate)
+            break
+        except json.JSONDecodeError:
+            continue
+
+    if not isinstance(parsed, list):
+        return []
+
+    results: List[Dict[str, Any]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        label = item.get('label')
+        if isinstance(label, str) and label.strip():
+            results.append(item)
+    return results
+
+
+class TagSuggestionRequestThread(QThread):
+    """TAG提案AIリクエスト用スレッド"""
+
+    result_ready = Signal(object)
+    error_occurred = Signal(str)
+
+    def __init__(self, prompt: str):
+        super().__init__()
+        self.prompt = prompt
+
+    def run(self):
+        try:
+            from classes.config.ui.ai_settings_widget import get_ai_config
+
+            ai_config = get_ai_config()
+            provider = ai_config.get('default_provider', 'gemini') if ai_config else 'gemini'
+            model = (
+                ai_config.get('providers', {}).get(provider, {}).get('default_model', 'gemini-2.0-flash')
+                if ai_config else 'gemini-2.0-flash'
+            )
+
+            ai_manager = AIManager()
+            result = ai_manager.send_prompt(self.prompt, provider, model)
+            if result.get('success', False):
+                self.result_ready.emit(result)
+            else:
+                self.error_occurred.emit(result.get('error', '不明なエラー'))
+        except Exception as e:
+            self.error_occurred.emit(str(e))
 
 
 class TagBuilderDialog(QDialog):
@@ -30,17 +105,36 @@ class TagBuilderDialog(QDialog):
     # TAGが変更されたときのシグナル
     tags_changed = Signal(str)
     
-    def __init__(self, parent=None, current_tags=""):
+    def __init__(
+        self,
+        parent=None,
+        current_tags: str = "",
+        dataset_id: Optional[str] = None,
+        dataset_context: Optional[Dict[str, Any]] = None,
+    ):
         super().__init__(parent)
         self.current_tags = current_tags
         self.selected_tags = []
         self.preset_data = {}
+        self.dataset_id = dataset_id
+        self.dataset_context = dataset_context or {}
+        self._ai_thread: Optional[TagSuggestionRequestThread] = None
+        self._last_ai_prompt: str = ""
+        self._last_ai_response_text: str = ""
         
         # プリセットデータを読み込み
         self.load_preset_data()
         
         self.init_ui()
         self.parse_current_tags()
+
+        # テーマ変更に追従
+        try:
+            from classes.theme.theme_manager import ThemeManager
+            ThemeManager.instance().theme_changed.connect(self.refresh_theme)
+        except Exception:
+            pass
+        self.refresh_theme()
     
     def load_preset_data(self):
         """MI.jsonからプリセットデータを読み込み"""
@@ -96,17 +190,21 @@ class TagBuilderDialog(QDialog):
         main_layout = QVBoxLayout()
         
         # タブウィジェット
-        tab_widget = QTabWidget()
+        self.tab_widget = QTabWidget()
         
         # 1. 自由記述タブ
         free_input_tab = self.create_free_input_tab()
-        tab_widget.addTab(free_input_tab, "自由記述")
+        self.tab_widget.addTab(free_input_tab, "自由記述")
         
         # 2. プリセットタブ
         preset_tab = self.create_preset_tab()
-        tab_widget.addTab(preset_tab, "プリセット選択")
+        self.tab_widget.addTab(preset_tab, "プリセット選択")
+
+        # 3. AI提案タブ
+        ai_tab = self.create_ai_suggest_tab()
+        self.tab_widget.addTab(ai_tab, "AI提案")
         
-        main_layout.addWidget(tab_widget)
+        main_layout.addWidget(self.tab_widget)
         
         # プレビューエリア
         preview_group = QGroupBox("選択されたTAG")
@@ -227,6 +325,108 @@ class TagBuilderDialog(QDialog):
         
         widget.setLayout(layout)
         return widget
+
+    def create_ai_suggest_tab(self):
+        """AI提案タブを作成"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+
+        info_label = QLabel(
+            "選択中データセットを対象にAIへ問い合わせ、TAG候補を提示します。\n"
+            "候補を選択して『採用』すると、下部のTAG一覧へ追加されます。"
+        )
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+
+        target_text = self._build_ai_target_summary_text()
+        self.ai_target_label = QLabel(target_text)
+        self.ai_target_label.setWordWrap(True)
+        layout.addWidget(self.ai_target_label)
+
+        button_layout = QHBoxLayout()
+        self.ai_generate_button = QPushButton("AI提案取得")
+        self.ai_generate_button.clicked.connect(self.on_ai_generate_clicked)
+        button_layout.addWidget(self.ai_generate_button)
+
+        self.ai_prompt_button = QPushButton("プロンプト全文")
+        self.ai_prompt_button.setEnabled(False)
+        self.ai_prompt_button.clicked.connect(self.on_ai_show_prompt_clicked)
+        button_layout.addWidget(self.ai_prompt_button)
+
+        self.ai_response_button = QPushButton("回答全文")
+        self.ai_response_button.setEnabled(False)
+        self.ai_response_button.clicked.connect(self.on_ai_show_response_clicked)
+        button_layout.addWidget(self.ai_response_button)
+
+        self.ai_apply_button = QPushButton("選択を採用")
+        self.ai_apply_button.clicked.connect(self.on_ai_apply_clicked)
+        self.ai_apply_button.setEnabled(False)
+        button_layout.addWidget(self.ai_apply_button)
+
+        self.ai_apply_all_button = QPushButton("全て採用")
+        self.ai_apply_all_button.clicked.connect(self.on_ai_apply_all_clicked)
+        self.ai_apply_all_button.setEnabled(False)
+        button_layout.addWidget(self.ai_apply_all_button)
+
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+
+        self.ai_progress = QProgressBar()
+        self.ai_progress.setRange(0, 0)
+        self.ai_progress.setVisible(False)
+        layout.addWidget(self.ai_progress)
+
+        self.ai_suggestions_table = QTableWidget(0, 3)
+        self.ai_suggestions_table.setHorizontalHeaderLabels(["rank", "label", "reason"])
+        self.ai_suggestions_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.ai_suggestions_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.ai_suggestions_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        header = self.ai_suggestions_table.horizontalHeader()
+        if header is not None:
+            header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(2, QHeaderView.Stretch)
+        layout.addWidget(self.ai_suggestions_table)
+
+        widget.setLayout(layout)
+        return widget
+
+    def _build_ai_target_summary_text(self) -> str:
+        if not self.dataset_id:
+            return "対象データセット: （未選択）"
+        name = str(self.dataset_context.get('name') or '')
+        grant_number = str(self.dataset_context.get('grant_number') or '')
+        parts = ["対象データセット:"]
+        if name:
+            parts.append(f"- 名前: {name}")
+        parts.append(f"- ID: {self.dataset_id}")
+        if grant_number:
+            parts.append(f"- 課題番号: {grant_number}")
+        return "\n".join(parts)
+
+    def refresh_theme(self):
+        """テーマ変更時の再描画/スタイル適用"""
+        try:
+            if hasattr(self, 'stats_label') and self.stats_label is not None:
+                self.stats_label.setStyleSheet(
+                    f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 11px;"
+                )
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, 'preset_tree') and self.preset_tree is not None:
+                self.preset_tree.setStyleSheet(
+                    "\n".join(
+                        [
+                            f"QTreeWidget {{ color: {get_color(ThemeKey.TEXT_PRIMARY)}; }}",
+                            f"QTreeView::indicator {{ width:16px; height:16px; border:1px solid {get_color(ThemeKey.INPUT_BORDER)}; background:{get_color(ThemeKey.INPUT_BACKGROUND)}; border-radius:3px; }}",
+                            f"QTreeView::indicator:checked {{ background:{get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; border-color:{get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; }}",
+                        ]
+                    )
+                )
+        except Exception:
+            pass
     
     def update_stats_label(self):
         """統計情報ラベルを更新"""
@@ -248,8 +448,197 @@ class TagBuilderDialog(QDialog):
         try:
             self.stats_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 11px;")
         except Exception:
-            # テーマが未初期化でも起動できるようフォールバック
-            self.stats_label.setStyleSheet("color: #888888; font-size: 11px;")
+            pass
+
+    def on_ai_generate_clicked(self):
+        """AI提案を実行"""
+        if self._ai_thread is not None and self._ai_thread.isRunning():
+            return
+
+        if not self.dataset_id:
+            QMessageBox.information(self, "AI提案", "AI提案は、データセット選択時のみ利用できます。")
+            return
+
+        template = load_prompt_file('input/ai/prompts/json/json_suggest_tag_rde.txt')
+        if not template:
+            QMessageBox.warning(self, "AI提案", "プロンプトテンプレートの読み込みに失敗しました。")
+            return
+
+        # データセットコンテキストを収集
+        try:
+            collector = get_dataset_context_collector()
+            full_context = collector.collect_full_context(dataset_id=self.dataset_id, **self.dataset_context)
+        except Exception as e:
+            QMessageBox.warning(self, "AI提案", f"データセット情報の収集に失敗しました:\n{e}")
+            return
+
+        prompt = format_prompt_with_context(template, full_context)
+        self._last_ai_prompt = prompt
+        self._last_ai_response_text = ""
+        self.ai_prompt_button.setEnabled(bool(self._last_ai_prompt.strip()))
+        self.ai_response_button.setEnabled(False)
+
+        self.ai_generate_button.setEnabled(False)
+        self.ai_apply_button.setEnabled(False)
+        self.ai_apply_all_button.setEnabled(False)
+        self.ai_progress.setVisible(True)
+
+        self._ai_thread = TagSuggestionRequestThread(prompt)
+        self._ai_thread.result_ready.connect(self._on_ai_result_ready)
+        self._ai_thread.error_occurred.connect(self._on_ai_error)
+        self._ai_thread.finished.connect(self._on_ai_finished)
+        self._ai_thread.start()
+
+    def _on_ai_finished(self):
+        self.ai_progress.setVisible(False)
+        self.ai_generate_button.setEnabled(True)
+        self._ai_thread = None
+
+    def _on_ai_error(self, error_message: str):
+        reply = QMessageBox.question(
+            self,
+            "AI提案",
+            f"AI問い合わせに失敗しました。\n\n{error_message}\n\n再試行しますか？",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if reply == QMessageBox.Yes:
+            self.on_ai_generate_clicked()
+
+    def _on_ai_result_ready(self, result: object):
+        try:
+            if isinstance(result, dict):
+                response_text = result.get('response') or result.get('content', '')
+            else:
+                response_text = ''
+
+            self._last_ai_response_text = str(response_text)
+            self.ai_response_button.setEnabled(bool(self._last_ai_response_text.strip()))
+
+            suggestions = parse_tag_suggestion_response(str(response_text))
+            if not suggestions:
+                reply = QMessageBox.question(
+                    self,
+                    "AI提案",
+                    "TAG候補を解析できませんでした（JSON配列が必要です）。\n\n再試行しますか？",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes,
+                )
+                self.ai_suggestions_table.setRowCount(0)
+                self.ai_apply_button.setEnabled(False)
+                self.ai_apply_all_button.setEnabled(False)
+                if reply == QMessageBox.Yes:
+                    self.on_ai_generate_clicked()
+                return
+
+            self.ai_suggestions_table.setRowCount(0)
+            for item in suggestions:
+                rank = str(item.get('rank', ''))
+                label = str(item.get('label', '')).strip()
+                reason = str(item.get('reason', '')).strip()
+                if not label:
+                    continue
+
+                row = self.ai_suggestions_table.rowCount()
+                self.ai_suggestions_table.insertRow(row)
+                self.ai_suggestions_table.setItem(row, 0, QTableWidgetItem(rank))
+                label_item = QTableWidgetItem(label)
+                label_item.setData(Qt.UserRole, label)
+                self.ai_suggestions_table.setItem(row, 1, label_item)
+                self.ai_suggestions_table.setItem(row, 2, QTableWidgetItem(reason))
+
+            has_rows = self.ai_suggestions_table.rowCount() > 0
+            self.ai_apply_button.setEnabled(has_rows)
+            self.ai_apply_all_button.setEnabled(has_rows)
+        except Exception as e:
+            QMessageBox.warning(self, "AI提案", f"AI応答の処理に失敗しました:\n{e}")
+            self.ai_suggestions_table.setRowCount(0)
+            self.ai_apply_button.setEnabled(False)
+            self.ai_apply_all_button.setEnabled(False)
+
+    def on_ai_show_prompt_clicked(self):
+        self._show_text_dialog("AI提案: プロンプト全文", self._last_ai_prompt)
+
+    def on_ai_show_response_clicked(self):
+        self._show_text_dialog("AI提案: 回答全文", self._last_ai_response_text)
+
+    def _show_text_dialog(self, title: str, text: str):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.setModal(True)
+        dialog.resize(800, 600)
+
+        layout = QVBoxLayout(dialog)
+        edit = QTextEdit()
+        edit.setReadOnly(True)
+        edit.setPlainText(text or "")
+        layout.addWidget(edit)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        close_button = QPushButton("閉じる")
+        close_button.clicked.connect(dialog.accept)
+        buttons.addWidget(close_button)
+        layout.addLayout(buttons)
+
+        dialog.exec()
+
+    def on_ai_apply_clicked(self):
+        """選択したAI提案をTAGに反映"""
+        if not hasattr(self, 'ai_suggestions_table'):
+            return
+        selection = self.ai_suggestions_table.selectionModel()
+        if selection is None:
+            return
+
+        rows = {index.row() for index in selection.selectedRows()}
+        if not rows:
+            return
+
+        added = False
+        for row in sorted(rows):
+            item = self.ai_suggestions_table.item(row, 1)
+            if item is None:
+                continue
+            label = item.data(Qt.UserRole) or item.text()
+            if isinstance(label, str):
+                label = label.strip()
+            if not label:
+                continue
+            if label not in self.selected_tags:
+                self.selected_tags.append(label)
+                added = True
+
+        if added:
+            self.update_preview()
+            self.update_preset_checkboxes()
+
+    def on_ai_apply_all_clicked(self):
+        """AI提案の全候補をTAGに反映"""
+        if not hasattr(self, 'ai_suggestions_table'):
+            return
+
+        row_count = self.ai_suggestions_table.rowCount()
+        if row_count <= 0:
+            return
+
+        added = False
+        for row in range(row_count):
+            item = self.ai_suggestions_table.item(row, 1)
+            if item is None:
+                continue
+            label = item.data(Qt.UserRole) or item.text()
+            if isinstance(label, str):
+                label = label.strip()
+            if not label:
+                continue
+            if label not in self.selected_tags:
+                self.selected_tags.append(label)
+                added = True
+
+        if added:
+            self.update_preview()
+            self.update_preset_checkboxes()
     
     def populate_preset_data(self):
         """プリセットデータをツリーに表示"""

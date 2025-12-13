@@ -35,6 +35,7 @@ class DataRegisterTabWidget(QWidget):
         self.title = title
         self.button_style = button_style or "background-color: #2196f3; color: white; font-weight: bold; border-radius: 6px;"
         self._batch_tab_alert_shown = False  # 警告表示フラグ
+        self._normal_tab_index = None
         self._batch_tab_index = None
         self.setup_ui()
         
@@ -344,7 +345,8 @@ class DataRegisterTabWidget(QWidget):
         """
         scroll_area.setStyleSheet(scroll_area_style)
         self.normal_register_scroll_area = scroll_area
-        self.tab_widget.addTab(scroll_area, "通常登録")
+        index = self.tab_widget.addTab(scroll_area, "通常登録")
+        self._normal_tab_index = index
         
     def create_batch_register_tab(self):
         """一括登録タブを作成"""
@@ -393,6 +395,36 @@ class DataRegisterTabWidget(QWidget):
     def set_current_tab(self, index):
         """指定されたタブを選択"""
         self.tab_widget.setCurrentIndex(index)
+
+    def focus_normal_register_tab(self) -> bool:
+        """通常登録タブを前面に表示"""
+        if not hasattr(self, 'tab_widget') or self.tab_widget is None:
+            return False
+        target_index = self._normal_tab_index if self._normal_tab_index is not None else 0
+        if target_index < 0 or target_index >= self.tab_widget.count():
+            return False
+        try:
+            if self.tab_widget.currentIndex() != target_index:
+                self.tab_widget.setCurrentIndex(target_index)
+        except Exception as exc:
+            logger.debug("DataRegisterTabWidget: 通常登録タブへのフォーカスに失敗: %s", exc)
+            return False
+        return True
+
+    def focus_batch_register_tab(self) -> bool:
+        """一括登録タブを前面に表示"""
+        if not hasattr(self, 'tab_widget') or self.tab_widget is None:
+            return False
+        target_index = self._batch_tab_index if self._batch_tab_index is not None else 1
+        if target_index < 0 or target_index >= self.tab_widget.count():
+            return False
+        try:
+            if self.tab_widget.currentIndex() != target_index:
+                self.tab_widget.setCurrentIndex(target_index)
+        except Exception as exc:
+            logger.debug("DataRegisterTabWidget: 一括登録タブへのフォーカスに失敗: %s", exc)
+            return False
+        return True
 
     # resizeEventのオーバーライドは不要（ウインドウサイズ変更を妨げない）
 

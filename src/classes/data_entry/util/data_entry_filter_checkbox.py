@@ -599,6 +599,18 @@ def create_checkbox_filter_dropdown(parent=None):
             
             # 最適化されたフィルタリング実行
             filtered_datasets = filter_datasets_by_checkbox_selection_optimized(current_user_id, selected_roles)
+
+            # フィルタ結果が0件の場合は全件フォールバック（UI空白防止）
+            if not filtered_datasets:
+                try:
+                    all_datasets = get_datasets_for_data_entry()
+                    if all_datasets:
+                        filtered_datasets = all_datasets
+                        status_label.setText(f"⚠ フィルタで0件 → 全件表示 ({len(filtered_datasets)}件)")
+                    else:
+                        status_label.setText("⚠ データセットが読み込まれていません")
+                except Exception as fallback_error:
+                    status_label.setText(f"❌ 全件フォールバック失敗: {fallback_error}")
             
             # ドロップダウンの更新
             # 先頭に空欄を維持
@@ -676,6 +688,33 @@ def create_checkbox_filter_dropdown(parent=None):
     container.status_label = status_label
     container.update_datasets = update_filtered_datasets
     container.clear_cache = clear_user_cache
+
+    def _apply_role_filter_state(owner=True, assistant=True, member=True, agent=True, force_reload=False):
+        checkboxes = [
+            (checkbox_owner, owner),
+            (checkbox_assistant, assistant),
+            (checkbox_member, member),
+            (checkbox_agent, agent),
+        ]
+        changed = False
+        for checkbox, desired in checkboxes:
+            if checkbox.isChecked() != desired:
+                prev = checkbox.blockSignals(True)
+                checkbox.setChecked(desired)
+                checkbox.blockSignals(prev)
+                changed = True
+        if force_reload or changed:
+            update_filtered_datasets()
+        return changed
+
+    def set_role_filters(owner=True, assistant=True, member=True, agent=True, force_reload=False):
+        return _apply_role_filter_state(owner, assistant, member, agent, force_reload)
+
+    def relax_filters_for_launch():
+        _apply_role_filter_state(True, True, True, True, True)
+
+    container.set_role_filters = set_role_filters
+    container.relax_filters_for_launch = relax_filters_for_launch
     
     return container
 

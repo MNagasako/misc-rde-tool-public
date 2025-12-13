@@ -20,13 +20,14 @@ import os
 import logging
 import threading
 import json
-from qt_compat.widgets import QVBoxLayout, QLabel, QWidget, QMessageBox, QProgressDialog, QComboBox, QPushButton
+from qt_compat.widgets import QVBoxLayout, QLabel, QWidget, QMessageBox, QProgressDialog, QComboBox, QPushButton, QHBoxLayout
 from qt_compat.core import QTimer, Qt, QMetaObject, Q_ARG, QUrl, Signal, QObject
 from qt_compat.gui import QDesktopServices
 from config.common import OUTPUT_DIR, DATAFILES_DIR, get_dynamic_file_path
 from classes.theme import ThemeKey
 from classes.theme.theme_manager import get_color
 from classes.utils.label_style import apply_label_style
+from classes.utils.dataset_launch_manager import DatasetLaunchManager, DatasetPayload
 
 # ロガー設定
 # シグナル用ヘルパークラス
@@ -43,6 +44,37 @@ if not logger.handlers:
     _h.setFormatter(_fmt)
     logger.addHandler(_h)
 logger.setLevel(logging.INFO)
+
+
+def relax_fetch2_filters_for_launch(dropdown_widget) -> bool:
+    """Reset filters to the broadest state before applying dataset handoff."""
+    if dropdown_widget is None:
+        return False
+
+    reset_fn = getattr(dropdown_widget, 'reset_filters', None)
+    reload_fn = getattr(dropdown_widget, 'reload_datasets', None)
+    changed = False
+
+    try:
+        if callable(reset_fn):
+            try:
+                changed = bool(reset_fn(reload=False))
+            except TypeError:
+                reset_fn()
+                changed = True
+    except Exception:  # pragma: no cover - defensive logging
+        logger.debug("data_fetch2: reset_filters failed", exc_info=True)
+
+    try:
+        if callable(reload_fn):
+            reload_fn()
+        else:
+            changed = False
+    except Exception:  # pragma: no cover - defensive logging
+        logger.debug("data_fetch2: reload_datasets failed", exc_info=True)
+
+    return changed
+
 
 def safe_show_message_widget(parent, title, message, message_type="warning"):
     """
@@ -441,6 +473,16 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
                 
                 filtered_datasets.append(dataset)
             
+            # 最新フィルタ結果をキャッシュ
+            try:
+                container.dataset_map = {
+                    dataset.get("id"): dataset
+                    for dataset in filtered_datasets
+                    if isinstance(dataset, dict) and dataset.get("id")
+                }
+            except Exception:
+                container.dataset_map = {}
+
             # コンボボックスを更新（ダミー項目は追加しない）
             combo.clear()
             
@@ -601,6 +643,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     container.grant_edit = grant_edit
     container.search_edit = search_edit
     container.count_label = count_label
+    container.dataset_map = {}
 
     # テストや外部から編集モードを強制するためのユーティリティを公開
     def enable_dataset_editing():
@@ -657,6 +700,61 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
             logger.error(f"create_dataset_dropdown_all: テーマ更新エラー: {e}")
     
     container.refresh_theme = refresh_theme
+
+    def reset_filters_to_all(reload=True):
+        """全件表示状態に戻してから再読み込み"""
+        share_all = share_button_group.button(0) if share_button_group else None
+        member_all = member_button_group.button(0) if member_button_group else None
+        controls = [
+            share_all,
+            share_button_group.button(1) if share_button_group else None,
+            share_button_group.button(2) if share_button_group else None,
+            member_all,
+            member_button_group.button(1) if member_button_group else None,
+            member_button_group.button(2) if member_button_group else None,
+            type_combo,
+            grant_edit,
+        ]
+
+        blocked = []
+        for ctrl in controls:
+            if ctrl and hasattr(ctrl, 'blockSignals'):
+                try:
+                    previous = ctrl.blockSignals(True)
+                except Exception:
+                    continue
+                blocked.append((ctrl, previous))
+
+        changed = False
+        try:
+            if share_all and hasattr(share_all, 'isChecked') and not share_all.isChecked():
+                share_all.setChecked(True)
+                changed = True
+            if member_all and hasattr(member_all, 'isChecked') and not member_all.isChecked():
+                member_all.setChecked(True)
+                changed = True
+            if type_combo and hasattr(type_combo, 'currentIndex') and type_combo.currentIndex() != 0:
+                type_combo.setCurrentIndex(0)
+                changed = True
+            if grant_edit and hasattr(grant_edit, 'text') and grant_edit.text().strip():
+                grant_edit.clear()
+                changed = True
+        finally:
+            for ctrl, previous in blocked:
+                try:
+                    ctrl.blockSignals(previous)
+                except Exception:
+                    pass
+
+        if reload:
+            try:
+                load_and_filter_datasets()
+            except Exception:
+                logger.debug("reset_filters_to_all: reload failed", exc_info=True)
+        return changed
+
+    container.reset_filters = reset_filters_to_all
+    container.reload_datasets = load_and_filter_datasets
     
     # ThemeManager接続
     from classes.theme.theme_manager import ThemeManager
@@ -706,6 +804,127 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
     # 広域シェアフィルタ付きデータセットドロップダウンを作成（フィルタ表示の下に配置）
     fetch2_dropdown_widget = create_dataset_dropdown_all(dataset_json_path, widget, global_share_filter="both")
     layout.addWidget(fetch2_dropdown_widget)
+
+    launch_controls = QWidget()
+    launch_controls_layout = QHBoxLayout()
+    launch_controls_layout.setContentsMargins(0, 0, 0, 0)
+    launch_label = QLabel("他機能連携:")
+    apply_label_style(launch_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
+    launch_controls_layout.addWidget(launch_label)
+
+    launch_button_style = f"""
+        QPushButton {{
+            background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)};
+            color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)};
+            border-radius: 4px;
+            padding: 4px 10px;
+            border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)};
+        }}
+        QPushButton:hover {{
+            background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)};
+        }}
+        QPushButton:disabled {{
+            background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+            border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+        }}
+    """
+
+    launch_targets = [
+    #    ("dataset_edit", "データセット修正"),
+    #    ("dataset_dataentry", "データエントリー"),
+        ("data_register", "データ登録"),
+        ("data_register_batch", "データ登録(一括)"),
+    ]
+
+    launch_buttons = []
+
+    def _dataset_combo():
+        return getattr(fetch2_dropdown_widget, 'dataset_dropdown', None)
+
+    def _has_dataset_selection() -> bool:
+        combo = _dataset_combo()
+        if combo is None:
+            return False
+        idx = combo.currentIndex()
+        if idx < 0:
+            return False
+        data = combo.itemData(idx)
+        if isinstance(data, dict):
+            return bool(data.get('id') or data)
+        return bool(data)
+
+    def _update_launch_button_state() -> None:
+        enabled = _has_dataset_selection()
+        for button in launch_buttons:
+            button.setEnabled(enabled)
+
+    def _load_dataset_record(dataset_id: str):
+        try:
+            with open(dataset_json_path, 'r', encoding='utf-8') as f:
+                dataset_data = json.load(f)
+            items = dataset_data['data'] if isinstance(dataset_data, dict) and 'data' in dataset_data else dataset_data
+            for dataset in items or []:
+                if isinstance(dataset, dict) and dataset.get('id') == dataset_id:
+                    return dataset
+        except Exception as exc:
+            logger.debug("データセット読み込みに失敗: %s", exc)
+        return None
+
+    def _get_current_dataset_payload():
+        combo = getattr(fetch2_dropdown_widget, 'dataset_dropdown', None)
+        if combo is None:
+            return None
+        idx = combo.currentIndex()
+        if idx < 0:
+            safe_show_message_widget(widget, "データセット未選択", "連携するデータセットを選択してください。", "warning")
+            return None
+        dataset_id = combo.itemData(idx)
+        if not dataset_id:
+            safe_show_message_widget(widget, "データセット未選択", "連携するデータセットを選択してください。", "warning")
+            return None
+        display_text = combo.itemText(idx)
+        dataset_map = getattr(fetch2_dropdown_widget, 'dataset_map', {}) or {}
+        raw_dataset = dataset_map.get(dataset_id)
+        if raw_dataset is None:
+            raw_dataset = _load_dataset_record(dataset_id)
+            if raw_dataset:
+                dataset_map[dataset_id] = raw_dataset
+                fetch2_dropdown_widget.dataset_map = dataset_map
+        return {
+            "dataset_id": dataset_id,
+            "display_text": display_text or dataset_id,
+            "raw_dataset": raw_dataset,
+        }
+
+    def _handle_launch_request(target_key: str):
+        payload = _get_current_dataset_payload()
+        if not payload:
+            return
+        DatasetLaunchManager.instance().request_launch(
+            target_key=target_key,
+            dataset_id=payload["dataset_id"],
+            display_text=payload["display_text"],
+            raw_dataset=payload["raw_dataset"],
+            source_name="data_fetch2",
+        )
+
+    for target_key, caption in launch_targets:
+        btn = QPushButton(caption)
+        btn.setStyleSheet(launch_button_style)
+        btn.clicked.connect(lambda _=None, key=target_key: _handle_launch_request(key))
+        launch_controls_layout.addWidget(btn)
+        launch_buttons.append(btn)
+
+    launch_controls_layout.addStretch()
+    launch_controls.setLayout(launch_controls_layout)
+    layout.addWidget(launch_controls)
+    widget._dataset_launch_buttons = launch_buttons  # type: ignore[attr-defined]
+
+    combo_for_buttons = _dataset_combo()
+    if combo_for_buttons is not None:
+        combo_for_buttons.currentIndexChanged.connect(lambda *_: _update_launch_button_state())
+    _update_launch_button_state()
 
     # ウィジェットにフィルタ状態ラベルを保存（後で更新できるように）
     widget.filter_status_label = filter_status_label
@@ -1061,6 +1280,70 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
         QTimer.singleShot(0, update_planned_summary)
     except Exception:
         pass
+
+    def _find_dataset_index(dataset_id: str) -> int:
+        combo = getattr(fetch2_dropdown_widget, 'dataset_dropdown', None)
+        if not combo:
+            return -1
+        for i in range(combo.count()):
+            if combo.itemData(i) == dataset_id:
+                return i
+        return -1
+
+    def _format_display_text(payload: DatasetPayload) -> str:
+        if payload.display_text:
+            return payload.display_text
+        attrs = (payload.raw or {}).get('attributes', {}) if payload.raw else {}
+        grant = attrs.get('grantNumber', '')
+        name = attrs.get('name', '')
+        parts = [part for part in (grant, name) if part]
+        return " - ".join(parts) if parts else payload.id
+
+    def _apply_dataset_payload(payload: DatasetPayload) -> bool:
+        if not payload or not payload.id:
+            return False
+        combo = getattr(fetch2_dropdown_widget, 'dataset_dropdown', None)
+        if combo is None:
+            return False
+
+        relax_fetch2_filters_for_launch(fetch2_dropdown_widget)
+
+        dataset_map = getattr(fetch2_dropdown_widget, 'dataset_map', {}) or {}
+        if payload.raw:
+            dataset_map[payload.id] = payload.raw
+            fetch2_dropdown_widget.dataset_map = dataset_map
+
+        index = _find_dataset_index(payload.id)
+        if index < 0:
+            reset_filters = getattr(fetch2_dropdown_widget, 'reset_filters', None)
+            reload_fn = getattr(fetch2_dropdown_widget, 'reload_datasets', None)
+            if callable(reset_filters):
+                reset_filters()
+            if callable(reload_fn):
+                reload_fn()
+                index = _find_dataset_index(payload.id)
+
+        if index < 0:
+            display_text = _format_display_text(payload)
+            combo.blockSignals(True)
+            combo.addItem(display_text, payload.id)
+            combo.blockSignals(False)
+            index = combo.count() - 1
+
+        if index < 0:
+            return False
+
+        previous_index = combo.currentIndex()
+        combo.setCurrentIndex(index)
+        if previous_index == index:
+            try:
+                update_planned_summary()
+            except Exception:
+                logger.debug("data_fetch2: manual summary refresh failed", exc_info=True)
+        _update_launch_button_state()
+        return True
+
+    DatasetLaunchManager.instance().register_receiver("data_fetch2", _apply_dataset_payload)
 
     # 余白を下へ押し上げるストレッチで上側に詰める
     layout.addStretch()

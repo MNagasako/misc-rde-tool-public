@@ -16,6 +16,7 @@ from config.common import INPUT_DIR, OUTPUT_DIR, SUMMARY_XLSX_PATH, ensure_direc
 from classes.basic.util.summary_file_utils import list_summary_workbooks
 from classes.theme import get_color, ThemeKey
 from classes.utils.button_styles import get_menu_button_style
+from classes.utils.dataset_launch_manager import DatasetLaunchManager
 
 # UIControllerCore をインポート
 from .ui_controller_core import UIControllerCore
@@ -629,6 +630,9 @@ class UIController(UIControllerCore):
         
         # フォーム機能コントローラーを初期化
         self.forms_controller = UIControllerForms(self)
+
+        # データセット連携マネージャーへUIコントローラーを登録
+        DatasetLaunchManager.instance().set_ui_controller(self)
     
     @property
     def bearer_token(self):
@@ -1570,6 +1574,91 @@ class UIController(UIControllerCore):
             pass
 
         self.dataset_open_widget = None
+
+    def focus_dataset_launch_target(self, target_key: str) -> bool:
+        """Switch dataset tab to match the dataset launch target."""
+
+        if target_key in {"data_register", "data_register_batch"}:
+            return self._focus_data_register_tab(target_key)
+
+        target_attr_map = {
+            "dataset_open": ("open_tab", "_dataset_create_tab"),
+            "dataset_edit": ("edit_tab", "_dataset_edit_tab"),
+            "dataset_dataentry": ("dataentry_tab", "_dataset_dataentry_tab"),
+        }
+
+        attr_pair = target_attr_map.get(target_key)
+        if not attr_pair:
+            return False
+
+        primary_attr, fallback_attr = attr_pair
+
+        tab_widget = getattr(self, '_dataset_tab_widget', None)
+        target_tab = None
+        if tab_widget is not None:
+            target_tab = getattr(tab_widget, primary_attr, None)
+
+        if target_tab is None:
+            dataset_widget = getattr(self, 'dataset_open_widget', None)
+            if not dataset_widget:
+                return False
+            tab_widget = getattr(dataset_widget, '_dataset_tab_widget', None)
+            if tab_widget is None:
+                return False
+            target_tab = getattr(dataset_widget, fallback_attr, None)
+        if target_tab is None:
+            return False
+
+        try:
+            desired_index = tab_widget.indexOf(target_tab)
+        except Exception:
+            desired_index = -1
+        if desired_index < 0:
+            return False
+
+        try:
+            if tab_widget.currentIndex() != desired_index:
+                tab_widget.setCurrentIndex(desired_index)
+        except Exception:
+            return False
+        return True
+
+    def _focus_data_register_tab(self, target_key: str) -> bool:
+        """Ensure the data register tab shows the requested sub-tab."""
+
+        if self._apply_data_register_focus(getattr(self, "data_register_widget", None), target_key):
+            return True
+        parent_widget = getattr(getattr(self, "parent", None), "data_register_tab_widget", None)
+        if self._apply_data_register_focus(parent_widget, target_key):
+            return True
+        return False
+
+    @staticmethod
+    def _apply_data_register_focus(widget, target_key: str) -> bool:
+        if widget is None:
+            return False
+        method_name = "focus_batch_register_tab" if target_key == "data_register_batch" else "focus_normal_register_tab"
+        focus_method = getattr(widget, method_name, None)
+        if callable(focus_method):
+            try:
+                if focus_method():
+                    return True
+            except Exception:
+                logger.debug("UIController: %s failed", method_name, exc_info=True)
+        tab_widget = getattr(widget, "tab_widget", None)
+        if tab_widget is not None:
+            try:
+                if tab_widget.count() > 0:
+                    if target_key == "data_register_batch":
+                        target_index = getattr(widget, "_batch_tab_index", 1) or 1
+                    else:
+                        target_index = getattr(widget, "_normal_tab_index", 0) or 0
+                    target_index = max(0, min(target_index, tab_widget.count() - 1))
+                    tab_widget.setCurrentIndex(target_index)
+                    return True
+            except Exception:
+                logger.debug("UIController: direct data register tab focus failed", exc_info=True)
+        return False
 
     def _create_dummy_ui(self, layout, title, button_style):
         """

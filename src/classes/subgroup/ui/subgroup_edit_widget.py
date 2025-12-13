@@ -6,12 +6,15 @@
 import os
 import json
 import logging
+import webbrowser
+from typing import Iterable, List, Optional
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGridLayout, 
     QPushButton, QMessageBox, QScrollArea, QCheckBox, QRadioButton, 
-    QButtonGroup, QDialog, QTextEdit, QComboBox, QCompleter
+    QButtonGroup, QDialog, QTextEdit, QComboBox, QCompleter, QSizePolicy
 )
 from config.common import SUBGROUP_JSON_PATH
+from config.site_rde import URLS
 from qt_compat.core import Qt
 from classes.theme import get_color, ThemeKey
 from classes.utils.label_style import apply_label_style
@@ -29,6 +32,10 @@ from ..util.subgroup_member_selector_common import (
     create_common_subgroup_member_selector_with_api_complement
 )
 from ..core import subgroup_api_helper
+from ..util.related_dataset_fetcher import RelatedDatasetFetcher, RelatedDataset
+
+
+DATASET_PAGE_TEMPLATE = URLS["web"].get("dataset_page", "https://rde.nims.go.jp/rde/datasets/{id}")
 
 
 class SubgroupEditHandler(SubgroupCreateHandler):
@@ -553,6 +560,188 @@ class SubgroupSelector:
         return self.combo_widget.currentData()
 
 
+class RelatedDatasetSection:
+    """Displays datasets linked to the currently selected subgroup."""
+
+    def __init__(self, fetcher: Optional[RelatedDatasetFetcher] = None) -> None:
+        self.fetcher = fetcher or RelatedDatasetFetcher()
+        self.widget = QWidget()
+        self.widget.setObjectName("relatedDatasetSection")
+        container = QVBoxLayout()
+        container.setContentsMargins(0, 12, 0, 0)
+        container.setSpacing(6)
+        self.widget.setLayout(container)
+
+        header_layout = QHBoxLayout()
+        header_label = QLabel("関連データセット")
+        apply_label_style(header_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
+        self.count_label = QLabel("0件 / 課題 0件")
+        self.count_label.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-weight: bold;"
+        )
+        header_layout.addWidget(header_label)
+        header_layout.addStretch()
+        header_layout.addWidget(self.count_label)
+        container.addLayout(header_layout)
+
+        self.message_label = QLabel("サブグループを選択すると関連データセットを表示します。")
+        self.message_label.setWordWrap(True)
+        self.message_label.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_MUTED)};"
+        )
+        container.addWidget(self.message_label)
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameStyle(0)
+        self.scroll_area.setMinimumHeight(180)
+        self.scroll_area.setMaximumHeight(320)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_area.hide()
+        container.addWidget(self.scroll_area)
+
+        self.scroll_body = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_body)
+        self.scroll_layout.setContentsMargins(0, 0, 0, 0)
+        self.scroll_layout.setSpacing(6)
+        self.scroll_layout.setAlignment(Qt.AlignTop)
+        self.scroll_area.setWidget(self.scroll_body)
+
+        self._row_widgets: List[QWidget] = []
+
+    def update_for_group(self, group_data: Optional[dict]) -> None:
+        """Render datasets associated with *group_data*."""
+
+        if not group_data:
+            self.clear()
+            return
+
+        subjects = group_data.get('subjects', []) if isinstance(group_data, dict) else []
+        grant_numbers = self._extract_grant_numbers(subjects)
+        grant_total = len(set(grant_numbers))
+
+        if not grant_total:
+            self.clear("サブグループに課題番号が設定されていません。", grant_total=0)
+            return
+
+        datasets = self.fetcher.get_related_datasets(grant_numbers)
+        if not datasets:
+            dataset_path = getattr(self.fetcher, 'dataset_json_path', '')
+            if dataset_path and not os.path.exists(dataset_path):
+                message = "dataset.jsonが見つからないため関連データセットを表示できません。"
+            else:
+                message = "関連するデータセットが見つかりません。"
+            self.clear(message, grant_total=grant_total)
+            return
+
+        self._render_rows(datasets, grant_total)
+
+    def clear(self, message: Optional[str] = None, grant_total: int = 0) -> None:
+        """Clear the list and show *message*."""
+
+        self._clear_rows()
+        fallback = "サブグループを選択すると関連データセットを表示します。"
+        self.message_label.setText(message or fallback)
+        self.message_label.show()
+        self.scroll_area.hide()
+        self._update_count_label(0, grant_total)
+
+    def _render_rows(self, datasets: List[RelatedDataset], grant_total: int) -> None:
+        self._clear_rows()
+        for dataset in datasets:
+            row = self._build_row_widget(dataset)
+            self.scroll_layout.addWidget(row)
+            self._row_widgets.append(row)
+
+        self.message_label.hide()
+        self.scroll_area.show()
+        self._update_count_label(len(datasets), grant_total)
+
+    def _build_row_widget(self, dataset: RelatedDataset) -> QWidget:
+        row_widget = QWidget()
+        row_widget.setObjectName("relatedDatasetRow")
+        layout = QHBoxLayout(row_widget)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(12)
+
+        title = dataset.get('name') or "名称未設定"
+        grant_number = dataset.get('grant_number') or "-"
+
+        title_label = QLabel(title)
+        title_label.setWordWrap(True)
+        title_label.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-weight: bold;"
+        )
+        title_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        layout.addWidget(title_label, 3)
+
+        grant_label = QLabel(grant_number)
+        grant_label.setAlignment(Qt.AlignCenter)
+        grant_label.setMinimumWidth(150)
+        grant_label.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_INFO)}; font-family: Consolas, 'Courier New', monospace;"
+        )
+        layout.addWidget(grant_label, 1)
+
+        open_button = QPushButton("開く")
+        open_button.setObjectName("relatedDatasetOpenButton")
+        open_button.setFixedWidth(64)
+        open_button.setStyleSheet(
+            f"background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};"
+            f"color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; font-weight: bold; border-radius: 4px;"
+            f"border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BORDER)};"
+        )
+
+        dataset_id = dataset.get('id', '')
+        if dataset_id:
+            open_button.clicked.connect(
+                lambda _checked=False, ds_id=dataset_id: self._open_dataset_page(ds_id)
+            )
+        else:
+            open_button.setEnabled(False)
+            open_button.setToolTip("データセットIDが見つかりません")
+
+        layout.addWidget(open_button)
+        return row_widget
+
+    def _open_dataset_page(self, dataset_id: str) -> None:
+        url = DATASET_PAGE_TEMPLATE.format(id=dataset_id)
+        try:
+            webbrowser.open(url)
+            logger.info("関連データセットページをブラウザで開きました: %s", url)
+        except Exception as exc:
+            logger.warning("関連データセットページを開けませんでした: %s", exc)
+
+    def _update_count_label(self, dataset_count: int, grant_total: int) -> None:
+        self.count_label.setText(f"{dataset_count}件 / 課題 {grant_total}件")
+
+    def _clear_rows(self) -> None:
+        while self.scroll_layout.count():
+            item = self.scroll_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        self._row_widgets.clear()
+
+    @staticmethod
+    def _extract_grant_numbers(subjects: Iterable) -> List[str]:
+        grant_numbers: List[str] = []
+        if not isinstance(subjects, list):
+            return grant_numbers
+        for subject in subjects:
+            if isinstance(subject, dict):
+                grant = subject.get('grantNumber') or ""
+                if grant:
+                    grant_numbers.append(grant)
+        return grant_numbers
+
+
+def _create_related_dataset_section(layout: QVBoxLayout) -> RelatedDatasetSection:
+    section = RelatedDatasetSection()
+    layout.addWidget(section.widget)
+    return section
+
+
 def create_subgroup_edit_widget(parent, title, color, create_auto_resize_button):
     """
     サブグループ修正ウィジェット作成
@@ -588,18 +777,21 @@ def create_subgroup_edit_widget(parent, title, color, create_auto_resize_button)
     button_section = _create_button_section(layout, button_style, create_auto_resize_button)
     update_btn, show_selected_btn = button_section['update'], button_section['show']
     
-    # === 5. 管理クラス初期化 ===
+    # === 5. 関連データセット表示 ===
+    related_dataset_section = _create_related_dataset_section(layout)
+    
+    # === 6. 管理クラス初期化 ===
     managers = _initialize_managers(
         existing_group_combo, filter_combo, scroll_area, 
-        form_section['builder'], form_widgets, widget  # widgetを追加
+        form_section['builder'], form_widgets, widget, related_dataset_section
     )
     
-    # === 6. イベントハンドラー設定 ===
+    # === 7. イベントハンドラー設定 ===
     _setup_event_handlers(
         widget, parent, managers, button_section, form_widgets, refresh_btn
     )
     
-    # === 7. 初期化 ===
+    # === 8. 初期化 ===
     managers['selector'].load_existing_subgroups()
     
     # 修正タブ作成時に動的ユーザーを初期化
@@ -763,11 +955,13 @@ def _create_button_section(layout, button_style, create_auto_resize_button):
     }
 
 
-def _initialize_managers(combo, filter_combo, scroll_area, form_builder, form_widgets, widget):
+def _initialize_managers(combo, filter_combo, scroll_area, form_builder, form_widgets, widget, dataset_section):
     """管理クラスの初期化"""
     
     def on_group_selection_changed(group_data):
         """グループ選択変更時のコールバック"""
+        # 先に関連データセットを更新（Noneでも内部で初期化）
+        dataset_section.update_for_group(group_data)
         if not group_data:
             return
         
@@ -802,7 +996,8 @@ def _initialize_managers(combo, filter_combo, scroll_area, form_builder, form_wi
         'selector': selector,
         'form': form_manager,
         'member': member_manager,
-        'handler': edit_handler
+        'handler': edit_handler,
+        'datasets': dataset_section,
     }
 
 
@@ -858,7 +1053,6 @@ def _setup_event_handlers(widget, parent, managers, button_section, form_widgets
         # サブグループページのURLを生成してブラウザで開く
         url = f"https://rde.nims.go.jp/rde/datasets/groups/{subgroup_id}"
         try:
-            import webbrowser
             webbrowser.open(url)
             logger.info("サブグループページをブラウザで開きました: %s", url)
         except Exception as e:

@@ -9,6 +9,7 @@ import shutil
 import codecs
 import logging
 import re
+from typing import Iterable, Callable, Optional
 try:
     from unittest.mock import MagicMock
 except ImportError:  # pragma: no cover - fallback for restricted runtimes
@@ -29,9 +30,47 @@ from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_no
 from classes.dataset.util.show_event_refresh import RefreshOnShowWidget
 from classes.dataset.ui.taxonomy_builder_dialog import TaxonomyBuilderDialog
 from classes.dataset.ui.ai_suggestion_dialog import AISuggestionDialog
+from classes.utils.dataset_launch_manager import DatasetLaunchManager, DatasetPayload
 
 # ロガー設定
 logger = logging.getLogger(__name__)
+
+
+def relax_dataset_edit_filters_for_launch(
+    all_radio,
+    other_radios: Optional[Iterable] = None,
+    grant_filter_edit=None,
+    apply_filter_callback: Optional[Callable[[], None]] = None,
+) -> bool:
+    """Switch filter UI to the loosest mode prior to dataset handoff."""
+    controls = []
+    for control in filter(None, [all_radio, grant_filter_edit]):
+        if hasattr(control, 'blockSignals'):
+            controls.append((control, control.blockSignals(True)))
+    for radio in other_radios or []:
+        if hasattr(radio, 'blockSignals'):
+            controls.append((radio, radio.blockSignals(True)))
+
+    changed = False
+    try:
+        if all_radio is not None and hasattr(all_radio, 'isChecked') and not all_radio.isChecked():
+            all_radio.setChecked(True)
+            changed = True
+        if grant_filter_edit is not None and hasattr(grant_filter_edit, 'text'):
+            if grant_filter_edit.text().strip():
+                if hasattr(grant_filter_edit, 'clear'):
+                    grant_filter_edit.clear()
+                    changed = True
+    finally:
+        for control, previous in controls:
+            control.blockSignals(previous)
+
+    if changed and callable(apply_filter_callback):
+        try:
+            apply_filter_callback()
+        except Exception:  # pragma: no cover - defensive fallback
+            logger.debug("dataset_edit: filter reload failed", exc_info=True)
+    return changed
 
 
 def _ensure_real_qt_widgets():
@@ -709,6 +748,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     existing_dataset_label = QLabel("表示するデータセット:")
     existing_dataset_label.setMinimumWidth(150)
     existing_dataset_combo = QComboBox()
+    existing_dataset_combo.setObjectName("datasetEditCombo")
     existing_dataset_combo.setMinimumWidth(650)  # 幅を広げてID表示対応
     existing_dataset_combo.setEditable(True)  # 検索補完のために編集可能にする
     existing_dataset_combo.setInsertPolicy(QComboBox.NoInsert)  # 新しいアイテムの挿入を禁止
@@ -724,6 +764,204 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     dataset_selection_layout.addWidget(existing_dataset_combo)
     dataset_selection_widget.setLayout(dataset_selection_layout)
     layout.addWidget(dataset_selection_widget)
+
+    launch_controls_widget = QWidget()
+    launch_controls_layout = QHBoxLayout()
+    launch_controls_layout.setContentsMargins(0, 0, 0, 0)
+    launch_label = QLabel("他機能連携:")
+    launch_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-weight: bold;")
+    launch_controls_layout.addWidget(launch_label)
+
+    launch_button_style = f"""
+        QPushButton {{
+            background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)};
+            color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)};
+            padding: 4px 10px;
+            border-radius: 4px;
+            border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)};
+        }}
+        QPushButton:hover {{
+            background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)};
+        }}
+        QPushButton:disabled {{
+            background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+            border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+        }}
+    """
+
+    launch_targets = [
+        ("data_fetch2", "データ取得2"),
+    #    ("dataset_dataentry", "データエントリー"),
+        ("data_register", "データ登録"),
+        ("data_register_batch", "データ登録(一括)"),
+    ]
+
+    launch_buttons = []
+
+    def _has_dataset_selection() -> bool:
+        idx = existing_dataset_combo.currentIndex()
+        if idx <= 0:
+            return False
+        dataset_data = existing_dataset_combo.itemData(idx)
+        return isinstance(dataset_data, dict) and bool(dataset_data.get("id"))
+
+    def _update_launch_button_state() -> None:
+        enabled = _has_dataset_selection()
+        for button in launch_buttons:
+            button.setEnabled(enabled)
+
+    def _load_dataset_record(dataset_id: str):
+        dataset_path = get_dynamic_file_path("output/rde/data/dataset.json")
+        if not dataset_id or not os.path.exists(dataset_path):
+            return None
+        try:
+            with open(dataset_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            items = data.get('data') if isinstance(data, dict) else data
+            for dataset in items or []:
+                if isinstance(dataset, dict) and dataset.get('id') == dataset_id:
+                    return dataset
+        except Exception as exc:
+            logger.debug("dataset_edit: dataset.json読み込み失敗 %s", exc)
+        return None
+
+    def _get_selected_dataset_payload():
+        idx = existing_dataset_combo.currentIndex()
+        if idx <= 0:
+            QMessageBox.warning(widget, "データセット未選択", "連携するデータセットを選択してください。")
+            return None
+        dataset_data = existing_dataset_combo.itemData(idx)
+        if not isinstance(dataset_data, dict):
+            QMessageBox.warning(widget, "データセット未取得", "選択したデータセット情報を取得できません。")
+            return None
+        dataset_id = dataset_data.get("id")
+        if not dataset_id:
+            QMessageBox.warning(widget, "データセット未取得", "選択したデータセットIDを取得できません。")
+            return None
+        display_text = existing_dataset_combo.itemText(idx) or dataset_id
+        return {
+            "dataset_id": dataset_id,
+            "display_text": display_text,
+            "raw_dataset": dataset_data,
+        }
+
+    def _handle_dataset_launch(target_key: str):
+        payload = _get_selected_dataset_payload()
+        if not payload:
+            return
+        DatasetLaunchManager.instance().request_launch(
+            target_key=target_key,
+            dataset_id=payload["dataset_id"],
+            display_text=payload["display_text"],
+            raw_dataset=payload["raw_dataset"],
+            source_name="dataset_edit",
+        )
+
+    for target_key, caption in launch_targets:
+        btn = QPushButton(caption)
+        btn.setStyleSheet(launch_button_style)
+        btn.clicked.connect(lambda _=None, key=target_key: _handle_dataset_launch(key))
+        launch_controls_layout.addWidget(btn)
+        launch_buttons.append(btn)
+
+    launch_controls_layout.addStretch()
+    launch_controls_widget.setLayout(launch_controls_layout)
+    layout.addWidget(launch_controls_widget)
+
+    widget._dataset_launch_buttons = launch_buttons  # type: ignore[attr-defined]
+    existing_dataset_combo.currentIndexChanged.connect(lambda *_: _update_launch_button_state())
+    _update_launch_button_state()
+
+    def _find_dataset_index(dataset_id: str) -> int:
+        if not dataset_id:
+            return -1
+        for idx in range(existing_dataset_combo.count()):
+            data = existing_dataset_combo.itemData(idx)
+            if isinstance(data, dict) and data.get("id") == dataset_id:
+                return idx
+        return -1
+
+    def _get_current_dataset_id() -> str | None:
+        current_data = existing_dataset_combo.currentData()
+        if isinstance(current_data, dict):
+            return current_data.get("id")
+        return None
+
+    def _restore_dataset_selection(dataset_id: str | None) -> None:
+        attempts = {"count": 0}
+
+        def _apply_restore():
+            if not dataset_id:
+                logger.debug("dataset_edit: restore skipped (no dataset)")
+                existing_dataset_combo.setCurrentIndex(-1)
+                return
+            target_index = _find_dataset_index(dataset_id)
+            if target_index < 0:
+                if attempts["count"] < 5:
+                    attempts["count"] += 1
+                    QTimer.singleShot(50, _apply_restore)
+                    return
+                logger.debug("dataset_edit: restore target not found id=%s", dataset_id)
+                available_ids = []
+                for idx in range(existing_dataset_combo.count()):
+                    data = existing_dataset_combo.itemData(idx)
+                    if isinstance(data, dict):
+                        available_ids.append(data.get("id"))
+                logger.debug("dataset_edit: available ids=%s", available_ids)
+                existing_dataset_combo.setCurrentIndex(-1)
+                return
+            previous_index = existing_dataset_combo.currentIndex()
+            logger.debug(
+                "dataset_edit: restoring dataset id=%s target_index=%s previous=%s",
+                dataset_id,
+                target_index,
+                previous_index,
+            )
+            existing_dataset_combo.setCurrentIndex(target_index)
+            if previous_index == target_index:
+                try:
+                    on_dataset_selection_changed()
+                except Exception:
+                    logger.debug("dataset_edit: manual refresh after restore failed", exc_info=True)
+            _update_launch_button_state()
+
+        QTimer.singleShot(0, _apply_restore)
+
+    def _format_dataset_display(dataset_dict: dict, fallback: str | None = None) -> str:
+        attrs = dataset_dict.get("attributes", {}) if isinstance(dataset_dict, dict) else {}
+        grant = attrs.get("grantNumber") or ""
+        name = attrs.get("name") or ""
+        result_parts = [part for part in (grant, name) if part]
+        return " - ".join(result_parts) if result_parts else (fallback or dataset_dict.get("id", ""))
+
+    def _insert_dataset_into_combo(dataset_dict: dict, display_text: str | None = None) -> int:
+        if not isinstance(dataset_dict, dict):
+            return -1
+        dataset_id = dataset_dict.get("id")
+        if not dataset_id:
+            return -1
+        current_index = _find_dataset_index(dataset_id)
+        if current_index >= 0:
+            return current_index
+        text = display_text or _format_dataset_display(dataset_dict, dataset_id)
+        existing_dataset_combo.blockSignals(True)
+        existing_dataset_combo.addItem(text, dataset_dict)
+        existing_dataset_combo.blockSignals(False)
+
+        cached_datasets = getattr(existing_dataset_combo, '_datasets_cache', None)
+        if isinstance(cached_datasets, list):
+            cached_datasets.append(dataset_dict)
+        cached_display = getattr(existing_dataset_combo, '_display_names_cache', None)
+        if isinstance(cached_display, list):
+            cached_display.append(text)
+        display_map = getattr(existing_dataset_combo, '_display_to_dataset_map', None)
+        if isinstance(display_map, dict):
+            try:
+                display_map[_normalize_display_text(text)] = dataset_dict
+            except Exception:
+                pass
+        return existing_dataset_combo.count() - 1
     
     # データセットキャッシュシステム
     dataset_cache = {
@@ -1114,7 +1352,12 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             pass
 
     # データセット情報を読み込んでドロップダウンに追加
-    def load_existing_datasets(filter_type="user_only", grant_number_filter="", force_reload=False):
+    def load_existing_datasets(
+        filter_type="user_only",
+        grant_number_filter="",
+        force_reload=False,
+        preserve_selection_id: str | None = None,
+    ):
         """
         データセット一覧を読み込み、フィルタ条件に基づいて表示
         
@@ -1122,6 +1365,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             filter_type: "user_only", "others_only", "all"
             grant_number_filter: 課題番号の部分一致検索文字列
             force_reload: キャッシュを無視して強制再読み込み
+            preserve_selection_id: 再読み込み後に再選択したいデータセットID
         """
         dataset_path = get_dynamic_file_path("output/rde/data/dataset.json")
         logger.debug("データセットファイルパス: %s", dataset_path)
@@ -1141,6 +1385,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             
             # UIを更新
             update_combo_box_ui(datasets, display_names, filter_type, grant_number_filter, len(datasets))
+            _restore_dataset_selection(preserve_selection_id)
             logger.info("キャッシュからの読み込み完了: %s件", len(datasets))
             return
         
@@ -1286,6 +1531,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             
             # UIを更新
             update_combo_box_ui(datasets, display_names, filter_type, grant_number_filter, len(datasets))
+            _restore_dataset_selection(preserve_selection_id)
             
             logger.info("データセット一覧の再読み込み完了: %s件", len(datasets))
             
@@ -2344,10 +2590,32 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 from classes.dataset.ui.tag_builder_dialog import TagBuilderDialog
                 
                 current_tags = edit_tags_edit.text().strip()
+
+                # 現在選択されているデータセット情報（AI提案タブ用）
+                selected_dataset_id = None
+                dataset_context = {}
+                try:
+                    current_index = existing_dataset_combo.currentIndex()
+                    if current_index > 0:
+                        selected_dataset = existing_dataset_combo.itemData(current_index)
+                        if isinstance(selected_dataset, dict):
+                            selected_dataset_id = selected_dataset.get("id")
+                            attrs = selected_dataset.get("attributes", {})
+                            if isinstance(attrs, dict):
+                                dataset_context = {
+                                    "name": attrs.get("name", ""),
+                                    "type": attrs.get("type") or attrs.get("datasetType") or "",
+                                    "grant_number": attrs.get("grantNumber", ""),
+                                    "description": attrs.get("description", ""),
+                                }
+                except Exception:
+                    dataset_context = {}
                 
                 dialog = TagBuilderDialog(
                     parent=widget,
-                    current_tags=current_tags
+                    current_tags=current_tags,
+                    dataset_id=selected_dataset_id,
+                    dataset_context=dataset_context,
                 )
                 
                 # TAG変更シグナルに接続
@@ -3104,6 +3372,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         current_index = existing_dataset_combo.currentIndex()
         logger.debug("データセット選択変更: インデックス=%s", current_index)
         reset_update_override("データセット選択変更")
+        _update_launch_button_state()
         
         if current_index <= 0:  # 最初のアイテム（"-- データセットを選択してください --"）または無効な選択
             logger.debug("データセット未選択状態 - フォームをクリアします")
@@ -3205,6 +3474,39 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
 
     
     existing_dataset_combo.currentIndexChanged.connect(on_dataset_selection_changed)
+
+    def _apply_dataset_launch_payload(payload: DatasetPayload) -> bool:
+        if not payload or not payload.id:
+            return False
+        relax_dataset_edit_filters_for_launch(
+            filter_all_radio,
+            (filter_user_only_radio, filter_others_only_radio),
+            grant_number_filter_edit,
+            lambda: apply_filter(force_reload=False),
+        )
+        target_index = _find_dataset_index(payload.id)
+        dataset_dict = payload.raw
+        if target_index < 0:
+            if dataset_dict is None:
+                dataset_dict = _load_dataset_record(payload.id)
+            if dataset_dict is None:
+                logger.warning("dataset_edit: 連携データセットが見つかりません: %s", payload.id)
+                return False
+            target_index = _insert_dataset_into_combo(dataset_dict, payload.display_text)
+        if target_index < 0:
+            return False
+
+        previous_index = existing_dataset_combo.currentIndex()
+        existing_dataset_combo.setCurrentIndex(target_index)
+        if previous_index == target_index:
+            try:
+                on_dataset_selection_changed()
+            except Exception:
+                logger.debug("dataset_edit: manual dataset refresh failed", exc_info=True)
+        _update_launch_button_state()
+        return True
+
+    DatasetLaunchManager.instance().register_receiver("dataset_edit", _apply_dataset_launch_payload)
     
     # フィルタ機能のイベントハンドラー
     def apply_filter(force_reload=False):
@@ -3446,12 +3748,18 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         """現在のフィルタ設定でリフレッシュ"""
         filter_type = get_current_filter_type()
         grant_number_filter = grant_number_filter_edit.text().strip()
+        selection_id = _get_current_dataset_id()
         
         if force_reload:
             logger.info("外部からキャッシュクリア付きリフレッシュ")
             clear_cache()
         
-        load_existing_datasets(filter_type, grant_number_filter, force_reload)
+        load_existing_datasets(
+            filter_type,
+            grant_number_filter,
+            force_reload,
+            preserve_selection_id=selection_id,
+        )
     
     def refresh_cache_from_external():
         """外部からキャッシュを強制更新"""
@@ -3460,6 +3768,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     widget._refresh_dataset_list = refresh_with_current_filter
     widget._refresh_cache = refresh_cache_from_external
     widget.add_show_refresh_callback(lambda: refresh_with_current_filter())
+    widget._restore_dataset_selection = _restore_dataset_selection
     
     # グローバル通知システムに登録
     notifier = get_dataset_refresh_notifier()

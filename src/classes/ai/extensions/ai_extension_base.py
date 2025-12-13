@@ -165,6 +165,7 @@ class DatasetDescriptionExtension(AIExtensionBase):
         # 外部ファイルからテンプレートを読み込み
         if self._load_external_templates():
             logger.info("外部テンプレートファイルからの読み込み成功")
+            self._ensure_required_templates()
             return
         
         # 保存されたテンプレートファイルを削除（新しいテンプレートを強制読み込み）
@@ -339,7 +340,12 @@ ARIM課題データ:
         
         self.register_template(detailed_template)
         
-        # クイック版テンプレート（フォールバック用）
+        self._register_quick_fallback_template()
+        logger.info("フォールバックテンプレート登録完了: basic, detailed, quick")
+
+    def _register_quick_fallback_template(self):
+        """Register fallback quick template used when config omits it."""
+
         quick_template = AIPromptTemplate(
             "quick",
             """
@@ -374,13 +380,30 @@ STRUCTUREDファイルのテキスト内容:
 - 箇条書きを避け、一続きの自然な文章とする
 - 冗長な表現・重複は避ける
 
-出力: 簡潔な説明文のみ（見出しや形式マーカーなし）
+出力JSON例:
+{
+    "explain_normal": "ここに150-250文字程度の学術的な説明",
+    "explain_detail": "詳細説明は必要に応じてここに記載",
+    "explain_general": "一般向けに噛み砕いた説明をここに記載",
+    "metadata": {
+        "language": "ja"
+    }
+}
+
+出力: 上記JSON例と同じキー構造で、実際の説明文を埋め込んだJSON文字列を返す
 """,
             ["name", "type", "grant_number", "existing_description", "dataset_existing_info", "arim_extension_data", "arim_experiment_data", "experiment_summary", "material_index_data", "equipment_data", "file_tree", "text_from_structured_files", "json_from_structured_files"]
         )
         
         self.register_template(quick_template)
-        logger.info("フォールバックテンプレート登録完了: basic, detailed, quick")
+        logger.debug("フォールバックquickテンプレートを登録")
+
+    def _ensure_required_templates(self) -> None:
+        """Guarantee that essential templates (quick) are always available."""
+
+        if "quick" not in self.prompt_templates:
+            logger.warning("quickテンプレートが外部設定に存在しないためフォールバックを登録します")
+            self._register_quick_fallback_template()
         
     def collect_context_data(self, **kwargs) -> Dict[str, Any]:
         """データセット関連のコンテキストデータを収集"""

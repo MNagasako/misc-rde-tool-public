@@ -1,7 +1,4 @@
-"""
-Aboutタブ - ARIM RDE Tool v2.1.3
-ライセンス情報表示
-"""
+"""Aboutタブ - アプリケーション情報とライセンス情報表示"""
 
 import logging
 
@@ -57,7 +54,11 @@ class AboutTab(QWidget):
             )
         except ImportError:
             APP_NAME = "ARIM RDE Tool"
-            APP_VERSION = "v2.1.5"
+            try:
+                from config.common import REVISION as _REVISION
+                APP_VERSION = f"v{_REVISION}"
+            except Exception:
+                APP_VERSION = "v(unknown)"
             APP_DESCRIPTION = "データ移行ツール"
             APP_AUTHOR = "ARIM事業"
             APP_COPYRIGHT = "Copyright © 2024-2025 ARIM"

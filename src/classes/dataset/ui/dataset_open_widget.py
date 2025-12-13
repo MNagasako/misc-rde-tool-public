@@ -39,6 +39,8 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     # タブ管理用のリファレンスを保持（クリーンアップや再生成時に使用）
     main_widget._dataset_tab_widget = None  # type: ignore[attr-defined]
     main_widget._dataset_create_tab = None  # type: ignore[attr-defined]
+    main_widget._dataset_edit_tab = None  # type: ignore[attr-defined]
+    main_widget._dataset_dataentry_tab = None  # type: ignore[attr-defined]
     
     # タイトル
     label = QLabel(f"{title}機能")
@@ -81,6 +83,7 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
         from classes.dataset.ui.dataset_edit_widget import create_dataset_edit_widget
         edit_tab = create_dataset_edit_widget(parent, "データセット編集", create_auto_resize_button)
         tab_widget.addTab(edit_tab, "修正")
+        main_widget._dataset_edit_tab = edit_tab  # type: ignore[attr-defined]
         
     except Exception as e:
         logger.warning("データセット編集タブの作成に失敗: %s", e)
@@ -90,7 +93,9 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     try:
         from classes.dataset.ui.dataset_dataentry_widget_minimal import create_dataset_dataentry_widget
         dataentry_tab = create_dataset_dataentry_widget(parent, "データエントリー", create_auto_resize_button)
+        dataentry_tab = create_dataset_dataentry_widget(parent, "データエントリー", create_auto_resize_button)
         tab_widget.addTab(dataentry_tab, "タイル（データエントリー）")
+        main_widget._dataset_dataentry_tab = dataentry_tab  # type: ignore[attr-defined]
         
     except Exception as e:
         logger.warning("データエントリータブの作成に失敗: %s", e)
