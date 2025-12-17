@@ -4,6 +4,24 @@
 
 ---
 
+## v2.2.7 (2025-12-17) - Windows / pytest-qt テスト安定化 + バージョン表記更新
+
+### 🧪 Windows / pytest-qt テスト安定化
+
+- pytest実行時のみ、ネイティブUI操作（ダイアログ/可視化/強制processEvents等）を抑制し、0x8001010d 系の致命的クラッシュを回避。
+- テスト時のウィジェット生成・showイベント周辺の副作用を低減し、テストスイートの完走性を改善。
+
+### 📚 バージョン表記更新・ドキュメント整理
+
+- VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.2.7 に統一。
+
+### 🧪 テスト（推奨）
+
+- `./.venv/Scripts/python.exe -m pytest -q -k 'test_revision_sync'`
+- `./.venv/Scripts/python.exe -m pytest -q`
+
+---
+
 ## v2.2.6 (2025-12-13) - データポータルアップロードUI改善 + TAGビルダーAI提案
 
 ### 🗂 データポータル: データセットアップロードUI改善

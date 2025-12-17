@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.2.6** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.2.7** のバイナリ配布およびドキュメント公開用リポジトリです。
 
 **[ツール概要(こちらのほうが更新頻度高いです)](https://cuddly-stinger-40d.notion.site/QuickStart-2befc2cb5fc380f09d0dd4595b767f4d?source=copy_link)**
 
@@ -16,14 +16,13 @@
 
 ## 🚀 最新情報
 
-**2025-12-13 最新リリース**: バージョン2.2.6（データポータルアップロードUI改善 + TAGビルダーAI提案）
+**2025-12-17 最新リリース**: バージョン2.2.7（Windows / pytest-qt テスト安定化 + バージョン表記更新）
 
-### v2.2.6 の主な改善
+### v2.2.7 の主な改善
 
-- データポータルのデータセットアップロード画面で、取得済み画像一覧を4列テーブル化（選択/ファイル名/キャプション/アップロード）し、キャプション編集・ヘッダ固定・ソート・Up済表示に対応しました。
-- アップロード時にキャプションを反映（空の場合はファイル名を使用）し、アップ済みファイルは一覧で区別できるようになりました。
-- データセット編集のTAGビルダーに「AI提案」タブを追加し、AI問い合わせ→候補表示→採用/全て採用、リトライ提案、プロンプト全文/回答全文確認を実装しました。
-- README / VERSION.txt / CHANGELOG / リリースノート等のバージョン表記を2.2.6へ統一しました。
+- pytest実行時のみ、ネイティブUI操作（ダイアログ/可視化/強制processEvents等）を抑制し、0x8001010d 系の致命的クラッシュを回避しました。
+- テスト時のウィジェット生成・showイベント周辺の副作用を低減し、テストスイートの完走性を改善しました。
+- README / VERSION.txt / CHANGELOG / リリースノート等のバージョン表記を 2.2.7 へ統一しました。
 
 > ℹ️ リスティングタブは `output/arim-site/{equipment|reports}_latest.json` など最新エクスポートを前提とします。再読込前に各タブで「JSON再取得」を実行し、キャッシュディレクトリ（`output/arim-site/reports/cache/`）の残量にも留意してください。
 
