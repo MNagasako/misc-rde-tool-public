@@ -8,7 +8,17 @@ import json
 import os
 import logging
 from qt_compat.widgets import (
-    QWidget, QVBoxLayout, QLabel, QLineEdit, QHBoxLayout, QTextEdit, QGroupBox, QComboBox, QSizePolicy, QMessageBox
+    QWidget,
+    QVBoxLayout,
+    QLabel,
+    QLineEdit,
+    QHBoxLayout,
+    QTextEdit,
+    QGroupBox,
+    QComboBox,
+    QSizePolicy,
+    QMessageBox,
+    QPushButton,
 )
 from classes.data_entry.conf.ui_constants import get_data_register_form_style, TAB_HEIGHT_RATIO
 from classes.theme.theme_keys import ThemeKey
@@ -191,12 +201,12 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
             group = relationships.get('group', {}).get('data', {})
             group_id = group.get('id', '')
 
-        # --- 試料フォーム生成（常に3番目に挿入） ---
+        # --- 試料フォーム生成（常に基本情報の次に挿入） ---
         try:
             parent_controller.sample_form_widget = create_sample_form(widget, group_id, parent_controller)
             if parent_controller.sample_form_widget:
-                # データセット選択(0), ドロップダウン(1), 基本情報(2)の次に挿入
-                layout.insertWidget(3, parent_controller.sample_form_widget)
+                # データセット選択(0), ドロップダウン(1), 他機能連携(2), 基本情報(3)の次に挿入
+                layout.insertWidget(4, parent_controller.sample_form_widget)
                 parent_controller.sample_form_widget.setVisible(True)
                 parent_controller.sample_form_widget.update()
                 widget.update()
@@ -206,7 +216,7 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
             traceback.print_exc()
             parent_controller.sample_form_widget = None
 
-        # --- 固有情報フォーム生成（常に4番目に挿入） ---
+        # --- 固有情報フォーム生成（常に試料フォームの次に挿入） ---
         template_id = ''
         instrument_id = ''
         invoice_schema_exists = ''
@@ -225,7 +235,7 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
         if invoice_schema_exists == 'あり' and invoice_schema_path:
             form = create_schema_form_from_path(invoice_schema_path, widget)
             if form:
-                layout.insertWidget(4, form)
+                layout.insertWidget(5, form)
                 schema_form_widget = form
                 parent_controller.schema_form_widget = schema_form_widget
                 form.setVisible(True)
@@ -346,8 +356,8 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
         QPushButton {{
             background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)};
             color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)};
-            border-radius: 6px;
-            padding: 6px 12px;
+            border-radius: 4px;
+            padding: 4px 10px;
             border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)};
         }}
         QPushButton:hover {{
@@ -420,29 +430,30 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
             source_name="data_register",
         )
 
-    # ファイル選択・登録実行ボタンを分離
-    btn_layout = QHBoxLayout()
-    btn_layout.setSpacing(15)  # ボタン間隔を広げる
+    # 他機能連携ボタン（データセットコンボボックス直下に配置）
+    # 他タブ（データセット編集/データエントリー）と同様に、項目名ラベルの右側へボタンを並べる
+    launch_controls_widget = QWidget()
+    launch_controls_layout = QHBoxLayout()
+    launch_controls_layout.setContentsMargins(0, 0, 0, 0)
+
+    launch_label = QLabel("他機能連携:")
+    launch_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-weight: bold;")
+    launch_controls_layout.addWidget(launch_label)
 
     # 他機能連携ボタン（データセット修正）
-    launch_dataset_edit_button = parent_controller.create_auto_resize_button(
-        "データセット修正",
-        160,
-        45,
-        launch_button_style,
-    )
+    launch_dataset_edit_button = QPushButton("データセット修正")
+    launch_dataset_edit_button.setStyleSheet(launch_button_style)
     launch_dataset_edit_button.clicked.connect(_launch_to_dataset_edit)
-    btn_layout.addWidget(launch_dataset_edit_button)
+    launch_controls_layout.addWidget(launch_dataset_edit_button)
 
     # 他機能連携ボタン（データエントリー）
-    launch_dataset_dataentry_button = parent_controller.create_auto_resize_button(
-        "データエントリー",
-        160,
-        45,
-        launch_button_style,
-    )
+    launch_dataset_dataentry_button = QPushButton("データエントリー")
+    launch_dataset_dataentry_button.setStyleSheet(launch_button_style)
     launch_dataset_dataentry_button.clicked.connect(_launch_to_dataset_dataentry)
-    btn_layout.addWidget(launch_dataset_dataentry_button)
+    launch_controls_layout.addWidget(launch_dataset_dataentry_button)
+
+    launch_controls_layout.addStretch()
+    launch_controls_widget.setLayout(launch_controls_layout)
 
     widget._dataset_launch_buttons = [
         launch_dataset_edit_button,
@@ -452,6 +463,14 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
     if combo is not None:
         combo.currentIndexChanged.connect(lambda *_: _update_launch_button_state())
     _update_launch_button_state()
+
+    # データセットドロップダウンの直下に「他機能連携」ボタン行を挿入
+    layout.insertWidget(2, launch_controls_widget)
+
+
+    # ファイル選択・登録実行ボタン（通常登録の主操作）
+    btn_layout = QHBoxLayout()
+    btn_layout.setSpacing(15)  # ボタン間隔を広げる
 
 
     # --- ファイル検証関数 ---

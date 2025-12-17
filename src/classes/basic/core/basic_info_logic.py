@@ -4875,6 +4875,9 @@ def fetch_invoice_schema_from_api(
 
     lock_ctx = summary_lock if summary_lock is not None else nullcontext()
     candidates = team_id_candidates if isinstance(team_id_candidates, list) and team_id_candidates else [DEFAULT_TEAM_ID]
+    # NOTE: 2025-12-18: teamId候補のリトライは行わない。
+    # 基本情報/InvoiceSchema取得ボタンの動作として、最初の候補のみを使用し、失敗しても他候補は試さない。
+    candidates = candidates[:1]
 
     # summaryの最低限の整合性を保証
     if not isinstance(summary, dict):
@@ -4887,45 +4890,39 @@ def fetch_invoice_schema_from_api(
         summary["failed"] = {}
 
     try:
-        last_error = None
-        last_status = None
+        team_id = candidates[0]
+        url = f"https://rde-api.nims.go.jp/invoiceSchemas/{template_id}?teamId={team_id}"
+        resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=10)
 
-        for team_id in candidates:
-            url = f"https://rde-api.nims.go.jp/invoiceSchemas/{template_id}?teamId={team_id}"
-            resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=10)
-            if resp is None:
-                last_error = "Request failed"
-                last_status = 0
-                continue
-
+        if resp is None:
+            last_status = 0
+            last_error = "Request failed"
+        else:
             last_status = getattr(resp, "status_code", None)
 
             # token無効はteamIdに依らないので即終了
             if last_status == 401:
                 last_error = "HTTP 401 Unauthorized"
-                break
-
-            # teamId違い/権限/存在差分の可能性があるものは次候補を試す
-            if last_status in (403, 404):
+            elif last_status in (403, 404):
+                # teamId違い/権限/存在差分の可能性はあるが、候補のリトライは行わない
                 last_error = f"HTTP {last_status}"
-                continue
+            else:
+                resp.raise_for_status()
+                data = resp.json()
+                with open(filepath, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
 
-            resp.raise_for_status()
-            data = resp.json()
-            with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+                with lock_ctx:
+                    summary["success"].append(template_id)
+                    summary["failed"].pop(template_id, None)
+                    with open(log_path, "a", encoding="utf-8") as logf:
+                        logf.write(
+                            f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [SUCCESS] template_id={template_id} teamId={team_id}\n"
+                        )
+                    with open(summary_path, "w", encoding="utf-8") as f:
+                        json.dump(summary, f, ensure_ascii=False, indent=2)
 
-            with lock_ctx:
-                summary["success"].append(template_id)
-                summary["failed"].pop(template_id, None)
-                with open(log_path, "a", encoding="utf-8") as logf:
-                    logf.write(
-                        f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [SUCCESS] template_id={template_id} teamId={team_id}\n"
-                    )
-                with open(summary_path, "w", encoding="utf-8") as f:
-                    json.dump(summary, f, ensure_ascii=False, indent=2)
-
-            return "success"
+                return "success"
 
         with lock_ctx:
             summary["failed"][template_id] = last_error or "failed"
