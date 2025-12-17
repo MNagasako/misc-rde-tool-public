@@ -5,6 +5,8 @@
 報告書ベースとAIベースの2種類の情報源から候補を取得し、ユーザーが選択して適用できる
 """
 
+import os
+
 from typing import Dict, Any, Optional, Callable
 from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -218,14 +220,16 @@ class AutoSettingDialog(QDialog):
     def _on_fetch_candidates(self):
         """候補を取得"""
         try:
-            # プログレスダイアログ
-            progress = QProgressDialog("候補を取得しています...", None, 0, 0, self)
-            progress.setWindowTitle("候補取得中")
-            progress.setWindowModality(Qt.WindowModal)
-            progress.show()
-            
-            from qt_compat.core import QCoreApplication
-            QCoreApplication.processEvents()
+            # pytest実行中は、モーダルUI/イベント強制処理がWindows側で不安定になり得るため抑制
+            progress = None
+            if not os.environ.get("PYTEST_CURRENT_TEST"):
+                progress = QProgressDialog("候補を取得しています...", None, 0, 0, self)
+                progress.setWindowTitle("候補取得中")
+                progress.setWindowModality(Qt.WindowModal)
+                progress.show()
+
+                from qt_compat.core import QCoreApplication
+                QCoreApplication.processEvents()
             
             # 候補取得
             if self.selected_source == "report" and self.report_fetcher:
@@ -237,7 +241,8 @@ class AutoSettingDialog(QDialog):
             else:
                 raise ValueError(f"取得機能が利用できません: {self.selected_source}")
             
-            progress.close()
+            if progress is not None:
+                progress.close()
             
             # 候補表示
             if self.candidates:

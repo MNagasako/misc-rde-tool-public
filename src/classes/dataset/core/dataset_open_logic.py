@@ -51,7 +51,43 @@ def filter_groups_by_role(groups, filter_type="member", user_id=None):
 
 
 # 事前に選択されたグループ情報を引数で受け取る形に変更
-def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, dataset_name=None, embargo_date_str=None, template_id=None, dataset_type=None, share_core_scope=False, anonymize=False):
+def _parse_related_links_text(related_links_text: str | None) -> list[dict]:
+    related_links_text = (related_links_text or "").strip()
+    related_links: list[dict] = []
+    if not related_links_text:
+        return related_links
+    # TITLE:URL をカンマ区切りで受け付ける
+    items = related_links_text.split(',')
+    for item in items:
+        item = item.strip()
+        if not item:
+            continue
+        if ':' not in item:
+            continue
+        title, url = item.split(':', 1)
+        title = title.strip()
+        url = url.strip()
+        if title and url:
+            related_links.append({"title": title, "url": url})
+    return related_links
+
+
+def run_dataset_open_logic(
+    parent=None,
+    bearer_token=None,
+    group_info=None,
+    dataset_name=None,
+    embargo_date_str=None,
+    template_id=None,
+    dataset_type=None,
+    share_core_scope=False,
+    anonymize=False,
+    *,
+    description: str | None = None,
+    related_links_text: str | None = None,
+    tags: list[str] | None = None,
+    related_dataset_ids: list[str] | None = None,
+):
     logger.debug("run_dataset_open_logic: dataset_name=%s, embargo_date_str=%s, template_id=%s, dataset_type=%s, bearer_token=%s, group_info=%s", dataset_name, embargo_date_str, template_id, dataset_type, '[PRESENT]' if bearer_token else '[NONE]', group_info)
     logger.debug("share_core_scope=%s, anonymize=%s", share_core_scope, anonymize)
     
@@ -114,6 +150,27 @@ def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, data
             }
         }
     }
+
+    # Optional metadata for "新規開設2"
+    description = (description or "").strip()
+    if description:
+        payload["data"]["attributes"]["description"] = description
+
+    parsed_links = _parse_related_links_text(related_links_text)
+    if parsed_links:
+        payload["data"]["attributes"]["relatedLinks"] = parsed_links
+
+    if tags:
+        normalized_tags = [t.strip() for t in tags if isinstance(t, str) and t.strip()]
+        if normalized_tags:
+            payload["data"]["attributes"]["tags"] = normalized_tags
+
+    if related_dataset_ids:
+        rel_ids = [rid for rid in related_dataset_ids if isinstance(rid, str) and rid.strip()]
+        if rel_ids:
+            payload["data"]["relationships"]["relatedDatasets"] = {
+                "data": [{"type": "dataset", "id": rid} for rid in rel_ids]
+            }
     payload_str = json.dumps(payload, ensure_ascii=False, indent=2)
     logger.debug("payload sharingPolicies: %s", payload['data']['attributes']['sharingPolicies'])
     logger.debug("payload isAnonymized: %s", payload['data']['attributes']['isAnonymized'])
@@ -127,6 +184,10 @@ def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, data
         f"データセットを匿名にする: {attr.get('isAnonymized')}\n"
         f"エンバーゴ期間終了日: {attr.get('embargoDate')}\n"
         f"共有範囲: {attr.get('sharingPolicies')}\n"
+        f"説明: {'入力あり' if attr.get('description') else '未入力'}\n"
+        f"関連情報: {len(attr.get('relatedLinks', []) or [])}件\n"
+        f"TAG: {', '.join(attr.get('tags', []) or [])}\n"
+        f"関連データセット: {len(payload['data'].get('relationships', {}).get('relatedDatasets', {}).get('data', []) or [])}件\n"
         f"\nこの操作はRDEに新規データセットを作成します。"
     )
 
@@ -230,7 +291,7 @@ def run_dataset_open_logic(parent=None, bearer_token=None, group_info=None, data
         logger.info("データセット開設処理はユーザーによりキャンセルされました。")
 
 # グループ選択UIを事前に表示する関数
-def create_group_select_widget(parent=None):
+def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool = True, connect_open_handler: bool = True):
     from qt_compat.widgets import QCheckBox
     # データ中核拠点広域シェア チェックボックス
     share_core_scope_checkbox = QCheckBox("データ中核拠点広域シェア（RDE全体での共有）を有効にする", parent)
@@ -688,6 +749,9 @@ def create_group_select_widget(parent=None):
         _apply_warning_state(data_warning_message)
 
     container = RefreshOnShowWidget(parent)
+    # Expose checkboxes for external wrappers (e.g., 新規開設2)
+    container.share_core_scope_checkbox = share_core_scope_checkbox  # type: ignore[attr-defined]
+    container.anonymize_checkbox = anonymize_checkbox  # type: ignore[attr-defined]
     container.setLayout(form_layout)
 
     # テーマ再適用（ダーク/ライト切替時に背景色が逆転しないよう強制再指定）
@@ -818,7 +882,8 @@ def create_group_select_widget(parent=None):
         
         logger.debug("on_open: group=%s, grant_number=%s, dataset_name=%s, embargo_str=%s, template_id=%s, dataset_type=%s, bearer_token=%s, share_core_scope=%s, anonymize=%s", group_info.get('attributes', {}).get('name'), selected_grant_number, dataset_name, embargo_str, template_id, dataset_type, '[PRESENT]' if bearer_token else '[NONE]', share_core_scope, anonymize)
         run_dataset_open_logic(parent, bearer_token, group_info, dataset_name, embargo_str, template_id, dataset_type, share_core_scope, anonymize)
-    open_btn.clicked.connect(on_open)
+    if connect_open_handler:
+        open_btn.clicked.connect(on_open)
 
     # サブグループ情報の更新機能を追加
     def refresh_subgroup_data():
@@ -879,26 +944,27 @@ def create_group_select_widget(parent=None):
             message = f"サブグループ情報の更新に失敗しました: {e}"
             _apply_warning_state(message)
     
-    # サブグループ更新通知システムに登録
-    try:
-        from classes.dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
-        subgroup_notifier = get_subgroup_refresh_notifier()
-        subgroup_notifier.register_callback(refresh_subgroup_data)
-        logger.info("データセット開設タブ: サブグループ更新通知に登録完了")
-        
-        # ウィジェット破棄時の通知解除用
-        def cleanup_callback():
-            subgroup_notifier.unregister_callback(refresh_subgroup_data)
-            logger.info("データセット開設タブ: サブグループ更新通知を解除")
-        
-        container._cleanup_subgroup_callback = cleanup_callback
-        
-    except Exception as e:
-        logger.warning("サブグループ更新通知への登録に失敗: %s", e)
-
-    # 外部から呼び出し可能にする
+    # 外部から呼び出し可能にする（register_subgroup_notifier=False でも showEvent で追従できるように保持）
     container._refresh_subgroup_data = refresh_subgroup_data
     container.add_show_refresh_callback(refresh_subgroup_data)
+
+    if register_subgroup_notifier:
+        # サブグループ更新通知システムに登録
+        try:
+            from classes.dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
+            subgroup_notifier = get_subgroup_refresh_notifier()
+            subgroup_notifier.register_callback(refresh_subgroup_data)
+            logger.info("データセット開設タブ: サブグループ更新通知に登録完了")
+
+            # ウィジェット破棄時の通知解除用
+            def cleanup_callback():
+                subgroup_notifier.unregister_callback(refresh_subgroup_data)
+                logger.info("データセット開設タブ: サブグループ更新通知を解除")
+
+            container._cleanup_subgroup_callback = cleanup_callback
+
+        except Exception as e:
+            logger.warning("サブグループ更新通知への登録に失敗: %s", e)
 
     return container, team_groups, combo, grant_combo, open_btn, name_edit, embargo_edit, template_combo, template_list, filter_combo
 

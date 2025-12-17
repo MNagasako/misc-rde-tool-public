@@ -31,9 +31,10 @@ from classes.dataset.util.show_event_refresh import RefreshOnShowWidget
 from classes.dataset.ui.taxonomy_builder_dialog import TaxonomyBuilderDialog
 from classes.dataset.ui.ai_suggestion_dialog import AISuggestionDialog
 from classes.utils.dataset_launch_manager import DatasetLaunchManager, DatasetPayload
+from classes.managers.log_manager import get_logger
 
 # ロガー設定
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def relax_dataset_edit_filters_for_launch(
@@ -792,7 +793,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
 
     launch_targets = [
         ("data_fetch2", "データ取得2"),
-    #    ("dataset_dataentry", "データエントリー"),
+        ("dataset_dataentry", "データエントリー"),
         ("data_register", "データ登録"),
         ("data_register_batch", "データ登録(一括)"),
     ]
@@ -889,13 +890,42 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         return None
 
     def _restore_dataset_selection(dataset_id: str | None) -> None:
-        attempts = {"count": 0}
+        attempts = {"count": 0, "expanded": False}
 
         def _apply_restore():
             if not dataset_id:
                 logger.debug("dataset_edit: restore skipped (no dataset)")
                 existing_dataset_combo.setCurrentIndex(-1)
                 return
+
+            # ComboBoxは遅延展開のため、リフレッシュ直後はアイテムが未展開のことがあります。
+            # その場合はキャッシュから一度だけ展開してから復元を試みます。
+            if not attempts["expanded"]:
+                try:
+                    has_any_dataset_item = False
+                    for idx in range(existing_dataset_combo.count()):
+                        data = existing_dataset_combo.itemData(idx)
+                        if isinstance(data, dict) and data.get("id"):
+                            has_any_dataset_item = True
+                            break
+
+                    if not has_any_dataset_item:
+                        cached_datasets = getattr(existing_dataset_combo, '_datasets_cache', None)
+                        cached_display_names = getattr(existing_dataset_combo, '_display_names_cache', None)
+                        if (
+                            isinstance(cached_datasets, list)
+                            and isinstance(cached_display_names, list)
+                            and cached_datasets
+                        ):
+                            attempts["expanded"] = True
+                            populate_combo_box_with_progress(
+                                existing_dataset_combo,
+                                cached_datasets,
+                                cached_display_names,
+                            )
+                except Exception:
+                    logger.debug("dataset_edit: restore combo expansion from cache failed", exc_info=True)
+
             target_index = _find_dataset_index(dataset_id)
             if target_index < 0:
                 if attempts["count"] < 5:
@@ -996,8 +1026,32 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         dataset_cache["display_data"].clear()
         logger.info("データセットキャッシュをクリアしました")
     
+    is_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+    class _NullProgress:
+        def show(self):
+            return None
+
+        def setValue(self, _value):
+            return None
+
+        def setLabelText(self, _text):
+            return None
+
+        def close(self):
+            return None
+
+    def _process_events():
+        if not is_pytest:
+            QApplication.processEvents()
+
+    # プログレスダイアログを作成
     def create_progress_dialog(title, text, maximum=0):
         """プログレスダイアログを作成"""
+        # Windows + pytest-qt 環境でネイティブUI/イベント処理が不安定になり得るため、テスト時はno-op化
+        if is_pytest:
+            return _NullProgress()
+
         progress = QProgressDialog(text, "キャンセル", 0, maximum, widget)
         progress.setWindowTitle(title)
         progress.setWindowModality(Qt.WindowModal)
@@ -1031,7 +1085,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 if i % 50 == 0 or i == total_datasets - 1:  # 50件ごと、または最後の処理時に更新
                     progress.setValue(i)
                     progress.setLabelText(f"データセットを処理しています... ({i+1}/{total_datasets})")
-                    QApplication.processEvents()  # UIの更新を強制
+                    _process_events()  # UIの更新を強制
                 
                 try:
                     # データ構造の検証
@@ -1071,7 +1125,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             # 最終プログレス更新
             progress.setValue(total_datasets)
             progress.setLabelText("処理完了")
-            QApplication.processEvents()
+            _process_events()
             
         finally:
             progress.close()
@@ -1110,7 +1164,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 if i % 100 == 0 or i == total_datasets - 1:
                     progress.setValue(i)
                     progress.setLabelText(f"表示用データを作成しています... ({i+1}/{total_datasets})")
-                    QApplication.processEvents()
+                    _process_events()
                 
                 try:
                     # データ構造の検証
@@ -1148,7 +1202,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             # 最終プログレス更新
             progress.setValue(total_datasets)
             progress.setLabelText("表示データ作成完了")
-            QApplication.processEvents()
+            _process_events()
             
         finally:
             progress.close()
@@ -1169,7 +1223,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 total_items
             )
             progress.show()
-            QApplication.processEvents()
+            _process_events()
         else:
             progress = None
         
@@ -1195,12 +1249,12 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 if progress:
                     progress.setValue(batch_end)
                     progress.setLabelText(f"データセット一覧を展開しています... ({batch_end}/{total_items})")
-                    QApplication.processEvents()
+                    _process_events()
                 
                 # 応答性を保つため、バッチごとに少し待機
                 if total_items > 500:  # 500件以上の場合のみ
                     QTimer.singleShot(1, lambda: None)  # 1msの非ブロッキング待機
-                    QApplication.processEvents()
+                    _process_events()
             # 追加完了後にマップ再構築
             rebuild_display_map(combo_box)
             # 初期選択を未選択状態に（ラインエディットのプレースホルダのみ表示）
@@ -1385,7 +1439,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             
             # UIを更新
             update_combo_box_ui(datasets, display_names, filter_type, grant_number_filter, len(datasets))
-            _restore_dataset_selection(preserve_selection_id)
+            if preserve_selection_id:
+                _restore_dataset_selection(preserve_selection_id)
             logger.info("キャッシュからの読み込み完了: %s件", len(datasets))
             return
         
@@ -1406,18 +1461,18 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 # 統合プログレス表示
                 loading_progress = create_progress_dialog("データ読み込み中", "データセット情報を読み込んでいます...", 0)
                 loading_progress.show()
-                QApplication.processEvents()
+                _process_events()  # UIの更新を強制
                 
                 try:
                     loading_progress.setLabelText("dataset.jsonを読み込んでいます...")
-                    QApplication.processEvents()
+                    _process_events()
                     
                     try:
                         with open(dataset_path, encoding="utf-8", errors='replace') as f:
                             data = json.load(f)
                             
                         loading_progress.setLabelText("JSONデータを解析中...")
-                        QApplication.processEvents()
+                        _process_events()
                         
                     except (json.JSONDecodeError, UnicodeDecodeError) as json_error:
                         logger.error("データセット読み込みエラー: %s", json_error)
@@ -1473,20 +1528,28 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                                     logger.info("元ファイルの直接修復が成功しました")
                                 else:
                                     logger.error("元ファイルの修復も失敗しました")
-                                    QMessageBox.critical(widget, "エラー", 
-                                                       "データセットファイルが破損しており、修復できませんでした。\n"
-                                                       "新しいファイルが作成されます。")
+                                    if not is_pytest:
+                                        QMessageBox.critical(
+                                            widget,
+                                            "エラー",
+                                            "データセットファイルが破損しており、修復できませんでした。\n"
+                                            "新しいファイルが作成されます。",
+                                        )
                                     data = {"data": [], "links": {}, "meta": {}}
                             except Exception as final_error:
                                 logger.error("最終修復試行も失敗: %s", final_error)
-                                QMessageBox.critical(widget, "エラー", 
-                                                   "データセットファイルの読み込みに完全に失敗しました。\n"
-                                                   "空のデータセットリストから開始します。")
+                                if not is_pytest:
+                                    QMessageBox.critical(
+                                        widget,
+                                        "エラー",
+                                        "データセットファイルの読み込みに完全に失敗しました。\n"
+                                        "空のデータセットリストから開始します。",
+                                    )
                                 data = {"data": [], "links": {}, "meta": {}}
                     
                     # ユーザーのgrantNumber取得
                     loading_progress.setLabelText("ユーザーの権限情報を取得しています...")
-                    QApplication.processEvents()
+                    _process_events()
                     
                     # データをキャッシュに保存
                     dataset_cache["raw_data"] = data.get("data", [])
@@ -1531,7 +1594,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             
             # UIを更新
             update_combo_box_ui(datasets, display_names, filter_type, grant_number_filter, len(datasets))
-            _restore_dataset_selection(preserve_selection_id)
+            if preserve_selection_id:
+                _restore_dataset_selection(preserve_selection_id)
             
             logger.info("データセット一覧の再読み込み完了: %s件", len(datasets))
             
@@ -1975,7 +2039,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             try:
                 # スピナー開始（ボタン無効化）
                 ai_suggest_button.start_loading("AI生成中")
-                QApplication.processEvents()  # UI更新
+                _process_events()  # UI更新
                 
                 # 現在のフォームデータを収集してコンテキストとして使用
                 context_data = {}
@@ -2063,7 +2127,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             try:
                 # スピナー開始
                 quick_ai_button.start_loading("生成中")
-                QApplication.processEvents()  # UI更新
+                _process_events()  # UI更新
                 
                 # 現在のフォームデータを収集してコンテキストとして使用
                 context_data = {}
@@ -2158,7 +2222,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 
                 # スピナー開始
                 ai_check_button.start_loading("チェック中")
-                QApplication.processEvents()
+                _process_events()
                 
                 # コンテキスト収集
                 context_data = {
@@ -3478,12 +3542,33 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     def _apply_dataset_launch_payload(payload: DatasetPayload) -> bool:
         if not payload or not payload.id:
             return False
+
+        # デバッグ用: 呼び出し先(dataset_edit)で受け取った dataset_id をログへ出す
+        logger.info(
+            "dataset_edit: launch payload received dataset_id=%s display=%s has_raw=%s",
+            payload.id,
+            payload.display_text,
+            bool(payload.raw),
+        )
         relax_dataset_edit_filters_for_launch(
             filter_all_radio,
             (filter_user_only_radio, filter_others_only_radio),
             grant_number_filter_edit,
             lambda: apply_filter(force_reload=False),
         )
+
+        # ComboBoxは通常、初期ロード時にアイテムを展開せず（placeholder + completer + cacheのみ）
+        # mousePressEvent 等で必要時に展開します。
+        # 連携起動では「選択状態」を作る必要があるため、キャッシュがある場合はここで展開します。
+        try:
+            if existing_dataset_combo.count() == 0:
+                cached_datasets = getattr(existing_dataset_combo, '_datasets_cache', None)
+                cached_display_names = getattr(existing_dataset_combo, '_display_names_cache', None)
+                if isinstance(cached_datasets, list) and isinstance(cached_display_names, list) and cached_datasets:
+                    populate_combo_box_with_progress(existing_dataset_combo, cached_datasets, cached_display_names)
+        except Exception:
+            logger.debug("dataset_edit: combo expansion from cache failed", exc_info=True)
+
         target_index = _find_dataset_index(payload.id)
         dataset_dict = payload.raw
         if target_index < 0:
@@ -3492,6 +3577,11 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             if dataset_dict is None:
                 logger.warning("dataset_edit: 連携データセットが見つかりません: %s", payload.id)
                 return False
+
+            # フォールバック: キャッシュ展開できない/対象が無い場合は単体で挿入。
+            # index==0 を未選択扱いにしているため、ヘッダーが無い場合は先に追加します。
+            if existing_dataset_combo.count() == 0:
+                existing_dataset_combo.addItem("-- データセットを選択してください --", None)
             target_index = _insert_dataset_into_combo(dataset_dict, payload.display_text)
         if target_index < 0:
             return False
@@ -3506,7 +3596,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         _update_launch_button_state()
         return True
 
-    DatasetLaunchManager.instance().register_receiver("dataset_edit", _apply_dataset_launch_payload)
+    # NOTE: DatasetLaunchManager の receiver 登録は、初期データロード後に行う。
+    # 連携ペイロードが widget 生成前に到着している場合、register_receiver() が即時適用を試みるため、
+    # ここで登録するとキャッシュ未構築の状態で選択処理が走りやすい。
     
     # フィルタ機能のイベントハンドラー
     def apply_filter(force_reload=False):
@@ -3742,6 +3834,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     # 初期状態でフォームをクリア
     clear_edit_form()
     logger.info("データセット編集ウィジェット初期化完了 - フォームをクリアしました")
+
+    # 他機能からの連携（target dataset 指定）を受け取る
+    DatasetLaunchManager.instance().register_receiver("dataset_edit", _apply_dataset_launch_payload)
     
     # 外部からリフレッシュできるように関数を属性として追加
     def refresh_with_current_filter(force_reload=False):

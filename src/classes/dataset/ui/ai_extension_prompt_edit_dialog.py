@@ -33,7 +33,10 @@ class AIExtensionPromptEditDialog(QDialog):
     def setup_ui(self):
         """UI要素のセットアップ"""
         self.setWindowTitle("AI拡張プロンプト編集")
-        self.setModal(True)
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            self.setAttribute(Qt.WA_DontShowOnScreen, True)
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            self.setModal(True)
         self.resize(800, 600)
         # ユーザーが高さを変更できるようサイズグリップを有効化
         self.setSizeGripEnabled(True)

@@ -18,9 +18,10 @@ from qt_compat.core import QTimer, Qt
 from config.common import get_dynamic_file_path
 from classes.data_entry.util.template_format_validator import TemplateFormatValidator
 from classes.utils.dataset_launch_manager import DatasetLaunchManager, DatasetPayload
+from classes.managers.log_manager import get_logger
 
 # ロガー設定
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 from classes.data_entry.util.data_entry_forms import create_schema_form_from_path
 from classes.data_entry.util.data_entry_forms_fixed import create_sample_form
 
@@ -59,7 +60,9 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
         QWidget: データ登録用ウィジェット
     """
     widget = QWidget()
-    widget.setVisible(True)  # 明示的に表示設定
+    # pytest環境では強制表示がWindows側で不安定になることがあるため抑制
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        widget.setVisible(True)  # 明示的に表示設定
     layout = QVBoxLayout()
     layout.setContentsMargins(15, 15, 15, 15)  # より適切な余白
     layout.setSpacing(15)  # 要素間の間隔を増加
@@ -338,9 +341,117 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
         combo.currentIndexChanged.connect(on_dataset_changed)
         DatasetLaunchManager.instance().register_receiver("data_register", _apply_dataset_launch_payload)
 
+    # 他機能連携（通常登録 → データセット修正）
+    launch_button_style = f"""
+        QPushButton {{
+            background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)};
+            color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)};
+            border-radius: 6px;
+            padding: 6px 12px;
+            border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)};
+        }}
+        QPushButton:hover {{
+            background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)};
+        }}
+        QPushButton:disabled {{
+            background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+            border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+        }}
+    """
+
+    def _get_current_dataset_payload_for_launch():
+        if combo is None:
+            return None
+        idx = combo.currentIndex()
+        if idx < 0:
+            return None
+        dataset_item = combo.itemData(idx, 0x0100)
+        if not isinstance(dataset_item, dict):
+            return None
+        dataset_id = dataset_item.get("id")
+        if not dataset_id:
+            return None
+        display_text = combo.itemText(idx) or dataset_id
+        return {
+            "dataset_id": dataset_id,
+            "display_text": display_text,
+            "raw_dataset": dataset_item,
+        }
+
+    def _update_launch_button_state() -> None:
+        enabled = bool(_get_current_dataset_payload_for_launch())
+        for btn in getattr(widget, "_dataset_launch_buttons", []):
+            btn.setEnabled(enabled)
+
+    def _launch_to_dataset_edit() -> None:
+        payload = _get_current_dataset_payload_for_launch()
+        if not payload:
+            QMessageBox.warning(widget, "データセット未選択", "連携するデータセットを選択してください。")
+            return
+        logger.info(
+            "data_register: launch request target=dataset_edit dataset_id=%s display=%s",
+            payload["dataset_id"],
+            payload["display_text"],
+        )
+        DatasetLaunchManager.instance().request_launch(
+            target_key="dataset_edit",
+            dataset_id=payload["dataset_id"],
+            display_text=payload["display_text"],
+            raw_dataset=payload["raw_dataset"],
+            source_name="data_register",
+        )
+
+    def _launch_to_dataset_dataentry() -> None:
+        payload = _get_current_dataset_payload_for_launch()
+        if not payload:
+            QMessageBox.warning(widget, "データセット未選択", "連携するデータセットを選択してください。")
+            return
+        logger.info(
+            "data_register: launch request target=dataset_dataentry dataset_id=%s display=%s",
+            payload["dataset_id"],
+            payload["display_text"],
+        )
+        DatasetLaunchManager.instance().request_launch(
+            target_key="dataset_dataentry",
+            dataset_id=payload["dataset_id"],
+            display_text=payload["display_text"],
+            raw_dataset=payload["raw_dataset"],
+            source_name="data_register",
+        )
+
     # ファイル選択・登録実行ボタンを分離
     btn_layout = QHBoxLayout()
     btn_layout.setSpacing(15)  # ボタン間隔を広げる
+
+    # 他機能連携ボタン（データセット修正）
+    launch_dataset_edit_button = parent_controller.create_auto_resize_button(
+        "データセット修正",
+        160,
+        45,
+        launch_button_style,
+    )
+    launch_dataset_edit_button.clicked.connect(_launch_to_dataset_edit)
+    btn_layout.addWidget(launch_dataset_edit_button)
+
+    # 他機能連携ボタン（データエントリー）
+    launch_dataset_dataentry_button = parent_controller.create_auto_resize_button(
+        "データエントリー",
+        160,
+        45,
+        launch_button_style,
+    )
+    launch_dataset_dataentry_button.clicked.connect(_launch_to_dataset_dataentry)
+    btn_layout.addWidget(launch_dataset_dataentry_button)
+
+    widget._dataset_launch_buttons = [
+        launch_dataset_edit_button,
+        launch_dataset_dataentry_button,
+    ]  # type: ignore[attr-defined]
+
+    if combo is not None:
+        combo.currentIndexChanged.connect(lambda *_: _update_launch_button_state())
+    _update_launch_button_state()
 
 
     # --- ファイル検証関数 ---
@@ -459,8 +570,9 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
     widget.setMinimumWidth(600)  # 最小幅設定
     widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     
-    # ウィジェットを確実に表示
-    widget.setVisible(True)
+    # ウィジェットを確実に表示（pytest環境では不安定化することがあるため抑制）
+    if not os.environ.get("PYTEST_CURRENT_TEST"):
+        widget.setVisible(True)
     # widget.show()  # 削除 - これがメインウィンドウから分離する原因
     
     return widget

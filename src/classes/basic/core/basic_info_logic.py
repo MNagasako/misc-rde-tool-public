@@ -327,25 +327,188 @@ def _iterate_template_team_ids(output_dir: Optional[str] = None) -> List[str]:
             logger.info("テンプレート取得: 環境変数からteamId=%sのみを候補として使用", team_id[:12])
             return [team_id]
 
-    candidate_paths: List[str] = []
-    if output_dir:
-        candidate_paths.append(os.path.join(output_dir, "subGroup.json"))
-    candidate_paths.append(SUBGROUP_JSON_PATH)
+    def _append_unique(target: List[str], value: Optional[str]) -> None:
+        if value and value not in target:
+            target.append(value)
 
+    def _extract_children_ids(payload: Dict) -> List[str]:
+        children = payload.get("data", {}).get("relationships", {}).get("children", {}).get("data", [])
+        if not isinstance(children, list):
+            return []
+        ids: List[str] = []
+        for item in children:
+            if isinstance(item, dict):
+                child_id = item.get("id")
+                if isinstance(child_id, str) and child_id:
+                    ids.append(child_id)
+        return ids
+
+    def _resolve_self_user_id(target_dir: Optional[str]) -> Optional[str]:
+        # output_dir が指定されている場合は、そのディレクトリ配下の self.json のみを参照する。
+        # 既定パスへフォールバックすると「別ユーザー/別環境のJSON」が混在し得るため。
+        candidate_paths: List[str] = []
+        if target_dir:
+            candidate_paths.append(os.path.join(target_dir, "self.json"))
+        else:
+            candidate_paths.append(SELF_JSON_PATH)
+
+        for path in candidate_paths:
+            payload = _load_json_if_exists(path)
+            if not payload:
+                continue
+            user_id = payload.get("data", {}).get("id")
+            if isinstance(user_id, str) and user_id:
+                return user_id
+        return None
+
+    def _user_has_project_role(project_item: Dict, user_id: str) -> bool:
+        attrs = project_item.get("attributes", {})
+        if not isinstance(attrs, dict):
+            return False
+        roles = attrs.get("roles", [])
+        if not isinstance(roles, list):
+            return False
+        for role in roles:
+            if isinstance(role, dict) and role.get("userId") == user_id:
+                return True
+        return False
+
+    def _team_has_user_role(team_id: str, user_id: str, target_dir: Optional[str]) -> Optional[bool]:
+        # None: 判定不能（詳細ファイルが無い/壊れている等）
+        # True/False: 判定結果
+        # output_dir が指定されている場合は、そのディレクトリ配下の subGroups のみを参照する。
+        candidate_paths: List[str] = []
+        if target_dir:
+            candidate_paths.append(os.path.join(target_dir, "subGroups", f"{team_id}.json"))
+        else:
+            candidate_paths.append(os.path.join(SUBGROUP_DETAILS_DIR, f"{team_id}.json"))
+            candidate_paths.append(os.path.join(LEGACY_SUBGROUP_DETAILS_DIR, f"{team_id}.json"))
+
+        subgroup_detail: Optional[Dict] = None
+        for path in candidate_paths:
+            subgroup_detail = _load_json_if_exists(path)
+            if subgroup_detail:
+                break
+        if not subgroup_detail:
+            return None
+
+        roles = subgroup_detail.get("data", {}).get("attributes", {}).get("roles", [])
+        if not isinstance(roles, list):
+            return None
+        for role in roles:
+            if isinstance(role, dict) and role.get("userId") == user_id:
+                return True
+        return False
+
+    # まずは groupDetail.json / subGroup.json から候補teamIdを抽出
+    # NOTE: teamId は「アクセス可能なTEAMグループID」である可能性が高い。
+    #       groupDetail.json の included(PROJECT) の children が実運用上の有力候補。
     team_ids: List[str] = []
-    for path in candidate_paths:
+
+    # groupDetail.json から「ログインユーザーがロールを持つPROJECTのchildren(TEAM)」を優先的に抽出
+    user_id = _resolve_self_user_id(output_dir)
+    preferred_team_ids: List[str] = []
+
+    group_detail_paths: List[str] = []
+    if output_dir:
+        group_detail_paths.append(os.path.join(output_dir, "groupDetail.json"))
+    else:
+        group_detail_paths.append(GROUP_DETAIL_JSON_PATH)
+    for path in group_detail_paths:
+        group_detail = _load_json_if_exists(path)
+        if not group_detail:
+            continue
+
+        # groupDetail.json は PROGRAM の詳細で、data.children は PROJECT を指すことがある。
+        # そのため、included 内の PROJECT の children (=TEAM) を候補として採用する。
+        included = group_detail.get("included", [])
+        if isinstance(included, list):
+            for item in included:
+                if not isinstance(item, dict):
+                    continue
+                attrs = item.get("attributes", {})
+                if not isinstance(attrs, dict):
+                    continue
+                group_type = attrs.get("groupType")
+                if group_type == "PROJECT":
+                    # ユーザーがPROJECTロールを持つなら、そのchildren(TEAM)は使える可能性が高い
+                    if user_id and _user_has_project_role(item, user_id):
+                        for child_id in _extract_children_ids({"data": item}):
+                            _append_unique(preferred_team_ids, child_id)
+                    for child_id in _extract_children_ids({"data": item}):
+                        _append_unique(team_ids, child_id)
+                elif group_type == "TEAM":
+                    _append_unique(team_ids, item.get("id"))
+        if team_ids:
+            logger.debug(
+                "テンプレート取得: %s の children から %d 件のteamId候補を抽出",
+                os.path.basename(path),
+                len(team_ids),
+            )
+            break
+
+    sub_group_paths: List[str] = []
+    if output_dir:
+        sub_group_paths.append(os.path.join(output_dir, "subGroup.json"))
+    else:
+        sub_group_paths.append(SUBGROUP_JSON_PATH)
+    for path in sub_group_paths:
         sub_group_data = _load_json_if_exists(path)
         if not sub_group_data:
             continue
-        for item in sub_group_data.get("included", []):
-            attrs = item.get("attributes", {})
-            if attrs.get("groupType") == "TEAM":
-                team_id = item.get("id")
-                if team_id and team_id not in team_ids:
-                    team_ids.append(team_id)
+
+        # subGroup.json 自体が PROJECT 詳細で、children に TEAM 群が並ぶことがある
+        for child_id in _extract_children_ids(sub_group_data):
+            _append_unique(team_ids, child_id)
+
+        # 旧来の included(groupType=TEAM) も互換的に拾う
+        included = sub_group_data.get("included", [])
+        if isinstance(included, list):
+            for item in included:
+                if not isinstance(item, dict):
+                    continue
+                attrs = item.get("attributes", {})
+                if isinstance(attrs, dict) and attrs.get("groupType") == "TEAM":
+                    _append_unique(team_ids, item.get("id"))
+
         if team_ids:
-            logger.debug("テンプレート取得: %s から %d 件のteamId候補を抽出", os.path.basename(path), len(team_ids))
+            logger.debug(
+                "テンプレート取得: %s から %d 件のteamId候補を抽出",
+                os.path.basename(path),
+                len(team_ids),
+            )
             break
+
+    # PROJECTロール経由で候補が取れた場合は、それを優先（TEAM詳細での所属判定に依存しない）
+    if preferred_team_ids:
+        logger.info(
+            "テンプレート取得: PROJECTロールに基づきteamId候補を採用します (preferred=%d, total=%d)",
+            len(preferred_team_ids),
+            len(team_ids),
+        )
+        return preferred_team_ids
+
+    # 次に「ログイン中ユーザーが所属するTEAM」に絞り込む（TEAM詳細ファイルがある場合）
+    if user_id and team_ids:
+        member_team_ids: List[str] = []
+        unknown_team_ids: List[str] = []
+        for team_id in team_ids:
+            verdict = _team_has_user_role(team_id, user_id, output_dir)
+            if verdict is True:
+                member_team_ids.append(team_id)
+            elif verdict is None:
+                unknown_team_ids.append(team_id)
+
+        # 所属TEAMが特定できた場合はそれを優先。
+        # 特定できない場合は従来通り候補全体を返す。
+        if member_team_ids:
+            logger.info(
+                "テンプレート取得: ログインユーザー所属TEAMに絞り込みました (member=%d, unknown=%d, total=%d)",
+                len(member_team_ids),
+                len(unknown_team_ids),
+                len(team_ids),
+            )
+            return member_team_ids
 
     if not team_ids:
         logger.info("テンプレート取得: teamId候補が見つからなかったためデフォルト%sのみを使用", DEFAULT_TEAM_ID)
@@ -694,6 +857,7 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
     """
     try:
         from net.http_helpers import parallel_download
+        import threading
         
         if progress_callback:
             if not progress_callback(0, 100, "invoiceSchemas取得を開始しています... (並列: 有効)"):
@@ -728,20 +892,45 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
         else:
             summary = {"success": [], "failed": {}}
 
+        # 旧形式/壊れたsummaryの互換補正
+        if not isinstance(summary, dict):
+            summary = {"success": [], "failed": {}}
+        if not isinstance(summary.get("success"), list):
+            summary["success"] = []
+        if not isinstance(summary.get("failed"), dict):
+            summary["failed"] = {}
+
+        # teamId は template.json 取得時と同様に subGroup.json から抽出した候補を使う
+        team_id_candidates = _iterate_template_team_ids(output_dir)
+        logger.info("invoiceSchemas取得: teamId候補=%s", [t[:12] for t in team_id_candidates])
+
+        # 並列実行時にsummary/log/summary.jsonを書き換えるためロックを共有
+        summary_lock = threading.Lock()
+
         total_templates = len(template_ids)
         
         # タスクリストを作成（並列実行用）
-        tasks = [(bearer_token, template_id, output_dir, summary, log_path, summary_path) 
-                for template_id in template_ids]
+        tasks = [
+            (bearer_token, template_id, output_dir, summary, log_path, summary_path, team_id_candidates, summary_lock)
+            for template_id in template_ids
+        ]
         
         # 並列ダウンロード実行（50件以上で自動並列化）
-        def worker(token, template_id, out_dir, summ, log_p, summ_p):
+        def worker(token, template_id, out_dir, summ, log_p, summ_p, team_ids, lock):
             """ワーカー関数"""
             try:
-                return fetch_invoice_schema_from_api(token, template_id, out_dir, summ, log_p, summ_p)
+                return fetch_invoice_schema_from_api(token, template_id, out_dir, summ, log_p, summ_p, team_ids, lock)
             except Exception as e:
                 logger.error(f"invoiceSchema取得失敗 (template_id: {template_id}): {e}")
-                summ.setdefault("failed", {})[template_id] = str(e)
+                try:
+                    with lock:
+                        if not isinstance(summ, dict):
+                            return f"failed: {e}"
+                        summ.setdefault("failed", {})[template_id] = str(e)
+                        with open(summ_p, "w", encoding="utf-8") as f:
+                            json.dump(summ, f, ensure_ascii=False, indent=2)
+                except Exception:
+                    logger.debug("invoiceSchemas取得: summary更新に失敗", exc_info=True)
                 return f"failed: {e}"
         
         # プログレスコールバックを調整（10-95%の範囲にマッピング）
@@ -4654,7 +4843,16 @@ def get_stage_completion_status():
                     write_row(value_dict)
                     row_idx += 1
 
-def fetch_invoice_schema_from_api(bearer_token, template_id, output_dir, summary, log_path, summary_path):
+def fetch_invoice_schema_from_api(
+    bearer_token,
+    template_id,
+    output_dir,
+    summary,
+    log_path,
+    summary_path,
+    team_id_candidates=None,
+    summary_lock=None,
+):
     """
     指定template_idのinvoiceSchemasを取得し保存。成功・失敗をsummary/logに記録。
     既にsummary.success/ファイルがあればスキップ。
@@ -4665,66 +4863,91 @@ def fetch_invoice_schema_from_api(bearer_token, template_id, output_dir, summary
         with open(summary_path, "w", encoding="utf-8") as f:
             json.dump(summary, f, ensure_ascii=False, indent=2)
         return "skipped_summary"
-    # 401/403でスキップ記録があればスキップ
-    if template_id in summary.get("skipped_401", []):
-        with open(summary_path, "w", encoding="utf-8") as f:
-            json.dump(summary, f, ensure_ascii=False, indent=2)
-        return "skipped_401"
-    if template_id in summary.get("skipped_403", []):
-        with open(summary_path, "w", encoding="utf-8") as f:
-            json.dump(summary, f, ensure_ascii=False, indent=2)
-        return "skipped_403"
     # 既存ファイルがあればスキップ
     if os.path.exists(filepath):
         with open(summary_path, "w", encoding="utf-8") as f:
             json.dump(summary, f, ensure_ascii=False, indent=2)
         return "skipped_file"
-    url = f"https://rde-api.nims.go.jp/invoiceSchemas/{template_id}"
+    # NOTE: teamId が無いと多くのテンプレートで403/404になり、取得件数が激減する。
+    # そのため teamId 候補を付けて取得する（候補は subGroup.json の TEAM group から抽出）。
     headers = _make_headers(bearer_token, host="rde-api.nims.go.jp", origin="https://rde.nims.go.jp", referer="https://rde.nims.go.jp/")
+    from contextlib import nullcontext
+
+    lock_ctx = summary_lock if summary_lock is not None else nullcontext()
+    candidates = team_id_candidates if isinstance(team_id_candidates, list) and team_id_candidates else [DEFAULT_TEAM_ID]
+
+    # summaryの最低限の整合性を保証
+    if not isinstance(summary, dict):
+        return "failed: invalid summary"
+    summary.setdefault("success", [])
+    if not isinstance(summary.get("success"), list):
+        summary["success"] = []
+    summary.setdefault("failed", {})
+    if not isinstance(summary.get("failed"), dict):
+        summary["failed"] = {}
+
     try:
-        resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=10)  # refactored to use api_request_helper
-        if resp is None:
-            # リクエスト失敗をエラーとして記録
-            summary.setdefault("failed", []).append(template_id)
+        last_error = None
+        last_status = None
+
+        for team_id in candidates:
+            url = f"https://rde-api.nims.go.jp/invoiceSchemas/{template_id}?teamId={team_id}"
+            resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=10)
+            if resp is None:
+                last_error = "Request failed"
+                last_status = 0
+                continue
+
+            last_status = getattr(resp, "status_code", None)
+
+            # token無効はteamIdに依らないので即終了
+            if last_status == 401:
+                last_error = "HTTP 401 Unauthorized"
+                break
+
+            # teamId違い/権限/存在差分の可能性があるものは次候補を試す
+            if last_status in (403, 404):
+                last_error = f"HTTP {last_status}"
+                continue
+
+            resp.raise_for_status()
+            data = resp.json()
+            with open(filepath, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+
+            with lock_ctx:
+                summary["success"].append(template_id)
+                summary["failed"].pop(template_id, None)
+                with open(log_path, "a", encoding="utf-8") as logf:
+                    logf.write(
+                        f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [SUCCESS] template_id={template_id} teamId={team_id}\n"
+                    )
+                with open(summary_path, "w", encoding="utf-8") as f:
+                    json.dump(summary, f, ensure_ascii=False, indent=2)
+
+            return "success"
+
+        with lock_ctx:
+            summary["failed"][template_id] = last_error or "failed"
             with open(log_path, "a", encoding="utf-8") as logf:
-                logf.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [FAILED] template_id={template_id} error=Request failed\n")
+                logf.write(
+                    f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [FAILED] template_id={template_id} "
+                    f"status={last_status} error={last_error}\n"
+                )
             with open(summary_path, "w", encoding="utf-8") as f:
                 json.dump(summary, f, ensure_ascii=False, indent=2)
-            return "failed"
-        if resp.status_code == 401:
-            # 401は今後も再取得しない
-            summary.setdefault("skipped_401", []).append(template_id)
-            with open(log_path, "a", encoding="utf-8") as logf:
-                logf.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [SKIPPED_401] template_id={template_id} error=401 Unauthorized\n")
-            with open(summary_path, "w", encoding="utf-8") as f:
-                json.dump(summary, f, ensure_ascii=False, indent=2)
-            return "skipped_401"
-        if resp.status_code == 403:
-            # 403も今後も再取得しない
-            summary.setdefault("skipped_403", []).append(template_id)
-            with open(log_path, "a", encoding="utf-8") as logf:
-                logf.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [SKIPPED_403] template_id={template_id} error=403 Forbidden\n")
-            with open(summary_path, "w", encoding="utf-8") as f:
-                json.dump(summary, f, ensure_ascii=False, indent=2)
-            return "skipped_403"
-        resp.raise_for_status()
-        data = resp.json()
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        summary.setdefault("success", []).append(template_id)
-        if template_id in summary.get("failed", {}):
-            summary["failed"].pop(template_id)
-        with open(log_path, "a", encoding="utf-8") as logf:
-            logf.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [SUCCESS] template_id={template_id}\n")
-        with open(summary_path, "w", encoding="utf-8") as f:
-            json.dump(summary, f, ensure_ascii=False, indent=2)
-        return "success"
+
+        return "failed"
+
     except Exception as e:
-        summary["failed"][template_id] = str(e)
-        with open(log_path, "a", encoding="utf-8") as logf:
-            logf.write(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [FAILED] template_id={template_id} error={e}\n")
-        with open(summary_path, "w", encoding="utf-8") as f:
-            json.dump(summary, f, ensure_ascii=False, indent=2)
+        with lock_ctx:
+            summary["failed"][template_id] = str(e)
+            with open(log_path, "a", encoding="utf-8") as logf:
+                logf.write(
+                    f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [FAILED] template_id={template_id} error={e}\n"
+                )
+            with open(summary_path, "w", encoding="utf-8") as f:
+                json.dump(summary, f, ensure_ascii=False, indent=2)
         return "failed"
 
 

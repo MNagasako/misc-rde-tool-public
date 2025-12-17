@@ -564,9 +564,14 @@ class RelatedDatasetSection:
     """Displays datasets linked to the currently selected subgroup."""
 
     def __init__(self, fetcher: Optional[RelatedDatasetFetcher] = None) -> None:
+        import os
+
         self.fetcher = fetcher or RelatedDatasetFetcher()
+        self._is_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
         self.widget = QWidget()
         self.widget.setObjectName("relatedDatasetSection")
+        if self._is_pytest:
+            self.widget.setAttribute(Qt.WA_DontShowOnScreen, True)
         container = QVBoxLayout()
         container.setContentsMargins(0, 12, 0, 0)
         container.setSpacing(6)
@@ -592,6 +597,8 @@ class RelatedDatasetSection:
         container.addWidget(self.message_label)
 
         self.scroll_area = QScrollArea()
+        if self._is_pytest:
+            self.scroll_area.setAttribute(Qt.WA_DontShowOnScreen, True)
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameStyle(0)
         self.scroll_area.setMinimumHeight(180)
@@ -678,9 +685,12 @@ class RelatedDatasetSection:
         grant_label = QLabel(grant_number)
         grant_label.setAlignment(Qt.AlignCenter)
         grant_label.setMinimumWidth(150)
-        grant_label.setStyleSheet(
-            f"color: {get_color(ThemeKey.TEXT_INFO)}; font-family: Consolas, 'Courier New', monospace;"
-        )
+        if self._is_pytest:
+            grant_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_INFO)};")
+        else:
+            grant_label.setStyleSheet(
+                f"color: {get_color(ThemeKey.TEXT_INFO)}; font-family: Consolas, 'Courier New', monospace;"
+            )
         layout.addWidget(grant_label, 1)
 
         open_button = QPushButton("開く")

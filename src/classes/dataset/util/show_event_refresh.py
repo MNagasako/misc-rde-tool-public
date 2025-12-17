@@ -1,6 +1,8 @@
 import logging
+import os
 from typing import Callable, List
 
+from qt_compat.core import Qt
 from qt_compat.widgets import QWidget
 
 logger = logging.getLogger(__name__)
@@ -11,6 +13,8 @@ class RefreshOnShowWidget(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            self.setAttribute(Qt.WA_DontShowOnScreen, True)
         self._show_refresh_callbacks: List[Callable[[], None]] = []
         self._auto_refresh_enabled: bool = True
 

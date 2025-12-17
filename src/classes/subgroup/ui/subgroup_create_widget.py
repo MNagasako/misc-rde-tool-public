@@ -41,7 +41,7 @@ def create_subgroup_create_widget(parent, title, color, create_auto_resize_butto
     try:
         from .subgroup_edit_widget import create_subgroup_edit_widget
         edit_tab = create_subgroup_edit_widget(parent, "サブグループ修正", color, create_auto_resize_button)
-        tab_widget.addTab(edit_tab, "修正")
+        tab_widget.addTab(edit_tab, "閲覧・修正")
         
         # タブ切り替え時にサブグループリストをリフレッシュする機能を追加
         def on_tab_changed(index):

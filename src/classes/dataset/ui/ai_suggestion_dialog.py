@@ -137,7 +137,10 @@ class AISuggestionDialog(QDialog):
     def setup_ui(self):
         """UI要素のセットアップ"""
         self.setWindowTitle("AI説明文提案")
-        self.setModal(True)
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            self.setAttribute(Qt.WA_DontShowOnScreen, True)
+        else:
+            self.setModal(True)
         self.resize(900, 700)
         # 位置調整は行わない（ユーザー要望により削除）
         

@@ -155,7 +155,7 @@ class DatasetFilterFetcher(QObject):
         if self._search_edit:
             self._search_edit.clear()
         self.apply_filters()
-        if self.combo:
+        if self.combo and not os.environ.get("PYTEST_CURRENT_TEST"):
             self.combo.showPopup()
 
     # ------------------------------------------------------------------

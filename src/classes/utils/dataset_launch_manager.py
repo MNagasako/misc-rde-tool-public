@@ -9,9 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+import time
 from typing import Any, Callable, Dict, Optional
 
-logger = logging.getLogger(__name__)
+from classes.managers.log_manager import get_logger
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -28,6 +31,8 @@ class DatasetPayload:
 class DatasetLaunchManager:
     """Singleton helper that coordinates dataset handoff between widgets."""
 
+    _RECENT_REAPPLY_WINDOW_SECONDS: float = 2.0
+
     _instance: "DatasetLaunchManager" | None = None
 
     _TARGET_MODE_MAP: Dict[str, str] = {
@@ -42,6 +47,10 @@ class DatasetLaunchManager:
         self._ui_controller: Any = None
         self._receivers: Dict[str, Callable[[DatasetPayload], bool]] = {}
         self._pending_request: Optional[dict[str, Any]] = None
+        # Some screens can create the same target widget more than once during a
+        # mode switch. Keep the most recently applied payload per target for a
+        # short window so that the visible widget also receives it.
+        self._recent_applied: Dict[str, tuple[DatasetPayload, float]] = {}
 
     # ------------------------------------------------------------------
     # Singleton helpers
@@ -59,7 +68,7 @@ class DatasetLaunchManager:
         """Store a weak reference to the main UI controller."""
 
         self._ui_controller = controller
-        logger.debug("DatasetLaunchManager: UI controller registered")
+        logger.info("DatasetLaunchManager: UI controller registered (%s)", type(controller).__name__)
 
     def register_receiver(
         self,
@@ -69,8 +78,35 @@ class DatasetLaunchManager:
         """Register a callback that can apply a pending dataset to a widget."""
 
         self._receivers[target_key] = apply_callback
-        logger.debug("DatasetLaunchManager: receiver registered for %s", target_key)
-        self._try_apply(target_key)
+        pending = self._pending_request
+        pending_id = None
+        if isinstance(pending, dict) and pending.get("target") == target_key:
+            payload = pending.get("payload")
+            if isinstance(payload, DatasetPayload):
+                pending_id = payload.id
+        logger.info(
+            "DatasetLaunchManager: receiver registered target=%s (pending=%s)",
+            target_key,
+            pending_id or "-",
+        )
+        if self._try_apply(target_key):
+            return
+
+        recent = self._recent_applied.get(target_key)
+        if recent is None:
+            return
+        payload, applied_at = recent
+        if time.monotonic() - applied_at > self._RECENT_REAPPLY_WINDOW_SECONDS:
+            return
+        try:
+            logger.info(
+                "DatasetLaunchManager: reapplying recent payload target=%s dataset=%s",
+                target_key,
+                payload.id,
+            )
+            apply_callback(payload)
+        except Exception:  # pragma: no cover - defensive logging
+            logger.debug("DatasetLaunchManager: recent payload reapply failed", exc_info=True)
 
     def unregister_receiver(self, target_key: str) -> None:
         self._receivers.pop(target_key, None)
@@ -108,6 +144,13 @@ class DatasetLaunchManager:
         applied = self._try_apply(target_key)
         if not applied and self._pending_request is None:
             applied = True
+        if not applied:
+            logger.info(
+                "DatasetLaunchManager: launch pending target=%s dataset=%s receivers=%s",
+                target_key,
+                dataset_id,
+                sorted(self._receivers.keys()),
+            )
         if applied:
             self._notify_status(
                 f"{display_text or dataset_id} を {self._resolve_mode_label(target_key)} へ連携しました"
@@ -131,6 +174,11 @@ class DatasetLaunchManager:
 
         payload: DatasetPayload = self._pending_request["payload"]
         try:
+            logger.info(
+                "DatasetLaunchManager: applying payload target=%s dataset=%s",
+                target_key,
+                payload.id,
+            )
             applied = callback(payload)
             if applied:
                 logger.debug(
@@ -138,6 +186,7 @@ class DatasetLaunchManager:
                     target_key,
                     payload.id,
                 )
+                self._recent_applied[target_key] = (payload, time.monotonic())
                 self._pending_request = None
                 return True
         except Exception as exc:  # pragma: no cover - defensive logging
@@ -148,6 +197,12 @@ class DatasetLaunchManager:
         mode = self._TARGET_MODE_MAP.get(target_key)
         controller = self._ui_controller
         if not mode or not controller:
+            if not controller:
+                logger.info(
+                    "DatasetLaunchManager: ui_controller is not set (cannot switch to %s for target=%s)",
+                    mode or "-",
+                    target_key,
+                )
             return
 
         try:

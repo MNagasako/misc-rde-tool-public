@@ -2302,8 +2302,8 @@ class BatchRegisterWidget(QWidget):
 
         launch_targets = [
             ("data_fetch2", "データ取得2"),
-        #    ("dataset_edit", "データセット修正"),
-        #    ("dataset_dataentry", "データエントリー"),
+            ("dataset_edit", "データセット修正"),
+            ("dataset_dataentry", "データエントリー"),
         ]
 
         self._launch_buttons = []

@@ -831,8 +831,8 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
     """
 
     launch_targets = [
-    #    ("dataset_edit", "データセット修正"),
-    #    ("dataset_dataentry", "データエントリー"),
+        ("dataset_edit", "データセット修正"),
+        ("dataset_dataentry", "データエントリー"),
         ("data_register", "データ登録"),
         ("data_register_batch", "データ登録(一括)"),
     ]
@@ -879,7 +879,10 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
         if idx < 0:
             safe_show_message_widget(widget, "データセット未選択", "連携するデータセットを選択してください。", "warning")
             return None
-        dataset_id = combo.itemData(idx)
+        dataset_item_data = combo.itemData(idx)
+        dataset_id = dataset_item_data
+        if isinstance(dataset_item_data, dict):
+            dataset_id = dataset_item_data.get("id")
         if not dataset_id:
             safe_show_message_widget(widget, "データセット未選択", "連携するデータセットを選択してください。", "warning")
             return None
@@ -901,12 +904,58 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
         payload = _get_current_dataset_payload()
         if not payload:
             return
-        DatasetLaunchManager.instance().request_launch(
-            target_key=target_key,
-            dataset_id=payload["dataset_id"],
-            display_text=payload["display_text"],
-            raw_dataset=payload["raw_dataset"],
-            source_name="data_fetch2",
+
+        # デバッグ用: 呼び出し元(data_fetch2)が送る dataset_id を明示的にログへ出す
+        manager = DatasetLaunchManager.instance()
+        dataset_id = payload.get("dataset_id")
+        display_text = payload.get("display_text")
+
+        pending_before = getattr(manager, "_pending_request", None)
+        receivers_before = getattr(manager, "_receivers", None)
+        ui_controller_before = getattr(manager, "_ui_controller", None)
+        receivers_keys = sorted(receivers_before.keys()) if isinstance(receivers_before, dict) else []
+        pending_target = pending_before.get("target") if isinstance(pending_before, dict) else None
+        pending_payload = pending_before.get("payload") if isinstance(pending_before, dict) else None
+        pending_id = pending_payload.id if isinstance(pending_payload, DatasetPayload) else None
+
+        logger.info(
+            "data_fetch2: launch request target=%s dataset_id=%s display=%s manager_id=%s ui_controller=%s receivers=%s pending=%s:%s",
+            target_key,
+            dataset_id,
+            display_text,
+            hex(id(manager)),
+            bool(ui_controller_before),
+            receivers_keys,
+            pending_target or "-",
+            pending_id or "-",
+        )
+
+        try:
+            applied = manager.request_launch(
+                target_key=target_key,
+                dataset_id=payload["dataset_id"],
+                display_text=payload["display_text"],
+                raw_dataset=payload["raw_dataset"],
+                source_name="data_fetch2",
+            )
+        except Exception:
+            logger.exception(
+                "data_fetch2: request_launch failed target=%s dataset_id=%s",
+                target_key,
+                dataset_id,
+            )
+            return
+
+        pending_after = getattr(manager, "_pending_request", None)
+        pending_after_target = pending_after.get("target") if isinstance(pending_after, dict) else None
+        pending_after_payload = pending_after.get("payload") if isinstance(pending_after, dict) else None
+        pending_after_id = pending_after_payload.id if isinstance(pending_after_payload, DatasetPayload) else None
+
+        logger.info(
+            "data_fetch2: launch result applied=%s pending_after=%s:%s",
+            applied,
+            pending_after_target or "-",
+            pending_after_id or "-",
         )
 
     for target_key, caption in launch_targets:

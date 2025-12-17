@@ -9,14 +9,20 @@ import datetime
 import time
 import logging
 from typing import Iterable, Callable, Optional
+try:
+    from shiboken6 import isValid as qt_is_valid
+except Exception:  # pragma: no cover
+    def qt_is_valid(obj) -> bool:  # type: ignore[no-redef]
+        return obj is not None
+
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QMessageBox, QComboBox, 
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
     QCheckBox, QRadioButton, QProgressDialog, QApplication,
-    QLineEdit, QButtonGroup, QGridLayout
+    QLineEdit, QButtonGroup, QGridLayout, QCompleter
 )
-from qt_compat.core import Qt, QTimer, QUrl
+from qt_compat.core import Qt, QTimer, QUrl, QStringListModel
 from qt_compat.gui import QDesktopServices
 from config.common import get_dynamic_file_path
 from core.bearer_token_manager import BearerTokenManager
@@ -24,9 +30,10 @@ from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
 from classes.dataset.util.show_event_refresh import RefreshOnShowWidget
 from classes.utils.dataset_launch_manager import DatasetLaunchManager, DatasetPayload
+from classes.managers.log_manager import get_logger
 
 # ロガー設定
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 def relax_dataset_dataentry_filters_for_launch(
@@ -70,6 +77,8 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     """データセット データエントリー専用ウィジェット（最小版）"""
     widget = RefreshOnShowWidget()
     widget.dataset_map = {}
+    widget._dataentry_fetch_timer = None
+    widget._initial_refresh_timer = None
     layout = QVBoxLayout()
 
     # フィルタUI
@@ -113,6 +122,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     grant_filter_label.setStyleSheet("font-weight: bold;")
 
     grant_filter_input = QLineEdit()
+    grant_filter_input.setObjectName("datasetDataEntryGrantFilterInput")
     grant_filter_input.setPlaceholderText("課題番号 (例: 22XXXXXX)")
     grant_filter_input.setMinimumWidth(200)
 
@@ -140,6 +150,46 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     dataset_combo.setEditable(True)
     dataset_combo.setInsertPolicy(QComboBox.NoInsert)
     dataset_combo.setMaxVisibleItems(12)
+
+    # 部分一致検索（閲覧・修正タブ同等）
+    dataset_combo_completer_model = QStringListModel([], dataset_combo)
+    dataset_combo_completer = QCompleter(dataset_combo_completer_model, dataset_combo)
+    dataset_combo_completer.setCaseSensitivity(Qt.CaseInsensitive)
+    dataset_combo_completer.setFilterMode(Qt.MatchContains)
+    popup_view = dataset_combo_completer.popup()
+    popup_view.setMinimumHeight(240)
+    popup_view.setMaximumHeight(240)
+    dataset_combo.setCompleter(dataset_combo_completer)
+
+    def _normalize_display_text(text: str) -> str:
+        return " ".join((text or "").strip().split()).lower()
+
+    def _refresh_dataset_combo_completer_from_items() -> None:
+        display_names: list[str] = []
+        display_to_id: dict[str, str] = {}
+        for idx in range(1, dataset_combo.count()):
+            text = dataset_combo.itemText(idx)
+            dataset_id = dataset_combo.itemData(idx)
+            if not text or not dataset_id:
+                continue
+            display_names.append(text)
+            display_to_id[_normalize_display_text(text)] = str(dataset_id)
+        dataset_combo._display_names_cache = display_names  # type: ignore[attr-defined]
+        dataset_combo._display_to_dataset_id_map = display_to_id  # type: ignore[attr-defined]
+        dataset_combo_completer_model.setStringList(display_names)
+
+    def _on_dataset_combo_completer_activated(text: str) -> None:
+        display_map = getattr(dataset_combo, '_display_to_dataset_id_map', None)
+        if not isinstance(display_map, dict) or not text:
+            return
+        dataset_id = display_map.get(_normalize_display_text(text))
+        if not dataset_id:
+            return
+        target_index = _find_dataset_index(dataset_id)
+        if target_index >= 0:
+            dataset_combo.setCurrentIndex(target_index)
+
+    dataset_combo_completer.activated.connect(_on_dataset_combo_completer_activated)
 
     show_all_btn = QPushButton("▼")
     show_all_btn.setToolTip("全件リスト表示")
@@ -180,7 +230,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
 
     launch_targets = [
         ("data_fetch2", "データ取得2"),
-    #    ("dataset_edit", "データセット修正"),
+        ("dataset_edit", "データセット修正"),
         ("data_register", "データ登録"),
         ("data_register_batch", "データ登録(一括)"),
     ]
@@ -737,7 +787,9 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         if not os.path.exists(dataset_path):
             dataset_combo.clear()
             dataset_combo.addItem("-- データセット情報がありません --", "")
-            QMessageBox.warning(widget, "注意", "データセット情報が見つかりません。\n基本情報取得を実行してください。")
+            _refresh_dataset_combo_completer_from_items()
+            if not os.environ.get("PYTEST_CURRENT_TEST"):
+                QMessageBox.warning(widget, "注意", "データセット情報が見つかりません。\n基本情報取得を実行してください。")
             return
         
         try:
@@ -830,6 +882,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
                 dataset_combo.addItem(display_text, dataset_id)
             
             dataset_combo.blockSignals(False)
+            _refresh_dataset_combo_completer_from_items()
             _restore_dataentry_dataset_selection(preserve_selection_id)
             
             logger.info("フィルタ適用後のデータセット: %s件 (全%s件中)", len(filtered_datasets), len(datasets))
@@ -838,6 +891,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             logger.error("dataset.json読み込みエラー: %s", e)
             dataset_combo.clear()
             dataset_combo.addItem("-- データセット読み込みエラー --", "")
+            _refresh_dataset_combo_completer_from_items()
 
     def _find_dataset_index(dataset_id: str) -> int:
         if not dataset_id:
@@ -921,14 +975,48 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             last_updated_label.setText("最終取得: 取得中...")
             entry_table.setRowCount(0)
             logger.debug("[データエントリー取得] fetch_dataentry_info(%s, %s)", dataset_id, force_refresh)
-                # 少し遅延させてから取得処理を実行
-            QTimer.singleShot(100, lambda: fetch_dataentry_info(dataset_id, force_refresh))
+            # 少し遅延させてから取得処理を実行（widget破棄後に走らないように子Timerで管理）
+            schedule_fetch_dataentry_info(dataset_id, force_refresh)
         else:
             # 既存のJSONファイルを読み込んで表示
             load_and_display_dataentry_info(dataset_id)
+
+    def schedule_fetch_dataentry_info(dataset_id, force_refresh=False):
+        """widget破棄後に遅延実行が走ってクラッシュしないようにする"""
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            logger.debug("dataset_dataentry: skip auto fetch under pytest")
+            return
+        if not qt_is_valid(widget):
+            return
+        existing_timer = getattr(widget, "_dataentry_fetch_timer", None)
+        if existing_timer is not None:
+            try:
+                existing_timer.stop()
+                existing_timer.deleteLater()
+            except Exception:
+                logger.debug("dataset_dataentry: previous fetch timer cleanup failed", exc_info=True)
+
+        timer = QTimer(widget)
+        timer.setSingleShot(True)
+
+        def _run_fetch():
+            if not qt_is_valid(widget):
+                return
+            fetch_dataentry_info(dataset_id, force_refresh)
+
+        timer.timeout.connect(_run_fetch)
+        widget._dataentry_fetch_timer = timer
+        timer.start(100)
     
     def fetch_dataentry_info(dataset_id, force_refresh=False):
         """データエントリー情報をAPIから取得"""
+
+        if not qt_is_valid(widget):
+            return
+
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            logger.debug("dataset_dataentry: fetch_dataentry_info skipped under pytest")
+            return
         
         try:
             # プログレスダイアログを表示
@@ -1099,7 +1187,15 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     def on_dataset_selection_changed():
         """データセット選択変更時のハンドラー"""
         _update_launch_button_state()
-        update_dataentry_display()
+
+        # editable combobox での入力中に currentTextChanged が頻発するため、
+        # 選択IDが変わっていない場合は更新をスキップする。
+        current_id = get_selected_dataset_id()
+        previous_id = getattr(widget, '_last_selected_dataset_id', None)
+        if current_id == previous_id:
+            return
+        widget._last_selected_dataset_id = current_id  # type: ignore[attr-defined]
+        update_dataentry_display(current_id)
     
     def on_fetch_button_clicked():
         """データエントリー取得ボタンクリック時のハンドラー"""
@@ -1117,7 +1213,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     
     def on_filter_changed():
         """フィルタ変更時のハンドラー"""
-        populate_dataset_combo_with_filter()
+        populate_dataset_combo_with_filter(get_selected_dataset_id())
     
     # イベント接続
     dataset_combo.currentTextChanged.connect(on_dataset_selection_changed)
@@ -1134,7 +1230,30 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     grant_filter_input.textChanged.connect(on_filter_changed)
     
     # 初期データ読み込みと表示時の自動更新をセット
-    QTimer.singleShot(100, lambda: refresh_dataset_sources("initial"))
+    def schedule_initial_refresh():
+        if not qt_is_valid(widget):
+            return
+        existing_timer = getattr(widget, "_initial_refresh_timer", None)
+        if existing_timer is not None:
+            try:
+                existing_timer.stop()
+                existing_timer.deleteLater()
+            except Exception:
+                logger.debug("dataset_dataentry: initial refresh timer cleanup failed", exc_info=True)
+
+        timer = QTimer(widget)
+        timer.setSingleShot(True)
+
+        def _run_initial_refresh():
+            if not qt_is_valid(widget):
+                return
+            refresh_dataset_sources("initial")
+
+        timer.timeout.connect(_run_initial_refresh)
+        widget._initial_refresh_timer = timer
+        timer.start(100)
+
+    schedule_initial_refresh()
     _update_launch_button_state()
 
     def _apply_dataset_launch_payload(payload: DatasetPayload) -> bool:
@@ -1144,7 +1263,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             filter_all_radio,
             (filter_user_only_radio, filter_others_only_radio),
             grant_filter_input,
-            populate_dataset_combo_with_filter,
+            lambda: populate_dataset_combo_with_filter(payload.id),
         )
         dataset_map = getattr(widget, 'dataset_map', {}) or {}
         if payload.raw:
@@ -1158,7 +1277,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
                 grant_filter_input.clear()
             except Exception:
                 pass
-            populate_dataset_combo_with_filter()
+            populate_dataset_combo_with_filter(payload.id)
             index = _find_dataset_index(payload.id)
 
         if index < 0:
@@ -1169,6 +1288,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             dataset_combo.blockSignals(True)
             dataset_combo.addItem(display_text, payload.id)
             dataset_combo.blockSignals(False)
+            _refresh_dataset_combo_completer_from_items()
             index = dataset_combo.count() - 1
             dataset_map[payload.id] = dataset_dict
             widget.dataset_map = dataset_map

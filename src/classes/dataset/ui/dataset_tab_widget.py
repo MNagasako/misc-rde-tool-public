@@ -55,7 +55,7 @@ class DatasetTabWidget(QTabWidget):
             edit_layout.addWidget(error_label)
         
         self.edit_tab.setLayout(edit_layout)
-        self.addTab(self.edit_tab, "修正")
+        self.addTab(self.edit_tab, "閲覧・修正")
         
         # データエントリータブ
         self.dataentry_tab = QWidget()
