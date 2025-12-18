@@ -42,14 +42,31 @@ def _parse_tags_text(text: str) -> list[str]:
 def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     """Create a new dataset creation tab with extra metadata inputs."""
     create_tab_result = create_group_select_widget(parent, register_subgroup_notifier=False, connect_open_handler=False)
-    if not create_tab_result or len(create_tab_result) < 5:
+    if not create_tab_result or len(create_tab_result) < 6:
         fallback_widget = QWidget()
         fallback_layout = QVBoxLayout()
         fallback_layout.addWidget(QLabel("データセット開設機能を読み込み中..."))
         fallback_widget.setLayout(fallback_layout)
         return fallback_widget
 
-    container, team_groups, group_combo, grant_combo, open_btn, name_edit, embargo_edit, template_combo, template_list, _filter_combo = create_tab_result
+    manager_combo = None
+    if len(create_tab_result) >= 11:
+        (
+            container,
+            team_groups,
+            group_combo,
+            grant_combo,
+            manager_combo,
+            open_btn,
+            name_edit,
+            embargo_edit,
+            template_combo,
+            template_list,
+            _filter_combo,
+        ) = create_tab_result[:11]
+    else:
+        container, team_groups, group_combo, grant_combo, open_btn, name_edit, embargo_edit, template_combo, template_list, _filter_combo = create_tab_result
+        manager_combo = getattr(container, "manager_combo", None)
 
     # AI CHECK thread reference (avoid accessing container from destroyed handler)
     _ai_check_thread_ref: dict[str, object | None] = {"thread": None}
@@ -645,6 +662,13 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
             QMessageBox.warning(parent, "入力エラー", "テンプレートは必須です。")
             return
 
+        resolve_manager = getattr(container, "_resolve_selected_manager_id", None)
+        manager_user_id = resolve_manager() if callable(resolve_manager) else None
+        if not manager_user_id:
+            from qt_compat.widgets import QMessageBox
+            QMessageBox.warning(parent, "データセット管理者未選択", "データセット管理者を選択してください。")
+            return
+
         # extra fields
         description = description_edit.toPlainText().strip() if hasattr(description_edit, "toPlainText") else ""
         related_info = related_info_edit.text().strip() if hasattr(related_info_edit, "text") else ""
@@ -676,6 +700,7 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
             dataset_type,
             share_core_scope_val,
             anonymize_val,
+            manager_user_id=manager_user_id,
             description=description,
             related_links_text=related_info,
             tags=tags,

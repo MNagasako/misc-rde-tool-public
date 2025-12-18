@@ -20,7 +20,7 @@ from qt_compat.widgets import (
     QPushButton, QMessageBox, QScrollArea, QCheckBox, QRadioButton, 
     QButtonGroup, QDialog, QTextEdit, QComboBox, QCompleter, QDateEdit,
     QListWidget, QListWidgetItem, QProgressDialog, QApplication, QSplitter,
-    QTableWidget, QTableWidgetItem, QHeaderView
+    QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy
 )
 from qt_compat.core import Qt, QDate, QTimer
 from config.common import get_dynamic_file_path
@@ -35,6 +35,65 @@ from classes.managers.log_manager import get_logger
 
 # ロガー設定
 logger = get_logger(__name__)
+
+
+def _format_user_label_user_org(user_data: dict) -> str:
+    """Display user as `userName (organizationName)`.
+
+    Falls back to kanji name / latin name / email when userName is missing.
+    """
+    if not isinstance(user_data, dict):
+        return ""
+
+    user_name = (user_data.get("userName") or "").strip()
+    org = (user_data.get("organizationName") or "").strip()
+    email = (user_data.get("emailAddress") or "").strip()
+
+    family_kanji = (user_data.get("familyNameKanji") or "").strip()
+    given_kanji = (user_data.get("givenNameKanji") or "").strip()
+    kanji_name = " ".join([family_kanji, given_kanji]).strip()
+
+    family = (user_data.get("familyName") or "").strip()
+    given = (user_data.get("givenName") or "").strip()
+    latin_name = " ".join([family, given]).strip()
+
+    base_name = user_name or kanji_name or latin_name or email or "(氏名未設定)"
+    if org:
+        return f"{base_name} ({org})"
+    return base_name
+
+
+def _load_dataset_detail_from_output(dataset_id: str) -> dict | None:
+    """Load full dataset detail from output cache.
+
+    Expected path: output/rde/data/datasets/{dataset_id}.json
+    Returns the inner `data` dict when available.
+    """
+    if not dataset_id:
+        return None
+    try:
+        detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dataset_id}.json")
+        if not detail_path or not os.path.exists(detail_path):
+            return None
+        with open(detail_path, encoding="utf-8") as f:
+            payload = json.load(f)
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if isinstance(data, dict) and data.get("id"):
+            return data
+    except Exception:
+        logger.debug("dataset_edit: dataset detail load failed id=%s", dataset_id, exc_info=True)
+    return None
+
+
+def _resolve_dataset_for_edit(dataset_dict: dict | None) -> dict | None:
+    """Prefer full dataset detail JSON over digest entry when available."""
+    if not isinstance(dataset_dict, dict):
+        return None
+    dataset_id = str(dataset_dict.get("id") or "")
+    if not dataset_id:
+        return dataset_dict
+    detailed = _load_dataset_detail_from_output(dataset_id)
+    return detailed or dataset_dict
 
 
 def relax_dataset_edit_filters_for_launch(
@@ -1873,6 +1932,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         """編集フォームを作成"""
         form_widget = QWidget()
         form_layout = QGridLayout()
+        form_layout.setHorizontalSpacing(12)
+        form_layout.setVerticalSpacing(6)
+        # 2列レイアウト（左: ラベル, 右: 入力/ボタン）
+        form_layout.setColumnStretch(1, 1)
         
         # データセット名
         form_layout.addWidget(QLabel("データセット名:"), 0, 0)
@@ -2545,7 +2608,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         edit_embargo_edit = QDateEdit()
         edit_embargo_edit.setDisplayFormat("yyyy-MM-dd")
         edit_embargo_edit.setCalendarPopup(True)
-        edit_embargo_edit.setMinimumWidth(120)
+        edit_embargo_edit.setFixedWidth(140)
         # デフォルトを翌年度末日に設定
         today = datetime.date.today()
         next_year = today.year + 1
@@ -2562,29 +2625,65 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         # edit_template_display.setStyleSheet(f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)}; color: {get_color(ThemeKey.TEXT_MUTED)};")
         form_layout.addWidget(edit_template_display, 4, 1)
         
-        # 問い合わせ先
-        form_layout.addWidget(QLabel("問い合わせ先:"), 5, 0)
-        edit_contact_edit = QLineEdit()
-        edit_contact_edit.setPlaceholderText("問い合わせ先を入力")
-        form_layout.addWidget(edit_contact_edit, 5, 1)
+        # 申請者（表示のみ）
+        applicant_label = QLabel("申請者:")
+        edit_applicant_display = QLineEdit()
+        edit_applicant_display.setPlaceholderText("申請者（表示のみ）")
+        edit_applicant_display.setReadOnly(True)
+        edit_applicant_display.setStyleSheet(
+            f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)}; color: {get_color(ThemeKey.TEXT_MUTED)};"
+        )
+        edit_applicant_display.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        form_layout.addWidget(applicant_label, 5, 0)
+        form_layout.addWidget(edit_applicant_display, 5, 1)
+
+        # データセット管理者（変更可）
+        manager_label = QLabel("管理者:")
+        edit_manager_combo = QComboBox()
+        edit_manager_combo.setEditable(True)
+        edit_manager_combo.setInsertPolicy(QComboBox.NoInsert)
+        if edit_manager_combo.lineEdit():
+            edit_manager_combo.lineEdit().setPlaceholderText("グループメンバーから選択")
+        edit_manager_combo.setEnabled(False)
+        edit_manager_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        try:
+            edit_manager_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+            edit_manager_combo.setMinimumContentsLength(24)
+            edit_manager_combo.view().setTextElideMode(Qt.ElideRight)
+        except Exception:
+            logger.debug("管理者コンボの表示調整に失敗", exc_info=True)
+        form_layout.addWidget(manager_label, 6, 0)
+        form_layout.addWidget(edit_manager_combo, 6, 1)
         
         # タクソノミーキー（ビルダーダイアログ使用）
-        form_layout.addWidget(QLabel("タクソノミーキー:"), 6, 0)
         taxonomy_layout = QHBoxLayout()
+        taxonomy_layout.setContentsMargins(0, 0, 0, 0)
+        taxonomy_layout.setSpacing(6)
         edit_taxonomy_edit = QLineEdit()
         edit_taxonomy_edit.setPlaceholderText("タクソノミーキー（設定ボタンで編集）")
         edit_taxonomy_edit.setReadOnly(True)  # 読み取り専用
-        
+
         taxonomy_builder_button = QPushButton("設定...")
-        taxonomy_builder_button.setMaximumWidth(80)
-        
+        taxonomy_builder_button.setMaximumWidth(90)
+
         taxonomy_layout.addWidget(edit_taxonomy_edit)
         taxonomy_layout.addWidget(taxonomy_builder_button)
-        
-        # レイアウトをWidgetでラップしてGridLayoutに追加
+
         taxonomy_widget = QWidget()
         taxonomy_widget.setLayout(taxonomy_layout)
-        form_layout.addWidget(taxonomy_widget, 6, 1)
+
+        # 問い合わせ先
+        edit_contact_edit = QLineEdit()
+        edit_contact_edit.setPlaceholderText("問い合わせ先を入力")
+        edit_contact_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        edit_contact_edit.setFixedHeight(26)
+        form_layout.addWidget(QLabel("問い合わせ先:"), 7, 0)
+        form_layout.addWidget(edit_contact_edit, 7, 1)
+
+        # タクソノミーキー（ビルダーダイアログ使用）
+        taxonomy_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        form_layout.addWidget(QLabel("タクソノミーキー:"), 8, 0)
+        form_layout.addWidget(taxonomy_widget, 8, 1)
         
         # タクソノミービルダーボタンのイベントハンドラー
         def open_taxonomy_builder():
@@ -2614,8 +2713,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         taxonomy_builder_button.clicked.connect(open_taxonomy_builder)
         
         # 関連情報（旧：関連リンク）- ビルダーダイアログ使用
-        form_layout.addWidget(QLabel("関連情報:"), 7, 0)
+        form_layout.addWidget(QLabel("関連情報:"), 9, 0)
         related_links_layout = QHBoxLayout()
+        related_links_layout.setContentsMargins(0, 2, 0, 2)
+        related_links_layout.setSpacing(8)
         edit_related_links_edit = QLineEdit()
         edit_related_links_edit.setPlaceholderText("関連情報を入力（タイトル1:URL1,タイトル2:URL2 の形式、設定ボタンでも編集可能）")
         
@@ -2628,11 +2729,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         # レイアウトをWidgetでラップしてGridLayoutに追加
         related_links_widget = QWidget()
         related_links_widget.setLayout(related_links_layout)
-        form_layout.addWidget(related_links_widget, 7, 1)
+        form_layout.addWidget(related_links_widget, 9, 1)
         
         # TAGフィールド（ビルダーダイアログ使用）
-        form_layout.addWidget(QLabel("TAG:"), 8, 0)
+        form_layout.addWidget(QLabel("TAG:"), 10, 0)
         tag_layout = QHBoxLayout()
+        tag_layout.setContentsMargins(0, 2, 0, 2)
+        tag_layout.setSpacing(8)
         edit_tags_edit = QLineEdit()
         edit_tags_edit.setPlaceholderText("TAGを入力（カンマ区切り、設定ボタンでも編集可能）")
         
@@ -2645,7 +2748,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         # レイアウトをWidgetでラップしてGridLayoutに追加
         tag_widget = QWidget()
         tag_widget.setLayout(tag_layout)
-        form_layout.addWidget(tag_widget, 8, 1)
+        form_layout.addWidget(tag_widget, 10, 1)
         
         # TAGビルダーボタンのイベントハンドラー
         def open_tag_builder():
@@ -2759,18 +2862,22 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         
         related_links_builder_button.clicked.connect(open_related_links_builder)
         
-        # データセット引用の書式（テキストボックスへ変更）
-        form_layout.addWidget(QLabel("データセット引用の書式:"), 9, 0)
+        # データセット引用の書式
         edit_citation_format_edit = QLineEdit()
         edit_citation_format_edit.setPlaceholderText("データセット引用の書式を入力")
-        form_layout.addWidget(edit_citation_format_edit, 9, 1)
-        
+        edit_citation_format_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        edit_citation_format_edit.textChanged.connect(lambda text: edit_citation_format_edit.setToolTip(text))
+
         # 利用ライセンス選択
-        form_layout.addWidget(QLabel("利用ライセンス:"), 10, 0)
         edit_license_combo = QComboBox()
         edit_license_combo.setEditable(True)
         edit_license_combo.setInsertPolicy(QComboBox.NoInsert)
         edit_license_combo.lineEdit().setPlaceholderText("ライセンスを選択または検索")
+        edit_license_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        try:
+            edit_license_combo.view().setTextElideMode(Qt.ElideRight)
+        except Exception:
+            logger.debug("ライセンスコンボのElide設定に失敗", exc_info=True)
         
         # ライセンスデータをlicenses.jsonから読み込み
         license_data = []
@@ -2832,11 +2939,14 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         license_completer.setCaseSensitivity(Qt.CaseInsensitive)
         license_completer.setFilterMode(Qt.MatchContains)
         edit_license_combo.setCompleter(license_completer)
-        
-        form_layout.addWidget(edit_license_combo, 10, 1)
+
+        form_layout.addWidget(QLabel("データセット引用の書式:"), 11, 0)
+        form_layout.addWidget(edit_citation_format_edit, 11, 1)
+        form_layout.addWidget(QLabel("利用ライセンス:"), 12, 0)
+        form_layout.addWidget(edit_license_combo, 12, 1)
         
         # 関連データセット - ビルダーダイアログ使用
-        form_layout.addWidget(QLabel("関連データセット:"), 11, 0)
+        form_layout.addWidget(QLabel("関連データセット:"), 13, 0)
         related_datasets_layout = QHBoxLayout()
         edit_related_datasets_display = QLineEdit()
         edit_related_datasets_display.setReadOnly(True)
@@ -2853,13 +2963,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         # レイアウトをWidgetでラップしてGridLayoutに追加
         related_datasets_widget = QWidget()
         related_datasets_widget.setLayout(related_datasets_layout)
-        form_layout.addWidget(related_datasets_widget, 11, 1)
+        form_layout.addWidget(related_datasets_widget, 13, 1)
         
         # 内部データ保持用（IDリスト）
         widget._selected_related_dataset_ids = []
         
         # データ一覧表示タイプ選択（ラジオボタン）- 関連データセットの下に移動
-        form_layout.addWidget(QLabel("データ一覧表示タイプ:"), 12, 0)
+        form_layout.addWidget(QLabel("データ一覧表示タイプ:"), 14, 0)
         data_listing_type_widget = QWidget()
         data_listing_type_layout = QHBoxLayout()
         data_listing_type_layout.setContentsMargins(0, 0, 0, 0)
@@ -2873,7 +2983,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         data_listing_type_layout.addStretch()  # 右側にスペースを追加
         
         data_listing_type_widget.setLayout(data_listing_type_layout)
-        form_layout.addWidget(data_listing_type_widget, 12, 1)
+        form_layout.addWidget(data_listing_type_widget, 14, 1)
         
         # チェックボックス（横並び1行）
         checkbox_widget = QWidget()
@@ -2894,32 +3004,236 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
 
         checkbox_widget.setLayout(checkbox_layout)
 
-        form_layout.addWidget(QLabel("共有範囲/利用制限:"), 14, 0)
-        form_layout.addWidget(checkbox_widget, 14, 1)
+        form_layout.addWidget(QLabel("共有範囲/利用制限:"), 15, 0)
+        form_layout.addWidget(checkbox_widget, 15, 1)
         
         form_widget.setLayout(form_layout)
         
         # フォーム内のウィジェットを返す
-        return (form_widget, edit_dataset_name_edit, edit_grant_number_combo, 
-                edit_description_edit, edit_embargo_edit, edit_contact_edit,
-                edit_taxonomy_edit, edit_related_links_edit, edit_tags_edit,
-                edit_citation_format_edit, edit_license_combo, edit_data_listing_gallery_radio, edit_data_listing_tree_radio, 
-                edit_related_datasets_display,
-                edit_anonymize_checkbox,
-                edit_data_entry_prohibited_checkbox, edit_data_entry_delete_prohibited_checkbox, edit_share_core_scope_checkbox,
-                edit_template_display)
+        return (
+            form_widget,
+            edit_dataset_name_edit,
+            edit_grant_number_combo,
+            edit_description_edit,
+            edit_embargo_edit,
+            edit_contact_edit,
+            edit_taxonomy_edit,
+            edit_related_links_edit,
+            edit_tags_edit,
+            edit_citation_format_edit,
+            edit_license_combo,
+            edit_data_listing_gallery_radio,
+            edit_data_listing_tree_radio,
+            edit_related_datasets_display,
+            edit_anonymize_checkbox,
+            edit_data_entry_prohibited_checkbox,
+            edit_data_entry_delete_prohibited_checkbox,
+            edit_share_core_scope_checkbox,
+            edit_template_display,
+            edit_manager_combo,
+            edit_applicant_display,
+        )
     
     # 編集フォームを作成
-    (edit_form_widget, edit_dataset_name_edit, edit_grant_number_combo, 
-     edit_description_edit, edit_embargo_edit, edit_contact_edit,
-     edit_taxonomy_edit, edit_related_links_edit, edit_tags_edit,
-     edit_citation_format_edit, edit_license_combo, edit_data_listing_gallery_radio, edit_data_listing_tree_radio, 
-     edit_related_datasets_display,
-     edit_anonymize_checkbox,
-     edit_data_entry_prohibited_checkbox, edit_data_entry_delete_prohibited_checkbox, edit_share_core_scope_checkbox,
-     edit_template_display) = create_edit_form()
+    (
+        edit_form_widget,
+        edit_dataset_name_edit,
+        edit_grant_number_combo,
+        edit_description_edit,
+        edit_embargo_edit,
+        edit_contact_edit,
+        edit_taxonomy_edit,
+        edit_related_links_edit,
+        edit_tags_edit,
+        edit_citation_format_edit,
+        edit_license_combo,
+        edit_data_listing_gallery_radio,
+        edit_data_listing_tree_radio,
+        edit_related_datasets_display,
+        edit_anonymize_checkbox,
+        edit_data_entry_prohibited_checkbox,
+        edit_data_entry_delete_prohibited_checkbox,
+        edit_share_core_scope_checkbox,
+        edit_template_display,
+        edit_manager_combo,
+        edit_applicant_display,
+    ) = create_edit_form()
     
     # 上: 既存フォーム / 下: データエントリー一覧 の縦スプリッターを追加
+    manager_entries = []
+    current_member_info = {}
+    current_group_id = None
+
+    def _reset_manager_combo(placeholder: str = "グループメンバーから選択"):
+        """管理者コンボの表示と内部状態を初期化する。"""
+        nonlocal manager_entries, current_member_info, current_group_id
+        manager_entries = []
+        current_member_info = {}
+        current_group_id = None
+        try:
+            edit_manager_combo.blockSignals(True)
+            edit_manager_combo.clear()
+            edit_manager_combo.setEnabled(False)
+            edit_manager_combo.blockSignals(False)
+        except Exception:
+            logger.debug("管理者コンボのリセットに失敗", exc_info=True)
+        if edit_manager_combo.lineEdit():
+            edit_manager_combo.lineEdit().setPlaceholderText(placeholder)
+        edit_manager_combo.setToolTip("")
+
+    def _build_user_label_from_data(user_data: dict) -> str:
+        """仕様: userName (organizationName) を表示する。"""
+        return _format_user_label_user_org(user_data)
+
+    def _format_user_display(user_id: str | None) -> str:
+        if not user_id:
+            return ""
+        user_data = current_member_info.get(user_id)
+        if not user_data and current_group_id:
+            try:
+                from classes.subgroup.core import subgroup_api_helper
+                detail_attr_map = subgroup_api_helper._load_detail_user_attributes(current_group_id)  # noqa: SLF001
+                detail = detail_attr_map.get(user_id)
+                if detail:
+                    user_data = {
+                        "id": user_id,
+                        "userName": detail.get("userName", ""),
+                        "emailAddress": detail.get("emailAddress", ""),
+                        "familyName": detail.get("familyName", ""),
+                        "givenName": detail.get("givenName", ""),
+                        "familyNameKanji": detail.get("familyNameKanji", ""),
+                        "givenNameKanji": detail.get("givenNameKanji", ""),
+                        "organizationName": detail.get("organizationName", ""),
+                    }
+                    current_member_info[user_id] = user_data
+            except Exception:
+                logger.debug("詳細属性の補完に失敗", exc_info=True)
+        if not user_data:
+            user_data = {"id": user_id}
+        return _build_user_label_from_data(user_data)
+
+    def _populate_members_for_group(group_id: str | None):
+        nonlocal current_member_info, current_group_id, manager_entries
+        if current_group_id and group_id and group_id == current_group_id and manager_entries:
+            return
+        if not group_id:
+            _reset_manager_combo("グループ未選択")
+            return
+
+        _reset_manager_combo("グループメンバーを取得中…")
+        try:
+            from classes.subgroup.core import subgroup_api_helper
+
+            unified_users, member_info = subgroup_api_helper.load_unified_member_list(subgroup_id=group_id)
+
+            # 仕様: subGroups/{id}.json または subGroupsAncestors/{id}.json の included(user) を選択肢にする
+            # 既存ロジックは統合候補を広めに拾うため、詳細ファイルがある場合は included のユーザーIDに限定する
+            try:
+                detail_attr_map = subgroup_api_helper._load_detail_user_attributes(group_id)  # noqa: SLF001
+                if isinstance(detail_attr_map, dict) and detail_attr_map:
+                    allowed_ids = set(detail_attr_map.keys())
+                    unified_users = [u for u in (unified_users or []) if str(u.get("id") or "") in allowed_ids]
+                    member_info = {uid: info for uid, info in (member_info or {}).items() if uid in allowed_ids}
+            except Exception:
+                logger.debug("管理者候補の限定に失敗 (fallback to unified list)", exc_info=True)
+
+            current_member_info = member_info or {}
+        except Exception:
+            logger.warning("グループメンバーの読み込みに失敗: %s", group_id, exc_info=True)
+            _reset_manager_combo("メンバー情報を読み込めませんでした")
+            return
+
+        manager_entries = []
+        try:
+            edit_manager_combo.blockSignals(True)
+            for user in unified_users or []:
+                uid = str(user.get("id") or "")
+                if not uid or user.get("isDeleted"):
+                    continue
+                label = _build_user_label_from_data(user)
+                manager_entries.append((label, uid))
+                edit_manager_combo.addItem(label, uid)
+                email = user.get("emailAddress")
+                if email:
+                    try:
+                        edit_manager_combo.setItemData(edit_manager_combo.count() - 1, email, Qt.ToolTipRole)
+                    except Exception:
+                        logger.debug("管理者コンボのToolTip設定に失敗", exc_info=True)
+            edit_manager_combo.blockSignals(False)
+        except Exception:
+            logger.debug("管理者コンボの更新に失敗", exc_info=True)
+            _reset_manager_combo("メンバー情報の更新に失敗しました")
+            return
+
+        if manager_entries:
+            edit_manager_combo.setEnabled(True)
+            if edit_manager_combo.lineEdit():
+                edit_manager_combo.lineEdit().setPlaceholderText("データセット管理者を選択")
+            try:
+                manager_completer = QCompleter([label for label, _ in manager_entries], edit_manager_combo)
+                manager_completer.setCaseSensitivity(Qt.CaseInsensitive)
+                manager_completer.setFilterMode(Qt.MatchContains)
+                edit_manager_combo.setCompleter(manager_completer)
+                try:
+                    edit_manager_combo.view().setTextElideMode(Qt.ElideRight)
+                except Exception:
+                    logger.debug("管理者コンボのElide設定に失敗", exc_info=True)
+            except Exception:
+                logger.debug("管理者コンボのCompleter設定に失敗", exc_info=True)
+            current_group_id = group_id
+        else:
+            _reset_manager_combo("メンバー情報が見つかりません")
+
+    def _set_applicant_display(user_id: str | None):
+        if not user_id:
+            edit_applicant_display.clear()
+            edit_applicant_display.setToolTip("")
+            return
+        text = _format_user_display(user_id) or user_id
+        edit_applicant_display.setText(text)
+        tooltip_parts = [text]
+        try:
+            if current_member_info.get(user_id, {}).get("emailAddress"):
+                tooltip_parts.append(current_member_info[user_id]["emailAddress"])
+        except Exception:
+            pass
+        edit_applicant_display.setToolTip("\n".join([p for p in tooltip_parts if p]))
+
+    def _apply_manager_selection(manager_id: str | None):
+        if manager_id:
+            idx = -1
+            for i, (_label, uid) in enumerate(manager_entries):
+                if uid == manager_id:
+                    idx = i
+                    break
+            if idx < 0:
+                fallback_label = _format_user_display(manager_id) or "現在の管理者"
+                manager_entries.append((fallback_label, manager_id))
+                edit_manager_combo.addItem(fallback_label, manager_id)
+                try:
+                    edit_manager_combo.setItemData(edit_manager_combo.count() - 1, manager_id, Qt.ToolTipRole)
+                except Exception:
+                    logger.debug("管理者コンボのToolTip設定に失敗", exc_info=True)
+                idx = edit_manager_combo.count() - 1
+            edit_manager_combo.setCurrentIndex(idx)
+        else:
+            try:
+                edit_manager_combo.setCurrentIndex(-1)
+            except Exception:
+                logger.debug("管理者コンボの選択クリアに失敗", exc_info=True)
+
+    def _extract_user_id(rel_data: dict | None) -> str:
+        if not rel_data:
+            return ""
+        data = rel_data.get("data") if isinstance(rel_data, dict) else None
+        if isinstance(data, dict):
+            return str(data.get("id") or "")
+        if isinstance(data, list) and data:
+            first = data[0]
+            if isinstance(first, dict):
+                return str(first.get("id") or "")
+        return ""
+
     content_splitter = QSplitter(Qt.Vertical)
     content_splitter.setChildrenCollapsible(False)
     content_splitter.addWidget(edit_form_widget)
@@ -3159,6 +3473,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         edit_grant_number_combo.setCurrentIndex(-1)
         edit_description_edit.clear()
         edit_contact_edit.clear()
+        edit_applicant_display.clear()
+        edit_applicant_display.setToolTip("")
+        _reset_manager_combo()
         edit_taxonomy_edit.clear()
         edit_related_links_edit.clear()  # 関連情報もクリア
         edit_tags_edit.clear()  # TAGフィールドをクリア
@@ -3248,6 +3565,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         if not selected_dataset:
             clear_edit_form()  # データセットが選択されていない場合はフォームをクリア
             return
+
+        # dataset.json はダイジェストのため、詳細ファイル(output/rde/data/datasets/{id}.json)があれば優先して使用
+        selected_dataset = _resolve_dataset_for_edit(selected_dataset) or selected_dataset
         
         # テンプレートIDを保存（タクソノミービルダーで使用）
         current_template_id = ""
@@ -3262,7 +3582,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         logger.debug("テンプレートID保存・表示: %s", current_template_id)
         
         attrs = selected_dataset.get("attributes", {})
-        
+
         # 基本情報
         edit_dataset_name_edit.setText(attrs.get("name", ""))
         
@@ -3291,6 +3611,17 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         else:
             logger.debug("課題番号設定スキップ: current='%s', available=%s", current_grant_number, len(dataset_grant_numbers) if dataset_grant_numbers else 0)
         edit_description_edit.setText(attrs.get("description", ""))
+
+        # 申請者/管理者情報の反映
+        group_id = relationships.get("group", {}).get("data", {}).get("id") if isinstance(relationships, dict) else None
+        _populate_members_for_group(group_id)
+
+        applicant_id = _extract_user_id(relationships.get("applicant") if isinstance(relationships, dict) else None)
+        _set_applicant_display(applicant_id)
+
+        manager_id = _extract_user_id(relationships.get("manager") if isinstance(relationships, dict) else None)
+        _apply_manager_selection(manager_id)
+
         edit_contact_edit.setText(attrs.get("contact", ""))
         
         # エンバーゴ期間終了日
@@ -3446,11 +3777,12 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         else:
             selected_dataset = existing_dataset_combo.itemData(current_index)
             if selected_dataset:
-                dataset_name = selected_dataset.get("attributes", {}).get("name", "不明")
-                dataset_id = selected_dataset.get("id", "")
+                resolved_dataset = _resolve_dataset_for_edit(selected_dataset) or selected_dataset
+                dataset_name = resolved_dataset.get("attributes", {}).get("name", "不明")
+                dataset_id = str(resolved_dataset.get("id", "") or "")
                 logger.debug("データセット '%s' を選択 - フォームに反映します", dataset_name)
-                
-                populate_edit_form_local(selected_dataset)
+
+                populate_edit_form_local(resolved_dataset)
                 # 選択データセットのエントリー一覧を更新
                 update_entries_table_for_dataset(dataset_id, dataset_name, force_refresh=False)
             else:
@@ -3478,6 +3810,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         dataset_dict = display_map.get(norm_text)
         
         if dataset_dict:
+            dataset_dict = _resolve_dataset_for_edit(dataset_dict) or dataset_dict
             # データセット辞書が見つかった場合、直接フォームに反映
             dataset_id = dataset_dict.get("id", "")
             dataset_name = dataset_dict.get("attributes", {}).get("name", "不明")
@@ -3729,6 +4062,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         if not selected_dataset:
             QMessageBox.warning(widget, "データセットエラー", "選択されたデータセットの情報が取得できません。")
             return
+
+        # 更新ペイロードは重要なrelationships(applicant/group等)を保持するため、詳細JSONを優先
+        selected_dataset = _resolve_dataset_for_edit(selected_dataset) or selected_dataset
         
         # 現在選択されているデータセットIDを保存（更新後の再選択用）
         current_dataset_id = selected_dataset.get("id")
@@ -3821,7 +4157,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             edit_related_links_edit, edit_tags_edit, edit_citation_format_edit, edit_license_combo,
             edit_data_listing_gallery_radio, edit_data_listing_tree_radio, widget, edit_anonymize_checkbox, 
             edit_data_entry_prohibited_checkbox, edit_data_entry_delete_prohibited_checkbox,
-            edit_share_core_scope_checkbox, ui_refresh_callback=refresh_ui_after_update
+            edit_share_core_scope_checkbox, edit_manager_combo, ui_refresh_callback=refresh_ui_after_update
         )
     
     # イベント接続

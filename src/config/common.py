@@ -44,9 +44,13 @@ logger = logging.getLogger(__name__)
 # 2025-11-15: v2.1.3 - データ取得2機能ファイル単位プログレス表示・粒度改善・スレッドセーフ実装
 # 2025-11-15: v2.1.2 - プログレス表示随時更新修正・スレッド安全性向上・repaint実装
 # 2025-11-14: v2.0.8 - プロキシ設定完全修正・接続テストUI設定反映・truststore/CA設定統合
-REVISION = "2.2.7"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+REVISION = "2.2.8"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+# 2025-12-18: v2.2.8 - データセット開設フィルタUI改善 + 基本情報キャッシュ判定修正 + ドキュメント更新
+#   - データセット開設（新規開設/新規開設2）: ロール/サブグループ/テンプレート/組織フィルタのラベル整理と「フィルタなし」の追加
+#   - 基本情報: サブグループ0件ケースで subGroups/ 欠損扱いにせず、不要な再取得を抑制
+#   - リリースノート/ヘルプ/READMEを v2.2.8 に更新し、v2.2.7 リリースノートをアーカイブへ退避
 # 2025-12-18: v2.2.7 - Windows/pytest-qt テスト安定化 + バージョン表記更新
-#   - テスト実行時のみ、ネイティブUI操作（ダイアログ/可視化/強制processEvents等）を抑制して 0x8001010d 系の致命的クラッシュを回避
+#   - pytest実行時のみ、ネイティブUI操作（ダイアログ/可視化/強制processEvents等）を抑制して 0x8001010d 系の致命的クラッシュを回避
 #   - invoiceSchema取得時はteamId候補のうち最初の候補のみを使用し、失敗しても他の候補を試行しないように変更
 #   - REVISION/VERSION.txt/README/ヘルプ/配布物のバージョン表記を2.2.7へ更新し、旧リリースノートをアーカイブへ退避
 # 2025-12-13: v2.2.6 - データポータルアップロードUI改善 + TAGビルダーAI提案追加
@@ -378,6 +382,7 @@ GROUP_PROJECT_DIR = get_dynamic_file_path('output/rde/data/groupProject')
 GROUP_ORGNIZATION_DIR = get_dynamic_file_path('output/rde/data/groupOrgnizations')  # 仕様上のスペルを維持
 SUBGROUP_DETAILS_DIR = get_dynamic_file_path('output/rde/data/subGroups')
 LEGACY_SUBGROUP_DETAILS_DIR = get_dynamic_file_path('output/rde/data/subgroups')  # 互換目的
+SUBGROUP_REL_DETAILS_DIR = get_dynamic_file_path('output/rde/data/subGroupsAncestors')
 DATASET_JSON_PATH = get_dynamic_file_path('output/rde/data/dataset.json')
 INFO_JSON_PATH = get_dynamic_file_path('output/rde/data/info.json')
 SELF_JSON_PATH = get_dynamic_file_path('output/rde/data/self.json')

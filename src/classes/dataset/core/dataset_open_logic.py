@@ -138,16 +138,17 @@ def _parse_related_links_text(related_links_text: str | None) -> list[dict]:
 
 
 def run_dataset_open_logic(
-    parent=None,
-    bearer_token=None,
-    group_info=None,
-    dataset_name=None,
-    embargo_date_str=None,
-    template_id=None,
-    dataset_type=None,
-    share_core_scope=False,
-    anonymize=False,
+    parent,
+    bearer_token,
+    group_info,
+    dataset_name,
+    embargo_date_str,
+    template_id,
+    dataset_type,
+    share_core_scope,
+    anonymize,
     *,
+    manager_user_id: str | None = None,
     description: str | None = None,
     related_links_text: str | None = None,
     tags: list[str] | None = None,
@@ -179,8 +180,10 @@ def run_dataset_open_logic(
         if role.get("role") == "OWNER":
             owner_id = role.get("userId")
             break
-    if not (group_id and owner_id and grant_number):
-        QMessageBox.warning(parent, "グループ情報エラー", "グループID/OWNER/課題番号が取得できませんでした。")
+
+    manager_id = manager_user_id or owner_id
+    if not (group_id and manager_id and grant_number):
+        QMessageBox.warning(parent, "グループ情報エラー", "グループID/管理者/課題番号が取得できませんでした。")
         return
 
     # データセット名
@@ -210,7 +213,7 @@ def run_dataset_open_logic(
             },
             "relationships": {
                 "group": {"data": {"type": "group", "id": group_id}},
-                "manager": {"data": {"type": "user", "id": owner_id}},
+                "manager": {"data": {"type": "user", "id": manager_id}},
                 "template": {"data": {"type": "datasetTemplate", "id": template_id}}
             }
         }
@@ -368,11 +371,20 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     from qt_compat.widgets import QWidget, QPushButton, QLineEdit, QDateEdit, QComboBox
     from qt_compat.core import QDate, Qt
     import datetime
-    from config.common import SUBGROUP_JSON_PATH, TEMPLATE_JSON_PATH, SELF_JSON_PATH, ORGANIZATION_JSON_PATH, INSTRUMENTS_JSON_PATH
+    from config.common import (
+        SUBGROUP_JSON_PATH,
+        TEMPLATE_JSON_PATH,
+        SELF_JSON_PATH,
+        ORGANIZATION_JSON_PATH,
+        INSTRUMENTS_JSON_PATH,
+        SUBGROUP_DETAILS_DIR,
+        SUBGROUP_REL_DETAILS_DIR,
+    )
     
     logger.debug("データセット開設機能：パス確認完了")
     
     user_id = None
+    self_user_attr: dict = {}
     all_team_groups = []
     data_load_failed = False
     data_warning_message = None
@@ -382,6 +394,7 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         with open(SELF_JSON_PATH, encoding="utf-8") as f:
             self_data = json.load(f)
         user_id = self_data.get("data", {}).get("id", None)
+        self_user_attr = self_data.get("data", {}).get("attributes", {}) or {}
         if not user_id:
             logger.error("self.jsonからユーザーIDが取得できませんでした。")
         with open(SUBGROUP_JSON_PATH, encoding="utf-8") as f:
@@ -417,13 +430,14 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     except Exception:
         pass
     #filter_combo.addItem("メンバー（何らかの役割を持つ）", "member")
-    #filter_combo.addItem("フィルタなし（全てのグループ）", "none")
+    
     filter_combo.addItem("管理者 または 管理者代理", "owner_assistant")
     filter_combo.addItem("管理者 のみ", "owner")
     filter_combo.addItem("管理者代理 のみ", "assistant")
-
+    filter_combo.addItem("フィルタなし（全てのグループ）", "none")
+    
     #filter_combo.addItem("管理者、管理者代理、メンバー、登録代行者、閲覧者", "all_roles")
-    filter_combo.setCurrentIndex(0)  # デフォルト：メンバー
+    filter_combo.setCurrentIndex(0)  # デフォルト：管理者 または 管理者代理
     
     # 初期グループリスト設定
     team_groups = team_groups_raw
@@ -478,6 +492,27 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     grant_combo.clear()
     grant_combo.lineEdit().setPlaceholderText("先にグループを選択してください")
     grant_combo.setEnabled(False)  # 初期状態では無効
+
+    # データセット管理者選択欄（グループ決定後に有効化）
+    manager_combo = QComboBox(parent)
+    try:
+        manager_combo.setStyleSheet(
+            f"QComboBox {{  border: 1px solid {_gc(_TK.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
+        )
+    except Exception:
+        pass
+    manager_combo.setEditable(True)
+    manager_combo.setInsertPolicy(QComboBox.NoInsert)
+    manager_combo.setMaxVisibleItems(12)
+    manager_combo.view().setMinimumHeight(240)
+    manager_combo.setEnabled(False)
+    manager_combo.setMinimumWidth(220)
+    manager_combo.lineEdit().setPlaceholderText("先にグループを選択してください")
+    manager_entries: list[tuple[str, str]] = []
+    manager_completer = QCompleter([], manager_combo)
+    manager_completer.setCaseSensitivity(Qt.CaseInsensitive)
+    manager_completer.setFilterMode(Qt.MatchContains)
+    manager_combo.setCompleter(manager_completer)
     
     # グループ選択コンボボックス
     def update_group_list(filter_type="member"):
@@ -522,6 +557,154 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         grant_combo.lineEdit().setPlaceholderText("先にグループを選択してください")
         
         return group_names_new
+
+    def _find_role_for_user(group: dict, target_user_id: str | None) -> str | None:
+        if not target_user_id:
+            return None
+        for role in group.get("attributes", {}).get("roles", []):
+            if role.get("userId") == target_user_id:
+                return role.get("role")
+        return None
+
+    def _build_member_label(user_item: dict, group: dict) -> str:
+        attr = user_item.get("attributes", {}) if isinstance(user_item, dict) else {}
+        org = attr.get("organizationName") or "(組織不明)"
+        name_kanji = " ".join([attr.get("familyNameKanji", ""), attr.get("givenNameKanji", "")]).strip()
+        name_latin = " ".join([attr.get("familyName", ""), attr.get("givenName", "")]).strip()
+        base_name = name_kanji or name_latin or attr.get("userName") or attr.get("emailAddress") or (user_item.get("id") or "")
+        user_name = attr.get("userName")
+        if user_name and user_name not in base_name:
+            base_name = f"{base_name} ({user_name})"
+        role = _find_role_for_user(group, user_item.get("id"))
+        role_suffix = f" [{role}]" if role else ""
+        if org:
+            return f"{org} / {base_name}{role_suffix}"
+        return f"{base_name}{role_suffix}"
+
+    def _load_group_member_users(group_id: str | None) -> list[dict]:
+        users: list[dict] = []
+        if not group_id:
+            return users
+        candidate_paths = [
+            os.path.join(SUBGROUP_DETAILS_DIR, f"{group_id}.json"),
+            os.path.join(SUBGROUP_REL_DETAILS_DIR, f"{group_id}.json"),
+        ]
+        for path in candidate_paths:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    data = json.load(f)
+                for item in (data or {}).get("included", []) or []:
+                    if item.get("type") == "user":
+                        users.append(item)
+                if users:
+                    return users
+            except FileNotFoundError:
+                logger.debug("グループメンバー情報が見つかりません: %s", path)
+            except Exception as e:
+                logger.debug("グループメンバー情報の読み込みに失敗: %s", e)
+        return users
+
+    def _populate_manager_combo(selected_group: dict | None):
+        nonlocal manager_entries
+        if not manager_combo:
+            return
+        manager_entries = []
+        manager_combo.blockSignals(True)
+        manager_combo.clear()
+        manager_combo.setEnabled(False)
+        if manager_combo.lineEdit():
+            manager_combo.lineEdit().setPlaceholderText("先にグループを選択してください")
+        manager_combo.blockSignals(False)
+
+        if not selected_group:
+            return
+
+        owner_id = None
+        for role in selected_group.get("attributes", {}).get("roles", []):
+            if role.get("role") == "OWNER" and role.get("userId"):
+                owner_id = str(role["userId"])
+                break
+
+        def _add_entry(label: str, uid: str):
+            manager_entries.append((label, uid))
+            manager_combo.addItem(label, uid)
+
+        members = _load_group_member_users(selected_group.get("id"))
+        for member in members:
+            user_id_val = member.get("id")
+            if not user_id_val:
+                continue
+            attr = member.get("attributes", {}) or {}
+            if attr.get("isDeleted"):
+                continue
+            label = _build_member_label(member, selected_group)
+            _add_entry(label, str(user_id_val))
+            email = attr.get("emailAddress")
+            if email:
+                try:
+                    manager_combo.setItemData(manager_combo.count() - 1, email, Qt.ToolTipRole)
+                except Exception:
+                    pass
+
+        if not manager_entries and owner_id:
+            _add_entry(f"グループ管理者 ({owner_id})", owner_id)
+
+        if not manager_entries and user_id:
+            pseudo_user = {"id": user_id, "attributes": self_user_attr}
+            label = _build_member_label(pseudo_user, selected_group)
+            _add_entry(label or f"ログインユーザー ({user_id})", str(user_id))
+
+        if manager_entries:
+            manager_combo.setEnabled(True)
+            if manager_combo.lineEdit():
+                manager_combo.lineEdit().setPlaceholderText("データセット管理者を選択")
+            try:
+                manager_completer.setModel(manager_completer.model().__class__([lbl for lbl, _ in manager_entries], manager_completer))
+            except Exception:
+                pass
+
+            preferred_ids = []
+            if user_id:
+                preferred_ids.append(str(user_id))
+            if owner_id:
+                preferred_ids.append(owner_id)
+            default_idx = -1
+            for preferred in preferred_ids:
+                for idx, (_lbl, uid) in enumerate(manager_entries):
+                    if uid == preferred:
+                        default_idx = idx
+                        break
+                if default_idx >= 0:
+                    break
+            if default_idx < 0:
+                default_idx = 0
+            if 0 <= default_idx < manager_combo.count():
+                manager_combo.setCurrentIndex(default_idx)
+        else:
+            if manager_combo.lineEdit():
+                manager_combo.lineEdit().setPlaceholderText("メンバー情報が見つかりません")
+            manager_combo.setEnabled(False)
+
+    def _resolve_selected_manager_id() -> str | None:
+        try:
+            if manager_combo.currentData():
+                return str(manager_combo.currentData())
+        except Exception:
+            pass
+        try:
+            text = (manager_combo.lineEdit().text() or "").strip()
+        except Exception:
+            text = ""
+        if text:
+            idx = manager_combo.findText(text)
+            if idx >= 0:
+                data = manager_combo.itemData(idx)
+                if data:
+                    return str(data)
+            for label, uid in manager_entries:
+                if label == text:
+                    return uid
+        return None
     
     # グループ選択コンボボックスの設定
     combo.lineEdit().setPlaceholderText("グループ名で検索")
@@ -545,6 +728,7 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         logger.debug("Filter changed to: %s", filter_type)
         update_group_list(filter_type)  # update_group_list内でCompleterも更新される
         logger.debug("Groups after filter: %s groups", len(team_groups))
+        _populate_manager_combo(None)
         
     filter_combo.currentTextChanged.connect(on_filter_changed)
     
@@ -630,6 +814,10 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
                 logger.debug("Added %s grant numbers to combo", len(grant_items))
             else:
                 grant_combo.lineEdit().setPlaceholderText("このグループには課題が登録されていません")
+            _populate_manager_combo(selected_group)
+        else:
+            _populate_manager_combo(None)
+            grant_combo.lineEdit().setPlaceholderText("先にグループを選択してください")
     
     # グループ選択の変更イベントを接続
     combo.lineEdit().textChanged.connect(on_group_changed)
@@ -679,6 +867,9 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     template_filter_combo.addItem("全件", "all")
     template_filter_combo.addItem("組織でフィルタ", "org")
     template_filter_combo.setCurrentIndex(0)
+    # 副次的なフィルタ項目として控えめに（右寄せ + 幅を10%縮小）
+    template_filter_combo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    template_filter_combo.setFixedWidth(int(200 * 0.9))
 
     # 組織フィルタ用
     org_filter_combo = QComboBox(parent)
@@ -693,7 +884,8 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     org_filter_combo.setMaxVisibleItems(12)
     org_filter_combo.view().setMinimumHeight(240)
     org_filter_combo.setEnabled(False)
-    org_filter_combo.setMinimumWidth(220)
+    org_filter_combo.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+    org_filter_combo.setFixedWidth(int(220 * 0.9))
 
     template_items: list[str] = []
     org_id_by_nameja: dict[str, str] = {}
@@ -829,27 +1021,40 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     # ラベル太字スタイル (共通ヘルパー使用でQSS削減)
     from classes.utils.label_style import apply_label_style
     from classes.theme import ThemeKey as _TKey
-    label_filter = QLabel("フィルタ:");
+    label_filter = QLabel("ロールフィルタ:");
     #apply_label_style(label_filter, _TKey.TEXT_PRIMARY, bold=True)
-    label_group = QLabel("グループ:");
+    label_group = QLabel("サブグループフィルタ:");
     #apply_label_style(label_group, _TKey.TEXT_PRIMARY, bold=True)
     label_grant = QLabel("課題番号:");
+    label_manager = QLabel("データセット管理者:");
     #apply_label_style(label_grant, _TKey.TEXT_PRIMARY, bold=True)
     label_name = QLabel("データセット名:"); 
     #apply_label_style(label_name, _TKey.TEXT_PRIMARY, bold=True)
     label_embargo = QLabel("エンバーゴ期間終了日:"); 
     #apply_label_style(label_embargo, _TKey.TEXT_PRIMARY, bold=True)
-    label_template_filter = QLabel("テンプレート表示:");
-    label_template_org = QLabel("組織:");
+    label_template_filter = QLabel("テンプレートフィルタ形式:");
+    label_template_org = QLabel("組織フィルタ:");
     label_template = QLabel("データセットテンプレート名:"); 
     #apply_label_style(label_template, _TKey.TEXT_PRIMARY, bold=True)
     form_layout.addRow(label_filter, filter_combo)
     form_layout.addRow(label_group, combo)
     form_layout.addRow(label_grant, grant_combo)
+    form_layout.addRow(label_manager, manager_combo)
     form_layout.addRow(label_name, name_edit)
     form_layout.addRow(label_embargo, embargo_edit)
-    form_layout.addRow(label_template_filter, template_filter_combo)
-    form_layout.addRow(label_template_org, org_filter_combo)
+    # 右寄せ: 副次的なフィルタ項目として視認上控えめにする
+    def _wrap_right_aligned_field(field_widget: QWidget) -> QWidget:
+        # parent を明示しない（レイアウト追加時に適切にリペアレントされる）
+        wrapper = QWidget()
+        h = QHBoxLayout(wrapper)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(0)
+        h.addStretch(1)
+        h.addWidget(field_widget)
+        return wrapper
+
+    form_layout.addRow(label_template_filter, _wrap_right_aligned_field(template_filter_combo))
+    form_layout.addRow(label_template_org, _wrap_right_aligned_field(org_filter_combo))
     form_layout.addRow(label_template, template_combo)
     form_layout.addRow(share_core_scope_checkbox)
     form_layout.addRow(anonymize_checkbox)
@@ -876,12 +1081,14 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
             warning_label.setVisible(True)
             combo.setEnabled(False)
             grant_combo.setEnabled(False)
+            manager_combo.setEnabled(False)
             open_btn.setEnabled(False)
         else:
             warning_label.clear()
             warning_label.setVisible(False)
             combo.setEnabled(True)
             grant_combo.setEnabled(True)
+            manager_combo.setEnabled(bool(manager_entries))
             open_btn.setEnabled(True)
 
     if data_warning_message:
@@ -893,6 +1100,9 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     container.anonymize_checkbox = anonymize_checkbox  # type: ignore[attr-defined]
     container.template_filter_combo = template_filter_combo  # type: ignore[attr-defined]
     container.template_org_combo = org_filter_combo  # type: ignore[attr-defined]
+    container.manager_combo = manager_combo  # type: ignore[attr-defined]
+    container._resolve_selected_manager_id = _resolve_selected_manager_id  # type: ignore[attr-defined]
+    container._manager_entries = manager_entries  # type: ignore[attr-defined]
     container.setLayout(form_layout)
 
     # テーマ再適用（ダーク/ライト切替時に背景色が逆転しないよう強制再指定）
@@ -905,7 +1115,7 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
                 f"QComboBox {{ background-color: {_gc2(_TK2.COMBO_BACKGROUND)}; color: {_gc2(_TK2.TEXT_PRIMARY)}; "
                 f"border: 1px solid {_gc2(_TK2.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
             )
-            for cb in (filter_combo, combo, grant_combo, template_combo):
+            for cb in (filter_combo, combo, grant_combo, manager_combo, template_combo):
                 if cb:
                     cb.setStyleSheet(combo_style)
             # LineEdit / DateEdit
@@ -936,7 +1146,7 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
                 f"QPushButton:pressed {{ background-color: {_gc2(_TK2.BUTTON_PRIMARY_BACKGROUND_PRESSED)}; }}"
             )
             # ラベル色再適用（読みやすさ向上）
-            for _lbl in [label_filter, label_group, label_grant, label_name, label_embargo, label_template]:
+            for _lbl in [label_filter, label_group, label_grant, label_manager, label_name, label_embargo, label_template]:
                 if _lbl:
                     _lbl.setStyleSheet(f"color: {_gc2(_TK2.TEXT_SECONDARY)}; font-weight:bold;")
             # コンテナ背景
@@ -1014,6 +1224,11 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         # チェックボックスの値取得
         share_core_scope = share_core_scope_checkbox.isChecked()
         anonymize = anonymize_checkbox.isChecked()
+
+        manager_user_id = _resolve_selected_manager_id()
+        if not manager_user_id:
+            QMessageBox.warning(parent, "データセット管理者未選択", "データセット管理者を選択してください。")
+            return
         
         # Bearer Token統一管理システムで取得
         bearer_token = BearerTokenManager.get_token_with_relogin_prompt(parent)
@@ -1022,7 +1237,18 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
             return
         
         logger.debug("on_open: group=%s, grant_number=%s, dataset_name=%s, embargo_str=%s, template_id=%s, dataset_type=%s, bearer_token=%s, share_core_scope=%s, anonymize=%s", group_info.get('attributes', {}).get('name'), selected_grant_number, dataset_name, embargo_str, template_id, dataset_type, '[PRESENT]' if bearer_token else '[NONE]', share_core_scope, anonymize)
-        run_dataset_open_logic(parent, bearer_token, group_info, dataset_name, embargo_str, template_id, dataset_type, share_core_scope, anonymize)
+        run_dataset_open_logic(
+            parent,
+            bearer_token,
+            group_info,
+            dataset_name,
+            embargo_str,
+            template_id,
+            dataset_type,
+            share_core_scope,
+            anonymize,
+            manager_user_id=manager_user_id,
+        )
     if connect_open_handler:
         open_btn.clicked.connect(on_open)
 
@@ -1054,6 +1280,7 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
             # 現在のフィルタを適用して更新
             current_filter = filter_combo.currentData()
             update_group_list(current_filter or "owner_assistant")
+            _populate_manager_combo(None)
             
             # Completer の更新 - これが重要！
             if group_completer and hasattr(group_completer, 'setModel'):
@@ -1107,7 +1334,19 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         except Exception as e:
             logger.warning("サブグループ更新通知への登録に失敗: %s", e)
 
-    return container, team_groups, combo, grant_combo, open_btn, name_edit, embargo_edit, template_combo, template_list, filter_combo
+    return (
+        container,
+        team_groups,
+        combo,
+        grant_combo,
+        manager_combo,
+        open_btn,
+        name_edit,
+        embargo_edit,
+        template_combo,
+        template_list,
+        filter_combo,
+    )
 
 def create_dataset(bearer_token, payload, output_dir=None):
     """

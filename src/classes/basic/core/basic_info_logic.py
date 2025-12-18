@@ -60,6 +60,7 @@ from config.common import (
     OUTPUT_DIR as COMMON_OUTPUT_DIR,
     OUTPUT_RDE_DATA_DIR,
     SELF_JSON_PATH,
+    SUBGROUP_REL_DETAILS_DIR,
     SUBGROUP_DETAILS_DIR,
     SUBGROUP_JSON_PATH,
     TEMPLATE_JSON_CHUNKS_DIR,
@@ -146,38 +147,56 @@ def _subgroups_folder_complete() -> bool:
         logger.info("\n[フォルダ完全性チェック開始] v2.1.24")
 
         org_dir = Path(GROUP_ORGNIZATION_DIR)
-        if not org_dir.exists():
-            logger.info(f"  ❌ groupOrgnizations/ディレクトリが存在しません: {org_dir}")
-            return True  # フォルダがなければチェック対象外
+        if org_dir.exists():
+            logger.info(f"  📂 groupOrgnizations/ディレクトリをスキャン: {org_dir}")
 
-        logger.info(f"  📂 groupOrgnizations/ディレクトリをスキャン: {org_dir}")
+            org_json_files = list(org_dir.glob("*.json"))
+            logger.info(f"  📋 プロジェクトJSONファイル数: {len(org_json_files)}個")
 
-        org_json_files = list(org_dir.glob("*.json"))
-        logger.info(f"  📋 プロジェクトJSONファイル数: {len(org_json_files)}個")
+            for json_file in org_json_files:
+                try:
+                    with open(json_file, 'r', encoding='utf-8') as f:
+                        proj_data = json.load(f)
 
-        for json_file in org_json_files:
-            try:
-                with open(json_file, 'r', encoding='utf-8') as f:
-                    proj_data = json.load(f)
+                    included = proj_data.get("included", [])
+                    subgroup_count = 0
+                    for item in included:
+                        if (
+                            item.get("type") == "group" and
+                            item.get("attributes", {}).get("groupType") == "TEAM"
+                        ):
+                            item_id = item.get("id")
+                            expected_ids.add(item_id)
+                            subgroup_count += 1
 
-                included = proj_data.get("included", [])
-                subgroup_count = 0
-                for item in included:
-                    if (
-                        item.get("type") == "group" and
-                        item.get("attributes", {}).get("groupType") == "TEAM"
-                    ):
-                        item_id = item.get("id")
-                        expected_ids.add(item_id)
-                        subgroup_count += 1
+                    logger.debug(f"    ✓ {json_file.name}: {subgroup_count}個のサブグループを抽出")
+                except Exception as e:
+                    logger.warning(f"    ❌ プロジェクトJSON読み込みエラー（{json_file.name}）: {e}")
+                    continue
+        else:
+            logger.info(f"  ℹ️  groupOrgnizations/ディレクトリが存在しません: {org_dir}")
 
-                logger.debug(f"    ✓ {json_file.name}: {subgroup_count}個のサブグループを抽出")
-            except Exception as e:
-                logger.warning(f"    ❌ プロジェクトJSON読み込みエラー（{json_file.name}）: {e}")
-                continue
-
+        # groupOrgnizations/ に情報がない場合でも、subGroup.json から TEAM を推定できる
         if not expected_ids:
-            logger.info("  ℹ️  サブグループIDが見つかりません（チェック対象外）")
+            try:
+                subgroup_json_path = Path(SUBGROUP_JSON_PATH)
+                if subgroup_json_path.exists():
+                    with open(subgroup_json_path, "r", encoding="utf-8") as f:
+                        subgroup_data = json.load(f)
+                    included = subgroup_data.get("included", [])
+                    for item in included:
+                        if (
+                            item.get("type") == "group" and
+                            item.get("attributes", {}).get("groupType") == "TEAM"
+                        ):
+                            item_id = item.get("id")
+                            expected_ids.add(item_id)
+            except Exception as e:
+                logger.debug("subGroup.json からのサブグループ推定に失敗（取得を続行）: %s", e)
+
+        # 期待されるサブグループが0件なら、subGroups/ のファイル有無で欠損扱いにしない
+        if not expected_ids:
+            logger.info("  ℹ️  期待されるサブグループIDが0件のため、subGroups/完全性チェックをスキップします")
             return True
 
         expected_count = len(expected_ids)
@@ -234,6 +253,18 @@ def _make_headers(bearer_token, host, origin, referer):
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": '"Windows"',
     }
+
+
+def _progress_ok(progress_callback, percent: int, total: int, message: str) -> bool:
+    """Run progress callback and treat None as OK (only False means cancel)."""
+    if not progress_callback:
+        return True
+    try:
+        result = progress_callback(percent, total, message)
+        return result is not False
+    except Exception as e:
+        logger.debug("progress callback error ignored: %s", e)
+        return True
 
 
 def _prepare_dataset_chunk_directory() -> Path:
@@ -2001,7 +2032,7 @@ def run_group_hierarchy_pipeline(
         - emit_progress(percent, total, message)
         """
         actual_message = message if message is not None else total_or_message
-        if progress_callback and not progress_callback(percent, 100, actual_message):
+        if not _progress_ok(progress_callback, percent, 100, actual_message):
             raise GroupFetchCancelled("キャンセルされました")
 
     headers = headers or _make_headers(
@@ -2115,27 +2146,57 @@ def run_group_hierarchy_pipeline(
 
     save_json(selected_project_data, SUBGROUP_JSON_PATH)
 
-    emit_progress(65, "サブグループ詳細取得中...")
+    # relationships(parent/children) に対する追加詳細取得（ancestors付き）
+    emit_progress(58, "関係グループ詳細取得準備中...")
+    fetch_relationship_group_details(
+        bearer_token=bearer_token,
+        sub_group_data=selected_project_data,
+        headers=headers,
+        progress_callback=emit_progress,
+        base_progress=58,
+        progress_range=7,
+        destination_dir=SUBGROUP_REL_DETAILS_DIR,
+        force_download=force_download,
+    )
+
+    emit_progress(60, "サブグループ詳細取得中...")
     subgroup_summary: Dict[str, Dict[str, int]] = {}
     total_project_details = max(len(project_details), 1)
     for idx, (project_id, project_data) in enumerate(project_details.items(), 1):
         project_name = project_meta.get(project_id, {}).get("name", "名称不明")
-        emit_progress(65 + int((idx / total_project_details) * 30), f"サブグループ展開: {project_name[:30]}...")
+        emit_progress(60 + int((idx / total_project_details) * 20), f"サブグループ展開: {project_name[:30]}...")
         success, fail, errors = fetch_all_subgroups(
             bearer_token=bearer_token,
             sub_group_data=project_data,
             headers=headers,
             progress_callback=emit_progress,
+            base_progress=65,
+            progress_range=20,
             destination_dir=SUBGROUP_DETAILS_DIR,
             legacy_dir=LEGACY_SUBGROUP_DETAILS_DIR,
             project_group_id=project_id,
             project_group_name=project_name,
             force_download=force_download,
         )
+
+        rel_success, rel_fail, rel_skipped = fetch_relationship_group_details(
+            bearer_token=bearer_token,
+            sub_group_data=project_data,
+            headers=headers,
+            progress_callback=emit_progress,
+            base_progress=85,
+            progress_range=10,
+            destination_dir=SUBGROUP_REL_DETAILS_DIR,
+            force_download=force_download,
+        )
+
         subgroup_summary[project_id] = {
             "success": success,
             "fail": fail,
-            "errors": len(errors)
+            "errors": len(errors),
+            "relationship_success": rel_success,
+            "relationship_fail": rel_fail,
+            "relationship_skipped": rel_skipped,
         }
 
     emit_progress(100, "グループ階層取得完了")
@@ -2242,10 +2303,16 @@ def fetch_all_subgroups(
         if item.get("type") == "group" 
         and item.get("attributes", {}).get("groupType") == "TEAM"
     ]
-    
+
+    # included に無い場合は data.relationships.children をフォールバックで利用（要求仕様: relationshipsベースで全取得）
     if not subgroups:
-        logger.info("サブグループが見つかりませんでした。")
-        return (0, 0, [])
+        rel_ids = _collect_relationship_group_ids(sub_group_data)
+        if rel_ids:
+            logger.info("includedにTEAMが無いためrelationshipsからサブグループIDを補完します: %s件", len(rel_ids))
+            subgroups = [{"id": gid, "attributes": {"name": gid}, "from_relationships": True} for gid in rel_ids]
+        else:
+            logger.info("サブグループが見つかりませんでした。")
+            return (0, 0, [])
     
     logger.info(f"\n[サブグループ個別取得ループ開始] v2.1.24")
     logger.info(f"  🔄 ループ処理対象: {len(subgroups)}件のサブグループ")
@@ -2291,12 +2358,11 @@ def fetch_all_subgroups(
             logger.info(f"  [{i:3d}] [上書き予定] {subgroup_name} (force_download=True)")
         
         # プログレス更新
-        if progress_callback:
-            current_progress = base_progress + int((i / len(subgroups)) * progress_range)
-            message = f"サブグループ取得中 ({i}/{len(subgroups)}): {subgroup_name[:30]}..."
-            if not progress_callback(current_progress, 100, message):
-                logger.warning("ユーザーによりキャンセルされました")
-                return (success_count, fail_count, error_messages)
+        current_progress = base_progress + int((i / len(subgroups)) * progress_range)
+        message = f"サブグループ取得中 ({i}/{len(subgroups)}): {subgroup_name[:30]}..."
+        if not _progress_ok(progress_callback, current_progress, 100, message):
+            logger.warning("ユーザーによりキャンセルされました")
+            return (success_count, fail_count, error_messages)
         
         # API呼び出し
         subgroup_url = f"https://rde-api.nims.go.jp/groups/{subgroup_id}?include=children%2Cmembers"
@@ -2388,6 +2454,115 @@ def fetch_all_subgroups(
     logger.info("[サブグループ個別取得ループ終了]\n")
     
     return (success_count, fail_count, error_messages)
+
+
+def _collect_relationship_group_ids(sub_group_data: dict) -> list[str]:
+    """Extract unique group IDs from parent/children relationships."""
+    relationship_ids: list[str] = []
+
+    def _append_id(data_obj: dict | None) -> None:
+        if not isinstance(data_obj, dict):
+            return
+        gid = data_obj.get("id")
+        if isinstance(gid, str) and gid and gid not in relationship_ids:
+            relationship_ids.append(gid)
+
+    relationships = sub_group_data.get("data", {}).get("relationships", {})
+    if not isinstance(relationships, dict):
+        return relationship_ids
+
+    _append_id(relationships.get("parent", {}).get("data"))
+
+    children = relationships.get("children", {}).get("data", [])
+    if isinstance(children, list):
+        for child in children:
+            _append_id(child)
+
+    return relationship_ids
+
+
+def fetch_relationship_group_details(
+    bearer_token: str,
+    sub_group_data: dict,
+    headers: dict,
+    progress_callback=None,
+    base_progress: int = 85,
+    progress_range: int = 10,
+    destination_dir: Optional[str] = None,
+    force_download: bool = False,
+):
+    """Fetch additional group details for relationship IDs in subGroup.json.
+
+    The API call uses include=ancestors,members to keep ancestor context and
+    membership information. Each response is stored under
+    output/rde/data/subGroupsAncestors/{group_id}.json. Existing files are
+    preserved unless force_download is True.
+    """
+    import time
+    from pathlib import Path
+
+    resolved_dir = destination_dir or SUBGROUP_REL_DETAILS_DIR
+
+    target_dir = Path(resolved_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    group_ids = _collect_relationship_group_ids(sub_group_data)
+    if not group_ids:
+        logger.info("関係グループIDが見つからないため追加取得をスキップします")
+        return (0, 0, 0)
+
+    logger.info("[関係グループ詳細取得開始] 対象: %s件", len(group_ids))
+
+    success_count = 0
+    fail_count = 0
+    skipped_count = 0
+
+    for idx, group_id in enumerate(group_ids, 1):
+        save_path = target_dir / f"{group_id}.json"
+        if save_path.exists() and not force_download:
+            skipped_count += 1
+            logger.debug("[%s/%s] 既存ファイルを利用しスキップ: %s", idx, len(group_ids), group_id)
+            continue
+
+        current_progress = base_progress + int((idx / max(len(group_ids), 1)) * progress_range)
+        message = f"関係グループ取得中 ({idx}/{len(group_ids)}): {group_id[:8]}..."
+        if not _progress_ok(progress_callback, current_progress, 100, message):
+            logger.warning("ユーザーにより追加取得がキャンセルされました")
+            return (success_count, fail_count, skipped_count)
+
+        detail_url = f"https://rde-api.nims.go.jp/groups/{group_id}?include=ancestors%2Cmembers"
+
+        start_time = time.time()
+        try:
+            resp = api_request("GET", detail_url, bearer_token=bearer_token, headers=headers, timeout=10)
+            elapsed_ms = (time.time() - start_time) * 1000
+
+            if resp is None:
+                logger.warning("[%s/%s] リクエスト失敗: %s", idx, len(group_ids), group_id)
+                fail_count += 1
+                continue
+
+            resp.raise_for_status()
+            payload = resp.json()
+
+            with open(save_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+
+            logger.info("[%s/%s] 関係グループ詳細保存完了: %s (%.0fms)", idx, len(group_ids), group_id, elapsed_ms)
+            success_count += 1
+
+        except Exception as e:
+            logger.warning("[%s/%s] 関係グループ詳細取得に失敗: %s", idx, len(group_ids), e)
+            fail_count += 1
+
+    logger.info(
+        "[関係グループ詳細取得完了] 成功=%s, 失敗=%s, スキップ=%s",
+        success_count,
+        fail_count,
+        skipped_count,
+    )
+
+    return (success_count, fail_count, skipped_count)
 
 
 def parse_group_id_from_data(data, preferred_program_id=None):
@@ -2693,6 +2868,32 @@ def fetch_group_info_stage(
         
         if not force_download and group_files_ready and subgroups_complete:
             logger.info("グループ関連情報: 既存ファイルは完全。取得をスキップします")
+            # 既存のsubGroup.jsonから関係グループ詳細を補完（ancestors付与）
+            try:
+                with open(SUBGROUP_JSON_PATH, "r", encoding="utf-8") as f:
+                    existing_subgroup = json.load(f)
+            except Exception as e:
+                logger.warning("既存subGroup.jsonの読み込みに失敗しました: %s", e)
+                existing_subgroup = None
+
+            if existing_subgroup:
+                headers = _make_headers(
+                    bearer_token,
+                    host="rde-api.nims.go.jp",
+                    origin="https://rde.nims.go.jp",
+                    referer="https://rde.nims.go.jp/",
+                )
+                fetch_relationship_group_details(
+                    bearer_token=bearer_token,
+                    sub_group_data=existing_subgroup,
+                    headers=headers,
+                    progress_callback=progress_callback,
+                    base_progress=85,
+                    progress_range=10,
+                    destination_dir=SUBGROUP_REL_DETAILS_DIR,
+                    force_download=False,
+                )
+
             if progress_callback:
                 progress_callback(100, 100, "既存ファイルを再利用しました")
             return "グループ関連情報: 既存ファイルを再利用しました"

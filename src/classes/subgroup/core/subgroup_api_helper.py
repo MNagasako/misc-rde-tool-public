@@ -7,14 +7,19 @@ import os
 import json
 import datetime
 import traceback
+from typing import Dict
 from qt_compat.widgets import QMessageBox
 from qt_compat.core import QTimer
 from .subgroup_api_client import SubgroupApiClient, SubgroupPayloadBuilder
 
 import logging
+from config.common import SUBGROUP_DETAILS_DIR, SUBGROUP_REL_DETAILS_DIR
 
 # ロガー設定
 logger = logging.getLogger(__name__)
+
+# サブグループ詳細ファイルのユーザー属性キャッシュ
+_DETAIL_USER_CACHE: Dict[str, Dict[str, dict]] = {}
 
 
 def fetch_user_details_by_id(user_id, bearer_token=None):
@@ -94,6 +99,39 @@ def fetch_user_details_by_id(user_id, bearer_token=None):
     except Exception as e:
         logger.error("ユーザー詳細取得エラー (ID: %s): %s", user_id, e)
         return None
+
+
+def _load_detail_user_attributes(subgroup_id: str) -> dict:
+    """サブグループ個別ファイルからユーザー属性を取得（キャッシュ付き）。"""
+    if not subgroup_id:
+        return {}
+    if subgroup_id in _DETAIL_USER_CACHE:
+        return _DETAIL_USER_CACHE[subgroup_id]
+
+    attr_map: dict[str, dict] = {}
+    candidate_paths = [
+        os.path.join(SUBGROUP_DETAILS_DIR, f"{subgroup_id}.json"),
+        os.path.join(SUBGROUP_REL_DETAILS_DIR, f"{subgroup_id}.json"),
+    ]
+
+    for path in candidate_paths:
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            for item in (data or {}).get("included", []) or []:
+                if item.get("type") == "user":
+                    uid = item.get("id")
+                    if uid:
+                        attr_map[str(uid)] = item.get("attributes", {}) or {}
+            if attr_map:
+                break
+        except FileNotFoundError:
+            logger.debug("サブグループ詳細ファイル未検出: %s", path)
+        except Exception as e:
+            logger.debug("サブグループ詳細読込失敗 (%s): %s", path, e)
+
+    _DETAIL_USER_CACHE[subgroup_id] = attr_map
+    return attr_map
 
 
 def check_subgroup_files():
@@ -213,6 +251,7 @@ def load_unified_member_list(subgroup_id=None, dynamic_users=None, bearer_token=
     
     # 0. subGroup.jsonを最初に読み込み（複数箇所で使用するため）
     subgroup_data = None
+    detail_attr_map: Dict[str, dict] = _load_detail_user_attributes(subgroup_id) if subgroup_id else {}
     email_to_user_map = {}
     try:
         from config.common import get_dynamic_file_path
@@ -492,12 +531,16 @@ def load_unified_member_list(subgroup_id=None, dynamic_users=None, bearer_token=
     all_user_ids.update(subgroup_roles.keys())
     all_user_ids.update(subgroup_all_users.keys())  # 新規作成時の全ユーザー
     all_user_ids.update(dynamic_members.keys())
+    if detail_attr_map:
+        # サブグループ詳細ファイルのみ存在する場合でも全メンバーを候補に含める
+        all_user_ids.update(detail_attr_map.keys())
 
     # 5. 統合ユーザーリスト作成
     unified_users = []
     member_info = {}
     
     for user_id in all_user_ids:
+        detail_attr = detail_attr_map.get(user_id) if detail_attr_map else None
         # 優先順位: rde-member.txt > dynamic_users > subgroup_all_users（新規作成時） > subGroup.json（IDのみ）
         user_data = None
         
@@ -511,42 +554,68 @@ def load_unified_member_list(subgroup_id=None, dynamic_users=None, bearer_token=
         else:
             # subGroup.jsonにしか存在しない場合、API補完を試行
             # まずsubGroup.jsonのincludedセクションからユーザー情報を探す
-            user_data = None
-            
-            # subGroup.jsonからユーザー詳細を探す
-            try:
-                if subgroup_data:
-                    included_items = subgroup_data.get("included", [])
-                    for item in included_items:
-                        if item.get("type") == "user" and item.get("id") == user_id:
-                            attr = item.get("attributes", {})
-                            user_data = {
-                                'id': user_id,
-                                'userName': attr.get('userName', ''),
-                                'emailAddress': attr.get('emailAddress', ''),
-                                'organizationName': attr.get('organizationName', ''),
-                                'familyName': attr.get('familyName', ''),
-                                'givenName': attr.get('givenName', ''),
-                                'source': 'subGroup.json',
-                                'source_format': 'included'
-                            }
-                            logger.debug("subGroup.jsonからユーザー詳細取得: %s (%s)", user_data.get('userName', 'Unknown'), user_id)
-                            break
-            except Exception as e:
-                logger.debug("subGroup.json ユーザー検索エラー: %s", e)
-            
-            # 見つからない場合は最小限のデータで初期化
-            if not user_data:
+            if detail_attr:
                 user_data = {
                     'id': user_id,
-                    'userName': 'Unknown User',
-                    'emailAddress': '',
-                    'organizationName': '',
-                    'familyName': '',
-                    'givenName': '',
-                    'source': 'subGroup.json',
-                    'source_format': 'roles_only'
+                    'userName': detail_attr.get('userName', ''),
+                    'emailAddress': detail_attr.get('emailAddress', ''),
+                    'familyNameKanji': detail_attr.get('familyNameKanji', ''),
+                    'givenNameKanji': detail_attr.get('givenNameKanji', ''),
+                    'organizationName': detail_attr.get('organizationName', ''),
+                    'familyName': detail_attr.get('familyName', ''),
+                    'givenName': detail_attr.get('givenName', ''),
+                    'source': 'subgroup_detail',
+                    'source_format': 'included'
                 }
+            else:
+                user_data = None
+                
+                # subGroup.jsonからユーザー詳細を探す
+                try:
+                    if subgroup_data:
+                        included_items = subgroup_data.get("included", [])
+                        for item in included_items:
+                            if item.get("type") == "user" and item.get("id") == user_id:
+                                attr = item.get("attributes", {})
+                                user_data = {
+                                    'id': user_id,
+                                    'userName': attr.get('userName', ''),
+                                    'emailAddress': attr.get('emailAddress', ''),
+                                    'organizationName': attr.get('organizationName', ''),
+                                    'familyName': attr.get('familyName', ''),
+                                    'givenName': attr.get('givenName', ''),
+                                    'source': 'subGroup.json',
+                                    'source_format': 'included'
+                                }
+                                logger.debug("subGroup.jsonからユーザー詳細取得: %s (%s)", user_data.get('userName', 'Unknown'), user_id)
+                                break
+                except Exception as e:
+                    logger.debug("subGroup.json ユーザー検索エラー: %s", e)
+                
+                # 見つからない場合は最小限のデータで初期化
+                if not user_data:
+                    user_data = {
+                        'id': user_id,
+                        'userName': 'Unknown User',
+                        'emailAddress': '',
+                        'organizationName': '',
+                        'familyName': '',
+                        'givenName': '',
+                        'source': 'subGroup.json',
+                        'source_format': 'roles_only'
+                    }
+
+        # サブグループ詳細に存在する属性で不足分を補う
+        if detail_attr:
+            if not user_data.get('emailAddress'):
+                user_data['emailAddress'] = detail_attr.get('emailAddress', '')
+            if not user_data.get('userName') or user_data.get('userName') in ['Unknown', 'Unknown User']:
+                user_data['userName'] = detail_attr.get('userName', user_data.get('userName', ''))
+            user_data.setdefault('organizationName', detail_attr.get('organizationName', ''))
+            user_data.setdefault('familyName', detail_attr.get('familyName', ''))
+            user_data.setdefault('givenName', detail_attr.get('givenName', ''))
+            user_data.setdefault('familyNameKanji', detail_attr.get('familyNameKanji', ''))
+            user_data.setdefault('givenNameKanji', detail_attr.get('givenNameKanji', ''))
         
         # 詳細データが不足している場合はAPI呼び出しで補完
         if (user_data.get('userName', '').strip() in ['', 'Unknown User', 'Unknown'] or 

@@ -13,7 +13,11 @@ from qt_compat.widgets import (
     QPushButton, QMessageBox, QScrollArea, QCheckBox, QRadioButton, 
     QButtonGroup, QDialog, QTextEdit, QComboBox, QCompleter, QSizePolicy
 )
-from config.common import SUBGROUP_JSON_PATH
+from config.common import (
+    SUBGROUP_JSON_PATH,
+    SUBGROUP_DETAILS_DIR,
+    SUBGROUP_REL_DETAILS_DIR,
+)
 from config.site_rde import URLS
 from qt_compat.core import Qt
 from classes.theme import get_color, ThemeKey
@@ -323,6 +327,7 @@ class SubgroupSelector:
         self.groups_data = []
         self.filtered_groups_data = []
         self.sample_count_cache = {}  # 試料数キャッシュ
+        self._detail_user_cache: dict[str, dict] = {}
         
         # イベント接続
         self.filter_combo.currentTextChanged.connect(self.apply_filter)
@@ -392,7 +397,7 @@ class SubgroupSelector:
                     logger.warning("attributes がdict型ではありません: %s", type(attr))
                     continue
                 if attr.get("groupType") == "TEAM":
-                    members = self._build_member_list(attr.get("roles", []), user_map)
+                    members = self._build_member_list(attr.get("roles", []), user_map, item.get("id", ""))
                     groups.append({
                         "id": item.get("id", ""),
                         "name": attr.get("name", ""),
@@ -405,13 +410,45 @@ class SubgroupSelector:
         
         return groups
     
-    def _build_member_list(self, roles, user_map):
+    def _read_detail_user_attributes(self, subgroup_id: str) -> dict:
+        """サブグループ個別ファイルからユーザー属性を読み込む（キャッシュ付き）。"""
+        if not subgroup_id:
+            return {}
+        if subgroup_id in self._detail_user_cache:
+            return self._detail_user_cache[subgroup_id]
+
+        attr_map: dict[str, dict] = {}
+        candidate_paths = [
+            os.path.join(SUBGROUP_DETAILS_DIR, f"{subgroup_id}.json"),
+            os.path.join(SUBGROUP_REL_DETAILS_DIR, f"{subgroup_id}.json"),
+        ]
+        for path in candidate_paths:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    data = json.load(f)
+                for item in (data or {}).get("included", []) or []:
+                    if item.get("type") == "user":
+                        uid = item.get("id")
+                        if uid:
+                            attr_map[str(uid)] = item.get("attributes", {}) or {}
+                if attr_map:
+                    break
+            except FileNotFoundError:
+                logger.debug("サブグループ詳細ファイル未検出: %s", path)
+            except Exception as e:
+                logger.debug("サブグループ詳細読込失敗 (%s): %s", path, e)
+
+        self._detail_user_cache[subgroup_id] = attr_map
+        return attr_map
+
+    def _build_member_list(self, roles, user_map, subgroup_id: str):
         """ロール情報からメンバーリストを構築"""
+        detail_attr_map = self._read_detail_user_attributes(subgroup_id)
         members = []
         for role in roles:
             user_id = role.get("userId", "")
             role_type = role.get("role", "MEMBER")
-            user_attr = user_map.get(user_id, {})
+            user_attr = detail_attr_map.get(user_id) or user_map.get(user_id, {})
             members.append({
                 "id": user_id,
                 "name": user_attr.get("userName", "Unknown"),

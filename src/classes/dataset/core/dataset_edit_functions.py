@@ -21,7 +21,7 @@ def create_dataset_update_payload(selected_dataset, edit_dataset_name_edit, edit
                                 edit_taxonomy_edit, edit_related_links_edit, edit_tags_edit,
                                 edit_citation_format_edit, edit_license_combo, edit_data_listing_gallery_radio, edit_data_listing_tree_radio, 
                                 widget, edit_anonymize_checkbox, edit_data_entry_prohibited_checkbox, 
-                                edit_data_entry_delete_prohibited_checkbox, edit_share_core_scope_checkbox):
+                                edit_data_entry_delete_prohibited_checkbox, edit_share_core_scope_checkbox, edit_manager_combo):
     """データセット更新用のペイロードを作成"""
     original_dataset_id = selected_dataset.get("id")  # 元のデータセットIDを明確に保存
     original_attrs = selected_dataset.get("attributes", {})
@@ -199,6 +199,32 @@ def create_dataset_update_payload(selected_dataset, edit_dataset_name_edit, edit
             relationships[rel_name] = original_relationships[rel_name]
             logger.debug("リレーションシップ保持: %s", rel_name)
     
+    # 管理者の更新（指定がある場合のみ上書き）
+    manager_user_id = None
+    try:
+        if edit_manager_combo.currentData():
+            manager_user_id = str(edit_manager_combo.currentData())
+    except Exception:
+        manager_user_id = None
+    if not manager_user_id:
+        try:
+            manager_text = (edit_manager_combo.lineEdit().text() or "").strip()
+            if manager_text:
+                idx = edit_manager_combo.findText(manager_text)
+                if idx >= 0 and edit_manager_combo.itemData(idx):
+                    manager_user_id = str(edit_manager_combo.itemData(idx))
+        except Exception:
+            manager_user_id = None
+
+    if manager_user_id:
+        relationships["manager"] = {
+            "data": {
+                "type": "user",
+                "id": manager_user_id
+            }
+        }
+        logger.debug("管理者を更新: %s", manager_user_id)
+
     # ライセンス情報をリレーションシップに追加（成功時のペイロード構造に合わせる）
     if license_id and license_id.strip():
         relationships["license"] = {
@@ -257,7 +283,7 @@ def send_dataset_update_request(widget, parent, selected_dataset,
                                edit_related_links_edit, edit_tags_edit, edit_citation_format_edit, edit_license_combo,
                                edit_data_listing_gallery_radio, edit_data_listing_tree_radio, selected_datasets_list, 
                                edit_anonymize_checkbox, edit_data_entry_prohibited_checkbox, 
-                               edit_data_entry_delete_prohibited_checkbox, edit_share_core_scope_checkbox, ui_refresh_callback=None):
+                               edit_data_entry_delete_prohibited_checkbox, edit_share_core_scope_checkbox, edit_manager_combo, ui_refresh_callback=None):
     """データセット更新リクエストを送信"""
     
     # Bearer Token統一管理システムで取得
@@ -273,7 +299,7 @@ def send_dataset_update_request(widget, parent, selected_dataset,
         edit_taxonomy_edit, edit_related_links_edit, edit_tags_edit,
         edit_citation_format_edit, edit_license_combo, edit_data_listing_gallery_radio, edit_data_listing_tree_radio, 
         widget, edit_anonymize_checkbox, edit_data_entry_prohibited_checkbox, 
-        edit_data_entry_delete_prohibited_checkbox, edit_share_core_scope_checkbox
+        edit_data_entry_delete_prohibited_checkbox, edit_share_core_scope_checkbox, edit_manager_combo
     )
     
     dataset_id = selected_dataset.get("id")
