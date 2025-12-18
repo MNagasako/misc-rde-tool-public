@@ -4,6 +4,29 @@
 
 ---
 
+## v2.2.8 (2025-12-18) - データセット開設フィルタUI改善 + 基本情報キャッシュ判定修正
+
+### 🧩 データセット開設フォーム（新規開設/新規開設2）UI
+
+- ロール/サブグループ/テンプレート/組織フィルタのラベル文言を整理。
+- ロールフィルタに「フィルタなし」を追加し、絞り込み解除を明示。
+
+### 📊 基本情報: キャッシュ判定の安定化
+
+- サブグループ0件ケースで subGroups/ を欠損扱いにせず、不要な再取得を抑制。
+
+### 📚 ドキュメント
+
+- VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.2.8 に統一。
+- `docs/RELEASE_NOTES_v2.2.8.md` を追加。
+
+### 🧪 テスト（推奨）
+
+- `./.venv/Scripts/python.exe -m pytest -q -k 'test_revision_sync'`
+- `./.venv/Scripts/python.exe -m pytest -q`
+
+---
+
 ## v2.2.7 (2025-12-17) - Windows / pytest-qt テスト安定化 + バージョン表記更新
 
 ### 🧪 Windows / pytest-qt テスト安定化
