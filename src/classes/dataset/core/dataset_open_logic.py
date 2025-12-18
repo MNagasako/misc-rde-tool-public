@@ -14,6 +14,71 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _build_template_entries(
+    template_data: dict,
+    instrument_map: dict,
+    allowed_instrument_ids: set[str] | None,
+) -> tuple[list[dict], list[str], list[tuple[str, str]]]:
+    """Build template combo entries.
+
+    Returns:
+        - template_list: list of dicts (id, datasetType, nameJa, instruments)
+        - template_items: list of display labels
+        - combo_items: list of (label, template_id) to add to QComboBox
+
+    Filtering:
+        - allowed_instrument_ids is None: include all templates
+        - otherwise: include templates that reference at least one instrument id in allowed_instrument_ids
+    """
+    template_list: list[dict] = []
+    template_items: list[str] = []
+    combo_items: list[tuple[str, str]] = []
+
+    for item in (template_data or {}).get("data", []) or []:
+        tid = item.get("id", "")
+        dtype = item.get("attributes", {}).get("datasetType", "")
+        name_ja = item.get("attributes", {}).get("nameJa", tid)
+
+        insts = item.get("relationships", {}).get("instruments", {}).get("data", []) or []
+        inst_labels: list[str] = []
+        has_allowed_instrument = allowed_instrument_ids is None
+
+        for inst in insts:
+            inst_id = inst.get("id")
+            if not inst_id:
+                continue
+
+            if allowed_instrument_ids is not None and inst_id in allowed_instrument_ids:
+                has_allowed_instrument = True
+
+            inst_info = instrument_map.get(inst_id)
+            if not inst_info:
+                continue
+
+            label_parts = [inst_info.get("nameJa", "")]
+            if inst_info.get("localId"):
+                label_parts.append(f"[{inst_info['localId']}]")
+            if inst_info.get("modelNumber"):
+                label_parts.append(f"({inst_info['modelNumber']})")
+            inst_label = " ".join([p for p in label_parts if p])
+            if inst_label:
+                inst_labels.append(inst_label)
+
+        if not has_allowed_instrument:
+            continue
+
+        inst_label_joined = ", ".join(inst_labels) if inst_labels else ""
+        label = f"{name_ja} ({dtype})"
+        if inst_label_joined:
+            label += f" | {inst_label_joined}"
+
+        template_list.append({"id": tid, "datasetType": dtype, "nameJa": name_ja, "instruments": inst_labels})
+        template_items.append(label)
+        combo_items.append((label, tid))
+
+    return template_list, template_items, combo_items
+
+
 def filter_groups_by_role(groups, filter_type="member", user_id=None):
     """グループを役割でフィルタリング"""
     filtered_groups = []
@@ -585,8 +650,8 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     embargo_edit.setCalendarPopup(True)
     embargo_edit.setMinimumWidth(120)
 
-    # テンプレート選択欄（所属組織のinstrumentを使うテンプレートのみ抽出）
-    template_list = []
+    # テンプレート選択欄（表示モード: 所属組織のみ / 全件 / 組織フィルタ）
+    template_list: list[dict] = []
     template_combo = QComboBox(parent)
     try:
         template_combo.setStyleSheet(
@@ -601,7 +666,38 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     template_combo.view().setMinimumHeight(240)
     template_combo.clear()
     template_combo.lineEdit().setPlaceholderText("テンプレート名・装置名で検索")
-    template_items = []
+
+    # テンプレート表示モード選択
+    template_filter_combo = QComboBox(parent)
+    try:
+        template_filter_combo.setStyleSheet(
+            f"QComboBox {{ border: 1px solid {_gc(_TK.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
+        )
+    except Exception:
+        pass
+    template_filter_combo.addItem("所属組織の装置のみ", "my")
+    template_filter_combo.addItem("全件", "all")
+    template_filter_combo.addItem("組織でフィルタ", "org")
+    template_filter_combo.setCurrentIndex(0)
+
+    # 組織フィルタ用
+    org_filter_combo = QComboBox(parent)
+    try:
+        org_filter_combo.setStyleSheet(
+            f"QComboBox {{ border: 1px solid {_gc(_TK.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}"
+        )
+    except Exception:
+        pass
+    org_filter_combo.setEditable(False)
+    org_filter_combo.setInsertPolicy(QComboBox.NoInsert)
+    org_filter_combo.setMaxVisibleItems(12)
+    org_filter_combo.view().setMinimumHeight(240)
+    org_filter_combo.setEnabled(False)
+    org_filter_combo.setMinimumWidth(220)
+
+    template_items: list[str] = []
+    org_id_by_nameja: dict[str, str] = {}
+    instrument_ids_by_org: dict[str, set[str]] = {}
     # --- 所属組織名取得 ---
     org_name = None
     try:
@@ -610,24 +706,36 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         org_name = self_data.get("data", {}).get("attributes", {}).get("organizationName")
     except Exception as e:
         logger.error("self.jsonの読み込みに失敗: %s", e)
-    # --- 組織ID取得 ---
+    # --- organization.json を読み込んで組織一覧 + 現在の組織IDを解決 ---
     org_id = None
     try:
         with open(ORGANIZATION_JSON_PATH, encoding="utf-8") as f:
             org_data = json.load(f)
-        for org in org_data.get("data", []):
-            if org.get("attributes", {}).get("nameJa") == org_name:
-                org_id = org.get("id")
-                break
+        org_items: list[tuple[str, str]] = []
+        for org in (org_data or {}).get("data", []) or []:
+            oid = org.get("id")
+            name_ja = org.get("attributes", {}).get("nameJa")
+            if oid and name_ja:
+                org_id_by_nameja[str(name_ja)] = str(oid)
+                org_items.append((str(name_ja), str(oid)))
+
+        # nameJa でソート
+        org_items.sort(key=lambda x: x[0])
+        org_filter_combo.clear()
+        org_filter_combo.addItem("(選択してください)", "")
+        for name_ja, oid in org_items:
+            org_filter_combo.addItem(name_ja, oid)
+
+        if org_name:
+            org_id = org_id_by_nameja.get(str(org_name))
     except Exception as e:
         logger.error("organization.jsonの読み込みに失敗: %s", e)
-    # --- instrument IDリスト取得 ---
-    instrument_ids = set()
-    instrument_map = {}
+    # --- instrument 一覧取得（全組織分の instrument_ids_by_org を作る） ---
+    instrument_map: dict[str, dict] = {}
     try:
         with open(INSTRUMENTS_JSON_PATH, encoding="utf-8") as f:
             instruments_data = json.load(f)
-        for inst in instruments_data.get("data", []):
+        for inst in (instruments_data or {}).get("data", []) or []:
             inst_id = inst.get("id")
             attr = inst.get("attributes", {})
             name_ja = attr.get("nameJa", "")
@@ -637,46 +745,67 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
                 if prog.get("localId"):
                     local_id = prog["localId"]
                     break
-            instrument_map[inst_id] = {"nameJa": name_ja, "localId": local_id, "modelNumber": model_number, "organizationId": attr.get("organizationId")}
-            if attr.get("organizationId") == org_id:
-                instrument_ids.add(inst_id)
+            if inst_id:
+                inst_org_id = attr.get("organizationId")
+                instrument_map[str(inst_id)] = {
+                    "nameJa": name_ja,
+                    "localId": local_id,
+                    "modelNumber": model_number,
+                    "organizationId": inst_org_id,
+                }
+                if inst_org_id:
+                    instrument_ids_by_org.setdefault(str(inst_org_id), set()).add(str(inst_id))
     except Exception as e:
         logger.error("instruments.jsonの読み込みに失敗: %s", e)
-    # --- テンプレート抽出 ---
+
+    # --- template.json 読み込み ---
+    template_data: dict = {}
     try:
         with open(TEMPLATE_JSON_PATH, encoding="utf-8") as f:
             template_data = json.load(f)
-        for item in template_data.get("data", []):
-            tid = item.get("id", "")
-            dtype = item.get("attributes", {}).get("datasetType", "")
-            name_ja = item.get("attributes", {}).get("nameJa", tid)
-            # instruments
-            insts = item.get("relationships", {}).get("instruments", {}).get("data", [])
-            inst_labels = []
-            has_my_instrument = False
-            for inst in insts:
-                inst_id = inst.get("id")
-                inst_info = instrument_map.get(inst_id)
-                if inst_info:
-                    if inst_id in instrument_ids:
-                        has_my_instrument = True
-                    label_parts = [inst_info['nameJa']]
-                    if inst_info['localId']:
-                        label_parts.append(f"[{inst_info['localId']}]")
-                    if inst_info['modelNumber']:
-                        label_parts.append(f"({inst_info['modelNumber']})")
-                    inst_labels.append(" ".join(label_parts))
-            if not has_my_instrument:
-                continue  # 所属組織のinstrumentがなければ除外
-            inst_label = ", ".join(inst_labels) if inst_labels else ""
-            label = f"{name_ja} ({dtype})"
-            if inst_label:
-                label += f" | {inst_label}"
-            template_list.append({"id": tid, "datasetType": dtype, "nameJa": name_ja, "instruments": inst_labels})
-            template_items.append(label)
-            template_combo.addItem(label, tid)
     except Exception as e:
         logger.error("template.jsonの読み込みに失敗: %s", e)
+        template_data = {}
+
+    def _reload_templates() -> None:
+        nonlocal template_list, template_items
+        mode = template_filter_combo.currentData()
+        selected_org_id = org_filter_combo.currentData() if org_filter_combo.isEnabled() else None
+
+        if mode == "all":
+            allowed_ids = None
+        elif mode == "org":
+            if not selected_org_id:
+                template_combo.clear()
+                template_list = []
+                template_items = []
+                template_combo.lineEdit().setPlaceholderText("先に組織を選択してください")
+                return
+            allowed_ids = instrument_ids_by_org.get(str(selected_org_id), set())
+        else:
+            # default: my
+            allowed_ids = instrument_ids_by_org.get(str(org_id), set()) if org_id else set()
+
+        template_combo.clear()
+        template_list, template_items, combo_items = _build_template_entries(template_data, instrument_map, allowed_ids)
+        for label, tid in combo_items:
+            template_combo.addItem(label, tid)
+        template_combo.lineEdit().setPlaceholderText("テンプレート名・装置名で検索")
+
+        try:
+            # Completer の更新
+            template_completer.setModel(template_completer.model().__class__(template_items, template_completer))
+        except Exception:
+            pass
+        template_combo.setCurrentIndex(-1)
+
+    def _on_template_filter_changed() -> None:
+        mode = template_filter_combo.currentData()
+        if mode == "org":
+            org_filter_combo.setEnabled(True)
+        else:
+            org_filter_combo.setEnabled(False)
+        _reload_templates()
     template_combo.setMinimumWidth(260)
     template_completer = QCompleter(template_items, template_combo)
     template_completer.setCaseSensitivity(Qt.CaseInsensitive)  # PySide6: 列挙型が必要
@@ -686,6 +815,12 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     t_popup_view.setMaximumHeight(240)
     template_combo.setCompleter(template_completer)
     template_combo.setCurrentIndex(-1)
+
+    # 初期ロード（現状互換: 所属組織のみ）
+    _reload_templates()
+
+    template_filter_combo.currentIndexChanged.connect(_on_template_filter_changed)
+    org_filter_combo.currentIndexChanged.connect(lambda *_: (_reload_templates() if template_filter_combo.currentData() == "org" else None))
 
     from qt_compat.widgets import QFormLayout
     form_layout = QFormLayout()
@@ -704,6 +839,8 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     #apply_label_style(label_name, _TKey.TEXT_PRIMARY, bold=True)
     label_embargo = QLabel("エンバーゴ期間終了日:"); 
     #apply_label_style(label_embargo, _TKey.TEXT_PRIMARY, bold=True)
+    label_template_filter = QLabel("テンプレート表示:");
+    label_template_org = QLabel("組織:");
     label_template = QLabel("データセットテンプレート名:"); 
     #apply_label_style(label_template, _TKey.TEXT_PRIMARY, bold=True)
     form_layout.addRow(label_filter, filter_combo)
@@ -711,6 +848,8 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     form_layout.addRow(label_grant, grant_combo)
     form_layout.addRow(label_name, name_edit)
     form_layout.addRow(label_embargo, embargo_edit)
+    form_layout.addRow(label_template_filter, template_filter_combo)
+    form_layout.addRow(label_template_org, org_filter_combo)
     form_layout.addRow(label_template, template_combo)
     form_layout.addRow(share_core_scope_checkbox)
     form_layout.addRow(anonymize_checkbox)
@@ -752,6 +891,8 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     # Expose checkboxes for external wrappers (e.g., 新規開設2)
     container.share_core_scope_checkbox = share_core_scope_checkbox  # type: ignore[attr-defined]
     container.anonymize_checkbox = anonymize_checkbox  # type: ignore[attr-defined]
+    container.template_filter_combo = template_filter_combo  # type: ignore[attr-defined]
+    container.template_org_combo = org_filter_combo  # type: ignore[attr-defined]
     container.setLayout(form_layout)
 
     # テーマ再適用（ダーク/ライト切替時に背景色が逆転しないよう強制再指定）
