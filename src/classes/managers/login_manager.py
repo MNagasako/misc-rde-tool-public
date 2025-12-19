@@ -21,6 +21,7 @@ RDEシステムへのログイン処理と認証情報管理を専門に行う�
 
 import logging
 import json
+import time
 from config.common import LOGIN_FILE
 from functions.common_funcs import load_js_template
 from qt_compat.core import QTimer, QUrl
@@ -73,6 +74,7 @@ class LoginManager:
         self._material_token_acquired = False
         self._login_in_progress = False
         self._autologin_cancelled = False  # 自動ログインキャンセルフラグ
+        self._refresh_fallback_enabled = False  # 自動ログイン時のみRefreshTokenフォールバックを許可
         
         # v1.16: 起動時に認証情報を決定
         self._initialize_credential_source()
@@ -416,7 +418,98 @@ class LoginManager:
         except Exception as e:
             logger.error(f"[TOKEN] BearerToken保存エラー ({host}): {e}")
 
-    def try_get_bearer_token(self, retries=3, host='rde.nims.go.jp', initial_delay=0, on_completed=None):
+    @staticmethod
+    def _safe_decode_jwt_payload(token: str):
+        try:
+            parts = token.split('.')
+            if len(parts) != 3:
+                return None
+            payload_b64 = parts[1]
+            payload_b64 += '=' * (4 - len(payload_b64) % 4)
+            import base64
+            payload_json = base64.b64decode(payload_b64).decode('utf-8')
+            return json.loads(payload_json)
+        except Exception:
+            return None
+
+    @classmethod
+    def _extract_access_refresh_tokens_from_items(cls, host: str, items: list):
+        """localStorage/sessionStorageのダンプから、ホストに適したAccess/RefreshTokenを抽出する。"""
+        access_candidates: list[tuple[int, str]] = []  # (score, token)
+        refresh_token = None
+
+        for item in items:
+            if not (isinstance(item, dict) and item.get('value')):
+                continue
+
+            key = str(item.get('key', '')).lower()
+            if 'accesstoken' not in key:
+                continue
+
+            try:
+                data = json.loads(item['value'])
+            except Exception:
+                continue
+
+            if data.get('credentialType') != 'AccessToken' or 'secret' not in data:
+                continue
+
+            token = data['secret']
+            score = 0
+            payload = cls._safe_decode_jwt_payload(token)
+            if payload:
+                scopes = payload.get('scp', '') or ''
+                aud = payload.get('aud', '') or ''
+
+                # rde-materialは materials scope / Material client_id を優先
+                if host == 'rde-material.nims.go.jp':
+                    if 'materials' in scopes:
+                        score += 10
+                    if aud == '329b7bb7-02c9-4437-a5cf-9742d238d3bf':
+                        score += 10
+                # rde は materials を含まない / RDE client_id を優先
+                elif host == 'rde.nims.go.jp':
+                    if 'materials' not in scopes:
+                        score += 5
+                    if aud == '6ff53d1d-7aee-445e-a01a-2b4c82ea84e1':
+                        score += 10
+
+            access_candidates.append((score, token))
+
+        # RefreshToken抽出（最初に見つかったものを採用）
+        for item in items:
+            if not (isinstance(item, dict) and item.get('value')):
+                continue
+            key = str(item.get('key', '')).lower()
+            if 'refreshtoken' not in key:
+                continue
+            try:
+                data = json.loads(item['value'])
+            except Exception:
+                continue
+            if data.get('credentialType') == 'RefreshToken' and 'secret' in data:
+                refresh_token = data['secret']
+                break
+
+        if not access_candidates:
+            return None, refresh_token
+
+        access_candidates.sort(key=lambda x: x[0], reverse=True)
+        return access_candidates[0][1], refresh_token
+
+    def try_get_bearer_token(
+        self,
+        retries=3,
+        host='rde.nims.go.jp',
+        initial_delay=0,
+        on_completed=None,
+        *,
+        total_timeout_ms: int | None = None,
+        poll_initial_interval_ms: int = 200,
+        poll_max_interval_ms: int = 2000,
+        poll_backoff_factor: float = 1.6,
+        allow_refresh_fallback: bool = False,
+    ):
         """
         WebViewからBearerトークンを取得する（複数ホスト対応）
         
@@ -438,6 +531,97 @@ class LoginManager:
         # v1.20.3: PySide6対応 - sessionStorageとlocalStorageの両方から取得
         js_code = load_js_template('extract_bearer_token_localStorage.js')
         
+        start_time = time.monotonic()
+        deadline = None
+        if total_timeout_ms is not None:
+            deadline = start_time + (total_timeout_ms / 1000.0)
+
+        poll_state = {
+            'attempt': 0,
+            'interval_ms': max(0, int(poll_initial_interval_ms)),
+        }
+
+        def _complete(success: bool):
+            if on_completed:
+                on_completed(success)
+
+        def _try_refresh_fallback_if_enabled():
+            if not allow_refresh_fallback:
+                return False
+            try:
+                from classes.managers.token_manager import TokenManager
+                from config.common import load_bearer_token
+
+                token_manager = TokenManager.get_instance()
+                if token_manager.refresh_access_token(host):
+                    refreshed = load_bearer_token(host)
+                    if refreshed:
+                        self.browser.bearer_token = refreshed
+                        self._notify_token_updated(refreshed, host)
+                        if host == 'rde.nims.go.jp':
+                            self._rde_token_acquired = True
+                        elif host == 'rde-material.nims.go.jp':
+                            self._material_token_acquired = True
+                        logger.info(f"[TOKEN] RefreshTokenフォールバックでAccessTokenを復旧 ({host})")
+                        return True
+            except Exception as e:
+                logger.error(f"[TOKEN] RefreshTokenフォールバック失敗 ({host}): {e}")
+            return False
+
+        def _schedule_next_poll(reason: str):
+            # キャンセル時は終了
+            if self._autologin_cancelled:
+                logger.info(f"[TOKEN] 自動ログインキャンセル済みのため中止 ({host})")
+                _complete(False)
+                return
+
+            # タイムアウト判定
+            if deadline is not None and time.monotonic() >= deadline:
+                logger.warning(f"[TOKEN] token待機がタイムアウト ({host}) - {reason}")
+                if _try_refresh_fallback_if_enabled():
+                    _complete(True)
+                else:
+                    _complete(False)
+                return
+
+            # 旧仕様: retriesベース
+            if deadline is None and retries <= 0:
+                logger.warning(f"[TOKEN] token取得失敗 ({host}) - リトライ上限")
+                if _try_refresh_fallback_if_enabled():
+                    _complete(True)
+                else:
+                    _complete(False)
+                return
+
+            # 次のポーリングをスケジュール
+            next_delay = poll_state['interval_ms'] if deadline is not None else 2000
+            if deadline is None:
+                # 旧仕様互換: 2秒固定 + retries減算
+                next_retries = retries - 1
+                logger.warning(f"[TOKEN] トークン未取得 ({host})。リトライします... (残り{next_retries}回)")
+                QTimer.singleShot(2000, lambda: self.try_get_bearer_token(
+                    retries=next_retries,
+                    host=host,
+                    initial_delay=0,
+                    on_completed=on_completed,
+                    total_timeout_ms=None,
+                    allow_refresh_fallback=allow_refresh_fallback,
+                ))
+                return
+
+            # deadlineモード: バックオフ
+            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+            remain_ms = max(0, int((deadline - time.monotonic()) * 1000)) if deadline is not None else -1
+            logger.info(
+                f"[TOKEN] token未生成のため待機継続 ({host}) - {reason} "
+                f"(attempt={poll_state['attempt']}, elapsed={elapsed_ms}ms, remain~{remain_ms}ms, next={next_delay}ms)"
+            )
+
+            # 次回遅延を更新
+            next_interval = int(poll_state['interval_ms'] * poll_backoff_factor)
+            poll_state['interval_ms'] = min(max(1, next_interval), int(poll_max_interval_ms))
+            QTimer.singleShot(next_delay, _attempt_once)
+
         def handle_token_list(token_list):
             logger.debug("JavaScript実行完了: result=%s", type(token_list))
             
@@ -457,17 +641,10 @@ class LoginManager:
                         token_list = None
             
             logger.debug(f"[TOKEN] sessionStorage取得結果: {len(token_list) if token_list else 0}件")
-            
+
             if not token_list:
-                logger.warning(f"[TOKEN] sessionStorageが空です ({host})")
-                logger.debug("sessionStorageが空 - リトライ=%s", retries)
-                if retries > 0:
-                    logger.warning(f"[TOKEN] トークン取得失敗 ({host})。リトライします... (残り{retries-1}回)")
-                    QTimer.singleShot(2000, lambda: self.try_get_bearer_token(retries=retries - 1, host=host, on_completed=on_completed))
-                else:
-                    # リトライ終了 - 失敗
-                    if on_completed:
-                        on_completed(False)
+                logger.warning(f"[TOKEN] localStorage/sessionStorageが空です ({host})")
+                _schedule_next_poll("storage empty")
                 return
             
             logger.debug("sessionStorage内容:")
@@ -475,66 +652,17 @@ class LoginManager:
                 if isinstance(item, dict):
                     logger.debug("  [%s] key=%s, value_len=%s", i, item.get('key', 'N/A'), len(item.get('value', '')))
             
-            # AccessToken抽出
-            access_token = None
-            refresh_token = None
-            
-            for item in token_list:
-                if (
-                    isinstance(item, dict)
-                    and 'accesstoken' in item['key'].lower()
-                    and item['value']
-                ):
-                    try:
-                        data = json.loads(item['value'])
-                        if data.get('credentialType') == 'AccessToken' and 'secret' in data:
-                            access_token = data['secret']
-                            
-                            # トークンの内容をデコードして検証（デバッグ用）
-                            logger.debug("AccessToken取得: %s...", access_token[:50])
-                            try:
-                                import base64
-                                # JWT形式: header.payload.signature
-                                parts = access_token.split('.')
-                                if len(parts) == 3:
-                                    # ペイロード部分をデコード（Base64URL → 通常のBase64）
-                                    payload_b64 = parts[1]
-                                    # パディング調整
-                                    payload_b64 += '=' * (4 - len(payload_b64) % 4)
-                                    payload_json = base64.b64decode(payload_b64).decode('utf-8')
-                                    payload_data = json.loads(payload_json)
-                                    logger.debug("AccessTokenペイロード: aud=%s, scp=%s", payload_data.get('aud'), payload_data.get('scp'))
-                                    
-                                    # スコープを確認してトークンの種類を判定
-                                    scopes = payload_data.get('scp', '')
-                                    if 'materials' in scopes:
-                                        logger.debug("[OK] Material API用トークンを検出")
-                                    else:
-                                        logger.debug("[OK] RDE API用トークンを検出")
-                            except Exception as decode_err:
-                                logger.debug("トークンデコードエラー: %s", decode_err)
-                            
-                            break  # AccessToken取得成功
-                    except Exception as e:
-                        logger.warning(f"[TOKEN] AccessToken JSONパース失敗: {e}")
-                        logger.debug("AccessToken JSONパースエラー: %s", e)
-            
-            # RefreshToken抽出（v2.1.0: TokenManager対応）
-            for item in token_list:
-                if (
-                    isinstance(item, dict)
-                    and 'refreshtoken' in item['key'].lower()
-                    and item['value']
-                ):
-                    try:
-                        data = json.loads(item['value'])
-                        if data.get('credentialType') == 'RefreshToken' and 'secret' in data:
-                            refresh_token = data['secret']
-                            logger.debug("RefreshToken取得: %s...", refresh_token[:50])
-                            break  # RefreshToken取得成功
-                    except Exception as e:
-                        logger.warning(f"[TOKEN] RefreshToken JSONパース失敗: {e}")
-                        logger.debug("RefreshToken JSONパースエラー: %s", e)
+            # AccessToken/RefreshToken抽出（ホスト適合優先）
+            access_token, refresh_token = self._extract_access_refresh_tokens_from_items(host, token_list)
+            if access_token:
+                logger.debug("AccessToken取得: %s...", access_token[:50])
+                payload_data = self._safe_decode_jwt_payload(access_token) or {}
+                if payload_data:
+                    logger.debug(
+                        "AccessTokenペイロード: aud=%s, scp=%s",
+                        payload_data.get('aud'),
+                        payload_data.get('scp'),
+                    )
             
             # トークン保存処理
             if access_token:
@@ -611,20 +739,26 @@ class LoginManager:
                 self._secure_cleanup_credentials()
                 
                 # 完了コールバックを実行
-                if on_completed:
-                    on_completed(True)
+                _complete(True)
                 
                 return
             else:
+                # 既存ログ互換: sessionStorageから取れない=AccessToken未出現を含む
                 logger.warning(f"[TOKEN] BearerトークンがsessionStorageから取得できませんでした ({host})")
                 logger.debug("AccessToken形式のデータが見つかりませんでした")
-                
-                # リトライ終了 - 失敗（sessionStorageはあるがトークンがない場合）
-                if retries <= 0 and on_completed:
-                    on_completed(False)
+                _schedule_next_poll("access token not found")
+
+        def _attempt_once():
+            if self._autologin_cancelled:
+                logger.info(f"[TOKEN] 自動ログインキャンセル済みのため中止 ({host})")
+                _complete(False)
+                return
+            poll_state['attempt'] += 1
+            logger.debug("JavaScript実行開始")
+            self.webview.page().runJavaScript(js_code, handle_token_list)
         
-        logger.debug("JavaScript実行開始")
-        self.webview.page().runJavaScript(js_code, handle_token_list)
+        # 初回実行
+        _attempt_once()
     
     def on_cookie_added(self, cookie):
         """
@@ -754,10 +888,11 @@ class LoginManager:
             self._material_token_fetch_timer = None
             self._material_auth_completed = False
             
-            # タイムアウト監視タイマー（10秒）
+            # タイムアウト監視タイマー（45秒: 遅延ケースの取りこぼし防止）
+            material_total_timeout_ms = 45000
             def on_timeout():
                 if not self._material_auth_completed:
-                    logger.warning(f"[TOKEN] マテリアルトークン取得がタイムアウト（10秒経過） - リトライします (retry={retry_count})")
+                    logger.warning(f"[TOKEN] マテリアルトークン取得がタイムアウト（{material_total_timeout_ms//1000}秒経過） - リトライします (retry={retry_count})")
                     self.browser.update_autologin_msg("⚠️ タイムアウト - 再試行中...")
                     
                     # シグナルを切断
@@ -779,8 +914,8 @@ class LoginManager:
                         self._material_token_fetched = False
                         self.browser.update_autologin_msg("❌ マテリアルトークン取得失敗（タイムアウト）")
             
-            # 10秒後にタイムアウトチェック
-            self._material_timeout_timer = QTimer.singleShot(10000, on_timeout)
+            # 45秒後にタイムアウトチェック
+            self._material_timeout_timer = QTimer.singleShot(material_total_timeout_ms, on_timeout)
             
             # リトライコンテキストを保存（エラー時に使用）
             self._material_retry_context = {
@@ -828,12 +963,16 @@ class LoginManager:
                     def after_token_fetch():
                         logger.info("[TOKEN] rde-material.nims.go.jpのトークン取得を試行")
                         logger.debug("Material トークン取得開始")
-                        self.try_get_bearer_token(retries=3, host='rde-material.nims.go.jp')
-                        # トークン取得完了後、元のrde.nims.go.jp/rde/datasetsに戻る
-                        QTimer.singleShot(2000, self.return_to_rde_datasets)
-                    
-                    # 待機時間を6秒に延長（sessionStorage更新待ち）
-                    self._material_token_fetch_timer = QTimer.singleShot(6000, after_token_fetch)
+                        self.try_get_bearer_token(
+                            retries=3,
+                            host='rde-material.nims.go.jp',
+                            total_timeout_ms=material_total_timeout_ms,
+                            allow_refresh_fallback=self._refresh_fallback_enabled,
+                            on_completed=lambda _success: QTimer.singleShot(500, self.return_to_rde_datasets),
+                        )
+
+                    # 固定sleepを廃止し、token出現条件で待つ
+                    self._material_token_fetch_timer = QTimer.singleShot(0, after_token_fetch)
             
             # ページロード完了を待ってトークン取得
             def on_load_finished(ok):
@@ -934,11 +1073,13 @@ class LoginManager:
                         self.try_get_bearer_token(
                             retries=3, 
                             host='rde-material.nims.go.jp',
+                            total_timeout_ms=material_total_timeout_ms,
+                            allow_refresh_fallback=self._refresh_fallback_enabled,
                             on_completed=lambda success: QTimer.singleShot(500, self.return_to_rde_datasets)
                         )
-                    
-                    # 待機時間を3秒に短縮（リトライ機構があるため）
-                    self._material_token_fetch_timer = QTimer.singleShot(3000, after_token_fetch)
+
+                    # 固定sleepを廃止し、token出現条件で待つ
+                    self._material_token_fetch_timer = QTimer.singleShot(0, after_token_fetch)
                 else:
                     # まだ認証リダイレクト中
                     logger.info(f"[TOKEN] 認証リダイレクト中: {current_url}")
@@ -1123,7 +1264,7 @@ class LoginManager:
             logger.error(f"[TOKEN-VALIDATE] トークン検証エラー: {e}", exc_info=True)
             return False, False
     
-    def ensure_both_tokens(self, force_refresh=False):
+    def ensure_both_tokens(self, force_refresh=False, is_autologin: bool = False):
         """
         両方のトークンが取得済みか確認し、不足分を取得
         
@@ -1141,6 +1282,9 @@ class LoginManager:
             self._material_token_fetched = False
             rde_exists = False
             material_exists = False
+
+        # RefreshTokenフォールバックは自動ログイン時のみ許可（手動ログインは別アカウントの可能性があるため）
+        self._refresh_fallback_enabled = bool(is_autologin)
         
         # マテリアルトークン取得処理（コールバック用）
         def fetch_material_if_needed(rde_success=True):
@@ -1176,6 +1320,8 @@ class LoginManager:
                 retries=3, 
                 host='rde.nims.go.jp', 
                 initial_delay=3000,
+                total_timeout_ms=20000,
+                allow_refresh_fallback=is_autologin,
                 on_completed=fetch_material_if_needed
             )
         else:

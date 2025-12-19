@@ -283,7 +283,7 @@ class LoginControlWidget(QWidget):
                 return
             
             logger.info("[TOKEN-ACQ] ensure_both_tokens() を実行")
-            login_manager.ensure_both_tokens()
+            login_manager.ensure_both_tokens(is_autologin=False)
             logger.info("[TOKEN-ACQ] ensure_both_tokens() 実行完了")
             
         except Exception as e:

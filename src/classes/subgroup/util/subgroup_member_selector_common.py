@@ -162,7 +162,7 @@ class CommonSubgroupMemberSelector(QWidget):
             """
             
             self.filter_institution_cb = QCheckBox("実施機関")
-            self.filter_institution_cb.setChecked(True)
+            self.filter_institution_cb.setChecked(False)
             self.filter_institution_cb.setToolTip("subGroup.json由来のメンバーを表示")
             self.filter_institution_cb.setStyleSheet(checkbox_style)
             self.filter_institution_cb.toggled.connect(self.apply_filter)

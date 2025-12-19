@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-ARIM RDE Tool v2.2.8 - PySide6によるRDE→ARIMデータポータル移行ツール
+ARIM RDE Tool v2.2.9 - PySide6によるRDE→ARIMデータポータル移行ツール
 
 主要機能:
 - RDEシステムへの自動ログイン・データセット一括取得・画像保存
@@ -473,7 +473,7 @@ class Browser(QWidget):
                     self.login_manager._login_in_progress = True
                     
                     # トークン取得を開始（不足分のみ）
-                    QTimer.singleShot(2000, lambda: self.login_manager.ensure_both_tokens())
+                    QTimer.singleShot(2000, lambda: self.login_manager.ensure_both_tokens(is_autologin=True))
                     
         except Exception as e:
             logger.error(f"[TOKEN-CHECK] 起動時トークン確認エラー: {e}", exc_info=True)
