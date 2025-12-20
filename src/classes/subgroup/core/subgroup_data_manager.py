@@ -99,6 +99,39 @@ class SubgroupDataManager:
                     "emailAddress": attr.get("emailAddress", "")
                 }
         return user_map
+    
+    @staticmethod
+    def fetch_subgroup_by_id(subgroup_id, bearer_token):
+        """
+        指定されたサブグループIDの情報をAPIから取得
+        
+        Args:
+            subgroup_id (str): サブグループID
+            bearer_token (str): 認証トークン
+            
+        Returns:
+            dict | None: サブグループ情報、または取得失敗時はNone
+        """
+        try:
+            from net.http_helpers import proxy_get
+            
+            api_url = f"https://rde-api.nims.go.jp/groups/{subgroup_id}"
+            headers = {
+                'Authorization': f'Bearer {bearer_token}',
+                'Accept': 'application/vnd.api+json',
+                'Content-Type': 'application/json'
+            }
+            
+            response = proxy_get(api_url, headers=headers, timeout=15)
+            response.raise_for_status()
+            
+            subgroup_data = response.json()
+            logger.info(f"サブグループ情報取得成功: {subgroup_id}")
+            return subgroup_data
+            
+        except Exception as e:
+            logger.error(f"サブグループ情報取得エラー (ID: {subgroup_id}): {e}")
+            return None
 
 
 class SubgroupConfigManager:

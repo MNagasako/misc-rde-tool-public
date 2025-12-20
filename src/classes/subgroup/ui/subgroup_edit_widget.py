@@ -1039,6 +1039,21 @@ def _initialize_managers(combo, filter_combo, scroll_area, form_builder, form_wi
     member_manager = EditMemberManager(scroll_area, parent_widget=widget)  # parent_widgetを追加
     edit_handler = SubgroupEditHandler(None, None, member_manager.get_current_selector())
     
+    # subGroup.json更新時にコンボボックスエントリーを更新
+    try:
+        from classes.dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
+        notifier = get_subgroup_refresh_notifier()
+        
+        # selector.load_existing_subgroupsをコールバックとして登録
+        def refresh_callback():
+            logger.info("サブグループ更新通知を受け取り、エントリーを更新します")
+            selector.load_existing_subgroups()
+        
+        notifier.register_callback(refresh_callback)
+        logger.info("サブグループ更新通知コールバックを登録しました")
+    except Exception as e:
+        logger.warning("サブグループ更新通知登録エラー: %s", e)
+    
     return {
         'selector': selector,
         'form': form_manager,

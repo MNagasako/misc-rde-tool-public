@@ -18,6 +18,7 @@ from qt_compat.gui import QColor
 from config.common import SUBGROUP_JSON_PATH
 from net.http_helpers import proxy_get
 from classes.theme import get_color, ThemeKey, ThemeManager
+from ..core import subgroup_api_helper
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -48,8 +49,40 @@ class CommonSubgroupMemberSelector(QWidget):
         self.owner_radio_group = QButtonGroup(self)
         self.owner_radio_group.setExclusive(True)
         
-        # ユーザーエントリーを設定（統合リスト使用）
+                # ユーザーエントリーを設定（統合リスト使用）
         if user_entries is None:
+            self.user_entries = []  # 初期化
+            self.member_info = {}
+            self.load_unified_user_entries()
+        else:
+            self.user_entries = user_entries
+        
+        self.setup_ui()
+    
+    def create_subgroup(self, subgroup_data,user_entries=None):
+        """サブグループを作成し、成功した場合は新しい情報を取得する"""
+        try:
+            # サブグループ作成処理
+            result = subgroup_api_helper.create_subgroup(subgroup_data)
+            
+            if result['success']:
+                logger.info("サブグループ作成成功: %s", result['subgroup_id'])
+                # 新しいサブグループの情報を取得
+                new_subgroup_id = result['subgroup_id']
+                unified_users, member_info = subgroup_api_helper.load_unified_member_list(
+                    subgroup_id=new_subgroup_id
+                )
+                # 新しい情報を保持
+                self.user_entries.extend(unified_users)  # 既存情報の上書きなし
+                self.member_info.update(member_info)  # 新しい情報を追加
+                logger.debug("新しいサブグループ情報を取得しました: %s", unified_users)
+            else:
+                logger.error("サブグループ作成失敗: %s", result['message'])
+        except Exception as e:
+            logger.error("サブグループ作成中にエラー: %s", e)
+        if user_entries is None:
+            self.user_entries = []  # 初期化
+            self.member_info = {}
             self.load_unified_user_entries()
         else:
             self.user_entries = user_entries
@@ -217,6 +250,7 @@ class CommonSubgroupMemberSelector(QWidget):
         # ThemeManager接続
         theme_manager = ThemeManager.instance()
         theme_manager.theme_changed.connect(self.refresh_theme)
+        self.apply_filter()
 
     def refresh_all_entries(self):
         """全行の氏名・メールをAPIで再フェッチしてキャッシュ更新"""
@@ -1188,12 +1222,13 @@ class CommonSubgroupMemberSelector(QWidget):
             # ユーザーのソースを判定
             source = None
             source_format = None
-            for entry in self.user_entries:
-                if entry.get('id') == user_id:
-                    # sourceとsource_formatの両方をチェック
-                    source = entry.get('source', '')
-                    source_format = entry.get('source_format', '')
-                    break
+            if self.user_entries:  # None チェック
+                for entry in self.user_entries:
+                    if entry.get('id') == user_id:
+                        # sourceとsource_formatの両方をチェック
+                        source = entry.get('source', '')
+                        source_format = entry.get('source_format', '')
+                        break
             
             # フィルタ判定
             should_show = False

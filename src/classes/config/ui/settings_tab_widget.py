@@ -46,8 +46,7 @@ class SettingsTabWidget(QWidget):
         
         # テーマ変更シグナルに接続
         from classes.theme import ThemeManager
-        theme_manager = ThemeManager()
-        theme_manager.theme_changed.connect(self.refresh_theme)
+        ThemeManager.instance().theme_changed.connect(self.refresh_theme)
         
     def setup_ui(self):
         """UI初期化 - レスポンシブ・段組対応"""

@@ -4,6 +4,7 @@ from classes.theme.theme_manager import get_color, ThemeManager
 
 # 【v2.1.7最適化】スタイルキャッシュ（テーマモード単位）
 _style_cache = {}
+_theme_hook_installed = False
 
 def _get_theme_cache_key(prefix):
     """テーマモードをキーとしてキャッシュキーを生成"""
@@ -12,6 +13,43 @@ def _get_theme_cache_key(prefix):
         return f"{prefix}_{mode}"
     except Exception:
         return f"{prefix}_default"
+
+
+def clear_style_cache() -> None:
+    """スタイル生成キャッシュをクリアする。
+
+    テーマ切替時に古い配色が残らないように、QSS生成キャッシュとQt側の描画キャッシュも可能な範囲でクリアする。
+    """
+
+    _style_cache.clear()
+    try:
+        from PySide6.QtGui import QPixmapCache
+
+        QPixmapCache.clear()
+    except Exception:
+        pass
+
+    # テーマ切替後に定数も更新しておく
+    try:
+        refresh_all_styles()
+    except Exception:
+        pass
+
+
+def _install_theme_cache_hook() -> None:
+    global _theme_hook_installed
+    if _theme_hook_installed:
+        return
+
+    try:
+        ThemeManager.instance().theme_changed.connect(lambda *_: clear_style_cache())
+        _theme_hook_installed = True
+    except Exception:
+        # ThemeManager未初期化/Qt未ロード等でもアプリは動かす
+        _theme_hook_installed = False
+
+
+_install_theme_cache_hook()
 
 # すべての関数と定数をエクスポート
 __all__ = [
@@ -23,6 +61,7 @@ __all__ = [
     'get_file_tree_style',
     'get_fileset_table_style',
     'get_groupbox_border_color',
+    'get_launch_button_style',
     'ROW_STYLE_QSS',
     'DATA_REGISTER_TAB_STYLE',
     'DATA_REGISTER_FORM_STYLE',
@@ -52,6 +91,7 @@ QLineEdit, QTextEdit, QComboBox {{
     padding: 2px 3px;
     font-size: 10pt;
     background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+    color: {get_color(ThemeKey.TEXT_PRIMARY)};
 }}
 QLineEdit:focus, QTextEdit:focus {{
     border-color: {get_color(ThemeKey.INPUT_BORDER_FOCUS)};
@@ -61,7 +101,20 @@ QLineEdit::placeholder, QTextEdit::placeholder {{
     color: {get_color(ThemeKey.INPUT_PLACEHOLDER)};
     font-style: italic;
 }}
+QComboBox QAbstractItemView {{
+    background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+    color: {get_color(ThemeKey.TEXT_PRIMARY)};
+    selection-background-color: {get_color(ThemeKey.TAB_ACTIVE_BACKGROUND)};
+    selection-color: {get_color(ThemeKey.TEXT_PRIMARY)};
+}}
 """
+
+def get_launch_button_style():
+    """他機能連携（Launch）ボタンのスタイル"""
+    # 後方互換のため、このモジュールでも公開する
+    from classes.utils.launch_ui_styles import get_launch_button_style as _get
+
+    return _get()
 
 # タブ・フォーム共通スタイル（QSS）
 def get_data_register_tab_style():

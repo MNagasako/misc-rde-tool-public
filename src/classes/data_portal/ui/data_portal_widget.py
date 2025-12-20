@@ -41,8 +41,7 @@ class DataPortalWidget(QWidget):
         
         # テーマ変更シグナルに接続
         from classes.theme import ThemeManager
-        theme_manager = ThemeManager()
-        theme_manager.theme_changed.connect(self.refresh_theme)
+        ThemeManager.instance().theme_changed.connect(self.refresh_theme)
         
         logger.info("データポータルウィジェット初期化完了")
     

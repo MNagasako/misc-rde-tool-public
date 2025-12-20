@@ -210,23 +210,9 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     launch_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-weight: bold;")
     launch_controls_layout.addWidget(launch_label)
 
-    launch_button_style = f"""
-        QPushButton {{
-            background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)};
-            color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)};
-            border-radius: 4px;
-            padding: 4px 10px;
-            border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)};
-        }}
-        QPushButton:hover {{
-            background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)};
-        }}
-        QPushButton:disabled {{
-            background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-            color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
-            border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
-        }}
-    """
+    from classes.utils.launch_ui_styles import get_launch_button_style
+
+    launch_button_style = get_launch_button_style()
 
     launch_targets = [
         ("data_fetch2", "データ取得2"),

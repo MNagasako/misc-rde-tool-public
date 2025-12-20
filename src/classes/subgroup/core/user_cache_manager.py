@@ -150,6 +150,42 @@ class UserCacheManager:
     def is_initialized(self) -> bool:
         """キャッシュが初期化済みか確認"""
         return self._initialized
+    
+    def add_subgroup_to_cache(self, subgroup_data: Dict):
+        """
+        新規サブグループ情報をキャッシュに追加
+        
+        Args:
+            subgroup_data: fetch_subgroup_by_idのAPI応答（新規サブグループ情報）
+        """
+        if not subgroup_data:
+            return
+        
+        # includedセクションからユーザー情報を抽出してキャッシュに追加
+        included = subgroup_data.get("included", [])
+        added_count = 0
+        
+        for item in included:
+            if item.get("type") == "user":
+                user_id = item.get("id", "")
+                if not user_id:
+                    continue
+                
+                attr = item.get("attributes", {})
+                user_info = {
+                    "userName": attr.get("userName", ""),
+                    "emailAddress": attr.get("emailAddress", ""),
+                    "familyName": attr.get("familyName", ""),
+                    "givenName": attr.get("givenName", ""),
+                    "organizationName": attr.get("organizationName", "")
+                }
+                
+                # 既存キャッシュを上書き（新規サブグループのユーザー情報が最新）
+                self.set_user(user_id, user_info, source="api")
+                added_count += 1
+        
+        logger.info(f"新規サブグループから{added_count}件のユーザー情報をキャッシュに追加")
+
 
 
 # グローバルアクセス用ヘルパー関数

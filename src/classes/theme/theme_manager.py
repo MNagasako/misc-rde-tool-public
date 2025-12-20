@@ -135,6 +135,14 @@ class ThemeManager(QObject):
         else:
             print(f"[ThemeManager] Theme reapply (same mode: {mode.value})")
 
+        # Qt側の描画キャッシュをクリア（テーマ切替後に旧配色が残るのを防ぐ）
+        try:
+            from PySide6.QtGui import QPixmapCache
+
+            QPixmapCache.clear()
+        except Exception:
+            pass
+
         # 差分スタイルパッチの準備 (失敗しても継続)
         try:
             from classes.utils.style_patch import apply_style_patch, reset_style_counters, get_style_counters

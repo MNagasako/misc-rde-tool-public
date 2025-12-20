@@ -40,8 +40,7 @@ class ReportWidget(QWidget):
         
         # テーマ変更シグナルに接続
         from classes.theme import ThemeManager
-        theme_manager = ThemeManager()
-        theme_manager.theme_changed.connect(self.refresh_theme)
+        ThemeManager.instance().theme_changed.connect(self.refresh_theme)
     
     def setup_ui(self):
         """UI構築"""

@@ -23,6 +23,7 @@ def get_current_user_id():
     """
     import os
     import json
+    from config.common import get_dynamic_file_path
     
     try:
         # self.jsonのパスを取得

@@ -450,6 +450,11 @@ class UIController(UIControllerCore):
                     form_values['basicDescription'] = desc_widget.text()
             if hasattr(self, 'experiment_id_input'):
                 form_values['experimentId'] = self.experiment_id_input.text()
+            if hasattr(self, 'data_owner_combo') and self.data_owner_combo:
+                # データ所有者（所属）の選択値を取得
+                selected_owner_id = self.data_owner_combo.currentData()
+                if selected_owner_id:
+                    form_values['dataOwnerId'] = selected_owner_id
             # 動的フォームから試料情報を取得（新しいフォーム構造対応）
             if hasattr(self, 'sample_input_widgets'):
                 # 新しいフォーム構造から取得
@@ -464,17 +469,43 @@ class UIController(UIControllerCore):
                     if selected_sample_data:
                         # 既存試料選択の場合
                         form_values['sampleId'] = selected_sample_data.get('id')
-                        form_values['sampleNames'] = selected_sample_data.get('name', '')
+                        # 既存データから値を設定（表示用ではなくロジック用）
+                        names = selected_sample_data.get('names', [])
+                        if not names and selected_sample_data.get('name'):
+                            names = [selected_sample_data.get('name')]
+                        form_values['sampleNames'] = names
+                        
                         form_values['sampleDescription'] = selected_sample_data.get('description', '')
                         form_values['sampleComposition'] = selected_sample_data.get('composition', '')
+                        form_values['sampleReferenceUrl'] = selected_sample_data.get('referenceUrl', '')
+                        tags = selected_sample_data.get('tags', [])
+                        form_values['sampleTags'] = tags
+                        form_values['ownerId'] = selected_sample_data.get('ownerId')
+                        form_values['hideOwner'] = selected_sample_data.get('hideOwner', False)
+                        form_values['relatedSamples'] = selected_sample_data.get('relatedSamples', [])
                     else:
                         # 新規試料作成の場合
                         if 'name' in self.sample_input_widgets:
-                            form_values['sampleNames'] = self.sample_input_widgets['name'].text()
+                            # SampleNamesWidgetからリストを取得
+                            names = self.sample_input_widgets['name'].get_sample_names()
+                            form_values['sampleNames'] = names
                         if 'description' in self.sample_input_widgets:
                             form_values['sampleDescription'] = self.sample_input_widgets['description'].toPlainText()
                         if 'composition' in self.sample_input_widgets:
                             form_values['sampleComposition'] = self.sample_input_widgets['composition'].text()
+                        if 'url' in self.sample_input_widgets:
+                            form_values['sampleReferenceUrl'] = self.sample_input_widgets['url'].text()
+                        if 'tags' in self.sample_input_widgets:
+                            # タグはカンマ区切り文字列で入力されるが、ここでリスト化してもよいし、ロジック側で処理してもよい。
+                            # 既存ロジックに合わせて文字列のまま渡すか、リストにするか。
+                            # ここでは文字列のまま渡して、ロジック側で柔軟に対応するようにする。
+                            form_values['sampleTags'] = self.sample_input_widgets['tags'].text()
+                        if 'manager' in self.sample_input_widgets:
+                            form_values['ownerId'] = self.sample_input_widgets['manager'].currentData()
+                        if 'hide_owner' in self.sample_input_widgets:
+                            form_values['hideOwner'] = self.sample_input_widgets['hide_owner'].isChecked()
+                        if 'related_samples' in self.sample_input_widgets:
+                            form_values['relatedSamples'] = self.sample_input_widgets['related_samples'].get_related_samples()
                 except Exception as e:
                     logger.error("新しいフォーム構造から試料データ取得エラー: %s", e)
             else:

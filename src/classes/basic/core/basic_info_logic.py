@@ -267,6 +267,46 @@ def _progress_ok(progress_callback, percent: int, total: int, message: str) -> b
         return True
 
 
+def _clear_dataset_entry_cache():
+    """
+    データセットエントリーのメモリキャッシュをクリア
+    
+    グループ関連情報取得後に、コンボボックスのメモリ上のキャッシュが古いままにならないようにクリアする
+    目的：
+    - データ取得2機能のコンボボックスに古い候補しか表示されない問題を解決
+    - container.dataset_mapをクリアして、次回アクセス時にdataset.jsonを再読み込みさせる
+    """
+    try:
+        # UIコンテナをグローバル状態から取得
+        # （PySide6アプリケーションの場合、QWidgetはグローバルに参照可能）
+        from classes.ui.controllers.ui_controller import main_app_instance
+        
+        if main_app_instance and hasattr(main_app_instance, 'fetch2_dropdown_widget'):
+            fetch2_widget = main_app_instance.fetch2_dropdown_widget
+            if hasattr(fetch2_widget, 'clear_cache'):
+                fetch2_widget.clear_cache()
+                logger.info("UIコントローラー経由でデータセットエントリーキャッシュをクリアしました")
+                return
+        
+        # フォールバック: 直接グローバルレジストリをスキャン
+        import gc
+        for obj in gc.get_objects():
+            try:
+                if hasattr(obj, 'clear_cache') and hasattr(obj, 'dataset_map'):
+                    obj.clear_cache()
+                    logger.info("グローバルレジストリ経由でデータセットエントリーキャッシュをクリアしました")
+                    return
+            except (TypeError, AttributeError):
+                pass
+        
+        logger.debug("データセットエントリーキャッシュのクリア: 対象コンテナが見つかりませんでした")
+        
+    except ImportError:
+        logger.debug("データセットエントリーキャッシュのクリア: UIコントローラーが利用不可")
+    except Exception as e:
+        logger.warning("データセットエントリーキャッシュのクリア中にエラー: %s", e)
+
+
 def _prepare_dataset_chunk_directory() -> Path:
     """dataset.jsonチャンク保存用ディレクトリを初期化して返す"""
     chunk_dir = Path(DATASET_JSON_CHUNKS_DIR)
@@ -2018,6 +2058,7 @@ def run_group_hierarchy_pipeline(
     force_project_dialog: bool = False,
     force_program_dialog: bool = False,
     force_download: bool = False,
+    skip_dialog: bool = False,
 ) -> GroupFetchResult:
     """root→program→project→subgroup の取得フローを共通実装で実行する
     
@@ -2058,10 +2099,10 @@ def run_group_hierarchy_pipeline(
             program_groups,
             parent_widget,
             context_name="プログラム（Root Group）",
-            force_dialog=force_program_dialog,
+            force_dialog=force_program_dialog and not skip_dialog,
             preferred_group_id=preferred_program_id,
             remember_context=PROGRAM_SELECTION_CONTEXT,
-            auto_select_saved=not force_program_dialog,
+            auto_select_saved=True if skip_dialog else not force_program_dialog,
         )
         if not selection:
             raise GroupFetchCancelled("プログラム選択がキャンセルされました")
@@ -2131,8 +2172,9 @@ def run_group_hierarchy_pipeline(
         program_projects,
         parent_widget,
         context_name="プロジェクトグループ（Detail）",
-        force_dialog=force_project_dialog,
+        force_dialog=force_project_dialog and not skip_dialog,
         remember_context=PROJECT_SELECTION_CONTEXT,
+        auto_select_saved=True if skip_dialog else True,
     )
     if not selection:
         raise GroupFetchCancelled("プロジェクト選択がキャンセルされました")
@@ -2834,6 +2876,8 @@ def fetch_group_info_stage(
     parent_widget=None,
     force_program_dialog: bool = False,
     force_download: bool = False,
+    force_refresh_subgroup: bool = False,
+    skip_dialog: bool = False,
 ):
     """
     段階2: グループ関連情報取得（グループ・詳細・サブグループ）
@@ -2851,9 +2895,18 @@ def fetch_group_info_stage(
     
     v2.1.22追加:
     - subGroups/ディレクトリの個別ファイル欠損検出機能
+    
+    v2.2.10追加:
+    - skip_dialog引数を追加（サブグループ自動更新時に確認ダイアログを抑止）
     """
     try:
         force_project_dialog = os.environ.get('FORCE_PROJECT_GROUP_DIALOG', '0') == '1'
+        
+        # ログ出力：実行モード確認
+        if skip_dialog:
+            logger.info("[自動更新モード] グループ選択ダイアログを抑止し、保存済み選択を自動適用します")
+        else:
+            logger.info("[通常モード] グループ選択ダイアログを表示します")
 
         def stage_progress(percent: int, total: int, message: str):
             if progress_callback:
@@ -2865,8 +2918,9 @@ def fetch_group_info_stage(
             Path(path).exists() for path in (GROUP_JSON_PATH, GROUP_DETAIL_JSON_PATH, SUBGROUP_JSON_PATH)
         )
         subgroups_complete = _subgroups_folder_complete() if group_files_ready else False
-        
-        if not force_download and group_files_ready and subgroups_complete:
+
+        reuse_allowed = not force_download and not force_refresh_subgroup
+        if reuse_allowed and group_files_ready and subgroups_complete:
             logger.info("グループ関連情報: 既存ファイルは完全。取得をスキップします")
             # 既存のsubGroup.jsonから関係グループ詳細を補完（ancestors付与）
             try:
@@ -2906,6 +2960,7 @@ def fetch_group_info_stage(
             force_project_dialog=force_project_dialog,
             force_program_dialog=force_program_dialog,
             force_download=force_download,
+            skip_dialog=skip_dialog,
         )
 
         total_success = sum(item.get("success", 0) for item in result.subgroup_summary.values())
@@ -2914,6 +2969,10 @@ def fetch_group_info_stage(
             f"グループ関連情報取得が完了しました（サブグループ: 成功 {total_success}件, 失敗 {total_fail}件）"
         )
         logger.info(result_msg)
+        
+        # グループ関連情報取得後、データセットエントリーキャッシュをクリア
+        _clear_dataset_entry_cache()
+        
         if progress_callback:
             progress_callback(100, 100, "グループ関連情報取得完了")
         return result_msg
@@ -2926,6 +2985,7 @@ def fetch_group_info_stage(
         logger.error(error_msg)
         logger.error(traceback.format_exc())
         return error_msg
+
 
 @stage_error_handler("組織・装置情報取得")
 def fetch_organization_stage(bearer_token, progress_callback=None):
@@ -3308,7 +3368,7 @@ def finalize_basic_info_stage(webview=None, progress_callback=None):
         logger.error(error_msg)
         return error_msg
 
-def auto_refresh_subgroup_json(bearer_token, progress_callback=None):
+def auto_refresh_subgroup_json(bearer_token, progress_callback=None, force_refresh_subgroup: bool = False):
     """
     サブグループ作成成功後にsubGroup.jsonを自動再取得する
     
@@ -3321,7 +3381,16 @@ def auto_refresh_subgroup_json(bearer_token, progress_callback=None):
                 return "キャンセルされました"
         
         logger.info("サブグループ作成成功 - subGroup.json自動更新開始")
-        result = fetch_group_info_stage(bearer_token, progress_callback, program_id=None, parent_widget=None)
+        result = fetch_group_info_stage(
+            bearer_token,
+            progress_callback,
+            program_id=None,
+            parent_widget=None,
+            force_program_dialog=False,
+            force_download=False,
+            force_refresh_subgroup=force_refresh_subgroup,
+            skip_dialog=True,
+        )
         
         if progress_callback:
             if not progress_callback(100, 100, "サブグループ情報自動更新完了"):

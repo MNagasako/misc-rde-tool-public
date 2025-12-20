@@ -63,11 +63,174 @@ def _format_user_label_user_org(user_data: dict) -> str:
     return base_name
 
 
+def _resolve_user_label_with_fallback(
+    user_id: str | None,
+    member_info: dict | None,
+    dataset_user_info: dict | None = None,
+    fallback_text: str | None = None,
+) -> tuple[str, str]:
+    """Resolve a user display label and its source.
+
+    Returns (label, source) where source is one of:
+    - "member": resolved from current group member info
+    - "dataset_json": resolved from dataset JSON `included` user attributes
+    - "fallback_text": resolved from provided fallback text
+    - "id_only": could not resolve attributes; fall back to user_id or placeholder
+    """
+
+    if not user_id:
+        return "", "missing"
+
+    member_info = member_info or {}
+    dataset_user_info = dataset_user_info or {}
+
+    user_data = None
+    source = "id_only"
+
+    if user_id in member_info:
+        user_data = member_info[user_id]
+        source = "member"
+    elif user_id in dataset_user_info:
+        user_data = dataset_user_info[user_id]
+        source = "dataset_json"
+    elif fallback_text:
+        # fallback_text は JSON 内の素の表示名をそのまま使う
+        return fallback_text, "fallback_text"
+
+    if not user_data:
+        user_data = {"id": user_id}
+
+    label = _format_user_label_user_org(user_data)
+    if not label or label == "(氏名未設定)":
+        label = fallback_text or user_id
+
+    return label, source
+
+
+def _should_block_update_for_users(
+    applicant_id: str | None,
+    applicant_source: str,
+    manager_id: str | None,
+    manager_source: str,
+) -> bool:
+    """Determine if update should be blocked when user names are unresolved.
+
+    - Block when applicant_id exists but not resolved from member info.
+    - Block when manager_id exists but not resolved from member info.
+    - Missing IDs do not block.
+    """
+
+    if applicant_id and applicant_source != "member":
+        return True
+    if manager_id and manager_source != "member":
+        return True
+    return False
+
+
+def _fetch_dataset_detail_from_api(dataset_id: str, bearer_token: str | None = None) -> dict | None:
+    """Fetch dataset detail from RDE API and cache it as JSON file.
+
+    Expected path: output/rde/data/datasets/{dataset_id}.json
+
+    Args:
+        dataset_id: Target dataset ID
+        bearer_token: Bearer token for authentication (optional; will auto-detect if not provided)
+
+    Returns:
+        dict: Full dataset detail from API, or None on error
+    """
+    if not dataset_id:
+        return None
+
+    try:
+        # Bearer Token取得（提供されていない場合）
+        if not bearer_token:
+            try:
+                from core.bearer_token_manager import BearerTokenManager
+                bearer_token = BearerTokenManager.get_valid_token()
+            except Exception as e:
+                logger.debug("Bearer Token自動取得失敗: %s", e)
+                bearer_token = None
+
+        if not bearer_token:
+            logger.warning("dataset_edit: API再取得用のBearer Tokenが取得できません")
+            return None
+
+        # API URLを構築（include パラメータで必要な関連情報を含める）
+        from config.site_rde import URLS
+        api_url = URLS["api"]["dataset_detail"].format(id=dataset_id)
+
+        # ヘッダーを設定
+        headers = {
+            "Accept": "application/vnd.api+json",
+            "Accept-Encoding": "gzip, deflate, br, zstd",
+            "Authorization": f"Bearer {bearer_token}",
+            "Connection": "keep-alive",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        }
+
+        # APIリクエストを実行
+        from classes.utils.api_request_helper import api_request
+        response = api_request("GET", api_url, headers=headers, timeout=15)
+
+        if response is None:
+            logger.warning("dataset_edit: API再取得失敗（リクエストエラー） dataset_id=%s", dataset_id)
+            return None
+
+        if response.status_code != 200:
+            logger.warning(
+                "dataset_edit: API再取得失敗（ステータス %s） dataset_id=%s",
+                response.status_code,
+                dataset_id,
+            )
+            return None
+
+        # レスポンスをJSON形式でパース
+        try:
+            payload = response.json()
+        except Exception as e:
+            logger.warning("dataset_edit: API再取得レスポンスのJSON解析失敗: %s", e)
+            return None
+
+        # JSONをファイルに保存
+        try:
+            datasets_dir = get_dynamic_file_path("output/rde/data/datasets")
+            if datasets_dir and not os.path.exists(datasets_dir):
+                os.makedirs(datasets_dir, exist_ok=True)
+
+            dataset_json_path = os.path.join(datasets_dir, f"{dataset_id}.json")
+            with open(dataset_json_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+
+            logger.info("dataset_edit: API再取得成功し、キャッシュに保存 dataset_id=%s path=%s", dataset_id, dataset_json_path)
+        except Exception as e:
+            logger.warning("dataset_edit: キャッシュファイル保存失敗: %s", e)
+            # ファイル保存に失敗してもJSONデータは返却
+            pass
+
+        # レスポンスのdataセクションを返却
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if isinstance(data, dict) and data.get("id"):
+            # includedセクションも付与
+            included = payload.get("included") if isinstance(payload, dict) else None
+            if included:
+                data["included"] = included
+            return data
+
+        logger.warning("dataset_edit: API再取得が空またはidがありません dataset_id=%s", dataset_id)
+        return None
+
+    except Exception as e:
+        logger.error("dataset_edit: API再取得エラー dataset_id=%s: %s", dataset_id, e, exc_info=True)
+        return None
+
+
 def _load_dataset_detail_from_output(dataset_id: str) -> dict | None:
     """Load full dataset detail from output cache.
 
     Expected path: output/rde/data/datasets/{dataset_id}.json
     Returns the inner `data` dict when available.
+    Includes any top-level `included` list by attaching it to the returned dict.
     """
     if not dataset_id:
         return None
@@ -79,6 +242,9 @@ def _load_dataset_detail_from_output(dataset_id: str) -> dict | None:
             payload = json.load(f)
         data = payload.get("data") if isinstance(payload, dict) else None
         if isinstance(data, dict) and data.get("id"):
+            included = payload.get("included") if isinstance(payload, dict) else None
+            if included:
+                data["included"] = included
             return data
     except Exception:
         logger.debug("dataset_edit: dataset detail load failed id=%s", dataset_id, exc_info=True)
@@ -818,7 +984,52 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     # パフォーマンス最適化設定
     existing_dataset_combo.view().setUniformItemSizes(True)  # アイテムサイズを統一（高速化）
     existing_dataset_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)  # サイズ調整ポリシー
-    existing_dataset_combo.setToolTip("クリックでデータセット一覧を展開します\n大量データの場合はプログレス表示されます")
+    existing_dataset_combo.setToolTip("クリックでデータセット一覧を展開します\n大量データの場合はプログレス表示されます\nカーソルキーで選択可能")
+    
+    # キー入力対応: lineEdit の keyPressEvent をラップして、カーソルキーでポップアップ操作を実現
+    def setup_combo_key_handling():
+        """コンボボックスのキー入力ハンドリングをセットアップ"""
+        if not existing_dataset_combo.lineEdit():
+            logger.debug("dataset_edit: lineEdit が見つかりません")
+            return
+        
+        original_key_press = existing_dataset_combo.lineEdit().keyPressEvent
+        
+        def combo_key_press_event(event):
+            """カーソルキー・ホイール対応のキープレスハンドラ"""
+            key = event.key()
+            
+            # ポップアップが未表示の場合、上/下キーでポップアップを表示
+            if not existing_dataset_combo.view().isVisible():
+                if key in (Qt.Key_Up, Qt.Key_Down, Qt.Key_PageUp, Qt.Key_PageDown):
+                    existing_dataset_combo.showPopup()
+                    return  # イベントを消費
+            
+            # ポップアップが表示中の場合、キーをポップアップに委譲
+            if existing_dataset_combo.view().isVisible():
+                if key in (Qt.Key_Up, Qt.Key_Down, Qt.Key_PageUp, Qt.Key_PageDown):
+                    # ポップアップのListViewに対してキーイベントを送信
+                    from qt_compat.core import QKeyEvent
+                    popup_event = QKeyEvent(event.type(), key, event.modifiers(), event.text())
+                    existing_dataset_combo.view().keyPressEvent(popup_event)
+                    return  # イベントを消費
+            
+            # その他のキーは通常処理
+            original_key_press(event)
+        
+        existing_dataset_combo.lineEdit().keyPressEvent = combo_key_press_event
+    
+    # lineEdit が作成された後にハンドラを設定（遅延実行）
+    def setup_combo_key_handling_deferred():
+        QTimer.singleShot(0, setup_combo_key_handling)
+    
+    existing_dataset_combo.focusInEvent_original = existing_dataset_combo.focusInEvent
+    def combo_focus_in(event):
+        """フォーカスイン時にlineEditハンドラをセットアップ"""
+        existing_dataset_combo.focusInEvent_original(event)
+        setup_combo_key_handling_deferred()
+    
+    existing_dataset_combo.focusInEvent = combo_focus_in
     
     dataset_selection_layout.addWidget(existing_dataset_label)
     dataset_selection_layout.addWidget(existing_dataset_combo)
@@ -832,23 +1043,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     launch_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-weight: bold;")
     launch_controls_layout.addWidget(launch_label)
 
-    launch_button_style = f"""
-        QPushButton {{
-            background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)};
-            color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)};
-            padding: 4px 10px;
-            border-radius: 4px;
-            border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)};
-        }}
-        QPushButton:hover {{
-            background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)};
-        }}
-        QPushButton:disabled {{
-            background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-            color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
-            border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
-        }}
-    """
+    from classes.utils.launch_ui_styles import get_launch_button_style
+
+    launch_button_style = get_launch_button_style()
 
     launch_targets = [
         ("data_fetch2", "データ取得2"),
@@ -1373,6 +1570,18 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             update_override_state["enabled"] = False
 
         effective_enabled = is_default_filter or update_override_state["enabled"]
+
+        if update_permission_blocked:
+            effective_enabled = False
+            update_override_state["enabled"] = False
+            update_button.setEnabled(False)
+            update_button.setStyleSheet(UPDATE_BUTTON_DISABLED_STYLE)
+            update_button.setToolTip("申請者/管理者のユーザー名が解決できないため更新できません")
+            enable_update_override_button.setEnabled(False)
+            enable_update_override_button.setText("更新有効化")
+            enable_update_override_button.setToolTip("申請者/管理者のユーザー名が未解決のため更新できません")
+            return
+
         update_button.setEnabled(effective_enabled)
 
         if effective_enabled:
@@ -1424,6 +1633,21 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         # 既存のCompleterがあればクリア
         if existing_dataset_combo.completer():
             existing_dataset_combo.completer().deleteLater()
+        
+        # コンボボックスにアイテムを追加（重要：カーソルキー操作に必要）
+        if not datasets or not display_names:
+            existing_dataset_combo.addItem("-- データセットを選択してください --", None)
+            logger.debug("データセットなし: プレースホルダのみ追加")
+        else:
+            # 全データセットをコンボボックスに追加
+            for i in range(min(len(display_names), len(datasets))):
+                display_text = display_names[i]
+                dataset = datasets[i]
+                if isinstance(dataset, dict):
+                    existing_dataset_combo.addItem(display_text, dataset)
+                else:
+                    logger.warning("データセットが辞書ではありません: index=%s, type=%s", i, type(dataset))
+            logger.debug("コンボボックスに %s 件のアイテムを追加", len(datasets))
         
         # QCompleterを設定
         completer = QCompleter(display_names, existing_dataset_combo)
@@ -3063,6 +3287,12 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     manager_entries = []
     current_member_info = {}
     current_group_id = None
+    dataset_user_info_map: dict[str, dict] = {}
+    dataset_user_role_fallback: dict[str, str | None] = {"applicant": None, "manager": None}
+    user_resolution_state = {"applicant": "missing", "manager": "missing"}
+    update_permission_blocked = False
+    current_applicant_id: str | None = None
+    current_manager_id: str | None = None
 
     def _reset_manager_combo(placeholder: str = "グループメンバーから選択"):
         """管理者コンボの表示と内部状態を初期化する。"""
@@ -3085,9 +3315,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         """仕様: userName (organizationName) を表示する。"""
         return _format_user_label_user_org(user_data)
 
-    def _format_user_display(user_id: str | None) -> str:
+    def _format_user_display(user_id: str | None, fallback_text: str | None = None) -> tuple[str, str]:
+        nonlocal dataset_user_info_map
         if not user_id:
-            return ""
+            return "", "missing"
         user_data = current_member_info.get(user_id)
         if not user_data and current_group_id:
             try:
@@ -3108,9 +3339,14 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                     current_member_info[user_id] = user_data
             except Exception:
                 logger.debug("詳細属性の補完に失敗", exc_info=True)
-        if not user_data:
-            user_data = {"id": user_id}
-        return _build_user_label_from_data(user_data)
+
+        label, source = _resolve_user_label_with_fallback(
+            user_id,
+            current_member_info,
+            dataset_user_info_map,
+            fallback_text=fallback_text,
+        )
+        return label, source
 
     def _populate_members_for_group(group_id: str | None):
         nonlocal current_member_info, current_group_id, manager_entries
@@ -3185,11 +3421,21 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             _reset_manager_combo("メンバー情報が見つかりません")
 
     def _set_applicant_display(user_id: str | None):
+        nonlocal update_permission_blocked, current_applicant_id
         if not user_id:
             edit_applicant_display.clear()
             edit_applicant_display.setToolTip("")
+            user_resolution_state["applicant"] = "missing"
+            current_applicant_id = None
             return
-        text = _format_user_display(user_id) or user_id
+
+        text, source = _format_user_display(
+            user_id,
+            fallback_text=dataset_user_role_fallback.get("applicant"),
+        )
+        user_resolution_state["applicant"] = source
+        current_applicant_id = user_id
+
         edit_applicant_display.setText(text)
         tooltip_parts = [text]
         try:
@@ -3200,14 +3446,20 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         edit_applicant_display.setToolTip("\n".join([p for p in tooltip_parts if p]))
 
     def _apply_manager_selection(manager_id: str | None):
+        nonlocal update_permission_blocked, current_manager_id
         if manager_id:
             idx = -1
             for i, (_label, uid) in enumerate(manager_entries):
                 if uid == manager_id:
                     idx = i
+                    user_resolution_state["manager"] = "member"
                     break
             if idx < 0:
-                fallback_label = _format_user_display(manager_id) or "現在の管理者"
+                fallback_label, source = _format_user_display(
+                    manager_id,
+                    fallback_text=dataset_user_role_fallback.get("manager"),
+                )
+                user_resolution_state["manager"] = source
                 manager_entries.append((fallback_label, manager_id))
                 edit_manager_combo.addItem(fallback_label, manager_id)
                 try:
@@ -3215,12 +3467,36 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 except Exception:
                     logger.debug("管理者コンボのToolTip設定に失敗", exc_info=True)
                 idx = edit_manager_combo.count() - 1
+            current_manager_id = manager_id
             edit_manager_combo.setCurrentIndex(idx)
         else:
+            user_resolution_state["manager"] = "missing"
+            current_manager_id = None
             try:
                 edit_manager_combo.setCurrentIndex(-1)
             except Exception:
                 logger.debug("管理者コンボの選択クリアに失敗", exc_info=True)
+
+    def _recompute_update_permission_block(applicant_id: str | None = None, manager_id: str | None = None):
+        nonlocal update_permission_blocked, current_applicant_id, current_manager_id
+        if applicant_id is not None:
+            current_applicant_id = applicant_id
+        if manager_id is not None:
+            current_manager_id = manager_id
+
+        blocked = _should_block_update_for_users(
+            current_applicant_id,
+            user_resolution_state.get("applicant", "missing"),
+            current_manager_id,
+            user_resolution_state.get("manager", "missing"),
+        )
+
+        if blocked and update_override_state.get("enabled"):
+            update_override_state["enabled"] = False
+
+        if blocked != update_permission_blocked:
+            update_permission_blocked = blocked
+        refresh_update_controls()
 
     def _extract_user_id(rel_data: dict | None) -> str:
         if not rel_data:
@@ -3469,6 +3745,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     # フォームクリア処理
     def clear_edit_form():
         """編集フォームをクリア"""
+        nonlocal dataset_user_info_map, dataset_user_role_fallback, user_resolution_state, update_permission_blocked, current_applicant_id, current_manager_id
         edit_dataset_name_edit.clear()
         edit_grant_number_combo.setCurrentIndex(-1)
         edit_description_edit.clear()
@@ -3476,6 +3753,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         edit_applicant_display.clear()
         edit_applicant_display.setToolTip("")
         _reset_manager_combo()
+        dataset_user_info_map = {}
+        dataset_user_role_fallback = {"applicant": None, "manager": None}
+        user_resolution_state["applicant"] = "missing"
+        user_resolution_state["manager"] = "missing"
+        current_applicant_id = None
+        current_manager_id = None
+        update_permission_blocked = False
         edit_taxonomy_edit.clear()
         edit_related_links_edit.clear()  # 関連情報もクリア
         edit_tags_edit.clear()  # TAGフィールドをクリア
@@ -3498,6 +3782,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         next_year = today.year + 1
         embargo_date = QDate(next_year, 3, 31)
         edit_embargo_edit.setDate(embargo_date)
+
+        _recompute_update_permission_block(applicant_id=None, manager_id=None)
     
     # 関連情報バリデーション機能（QLineEdit対応）
     def validate_related_links(text):
@@ -3566,6 +3852,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             clear_edit_form()  # データセットが選択されていない場合はフォームをクリア
             return
 
+        nonlocal dataset_user_info_map, dataset_user_role_fallback, user_resolution_state
+
         # dataset.json はダイジェストのため、詳細ファイル(output/rde/data/datasets/{id}.json)があれば優先して使用
         selected_dataset = _resolve_dataset_for_edit(selected_dataset) or selected_dataset
         
@@ -3582,6 +3870,26 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         logger.debug("テンプレートID保存・表示: %s", current_template_id)
         
         attrs = selected_dataset.get("attributes", {})
+
+        # データセットJSONに含まれるユーザー情報を保持（applicant/manager名のフォールバック用）
+        dataset_user_info_map = {}
+        dataset_user_role_fallback = {
+            "applicant": attrs.get("applicantName") or attrs.get("applicantDisplayName"),
+            "manager": attrs.get("managerName") or attrs.get("managerDisplayName"),
+        }
+        for item in selected_dataset.get("included", []) or []:
+            try:
+                if item.get("type") != "user":
+                    continue
+                uid = str(item.get("id") or "")
+                if not uid:
+                    continue
+                dataset_user_info_map[uid] = item.get("attributes", {}) or {}
+            except Exception:
+                logger.debug("dataset JSONのユーザー情報抽出に失敗", exc_info=True)
+
+        user_resolution_state["applicant"] = "missing"
+        user_resolution_state["manager"] = "missing"
 
         # 基本情報
         edit_dataset_name_edit.setText(attrs.get("name", ""))
@@ -3621,6 +3929,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
 
         manager_id = _extract_user_id(relationships.get("manager") if isinstance(relationships, dict) else None)
         _apply_manager_selection(manager_id)
+
+        _recompute_update_permission_block(applicant_id=applicant_id, manager_id=manager_id)
 
         edit_contact_edit.setText(attrs.get("contact", ""))
         
@@ -4073,6 +4383,20 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             """データセット更新後のUI再読み込み"""
             try:
                 logger.info("データセット更新後のUI再読み込みを開始")
+                
+                # 【重要】更新したデータセットIDに対してAPI再取得を実行
+                logger.info("更新データセットIDのAPI再取得を開始: %s", current_dataset_id)
+                try:
+                    from core.bearer_token_manager import BearerTokenManager
+                    bearer_token = BearerTokenManager.get_valid_token()
+                    refreshed_dataset = _fetch_dataset_detail_from_api(current_dataset_id, bearer_token)
+                    if refreshed_dataset:
+                        logger.info("API再取得成功: dataset_id=%s", current_dataset_id)
+                    else:
+                        logger.warning("API再取得失敗（データなし）: dataset_id=%s", current_dataset_id)
+                except Exception as api_error:
+                    logger.warning("API再取得エラー: %s", api_error, exc_info=True)
+                
                 # 現在のフィルタ設定でデータセットリストを再読み込み（強制再読み込み）
                 filter_type = get_current_filter_type()
                 grant_number_filter = grant_number_filter_edit.text().strip()

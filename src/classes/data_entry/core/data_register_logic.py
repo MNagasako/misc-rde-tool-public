@@ -106,8 +106,25 @@ def _continue_data_register_process(parent, bearer_token, dataset_info, form_val
         sampleReferenceUrl = form_values.get('sampleReferenceUrl') if form_values else None
         sampleTags = form_values.get('sampleTags') if form_values else None
         sampleNames = form_values.get('sampleNames') if form_values else ["試料名(ローカルID)"]
-        tags_list = [t.strip() for t in sampleTags.split(',')] if sampleTags else None
-        names_list = [n.strip() for n in sampleNames.split(',')] if sampleNames else ["試料名(ローカルID)"]
+        relatedSamples = form_values.get('relatedSamples') if form_values else []
+        hideOwner = form_values.get('hideOwner') if form_values else None
+        ownerId_from_form = form_values.get('ownerId') if form_values else None
+        if ownerId_from_form:
+            ownerId = ownerId_from_form
+        
+        if isinstance(sampleTags, list):
+            tags_list = sampleTags
+        elif isinstance(sampleTags, str):
+            tags_list = [t.strip() for t in sampleTags.split(',')] if sampleTags else None
+        else:
+            tags_list = None
+
+        if isinstance(sampleNames, list):
+            names_list = sampleNames
+        elif isinstance(sampleNames, str):
+            names_list = [n.strip() for n in sampleNames.split(',')] if sampleNames else ["試料名(ローカルID)"]
+        else:
+            names_list = ["試料名(ローカルID)"]
         # カスタム欄（スキーマフォーム）の値をpayloadに反映
         custom_values = form_values.get('custom') if form_values and 'custom' in form_values else {}
         
@@ -134,9 +151,9 @@ def _continue_data_register_process(parent, bearer_token, dataset_info, form_val
                             "description": sampleDescription or "試料の説明",
                             "composition": sampleComposition or "化学式・組成式・分子式",
                             "referenceUrl": sampleReferenceUrl or "",
-                            "hideOwner": None,
+                            "hideOwner": hideOwner,
                             "names": names_list,
-                            "relatedSamples": [],
+                            "relatedSamples": relatedSamples,
                             "tags": tags_list,
                             "generalAttributes": None,
                             "specificAttributes": None,
@@ -359,6 +376,17 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
     sampleReferenceUrl = form_values.get('sampleReferenceUrl') if form_values else None
     sampleTags = form_values.get('sampleTags') if form_values else None
     sampleNames = form_values.get('sampleNames') if form_values else None
+    relatedSamples = form_values.get('relatedSamples') if form_values else []
+    hideOwner = form_values.get('hideOwner') if form_values else None
+    ownerId_from_form = form_values.get('ownerId') if form_values else None
+    if ownerId_from_form:
+        ownerId = ownerId_from_form
+    
+    # データ所有者（所属）の反映
+    dataOwnerId_from_form = form_values.get('dataOwnerId') if form_values else None
+    if dataOwnerId_from_form:
+        dataOwnerId = dataOwnerId_from_form
+
     sample_id = form_values.get('sampleId') if form_values else None
     logger.info(f"DEBUG: sample_id from form_values = {sample_id}")  # デバッグログ追加
 
@@ -369,8 +397,19 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
         return
 
     # tags, namesはカンマ区切りでリスト化
-    tags_list = [t.strip() for t in sampleTags.split(',')] if sampleTags else None
-    names_list = [n.strip() for n in sampleNames.split(',')] if sampleNames else []
+    if isinstance(sampleTags, list):
+        tags_list = sampleTags
+    elif isinstance(sampleTags, str):
+        tags_list = [t.strip() for t in sampleTags.split(',')] if sampleTags else None
+    else:
+        tags_list = None
+
+    if isinstance(sampleNames, list):
+        names_list = sampleNames
+    elif isinstance(sampleNames, str):
+        names_list = [n.strip() for n in sampleNames.split(',')] if sampleNames else []
+    else:
+        names_list = []
 
     # カスタム欄（スキーマフォーム）の値をpayloadに反映
     custom_values = form_values.get('custom') if form_values and 'custom' in form_values else {}
@@ -386,9 +425,9 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
                             "description": sampleDescription or "",
                             "composition": sampleComposition or "",
                             "referenceUrl": sampleReferenceUrl or "",
-                            "hideOwner": None,
+                            "hideOwner": hideOwner,
                             "names": names_list,
-                            "relatedSamples": [],
+                            "relatedSamples": relatedSamples,
                             "tags": tags_list,
                             "generalAttributes": None,
                             "specificAttributes": None,

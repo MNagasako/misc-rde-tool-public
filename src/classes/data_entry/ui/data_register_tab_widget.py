@@ -7,10 +7,11 @@
 """
 
 import logging
+import os
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QTabWidget, QLabel, QScrollArea, QSizePolicy, QApplication, QGroupBox
 )
-from qt_compat.core import Qt
+from qt_compat.core import QTimer, Qt
 from qt_compat.gui import QFont
 
 from .data_register_ui_creator import create_data_register_widget
@@ -33,20 +34,22 @@ class DataRegisterTabWidget(QWidget):
         super().__init__()
         self.parent_controller = parent_controller
         self.title = title
-        self.button_style = button_style or "background-color: #2196f3; color: white; font-weight: bold; border-radius: 6px;"
+        # button_style は呼び出し元が指定した場合のみ使用し、未指定時は作成側でテーマ準拠のデフォルトを生成する。
+        self.button_style = button_style
         self._batch_tab_alert_shown = False  # 警告表示フラグ
         self._normal_tab_index = None
         self._batch_tab_index = None
         self.setup_ui()
         
-        # テーマ変更シグナルに接続
-        from classes.theme import ThemeManager
-        theme_manager = ThemeManager()
-        theme_manager.theme_changed.connect(self.refresh_theme)
+        # テーマ変更シグナルに接続（Singletonを必ず使用）
+        try:
+            from classes.theme.theme_manager import ThemeManager
+
+            ThemeManager.instance().theme_changed.connect(self.refresh_theme)
+        except Exception:
+            pass
         
-    def setup_ui(self):
-        """UIのセットアップ"""
-        # メインレイアウト
+
     def setup_ui(self):
         main_layout = QVBoxLayout()
         main_layout.setContentsMargins(0, 0, 0, 0)  # 余白をなくす
@@ -120,9 +123,37 @@ class DataRegisterTabWidget(QWidget):
             # 通常登録フォーム再適用
             if hasattr(self, 'normal_widget') and self.normal_widget:
                 self.normal_widget.setStyleSheet(get_data_register_form_style())
-                # 子GroupBoxが個別スタイルを保持している場合はクリアして継承させる
-                for gb in self.normal_widget.findChildren(QGroupBox):
-                    gb.setStyleSheet("")
+
+            # create_data_register_widget が個別に styleSheet を持つラベルがあるため、ここで再生成する
+            try:
+                from classes.theme.theme_keys import ThemeKey
+                from classes.theme.theme_manager import get_color
+
+                tpl_label = getattr(self.parent_controller, 'template_format_label', None)
+                if isinstance(tpl_label, QLabel) and tpl_label.parent() is not None:
+                    tpl_label.setStyleSheet(
+                        f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
+                        f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; "
+                        f"border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)}; border-radius: 4px;"
+                    )
+
+                fv_label = getattr(self.parent_controller, 'file_validation_label', None)
+                if isinstance(fv_label, QLabel) and fv_label.parent() is not None:
+                    fv_label.setStyleSheet(
+                        f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
+                        f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; "
+                        f"border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)}; border-radius: 4px;"
+                    )
+            except Exception:
+                pass
+
+            # 必須ラベルのエラー色は動的なため、テーマ切替時にも再評価
+            try:
+                updater = getattr(self.parent_controller, 'update_register_button_state', None)
+                if callable(updater):
+                    updater()
+            except Exception:
+                pass
             if hasattr(self, 'normal_register_scroll_area') and self.normal_register_scroll_area:
                 self.normal_register_scroll_area.setStyleSheet(get_scroll_area_style())
 
@@ -145,6 +176,24 @@ class DataRegisterTabWidget(QWidget):
             logger.debug("DataRegisterTabWidget: 動的スタイル再適用完了")
         except Exception as e:
             logger.error(f"DataRegisterTabWidget: テーマ更新エラー: {e}")
+
+    def showEvent(self, event):  # type: ignore[override]
+        super().showEvent(event)
+        # 他ウィジェットから戻ってきた場合、タブ変更イベントが発火しないため
+        # 現在タブに応じたサイズ調整を必ず再適用する。
+        try:
+            QTimer.singleShot(0, lambda: self._on_tab_changed(self.tab_widget.currentIndex()))
+        except Exception:
+            pass
+
+    def event(self, event):  # type: ignore[override]
+        # Windowsで表示復帰時にshowEventが来ないケース対策（WindowActivate）
+        try:
+            if event.type() == event.Type.WindowActivate:
+                QTimer.singleShot(0, lambda: self._on_tab_changed(self.tab_widget.currentIndex()))
+        except Exception:
+            pass
+        return super().event(event)
     
     def _on_tab_alert(self, index):
         """一括登録タブ選択時のみ警告を一度だけ表示"""
@@ -232,8 +281,9 @@ class DataRegisterTabWidget(QWidget):
                     top_level.show()
                     logger.debug("show()実行")
                     
-                # 強制的にイベント処理を実行してからサイズを再確認
-                QApplication.processEvents()
+                # pytest中はWindowsで不安定になり得るため processEvents を避ける
+                if not os.environ.get("PYTEST_CURRENT_TEST"):
+                    QApplication.processEvents()
                 final_size = top_level.size()
                 logger.debug("最終確認サイズ: %sx%s", final_size.width(), final_size.height())
                 
@@ -281,8 +331,9 @@ class DataRegisterTabWidget(QWidget):
                     top_level.show()
                     logger.debug("show()実行")
                     
-                # 強制的にイベント処理を実行してからサイズを再確認
-                QApplication.processEvents()
+                # pytest中はWindowsで不安定になり得るため processEvents を避ける
+                if not os.environ.get("PYTEST_CURRENT_TEST"):
+                    QApplication.processEvents()
                 final_size = top_level.size()
                 logger.debug("最終確認サイズ: %sx%s", final_size.width(), final_size.height())
         else:
@@ -395,6 +446,10 @@ class DataRegisterTabWidget(QWidget):
     def set_current_tab(self, index):
         """指定されたタブを選択"""
         self.tab_widget.setCurrentIndex(index)
+        try:
+            self._on_tab_changed(index)
+        except Exception:
+            pass
 
     def focus_normal_register_tab(self) -> bool:
         """通常登録タブを前面に表示"""

@@ -1882,8 +1882,7 @@ class BatchRegisterWidget(QWidget):
         # テーマ変更シグナル接続（動的再スタイル対応）
         try:
             from classes.theme import ThemeManager
-            theme_manager = ThemeManager()
-            theme_manager.theme_changed.connect(self.refresh_theme)
+            ThemeManager.instance().theme_changed.connect(self.refresh_theme)
         except Exception as e:
             logger.warning("BatchRegisterWidget: テーマ変更シグナル接続失敗: %s", e)
 
@@ -2282,23 +2281,9 @@ class BatchRegisterWidget(QWidget):
         launch_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-weight: bold;")
         launch_controls_layout.addWidget(launch_label)
 
-        launch_button_style = f"""
-            QPushButton {{
-                background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)};
-                border-radius: 4px;
-                padding: 4px 10px;
-                border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)};
-            }}
-            QPushButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)};
-            }}
-            QPushButton:disabled {{
-                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
-                border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
-            }}
-        """
+        from classes.utils.launch_ui_styles import get_launch_button_style
+
+        launch_button_style = get_launch_button_style()
 
         launch_targets = [
             ("data_fetch2", "データ取得2"),
@@ -2341,6 +2326,7 @@ class BatchRegisterWidget(QWidget):
         self.batch_template_format_label.setWordWrap(True)
         self.batch_template_format_label.setStyleSheet(
             f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
+            f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; "
             f"border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)}; border-radius: 4px;"
         )
         detail_layout.addWidget(self.batch_template_format_label)
@@ -5167,14 +5153,16 @@ class BatchRegisterWidget(QWidget):
                         "設定 → データ構造化タブでXLSXファイルを読み込んでください。"
                     )
                     self.batch_template_format_label.setStyleSheet(
-                        "padding: 8px; background-color: #fff3cd; color: #856404; "
-                        "border: 1px solid #ffc107; border-radius: 4px;"
+                        f"padding: 8px; background-color: {get_color(ThemeKey.PANEL_WARNING_BACKGROUND)}; "
+                        f"color: {get_color(ThemeKey.PANEL_WARNING_TEXT)}; "
+                        f"border: 1px solid {get_color(ThemeKey.PANEL_WARNING_BORDER)}; border-radius: 4px;"
                     )
                 else:
                     format_text = self.batch_validator.get_format_display_text(template_id)
                     self.batch_template_format_label.setText(f"📋 対応ファイル形式: {format_text}")
                     self.batch_template_format_label.setStyleSheet(
                         f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
+                        f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; "
                         f"border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)}; border-radius: 4px;"
                     )
                     # 対応拡張子をファイルセットテーブルへ反映し対象ファイル数を更新

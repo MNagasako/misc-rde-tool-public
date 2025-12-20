@@ -644,6 +644,17 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     container.search_edit = search_edit
     container.count_label = count_label
     container.dataset_map = {}
+    
+    # キャッシュクリアメソッドを公開
+    def clear_cache():
+        """
+        データセットエントリーのメモリキャッシュをクリア
+        グループ関連情報更新後に呼び出し、古いデータを再読み込みさせる
+        """
+        container.dataset_map.clear()
+        logger.info("データセットエントリーキャッシュをクリアしました")
+    
+    container.clear_cache = clear_cache
 
     # テストや外部から編集モードを強制するためのユーティリティを公開
     def enable_dataset_editing():
@@ -812,23 +823,9 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
     apply_label_style(launch_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
     launch_controls_layout.addWidget(launch_label)
 
-    launch_button_style = f"""
-        QPushButton {{
-            background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)};
-            color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)};
-            border-radius: 4px;
-            padding: 4px 10px;
-            border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)};
-        }}
-        QPushButton:hover {{
-            background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)};
-        }}
-        QPushButton:disabled {{
-            background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-            color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
-            border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
-        }}
-    """
+    from classes.utils.launch_ui_styles import get_launch_button_style
+
+    launch_button_style = get_launch_button_style()
 
     launch_targets = [
         ("dataset_edit", "データセット修正"),

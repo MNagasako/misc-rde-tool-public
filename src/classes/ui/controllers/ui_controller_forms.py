@@ -437,7 +437,12 @@ class UIControllerForms:
             try:
                 if (hasattr(self.ui_controller, 'sample_input_widgets') and
                     'name' in self.ui_controller.sample_input_widgets):
-                    sample_names = self.ui_controller.sample_input_widgets['name'].text().strip()
+                    widget = self.ui_controller.sample_input_widgets['name']
+                    if hasattr(widget, 'get_sample_names'):
+                        names = widget.get_sample_names()
+                        sample_names = ",".join(names) if names else ""
+                    else:
+                        sample_names = widget.text().strip()
                 elif hasattr(self.ui_controller, 'sample_names_input'):
                     sample_names = self.ui_controller.sample_names_input.text().strip()
             except RuntimeError:

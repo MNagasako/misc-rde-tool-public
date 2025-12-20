@@ -20,7 +20,7 @@ from qt_compat.widgets import (
     QMessageBox,
     QPushButton,
 )
-from classes.data_entry.conf.ui_constants import get_data_register_form_style, TAB_HEIGHT_RATIO
+from classes.data_entry.conf.ui_constants import get_data_register_form_style, TAB_HEIGHT_RATIO, get_launch_button_style
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
 from qt_compat.gui import QFont
@@ -29,11 +29,27 @@ from config.common import get_dynamic_file_path
 from classes.data_entry.util.template_format_validator import TemplateFormatValidator
 from classes.utils.dataset_launch_manager import DatasetLaunchManager, DatasetPayload
 from classes.managers.log_manager import get_logger
+from classes.dataset.util.dataset_dropdown_util import get_current_user_id
 
 # ロガー設定
 logger = get_logger(__name__)
 from classes.data_entry.util.data_entry_forms import create_schema_form_from_path
 from classes.data_entry.util.data_entry_forms_fixed import create_sample_form
+from classes.data_entry.util.group_member_loader import load_group_members
+
+
+def _set_required_label_state(label: QLabel, *, ok: bool) -> None:
+    """必須項目ラベルの最小表示制御（未選択時のみエラー色）。"""
+
+    try:
+        from classes.utils.label_style import apply_label_style
+
+        apply_label_style(label, get_color(ThemeKey.TEXT_PRIMARY if ok else ThemeKey.TEXT_ERROR), bold=True)
+    except Exception:
+        # 既存UIの動作を優先（label_style が使えない場合でも落とさない）
+        label.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_PRIMARY if ok else ThemeKey.TEXT_ERROR)}; font-weight: bold;"
+        )
 
 
 def safe_remove_widget(layout, widget):
@@ -74,18 +90,17 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
     if not os.environ.get("PYTEST_CURRENT_TEST"):
         widget.setVisible(True)  # 明示的に表示設定
     layout = QVBoxLayout()
-    layout.setContentsMargins(15, 15, 15, 15)  # より適切な余白
-    layout.setSpacing(15)  # 要素間の間隔を増加
+    layout.setContentsMargins(12, 12, 12, 12)
+    layout.setSpacing(8)
     
     if button_style is None:
-        button_style = """
-        background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                                   stop: 0 #2196f3, stop: 1 #1976d2);
-        color: white; 
-        font-weight: bold; 
+        button_style = f"""
+        background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+        color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+        font-weight: bold;
         border-radius: 8px;
         padding: 10px 16px;
-        border: none;
+        border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BORDER)};
         """
     
 
@@ -133,8 +148,11 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
     parent_controller.data_name_input = basic_info_widgets["data_name"]
     parent_controller.basic_description_input = basic_info_widgets["data_desc"]
     parent_controller.experiment_id_input = basic_info_widgets["exp_id"]
-    parent_controller.sample_reference_url_input = basic_info_widgets["url"]
-    parent_controller.sample_tags_input = basic_info_widgets["tags"]
+    parent_controller.data_owner_combo = basic_info_widgets["data_owner"]
+    parent_controller.data_owner_label = basic_info_widgets.get("data_owner_label")
+    # URLとタグは試料情報へ移動のため削除
+    # parent_controller.sample_reference_url_input = basic_info_widgets["url"]
+    # parent_controller.sample_tags_input = basic_info_widgets["tags"]
 
     # --- 固有情報フォームの動的生成用 ---
     schema_form_widget = None
@@ -147,6 +165,7 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
     template_format_label.setWordWrap(True)
     template_format_label.setStyleSheet(
         f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
+        f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; "
         f"border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)}; border-radius: 4px;"
     )
     layout.addWidget(template_format_label)
@@ -157,6 +176,7 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
     file_validation_label.setWordWrap(True)
     file_validation_label.setStyleSheet(
         f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
+        f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; "
         f"border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)}; border-radius: 4px;"
     )
     file_validation_label.setVisible(False)
@@ -201,6 +221,52 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
             group = relationships.get('group', {}).get('data', {})
             group_id = group.get('id', '')
 
+        # --- データ所有者（所属）コンボボックス更新 ---
+        if hasattr(parent_controller, 'data_owner_combo') and parent_controller.data_owner_combo:
+            combo_owner = parent_controller.data_owner_combo
+            combo_owner.clear()
+            combo_owner.addItem("選択してください...", None)
+            
+            if group_id:
+                try:
+                    members = load_group_members(group_id)
+                    current_user_id = get_current_user_id()
+                    default_index = 0
+                    
+                    for i, member in enumerate(members):
+                        user_id = member.get('id')
+                        attrs = member.get('attributes', {})
+                        name = attrs.get('name') or attrs.get('userName') or user_id
+                        # 所属情報があれば追加
+                        org = attrs.get('organizationName')
+                        if org:
+                            display_text = f"{name} ({org})"
+                        else:
+                            display_text = name
+                        combo_owner.addItem(display_text, user_id)
+                        
+                        # ログインユーザーと一致する場合、そのインデックスを記録
+                        # combo_ownerには"選択してください..."が先頭にあるため、indexは i + 1
+                        if current_user_id and user_id == current_user_id:
+                            default_index = i + 1
+                    
+                    combo_owner.setEnabled(True)
+                    
+                    # デフォルト選択: ログインユーザー > 先頭のメンバー
+                    if default_index > 0:
+                        combo_owner.setCurrentIndex(default_index)
+                    elif combo_owner.count() > 1:
+                        # ログインユーザーがいない場合は先頭のメンバー（index 1）を選択
+                        combo_owner.setCurrentIndex(1)
+                    
+                except Exception as e:
+                    logger.error("グループメンバー取得エラー: %s", e)
+                    combo_owner.addItem("メンバー取得エラー", None)
+                    combo_owner.setEnabled(False)
+            else:
+                combo_owner.addItem("グループ情報なし", None)
+                combo_owner.setEnabled(False)
+
         # --- 試料フォーム生成（常に基本情報の次に挿入） ---
         try:
             parent_controller.sample_form_widget = create_sample_form(widget, group_id, parent_controller)
@@ -210,6 +276,23 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
                 parent_controller.sample_form_widget.setVisible(True)
                 parent_controller.sample_form_widget.update()
                 widget.update()
+
+                # 必須項目の状態（試料管理者など）を反映
+                updater = getattr(parent_controller, 'update_register_button_state', None)
+                try:
+                    if callable(updater):
+                        updater()
+                except Exception:
+                    pass
+
+                # 試料管理者の選択変更でも状態更新
+                try:
+                    sample_widgets = getattr(parent_controller, 'sample_input_widgets', None) or {}
+                    manager_combo = sample_widgets.get('manager') if isinstance(sample_widgets, dict) else None
+                    if manager_combo is not None:
+                        manager_combo.currentIndexChanged.connect(lambda *_: updater() if callable(updater) else None)
+                except Exception:
+                    pass
         except Exception as form_error:
             logger.error("試料フォーム作成エラー: %s", form_error)
             import traceback
@@ -275,14 +358,16 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
                 "設定 → データ構造化タブでXLSXファイルを読み込んでください。"
             )
             template_format_label.setStyleSheet(
-                f"padding: 8px; background-color: #fff3cd; color: #856404; "
-                f"border: 1px solid #ffc107; border-radius: 4px;"
+                f"padding: 8px; background-color: {get_color(ThemeKey.PANEL_WARNING_BACKGROUND)}; "
+                f"color: {get_color(ThemeKey.PANEL_WARNING_TEXT)}; "
+                f"border: 1px solid {get_color(ThemeKey.PANEL_WARNING_BORDER)}; border-radius: 4px;"
             )
         else:
             format_text = validator.get_format_display_text(template_id)
             template_format_label.setText(f"📋 対応ファイル形式: {format_text}")
             template_format_label.setStyleSheet(
                 f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
+                f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; "
                 f"border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)}; border-radius: 4px;"
             )
         
@@ -352,23 +437,7 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
         DatasetLaunchManager.instance().register_receiver("data_register", _apply_dataset_launch_payload)
 
     # 他機能連携（通常登録 → データセット修正）
-    launch_button_style = f"""
-        QPushButton {{
-            background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)};
-            color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)};
-            border-radius: 4px;
-            padding: 4px 10px;
-            border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)};
-        }}
-        QPushButton:hover {{
-            background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)};
-        }}
-        QPushButton:disabled {{
-            background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-            color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
-            border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
-        }}
-    """
+    launch_button_style = get_launch_button_style()
 
     def _get_current_dataset_payload_for_launch():
         if combo is None:
@@ -486,8 +555,9 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
         if not template_id:
             file_validation_label.setText("⚠ データセットを選択してください")
             file_validation_label.setStyleSheet(
-                "padding: 8px; background-color: #fff3cd; color: #856404; "
-                "border: 1px solid #ffc107; border-radius: 4px;"
+                f"padding: 6px; background-color: {get_color(ThemeKey.PANEL_WARNING_BACKGROUND)}; "
+                f"color: {get_color(ThemeKey.PANEL_WARNING_TEXT)}; "
+                f"border: 1px solid {get_color(ThemeKey.PANEL_WARNING_BORDER)}; border-radius: 4px;"
             )
             file_validation_label.setVisible(True)
             return
@@ -499,15 +569,17 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
             # 有効なファイルあり
             file_validation_label.setText(f"✅ {result.validation_message}")
             file_validation_label.setStyleSheet(
-                "padding: 8px; background-color: #d4edda; color: #155724; "
-                "border: 1px solid #c3e6cb; border-radius: 4px;"
+                f"padding: 6px; background-color: {get_color(ThemeKey.PANEL_SUCCESS_BACKGROUND)}; "
+                f"color: {get_color(ThemeKey.PANEL_SUCCESS_TEXT)}; "
+                f"border: 1px solid {get_color(ThemeKey.PANEL_SUCCESS_BORDER)}; border-radius: 4px;"
             )
         else:
             # 有効なファイルなし
             file_validation_label.setText(f"{result.validation_message}")
             file_validation_label.setStyleSheet(
-                "padding: 8px; background-color: #f8d7da; color: #721c24; "
-                "border: 1px solid #f5c6cb; border-radius: 4px;"
+                f"padding: 6px; background-color: {get_color(ThemeKey.PANEL_WARNING_BACKGROUND)}; "
+                f"color: {get_color(ThemeKey.TEXT_ERROR)}; "
+                f"border: 1px solid {get_color(ThemeKey.PANEL_WARNING_BORDER)}; border-radius: 4px;"
             )
         
         file_validation_label.setVisible(True)
@@ -535,21 +607,77 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
 
     # ファイル選択状態に応じて登録実行ボタンの有効/無効を切り替える
     def update_register_button_state():
+        # Qtオブジェクトが破棄された後にシグナル経由で呼ばれるケースがあるため、
+        # isValid/RuntimeError を吸収して安全に判定する。
+        try:
+            from shiboken6 import isValid  # type: ignore
+        except Exception:  # pragma: no cover
+            isValid = None  # type: ignore
+
+        def _alive(w) -> bool:
+            if w is None:
+                return False
+            if isValid is not None and not isValid(w):
+                return False
+            return True
+
+        def _combo_selected(combo) -> bool:
+            if not _alive(combo):
+                return False
+            try:
+                return bool(combo.isEnabled() and combo.currentData() is not None)
+            except RuntimeError:
+                return False
+
         # 必須項目（データ名、ファイル選択）がすべて入力済みか判定（添付ファイルは判定に使わない）
         files = getattr(parent_controller, 'selected_register_files', [])
         file_selected = bool(files)
         data_name = getattr(parent_controller, 'data_name_input', None)
-        data_name_filled = data_name and data_name.text().strip() != ""
+        try:
+            data_name_filled = bool(_alive(data_name) and data_name.text().strip() != "")
+        except RuntimeError:
+            data_name_filled = False
+
+        # 必須: データ所有者（所属）
+        owner_combo = getattr(parent_controller, 'data_owner_combo', None)
+        owner_label = getattr(parent_controller, 'data_owner_label', None)
+        owner_selected = _combo_selected(owner_combo)
+        try:
+            if isinstance(owner_label, QLabel) and _alive(owner_label):
+                _set_required_label_state(owner_label, ok=owner_selected)
+        except RuntimeError:
+            pass
+
+        # 必須: 試料管理者
+        sample_widgets = getattr(parent_controller, 'sample_input_widgets', None) or {}
+        manager_combo = sample_widgets.get('manager') if isinstance(sample_widgets, dict) else None
+        manager_label = sample_widgets.get('manager_label') if isinstance(sample_widgets, dict) else None
+        manager_selected = _combo_selected(manager_combo)
+        try:
+            if isinstance(manager_label, QLabel) and _alive(manager_label):
+                _set_required_label_state(manager_label, ok=manager_selected)
+        except RuntimeError:
+            pass
         # QPushButtonが既に削除済みの場合は何もしない
         try:
             if button_register_exec is not None and button_register_exec.parent() is not None:
-                if file_selected and data_name_filled:
+                if file_selected and data_name_filled and owner_selected and manager_selected:
                     button_register_exec.setEnabled(True)
                 else:
                     button_register_exec.setEnabled(False)
         except RuntimeError:
             # 既に削除済みの場合は無視
             pass
+
+    parent_controller.update_register_button_state = update_register_button_state
+
+    # データ所有者の選択変更でも状態更新
+    try:
+        owner_combo = getattr(parent_controller, 'data_owner_combo', None)
+        if owner_combo is not None:
+            owner_combo.currentIndexChanged.connect(update_register_button_state)
+    except Exception:
+        pass
 
     # データ名入力時にも状態更新
     if hasattr(parent_controller, 'data_name_input'):
@@ -606,8 +734,8 @@ def create_basic_info_group():
     # これによりテーマ変更時に親側の再スタイルのみで反映される
     group_box.setStyleSheet("")
     layout = QVBoxLayout(group_box)
-    layout.setContentsMargins(12, 12, 12, 12)
-    layout.setSpacing(10)
+    layout.setContentsMargins(8, 8, 8, 8)
+    layout.setSpacing(6)
 
     # 個別スタイル設定は行わず、親フォームの get_data_register_form_style から継承
     # これによりテーマ変更時に自動的に正しい色が適用される
@@ -628,7 +756,7 @@ def create_basic_info_group():
 
     # データ説明
     desc_row = QHBoxLayout()
-    desc_label = QLabel("データ説明")
+    desc_label = QLabel("説明")
     desc_label.setStyleSheet("")
     desc_input = QTextEdit()
     desc_input.setMinimumHeight(32)
@@ -651,36 +779,25 @@ def create_basic_info_group():
     expid_row.addWidget(expid_input)
     layout.addLayout(expid_row)
 
-    # 参考URL
-    url_row = QHBoxLayout()
-    url_label = QLabel("参考URL")
-    url_label.setStyleSheet("")
-    url_input = QLineEdit()
-    url_input.setPlaceholderText("参考URL")
-    url_input.setMinimumHeight(24)
-    url_input.setStyleSheet("")
-    url_row.addWidget(url_label)
-    url_row.addWidget(url_input)
-    layout.addLayout(url_row)
-
-    # タグ
-    tag_row = QHBoxLayout()
-    tag_label = QLabel("タグ(カンマ区切り)")
-    tag_label.setStyleSheet("")
-    tag_input = QLineEdit()
-    tag_input.setPlaceholderText("タグ(カンマ区切り)")
-    tag_input.setMinimumHeight(24)
-    tag_input.setStyleSheet("")
-    tag_row.addWidget(tag_label)
-    tag_row.addWidget(tag_input)
-    layout.addLayout(tag_row)
+    # データ所有者（所属）
+    owner_row = QHBoxLayout()
+    owner_label = QLabel("データ所有者(所属) *")
+    owner_label.setStyleSheet("")
+    owner_combo = QComboBox()
+    owner_combo.setMinimumHeight(24)
+    owner_combo.setStyleSheet("")
+    owner_combo.addItem("データセット選択後に選択可能", None)
+    owner_combo.setEnabled(False)
+    owner_row.addWidget(owner_label)
+    owner_row.addWidget(owner_combo)
+    layout.addLayout(owner_row)
 
     widgets = {
         "data_name": name_input,
         "data_desc": desc_input,
         "exp_id": expid_input,
-        "url": url_input,
-        "tags": tag_input
+        "data_owner": owner_combo,
+        "data_owner_label": owner_label,
     }
     return group_box, widgets
 

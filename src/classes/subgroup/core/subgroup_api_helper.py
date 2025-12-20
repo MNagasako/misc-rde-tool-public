@@ -1105,6 +1105,15 @@ def send_subgroup_request(widget, api_url, headers, payload, group_name, auto_re
         from net.http_helpers import proxy_post
         resp = proxy_post(api_url, headers=headers, json=payload, timeout=15)
         if resp.status_code in (200, 201):
+            # レスポンスから新しいサブグループIDを取得
+            new_subgroup_id = None
+            try:
+                response_data = resp.json()
+                new_subgroup_id = response_data.get('data', {}).get('id')
+                logger.info(f"新規サブグループID: {new_subgroup_id}")
+            except Exception as e:
+                logger.warning(f"サブグループIDの取得に失敗: {e}")
+            
             QMessageBox.information(widget, "作成成功", f"サブグループ[{group_name}]の作成に成功しました。")
             
             # 成功時にsubGroup.jsonを自動再取得
@@ -1122,12 +1131,30 @@ def send_subgroup_request(widget, api_url, headers, payload, group_name, auto_re
                                 # プログレス表示付きで自動更新
                                 worker = SimpleProgressWorker(
                                     task_func=auto_refresh_subgroup_json,
-                                    task_kwargs={'bearer_token': bearer_token},
+                                    task_kwargs={
+                                        'bearer_token': bearer_token,
+                                        'force_refresh_subgroup': True,
+                                    },
                                     task_name="サブグループ情報自動更新"
                                 )
                                 
                                 # プログレス表示
                                 progress_dialog = show_progress_dialog(widget, "サブグループ情報自動更新", worker)
+                                
+                                # 新規サブグループの情報を個別取得
+                                if new_subgroup_id:
+                                    try:
+                                        from classes.subgroup.core.subgroup_data_manager import SubgroupDataManager
+                                        subgroup_data_mgr = SubgroupDataManager()
+                                        new_subgroup_info = subgroup_data_mgr.fetch_subgroup_by_id(new_subgroup_id, bearer_token)
+                                        if new_subgroup_info:
+                                            # 新しいサブグループ情報をキャッシュに追加
+                                            from classes.subgroup.core.user_cache_manager import UserCacheManager
+                                            cache_mgr = UserCacheManager.instance()
+                                            cache_mgr.add_subgroup_to_cache(new_subgroup_info)
+                                            logger.info(f"新規サブグループ情報をキャッシュに追加: {new_subgroup_id}")
+                                    except Exception as e:
+                                        logger.warning(f"新規サブグループ情報の個別取得に失敗: {e}")
                                 
                                 # サブグループ更新通知を送信
                                 try:

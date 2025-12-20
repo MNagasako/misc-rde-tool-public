@@ -118,8 +118,7 @@ class RdeMemberEditorDialog(QDialog):
         
         # テーマ変更シグナルに接続
         from classes.theme import ThemeManager
-        theme_manager = ThemeManager()
-        theme_manager.theme_changed.connect(self.refresh_theme)
+        ThemeManager.instance().theme_changed.connect(self.refresh_theme)
 
     def refresh_all_members(self):
         """rde-member.txtの全メンバーについてAPIで氏名/メールを再取得しキャッシュ更新"""
