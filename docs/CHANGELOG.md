@@ -4,6 +4,49 @@
 
 ---
 
+## v2.3.1 (2025-12-20) - データセット機能改善（API再取得 + キーボード操作対応）
+
+### 📊 データセット機能改善
+
+- データセット更新後、RDE APIから最新データを再取得して表示するように改善。
+- データセット編集コンボボックスでカーソルキー・PageUp/PageDown・マウスホイール操作に対応。
+- コンボボックス本体のアイテム格納を修正し、件数プレースホルダー表示と操作性の不整合を解消。
+
+### 📚 ドキュメント
+
+- VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.3.1 に統一。
+- `docs/RELEASE_NOTES_v2.3.1.md` を追加。
+
+### 🧪 テスト（推奨）
+
+- `./.venv/Scripts/python.exe -m pytest -q -k 'test_revision_sync'`
+- `./.venv/Scripts/python.exe -m pytest -q`
+
+---
+
+## v2.3.0 (2025-12-20) - ログイン安定化（トークン出現待ち）+ テスト環境オフライン化 + バージョン表記更新
+
+### 🔐 自動ログイン安定化（トークン出現待ち）
+
+- 固定sleep依存を廃止し、WebViewのstorageにトークンが出現することを条件に待機（バックオフ+総タイムアウト）して自動ログインを安定化。
+- **自動ログイン時のみ**、RefreshTokenがある場合のフォールバック挙動を最適化。
+
+### 🧪 テスト環境オフライン安定化
+
+- pytest実行時の外部HTTP依存を制限し、オフライン環境でもテストスイートが完走できるように調整。
+
+### 📚 ドキュメント
+
+- VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.3.0 に統一。
+- `docs/RELEASE_NOTES_v2.3.0.md` を追加。
+
+### 🧪 テスト（推奨）
+
+- `./.venv/Scripts/python.exe -m pytest -q -k 'test_revision_sync'`
+- `./.venv/Scripts/python.exe -m pytest -q`
+
+---
+
 ## v2.2.8 (2025-12-18) - データセット開設フィルタUI改善 + 基本情報キャッシュ判定修正
 
 ---

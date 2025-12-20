@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.2.9** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.3.1** のバイナリ配布およびドキュメント公開用リポジトリです。
 
 **[ツール概要(こちらのほうが更新頻度高いです)](https://cuddly-stinger-40d.notion.site/QuickStart-2befc2cb5fc380f09d0dd4595b767f4d?source=copy_link)**
 
@@ -16,14 +16,14 @@
 
 ## 🚀 最新情報
 
-**2025-12-19 最新リリース**: バージョン2.2.9（ログイン安定化（トークン出現待ち） + テスト環境オフライン安定化）
+**2025-12-20 最新リリース**: バージョン2.3.1（データセット機能改善 - API再取得・キーボード操作対応）
 
-### v2.2.9 の主な改善
+### v2.3.1 の主な改善
 
-- 自動ログイン: 固定sleep依存を廃止し、WebViewのstorageにトークンが出現することを条件に待機（バックオフ+総タイムアウト）して安定化しました。
-- 自動ログイン（自動ログイン時のみ）: RefreshTokenがあればフォールバックでアクセストークン再取得を試行します。
-- テスト: pytest実行時の外部HTTP依存を抑制し、オフライン環境でもテストスイートが完走できるように調整しました。
-- README / VERSION.txt / CHANGELOG / リリースノート等のバージョン表記を v2.2.9 に統一しました。
+- データセット: 更新後にRDE APIから最新データを再取得し、古いキャッシュではなく常に最新状態を表示するように改善しました。
+- データセット: 編集コンボボックスでカーソルキー（↑↓）・PageUp/PageDown・マウスホイール操作に対応しました。
+- データセット: コンボボックス本体に全アイテムを正しく格納し、件数プレースホルダー表示と操作性の不整合を解消しました。
+- README / VERSION.txt / CHANGELOG / リリースノート等のバージョン表記を v2.3.1 に統一しました。
 
 > ℹ️ リスティングタブは `output/arim-site/{equipment|reports}_latest.json` など最新エクスポートを前提とします。再読込前に各タブで「JSON再取得」を実行し、キャッシュディレクトリ（`output/arim-site/reports/cache/`）の残量にも留意してください。
 
@@ -388,7 +388,7 @@ Windowsのセキュリティ警告やアンチウイルスによりブロック�
 
 ## 🔢 バージョン情報
 
-現在配布バージョン: `v2.2.9` （`VERSION.txt` に基づく）
+現在配布バージョン: `v2.3.1` （`VERSION.txt` に基づく）
 
 更新履歴の詳細は `docs/CHANGELOG.md` を参照してください。
 
