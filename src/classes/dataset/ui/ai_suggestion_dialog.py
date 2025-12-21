@@ -932,7 +932,7 @@ class AISuggestionDialog(QDialog):
         for i, suggestion in enumerate(self.suggestions):
             if i == selected_index:
                 # 選択された候補は背景色を変更
-                preview_html += f'<div style=" border: 2px solid #0066cc; padding: 10px; margin: 5px 0; border-radius: 5px;">'
+                preview_html += f'<div style=" border: 1px solid #0066cc; padding: 10px; margin: 5px 0; border-radius: 5px;">'
                 preview_html += f'<h3 style=" margin: 0 0 10px 0;">【選択中】{suggestion["title"]}</h3>'
             else:
                 # その他の候補は通常表示
@@ -1619,7 +1619,7 @@ class AISuggestionDialog(QDialog):
                 self.progress_bar.setStyleSheet(
                     f"""
                     QProgressBar {{
-                        border: 2px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                        border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                         border-radius: 5px;
                         text-align: center;
                         font-weight: bold;

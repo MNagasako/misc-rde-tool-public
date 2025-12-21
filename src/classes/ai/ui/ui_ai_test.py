@@ -577,10 +577,10 @@ class AITestWidget:
             }}
             QCheckBox::indicator {{ width: 16px; height: 16px; }}
             QCheckBox::indicator:unchecked {{
-                border: 2px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)}; border-radius: 3px; background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)}; border-radius: 3px; background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
             }}
             QCheckBox::indicator:checked {{
-                border: 2px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; border-radius: 3px; background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; border-radius: 3px; background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
                 image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iMTIiIHZpZXdCb3g9IjAgMCAxMiAxMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTIgNkw0LjUgOC41TDEwIDMiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgc3Rya2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc+Cg==);
             }}
         """)
@@ -685,7 +685,7 @@ class AITestWidget:
             f"""
             QComboBox {{
                 padding: 8px;
-                border: 2px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
                 border-radius: 6px;
                 font-size: 12px;
                 background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
@@ -709,7 +709,7 @@ class AITestWidget:
             f"""
             QPushButton {{
                 background-color: {get_color(ThemeKey.BUTTON_NEUTRAL_BACKGROUND)};
-                border: 2px solid {get_color(ThemeKey.BUTTON_NEUTRAL_BORDER)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_NEUTRAL_BORDER)};
                 border-radius: 6px;
                 font-size: 16px;
                 font-weight: bold;
@@ -833,7 +833,7 @@ class AITestWidget:
         self.ai_progress_bar.setVisible(False)  # 初期状態は非表示
         self.ai_progress_bar.setStyleSheet(f"""
             QProgressBar {{
-                border: 2px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                 border-radius: 5px;
                 text-align: center;
                 font-weight: bold;
@@ -1011,10 +1011,10 @@ class AITestWidget:
                     }}
                     QCheckBox::indicator {{ width: 16px; height: 16px; }}
                     QCheckBox::indicator:unchecked {{
-                        border: 2px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)}; border-radius: 3px; background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
+                        border: 1px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)}; border-radius: 3px; background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
                     }}
                     QCheckBox::indicator:checked {{
-                        border: 2px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; border-radius: 3px; background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                        border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; border-radius: 3px; background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
                         image: url(data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMTIiIGhlaWdodD0iMTIiIHZpZXdCb3g9IjAgMCAxMiAxMiIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTTIgNkw0LjUgOC41TDEwIDMiIHN0cm9rZT0id2hpdGUiIHN0cm9rZS13aWR0aD0iMiIgc3Rya2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiLz4KPC9zdmc+Cg==);
                     }}
                     """
@@ -1028,7 +1028,7 @@ class AITestWidget:
                     f"""
                     QComboBox {{
                         padding: 8px;
-                        border: 2px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                        border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
                         border-radius: 6px;
                         font-size: 12px;
                         background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
@@ -1053,7 +1053,7 @@ class AITestWidget:
                     f"""
                     QPushButton {{
                         background-color: {get_color(ThemeKey.BUTTON_NEUTRAL_BACKGROUND)};
-                        border: 2px solid {get_color(ThemeKey.BUTTON_NEUTRAL_BORDER)};
+                        border: 1px solid {get_color(ThemeKey.BUTTON_NEUTRAL_BORDER)};
                         border-radius: 6px;
                         font-size: 16px;
                         font-weight: bold;
@@ -1075,7 +1075,7 @@ class AITestWidget:
                 self.ai_progress_bar.setStyleSheet(
                     f"""
                     QProgressBar {{
-                        border: 2px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                        border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                         border-radius: 5px;
                         text-align: center;
                         font-weight: bold;

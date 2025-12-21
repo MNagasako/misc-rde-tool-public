@@ -85,16 +85,24 @@ QLabel {{
     color: {get_color(ThemeKey.TEXT_SECONDARY)};
     padding: 2px 0;
 }}
-QLineEdit, QTextEdit, QComboBox {{
-    border: 2px solid {get_color(ThemeKey.INPUT_BORDER)};
+QLineEdit, QComboBox {{
+    border: {get_color(ThemeKey.INPUT_BORDER_WIDTH)} solid {get_color(ThemeKey.INPUT_BORDER)};
     border-radius: 3px;
     padding: 2px 3px;
     font-size: 10pt;
     background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
     color: {get_color(ThemeKey.TEXT_PRIMARY)};
 }}
+QTextEdit {{
+    border: {get_color(ThemeKey.INPUT_BORDER_WIDTH)} solid {get_color(ThemeKey.INPUT_BORDER)};
+    border-radius: 3px;
+    padding: 2px 3px;
+    font-size: 10pt;
+    background-color: {get_color(ThemeKey.TEXT_AREA_BACKGROUND)};
+    color: {get_color(ThemeKey.TEXT_PRIMARY)};
+}}
 QLineEdit:focus, QTextEdit:focus {{
-    border-color: {get_color(ThemeKey.INPUT_BORDER_FOCUS)};
+    border: {get_color(ThemeKey.INPUT_BORDER_FOCUS_WIDTH)} solid {get_color(ThemeKey.INPUT_BORDER_FOCUS)};
     outline: none;
 }}
 QLineEdit::placeholder, QTextEdit::placeholder {{
@@ -178,13 +186,13 @@ QLabel {{
     padding-top: 0.02em;
     padding-bottom: 0.02em;
 }}
-QLineEdit, QTextEdit, QComboBox {{
+QLineEdit, QPlainTextEdit, QComboBox {{
     font-size: 10.5pt;
     padding-top: 0.02em;
     padding-bottom: 0.02em;
     padding-left: 0.2em;
     padding-right: 0.2em;
-    border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+    border: {get_color(ThemeKey.INPUT_BORDER_WIDTH)} solid {get_color(ThemeKey.INPUT_BORDER)};
     border-radius: 3px;
     background: {get_color(ThemeKey.INPUT_BACKGROUND)};
     color: {get_color(ThemeKey.INPUT_TEXT)};
@@ -192,6 +200,45 @@ QLineEdit, QTextEdit, QComboBox {{
     margin-bottom: 0.05em;
     min-height: 1.3em;
     min-width: 120px;
+}}
+QLineEdit:focus, QPlainTextEdit:focus, QComboBox:focus {{
+    border: {get_color(ThemeKey.INPUT_BORDER_FOCUS_WIDTH)} solid {get_color(ThemeKey.INPUT_BORDER_FOCUS)};
+    background: {get_color(ThemeKey.INPUT_BACKGROUND_FOCUS)};
+}}
+
+/* QAbstractScrollArea系(QTextEdit/QTextBrowser)の枠線方針: docs/STYLING_AND_THEME_GUIDE.md */
+QTextEdit, QTextBrowser {{
+    font-size: 10.5pt;
+    /* viewport側のborderが効かない環境向けフォールバック */
+    background: {get_color(ThemeKey.TEXT_AREA_BACKGROUND)};
+    color: {get_color(ThemeKey.INPUT_TEXT)};
+    border: {get_color(ThemeKey.INPUT_BORDER_WIDTH)} solid {get_color(ThemeKey.INPUT_BORDER)};
+    border-radius: 3px;
+    padding: 0px;
+    margin-top: 0.05em;
+    margin-bottom: 0.05em;
+    min-height: 1.3em;
+    min-width: 120px;
+}}
+QTextEdit:focus, QTextBrowser:focus {{
+    border: {get_color(ThemeKey.INPUT_BORDER_FOCUS_WIDTH)} solid {get_color(ThemeKey.INPUT_BORDER_FOCUS)};
+    background: {get_color(ThemeKey.TEXT_AREA_BACKGROUND_FOCUS)};
+}}
+QTextEdit::viewport, QTextBrowser::viewport,
+QTextEdit QWidget#qt_scrollarea_viewport, QTextBrowser QWidget#qt_scrollarea_viewport {{
+    padding-top: 0.02em;
+    padding-bottom: 0.02em;
+    padding-left: 0.2em;
+    padding-right: 0.2em;
+    border: {get_color(ThemeKey.INPUT_BORDER_WIDTH)} solid {get_color(ThemeKey.INPUT_BORDER)};
+    border-radius: 3px;
+    background: {get_color(ThemeKey.TEXT_AREA_BACKGROUND)};
+    color: {get_color(ThemeKey.INPUT_TEXT)};
+}}
+QTextEdit::viewport:focus, QTextBrowser::viewport:focus,
+QTextEdit:focus QWidget#qt_scrollarea_viewport, QTextBrowser:focus QWidget#qt_scrollarea_viewport {{
+    border: {get_color(ThemeKey.INPUT_BORDER_FOCUS_WIDTH)} solid {get_color(ThemeKey.INPUT_BORDER_FOCUS)};
+    background: {get_color(ThemeKey.TEXT_AREA_BACKGROUND_FOCUS)};
 }}
 QPushButton {{
     font-size: 10.5pt;

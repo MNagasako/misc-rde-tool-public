@@ -16,11 +16,11 @@ for color in colors:
     print(f"\n=== Testing color: {color} ===")
     
     if color == "green":
-        style = f"QTextEdit {{ font-family: 'Consolas'; font-size: 9pt; border: 2px solid green; background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; }}"
+        style = f"QTextEdit {{ font-family: 'Consolas'; font-size: 9pt; border: 1px solid green; background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; }}"
     elif color == "red":
-        style = f"QTextEdit {{ font-family: 'Consolas'; font-size: 9pt; border: 2px solid red; background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; }}"
+        style = f"QTextEdit {{ font-family: 'Consolas'; font-size: 9pt; border: 1px solid red; background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; }}"
     elif color == "orange":
-        style = f"QTextEdit {{ font-family: 'Consolas'; font-size: 9pt; border: 2px solid orange; background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; }}"
+        style = f"QTextEdit {{ font-family: 'Consolas'; font-size: 9pt; border: 1px solid orange; background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; }}"
     else:
         style = f"QTextEdit {{ font-family: 'Consolas'; font-size: 9pt; background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; }}"
     

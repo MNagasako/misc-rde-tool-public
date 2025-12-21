@@ -79,7 +79,7 @@ class FileFilterWidget(QWidget):
             QCheckBox::indicator {{
                 width: 18px;
                 height: 18px;
-                border: 2px solid {get_color(ThemeKey.INPUT_BORDER)};
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
                 border-radius: 3px;
                 background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
             }}
@@ -837,7 +837,7 @@ class FileFilterWidget(QWidget):
                 QCheckBox::indicator {{
                     width: 18px;
                     height: 18px;
-                    border: 2px solid {get_color(ThemeKey.INPUT_BORDER)};
+                    border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
                     border-radius: 3px;
                     background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
                 }}

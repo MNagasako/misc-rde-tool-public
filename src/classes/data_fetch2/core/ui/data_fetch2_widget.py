@@ -211,7 +211,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
         QRadioButton::indicator {{
             width: 18px;
             height: 18px;
-            border: 2px solid {get_color(ThemeKey.INPUT_BORDER)};
+            border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
             border-radius: 10px;
             background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
         }}
@@ -361,7 +361,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
             padding-right: 35px;
         }}
         QComboBox:focus {{
-            border: 2px solid {get_color(ThemeKey.COMBO_BORDER_FOCUS)};
+            border: 1px solid {get_color(ThemeKey.COMBO_BORDER_FOCUS)};
             background-color: {get_color(ThemeKey.COMBO_BACKGROUND_FOCUS)};
         }}
         QComboBox::drop-down {{
@@ -681,7 +681,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
                 QRadioButton::indicator {{
                     width: 18px;
                     height: 18px;
-                    border: 2px solid {get_color(ThemeKey.INPUT_BORDER)};
+                    border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
                     border-radius: 10px;
                     background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
                 }}

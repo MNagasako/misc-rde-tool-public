@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-ARIM RDE Tool v2.3.1 - PySide6によるRDE→ARIMデータポータル移行ツール
+ARIM RDE Tool v2.3.2 - PySide6によるRDE→ARIMデータポータル移行ツール
 
 主要機能:
 - RDEシステムへの自動ログイン・データセット一括取得・画像保存
@@ -263,7 +263,7 @@ class Browser(QWidget):
                 font-size: 14px;
                 font-weight: bold;
                 padding: 12px;
-                border: 2px solid {get_color(ThemeKey.PANEL_INFO_BORDER)};
+                border: 1px solid {get_color(ThemeKey.PANEL_INFO_BORDER)};
                 border-radius: 6px;
                 margin: 5px;
             }}
@@ -657,7 +657,7 @@ class Browser(QWidget):
                         font-size: 14px;
                         font-weight: bold;
                         padding: 12px;
-                        border: 2px solid {get_color(ThemeKey.NOTIFICATION_SUCCESS_BORDER)};
+                        border: 1px solid {get_color(ThemeKey.NOTIFICATION_SUCCESS_BORDER)};
                         border-radius: 6px;
                         margin: 5px;
                     }}
@@ -671,7 +671,7 @@ class Browser(QWidget):
                         font-size: 14px;
                         font-weight: bold;
                         padding: 12px;
-                        border: 2px solid {get_color(ThemeKey.NOTIFICATION_ERROR_BORDER)};
+                        border: 1px solid {get_color(ThemeKey.NOTIFICATION_ERROR_BORDER)};
                         border-radius: 6px;
                         margin: 5px;
                     }}
@@ -685,7 +685,7 @@ class Browser(QWidget):
                         font-size: 14px;
                         font-weight: bold;
                         padding: 12px;
-                        border: 2px solid {get_color(ThemeKey.PANEL_INFO_BORDER)};
+                        border: 1px solid {get_color(ThemeKey.PANEL_INFO_BORDER)};
                         border-radius: 6px;
                         margin: 5px;
                     }}
@@ -699,7 +699,7 @@ class Browser(QWidget):
                         font-size: 14px;
                         font-weight: bold;
                         padding: 12px;
-                        border: 2px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                        border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                         border-radius: 6px;
                         margin: 5px;
                     }}

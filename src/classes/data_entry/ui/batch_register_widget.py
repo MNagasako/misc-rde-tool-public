@@ -1942,7 +1942,7 @@ class BatchRegisterWidget(QWidget):
                 QGroupBox {{
                     background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
                     color: {get_color(ThemeKey.TEXT_PRIMARY)};
-                    border: 2px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                    border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                     border-radius: 8px;
                     margin: 5px;
                     padding-top: 15px;
@@ -2442,7 +2442,7 @@ class BatchRegisterWidget(QWidget):
             QGroupBox {{
                 background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
                 color: {get_color(ThemeKey.TEXT_PRIMARY)};
-                border: 2px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                 border-radius: 8px;
                 margin: 5px;
                 padding-top: 15px;

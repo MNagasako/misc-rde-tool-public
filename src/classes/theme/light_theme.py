@@ -1,5 +1,5 @@
 """
-ライトテーマ定義 - ARIM RDE Tool v2.1.6
+ライトテーマ定義 - ARIM RDE Tool v2.3.2
 
 Material Design準拠のライトモード配色。
 現行アプリの配色を忠実に再現。
@@ -176,13 +176,24 @@ class LightTheme:
         # Input - 入力フィールド
         # ========================================
         ThemeKey.INPUT_BACKGROUND: "#f8f9fa",  # 微灰色（WINDOW背景と差別化）
-        ThemeKey.INPUT_BORDER: "#e9ecef",
+        ThemeKey.INPUT_BORDER: "#1C1D1F",
         ThemeKey.INPUT_TEXT: "#212529",
         ThemeKey.INPUT_PLACEHOLDER: "#6c757d",  # TEXT_PLACEHOLDERと統一
+        # TextArea（QTextEdit/QTextBrowser）
+        # 背景同化を避けるため、周囲のパネル背景より明確に明るくする
+        ThemeKey.TEXT_AREA_BACKGROUND: "#ffffff",
+        ThemeKey.TEXT_AREA_BACKGROUND_FOCUS: "#ffffff",
+        ThemeKey.TEXT_AREA_BACKGROUND_DISABLED: "#f5f5f5",
+
+        # 枠線太さ（QSS向け）
+        ThemeKey.INPUT_BORDER_WIDTH: "1px",
         
         # フォーカス状態
         ThemeKey.INPUT_BACKGROUND_FOCUS: "#ffffff",
         ThemeKey.INPUT_BORDER_FOCUS: "#2196f3",
+
+        # フォーカス時枠線太さ（QSS向け）
+        ThemeKey.INPUT_BORDER_FOCUS_WIDTH: "3px",
         
         # 無効状態
         ThemeKey.INPUT_BACKGROUND_DISABLED: "#f5f5f5",
@@ -242,9 +253,10 @@ class LightTheme:
         # ========================================
         # Tab - タブUI
         # ========================================
-        ThemeKey.TAB_BACKGROUND: "#f8f9fa",
+        ThemeKey.TAB_BACKGROUND: "#dadcdd",
         ThemeKey.TAB_BORDER: "#ddd",
-        ThemeKey.TAB_ACTIVE_BACKGROUND: "#ffffff",
+        # タブ背景を少し暗くして、内部の入力エリアと区別しやすくする
+        ThemeKey.TAB_ACTIVE_BACKGROUND: "#edf0f2",
         ThemeKey.TAB_ACTIVE_TEXT: "#2196f3",
         ThemeKey.TAB_ACTIVE_BORDER: "#2196f3",
         ThemeKey.TAB_INACTIVE_BACKGROUND: "#f8f9fa",
@@ -363,7 +375,8 @@ class LightTheme:
         ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER: "#dee2e6",
         
         # データ登録タブコンテナ
-        ThemeKey.DATA_ENTRY_TAB_CONTAINER_BACKGROUND: "#f5f5f5",  # PANEL色流用（明確な差別化）
+        # タブコンテナ（選択中ペインの外側）: 白系に寄り過ぎないよう僅かに暗くする
+        ThemeKey.DATA_ENTRY_TAB_CONTAINER_BACKGROUND: "#eef0f2",
         
         # ファイルツリー（一括登録）
         ThemeKey.FILE_TREE_BACKGROUND: "#fefefe",  # 極薄灰（WINDOW背景と差別化）

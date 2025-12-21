@@ -243,11 +243,11 @@ class BasicInfoTabValidator:
                 
                 # Build stylesheet using string concatenation to avoid f-string brace issues
                 if color == "green":
-                    border_style = "border: 2px solid green;"
+                    border_style = "border: 1px solid green;"
                 elif color == "red":
-                    border_style = "border: 2px solid red;"
+                    border_style = "border: 1px solid red;"
                 elif color == "orange":
-                    border_style = "border: 2px solid orange;"
+                    border_style = "border: 1px solid orange;"
                 else:
                     border_style = ""
                 

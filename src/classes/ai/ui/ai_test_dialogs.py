@@ -51,7 +51,7 @@ class PromptTemplateEditorDialog(QDialog):
         self.template_edit.setStyleSheet(
             f"""
             QTextEdit {{
-                border: 2px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                 border-radius: 8px;
                 padding: 10px;
                 font-family: 'Consolas', 'Monaco', 'Courier New', monospace;

@@ -732,7 +732,7 @@ def create_basic_info_group():
     group_box = QGroupBox("基本情報")
     # 個別スタイルは付与せず、親フォームウィジェットのスタイル(QGroupBoxルール)を継承させる
     # これによりテーマ変更時に親側の再スタイルのみで反映される
-    group_box.setStyleSheet("")
+    # NOTE: setStyleSheet("") はスタイル継承を阻害する可能性があるため設定しない
     layout = QVBoxLayout(group_box)
     layout.setContentsMargins(8, 8, 8, 8)
     layout.setSpacing(6)
@@ -744,12 +744,12 @@ def create_basic_info_group():
     name_row = QHBoxLayout()
     name_label = QLabel("データ名 *")
     # ラベルも個別スタイル不要（親で定義済み）
-    name_label.setStyleSheet("")
+    # NOTE: setStyleSheet("") は設定しない（親/グローバルQSSに追従）
     name_input = QLineEdit()
     name_input.setPlaceholderText("データ名（必須）")
     name_input.setMinimumHeight(24)
     # 個別スタイル不要（親のQLineEditルールを継承）
-    name_input.setStyleSheet("")
+    # NOTE: setStyleSheet("") は設定しない（親/グローバルQSSに追従）
     name_row.addWidget(name_label)
     name_row.addWidget(name_input)
     layout.addLayout(name_row)
@@ -757,12 +757,19 @@ def create_basic_info_group():
     # データ説明
     desc_row = QHBoxLayout()
     desc_label = QLabel("説明")
-    desc_label.setStyleSheet("")
+    # NOTE: setStyleSheet("") は設定しない（親/グローバルQSSに追従）
     desc_input = QTextEdit()
+    # QAbstractScrollArea系(QTextEdit)は環境によってQSSのborderが描画されないことがあるため、
+    # StyledBackgroundを有効化してスタイルシート描画を確実にする。
+    try:
+        desc_input.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        desc_input.viewport().setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    except Exception:
+        pass
     desc_input.setMinimumHeight(32)
     desc_input.setMaximumHeight(48)
     desc_input.setPlaceholderText("データ説明")
-    desc_input.setStyleSheet("")
+    # NOTE: setStyleSheet("") は設定しない（親/グローバルQSSに追従）
     desc_row.addWidget(desc_label)
     desc_row.addWidget(desc_input)
     layout.addLayout(desc_row)
@@ -770,11 +777,11 @@ def create_basic_info_group():
     # 実験ID
     expid_row = QHBoxLayout()
     expid_label = QLabel("実験ID")
-    expid_label.setStyleSheet("")
+    # NOTE: setStyleSheet("") は設定しない（親/グローバルQSSに追従）
     expid_input = QLineEdit()
     expid_input.setPlaceholderText("実験ID（半角英数記号のみ）")
     expid_input.setMinimumHeight(24)
-    expid_input.setStyleSheet("")
+    # NOTE: setStyleSheet("") は設定しない（親/グローバルQSSに追従）
     expid_row.addWidget(expid_label)
     expid_row.addWidget(expid_input)
     layout.addLayout(expid_row)
@@ -782,10 +789,10 @@ def create_basic_info_group():
     # データ所有者（所属）
     owner_row = QHBoxLayout()
     owner_label = QLabel("データ所有者(所属) *")
-    owner_label.setStyleSheet("")
+    # NOTE: setStyleSheet("") は設定しない（親/グローバルQSSに追従）
     owner_combo = QComboBox()
     owner_combo.setMinimumHeight(24)
-    owner_combo.setStyleSheet("")
+    # NOTE: setStyleSheet("") は設定しない（親/グローバルQSSに追従）
     owner_combo.addItem("データセット選択後に選択可能", None)
     owner_combo.setEnabled(False)
     owner_row.addWidget(owner_label)

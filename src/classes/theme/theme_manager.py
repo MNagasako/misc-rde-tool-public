@@ -63,6 +63,89 @@ class ThemeManager(QObject):
         self._global_style_cache = {}
         # 最後に適用したQSSのハッシュ
         self._last_style_hash = None
+        # QTextEdit/QTextBrowser viewport へ直接スタイルを当てる仕組み
+        self._text_area_viewport_styler = None
+
+    def _build_text_area_viewport_style_sheet(self) -> str:
+        """QTextEdit/QTextBrowser の viewport に直接当てるQSSを生成。"""
+        # NOTE:
+        # - ::viewport / #qt_scrollarea_viewport セレクタは環境差で効かない/揺れる報告があるため、
+        #   viewportウィジェット自身に styleSheet を設定する（最も確実）。
+        return (
+            "QWidget {"
+            f" background-color: {self.get_color(ThemeKey.TEXT_AREA_BACKGROUND)};"
+            f" color: {self.get_color(ThemeKey.INPUT_TEXT)};"
+            f" border: {self.get_color(ThemeKey.INPUT_BORDER_WIDTH)} solid {self.get_color(ThemeKey.INPUT_BORDER)};"
+            " border-radius: 4px;"
+            " padding: 4px;"
+            " }"
+            " QWidget:disabled {"
+            f" background-color: {self.get_color(ThemeKey.TEXT_AREA_BACKGROUND_DISABLED)};"
+            f" color: {self.get_color(ThemeKey.INPUT_TEXT_DISABLED)};"
+            f" border: 1px solid {self.get_color(ThemeKey.INPUT_BORDER_DISABLED)};"
+            " }"
+        )
+
+    def _apply_text_area_viewport_style(self, widget: object) -> None:
+        """対象ウィジェットがテキストエリアなら viewport へ直接スタイルを当てる。"""
+        try:
+            from PySide6.QtCore import Qt
+            from PySide6.QtWidgets import QTextEdit, QTextBrowser, QPlainTextEdit
+
+            if not isinstance(widget, (QTextEdit, QTextBrowser, QPlainTextEdit)):
+                return
+
+            if not hasattr(widget, "viewport"):
+                return
+
+            vp = widget.viewport()
+            try:
+                widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+                vp.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            except Exception:
+                pass
+
+            qss = self._build_text_area_viewport_style_sheet()
+            # 同一QSSは再適用しない（無駄なpolishを避ける）
+            try:
+                if getattr(vp, "styleSheet", None) and vp.styleSheet() == qss:
+                    return
+            except Exception:
+                pass
+            vp.setStyleSheet(qss)
+        except Exception:
+            # 失敗してもテーマ適用全体は継続
+            return
+
+    def _ensure_text_area_viewport_styler(self, app: QApplication) -> None:
+        """新規生成されるテキストエリアにも自動適用するイベントフィルタを導入。"""
+        if self._text_area_viewport_styler is None:
+            theme_manager = self
+
+            class _TextAreaViewportStyler(QObject):
+                def eventFilter(self, obj, event):  # type: ignore[override]
+                    try:
+                        et = event.type()
+                        # Polish/Show/ParentChange あたりで拾う（取りこぼしを減らす）
+                        if et in (event.Type.Polish, event.Type.Show, event.Type.ParentChange):
+                            theme_manager._apply_text_area_viewport_style(obj)
+                    except Exception:
+                        pass
+                    return False
+
+            self._text_area_viewport_styler = _TextAreaViewportStyler(app)
+            try:
+                app.installEventFilter(self._text_area_viewport_styler)
+            except Exception:
+                self._text_area_viewport_styler = None
+                return
+
+        # 既存ウィジェットにも一括適用（テーマ切替時の再適用も兼ねる）
+        try:
+            for w in QApplication.allWidgets():
+                self._apply_text_area_viewport_style(w)
+        except Exception:
+            pass
     
     @classmethod
     def instance(cls) -> 'ThemeManager':
@@ -205,6 +288,12 @@ class ThemeManager(QObject):
                 palette_start = time.perf_counter_ns()
                 self.apply_palette()
                 palette_elapsed = (time.perf_counter_ns() - palette_start) / 1_000_000
+
+                # QTextEdit/QTextBrowser の viewport へ直接スタイル適用（環境差対策）
+                try:
+                    self._ensure_text_area_viewport_styler(app)
+                except Exception:
+                    pass
                 
                 # 大量ComboBox最適化
                 combo_elapsed = 0.0

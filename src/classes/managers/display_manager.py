@@ -130,7 +130,7 @@ class DisplayManager:
                 self.autologin_msg_label.setStyleSheet(
                     f"background-color: {get_color(ThemeKey.NOTIFICATION_WARNING_BACKGROUND)}; "
                     f"color: {get_color(ThemeKey.NOTIFICATION_WARNING_TEXT)}; "
-                    f"border: 2px solid {get_color(ThemeKey.NOTIFICATION_WARNING_BORDER)}; "
+                    f"border: 1px solid {get_color(ThemeKey.NOTIFICATION_WARNING_BORDER)}; "
                     f"padding: 10px; border-radius: 5px; font-weight: bold;"
                 )
                 

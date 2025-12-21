@@ -362,7 +362,7 @@ class UIControllerForms:
                     font-size: 10pt;
                 }}
                 QLineEdit:focus, QTextEdit:focus {{
-                    border: 2px solid {get_color(ThemeKey.INPUT_BORDER_FOCUS)};
+                    border: 1px solid {get_color(ThemeKey.INPUT_BORDER_FOCUS)};
                 }}
                 QLineEdit:disabled, QTextEdit:disabled {{
                     background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)};

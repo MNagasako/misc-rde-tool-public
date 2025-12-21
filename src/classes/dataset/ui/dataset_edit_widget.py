@@ -2219,6 +2219,14 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         edit_description_edit = QTextEdit()
         edit_description_edit.setPlaceholderText("データセットの説明を入力")
         edit_description_edit.setMaximumHeight(80)  # 4行程度
+
+        # QTextEdit/QTextBrowser は環境によって ::viewport の描画が揺れるため、
+        # viewport側の枠線/背景(QSS)が確実に描画されるよう StyledBackground を付与する。
+        try:
+            edit_description_edit.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            edit_description_edit.viewport().setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        except Exception:
+            pass
         description_layout.addWidget(edit_description_edit)
         
         # AIサジェストボタン用の縦並びレイアウト
@@ -3838,7 +3846,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         if is_valid:
             edit_related_links_edit.setStyleSheet("border: 1px solid green;")
         else:
-            edit_related_links_edit.setStyleSheet("border: 2px solid red;")
+            edit_related_links_edit.setStyleSheet("border: 1px solid red;")
         
         # ツールチップでメッセージを表示
         edit_related_links_edit.setToolTip(message)

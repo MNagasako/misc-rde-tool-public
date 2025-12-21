@@ -259,22 +259,12 @@ class UIControllerCore:
             area_start = time.perf_counter_ns()
             if hasattr(self.parent, 'menu_area_widget'):
                 self.parent.menu_area_widget.setStyleSheet(f"""
-                    QWidget {{
+                    #menu_area_widget {{
                         background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
                         color: {get_color(ThemeKey.WINDOW_FOREGROUND)};
                     }}
-                    QLabel {{
+                    #menu_area_widget QLabel {{
                         color: {get_color(ThemeKey.WINDOW_FOREGROUND)};
-                    }}
-                    QLineEdit {{
-                        background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
-                        color: {get_color(ThemeKey.INPUT_TEXT)};
-                        border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
-                    }}
-                    QTextEdit {{
-                        background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
-                        color: {get_color(ThemeKey.INPUT_TEXT)};
-                        border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
                     }}
                 """)
             area_elapsed = (time.perf_counter_ns() - area_start) / 1_000_000
@@ -697,23 +687,14 @@ class UIControllerCore:
             
             # 下部：個別メニュー（切り替え可能エリア）
             self.parent.menu_area_widget = QWidget()
+            self.parent.menu_area_widget.setObjectName('menu_area_widget')
             self.parent.menu_area_widget.setStyleSheet(f"""
-                QWidget {{
+                #menu_area_widget {{
                     background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
                     color: {get_color(ThemeKey.WINDOW_FOREGROUND)};
                 }}
-                QLabel {{
+                #menu_area_widget QLabel {{
                     color: {get_color(ThemeKey.WINDOW_FOREGROUND)};
-                }}
-                QLineEdit {{
-                    background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
-                    color: {get_color(ThemeKey.INPUT_TEXT)};
-                    border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
-                }}
-                QTextEdit {{
-                    background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
-                    color: {get_color(ThemeKey.INPUT_TEXT)};
-                    border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
                 }}
             """)
             self.parent.menu_area_layout = QVBoxLayout()

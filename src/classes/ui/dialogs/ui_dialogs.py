@@ -201,7 +201,7 @@ class PopupDialog:
         # スタイル設定
         self.text_area.setStyleSheet(f"""
             QTextEdit {{
-                border: 2px solid {get_color(ThemeKey.BORDER_LIGHT)};
+                border: 1px solid {get_color(ThemeKey.BORDER_LIGHT)};
                 border-radius: 8px;
                 padding: 12px;
                 background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)};

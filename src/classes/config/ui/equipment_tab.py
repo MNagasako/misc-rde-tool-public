@@ -56,7 +56,7 @@ class EquipmentTab(QWidget):
             error_label.setStyleSheet(
                 f"font-weight: bold; color: {get_color(ThemeKey.PANEL_ERROR_TEXT)}; "
                 f"background-color: {get_color(ThemeKey.PANEL_ERROR_BACKGROUND)}; padding: 20px; "
-                f"border-radius: 4px; border: 2px solid {get_color(ThemeKey.PANEL_ERROR_BORDER)};"
+                f"border-radius: 4px; border: 1px solid {get_color(ThemeKey.PANEL_ERROR_BORDER)};"
             )
             error_label.setWordWrap(True)
             layout.addWidget(error_label)
@@ -75,7 +75,7 @@ class EquipmentTab(QWidget):
             error_label.setStyleSheet(
                 f"font-weight: bold; color: {get_color(ThemeKey.PANEL_ERROR_TEXT)}; "
                 f"background-color: {get_color(ThemeKey.PANEL_ERROR_BACKGROUND)}; padding: 20px; "
-                f"border-radius: 4px; border: 2px solid {get_color(ThemeKey.PANEL_ERROR_BORDER)};"
+                f"border-radius: 4px; border: 1px solid {get_color(ThemeKey.PANEL_ERROR_BORDER)};"
             )
             error_label.setWordWrap(True)
             layout.addWidget(error_label)

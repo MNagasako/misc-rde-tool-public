@@ -1338,7 +1338,7 @@ class CommonSubgroupMemberSelector(QWidget):
                 QCheckBox::indicator {{
                     width: 16px;
                     height: 16px;
-                    border: 2px solid {get_color(ThemeKey.INPUT_BORDER)};
+                    border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
                     border-radius: 3px;
                     background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
                 }}
@@ -1356,7 +1356,7 @@ class CommonSubgroupMemberSelector(QWidget):
                 QRadioButton::indicator {{
                     width: 16px;
                     height: 16px;
-                    border: 2px solid {get_color(ThemeKey.INPUT_BORDER)};
+                    border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
                     border-radius: 10px;
                     background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
                 }}
@@ -1388,7 +1388,7 @@ class CommonSubgroupMemberSelector(QWidget):
                     QCheckBox::indicator {{
                         width: 16px;
                         height: 16px;
-                        border: 2px solid {get_color(ThemeKey.INPUT_BORDER)};
+                        border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
                         border-radius: 3px;
                         background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
                     }}

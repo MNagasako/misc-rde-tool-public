@@ -1255,7 +1255,7 @@ class UIController(UIControllerCore):
             self.basic_info_input.setFixedHeight(32)
             self.basic_info_input.setStyleSheet(f"""
                 QLineEdit {{
-                    border: 2px solid {get_color(ThemeKey.BORDER_INFO)};
+                    border: 1px solid {get_color(ThemeKey.BORDER_INFO)};
                     border-radius: 6px;
                     padding: 5px;
                     font-size: 11pt;
@@ -1428,10 +1428,10 @@ class UIController(UIControllerCore):
                     color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
                     font-weight: bold;
                     border-radius: 6px;
-                    border: 2px solid {get_color(ThemeKey.BUTTON_INFO_BORDER)};
+                    border: 1px solid {get_color(ThemeKey.BUTTON_INFO_BORDER)};
                     padding: 3px;
                 """
-                xlsx_button_style_new = f"background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)}; font-weight: bold; border-radius: 4px; border: 2px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)}; padding: 3px;"
+                xlsx_button_style_new = f"background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)}; font-weight: bold; border-radius: 4px; border: 1px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)}; padding: 3px;"
                 for btn in [getattr(self, 'basic_btn', None), getattr(self, 'basic_self_btn', None), getattr(self, 'common_only_btn', None), getattr(self, 'invoice_schema_btn', None), getattr(self, 'sample_info_btn', None)]:
                     if btn:
                         btn.setStyleSheet(info_button_style_new)
@@ -1443,7 +1443,7 @@ class UIController(UIControllerCore):
                     self.basic_info_input.setStyleSheet(f"""
                         QLineEdit {{
        
-                            border: 2px solid {get_color(ThemeKey.BORDER_INFO)};
+                            border: 1px solid {get_color(ThemeKey.BORDER_INFO)};
                             border-radius: 6px;
                             padding: 5px;
                             font-size: 11pt;

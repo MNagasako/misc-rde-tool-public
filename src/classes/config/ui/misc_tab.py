@@ -56,7 +56,7 @@ class MiscTab(QWidget):
         group.setStyleSheet(f"""
             QGroupBox {{
                 font-weight: bold;
-                border: 2px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                 border-radius: 5px;
                 margin-top: 10px;
                 padding-top: 10px;

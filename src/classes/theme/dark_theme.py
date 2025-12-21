@@ -1,5 +1,5 @@
 """
-ダークテーマ定義 - ARIM RDE Tool v2.1.6
+ダークテーマ定義 - ARIM RDE Tool v2.3.2
 
 Material Design Dark準拠のダークモード配色。
 高コントラスト・視認性重視の配色設計。
@@ -179,10 +179,22 @@ class DarkTheme:
         ThemeKey.INPUT_BORDER: "#444444",
         ThemeKey.INPUT_TEXT: "#e0e0e0",
         ThemeKey.INPUT_PLACEHOLDER: "#9e9e9e",  # TEXT_PLACEHOLDERと統一
+
+        # TextArea（QTextEdit/QTextBrowser）
+        # ダークではINPUTと同等で良い（差別化は主に枠線とタブ背景で担保）
+        ThemeKey.TEXT_AREA_BACKGROUND: "#161616",
+        ThemeKey.TEXT_AREA_BACKGROUND_FOCUS: "#181818",
+        ThemeKey.TEXT_AREA_BACKGROUND_DISABLED: "#1e1e1e",
+
+        # 枠線太さ（QSS向け）
+        ThemeKey.INPUT_BORDER_WIDTH: "1px",
         
         # フォーカス状態
         ThemeKey.INPUT_BACKGROUND_FOCUS: "#181818",  # +6明度（フォーカス時微明）
         ThemeKey.INPUT_BORDER_FOCUS: "#42a5f5",
+
+        # フォーカス時枠線太さ（QSS向け）
+        ThemeKey.INPUT_BORDER_FOCUS_WIDTH: "3px",
         
         # 無効状態
         ThemeKey.INPUT_BACKGROUND_DISABLED: "#1e1e1e",

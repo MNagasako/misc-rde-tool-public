@@ -161,6 +161,15 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     description_layout.setSpacing(8)
     description_edit = QTextEdit(container)
     description_edit.setPlaceholderText("データセットの説明を入力")
+
+    # QTextEdit/QTextBrowser は環境によって ::viewport の描画が揺れるため、
+    # viewport側の枠線/背景(QSS)が確実に描画されるよう StyledBackground を付与する。
+    try:
+        description_edit.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        description_edit.viewport().setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    except Exception:
+        pass
+
     # 上側へ寄せる: QTextEdit が余白を取り過ぎないよう縦伸びを抑制
     description_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     description_edit.setMinimumHeight(72)
