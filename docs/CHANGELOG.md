@@ -4,6 +4,29 @@
 
 ---
 
+## v2.3.2 (2025-12-21) - テキストエリア可視性改善（枠線/背景）+ テスト強化
+
+### ✍️ テキストエリア可視性（枠線/背景）
+
+- QTextEdit/QTextBrowser/QPlainTextEdit の枠線・背景が環境差で見えにくい問題を改善（viewport直適用のフォールバック追加）。
+- ライトテーマでテキストエリア背景が周囲パネル背景と同化する問題を修正。
+
+### 🧪 テスト・品質管理
+
+- 描画結果（枠線/背景）を `grab()` のピクセル検証で確認するウィジェットテストを追加。
+
+### 📚 ドキュメント
+
+- VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.3.2 に統一。
+- `docs/RELEASE_NOTES_v2.3.2.md` を追加。
+
+### 🧪 テスト（推奨）
+
+- `./.venv/Scripts/python.exe -m pytest -q -k 'test_revision_sync'`
+- `./.venv/Scripts/python.exe -m pytest -q`
+
+---
+
 ## v2.3.1 (2025-12-20) - データセット機能改善（API再取得 + キーボード操作対応）
 
 ### 📊 データセット機能改善
