@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.3.2** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.3.3** のバイナリ配布およびドキュメント公開用リポジトリです。
 
 **本ページはAIによる自動生成文が含まれています。**
 
@@ -20,14 +20,14 @@
 
 ## 🚀 最新情報
 
-**2025-12-21 最新リリース**: バージョン2.3.2（テキストエリア可視性改善 - 枠線/背景 + テスト強化）
+**2025-12-22 最新リリース**: バージョン2.3.3（データセット修正UI改善 - 関連データ + テスト更新/安定化）
 
-### v2.3.2 の主な改善
+### v2.3.3 の主な改善
 
-- テキストエリア: QTextEdit/QTextBrowser/QPlainTextEdit の枠線・背景が環境差で見えにくい問題を改善しました。
-- テキストエリア: ライトテーマで背景が周囲と同化して区別しづらい問題を修正しました。
-- テスト: ピクセル検証のウィジェットテストを追加し、見た目の回帰を防止しました。
-- README / VERSION.txt / CHANGELOG / リリースノート等のバージョン表記を v2.3.2 に統一しました。
+- データセット修正（関連データ）: 関連データセット設定（ビルダーダイアログ）の操作性/安定性を改善しました。
+- データセット修正（関連データ）: 選択件数が1件（index=0）の場合に未選択扱いになる不具合を修正しました。
+- テスト: 既存実装に合わせてウィジェットテストを更新し、外部依存（ネットワーク/モーダル UI）に起因するフレークを抑制しました。
+- README / VERSION.txt / CHANGELOG / リリースノート等のバージョン表記を v2.3.3 に統一しました。
 
 > ℹ️ リスティングタブは `output/arim-site/{equipment|reports}_latest.json` など最新エクスポートを前提とします。再読込前に各タブで「JSON再取得」を実行し、キャッシュディレクトリ（`output/arim-site/reports/cache/`）の残量にも留意してください。
 
