@@ -11,7 +11,7 @@ import logging
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QLabel, QCheckBox, QPushButton, QHBoxLayout, 
     QMessageBox, QDialog, QTextEdit, QTableWidget, QTableWidgetItem, 
-    QHeaderView, QRadioButton, QButtonGroup, QLineEdit
+    QHeaderView, QRadioButton, QButtonGroup, QLineEdit, QSizePolicy
 )
 from qt_compat.core import Qt
 from qt_compat.gui import QColor
@@ -30,7 +30,15 @@ class CommonSubgroupMemberSelector(QWidget):
     新規作成・修正タブ両方で使用可能
     """
     
-    def __init__(self, user_entries=None, initial_roles=None, prechecked_user_ids=None, subgroup_id=None, show_filter=True):
+    def __init__(
+        self,
+        user_entries=None,
+        initial_roles=None,
+        prechecked_user_ids=None,
+        subgroup_id=None,
+        show_filter=True,
+        disable_internal_scroll: bool = False,
+    ):
         """
         Args:
             user_entries: ユーザーリスト（Noneの場合は統合リストを自動読み込み）
@@ -42,6 +50,7 @@ class CommonSubgroupMemberSelector(QWidget):
         super().__init__()
         self.subgroup_id = subgroup_id
         self.show_filter = show_filter
+        self.disable_internal_scroll = disable_internal_scroll
         self.initial_roles = initial_roles or {}
         self.prechecked_user_ids = set(prechecked_user_ids or [])
         self.dynamic_users = []  # 動的に追加されたユーザーリスト
@@ -581,23 +590,34 @@ class CommonSubgroupMemberSelector(QWidget):
         table.verticalHeader().setDefaultSectionSize(22)  # さらに小さく
         table.verticalHeader().setVisible(False)
         
-        # テーブルサイズを動的に計算（画面サイズを考慮）
-        from qt_compat.widgets import QApplication
-        screen = QApplication.primaryScreen().geometry()
-        max_table_height = int(screen.height() * 0.6)  # 画面の40%まで
-        
         # メンバー数に応じた動的高さ計算
         member_count = len(self.user_entries)
         header_height = 25  # ヘッダーの高さ
         row_height = 22     # 1行の高さ
         calculated_height = header_height + (member_count * row_height)
-        
-        # 最小・最大値を画面サイズに基づいて設定
-        min_height = min(150, max_table_height)
-        optimal_height = min(calculated_height, max_table_height)
-        
-        table.setMinimumHeight(min_height)
-        table.setMaximumHeight(optimal_height)
+
+        if getattr(self, 'disable_internal_scroll', False):
+            # 外側（タブ全体）にスクロールを集約するため、内側のスクロールバーは表示しない
+            table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            target_h = max(150, calculated_height)
+            table.setMinimumHeight(target_h)
+            table.setMaximumHeight(target_h)
+        else:
+            # 従来通り: 画面サイズに収めてテーブル内でスクロール
+            from qt_compat.widgets import QApplication
+            screen = QApplication.primaryScreen().geometry()
+            max_table_height = int(screen.height() * 0.6)  # 画面の60%まで
+            min_height = min(150, max_table_height)
+            optimal_height = min(calculated_height, max_table_height)
+            table.setMinimumHeight(min_height)
+            table.setMaximumHeight(optimal_height)
+
+        try:
+            table.setObjectName('subgroup_member_table')
+        except Exception:
+            pass
         
         return table
     
@@ -1411,7 +1431,7 @@ class CommonSubgroupMemberSelector(QWidget):
             logger.error(f"CommonSubgroupMemberSelector: テーマ更新エラー: {e}")
 
 
-def create_common_subgroup_member_selector(initial_roles=None, prechecked_user_ids=None, show_filter=True, user_entries=None):
+def create_common_subgroup_member_selector(initial_roles=None, prechecked_user_ids=None, show_filter=True, user_entries=None, disable_internal_scroll: bool = False):
     """
     共通サブグループメンバー選択ウィジェット作成
     Args:
@@ -1425,10 +1445,16 @@ def create_common_subgroup_member_selector(initial_roles=None, prechecked_user_i
     if user_entries is None:
         from .subgroup_ui_helpers import load_user_entries
         user_entries = load_user_entries()
-    return CommonSubgroupMemberSelector(user_entries, initial_roles, prechecked_user_ids, show_filter=show_filter)
+    return CommonSubgroupMemberSelector(
+        user_entries,
+        initial_roles,
+        prechecked_user_ids,
+        show_filter=show_filter,
+        disable_internal_scroll=disable_internal_scroll,
+    )
 
 
-def create_common_subgroup_member_selector_with_api_complement(initial_roles=None, prechecked_user_ids=None, subgroup_id=None, bearer_token=None, show_filter=False):
+def create_common_subgroup_member_selector_with_api_complement(initial_roles=None, prechecked_user_ids=None, subgroup_id=None, bearer_token=None, show_filter=False, disable_internal_scroll: bool = False):
     """
     API補完機能付きの共通サブグループメンバー選択ウィジェット作成（主に修正タブ用）
     Args:
@@ -1463,7 +1489,8 @@ def create_common_subgroup_member_selector_with_api_complement(initial_roles=Non
             initial_roles=initial_roles,
             prechecked_user_ids=prechecked_user_ids,
             subgroup_id=subgroup_id,
-            show_filter=show_filter
+            show_filter=show_filter,
+            disable_internal_scroll=disable_internal_scroll,
         )
         
     except Exception as e:
@@ -1471,7 +1498,12 @@ def create_common_subgroup_member_selector_with_api_complement(initial_roles=Non
         
         # フォールバック: 通常のメンバーセレクターを作成
         logger.debug("フォールバック: 通常のメンバーセレクターを作成")
-        return create_common_subgroup_member_selector(initial_roles, prechecked_user_ids, show_filter=show_filter)
+        return create_common_subgroup_member_selector(
+            initial_roles,
+            prechecked_user_ids,
+            show_filter=show_filter,
+            disable_internal_scroll=disable_internal_scroll,
+        )
 
 
 if __name__ == "__main__":

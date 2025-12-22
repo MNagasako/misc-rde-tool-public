@@ -3,12 +3,13 @@
 データエントリー情報をAPIから取得してJSONファイルに保存する機能
 Bearer Token統一管理システム対応
 """
-import os
 import json
 import logging
-from config.common import OUTPUT_DIR
-from classes.utils.api_request_helper import api_request
+import os
+
+from config.common import ensure_directory_exists, get_dynamic_file_path
 from core.bearer_token_manager import BearerTokenManager
+from net.http_helpers import proxy_get
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -36,9 +37,8 @@ def fetch_dataset_dataentry(dataset_id, bearer_token=None, force_refresh=False):
     
     try:
         # 出力ディレクトリの作成
-        output_dir = os.path.join(OUTPUT_DIR, "rde", "data", "dataEntry")
-        os.makedirs(output_dir, exist_ok=True)
-        
+        output_dir = ensure_directory_exists(get_dynamic_file_path("output/rde/data/dataEntry"))
+
         # 出力ファイルパス
         output_file = os.path.join(output_dir, f"{dataset_id}.json")
         
@@ -77,9 +77,8 @@ def fetch_dataset_dataentry(dataset_id, bearer_token=None, force_refresh=False):
         logger.info(f"データエントリー情報を取得開始: {dataset_id}")
         logger.debug("API URL: %s", api_url)
         
-        # 既存実装と同じapi_requestを使用
-        response = api_request("GET", api_url, bearer_token=bearer_token, headers=headers, timeout=60)
-        
+        response = proxy_get(api_url, headers=headers, timeout=60)
+
         if response is None:
             logger.error(f"データエントリー取得失敗: {dataset_id}")
             return False
@@ -92,6 +91,38 @@ def fetch_dataset_dataentry(dataset_id, bearer_token=None, force_refresh=False):
         
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+
+        # /data/{data_id}/files のレスポンスも保存（NONSHARED_RAW 等が relationships.files に含まれないケースの補完用）
+        try:
+            from config.site_rde import URLS
+
+            files_dir = ensure_directory_exists(get_dynamic_file_path("output/rde/data/dataFiles"))
+            for entry in data.get("data", []) or []:
+                data_id = entry.get("id")
+                if not data_id:
+                    continue
+
+                files_api_url = URLS["api"]["data_files"].format(id=data_id)
+                files_headers = {
+                    "Accept": "application/vnd.api+json",
+                    "Authorization": f"Bearer {bearer_token}",
+                    "Origin": "https://rde.nims.go.jp",
+                    "Referer": "https://rde.nims.go.jp/",
+                }
+                files_resp = proxy_get(files_api_url, headers=files_headers, timeout=60)
+                if files_resp is None:
+                    continue
+                try:
+                    files_resp.raise_for_status()
+                except Exception:
+                    continue
+
+                files_payload = files_resp.json()
+                files_out = os.path.join(files_dir, f"{data_id}.json")
+                with open(files_out, "w", encoding="utf-8") as fh:
+                    json.dump(files_payload, fh, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.debug(f"dataFiles 保存スキップ: {e}")
         
         entry_count = len(data.get('data', []))
         logger.info(f"データエントリー情報取得完了: {dataset_id} ({entry_count}件)")

@@ -263,12 +263,30 @@ class EditMemberManager:
             initial_roles=current_roles,
             prechecked_user_ids=set(current_roles.keys()),
             subgroup_id=group_data.get('id'),
-            bearer_token=bearer_token
+            bearer_token=bearer_token,
+            disable_internal_scroll=True,
         )
         
         # スクロールエリアに設定
         self.scroll_area.setWidget(new_member_selector)
         self.current_member_selector = new_member_selector
+
+        # 閲覧・修正タブは外側スクロールに集約するため、内側のスクロールを抑止
+        try:
+            from qt_compat.core import Qt
+            self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            self.scroll_area.setWidgetResizable(True)
+            self.scroll_area.setFrameStyle(0)
+            self.scroll_area.setContentsMargins(0, 0, 0, 0)
+
+            # セレクター側がコンテンツ全体の高さを持つ前提で、スクロールエリアも高さ追従
+            target_h = int(new_member_selector.sizeHint().height()) if new_member_selector is not None else 0
+            if target_h > 0:
+                self.scroll_area.setMinimumHeight(target_h)
+                self.scroll_area.setMaximumHeight(target_h)
+        except Exception:
+            logger.debug("member selector scroll suppression failed", exc_info=True)
         
         # Bearer tokenが取得できていない場合、後で再実行を試行
         if not bearer_token:
@@ -905,7 +923,7 @@ def _create_member_section(layout):
     """メンバー選択セクションの作成"""
     # 初期状態では空のメンバーセレクターを作成
     member_selector = create_common_subgroup_member_selector(
-        initial_roles={}, prechecked_user_ids=set()
+        initial_roles={}, prechecked_user_ids=set(), disable_internal_scroll=True
     )
     
     # スクロールエリア設定（余白を最小化、画面サイズ対応）
@@ -913,6 +931,14 @@ def _create_member_section(layout):
     scroll.setWidgetResizable(True)
     scroll.setFrameStyle(0)  # フレームを削除
     scroll.setContentsMargins(0, 0, 0, 0)  # スクロールエリアの余白を削除
+
+    # 閲覧・修正タブは外側スクロールに集約するため、内側のスクロールバーは表示しない
+    try:
+        from qt_compat.core import Qt
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+    except Exception:
+        pass
     
     # スクロールエリアのスタイルシートで余白を完全に削除
     scroll.setStyleSheet("""
@@ -928,18 +954,16 @@ def _create_member_section(layout):
     scroll.setMinimumWidth(520)  # スクロールエリア幅も調整
     scroll.setMaximumWidth(800)  # 余分な余白を削除
     
-    # 画面サイズを取得してスクロールエリアの高さを動的に設定
-    from qt_compat.widgets import QApplication
-    screen = QApplication.primaryScreen().geometry()
-    max_scroll_height = int(screen.height() * 0.70)  # 画面の35%まで
-    
-    # 動的高さ設定（画面サイズを考慮）
-    member_count = len(member_selector.user_rows) if member_selector.user_rows else 0
-    calculated_height = 47 + (member_count * 22)  # ヘッダー25px + 行22px
-    optimal_height = min(calculated_height, max_scroll_height)
-    
-    scroll.setMinimumHeight(min(150, optimal_height))
-    scroll.setMaximumHeight(optimal_height)
+    # セレクター全体の高さに追従（スクロールは外側へ）
+    try:
+        calculated_height = int(member_selector.sizeHint().height())
+        if calculated_height > 0:
+            scroll.setMinimumHeight(calculated_height)
+            scroll.setMaximumHeight(calculated_height)
+        else:
+            scroll.setMinimumHeight(150)
+    except Exception:
+        scroll.setMinimumHeight(150)
     
     # メンバーセレクターのラベルとスクロールエリアを余白なしで配置
     member_layout = QVBoxLayout()
@@ -953,6 +977,12 @@ def _create_member_section(layout):
     
     layout.addLayout(member_layout)
     scroll.setWidget(member_selector)
+
+    # 参照用（テスト/調整）
+    try:
+        scroll.setObjectName("subgroup_member_selector_scroll")
+    except Exception:
+        pass
     
     return {'scroll': scroll, 'selector': member_selector}
 

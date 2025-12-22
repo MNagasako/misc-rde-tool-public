@@ -20,7 +20,7 @@ from classes.theme import get_color, ThemeKey
 from classes.managers.log_manager import get_logger
 from classes.data_portal.ui.widgets import FilterableCheckboxTable
 from classes.dataset.util.data_entry_summary import (
-    get_shared2_stats,
+    get_data_entry_summary,
     format_size_with_bytes,
 )
 from classes.dataset.core.dataset_dataentry_logic import fetch_dataset_dataentry
@@ -641,7 +641,7 @@ class PortalEditDialog(QDialog):
                     background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
                 }}
             """)
-            auto_file_stats_btn.setToolTip("データエントリー情報から共用合計２の統計を推定し、ファイル数と全ファイルサイズを更新します")
+            auto_file_stats_btn.setToolTip("データエントリー情報から総計（全ファイル）の統計を推定し、ファイル数と全ファイルサイズを更新します")
             layout.addRow("", auto_file_stats_btn)
             self.file_stats_auto_button = auto_file_stats_btn
         
@@ -1495,10 +1495,10 @@ class PortalEditDialog(QDialog):
             )
 
     def _on_auto_set_file_stats(self):
-        """ファイル数 / 全ファイルサイズを共用合計2の統計から自動設定"""
+        """ファイル数 / 全ファイルサイズを総計（全ファイル）の統計から自動設定"""
         try:
-            stats = self._load_shared2_summary()
-            if not stats:
+            summary = self._load_data_entry_summary()
+            if not summary:
                 QMessageBox.warning(
                     self,
                     "データなし",
@@ -1507,11 +1507,54 @@ class PortalEditDialog(QDialog):
                 )
                 return
 
-            formatted_size = format_size_with_bytes(stats.bytes)
+            total = summary.get("total") or {}
+            total_count = int(total.get("count", 0) or 0)
+            total_bytes = int(total.get("bytes", 0) or 0)
+
+            shared2 = summary.get("shared2") or {}
+            shared2_count = int(shared2.get("count", 0) or 0)
+            shared2_bytes = int(shared2.get("bytes", 0) or 0)
+
+            nonshared = (summary.get("filetypes") or {}).get("NONSHARED_RAW") or {}
+            nonshared_count = int(nonshared.get("count", 0) or 0)
+            nonshared_bytes = int(nonshared.get("bytes", 0) or 0)
+
+            formatted_total = format_size_with_bytes(total_bytes)
+            formatted_shared2 = format_size_with_bytes(shared2_bytes)
+            formatted_nonshared = format_size_with_bytes(nonshared_bytes)
+
+            # fileTypeごとの短いラベル（dataset_dataentry_widget_minimal と同じ表示）
+            file_type_labels = {
+                "MAIN_IMAGE": "MAIN",
+                "STRUCTURED": "STRCT",
+                "NONSHARED_RAW": "NOSHARE",
+                "RAW": "RAW",
+                "META": "META",
+                "ATTACHEMENT": "ATTACH",
+                "THUMBNAIL": "THUMB",
+                "OTHER": "OTHER",
+            }
+            filetypes = summary.get("filetypes") or {}
+            breakdown_lines = []
+            for ft, stats in filetypes.items():
+                if not isinstance(stats, dict):
+                    continue
+                count = int(stats.get("count", 0) or 0)
+                bytes_ = int(stats.get("bytes", 0) or 0)
+                label = file_type_labels.get(ft, ft)
+                breakdown_lines.append(f"- {label}: {count:,} 件 / {format_size_with_bytes(bytes_)}")
+            breakdown_text = "\n".join(breakdown_lines) if breakdown_lines else "- (内訳なし)"
+
             message = (
-                "データエントリー情報集計（共用合計２: 非共有RAW/サムネイル除外）に基づく推定値です。\n\n"
-                f"ファイル数: {stats.count:,} 件\n"
-                f"全ファイルサイズ: {formatted_size}\n\n"
+                "データエントリー情報集計に基づく推定値です。\n\n"
+                f"【総計】ファイル数: {total_count:,} 件\n"
+                f"【総計】ファイルサイズ: {formatted_total}\n\n"
+                "（参考）\n"
+                f"【共用合計２】ファイル数: {shared2_count:,} 件\n"
+                f"【共用合計２】ファイルサイズ: {formatted_shared2}\n\n"
+                f"NONSHARED_RAW: {nonshared_count:,} 件 / {formatted_nonshared}\n\n"
+                "【fileType別 内訳】\n"
+                f"{breakdown_text}\n\n"
                 "これらの値を適用しますか?"
             )
             reply = QMessageBox.question(
@@ -1523,7 +1566,7 @@ class PortalEditDialog(QDialog):
             if reply != QMessageBox.Yes:
                 return
 
-            if self._apply_file_stats(stats.count, stats.bytes):
+            if self._apply_file_stats(shared2_count, shared2_bytes, total_bytes):
                 QMessageBox.information(
                     self,
                     "適用完了",
@@ -1537,11 +1580,12 @@ class PortalEditDialog(QDialog):
                 f"ファイル統計の取得中にエラーが発生しました:\n{exc}"
             )
 
-    def _load_shared2_summary(self, allow_fetch: bool = True):
-        """Load shared2 stats; optionally fetch dataEntry JSON when missing."""
-        stats = get_shared2_stats(self.dataset_id)
-        if stats or not allow_fetch:
-            return stats
+    def _load_data_entry_summary(self, allow_fetch: bool = True):
+        """Load dataEntry summary; optionally fetch dataEntry JSON when missing."""
+
+        summary = get_data_entry_summary(self.dataset_id)
+        if summary or not allow_fetch:
+            return summary
 
         reply = QMessageBox.question(
             self,
@@ -1583,16 +1627,19 @@ class PortalEditDialog(QDialog):
             )
             return None
 
-        return get_shared2_stats(self.dataset_id)
+        return get_data_entry_summary(self.dataset_id)
 
-    def _apply_file_stats(self, file_count: int, total_bytes: int) -> bool:
+    def _apply_file_stats(self, shared2_file_count: int, shared2_bytes: int, total_bytes: int) -> bool:
         """Apply calculated stats to corresponding widgets."""
         updated = False
 
         target_widgets = [
-            ('t_file_count', str(file_count)),
+            # ファイル数: 共用合計２
+            ('t_file_count', str(shared2_file_count)),
+            # ファイルサイズ欄: 共用合計２
+            ('t_meta_totalfilesizeinthisversion', str(shared2_bytes)),
+            # 全ファイルサイズ欄: 総計
             ('t_meta_totalfilesize', str(total_bytes)),
-            ('t_meta_totalfilesizeinthisversion', str(total_bytes)),
         ]
 
         for field_name, value in target_widgets:

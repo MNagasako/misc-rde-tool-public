@@ -25,6 +25,69 @@ DISPLAY_FILE_TYPES = tuple(DISPLAY_FILE_TYPES)
 IMAGE_FILE_TYPES = {"MAIN_IMAGE", "THUMBNAIL"}
 
 
+def _load_cached_files_payload(entry_id: str) -> Optional[Dict[str, Any]]:
+    """Load cached /data/{id}/files JSON when available.
+
+    Some environments do not expose NONSHARED_RAW in /data?include=files response.
+    When present, prefer the cached dataFiles payload to compute accurate stats.
+    """
+
+    if not entry_id:
+        return None
+
+    candidates = (
+        f"output/rde/data/dataFiles/{entry_id}.json",
+        f"output/rde/data/dataFiles/sub/{entry_id}.json",
+    )
+    for rel_path in candidates:
+        try:
+            path = get_dynamic_file_path(rel_path)
+            if not os.path.exists(path):
+                continue
+            with open(path, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+            if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+                return payload
+        except Exception:
+            continue
+
+    return None
+
+
+def _is_file_like_resource(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+
+    resource_type = item.get("type")
+    if resource_type in {"file", "dataFile"}:
+        return True
+
+    attributes = item.get("attributes")
+    if not isinstance(attributes, dict):
+        return False
+
+    # Some API responses may use a different `type` for file resources.
+    # Treat resources as files when they carry file attributes.
+    return any(key in attributes for key in ("fileType", "fileSize", "fileName", "mediaType"))
+
+
+def build_file_lookup(included: Any) -> Dict[str, Dict[str, Any]]:
+    """Build {file_id: file_resource} mapping from a JSON:API included list."""
+
+    if not isinstance(included, list):
+        return {}
+
+    lookup: Dict[str, Dict[str, Any]] = {}
+    for item in included:
+        if not _is_file_like_resource(item):
+            continue
+        file_id = item.get("id")
+        if not file_id:
+            continue
+        lookup[str(file_id)] = item
+    return lookup
+
+
 @dataclass(frozen=True)
 class Aggregate:
     """Simple container for aggregated counts/bytes."""
@@ -54,12 +117,7 @@ def compute_summary_from_payload(payload: Dict[str, Any]) -> Optional[Dict[str, 
         return None
 
     entries = payload.get("data", [])
-    included = payload.get("included", [])
-    file_lookup = {
-        item.get("id"): item
-        for item in included
-        if isinstance(item, dict) and item.get("type") == "file" and item.get("id")
-    }
+    file_lookup = build_file_lookup(payload.get("included", []))
 
     summary = _create_empty_summary()
 
@@ -129,37 +187,74 @@ def _classify_file_type(raw_type: str) -> str:
     return "OTHER"
 
 
-def _analyze_entry(entry: Dict[str, Any], file_lookup: Dict[str, Any]) -> Dict[str, Any]:
+def compute_entry_file_stats(entry: Dict[str, Any], file_lookup: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute fileType counts/sizes for a single entry.
+
+    Prefer cached /data/{id}/files payload when available because the
+    /data?include=files response may omit some file types from relationships.
+    """
+
     counts = {ft: 0 for ft in DISPLAY_FILE_TYPES}
     sizes = {ft: 0 for ft in DISPLAY_FILE_TYPES}
     image_bytes = 0
 
-    rel_files = (
-        entry.get("relationships", {})
-        .get("files", {})
-        .get("data", [])
-    )
-    for rel in rel_files:
-        file_id = rel.get("id")
-        if not file_id or file_id not in file_lookup:
-            continue
-        attributes = file_lookup[file_id].get("attributes", {})
-        raw_type = attributes.get("fileType", "OTHER")
-        classified = _classify_file_type(raw_type)
-        size = _safe_int(attributes.get("fileSize", 0))
-        counts[classified] += 1
-        sizes[classified] += size
-        is_image = attributes.get("isImageFile")
-        if is_image is None:
-            is_image = raw_type in IMAGE_FILE_TYPES
-        if is_image:
-            image_bytes += size
+    cached_files_payload = _load_cached_files_payload(str(entry.get("id", "")))
+    if cached_files_payload:
+        for item in cached_files_payload.get("data", []):
+            if not _is_file_like_resource(item):
+                continue
+            attributes = item.get("attributes", {})
+            if not isinstance(attributes, dict):
+                continue
+            raw_type = attributes.get("fileType", "OTHER")
+            classified = _classify_file_type(raw_type)
+            size = _safe_int(attributes.get("fileSize", 0))
+            counts[classified] += 1
+            sizes[classified] += size
+            is_image = attributes.get("isImageFile")
+            if is_image is None:
+                is_image = raw_type in IMAGE_FILE_TYPES
+            if is_image:
+                image_bytes += size
+
+        return {
+            "counts": counts,
+            "sizes": sizes,
+            "image_bytes": image_bytes,
+        }
+
+    rel_files = entry.get("relationships", {}).get("files", {}).get("data", [])
+    if isinstance(rel_files, list):
+        for rel in rel_files:
+            if not isinstance(rel, dict):
+                continue
+            file_id = rel.get("id")
+            if not file_id:
+                continue
+            file_id = str(file_id)
+            if file_id not in file_lookup:
+                continue
+            attributes = file_lookup[file_id].get("attributes", {})
+            raw_type = attributes.get("fileType", "OTHER")
+            classified = _classify_file_type(raw_type)
+            size = _safe_int(attributes.get("fileSize", 0))
+            counts[classified] += 1
+            sizes[classified] += size
+            is_image = attributes.get("isImageFile")
+            if is_image is None:
+                is_image = raw_type in IMAGE_FILE_TYPES
+            if is_image:
+                image_bytes += size
 
     return {
         "counts": counts,
         "sizes": sizes,
         "image_bytes": image_bytes,
     }
+
+
+def _analyze_entry(entry: Dict[str, Any], file_lookup: Dict[str, Any]) -> Dict[str, Any]:
+    return compute_entry_file_stats(entry, file_lookup)
 
 
 def _merge_entry_summary(summary: Dict[str, Any], entry: Dict[str, Any], entry_summary: Dict[str, Dict[str, int]]):

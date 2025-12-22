@@ -538,26 +538,15 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         return "OTHER"
 
     def analyze_entry_files(entry, file_lookup):
-        rel_files = entry.get("relationships", {}).get("files", {}).get("data", [])
-        counts = {ft: 0 for ft in DISPLAY_FILE_TYPES}
-        sizes = {ft: 0 for ft in DISPLAY_FILE_TYPES}
-        image_bytes = 0
-        for rel in rel_files:
-            file_id = rel.get("id")
-            file_info = file_lookup.get(file_id)
-            if not file_info:
-                continue
-            file_attr = file_info.get("attributes", {})
-            raw_type = file_attr.get("fileType")
-            ft_key = classify_file_type(raw_type)
-            file_size = safe_int(file_attr.get("fileSize", 0))
-            counts[ft_key] += 1
-            sizes[ft_key] += file_size
-            is_image = file_attr.get("isImageFile")
-            if is_image is None:
-                is_image = raw_type in IMAGE_FILE_TYPES
-            if is_image:
-                image_bytes += file_size
+        from classes.dataset.util.data_entry_summary import compute_entry_file_stats
+
+        stats = compute_entry_file_stats(entry, file_lookup)
+        raw_counts = stats.get("counts", {})
+        raw_sizes = stats.get("sizes", {})
+
+        counts = {ft: int(raw_counts.get(ft, 0) or 0) for ft in DISPLAY_FILE_TYPES}
+        sizes = {ft: int(raw_sizes.get(ft, 0) or 0) for ft in DISPLAY_FILE_TYPES}
+        image_bytes = int(stats.get("image_bytes", 0) or 0)
         return counts, sizes, image_bytes
 
     def open_entry_in_browser(entry_id):
@@ -1105,11 +1094,9 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             entry_count_label.setText(f"データエントリー件数: {entry_count}件")
             last_updated_label.setText(f"最終取得: {last_updated} path: {dataentry_file}")
 
-            included_files = {
-                item.get('id'): item
-                for item in data.get('included', [])
-                if item.get('type') == 'file' and item.get('id')
-            }
+            from classes.dataset.util.data_entry_summary import build_file_lookup
+
+            included_files = build_file_lookup(data.get('included', []))
             entry_contexts = [
                 {
                     "entry": entry,
@@ -1145,11 +1132,9 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
                 try:
                     with open(filepath, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                    included_files = {
-                        item.get('id'): item
-                        for item in data.get('included', [])
-                        if item.get('type') == 'file' and item.get('id')
-                    }
+                    from classes.dataset.util.data_entry_summary import build_file_lookup
+
+                    included_files = build_file_lookup(data.get('included', []))
                     for entry in data.get('data', []):
                         entry_contexts.append({
                             "entry": entry,
