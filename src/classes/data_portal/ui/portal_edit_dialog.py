@@ -4,15 +4,17 @@
 データポータルに登録済みのエントリを修正するためのダイアログ
 """
 
+import json
 import logging
-from typing import Dict, Any, Optional
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional
 from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QComboBox, QTextEdit, QPushButton,
     QGroupBox, QMessageBox, QProgressDialog, QApplication, QScrollArea, QWidget, QCheckBox, QRadioButton, QButtonGroup, QListWidget, QAbstractItemView,
-    QTableWidget, QTableWidgetItem, QHeaderView
+    QTableWidget, QTableWidgetItem, QHeaderView, QDialogButtonBox, QDateTimeEdit
 )
-from qt_compat.core import Qt
+from qt_compat.core import QDateTime, Qt
 from qt_compat import get_screen_geometry
 
 from classes.theme import get_color, ThemeKey
@@ -20,17 +22,45 @@ from classes.theme import get_color, ThemeKey
 from classes.managers.log_manager import get_logger
 from classes.data_portal.ui.widgets import FilterableCheckboxTable
 from classes.dataset.util.data_entry_summary import (
-    get_shared2_stats,
+    get_data_entry_summary,
     format_size_with_bytes,
 )
 from classes.dataset.core.dataset_dataentry_logic import fetch_dataset_dataentry
 from core.bearer_token_manager import BearerTokenManager
 
+from classes.data_portal.util.public_output_paths import (
+    find_latest_matching_file,
+    get_public_data_portal_root_dir,
+)
+from classes.data_portal.util.related_catalog_builder import (
+    build_related_catalog_html,
+    extract_related_dataset_ids,
+    find_related_catalog_candidates,
+    normalize_public_portal_records,
+)
+from config.common import get_dynamic_file_path
+
 logger = get_logger("DataPortal.PortalEditDialog")
 
 
+def extract_equipment_code_only(text: str) -> str:
+    """装置候補の表示テキストから、装置コード(例: NM-005)のみを抽出して返す。
+
+    - 表示は「NM-005:装置名」などを許容
+    - アンカータグ等の混在も許容
+    - 抽出できない場合は、元テキストのstripを返す
+    """
+    try:
+        from classes.utils.facility_link_helper import extract_equipment_id
+
+        equip_id = extract_equipment_id(text or "")
+        return equip_id if equip_id else (text or "").strip()
+    except Exception:
+        return (text or "").strip()
+
+
 class PortalEditDialog(QDialog):
-    """データポータル修正ダイアログ"""
+    """データカタログ修正ダイアログ"""
     
     def __init__(self, form_data: Dict[str, Any], t_code: str, dataset_id: str, portal_client, parent=None, metadata: Optional[Dict[str, Any]] = None):
         """
@@ -54,7 +84,7 @@ class PortalEditDialog(QDialog):
         self.field_widgets = {}
         self.file_stats_auto_button = None
         
-        self.setWindowTitle(f"データポータル修正 - {dataset_id[:8]}...")
+        self.setWindowTitle(f"データカタログ修正 - {dataset_id[:8]}...")
         self.setMinimumWidth(800)
         
         # 初期ウィンドウ高さを画面高さ - 100px に設定
@@ -172,7 +202,15 @@ class PortalEditDialog(QDialog):
         group.setLayout(layout)
         return group
     
-    def _create_editable_list_table(self, field_prefix: str, label: str, max_rows: int = 20, visible_rows: int = 5):
+    def _create_editable_list_table(
+        self,
+        field_prefix: str,
+        label: str,
+        max_rows: int = 20,
+        visible_rows: int = 5,
+        function_column_label: Optional[str] = None,
+        function_widget_factory: Optional[Callable[[QTableWidget, int], QWidget]] = None,
+    ):
         """
         編集可能なリストテーブルを作成（装置・プロセス、論文・プロシーディング用）
         常に20行表示、5行以上はスクロールバーで表示
@@ -187,15 +225,24 @@ class PortalEditDialog(QDialog):
             QTableWidget: テーブルウィジェット
         """
         table = QTableWidget()
-        table.setColumnCount(1)
-        table.setHorizontalHeaderLabels([label])
-        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        has_function_column = bool(function_column_label) and function_widget_factory is not None
+        if has_function_column:
+            table.setColumnCount(2)
+            table.setHorizontalHeaderLabels([label, function_column_label])
+            table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        else:
+            table.setColumnCount(1)
+            table.setHorizontalHeaderLabels([label])
+            table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         
         # 常に20行表示
-        table.setRowCount(20)
+        table.setRowCount(max_rows)
         
         # 既存データを読み込み
-        for i in range(1, 21):
+        function_col_widths: list[int] = []
+
+        for i in range(1, max_rows + 1):
             field_name = f"{field_prefix}{i}"
             value = ""
             if field_name in self.form_data:
@@ -203,9 +250,18 @@ class PortalEditDialog(QDialog):
             
             item = QTableWidgetItem(value)
             table.setItem(i - 1, 0, item)
+
+            if has_function_column:
+                widget = function_widget_factory(table, i - 1)
+                table.setCellWidget(i - 1, 1, widget)
+                function_col_widths.append(widget.sizeHint().width())
         
         # 行の高さを設定
         table.verticalHeader().setDefaultSectionSize(25)
+
+        if has_function_column and function_col_widths:
+            # ボタン合計幅 + セル余白ぶん
+            table.setColumnWidth(1, max(function_col_widths) + 18)
         
         # 5行分の表示高さに固定（それ以上はスクロール）
         table_height = visible_rows * 25 + table.horizontalHeader().height() + 2
@@ -213,6 +269,238 @@ class PortalEditDialog(QDialog):
         table.setMinimumHeight(table_height)
         
         return table
+
+    def _create_equip_process_function_cell(self, table: QTableWidget, row: int) -> QWidget:
+        container = QWidget()
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        related_btn = QPushButton("関連カタログ")
+        related_btn.setToolTip("関連データセットからリンク一覧を作成します")
+        related_btn.clicked.connect(lambda _=False, r=row: self._on_equip_process_set_related_catalog(table, r))
+
+        layout.addWidget(related_btn)
+        layout.addStretch()
+        return container
+
+    def _set_table_row_text(self, table: QTableWidget, row: int, col: int, text: str) -> None:
+        item = table.item(row, col)
+        if item is None:
+            item = QTableWidgetItem("")
+            table.setItem(row, col, item)
+        item.setText(text)
+
+    def _on_equip_process_set_datetime(self, table: QTableWidget, row: int) -> None:
+        try:
+            text = self._prompt_datetime_text()
+            if text is None:
+                return
+            self._set_table_row_text(table, row, 0, text)
+        except Exception as exc:
+            logger.error("日時ボタン処理で例外: %s", exc, exc_info=True)
+            QMessageBox.critical(self, "日時", f"日時の適用に失敗しました\n{exc}")
+
+    def _on_equip_process_set_related_catalog(self, table: QTableWidget, row: int) -> None:
+        try:
+            html = self._prompt_related_catalog_html()
+            if html is None:
+                return
+            self._set_table_row_text(table, row, 0, html)
+        except Exception as exc:
+            logger.error("関連カタログボタン処理で例外: %s", exc, exc_info=True)
+            QMessageBox.critical(self, "関連カタログ", f"関連カタログの適用に失敗しました\n{exc}")
+
+    def _prompt_datetime_text(self) -> Optional[str]:
+        dialog = QDialog(self)
+        dialog.setWindowTitle("日時")
+        dialog.setModal(True)
+
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(QLabel("現在日時（編集可）を適用します。"))
+
+        dt_edit = QDateTimeEdit()
+        dt_edit.setCalendarPopup(True)
+        dt_edit.setDisplayFormat("yyyy-MM-dd HH:mm:ss")
+        dt_edit.setDateTime(QDateTime.currentDateTime())
+        layout.addWidget(dt_edit)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+
+        if dialog.exec() != QDialog.Accepted:
+            return None
+
+        return dt_edit.dateTime().toString("yyyy-MM-dd HH:mm:ss")
+
+    def _load_related_catalog_candidates(self) -> Optional[list[dict]]:
+        dataset_json_path = Path(get_dynamic_file_path(f"output/rde/data/datasets/{self.dataset_id}.json"))
+        if not dataset_json_path.exists():
+            QMessageBox.warning(self, "関連カタログ", f"データセット詳細JSONが見つかりません:\n{dataset_json_path}")
+            return None
+
+        try:
+            dataset_payload = json.loads(dataset_json_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            QMessageBox.critical(self, "関連カタログ", f"データセット詳細JSONの解析に失敗しました:\n{dataset_json_path}\n{exc}")
+            return None
+        except OSError as exc:
+            QMessageBox.critical(self, "関連カタログ", f"データセット詳細JSONを読み込めません:\n{dataset_json_path}\n{exc}")
+            return None
+
+        related_ids = extract_related_dataset_ids(dataset_payload)
+        if not related_ids:
+            QMessageBox.information(self, "関連カタログ", "関連データセットが見つかりませんでした。")
+            return None
+
+        public_root = get_public_data_portal_root_dir()
+        public_json_path = find_latest_matching_file(
+            public_root,
+            (
+                "output.json",
+                "public_arim_data_details_*.json",
+                "public_arim_data_*.json",
+                "public_arim_data*.json",
+            ),
+        )
+        if not public_json_path:
+            QMessageBox.warning(self, "関連カタログ", f"公開データポータルJSONが見つかりません:\n{public_root}")
+            return None
+
+        try:
+            public_payload = json.loads(public_json_path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            QMessageBox.critical(self, "関連カタログ", f"公開データポータルJSONの解析に失敗しました:\n{public_json_path}\n{exc}")
+            return None
+        except OSError as exc:
+            QMessageBox.critical(self, "関連カタログ", f"公開データポータルJSONを読み込めません:\n{public_json_path}\n{exc}")
+            return None
+
+        public_records = normalize_public_portal_records(public_payload)
+        candidates = find_related_catalog_candidates(related_ids, public_records)
+        if not candidates:
+            QMessageBox.information(
+                self,
+                "関連カタログ",
+                "公開データポータルJSON内に、関連データセットIDに一致するレコードが見つかりませんでした。",
+            )
+            return None
+
+        logger.info(
+            "関連カタログ候補 %d 件 (related=%d, public_file=%s)",
+            len(candidates),
+            len(related_ids),
+            str(public_json_path),
+        )
+        return candidates
+
+    def _prompt_related_catalog_html(self) -> Optional[str]:
+        candidates = self._load_related_catalog_candidates()
+        if not candidates:
+            return None
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("関連カタログ")
+        dialog.setModal(True)
+        dialog.resize(760, 520)
+
+        root = QVBoxLayout(dialog)
+        root.addWidget(QLabel("関連カタログとして挿入するリンクを選択してください。"))
+
+        header_layout = QHBoxLayout()
+        header_layout.addWidget(QLabel("見出し:"))
+        header_edit = QLineEdit("関連データカタログ")
+        header_layout.addWidget(header_edit)
+        root.addLayout(header_layout)
+
+        tag_layout = QHBoxLayout()
+        tag_layout.addWidget(QLabel("タグ:"))
+        tag_edit = QLineEdit("h2")
+        tag_edit.setMaximumWidth(80)
+        tag_layout.addWidget(tag_edit)
+        tag_layout.addWidget(QLabel("※h1〜h6以外は動作未確認"))
+        tag_layout.addStretch()
+        root.addLayout(tag_layout)
+
+        body = QHBoxLayout()
+        root.addLayout(body)
+
+        # 左: チェックボックス一覧（スクロール）
+        left = QVBoxLayout()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        list_container = QWidget()
+        list_layout = QVBoxLayout(list_container)
+        list_layout.setContentsMargins(6, 6, 6, 6)
+        list_layout.setSpacing(4)
+
+        checkboxes: list[QCheckBox] = []
+        for item in candidates:
+            title = str(item.get("title") or item.get("id") or "")
+            dataset_id = str(item.get("id") or "")
+            url = item.get("detail_url") or item.get("url")
+
+            cb = QCheckBox(title)
+            cb.setChecked(True)
+            cb.setProperty("dataset_id", dataset_id)
+            if url:
+                cb.setToolTip(str(url))
+            checkboxes.append(cb)
+            list_layout.addWidget(cb)
+
+        list_layout.addStretch()
+        scroll.setWidget(list_container)
+        left.addWidget(scroll)
+        body.addLayout(left, 1)
+
+        # 右: HTMLプレビュー
+        preview = QTextEdit()
+        preview.setReadOnly(True)
+        preview.setMinimumWidth(360)
+        body.addWidget(preview, 1)
+
+        def selected_ids() -> set[str]:
+            selected: set[str] = set()
+            for cb in checkboxes:
+                if cb.isChecked():
+                    dataset_id = cb.property("dataset_id")
+                    if isinstance(dataset_id, str) and dataset_id:
+                        selected.add(dataset_id)
+            return selected
+
+        def update_preview() -> None:
+            html = build_related_catalog_html(
+                candidates,
+                selected_ids=selected_ids(),
+                header_text=header_edit.text(),
+                header_tag=tag_edit.text(),
+            )
+            preview.setHtml(html)
+
+        for cb in checkboxes:
+            cb.toggled.connect(lambda _checked=False: update_preview())
+
+        header_edit.textChanged.connect(lambda _text="": update_preview())
+        tag_edit.textChanged.connect(lambda _text="": update_preview())
+
+        update_preview()
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        root.addWidget(buttons)
+
+        if dialog.exec() != QDialog.Accepted:
+            return None
+
+        return build_related_catalog_html(
+            candidates,
+            selected_ids=selected_ids(),
+            header_text=header_edit.text(),
+            header_tag=tag_edit.text(),
+        )
     
     def _create_checkbox_group(self, field_name: str, label: str, max_selections: int = None) -> QWidget:
         """
@@ -534,7 +822,14 @@ class PortalEditDialog(QDialog):
             layout.addRow("", auto_btn)
         
         # 装置・プロセス - テーブル表示（20行固定、5行以上はスクロール）
-        equip_process_table = self._create_editable_list_table('t_equip_process', '装置・プロセス', max_rows=20, visible_rows=5)
+        equip_process_table = self._create_editable_list_table(
+            't_equip_process',
+            '装置・プロセス',
+            max_rows=20,
+            visible_rows=5,
+            function_column_label='機能',
+            function_widget_factory=self._create_equip_process_function_cell,
+        )
         self.field_widgets['t_equip_process'] = equip_process_table
         layout.addRow("装置・プロセス:", equip_process_table)
         
@@ -641,7 +936,7 @@ class PortalEditDialog(QDialog):
                     background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
                 }}
             """)
-            auto_file_stats_btn.setToolTip("データエントリー情報から共用合計２の統計を推定し、ファイル数と全ファイルサイズを更新します")
+            auto_file_stats_btn.setToolTip("データエントリー情報から総計（全ファイル）の統計を推定し、ファイル数と全ファイルサイズを更新します")
             layout.addRow("", auto_file_stats_btn)
             self.file_stats_auto_button = auto_file_stats_btn
         
@@ -664,7 +959,7 @@ class PortalEditDialog(QDialog):
             
             # プログレスダイアログ
             progress = QProgressDialog("修正中...", None, 0, 2, self)
-            progress.setWindowTitle("データポータル修正")
+            progress.setWindowTitle("データカタログ修正")
             progress.setWindowModality(Qt.WindowModal)
             progress.setMinimumDuration(0)
             progress.setCancelButton(None)
@@ -1078,14 +1373,7 @@ class PortalEditDialog(QDialog):
             )
             from .auto_setting_dialog import AutoSettingDialog
             from .selective_replacement_dialog import SelectiveReplacementDialog
-            from classes.utils.facility_link_helper import (
-                find_latest_facilities_json,
-                lookup_facility_code_by_equipment_id,
-                lookup_facility_name_by_equipment_id,
-                extract_equipment_id,
-                build_equipment_anchor,
-                build_equipment_anchor_with_name,
-            )
+            from classes.utils.facility_link_helper import extract_equipment_id
             
             # 助成番号を取得
             grant_number = get_grant_number_from_dataset_json(self.dataset_id)
@@ -1147,27 +1435,8 @@ class PortalEditDialog(QDialog):
                 return equip_id.lower() if equip_id else text.strip().lower()
             
             # リンク化拡張機能（設備ID + 設備名）
-            def apply_equipment_link(row: int, current_text: str, suggested_text: str) -> str:
-                """装置IDをリンクタグに変換（設備名付き）"""
-                text = suggested_text if suggested_text else current_text
-                if not text:
-                    return text
-                
-                latest_path = find_latest_facilities_json()
-                if latest_path is None:
-                    return text
-                
-                equip_id = extract_equipment_id(text)
-                if equip_id:
-                    code = lookup_facility_code_by_equipment_id(latest_path, equip_id)
-                    name = lookup_facility_name_by_equipment_id(latest_path, equip_id)
-                    if code and name:
-                        return build_equipment_anchor_with_name(code, equip_id, name)
-                return text
-            
-            extension_buttons = [
-                {"label": "リンク化", "callback": apply_equipment_link}
-            ]
+            # NOTE: 要件により、リンク化ボタンは非表示（拡張ボタンを渡さない）
+            extension_buttons = None
             
             # 選択的置換ダイアログ表示
             dialog = SelectiveReplacementDialog(
@@ -1190,19 +1459,11 @@ class PortalEditDialog(QDialog):
                     for i in range(table.rowCount()):
                         table.setItem(i, 0, QTableWidgetItem(""))
                     
-                    # リンク化して設定（設備名付き）
-                    latest_path = find_latest_facilities_json()
+                    # 要件: 適用してフォームに入力するのは装置コード(例: NM-005)のみ。装置名やリンクは挿入しない。
                     for i, equipment in enumerate(final_items[:5]):
                         text = str(equipment) if equipment is not None else ""
-                        anchor_text = None
-                        if latest_path is not None:
-                            equip_id = extract_equipment_id(text)
-                            if equip_id:
-                                code = lookup_facility_code_by_equipment_id(latest_path, equip_id)
-                                name = lookup_facility_name_by_equipment_id(latest_path, equip_id)
-                                if code and name:
-                                    anchor_text = build_equipment_anchor_with_name(code, equip_id, name)
-                        table.setItem(i, 0, QTableWidgetItem(anchor_text or text))
+                        code_only = extract_equipment_code_only(text)
+                        table.setItem(i, 0, QTableWidgetItem(code_only))
                     
                     logger.info(f"装置・プロセス適用: {len(final_items)}件（最大5件表示）")
                     QMessageBox.information(
@@ -1495,10 +1756,10 @@ class PortalEditDialog(QDialog):
             )
 
     def _on_auto_set_file_stats(self):
-        """ファイル数 / 全ファイルサイズを共用合計2の統計から自動設定"""
+        """ファイル数 / 全ファイルサイズを総計（全ファイル）の統計から自動設定"""
         try:
-            stats = self._load_shared2_summary()
-            if not stats:
+            summary = self._load_data_entry_summary()
+            if not summary:
                 QMessageBox.warning(
                     self,
                     "データなし",
@@ -1507,11 +1768,54 @@ class PortalEditDialog(QDialog):
                 )
                 return
 
-            formatted_size = format_size_with_bytes(stats.bytes)
+            total = summary.get("total") or {}
+            total_count = int(total.get("count", 0) or 0)
+            total_bytes = int(total.get("bytes", 0) or 0)
+
+            shared2 = summary.get("shared2") or {}
+            shared2_count = int(shared2.get("count", 0) or 0)
+            shared2_bytes = int(shared2.get("bytes", 0) or 0)
+
+            nonshared = (summary.get("filetypes") or {}).get("NONSHARED_RAW") or {}
+            nonshared_count = int(nonshared.get("count", 0) or 0)
+            nonshared_bytes = int(nonshared.get("bytes", 0) or 0)
+
+            formatted_total = format_size_with_bytes(total_bytes)
+            formatted_shared2 = format_size_with_bytes(shared2_bytes)
+            formatted_nonshared = format_size_with_bytes(nonshared_bytes)
+
+            # fileTypeごとの短いラベル（dataset_dataentry_widget_minimal と同じ表示）
+            file_type_labels = {
+                "MAIN_IMAGE": "MAIN",
+                "STRUCTURED": "STRCT",
+                "NONSHARED_RAW": "NOSHARE",
+                "RAW": "RAW",
+                "META": "META",
+                "ATTACHEMENT": "ATTACH",
+                "THUMBNAIL": "THUMB",
+                "OTHER": "OTHER",
+            }
+            filetypes = summary.get("filetypes") or {}
+            breakdown_lines = []
+            for ft, stats in filetypes.items():
+                if not isinstance(stats, dict):
+                    continue
+                count = int(stats.get("count", 0) or 0)
+                bytes_ = int(stats.get("bytes", 0) or 0)
+                label = file_type_labels.get(ft, ft)
+                breakdown_lines.append(f"- {label}: {count:,} 件 / {format_size_with_bytes(bytes_)}")
+            breakdown_text = "\n".join(breakdown_lines) if breakdown_lines else "- (内訳なし)"
+
             message = (
-                "データエントリー情報集計（共用合計２: 非共有RAW/サムネイル除外）に基づく推定値です。\n\n"
-                f"ファイル数: {stats.count:,} 件\n"
-                f"全ファイルサイズ: {formatted_size}\n\n"
+                "データエントリー情報集計に基づく推定値です。\n\n"
+                f"【総計】ファイル数: {total_count:,} 件\n"
+                f"【総計】ファイルサイズ: {formatted_total}\n\n"
+                "（参考）\n"
+                f"【共用合計２】ファイル数: {shared2_count:,} 件\n"
+                f"【共用合計２】ファイルサイズ: {formatted_shared2}\n\n"
+                f"NONSHARED_RAW: {nonshared_count:,} 件 / {formatted_nonshared}\n\n"
+                "【fileType別 内訳】\n"
+                f"{breakdown_text}\n\n"
                 "これらの値を適用しますか?"
             )
             reply = QMessageBox.question(
@@ -1523,7 +1827,7 @@ class PortalEditDialog(QDialog):
             if reply != QMessageBox.Yes:
                 return
 
-            if self._apply_file_stats(stats.count, stats.bytes):
+            if self._apply_file_stats(shared2_count, shared2_bytes, total_bytes):
                 QMessageBox.information(
                     self,
                     "適用完了",
@@ -1537,11 +1841,12 @@ class PortalEditDialog(QDialog):
                 f"ファイル統計の取得中にエラーが発生しました:\n{exc}"
             )
 
-    def _load_shared2_summary(self, allow_fetch: bool = True):
-        """Load shared2 stats; optionally fetch dataEntry JSON when missing."""
-        stats = get_shared2_stats(self.dataset_id)
-        if stats or not allow_fetch:
-            return stats
+    def _load_data_entry_summary(self, allow_fetch: bool = True):
+        """Load dataEntry summary; optionally fetch dataEntry JSON when missing."""
+
+        summary = get_data_entry_summary(self.dataset_id)
+        if summary or not allow_fetch:
+            return summary
 
         reply = QMessageBox.question(
             self,
@@ -1583,16 +1888,19 @@ class PortalEditDialog(QDialog):
             )
             return None
 
-        return get_shared2_stats(self.dataset_id)
+        return get_data_entry_summary(self.dataset_id)
 
-    def _apply_file_stats(self, file_count: int, total_bytes: int) -> bool:
+    def _apply_file_stats(self, shared2_file_count: int, shared2_bytes: int, total_bytes: int) -> bool:
         """Apply calculated stats to corresponding widgets."""
         updated = False
 
         target_widgets = [
-            ('t_file_count', str(file_count)),
+            # ファイル数: 共用合計２
+            ('t_file_count', str(shared2_file_count)),
+            # ファイルサイズ欄: 共用合計２
+            ('t_meta_totalfilesizeinthisversion', str(shared2_bytes)),
+            # 全ファイルサイズ欄: 総計
             ('t_meta_totalfilesize', str(total_bytes)),
-            ('t_meta_totalfilesizeinthisversion', str(total_bytes)),
         ]
 
         for field_name, value in target_widgets:

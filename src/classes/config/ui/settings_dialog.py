@@ -123,6 +123,11 @@ class SettingsDialog(QDialog):
         logger.info("setup_ui: 報告書タブ作成開始")
         self.setup_report_tab()
         logger.info("setup_ui: 報告書タブ作成完了")
+
+        # データポータルタブ（公開・ログイン不要）
+        logger.info("setup_ui: データポータルタブ作成開始")
+        self.setup_data_portal_public_tab()
+        logger.info("setup_ui: データポータルタブ作成完了")
         
         # 設備タブ
         logger.info("setup_ui: 設備タブ作成開始")
@@ -512,6 +517,46 @@ class SettingsDialog(QDialog):
             self.equipment_widget = equipment_widget
             self.tab_widget.addTab(equipment_scroll, "設備")
             logger.info("setup_equipment_tab: フォールバック設備タブ追加成功")
+
+    def setup_data_portal_public_tab(self):
+        """データポータル（公開・ログイン不要）タブ"""
+        logger.info("setup_data_portal_public_tab: 開始")
+        try:
+            from classes.config.ui.data_portal_public_tab import DataPortalPublicTab
+
+            portal_widget = DataPortalPublicTab(self)
+
+            portal_scroll = QScrollArea()
+            portal_scroll.setWidgetResizable(True)
+            portal_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            portal_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            portal_scroll.setWidget(portal_widget)
+
+            self.data_portal_public_widget = portal_widget
+            self.tab_widget.addTab(portal_scroll, "データポータル")
+            logger.info("setup_data_portal_public_tab: データポータルタブ追加成功")
+
+        except ImportError as e:
+            logger.warning(f"データポータルタブウィジェットのインポートに失敗: {e}")
+            portal_widget = QWidget()
+            layout = QVBoxLayout(portal_widget)
+            info = QLabel(
+                "データポータル（公開）タブの読み込みに失敗しました。\n"
+                "依存関係や環境を確認してください。"
+            )
+            info.setWordWrap(True)
+            layout.addWidget(info)
+            layout.addStretch()
+
+            portal_scroll = QScrollArea()
+            portal_scroll.setWidgetResizable(True)
+            portal_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            portal_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            portal_scroll.setWidget(portal_widget)
+
+            self.data_portal_public_widget = portal_widget
+            self.tab_widget.addTab(portal_scroll, "データポータル")
+            logger.info("setup_data_portal_public_tab: フォールバックデータポータルタブ追加成功")
     
     def setup_ai_settings_tab(self):
         """AI設定タブ"""

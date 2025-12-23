@@ -21,7 +21,7 @@
 """
 import os
 import json
-from qt_compat.widgets import QWidget, QVBoxLayout, QLabel, QTabWidget
+from qt_compat.widgets import QWidget, QVBoxLayout, QLabel, QTabWidget, QScrollArea, QApplication
 from qt_compat.widgets import QHBoxLayout, QFormLayout, QLineEdit, QTextEdit, QPushButton
 from qt_compat.widgets import QSizePolicy
 from qt_compat.core import Qt
@@ -817,12 +817,22 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
         logger.debug("dataset_open: subgroup notifier wiring failed: %s", e)
     
     # 編集タブ
-    edit_tab = None  # 初期化
+    edit_tab = None  # 初期化（中身）
+    edit_scroll = None  # 初期化（タブとして追加されるラッパ）
     try:
         from classes.dataset.ui.dataset_edit_widget import create_dataset_edit_widget
         edit_tab = create_dataset_edit_widget(parent, "データセット編集", create_auto_resize_button)
-        tab_widget.addTab(edit_tab, "閲覧・修正")
-        main_widget._dataset_edit_tab = edit_tab  # type: ignore[attr-defined]
+        # 閲覧・修正タブ全体をスクロール可能にする
+        edit_scroll = QScrollArea()
+        edit_scroll.setWidgetResizable(True)
+        edit_scroll.setFrameStyle(0)
+        edit_scroll.setContentsMargins(0, 0, 0, 0)
+        edit_scroll.setWidget(edit_tab)
+        tab_widget.addTab(edit_scroll, "閲覧・修正")
+        # 他機能連携（Launch）やタブ切替判定は、実際にタブへ追加したウィジェット
+        # （= QScrollArea）を参照する必要がある。
+        main_widget._dataset_edit_tab = edit_scroll  # type: ignore[attr-defined]
+        main_widget._dataset_edit_inner_tab = edit_tab  # type: ignore[attr-defined]
         
     except Exception as e:
         logger.warning("データセット編集タブの作成に失敗: %s", e)
@@ -857,6 +867,18 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
                     logger.info("データセットリストのリフレッシュが完了しました")
                 else:
                     logger.debug("データセットリフレッシュ機能がスキップされました (edit_tab=%s)", edit_tab is not None)
+
+                # 表示タイミングで縦サイズをディスプレイに合わせる（再表示のたびにリセット）
+                try:
+                    window = main_widget.window()
+                    screen = window.screen() if hasattr(window, 'screen') else None
+                    if screen is None:
+                        screen = QApplication.primaryScreen()
+                    if screen is not None:
+                        available = screen.availableGeometry()
+                        window.resize(window.width(), available.height())
+                except Exception:
+                    logger.debug("dataset_open: window height reset failed", exc_info=True)
             elif current_tab is main_widget._dataset_dataentry_tab:
                 logger.info("データエントリータブが選択されました")
         except Exception as e:

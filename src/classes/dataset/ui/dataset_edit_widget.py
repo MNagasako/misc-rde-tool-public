@@ -931,9 +931,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     grant_number_filter_edit.setPlaceholderText("課題番号の一部を入力（部分一致検索・リアルタイム絞り込み）")
     grant_number_filter_edit.setMinimumWidth(400)
     
-    # キャッシュ更新ボタンを追加
-    cache_refresh_button = QPushButton("キャッシュ更新")
-    cache_refresh_button.setMaximumWidth(100)
+    # エントリーリスト更新ボタンを追加
+    cache_refresh_button = QPushButton("エントリーリスト更新")
+    cache_refresh_button.setObjectName("dataset_entry_list_refresh_button")
+    cache_refresh_button.setMaximumWidth(150)
     # 警告系ボタンスタイルへ統一（ThemeKey）
     cache_refresh_button.setStyleSheet(f"""
         QPushButton {{
@@ -953,11 +954,36 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
         }}
     """)
-    cache_refresh_button.setToolTip("データセット一覧を強制的に再読み込みしてキャッシュを更新します\n大量データの場合はプログレス表示されます")
+    cache_refresh_button.setToolTip("選択中データセットのエントリー一覧をAPIから再取得して更新します")
+
+    # データセット再取得ボタン（APIから詳細再取得し、フォーム表示を更新）
+    dataset_refetch_button = QPushButton("再取得")
+    dataset_refetch_button.setObjectName("dataset_refetch_button")
+    dataset_refetch_button.setMaximumWidth(80)
+    dataset_refetch_button.setStyleSheet(f"""
+        QPushButton {{
+            background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
+            color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
+            font-weight: bold;
+            border-radius: 4px;
+            padding: 5px;
+            border: 1px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)};
+        }}
+        QPushButton:hover {{
+            background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
+        }}
+        QPushButton:disabled {{
+            background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+            border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+        }}
+    """)
+    dataset_refetch_button.setToolTip("選択中データセットの詳細をAPIから再取得し、表示を更新します")
     
     grant_number_filter_layout.addWidget(grant_number_filter_label)
     grant_number_filter_layout.addWidget(grant_number_filter_edit)
     grant_number_filter_layout.addWidget(cache_refresh_button)
+    grant_number_filter_layout.addWidget(dataset_refetch_button)
     grant_number_filter_layout.addStretch()
     
     grant_number_filter_widget.setLayout(grant_number_filter_layout)
@@ -2494,14 +2520,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             """説明文の簡易品質チェック（AIテスト2と同じロジック）"""
             try:
                 # データセットが選択されているかチェック
-                current_index = existing_dataset_combo.currentIndex()
-                if current_index <= 0:
-                    QMessageBox.warning(widget, "警告", "データセットを選択してください")
-                    return
-                
-                selected_dataset = existing_dataset_combo.itemData(current_index)
+                selected_dataset = _get_selected_dataset_from_combo()
                 if not selected_dataset:
-                    QMessageBox.warning(widget, "警告", "無効なデータセットが選択されています")
+                    QMessageBox.warning(widget, "警告", "データセットを選択してください")
                     return
                 
                 dataset_id = selected_dataset.get("id")
@@ -3530,6 +3551,32 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     entries_title.setStyleSheet("font-weight: bold;")
     entries_panel_layout.addWidget(entries_title)
 
+    # データエントリー一覧の上に操作ボタンを表示
+    entries_button_layout = QHBoxLayout()
+    entries_button_layout.setContentsMargins(0, 0, 0, 0)
+
+    open_dataset_page_button = create_auto_resize_button(
+        "RDEデータセットページを開く", 200, 40,
+        f"background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; font-weight: bold; border-radius: 6px; border:1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BORDER)};"
+    )
+    try:
+        open_dataset_page_button.setObjectName("dataset_open_page_button")
+    except Exception:
+        pass
+    entries_button_layout.addWidget(open_dataset_page_button)
+
+    update_button = create_auto_resize_button(
+        "データセット更新", 200, 40,
+        f"background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)}; font-weight: bold; border-radius: 6px; border:1px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)};"
+    )
+    try:
+        update_button.setObjectName("dataset_update_button")
+    except Exception:
+        pass
+    entries_button_layout.addWidget(update_button)
+    entries_button_layout.addStretch()
+    entries_panel_layout.addLayout(entries_button_layout)
+
     # MagicMock汚染の影響を避けるため、ここで動的に実体クラスを解決
     try:
         from qt_compat.widgets import QTableWidget as _QTableWidget, QTableWidgetItem as _QTableWidgetItem, QPushButton as _QPushButton, QHeaderView as _QHeaderView
@@ -3562,6 +3609,15 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     entries_header.setSectionResizeMode(5, _QHeaderView.ResizeToContents)
     entries_table.setSortingEnabled(True)
     entries_table.setEditTriggers(_QTableWidget.NoEditTriggers)
+
+    # 外側（タブ全体）のスクロールに集約するため、内側スクロールバーは表示しない
+    try:
+        entries_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        entries_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        entries_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        entries_table.setObjectName("dataset_dataentry_table")
+    except Exception:
+        pass
     entries_panel_layout.addWidget(entries_table)
     entries_panel.setLayout(entries_panel_layout)
 
@@ -3656,6 +3712,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         try:
             entries_table.setRowCount(0)
             if not dataset_id:
+                try:
+                    header_h = entries_table.horizontalHeader().height() if entries_table.horizontalHeader() else 25
+                    target_h = max(120, int(header_h + 6))
+                    entries_table.setMinimumHeight(target_h)
+                    entries_table.setMaximumHeight(target_h)
+                except Exception:
+                    pass
                 return
 
             # データエントリーJSONの存在確認と取得
@@ -3742,6 +3805,16 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 entries_table.customContextMenuRequested.connect(on_table_context_menu)
             except Exception as _:
                 # 失敗しても致命的ではないため無視
+                pass
+
+            # 行数に合わせてテーブル高さを固定（内側スクロールを出さない）
+            try:
+                header_h = entries_table.horizontalHeader().height() if entries_table.horizontalHeader() else 25
+                row_h = entries_table.verticalHeader().defaultSectionSize() if entries_table.verticalHeader() else 22
+                target_h = max(120, int(header_h + (row_h * entries_table.rowCount()) + 8))
+                entries_table.setMinimumHeight(target_h)
+                entries_table.setMaximumHeight(target_h)
+            except Exception:
                 pass
 
         except Exception as e:
@@ -4081,32 +4154,43 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         edit_share_core_scope_checkbox.setChecked(core_scope_enabled)
     
     # ドロップダウン選択時の処理
+    def _get_selected_dataset_from_combo() -> dict | None:
+        """Return selected dataset dict from combo, or None when not selected.
+
+        index==0 を未選択扱いにする前提に依存せず、itemData の実体で判断する。
+        """
+        try:
+            idx = existing_dataset_combo.currentIndex()
+            if idx < 0:
+                return None
+            data = existing_dataset_combo.itemData(idx)
+            if not isinstance(data, dict):
+                return None
+            if not data.get("id"):
+                return None
+            return data
+        except Exception:
+            return None
+
     def on_dataset_selection_changed():
         current_index = existing_dataset_combo.currentIndex()
         logger.debug("データセット選択変更: インデックス=%s", current_index)
         reset_update_override("データセット選択変更")
         _update_launch_button_state()
-        
-        if current_index <= 0:  # 最初のアイテム（"-- データセットを選択してください --"）または無効な選択
+
+        selected_dataset = _get_selected_dataset_from_combo()
+        if not selected_dataset:
             logger.debug("データセット未選択状態 - フォームをクリアします")
             clear_edit_form()
-            # エントリー表をクリア
             update_entries_table_for_dataset(None, None)
-        else:
-            selected_dataset = existing_dataset_combo.itemData(current_index)
-            if selected_dataset:
-                resolved_dataset = _resolve_dataset_for_edit(selected_dataset) or selected_dataset
-                dataset_name = resolved_dataset.get("attributes", {}).get("name", "不明")
-                dataset_id = str(resolved_dataset.get("id", "") or "")
-                logger.debug("データセット '%s' を選択 - フォームに反映します", dataset_name)
+            return
 
-                populate_edit_form_local(resolved_dataset)
-                # 選択データセットのエントリー一覧を更新
-                update_entries_table_for_dataset(dataset_id, dataset_name, force_refresh=False)
-            else:
-                logger.debug("データセットデータが取得できません - フォームをクリアします")
-                clear_edit_form()
-                update_entries_table_for_dataset(None, None)
+        resolved_dataset = _resolve_dataset_for_edit(selected_dataset) or selected_dataset
+        dataset_name = resolved_dataset.get("attributes", {}).get("name", "不明")
+        dataset_id = str(resolved_dataset.get("id", "") or "")
+        logger.debug("データセット '%s' を選択 - フォームに反映します", dataset_name)
+        populate_edit_form_local(resolved_dataset)
+        update_entries_table_for_dataset(dataset_id, dataset_name, force_refresh=False)
     
     def on_completer_activated(text):
         """QCompleterでフィルタ選択された場合の処理（直接フォーム更新版）"""
@@ -4272,9 +4356,55 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         clear_edit_form()
     
     def refresh_cache():
-        """キャッシュを強制更新"""
-        clear_cache()
-        apply_filter(force_reload=True)
+        """エントリーリスト更新（選択中データセットのみ）"""
+        selected_dataset = _get_selected_dataset_from_combo()
+        if not selected_dataset:
+            QMessageBox.warning(widget, "データセット未選択", "更新するデータセットを選択してください。")
+            return
+
+        dataset_id = selected_dataset.get("id")
+        dataset_name = (selected_dataset.get("attributes") or {}).get("name")
+        if not dataset_id:
+            QMessageBox.warning(widget, "データエラー", "選択されたデータセットのIDが取得できません。")
+            return
+
+        update_entries_table_for_dataset(str(dataset_id), str(dataset_name) if dataset_name else None, force_refresh=True)
+
+    def on_refetch_current_dataset():
+        """選択中データセット詳細をAPIから再取得し、フォーム表示を更新"""
+        current_index = existing_dataset_combo.currentIndex()
+        selected_dataset = _get_selected_dataset_from_combo()
+        if not selected_dataset:
+            QMessageBox.warning(widget, "データセット未選択", "再取得するデータセットを選択してください。")
+            return
+
+        dataset_id = selected_dataset.get("id")
+        if not dataset_id:
+            QMessageBox.warning(widget, "データエラー", "選択されたデータセットのIDが取得できません。")
+            return
+
+        try:
+            from core.bearer_token_manager import BearerTokenManager
+            bearer_token = BearerTokenManager.get_valid_token()
+        except Exception:
+            bearer_token = None
+
+        refreshed = _fetch_dataset_detail_from_api(str(dataset_id), bearer_token)
+        if not refreshed:
+            QMessageBox.warning(widget, "再取得失敗", "データセット詳細の再取得に失敗しました。ログイン状態や権限を確認してください。")
+            return
+
+        # コンボボックスの itemData を最新詳細へ差し替え
+        try:
+            existing_dataset_combo.setItemData(current_index, refreshed)
+        except Exception:
+            pass
+
+        populate_edit_form_local(refreshed)
+
+        # エントリー一覧も選択中データセットで再描画（強制ではない）
+        dataset_name = (refreshed.get("attributes") or {}).get("name")
+        update_entries_table_for_dataset(str(dataset_id), str(dataset_name) if dataset_name else None, force_refresh=False)
     
     # 動的フィルタリング用のタイマー
     filter_timer = QTimer()
@@ -4319,41 +4449,18 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
 
     # フィルタイベントを接続
     cache_refresh_button.clicked.connect(refresh_cache)
+    dataset_refetch_button.clicked.connect(on_refetch_current_dataset)
     filter_user_only_radio.toggled.connect(lambda: apply_filter() if filter_user_only_radio.isChecked() else None)
     filter_others_only_radio.toggled.connect(lambda: apply_filter() if filter_others_only_radio.isChecked() else None)
     filter_all_radio.toggled.connect(lambda: apply_filter() if filter_all_radio.isChecked() else None)
     grant_number_filter_edit.textChanged.connect(on_filter_text_changed)  # リアルタイム絞り込み
     enable_update_override_button.clicked.connect(on_enable_update_override)
     
-    # ボタンエリア
-    button_layout = QHBoxLayout()
-    
-    # データセットページ表示ボタン
-    open_dataset_page_button = create_auto_resize_button(
-        "RDEデータセットページを開く", 200, 40,
-        f"background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; font-weight: bold; border-radius: 6px; border:1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BORDER)};"
-    )
-    button_layout.addWidget(open_dataset_page_button)
-    
-    # 更新ボタン
-    update_button = create_auto_resize_button(
-        "データセット更新", 200, 40,
-        f"background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)}; font-weight: bold; border-radius: 6px; border:1px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)};"
-    )
-    button_layout.addWidget(update_button)
-    
-    layout.addLayout(button_layout)
-    
     def on_open_dataset_page():
         """データセットページをブラウザで開く"""
-        current_index = existing_dataset_combo.currentIndex()
-        if current_index <= 0:
-            QMessageBox.warning(widget, "データセット未選択", "開くデータセットを選択してください。")
-            return
-        
-        selected_dataset = existing_dataset_combo.itemData(current_index)
+        selected_dataset = _get_selected_dataset_from_combo()
         if not selected_dataset:
-            QMessageBox.warning(widget, "データセットエラー", "選択されたデータセットの情報が取得できません。")
+            QMessageBox.warning(widget, "データセット未選択", "開くデータセットを選択してください。")
             return
         
         dataset_id = selected_dataset.get("id")
@@ -4371,14 +4478,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     
     def on_update_dataset():
         """データセット更新処理"""
-        current_index = existing_dataset_combo.currentIndex()
-        if current_index <= 0:
-            QMessageBox.warning(widget, "データセット未選択", "修正するデータセットを選択してください。")
-            return
-        
-        selected_dataset = existing_dataset_combo.itemData(current_index)
+        selected_dataset = _get_selected_dataset_from_combo()
         if not selected_dataset:
-            QMessageBox.warning(widget, "データセットエラー", "選択されたデータセットの情報が取得できません。")
+            QMessageBox.warning(widget, "データセット未選択", "修正するデータセットを選択してください。")
             return
 
         # 更新ペイロードは重要なrelationships(applicant/group等)を保持するため、詳細JSONを優先

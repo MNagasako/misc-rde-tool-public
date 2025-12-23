@@ -765,7 +765,10 @@ class DatasetUploadTab(QWidget):
     
     def _on_dataset_selected_advanced(self, index: int):
         """高度なドロップダウンからデータセット選択時の処理"""
-        if index <= 0:  # 0は"選択してください"
+        # data_fetch2 の create_dataset_dropdown_all() は「ダミー項目を追加しない」ため、
+        # index=0 が先頭データセットになる。
+        # そのため index だけでプレースホルダ判定しない。
+        if index < 0:
             self.upload_btn.setEnabled(False)
             return
         
@@ -3009,17 +3012,31 @@ class DatasetUploadTab(QWidget):
                 # 公開ページURLの code/key を抽出（存在すれば公開ページボタンを有効化）
                 self.current_public_code = None
                 self.current_public_key = None
+                self.current_public_url = None
                 try:
                     for a in soup.find_all('a', href=True):
                         href = a.get('href') or ''
                         if 'arim_data.php' in href and 'mode=detail' in href and 'code=' in href and 'key=' in href:
-                            m_code = re.search(r'[?&]code=(\d+)', href)
-                            m_key = re.search(r'[?&]key=([A-Za-z0-9]+)', href)
-                            if m_code and m_key:
-                                self.current_public_code = m_code.group(1)
-                                self.current_public_key = m_key.group(1)
-                                logger.info(f"[CHECK_ENTRY] 公開URLパラメータ抽出: code={self.current_public_code}, key={self.current_public_key}")
-                                break
+                            try:
+                                from urllib.parse import urlparse, parse_qs
+                                parsed = urlparse(href)
+                                params = parse_qs(parsed.query)
+                                code = (params.get('code', [''])[0] or '').strip()
+                                key = (params.get('key', [''])[0] or '').strip()
+
+                                if code and key:
+                                    env = self.current_environment or self.env_combo.currentData() or 'production'
+                                    from classes.utils.data_portal_public import build_public_detail_url
+                                    full_url = build_public_detail_url(env, code, key)
+                                    self.current_public_code = code
+                                    self.current_public_key = key
+                                    self.current_public_url = full_url
+                                    logger.info(
+                                        f"[CHECK_ENTRY] 公開URLパラメータ抽出: code={self.current_public_code}, key={self.current_public_key}"
+                                    )
+                                    break
+                            except Exception:
+                                continue
                 except Exception as ex:
                     logger.debug(f"[CHECK_ENTRY] 公開URL抽出スキップ: {ex}")
                 
@@ -3074,6 +3091,7 @@ class DatasetUploadTab(QWidget):
             self._show_warning("公開ページのURL情報が取得できていません")
             return
         try:
+            # current_public_url が過去の環境（本番）を指している可能性があるため、常に選択環境で組み立て直す
             env = self.current_environment or self.env_combo.currentData() or "production"
             from classes.utils.data_portal_public import build_public_detail_url
             url = build_public_detail_url(env, self.current_public_code, self.current_public_key)

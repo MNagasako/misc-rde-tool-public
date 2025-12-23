@@ -82,6 +82,9 @@ class SettingsTabWidget(QWidget):
         
         # 報告書タブ（即座にロード）
         self.setup_report_tab()
+
+        # データポータルタブ（公開・ログイン不要）
+        self.setup_data_portal_public_tab()
         
         # 設備タブ（即座にロード）
         self.setup_equipment_tab()
@@ -866,6 +869,45 @@ class SettingsTabWidget(QWidget):
             
             layout.addStretch()
             self.tab_widget.addTab(widget, "報告書")
+
+    def setup_data_portal_public_tab(self):
+        """データポータル（公開・ログイン不要）タブ"""
+        logger.info("[settings_tab_widget] データポータルタブ作成開始")
+        try:
+            from classes.config.ui.data_portal_public_tab import DataPortalPublicTab
+
+            portal_widget = DataPortalPublicTab(self)
+
+            portal_scroll = QScrollArea()
+            portal_scroll.setWidgetResizable(True)
+            portal_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            portal_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            portal_scroll.setWidget(portal_widget)
+
+            self.data_portal_public_widget = portal_widget
+            self.tab_widget.addTab(portal_scroll, "データポータル")
+            logger.info("[settings_tab_widget] データポータルタブ追加成功")
+            return
+
+        except Exception as e:
+            logger.warning(f"[settings_tab_widget] データポータルタブ作成失敗: {e}")
+            widget = QWidget()
+            layout = QVBoxLayout(widget)
+            layout.setContentsMargins(20, 20, 20, 20)
+
+            title_label = QLabel("データポータル（公開）")
+            title_font = QFont()
+            title_font.setPointSize(14)
+            title_font.setBold(True)
+            title_label.setFont(title_font)
+            layout.addWidget(title_label)
+
+            info_label = QLabel("公開データポータル機能の読み込みに失敗しました。")
+            info_label.setWordWrap(True)
+            layout.addWidget(info_label)
+
+            layout.addStretch()
+            self.tab_widget.addTab(widget, "データポータル")
     
     def setup_equipment_tab(self):
         """設備タブ"""

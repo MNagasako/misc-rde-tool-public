@@ -121,6 +121,7 @@ class AISuggestionDialog(QDialog):
         self._dataset_filter_fetcher: Optional[DatasetFilterFetcher] = None
         self._dataset_filter_widget: Optional[QWidget] = None
         self._dataset_combo_connected = False
+        self._did_initial_top_align = False
         
         # AI拡張機能を取得
         self.ai_extension = AIExtensionRegistry.get(extension_name)
@@ -142,10 +143,10 @@ class AISuggestionDialog(QDialog):
         else:
             self.setModal(True)
         self.resize(900, 700)
-        # 位置調整は行わない（ユーザー要望により削除）
+        # 位置は showEvent で上端揃え（要件）
         
         layout = QVBoxLayout(self)
-        
+
         # タイトルとツールバー
         header_layout = QHBoxLayout()
         title_label = QLabel("AIによる説明文の提案")
@@ -258,6 +259,31 @@ class AISuggestionDialog(QDialog):
 
         # 初期テーマ適用
         self.refresh_theme()
+
+    def showEvent(self, event):  # noqa: N802 - Qt互換
+        super().showEvent(event)
+        if self._did_initial_top_align:
+            return
+
+        try:
+            screen = self.screen() if hasattr(self, 'screen') else None
+            if screen is None:
+                from qt_compat.widgets import QApplication
+                screen = QApplication.primaryScreen()
+            if screen is None:
+                return
+            geo = screen.availableGeometry()
+            target_x = geo.x() + (geo.width() - self.width()) // 2
+            target_y = geo.y()
+            if target_x < geo.x():
+                target_x = geo.x()
+            if target_x + self.width() > geo.x() + geo.width():
+                target_x = geo.x() + geo.width() - self.width()
+            self.move(int(target_x), int(target_y))
+        except Exception:
+            logger.debug("AISuggestionDialog: top align failed", exc_info=True)
+        finally:
+            self._did_initial_top_align = True
         
     def setup_main_tab(self, tab_widget):
         """メインタブのセットアップ"""

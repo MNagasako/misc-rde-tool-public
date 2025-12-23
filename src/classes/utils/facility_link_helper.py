@@ -61,8 +61,8 @@ def lookup_facility_code_by_equipment_id(json_path: Path, equipment_id: str) -> 
 
 
 _ID_PATTERNS = [
-    re.compile(r"[A-Z]{2}-\d{3}"),  # e.g., NM-005
-    re.compile(r"[A-Z]{2}-\d{4}"),  # e.g., XX-1234 (future proof)
+    re.compile(r"[A-Za-z]{2}-\d{3}"),  # e.g., NM-005 (case-insensitive)
+    re.compile(r"[A-Za-z]{2}-\d{4}"),  # e.g., XX-1234 (future proof)
 ]
 
 
@@ -75,11 +75,11 @@ def extract_equipment_id(text: str) -> Optional[str]:
     for pat in _ID_PATTERNS:
         m = pat.search(text)
         if m:
-            return m.group(0)
+            return m.group(0).upper()
     # Sometimes the text itself is the ID
     t = text.strip()
     if re.fullmatch(_ID_PATTERNS[0], t) or re.fullmatch(_ID_PATTERNS[1], t):
-        return t
+        return t.upper()
     return None
 
 

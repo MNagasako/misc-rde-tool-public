@@ -3,7 +3,7 @@ import json
 import logging
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QLabel, QScrollArea, QPushButton, QHBoxLayout, 
-    QMessageBox, QTabWidget, QDialog
+    QMessageBox, QTabWidget, QDialog, QApplication
 )
 from ..core import subgroup_api_helper
 from ..util.subgroup_ui_helpers import (
@@ -41,9 +41,35 @@ def create_subgroup_create_widget(parent, title, color, create_auto_resize_butto
     try:
         from .subgroup_edit_widget import create_subgroup_edit_widget
         edit_tab = create_subgroup_edit_widget(parent, "サブグループ修正", color, create_auto_resize_button)
-        tab_widget.addTab(edit_tab, "閲覧・修正")
+
+        # 閲覧・修正タブ全体をスクロール可能にする（内容量に応じてスクロールを外側へ集約）
+        edit_scroll = QScrollArea()
+        edit_scroll.setWidgetResizable(True)
+        edit_scroll.setFrameStyle(0)
+        edit_scroll.setContentsMargins(0, 0, 0, 0)
+        edit_scroll.setWidget(edit_tab)
+        tab_widget.addTab(edit_scroll, "閲覧・修正")
         
         # タブ切り替え時にサブグループリストをリフレッシュする機能を追加
+        def _reset_window_height_to_screen(target_widget: QWidget) -> None:
+            try:
+                window = target_widget.window() if target_widget is not None else None
+                if window is None:
+                    return
+                screen = getattr(window, 'screen', None)
+                if callable(screen):
+                    screen = screen()
+                if screen is None:
+                    # fallback
+                    screen = QApplication.primaryScreen()
+                if screen is None:
+                    return
+                available = screen.availableGeometry()
+                # 縦サイズのみディスプレイに合わせる（その後はユーザーが変更可能）
+                window.resize(window.width(), available.height())
+            except Exception:
+                logger.debug("subgroup_create: window height reset failed", exc_info=True)
+
         def on_tab_changed(index):
             """タブ切り替え時の処理"""
             try:
@@ -56,6 +82,9 @@ def create_subgroup_create_widget(parent, title, color, create_auto_resize_butto
                         logger.info("サブグループリストのリフレッシュが完了しました")
                     else:
                         logger.warning("サブグループリフレッシュ機能が見つかりません")
+
+                    # 表示タイミングで縦サイズをディスプレイに合わせる（再表示のたびにリセット）
+                    _reset_window_height_to_screen(edit_scroll)
             except Exception as e:
                 logger.error("タブ切り替え時のリフレッシュ処理でエラー: %s", e)
         
