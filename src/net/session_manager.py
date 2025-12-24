@@ -1293,6 +1293,15 @@ def get_proxy_session() -> requests.Session:
     """
     return _session_manager.get_session()
 
+
+def create_new_proxy_session(config: Optional[Dict[str, Any]] = None) -> requests.Session:
+    """完全に新しいプロキシ対応セッションを作成して返す。
+
+    RDEトークン自動付与等は行わず、プロキシ/SSL(=truststore含む)設定のみを反映した
+    独立セッションが必要な場合（外部API疎通確認など）に使用します。
+    """
+    return _session_manager.create_new_session(config)
+
 def configure_proxy_session(config: Optional[Dict[str, Any]] = None):
     """
     プロキシセッションを設定

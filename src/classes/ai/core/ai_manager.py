@@ -11,7 +11,15 @@ from net.session_manager import get_proxy_session
 import requests as _requests_types  # 型ヒント・例外処理用
 import logging
 from typing import Dict, List, Any
+import copy
 from config.common import get_dynamic_file_path
+
+from classes.ai.util.generation_params import (
+    build_gemini_generate_content_body,
+    build_openai_chat_completions_payload,
+    normalize_ai_config_inplace,
+    selected_generation_params,
+)
 
 logger = logging.getLogger("RDE_AI")
 
@@ -29,7 +37,8 @@ class AIManager:
         try:
             if os.path.exists(self.config_path):
                 with open(self.config_path, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    config = json.load(f)
+                    return normalize_ai_config_inplace(config)
             else:
                 logger.warning(f"AI設定ファイルが見つかりません: {self.config_path}")
                 return self._get_default_config()
@@ -39,7 +48,7 @@ class AIManager:
     
     def _get_default_config(self) -> Dict[str, Any]:
         """デフォルト設定を返す"""
-        return {
+        config = {
             "ai_providers": {
                 "openai": {"enabled": False, "api_key": "", "models": ["gpt-5-mini"]},
                 "gemini": {"enabled": False, "api_key": "", "models": ["gemini-1.5-flash"]},
@@ -50,6 +59,7 @@ class AIManager:
             "max_tokens": 1000,
             "temperature": 0.7
         }
+        return normalize_ai_config_inplace(config)
     
     def get_available_providers(self) -> List[str]:
         """利用可能なAIプロバイダーのリストを取得"""
@@ -97,16 +107,33 @@ class AIManager:
                 prompt = truncated_prompt
             
             if provider == "openai":
-                return self._send_openai_request(prompt, model)
+                result = self._send_openai_request(prompt, model)
             elif provider == "gemini":
-                return self._send_gemini_request(prompt, model)
+                result = self._send_gemini_request(prompt, model)
             elif provider == "local_llm":
-                return self._send_local_llm_request(prompt, model)
+                result = self._send_local_llm_request(prompt, model)
             else:
-                return {"success": False, "error": f"未対応のプロバイダー: {provider}"}
+                result = {"success": False, "error": f"未対応のプロバイダー: {provider}"}
+
+            # 呼び出し側で参照できるように provider/model を常に付与
+            if isinstance(result, dict):
+                result.setdefault("provider", provider)
+                result.setdefault("model", model)
+
+                req_params = result.get("request_params")
+                if isinstance(req_params, dict):
+                    req_params.setdefault("provider", provider)
+                    req_params.setdefault("model", model)
+
+                resp_params = result.get("response_params")
+                if isinstance(resp_params, dict):
+                    resp_params.setdefault("provider", provider)
+                    resp_params.setdefault("model", model)
+
+            return result
         except Exception as e:
             logger.error(f"AI API呼び出しエラー ({provider}): {e}")
-            return {"success": False, "error": str(e)}
+            return {"success": False, "error": str(e), "provider": provider, "model": model}
     
     def _send_openai_request(self, prompt: str, model: str) -> Dict[str, Any]:
         """OpenAI APIにリクエストを送信"""
@@ -124,25 +151,15 @@ class AIManager:
             "Content-Type": "application/json"
         }
         
-        # モデル名によってパラメータを切り替え
-        data = {
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}]
-        }
-        
-        if model.startswith("gpt-5") or model.startswith("gpt-4.1"):
-            # GPT-5系およびGPT-4.1系では max_completion_tokens を使用
-            # GPT-5系はパラメータなしでデフォルト動作を使用
-            if model.startswith("gpt-5"):
-                pass  # パラメータを指定しない
-            elif "nano" in model.lower():
-                data["max_completion_tokens"] = 50
-            else:
-                data["max_completion_tokens"] = max(1000, self.config.get("max_tokens", 1000))
-        else:
-            # GPT-4以前では従来のパラメータを使用
-            data["max_tokens"] = self.config.get("max_tokens", 1000)
-            data["temperature"] = self.config.get("temperature", 0.7)
+        data = build_openai_chat_completions_payload(prompt=prompt, model=model, config=self.config)
+
+        # 表示/デバッグ用: 本文（messages）以外のリクエストパラメータ
+        request_params: Dict[str, Any] = {k: v for k, v in data.items() if k != "messages"}
+        request_params["messages_count"] = len(data.get("messages", []) or [])
+
+        # 互換性維持: GPT-4.1-nano は明示的に小さい上限が安全（未指定時のみ）
+        if model.startswith("gpt-4.1") and "nano" in model.lower() and "max_completion_tokens" not in data:
+            data["max_completion_tokens"] = 50
         
         start_time = time.time()
         response = self.session.post(
@@ -197,7 +214,15 @@ class AIManager:
                     "usage": result.get("usage", {}),
                     "tokens_used": result.get("usage", {}).get("total_tokens", 0),  # 互換性のため追加
                     "model": model,
-                    "response_time": response_time
+                    "response_time": response_time,
+                    "request_params": request_params,
+                    "response_params": {
+                        "status_code": response.status_code,
+                        "finish_reason": finish_reason,
+                        "usage": result.get("usage", {}),
+                        "response_time": response_time,
+                        "model": model,
+                    },
                 }
             else:
                 logger.debug("OpenAI API choices が空またはなし: %s", result)
@@ -205,14 +230,27 @@ class AIManager:
                     "success": False, 
                     "error": "OpenAI APIからの応答が空です",
                     "model": model,
-                    "response_time": response_time
+                    "response_time": response_time,
+                    "request_params": request_params,
+                    "response_params": {
+                        "status_code": response.status_code,
+                        "usage": result.get("usage", {}),
+                        "response_time": response_time,
+                        "model": model,
+                    },
                 }
         else:
             return {
                 "success": False, 
                 "error": f"API エラー: {response.status_code} - {response.text}",
                 "model": model,
-                "response_time": response_time
+                "response_time": response_time,
+                "request_params": request_params,
+                "response_params": {
+                    "status_code": response.status_code,
+                    "response_time": response_time,
+                    "model": model,
+                },
             }
     
     def _send_gemini_request(self, prompt: str, model: str, retry_count: int = 0) -> Dict[str, Any]:
@@ -237,91 +275,282 @@ class AIManager:
         headers = {
             "Content-Type": "application/json"
         }
-        
-        data = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "maxOutputTokens": self.config.get("max_tokens", 1000),
-                "temperature": self.config.get("temperature", 0.7)
-            }
-        }
-        
-        start_time = time.time()
-        response = self.session.post(
-            f"{url}?key={api_key}",
-            headers=headers,
-            json=data,
-            timeout=self.config.get("timeout", 120)
-        )
-        response_time = time.time() - start_time
-        
-        if response.status_code == 200:
-            result = response.json()
-            if "candidates" in result and len(result["candidates"]) > 0:
-                try:
-                    # レスポンス構造を安全にパース
-                    candidate = result["candidates"][0]
-                    content_obj = candidate.get("content", {})
-                    parts = content_obj.get("parts", [])
-                    
-                    if not parts:
-                        logger.warning(f"Gemini API レスポンスにpartsが存在しません (試行 {retry_count + 1}/{max_retries + 1}): {result}")
-                        
-                        # リトライ可能な場合はリトライ
-                        if retry_count < max_retries:
-                            logger.info(f"Gemini APIリクエストをリトライします (試行 {retry_count + 2}/{max_retries + 1})")
-                            time.sleep(1)  # 1秒待機してからリトライ
-                            return self._send_gemini_request(prompt, model, retry_count + 1)
-                        else:
-                            logger.error(f"Gemini API リトライ回数上限に達しました。最終レスポンス: {result}")
-                            return {
-                                "success": False,
-                                "error": f"Geminiからの応答にpartsが存在しません（{max_retries + 1}回試行後も失敗）",
-                                "model": model,
-                                "response_time": response_time,
-                                "raw_response": result
-                            }
-                    
-                    content = parts[0].get("text", "")
-                    usage_metadata = result.get("usageMetadata", {})
-                    
-                    # リトライ後の成功をログ出力
-                    if retry_count > 0:
-                        logger.info(f"Gemini APIリクエストが {retry_count + 1}回目の試行で成功しました")
-                    
-                    return {
-                        "success": True, 
-                        "response": content,
-                        "content": content,  # 互換性のため追加
-                        "usage": usage_metadata,
-                        "tokens_used": usage_metadata.get("totalTokenCount", 0),  # 互換性のため追加
-                        "model": model,
-                        "response_time": response_time,
-                        "retry_count": retry_count  # リトライ回数を記録
-                    }
-                except (KeyError, IndexError, TypeError) as e:
-                    logger.error(f"Gemini API レスポンスのパースエラー: {e}, レスポンス: {result}")
-                    return {
-                        "success": False,
-                        "error": f"レスポンスのパースエラー: {str(e)}",
-                        "model": model,
-                        "response_time": response_time,
-                        "raw_response": result
-                    }
+
+        def _bump_max_output_tokens(body: Dict[str, Any]) -> Dict[str, Any]:
+            bumped = copy.deepcopy(body)
+            gen_cfg = bumped.setdefault("generationConfig", {})
+            current = gen_cfg.get("maxOutputTokens")
+            try:
+                current_int = int(current)
+            except Exception:
+                current_int = 0
+
+            # Geminiで MAX_TOKENS なのに parts が空の場合、出力上限が小さすぎる可能性があるため
+            # 最低値を確保しつつ増量して再試行する（安全側の上限も設ける）
+            min_tokens = 256
+            cap_tokens = 8192
+
+            if current_int <= 0:
+                new_value = min_tokens
             else:
+                new_value = max(min_tokens, current_int + 64, current_int * 2)
+                new_value = min(new_value, cap_tokens)
+
+            gen_cfg["maxOutputTokens"] = new_value
+            return bumped
+
+        # 初期ボディ
+        data = build_gemini_generate_content_body(prompt=prompt, model=model, config=self.config, drop_experimental=False)
+        dropped_experimental = False
+        adjustments: List[Dict[str, Any]] = []
+
+        last_response_time = 0.0
+        last_status_code = 0
+        last_result: Dict[str, Any] = {}
+        last_request_params: Dict[str, Any] = {}
+
+        # retry_count は「追加試行回数」を返すため、成功時は attempt_index をセットする
+        for attempt_index in range(max_retries + 1):
+            # 表示/デバッグ用: 本文（contents）以外のリクエストパラメータ
+            request_params = {k: v for k, v in data.items() if k != "contents"}
+            request_params["contents_count"] = len(data.get("contents", []) or [])
+            if adjustments:
+                request_params["auto_adjustments"] = adjustments
+
+            last_request_params = request_params
+
+            start_time = time.time()
+            response = self.session.post(
+                f"{url}?key={api_key}",
+                headers=headers,
+                json=data,
+                timeout=self.config.get("timeout", 120)
+            )
+            last_response_time = time.time() - start_time
+            last_status_code = response.status_code
+
+            # Gemini: 一部パラメータ（penalty系など）が未対応の場合があるため、400時はexperimentalを落として1回だけ再試行
+            if response.status_code == 400 and not dropped_experimental:
+                try:
+                    gen_cfg = data.get("generationConfig") or {}
+                    has_experimental = any(k in gen_cfg for k in ("presencePenalty", "frequencyPenalty"))
+                except Exception:
+                    has_experimental = False
+
+                if has_experimental:
+                    data = build_gemini_generate_content_body(
+                        prompt=prompt,
+                        model=model,
+                        config=self.config,
+                        drop_experimental=True,
+                    )
+                    dropped_experimental = True
+                    adjustments.append({"kind": "drop_experimental_generation_config", "keys": ["presencePenalty", "frequencyPenalty"]})
+                    # 同じ attempt_index 内で即再試行（これ自体はカウントしない）
+                    retry_resp = self.session.post(
+                        f"{url}?key={api_key}",
+                        headers=headers,
+                        json=data,
+                        timeout=self.config.get("timeout", 120)
+                    )
+                    response = retry_resp
+                    last_status_code = response.status_code
+                    # response_time は最後に計測したものを維持（ここでは厳密さより可観測性を優先）
+
+            if response.status_code != 200:
                 return {
-                    "success": False, 
+                    "success": False,
+                    "error": f"API エラー: {response.status_code} - {response.text}",
+                    "model": model,
+                    "response_time": last_response_time,
+                    "request_params": last_request_params,
+                    "response_params": {
+                        "status_code": response.status_code,
+                        "response_time": last_response_time,
+                        "model": model,
+                        "retry_count": attempt_index,
+                    },
+                }
+
+            try:
+                result = response.json()
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": f"GeminiレスポンスJSONの解析に失敗しました: {type(e).__name__}",
+                    "model": model,
+                    "response_time": last_response_time,
+                    "request_params": last_request_params,
+                    "response_params": {
+                        "status_code": response.status_code,
+                        "response_time": last_response_time,
+                        "model": model,
+                        "retry_count": attempt_index,
+                    },
+                }
+
+            last_result = result
+
+            candidates = result.get("candidates") or []
+            if not candidates:
+                return {
+                    "success": False,
                     "error": "Geminiからの応答が空です",
                     "model": model,
-                    "response_time": response_time
+                    "response_time": last_response_time,
+                    "request_params": last_request_params,
+                    "response_params": {
+                        "status_code": response.status_code,
+                        "response_time": last_response_time,
+                        "model": model,
+                        "retry_count": attempt_index,
+                        "model_version": result.get("modelVersion"),
+                        "response_id": result.get("responseId"),
+                    },
                 }
-        else:
+
+            candidate = candidates[0] or {}
+            finish_reason = candidate.get("finishReason")
+            content_obj = candidate.get("content") or {}
+            parts = content_obj.get("parts") or []
+
+            usage_metadata = result.get("usageMetadata", {})
+
+            if not parts:
+                logger.warning(
+                    f"Gemini API レスポンスにpartsが存在しません (試行 {attempt_index + 1}/{max_retries + 1}): {result}"
+                )
+
+                # MAX_TOKENS で parts が空の場合、maxOutputTokens を増量して再試行
+                if finish_reason == "MAX_TOKENS" and attempt_index < max_retries:
+                    before = ((data.get("generationConfig") or {}).get("maxOutputTokens"))
+                    data = _bump_max_output_tokens(data)
+                    after = ((data.get("generationConfig") or {}).get("maxOutputTokens"))
+                    adjustments.append({"kind": "bump_maxOutputTokens", "before": before, "after": after})
+                    logger.info(
+                        f"Gemini MAX_TOKENS + parts無しのため maxOutputTokens を増量してリトライします (before={before}, after={after})"
+                    )
+                    time.sleep(1)
+                    continue
+
+                # 従来通り、リトライ回数に余裕があればそのままリトライ
+                if attempt_index < max_retries:
+                    logger.info(f"Gemini APIリクエストをリトライします (試行 {attempt_index + 2}/{max_retries + 1})")
+                    time.sleep(1)
+                    continue
+
+                logger.error(f"Gemini API リトライ回数上限に達しました。最終レスポンス: {result}")
+                return {
+                    "success": False,
+                    "error": f"Geminiからの応答にpartsが存在しません（{max_retries + 1}回試行後も失敗）",
+                    "model": model,
+                    "response_time": last_response_time,
+                    "raw_response": result,
+                    "request_params": last_request_params,
+                    "response_params": {
+                        "status_code": response.status_code,
+                        "usage": usage_metadata,
+                        "response_time": last_response_time,
+                        "model": model,
+                        "retry_count": attempt_index,
+                        "finish_reason": finish_reason,
+                        "model_version": result.get("modelVersion"),
+                        "response_id": result.get("responseId"),
+                        "auto_adjustments": adjustments,
+                    },
+                }
+
+            # parts があるケース
+            try:
+                texts = [p.get("text", "") for p in parts if isinstance(p, dict)]
+            except Exception:
+                texts = []
+
+            content = "".join(texts)
+
+            # partsがあっても本文が空の場合がある（特に MAX_TOKENS で出力枠が不足するケース）
+            if not (content or "").strip():
+                logger.warning(
+                    f"Gemini API レスポンスの本文が空です (finishReason={finish_reason}, 試行 {attempt_index + 1}/{max_retries + 1}): {result}"
+                )
+
+                if finish_reason == "MAX_TOKENS" and attempt_index < max_retries:
+                    before = ((data.get("generationConfig") or {}).get("maxOutputTokens"))
+                    data = _bump_max_output_tokens(data)
+                    after = ((data.get("generationConfig") or {}).get("maxOutputTokens"))
+                    adjustments.append({"kind": "bump_maxOutputTokens", "before": before, "after": after})
+                    logger.info(
+                        f"Gemini MAX_TOKENS + 本文空のため maxOutputTokens を増量してリトライします (before={before}, after={after})"
+                    )
+                    time.sleep(1)
+                    continue
+
+                # MAX_TOKENS 以外で本文が空の場合は、後方互換性のため「空文字で成功」扱いにする。
+                # （呼び出し側が本文の有無を判定できるよう response_params に warning を付与）
+                return {
+                    "success": True,
+                    "response": "",
+                    "content": "",  # 互換性のため追加
+                    "usage": usage_metadata,
+                    "tokens_used": usage_metadata.get("totalTokenCount", 0),
+                    "model": model,
+                    "response_time": last_response_time,
+                    "retry_count": attempt_index,
+                    "request_params": last_request_params,
+                    "response_params": {
+                        "status_code": response.status_code,
+                        "usage": usage_metadata,
+                        "response_time": last_response_time,
+                        "model": model,
+                        "retry_count": attempt_index,
+                        "finish_reason": finish_reason,
+                        "model_version": result.get("modelVersion"),
+                        "response_id": result.get("responseId"),
+                        "auto_adjustments": adjustments,
+                        "warning": "empty_content",
+                    },
+                }
+            if attempt_index > 0:
+                logger.info(f"Gemini APIリクエストが {attempt_index + 1}回目の試行で成功しました")
+
             return {
-                "success": False, 
-                "error": f"API エラー: {response.status_code} - {response.text}",
+                "success": True,
+                "response": content,
+                "content": content,  # 互換性のため追加
+                "usage": usage_metadata,
+                "tokens_used": usage_metadata.get("totalTokenCount", 0),  # 互換性のため追加
                 "model": model,
-                "response_time": response_time
+                "response_time": last_response_time,
+                "retry_count": attempt_index,
+                "request_params": last_request_params,
+                "response_params": {
+                    "status_code": response.status_code,
+                    "usage": usage_metadata,
+                    "response_time": last_response_time,
+                    "model": model,
+                    "retry_count": attempt_index,
+                    "finish_reason": finish_reason,
+                    "model_version": result.get("modelVersion"),
+                    "response_id": result.get("responseId"),
+                    "auto_adjustments": adjustments,
+                },
             }
+
+        # 通常ここには到達しないが、念のため
+        return {
+            "success": False,
+            "error": f"Geminiリクエストが失敗しました（{max_retries + 1}回試行）",
+            "model": model,
+            "response_time": last_response_time,
+            "raw_response": last_result,
+            "request_params": last_request_params,
+            "response_params": {
+                "status_code": last_status_code,
+                "response_time": last_response_time,
+                "model": model,
+                "retry_count": max_retries,
+            },
+        }
     
     def _send_local_llm_request(self, prompt: str, model: str) -> Dict[str, Any]:
         """ローカルLLM（Ollama等）にリクエストを送信"""        
@@ -346,15 +575,35 @@ class AIManager:
                 "prompt": prompt,
                 "stream": False
             }
+
+            # 生成パラメータ（カスタム使用のみ）をOllama optionsへ反映
+            selected = selected_generation_params(self.config)
+            options: Dict[str, Any] = {}
+            if 'temperature' in selected:
+                options['temperature'] = selected['temperature']
+            if 'top_p' in selected:
+                options['top_p'] = selected['top_p']
+            if 'top_k' in selected:
+                options['top_k'] = selected['top_k']
+            if 'max_output_tokens' in selected:
+                # Ollama: num_predict が生成トークン上限に相当
+                options['num_predict'] = selected['max_output_tokens']
+            if 'stop_sequences' in selected:
+                options['stop'] = selected['stop_sequences']
+
+            if options:
+                data['options'] = options
         else:
             # OpenAI互換API形式のリクエスト
-            data = {
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": self.config.get("max_tokens", 1000),
-                "temperature": self.config.get("temperature", 0.7),
-                "stream": False
-            }
+            data = build_openai_chat_completions_payload(prompt=prompt, model=model, config=self.config)
+            data["stream"] = False
+
+        # 表示/デバッグ用: 本文以外のリクエストパラメータ
+        if "/api/generate" in base_url:
+            request_params: Dict[str, Any] = {k: v for k, v in data.items() if k != "prompt"}
+        else:
+            request_params = {k: v for k, v in data.items() if k != "messages"}
+            request_params["messages_count"] = len(data.get("messages", []) or [])
         
         start_time = time.time()
         try:
@@ -427,7 +676,15 @@ class AIManager:
                         "usage": usage_info,
                         "tokens_used": tokens_used,  # 互換性のため追加
                         "model": model,
-                        "response_time": response_time
+                        "response_time": response_time,
+                        "request_params": request_params,
+                        "response_params": {
+                            "status_code": response.status_code,
+                            "usage": usage_info,
+                            "tokens_used": tokens_used,
+                            "response_time": response_time,
+                            "model": model,
+                        },
                     }
                 except (KeyError, IndexError, TypeError) as e:
                     logger.error(f"Local LLM API レスポンス解析エラー: {e}")
@@ -437,14 +694,26 @@ class AIManager:
                         "error": f"Local LLM API レスポンス解析エラー: {str(e)}",
                         "raw_response": result,
                         "model": model,
-                        "response_time": response_time
+                        "response_time": response_time,
+                        "request_params": request_params,
+                        "response_params": {
+                            "status_code": response.status_code,
+                            "response_time": response_time,
+                            "model": model,
+                        },
                     }
             else:
                 return {
                     "success": False, 
                     "error": f"ローカルLLM エラー: {response.status_code} - {response.text}",
                     "model": model,
-                    "response_time": response_time
+                    "response_time": response_time,
+                    "request_params": request_params,
+                    "response_params": {
+                        "status_code": response.status_code,
+                        "response_time": response_time,
+                        "model": model,
+                    },
                 }
         except _requests_types.exceptions.ConnectionError:
             response_time = time.time() - start_time
@@ -452,7 +721,12 @@ class AIManager:
                 "success": False, 
                 "error": "ローカルLLMサーバーに接続できません。Ollama等が起動しているか確認してください。",
                 "model": model,
-                "response_time": response_time
+                "response_time": response_time,
+                "request_params": request_params,
+                "response_params": {
+                    "response_time": response_time,
+                    "model": model,
+                },
             }
     
     def test_connection(self, provider: str) -> Dict[str, Any]:

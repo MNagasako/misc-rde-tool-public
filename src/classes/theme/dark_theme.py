@@ -1,5 +1,5 @@
 """
-ダークテーマ定義 - ARIM RDE Tool v2.3.6
+ダークテーマ定義 - ARIM RDE Tool v2.3.7
 
 Material Design Dark準拠のダークモード配色。
 高コントラスト・視認性重視の配色設計。

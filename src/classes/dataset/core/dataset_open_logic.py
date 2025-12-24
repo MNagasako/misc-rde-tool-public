@@ -1071,7 +1071,7 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     warning_label = QLabel("", parent)
     warning_label.setObjectName("datasetOpenWarningLabel")
     warning_label.setWordWrap(True)
-    warning_label.setStyleSheet("color: #d9534f; font-weight: bold;")
+    warning_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;")
     warning_label.setVisible(False)
     form_layout.addRow(warning_label)
 

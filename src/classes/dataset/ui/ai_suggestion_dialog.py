@@ -117,6 +117,10 @@ class AISuggestionDialog(QDialog):
         self.extension_buttons = []  # AI拡張ボタンのリスト（複数クリック防止用）
         self.auto_generate = auto_generate  # 自動生成フラグ
         self.last_used_prompt = None  # 最後に使用したプロンプトを保存
+        self.last_api_request_params = None  # 最後に使用したAPIリクエストパラメータ（本文除外）
+        self.last_api_response_params = None  # 最後に使用したAPIレスポンスパラメータ（本文除外）
+        self.last_api_provider = None  # 最後に使用したprovider
+        self.last_api_model = None  # 最後に使用したmodel
         self.mode = mode  # 表示モード: "dataset_suggestion" または "ai_extension"
         self._dataset_filter_fetcher: Optional[DatasetFilterFetcher] = None
         self._dataset_filter_widget: Optional[QWidget] = None
@@ -1334,6 +1338,13 @@ class AISuggestionDialog(QDialog):
         self.show_prompt_button.setEnabled(False)  # 初期状態は無効
         
         response_button_layout.addWidget(self.show_prompt_button)
+
+        # APIリクエスト/レスポンス表示ボタンを追加
+        self.show_api_params_button = QPushButton("🔎 API req/resp")
+        self.show_api_params_button.clicked.connect(self.show_api_request_response_params)
+        self.show_api_params_button.setStyleSheet(self.show_prompt_button.styleSheet())
+        self.show_api_params_button.setEnabled(False)  # 初期状態は無効
+        response_button_layout.addWidget(self.show_api_params_button)
         response_button_layout.addStretch()
         
         right_layout.addLayout(response_button_layout)
@@ -2093,6 +2104,14 @@ class AISuggestionDialog(QDialog):
         try:
             # 使用するプロンプトを保存
             self.last_used_prompt = prompt
+
+            # リクエスト/レスポンス params は実行結果が返ってから更新
+            self.last_api_request_params = None
+            self.last_api_response_params = None
+            self.last_api_provider = None
+            self.last_api_model = None
+            if hasattr(self, 'show_api_params_button'):
+                self.show_api_params_button.setEnabled(False)
             
             # プロンプト表示ボタンを有効化
             if hasattr(self, 'show_prompt_button'):
@@ -2119,6 +2138,17 @@ class AISuggestionDialog(QDialog):
             # スレッド完了時のコールバック
             def on_success(result):
                 try:
+                    # API req/resp パラメータを保存（本文は含めない想定）
+                    try:
+                        self.last_api_request_params = result.get('request_params')
+                        self.last_api_response_params = result.get('response_params')
+                        self.last_api_provider = result.get('provider')
+                        self.last_api_model = result.get('model')
+                        if hasattr(self, 'show_api_params_button'):
+                            self.show_api_params_button.setEnabled(bool(self.last_api_request_params or self.last_api_response_params))
+                    except Exception as _e:
+                        logger.debug("API req/resp params capture failed: %s", _e)
+
                     response_text = result.get('response') or result.get('content', '')
                     if response_text:
                         # 出力フォーマットに応じた表示処理
@@ -2195,6 +2225,14 @@ class AISuggestionDialog(QDialog):
                         self.extension_spinner_overlay.set_message("AI応答を待機中...")
                     # 全AI拡張ボタンを有効化（エラー時）
                     self.enable_all_extension_buttons()
+
+                    # エラー時はAPI params表示も無効化
+                    self.last_api_request_params = None
+                    self.last_api_response_params = None
+                    self.last_api_provider = None
+                    self.last_api_model = None
+                    if hasattr(self, 'show_api_params_button'):
+                        self.show_api_params_button.setEnabled(False)
             
             ai_thread.result_ready.connect(on_success)
             ai_thread.error_occurred.connect(on_error)
@@ -2675,6 +2713,73 @@ class AISuggestionDialog(QDialog):
         except Exception as e:
             logger.error("プロンプト表示エラー: %s", e)
             QMessageBox.critical(self, "エラー", f"プロンプト表示エラー: {str(e)}")
+
+    def show_api_request_response_params(self):
+        """実際のAPIリクエスト/レスポンス（本文以外）を表示"""
+        try:
+            if not (self.last_api_request_params or self.last_api_response_params):
+                QMessageBox.information(self, "情報", "表示可能なAPIリクエスト/レスポンス情報がありません。\nAI機能を実行してから再度お試しください。")
+                return
+
+            params_dialog = QDialog(self)
+            params_dialog.setWindowTitle("APIリクエスト/レスポンス（本文以外）")
+            params_dialog.setModal(True)
+            params_dialog.resize(900, 650)
+
+            layout = QVBoxLayout(params_dialog)
+
+            provider = self.last_api_provider or ""
+            model = self.last_api_model or ""
+            header_label = QLabel(f"🔎 実際のAPI req/resp パラメータ（プロンプト/本文は省略）\nprovider: {provider} / model: {model}")
+            header_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 5px;")
+            layout.addWidget(header_label)
+
+            splitter = QSplitter(Qt.Horizontal)
+
+            req_widget = QWidget()
+            req_layout = QVBoxLayout(req_widget)
+            req_title = QLabel("リクエスト")
+            req_title.setStyleSheet("font-weight: bold; margin: 3px;")
+            req_layout.addWidget(req_title)
+            req_edit = QTextEdit()
+            req_edit.setReadOnly(True)
+            req_edit.setPlainText(self._pretty_json(self.last_api_request_params or {}))
+            req_layout.addWidget(req_edit)
+            splitter.addWidget(req_widget)
+
+            resp_widget = QWidget()
+            resp_layout = QVBoxLayout(resp_widget)
+            resp_title = QLabel("レスポンス")
+            resp_title.setStyleSheet("font-weight: bold; margin: 3px;")
+            resp_layout.addWidget(resp_title)
+            resp_edit = QTextEdit()
+            resp_edit.setReadOnly(True)
+            resp_edit.setPlainText(self._pretty_json(self.last_api_response_params or {}))
+            resp_layout.addWidget(resp_edit)
+            splitter.addWidget(resp_widget)
+
+            splitter.setSizes([450, 450])
+            layout.addWidget(splitter)
+
+            button_layout = QHBoxLayout()
+            button_layout.addStretch()
+            close_button = QPushButton("閉じる")
+            close_button.clicked.connect(params_dialog.accept)
+            close_button.setStyleSheet(self.show_prompt_button.styleSheet() if hasattr(self, 'show_prompt_button') else "")
+            button_layout.addWidget(close_button)
+            layout.addLayout(button_layout)
+
+            params_dialog.exec_()
+
+        except Exception as e:
+            logger.error("API req/resp params表示エラー: %s", e)
+            QMessageBox.critical(self, "エラー", f"API req/resp params表示エラー: {str(e)}")
+
+    def _pretty_json(self, obj) -> str:
+        try:
+            return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
+        except Exception:
+            return str(obj)
     
     def _copy_prompt_to_clipboard(self, prompt_text):
         """プロンプトをクリップボードにコピー"""

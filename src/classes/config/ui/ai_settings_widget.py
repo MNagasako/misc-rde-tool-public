@@ -17,6 +17,14 @@ from typing import Dict, Any, List, Optional
 
 from classes.theme import get_color, ThemeKey
 
+from classes.ai.util.generation_params import (
+    GENERATION_PARAM_SPECS,
+    build_gemini_generate_content_body,
+    build_openai_chat_completions_payload,
+    normalize_ai_config_inplace,
+    parse_stop_sequences,
+)
+
 try:
     from qt_compat.widgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
@@ -68,8 +76,12 @@ class AISettingsWidget(QWidget):
         self.provider_widgets = {}
         self.default_provider_combo = None
         self.timeout_spinbox = None
-        self.max_tokens_spinbox = None
-        self.temperature_spinbox = None
+        self.max_tokens_spinbox = None  # 互換性のため残す（UIでは使用しない）
+        self.temperature_spinbox = None  # 互換性のため残す（UIでは使用しない）
+
+        # 生成パラメータ（新UI）
+        self.generation_params_table = None
+        self._gen_param_controls: Dict[str, Dict[str, Any]] = {}
         
         self.setup_ui()
         self.load_current_settings()
@@ -101,6 +113,9 @@ class AISettingsWidget(QWidget):
         
         # グローバル設定
         self.setup_global_settings(content_layout)
+
+        # 生成パラメータ設定（グローバルの下に追加）
+        self.setup_generation_params_settings(content_layout)
         
         # プロバイダー設定
         self.setup_provider_settings(content_layout)
@@ -131,19 +146,74 @@ class AISettingsWidget(QWidget):
         self.timeout_spinbox.setSuffix(" 秒")
         group_layout.addRow("タイムアウト:", self.timeout_spinbox)
         
-        # 最大トークン数
-        self.max_tokens_spinbox = QSpinBox()
-        self.max_tokens_spinbox.setRange(1, 100000)
-        self.max_tokens_spinbox.setValue(1000)
-        group_layout.addRow("最大トークン数:", self.max_tokens_spinbox)
-        
-        # 温度パラメータ
-        self.temperature_spinbox = QDoubleSpinBox()
-        self.temperature_spinbox.setRange(0.0, 2.0)
-        self.temperature_spinbox.setSingleStep(0.1)
-        self.temperature_spinbox.setValue(0.7)
-        group_layout.addRow("温度パラメータ:", self.temperature_spinbox)
-        
+        layout.addWidget(group)
+
+    def setup_generation_params_settings(self, layout):
+        """生成パラメータ設定セクション（プロバイダ差異は送信時に吸収）"""
+        group = QGroupBox("生成パラメータ")
+        group_layout = QVBoxLayout(group)
+
+        desc = QLabel(
+            "各パラメータは『カスタム使用』をONにした場合のみリクエストに含めます。\n"
+            "OFFの場合は未指定（プロバイダ/モデルのデフォルト動作）になります。"
+        )
+        desc.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 11px;")
+        group_layout.addWidget(desc)
+
+        table = QTableWidget()
+        table.setColumnCount(4)
+        table.setHorizontalHeaderLabels(["パラメータ", "説明", "値", "カスタム使用"])
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        table.verticalHeader().setVisible(False)
+        table.setSelectionMode(QTableWidget.NoSelection)
+        table.setEditTriggers(QTableWidget.NoEditTriggers)
+        table.setWordWrap(True)
+
+        table.setRowCount(len(GENERATION_PARAM_SPECS))
+
+        self._gen_param_controls.clear()
+
+        for row, spec in enumerate(GENERATION_PARAM_SPECS):
+            label_item = QTableWidgetItem(spec.label)
+            label_item.setFlags(label_item.flags() & ~Qt.ItemIsEditable)
+            table.setItem(row, 0, label_item)
+
+            desc_item = QTableWidgetItem(spec.description)
+            desc_item.setFlags(desc_item.flags() & ~Qt.ItemIsEditable)
+            table.setItem(row, 1, desc_item)
+
+            if spec.value_type == "float":
+                value_widget = QDoubleSpinBox()
+                value_widget.setDecimals(3)
+                if spec.min_value is not None and spec.max_value is not None:
+                    value_widget.setRange(float(spec.min_value), float(spec.max_value))
+                value_widget.setSingleStep(0.05)
+                value_widget.setValue(float(spec.default_value))
+            elif spec.value_type == "int":
+                value_widget = QSpinBox()
+                if spec.min_value is not None and spec.max_value is not None:
+                    value_widget.setRange(int(spec.min_value), int(spec.max_value))
+                value_widget.setValue(int(spec.default_value))
+            else:
+                value_widget = QLineEdit()
+                value_widget.setPlaceholderText("例: END, ###")
+
+            use_checkbox = QCheckBox()
+            use_checkbox.setChecked(False)
+
+            table.setCellWidget(row, 2, value_widget)
+            table.setCellWidget(row, 3, use_checkbox)
+
+            self._gen_param_controls[spec.key] = {"value": value_widget, "use_custom": use_checkbox}
+
+        table.resizeRowsToContents()
+        table.setMinimumHeight(260)
+
+        self.generation_params_table = table
+        group_layout.addWidget(table)
         layout.addWidget(group)
     
     def setup_provider_settings(self, layout):
@@ -161,31 +231,44 @@ class AISettingsWidget(QWidget):
         """OpenAI設定"""
         group = QGroupBox("OpenAI設定")
         group_layout = QVBoxLayout(group)
-        
-        # 有効化チェックボックス
+
+        # 折りたたみヘッダ（常に表示）
+        header_layout = QHBoxLayout()
+        toggle_button = QPushButton("▶")
+        toggle_button.setMaximumWidth(24)
+        toggle_button.setToolTip("復元")
+        header_layout.addWidget(toggle_button)
+
         enabled_checkbox = QCheckBox("OpenAIを有効にする")
-        group_layout.addWidget(enabled_checkbox)
-        
-        # 設定フォーム
+        header_layout.addWidget(enabled_checkbox)
+
+        default_model_label = QLabel("デフォルトモデル:")
+        header_layout.addWidget(default_model_label)
+
+        default_model_combo = QComboBox()
+        default_model_combo.setEditable(True)
+        initial_models = ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"]
+        self._update_default_model_combo(default_model_combo, initial_models, 'openai', 'gpt-4o-mini')
+        header_layout.addWidget(default_model_combo)
+        header_layout.addStretch()
+        group_layout.addLayout(header_layout)
+
+        details_widget = QWidget()
+        details_layout = QVBoxLayout(details_widget)
+
+        # 設定フォーム（詳細）
         form_layout = QFormLayout()
-        
+
         # API Key
         api_key_edit = QLineEdit()
         api_key_edit.setEchoMode(QLineEdit.Password)
         api_key_edit.setPlaceholderText("OpenAI API Keyを入力...")
         form_layout.addRow("API Key:", api_key_edit)
-        
+
         # Base URL
         base_url_edit = QLineEdit()
         base_url_edit.setText("https://api.openai.com/v1")
         form_layout.addRow("Base URL:", base_url_edit)
-        
-        # デフォルトモデル（料金情報付き）
-        default_model_combo = QComboBox()
-        default_model_combo.setEditable(True)
-        initial_models = ["gpt-4o-mini", "gpt-4o", "gpt-4-turbo"]
-        self._update_default_model_combo(default_model_combo, initial_models, 'openai', 'gpt-4o-mini')
-        form_layout.addRow("デフォルトモデル:", default_model_combo)
         
         # 利用可能モデルラベルと更新ボタン + フィルタ
         models_header_layout = QHBoxLayout()
@@ -236,8 +319,10 @@ class AISettingsWidget(QWidget):
         pricing_link.setOpenExternalLinks(True)
         pricing_link.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 11px;")
         form_layout.addRow("", pricing_link)
-        
-        group_layout.addLayout(form_layout)
+
+        details_layout.addLayout(form_layout)
+        details_widget.setVisible(False)  # デフォルトは縮小
+        group_layout.addWidget(details_widget)
         
         # ウィジェット参照を保存
         self.provider_widgets['openai'] = {
@@ -248,8 +333,12 @@ class AISettingsWidget(QWidget):
             'models_table': models_table,
             'fetch_button': fetch_models_button,
             'filter': models_filter,
-            'clear_filter': clear_filter_btn
+            'clear_filter': clear_filter_btn,
+            'toggle_button': toggle_button,
+            'details_widget': details_widget,
         }
+
+        toggle_button.clicked.connect(lambda: self._toggle_provider_details('openai'))
         
         layout.addWidget(group)
     
@@ -257,31 +346,44 @@ class AISettingsWidget(QWidget):
         """Gemini設定"""
         group = QGroupBox("Gemini設定")
         group_layout = QVBoxLayout(group)
-        
-        # 有効化チェックボックス
+
+        # 折りたたみヘッダ（常に表示）
+        header_layout = QHBoxLayout()
+        toggle_button = QPushButton("▶")
+        toggle_button.setMaximumWidth(24)
+        toggle_button.setToolTip("復元")
+        header_layout.addWidget(toggle_button)
+
         enabled_checkbox = QCheckBox("Geminiを有効にする")
-        group_layout.addWidget(enabled_checkbox)
-        
-        # 設定フォーム
+        header_layout.addWidget(enabled_checkbox)
+
+        default_model_label = QLabel("デフォルトモデル:")
+        header_layout.addWidget(default_model_label)
+
+        default_model_combo = QComboBox()
+        default_model_combo.setEditable(True)
+        initial_models = ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.0-pro"]
+        self._update_default_model_combo(default_model_combo, initial_models, 'gemini', 'gemini-2.0-flash-exp')
+        header_layout.addWidget(default_model_combo)
+        header_layout.addStretch()
+        group_layout.addLayout(header_layout)
+
+        details_widget = QWidget()
+        details_layout = QVBoxLayout(details_widget)
+
+        # 設定フォーム（詳細）
         form_layout = QFormLayout()
-        
+
         # API Key
         api_key_edit = QLineEdit()
         api_key_edit.setEchoMode(QLineEdit.Password)
         api_key_edit.setPlaceholderText("Gemini API Keyを入力...")
         form_layout.addRow("API Key:", api_key_edit)
-        
+
         # Base URL
         base_url_edit = QLineEdit()
         base_url_edit.setText("https://generativelanguage.googleapis.com/v1beta")
         form_layout.addRow("Base URL:", base_url_edit)
-        
-        # デフォルトモデル（料金情報付き）
-        default_model_combo = QComboBox()
-        default_model_combo.setEditable(True)
-        initial_models = ["gemini-2.0-flash-exp", "gemini-1.5-pro", "gemini-1.5-flash", "gemini-1.0-pro"]
-        self._update_default_model_combo(default_model_combo, initial_models, 'gemini', 'gemini-2.0-flash-exp')
-        form_layout.addRow("デフォルトモデル:", default_model_combo)
         
         # 利用可能モデルラベルと更新ボタン + フィルタ
         models_header_layout = QHBoxLayout()
@@ -332,8 +434,10 @@ class AISettingsWidget(QWidget):
         pricing_link.setOpenExternalLinks(True)
         pricing_link.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 11px;")
         form_layout.addRow("", pricing_link)
-        
-        group_layout.addLayout(form_layout)
+
+        details_layout.addLayout(form_layout)
+        details_widget.setVisible(False)  # デフォルトは縮小
+        group_layout.addWidget(details_widget)
         
         # ウィジェット参照を保存
         self.provider_widgets['gemini'] = {
@@ -344,8 +448,12 @@ class AISettingsWidget(QWidget):
             'models_table': models_table,
             'fetch_button': fetch_models_button,
             'filter': models_filter,
-            'clear_filter': clear_filter_btn
+            'clear_filter': clear_filter_btn,
+            'toggle_button': toggle_button,
+            'details_widget': details_widget,
         }
+
+        toggle_button.clicked.connect(lambda: self._toggle_provider_details('gemini'))
         
         layout.addWidget(group)
     
@@ -353,26 +461,39 @@ class AISettingsWidget(QWidget):
         """ローカルLLM設定"""
         group = QGroupBox("ローカルLLM設定")
         group_layout = QVBoxLayout(group)
-        
-        # 有効化チェックボックス
+
+        # 折りたたみヘッダ（常に表示）
+        header_layout = QHBoxLayout()
+        toggle_button = QPushButton("▶")
+        toggle_button.setMaximumWidth(24)
+        toggle_button.setToolTip("復元")
+        header_layout.addWidget(toggle_button)
+
         enabled_checkbox = QCheckBox("ローカルLLMを有効にする")
-        group_layout.addWidget(enabled_checkbox)
-        
-        # 設定フォーム
+        header_layout.addWidget(enabled_checkbox)
+
+        default_model_label = QLabel("デフォルトモデル:")
+        header_layout.addWidget(default_model_label)
+
+        default_model_combo = QComboBox()
+        default_model_combo.setEditable(True)
+        initial_models = ["llama3.1:8b", "gemma2:9b", "deepseek-r1:7b"]
+        self._update_default_model_combo(default_model_combo, initial_models, 'local_llm', 'llama3.1:8b')
+        header_layout.addWidget(default_model_combo)
+        header_layout.addStretch()
+        group_layout.addLayout(header_layout)
+
+        details_widget = QWidget()
+        details_layout = QVBoxLayout(details_widget)
+
+        # 設定フォーム（詳細）
         form_layout = QFormLayout()
-        
+
         # Base URL（ローカルLLMの場合はAPI Keyの代わり）
         base_url_edit = QLineEdit()
         base_url_edit.setText("http://localhost:11434/api/generate")
         base_url_edit.setPlaceholderText("ローカルLLMサーバーのURLを入力...")
         form_layout.addRow("サーバーURL:", base_url_edit)
-        
-        # デフォルトモデル（料金情報付き）
-        default_model_combo = QComboBox()
-        default_model_combo.setEditable(True)
-        initial_models = ["llama3.1:8b", "gemma2:9b", "deepseek-r1:7b"]
-        self._update_default_model_combo(default_model_combo, initial_models, 'local_llm', 'llama3.1:8b')
-        form_layout.addRow("デフォルトモデル:", default_model_combo)
         
         # 利用可能モデルラベルと更新ボタン + フィルタ
         models_header_layout = QHBoxLayout()
@@ -419,8 +540,10 @@ class AISettingsWidget(QWidget):
         note_label = QLabel("注意: Ollama等のローカルLLMサーバーが必要です。")
         note_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-style: italic;")
         form_layout.addRow("", note_label)
-        
-        group_layout.addLayout(form_layout)
+
+        details_layout.addLayout(form_layout)
+        details_widget.setVisible(False)  # デフォルトは縮小
+        group_layout.addWidget(details_widget)
         
         # 価格情報表示（ローカルは対象外）
         pricing_note = QLabel("ローカル環境: 料金情報は対象外です")
@@ -435,8 +558,12 @@ class AISettingsWidget(QWidget):
             'models_table': models_table,
             'fetch_button': fetch_models_button,
             'filter': models_filter,
-            'clear_filter': clear_filter_btn
+            'clear_filter': clear_filter_btn,
+            'toggle_button': toggle_button,
+            'details_widget': details_widget,
         }
+
+        toggle_button.clicked.connect(lambda: self._toggle_provider_details('local_llm'))
         
         layout.addWidget(group)
     
@@ -506,6 +633,25 @@ class AISettingsWidget(QWidget):
         self.test_result_area.setReadOnly(True)
         self.test_result_area.setPlaceholderText("テスト結果がここに表示されます...")
         group_layout.addWidget(self.test_result_area)
+
+        # リクエスト/レスポンス パラメータ表示（プロンプト/応答本文は省略）
+        req_label = QLabel("リクエストパラメータ:")
+        group_layout.addWidget(req_label)
+
+        self.test_request_params_area = QTextEdit()
+        self.test_request_params_area.setMaximumHeight(140)
+        self.test_request_params_area.setReadOnly(True)
+        self.test_request_params_area.setPlaceholderText("送信されたリクエストパラメータがここに表示されます...")
+        group_layout.addWidget(self.test_request_params_area)
+
+        resp_label = QLabel("レスポンスパラメータ:")
+        group_layout.addWidget(resp_label)
+
+        self.test_response_params_area = QTextEdit()
+        self.test_response_params_area.setMaximumHeight(140)
+        self.test_response_params_area.setReadOnly(True)
+        self.test_response_params_area.setPlaceholderText("受信したレスポンスパラメータがここに表示されます...")
+        group_layout.addWidget(self.test_response_params_area)
         
         layout.addWidget(group)
     
@@ -579,7 +725,7 @@ class AISettingsWidget(QWidget):
     
     def get_hardcoded_defaults(self):
         """ハードコードされたデフォルト設定"""
-        return {
+        config = {
             "ai_providers": {
                 "openai": {
                     "enabled": True,
@@ -607,10 +753,14 @@ class AISettingsWidget(QWidget):
             "max_tokens": 1000,
             "temperature": 0.7
         }
+        return normalize_ai_config_inplace(config)
     
     def apply_config_to_ui(self):
         """設定をUIに反映"""
         try:
+            # 生成パラメータ含めて正規化（旧設定との互換維持）
+            normalize_ai_config_inplace(self.current_config)
+
             # グローバル設定
             if self.default_provider_combo:
                 default_provider = self.current_config.get('default_provider', 'gemini')
@@ -620,12 +770,34 @@ class AISettingsWidget(QWidget):
             
             if self.timeout_spinbox:
                 self.timeout_spinbox.setValue(self.current_config.get('timeout', 30))
-            
-            if self.max_tokens_spinbox:
-                self.max_tokens_spinbox.setValue(self.current_config.get('max_tokens', 1000))
-            
-            if self.temperature_spinbox:
-                self.temperature_spinbox.setValue(self.current_config.get('temperature', 0.7))
+
+            # 生成パラメータ（テーブル）
+            gen_params = self.current_config.get('generation_params', {})
+            for key, controls in self._gen_param_controls.items():
+                entry = gen_params.get(key, {})
+                use_custom = bool(entry.get('use_custom', False))
+                controls['use_custom'].setChecked(use_custom)
+
+                value = entry.get('value')
+                widget = controls['value']
+                if isinstance(widget, QDoubleSpinBox):
+                    try:
+                        widget.setValue(float(value))
+                    except Exception:
+                        pass
+                elif isinstance(widget, QSpinBox):
+                    try:
+                        widget.setValue(int(value))
+                    except Exception:
+                        pass
+                else:
+                    # Stop sequencesなど: 表示用に整形
+                    if isinstance(value, list):
+                        widget.setText(', '.join([str(x) for x in value if str(x).strip()]))
+                    elif value is None:
+                        widget.setText('')
+                    else:
+                        widget.setText(str(value))
             
             # プロバイダー設定
             providers = self.current_config.get('ai_providers', {})
@@ -681,9 +853,39 @@ class AISettingsWidget(QWidget):
                 "ai_providers": {},
                 "default_provider": self.default_provider_combo.currentText(),
                 "timeout": self.timeout_spinbox.value(),
-                "max_tokens": self.max_tokens_spinbox.value(),
-                "temperature": self.temperature_spinbox.value()
+                "generation_params": {}
             }
+
+            # 生成パラメータを収集
+            for spec in GENERATION_PARAM_SPECS:
+                controls = self._gen_param_controls.get(spec.key)
+                if not controls:
+                    continue
+
+                use_custom = bool(controls['use_custom'].isChecked())
+                widget = controls['value']
+
+                if isinstance(widget, QDoubleSpinBox):
+                    value: Any = float(widget.value())
+                elif isinstance(widget, QSpinBox):
+                    value = int(widget.value())
+                else:
+                    value = parse_stop_sequences(widget.text())
+
+                config['generation_params'][spec.key] = {
+                    'use_custom': use_custom,
+                    'value': value
+                }
+
+            # 互換性維持: 旧キーを残す（値はgeneration_paramsから同期）
+            try:
+                config['max_tokens'] = int(config['generation_params']['max_output_tokens']['value'])
+            except Exception:
+                config['max_tokens'] = 1000
+            try:
+                config['temperature'] = float(config['generation_params']['temperature']['value'])
+            except Exception:
+                config['temperature'] = 0.7
             
             # プロバイダー設定を収集
             for provider_name, widgets in self.provider_widgets.items():
@@ -1224,8 +1426,8 @@ class AISettingsWidget(QWidget):
     
     def _test_openai_connection(self, model_name: str, provider_widgets: dict):
         """OpenAIモデルの接続テスト"""
-        import requests
         import json
+        from net.session_manager import create_new_proxy_session
         
         api_key = provider_widgets['api_key'].text().strip()
         base_url = provider_widgets['base_url'].text().strip()
@@ -1233,9 +1435,8 @@ class AISettingsWidget(QWidget):
         if not api_key:
             raise ValueError("APIキーが設定されていません")
         
-        # 新しいセッションを作成（RDEトークン付与を回避）
-        session = requests.Session()
-        session.verify = False  # SSL検証を無効化
+        # 新しいセッションを作成（RDEトークン付与を回避、ただしSSL検証はネットワーク設定に従う）
+        session = create_new_proxy_session()
         
         # テストリクエスト（modelsリストを取得して確認）
         url = f"{base_url}/models"
@@ -1275,16 +1476,15 @@ class AISettingsWidget(QWidget):
     
     def _test_gemini_connection(self, model_name: str, provider_widgets: dict):
         """Geminiモデルの接続テスト"""
-        import requests
+        from net.session_manager import create_new_proxy_session
         
         api_key = provider_widgets['api_key'].text().strip()
         
         if not api_key:
             raise ValueError("APIキーが設定されていません")
         
-        # 新しいセッションを作成（RDEトークン付与を回避）
-        session = requests.Session()
-        session.verify = False  # SSL検証を無効化
+        # 新しいセッションを作成（RDEトークン付与を回避、ただしSSL検証はネットワーク設定に従う）
+        session = create_new_proxy_session()
         
         # gemini-latestなどの解決
         resolved_name = self._resolve_model_display_name(model_name, 'gemini')
@@ -1308,17 +1508,16 @@ class AISettingsWidget(QWidget):
     
     def _test_local_llm_connection(self, model_name: str, provider_widgets: dict):
         """ローカルLLMモデルの接続テスト"""
-        import requests
         import json
+        from net.session_manager import create_new_proxy_session
         
         base_url = provider_widgets['base_url'].text().strip()
         
         if not base_url:
             raise ValueError("サーバーURLが設定されていません")
         
-        # 新しいセッションを作成（RDEトークン付与を回避）
-        session = requests.Session()
-        session.verify = False  # SSL検証を無効化
+        # 新しいセッションを作成（RDEトークン付与を回避、ただしSSL検証はネットワーク設定に従う）
+        session = create_new_proxy_session()
         
         # Ollama形式のテスト（/api/tagsエンドポイント）
         server_base = base_url.rsplit('/api/', 1)[0]
@@ -1674,6 +1873,11 @@ class AISettingsWidget(QWidget):
         # 結果エリアにプログレス表示
         if hasattr(self, 'test_result_area'):
             self.test_result_area.setText(f"🔄 {message}")
+
+        if hasattr(self, 'test_request_params_area'):
+            self.test_request_params_area.setText("")
+        if hasattr(self, 'test_response_params_area'):
+            self.test_response_params_area.setText("")
     
     def hide_test_progress(self):
         """テストプログレス非表示"""
@@ -1696,6 +1900,14 @@ class AISettingsWidget(QWidget):
                 self.hide_test_progress()
                 self.show_test_result("❌ エラー", "AIマネージャーの初期化に失敗しました。")
                 return
+
+            # リクエストパラメータ表示（本文は省略）
+            try:
+                req_params = self._build_request_params_for_display(ai_manager, provider, model, prompt)
+                if hasattr(self, 'test_request_params_area'):
+                    self.test_request_params_area.setText(self._format_as_pretty_json(req_params))
+            except Exception as e:
+                logger.debug(f"リクエストパラメータ表示エラー: {e}")
             
             # プロンプトを実行
             try:
@@ -1707,17 +1919,25 @@ class AISettingsWidget(QWidget):
                 
                 elapsed_time = time.time() - start_time
                 
-                # send_promptは辞書を返すので、responseを取得
+                # レスポンスパラメータ表示（本文は省略）
+                try:
+                    resp_params = self._build_response_params_for_display(result)
+                    if hasattr(self, 'test_response_params_area'):
+                        self.test_response_params_area.setText(self._format_as_pretty_json(resp_params))
+                except Exception as e:
+                    logger.debug(f"レスポンスパラメータ表示エラー: {e}")
+
                 if result and result.get('response'):
-                    response = result['response']
+                    tokens_used = result.get('tokens_used')
                     result_text = (
                         f"✅ {test_type}成功\n\n"
                         f"📋 テスト情報:\n"
                         f"  • プロバイダー: {provider}\n"
                         f"  • モデル: {model}\n"
-                        f"  • 実行時間: {elapsed_time:.2f}秒\n\n"
-                        f"💬 プロンプト:\n{prompt}\n\n"
-                        f"🤖 AI応答:\n{response}"
+                        f"  • 実行時間: {elapsed_time:.2f}秒\n"
+                        + (f"  • 使用トークン: {tokens_used}\n" if isinstance(tokens_used, int) else "")
+                        + "\n"
+                        "（プロンプト/AI応答本文は省略表示）"
                     )
                     self.show_test_result(f"✅ {test_type}成功", result_text)
                 else:
@@ -1775,6 +1995,88 @@ class AISettingsWidget(QWidget):
                 cursor.movePosition(cursor.MoveOperation.Start)
                 self.test_result_area.setTextCursor(cursor)
 
+    def _toggle_provider_details(self, provider: str):
+        """プロバイダ設定の折りたたみ状態を切り替え"""
+        widgets = self.provider_widgets.get(provider, {})
+        details = widgets.get('details_widget')
+        if not details:
+            return
+        collapsed = details.isVisible()
+        self._set_provider_collapsed(provider, collapsed)
+
+    def _set_provider_collapsed(self, provider: str, collapsed: bool):
+        """折りたたみ状態を設定（collapsed=Trueで詳細を隠す）"""
+        widgets = self.provider_widgets.get(provider, {})
+        details = widgets.get('details_widget')
+        toggle = widgets.get('toggle_button')
+        if details:
+            details.setVisible(not collapsed)
+        if toggle:
+            toggle.setText("▶" if collapsed else "▼")
+            toggle.setToolTip("復元" if collapsed else "縮小")
+
+    def _format_as_pretty_json(self, obj: Any) -> str:
+        try:
+            return json.dumps(obj, ensure_ascii=False, indent=2, default=str)
+        except Exception:
+            return str(obj)
+
+    def _build_request_params_for_display(self, ai_manager: Any, provider: str, model: str, prompt: str) -> Dict[str, Any]:
+        """AIテスト表示用のリクエストパラメータを作成（本文は含めない）"""
+        cfg = getattr(ai_manager, 'config', {}) or {}
+
+        if provider == 'openai':
+            payload = build_openai_chat_completions_payload(prompt=prompt, model=model, config=cfg)
+            safe = {k: v for k, v in payload.items() if k != 'messages'}
+            safe['messages_count'] = len(payload.get('messages', []) or [])
+            return {'provider': provider, 'model': model, 'payload': safe}
+
+        if provider == 'gemini':
+            body = build_gemini_generate_content_body(prompt=prompt, model=model, config=cfg, drop_experimental=False)
+            safe = {k: v for k, v in body.items() if k != 'contents'}
+            safe['contents_count'] = len(body.get('contents', []) or [])
+            return {'provider': provider, 'model': model, 'body': safe}
+
+        if provider == 'local_llm':
+            providers = (cfg.get('ai_providers') or {})
+            base_url = ((providers.get('local_llm') or {}).get('base_url') or '')
+            if '/api/generate' in base_url:
+                # Ollama等: /api/generate はprompt本文を除外し、optionsのみ表示
+                from classes.ai.util.generation_params import selected_generation_params
+
+                selected = selected_generation_params(cfg)
+                options: Dict[str, Any] = {}
+                if 'temperature' in selected:
+                    options['temperature'] = selected['temperature']
+                if 'top_p' in selected:
+                    options['top_p'] = selected['top_p']
+                if 'top_k' in selected:
+                    options['top_k'] = selected['top_k']
+                if 'max_output_tokens' in selected:
+                    options['num_predict'] = selected['max_output_tokens']
+                if 'stop_sequences' in selected:
+                    options['stop'] = selected['stop_sequences']
+
+                payload = {'model': model, 'stream': False}
+                if options:
+                    payload['options'] = options
+                return {'provider': provider, 'model': model, 'payload': payload}
+
+            # OpenAI互換
+            payload = build_openai_chat_completions_payload(prompt=prompt, model=model, config=cfg)
+            payload['stream'] = False
+            safe = {k: v for k, v in payload.items() if k != 'messages'}
+            safe['messages_count'] = len(payload.get('messages', []) or [])
+            return {'provider': provider, 'model': model, 'payload': safe}
+
+        return {'provider': provider, 'model': model}
+
+    def _build_response_params_for_display(self, result: Any) -> Dict[str, Any]:
+        """AIテスト表示用のレスポンスパラメータを作成（本文は含めない）"""
+        if not isinstance(result, dict):
+            return {'raw': str(result)}
+        return {k: v for k, v in result.items() if k not in ('response', 'content', 'raw_response')}
+
 
 class _ModelFetchWorker(QThread):
     """モデル取得ワーカー（HTTPはnet.http_helpers使用）"""
@@ -1788,14 +2090,14 @@ class _ModelFetchWorker(QThread):
 
     def run(self):
         try:
-            import requests
             provider = self.provider
             p = self.params
             models: List[str] = []
-            
-            # 新しいセッションを作成（RDEトークン付与を回避）
-            session = requests.Session()
-            session.verify = False  # SSL検証を無効化
+
+            from net.session_manager import create_new_proxy_session
+
+            # 新しいセッションを作成（RDEトークン付与を回避、ただしSSL検証はネットワーク設定に従う）
+            session = create_new_proxy_session()
             
             if provider == 'openai':
                 api_key = p.get('api_key', '')
@@ -1872,6 +2174,7 @@ def get_ai_config():
         if os.path.exists(config_path):
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
+                normalize_ai_config_inplace(config)
                 # 設定ファイルの構造に合わせて正規化
                 if 'ai_providers' in config:
                     # 新しい構造: ai_providers -> providers
@@ -1879,8 +2182,11 @@ def get_ai_config():
                         'default_provider': config.get('default_provider', 'gemini'),
                         'providers': config.get('ai_providers', {}),
                         'timeout': config.get('timeout', 30),
-                        'max_tokens': config.get('max_tokens', 1001),
-                        'temperature': config.get('temperature', 0.8)
+                        # 互換キー（旧呼び出し側向け）
+                        'max_tokens': config.get('max_tokens', 1000),
+                        'temperature': config.get('temperature', 0.7),
+                        # 新キー
+                        'generation_params': config.get('generation_params', {})
                     }
                     return normalized_config
                 else:
@@ -1894,7 +2200,8 @@ def get_ai_config():
                     'gemini': {
                         'default_model': 'gemini-2.0-flash'
                     }
-                }
+                },
+                'generation_params': {}
             }
     except Exception as e:
         logger.error(f"AI設定取得エラー: {e}")

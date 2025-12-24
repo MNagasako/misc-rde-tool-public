@@ -25,6 +25,27 @@ import os
 import logging
 logger = logging.getLogger(__name__)
 
+
+def _get_this_module_file_path() -> str | None:
+    spec = globals().get("__spec__")
+    origin = getattr(spec, "origin", None) if spec else None
+    if origin and origin != "built-in":
+        return origin
+    try:
+        import inspect
+
+        return inspect.getsourcefile(sys.modules[__name__]) or inspect.getfile(sys.modules[__name__])
+    except Exception:
+        return None
+
+
+def _get_src_dir_for_source_execution() -> str:
+    module_file_path = _get_this_module_file_path()
+    if not module_file_path:
+        raise RuntimeError("Failed to resolve module file path for config.common")
+    current_file_dir = os.path.dirname(os.path.abspath(module_file_path))  # src/config
+    return os.path.dirname(current_file_dir)  # src
+
 # バージョン管理
 # リリース時は以下の場所も更新必要:
 # 1. ドキュメント: VERSION.txt, README.md, RELEASE_NOTES_v*.md
@@ -44,13 +65,14 @@ logger = logging.getLogger(__name__)
 # 2025-11-15: v2.1.3 - データ取得2機能ファイル単位プログレス表示・粒度改善・スレッドセーフ実装
 # 2025-11-15: v2.1.2 - プログレス表示随時更新修正・スレッド安全性向上・repaint実装
 # 2025-11-14: v2.0.8 - プロキシ設定完全修正・接続テストUI設定反映・truststore/CA設定統合
+# 2025-12-24: v2.3.7 - AI安定化（Gemini MAX_TOKENS復旧）+ 設定画面のSSL警告抑制 + 規約準拠改善
 # 2025-12-24: v2.3.6 - データ登録UX改善（通常/一括の完了挙動分離）+ テスト強化
 # 2025-12-24: v2.3.5 - テスト安定化・テーマ追従の改善・診断ランナー堅牢化
 # 2025-12-23: v2.3.4 - データポータル修正（装置・プロセス関連カタログ生成）+ テスト安定化
 # 2025-12-22: v2.3.3 - データセット修正UI改善（関連データ）+ テスト更新/安定化
 # 2025-12-21: v2.3.2 - テキストエリア可視性改善（枠線/背景）+ テスト強化
 # 2025-12-20: v2.3.1 - データセット機能改善（API再取得・キーボード操作対応）
-REVISION = "2.3.6"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+REVISION = "2.3.7"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
 # 2025-12-18: v2.2.8 - データセット開設フィルタUI改善 + 基本情報キャッシュ判定修正 + ドキュメント更新
 #   - データセット開設（新規開設/新規開設2）: ロール/サブグループ/テンプレート/組織フィルタのラベル整理と「フィルタなし」の追加
 #   - 基本情報: サブグループ0件ケースで subGroups/ 欠損扱いにせず、不要な再取得を抑制
@@ -205,8 +227,7 @@ def get_base_dir():
     else:
         # ソース実行時: メインソースファイル（arim_rde_tool.py）のディレクトリの親
         # src/config/common.py -> src -> project_root（arim_rde_tool.pyの親）
-        current_file_dir = os.path.dirname(os.path.abspath(__file__))  # src/config
-        src_dir = os.path.dirname(current_file_dir)  # src
+        src_dir = _get_src_dir_for_source_execution()  # src
         project_root = os.path.dirname(src_dir)  # project_root
         if _debug_enabled():
             logger.debug(f"[PATH_DEBUG] get_base_dir (source): {project_root}")
@@ -234,14 +255,10 @@ def get_static_resource_path(relative_path):
         # ソース実行時
         # testsディレクトリは特別扱い（project_root直下）
         if path_parts[0] == 'tests':
-            current_file_dir = os.path.dirname(os.path.abspath(__file__))  # src/config
-            src_dir = os.path.dirname(current_file_dir)  # src
-            project_root = os.path.dirname(src_dir)  # project_root
-            return os.path.join(project_root, *path_parts)
+            return os.path.join(get_base_dir(), *path_parts)
         else:
             # その他のリソースはsrc配下
-            current_file_dir = os.path.dirname(os.path.abspath(__file__))  # src/config
-            src_dir = os.path.dirname(current_file_dir)  # src
+            src_dir = _get_src_dir_for_source_execution()
             return os.path.join(src_dir, *path_parts)
 
 def get_dynamic_file_path(relative_path):

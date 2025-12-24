@@ -1,4 +1,4 @@
-from PySide6.QtGui import QFont, QColor
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QLabel
 from classes.theme import ThemeKey, get_color
 
@@ -17,9 +17,7 @@ def apply_label_style(label: QLabel, color_key: ThemeKey, bold: bool = False, po
         font.setPointSize(point_size)
         font.setBold(bold)
         label.setFont(font)
-        pal = label.palette()
-        pal.setColor(label.foregroundRole(), QColor(get_color(color_key)))
-        label.setPalette(pal)
+        label.setStyleSheet(f"color: {get_color(color_key)};")
     except Exception:
         # フォールバック（最低限カラーのみ）
         try:

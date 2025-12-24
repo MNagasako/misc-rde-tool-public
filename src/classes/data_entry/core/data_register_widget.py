@@ -68,7 +68,9 @@ class DataRegisterWidget(QWidget):
         self.dataset_summary_text = QTextEdit()
         self.dataset_summary_text.setMaximumHeight(100)
         self.dataset_summary_text.setReadOnly(True)
-        self.dataset_summary_text.setStyleSheet(f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; border: 1px solid #ccc;")
+        self.dataset_summary_text.setStyleSheet(
+            f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};"
+        )
         dataset_layout.addWidget(self.dataset_summary_text)
         
         dataset_frame.setLayout(dataset_layout)
