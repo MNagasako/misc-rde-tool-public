@@ -412,7 +412,7 @@ class LoginSettingsTab(QWidget):
     def _log_status(self, message: str, error: bool = False):
         """ステータスログ出力"""
         if error:
-            style = "color: red;"
+            style = f"color: {get_color(ThemeKey.TEXT_ERROR)};"
         else:
             style = f"color: {get_color(ThemeKey.INPUT_TEXT)};"
         

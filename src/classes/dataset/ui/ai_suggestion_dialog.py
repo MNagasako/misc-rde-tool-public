@@ -1268,20 +1268,25 @@ class AISuggestionDialog(QDialog):
         
         self.clear_response_button = QPushButton("🗑️ クリア")
         self.clear_response_button.clicked.connect(self.clear_extension_response)
-        self.clear_response_button.setStyleSheet("""
-            QPushButton {
-                background-color: #dc3545;
-                color: white;
+        self.clear_response_button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
                 border: none;
                 border-radius: 4px;
                 padding: 6px 12px;
                 font-size: 12px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #c82333;
-            }
-        """)
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_PRESSED)};
+            }}
+        """
+        )
         
         self.copy_response_button = QPushButton("📋 コピー")
         self.copy_response_button.clicked.connect(self.copy_extension_response)
@@ -1608,6 +1613,28 @@ class AISuggestionDialog(QDialog):
     def refresh_theme(self, *_):
         """テーマ変更時に必要なスタイルを再適用する"""
         try:
+            # AI拡張: 応答制御ボタン
+            if hasattr(self, 'clear_response_button') and self.clear_response_button:
+                self.clear_response_button.setStyleSheet(
+                    f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
+                        border: none;
+                        border-radius: 4px;
+                        padding: 6px 12px;
+                        font-size: 12px;
+                        font-weight: bold;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+                    }}
+                    QPushButton:pressed {{
+                        background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_PRESSED)};
+                    }}
+                    """
+                )
+
             # プロンプト統計ラベル
             if hasattr(self, 'prompt_stats') and self.prompt_stats:
                 self.prompt_stats.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin: 5px;")
@@ -1807,7 +1834,7 @@ class AISuggestionDialog(QDialog):
             
         except Exception as e:
             error_label = QLabel(f"AI拡張設定の読み込みエラー: {str(e)}")
-            error_label.setStyleSheet("color: red; padding: 10px;")
+            error_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; padding: 10px;")
             self.buttons_layout.addWidget(error_label)
     
     def create_category_section(self, category_name, buttons, buttons_per_row, button_height, button_width, show_icons):

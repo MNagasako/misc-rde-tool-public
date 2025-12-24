@@ -285,17 +285,13 @@ class APICallRecorder:
     <meta charset="UTF-8">
     <title>API Call History - {self.session_id}</title>
     <style>
-        body {{ font-family: Arial, sans-serif; margin: 20px; background-color: #f5f5f5; }}
-        h1 {{ color: #333; }}
-        .summary {{ background-color: #e7f3ff; padding: 15px; border-radius: 5px; margin-bottom: 20px; }}
-        table {{ width: 100%; border-collapse: collapse; background-color: white; }}
-        th {{ background-color: #4CAF50; color: white; padding: 12px; text-align: left; }}
-        td {{ padding: 10px; border-bottom: 1px solid #ddd; }}
-        tr:hover {{ background-color: #f5f5f5; }}
-        .success {{ color: green; }}
-        .failed {{ color: red; }}
-        .details {{ margin-top: 10px; padding: 10px; background-color: #f9f9f9; border-left: 3px solid #4CAF50; }}
-        pre {{ background-color: #f4f4f4; padding: 10px; overflow-x: auto; }}
+        body {{ font-family: Arial, sans-serif; margin: 20px; }}
+        .summary {{ padding: 15px; border-radius: 5px; margin-bottom: 20px; border: 1px solid; }}
+        table {{ width: 100%; border-collapse: collapse; }}
+        th {{ padding: 12px; text-align: left; font-weight: bold; border-bottom: 1px solid; }}
+        td {{ padding: 10px; border-bottom: 1px solid; }}
+        .details {{ margin-top: 10px; padding: 10px; border-left: 3px solid; }}
+        pre {{ padding: 10px; overflow-x: auto; border: 1px solid; }}
     </style>
 </head>
 <body>

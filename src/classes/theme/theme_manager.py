@@ -597,3 +597,19 @@ def get_color(key: ThemeKey) -> str:
         >>> bg_color = get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)
     """
     return ThemeManager.instance().get_color(key)
+
+
+def get_qcolor(key: ThemeKey):
+    """現在のテーマから QColor を取得（グローバル関数）
+
+    直接 QColor() を呼ばずにテーマから色を取得したい場合に使用する。
+
+    Args:
+        key: テーマキー
+
+    Returns:
+        PySide6.QtGui.QColor
+    """
+    from PySide6.QtGui import QColor
+
+    return QColor(get_color(key))

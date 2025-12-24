@@ -4,6 +4,195 @@ import logging
 import tempfile
 import urllib.parse
 import re
+
+
+def _build_data_register_completion_text(
+    *,
+    success: bool,
+    upload_total: int,
+    upload_success_data_files: int,
+    upload_success_attachments: int,
+    failed_files: list[str] | None = None,
+    detail: str | None = None,
+) -> str:
+    """通常登録の進捗ダイアログ完了表示用テキストを生成する（純粋関数）。"""
+
+    failed_files = failed_files or []
+    upload_success_total = int(upload_success_data_files) + int(upload_success_attachments)
+    status_line = "結果: 成功" if success else "結果: 失敗"
+    lines: list[str] = [
+        status_line,
+        f"アップロード: {upload_success_total}件 / {upload_total}件 (データ: {upload_success_data_files}件, 添付: {upload_success_attachments}件)",
+    ]
+    if failed_files:
+        # 長すぎると見落としやすいので、ここでは列挙のみ（UIは手動コピー可能）
+        lines.append("失敗ファイル:\n- " + "\n- ".join(failed_files))
+    if detail:
+        lines.append(detail)
+    return "\n".join(lines)
+
+
+def _finalize_progress_dialog(progress, *, title: str, text: str, require_confirmation: bool = True) -> None:
+    """進捗ダイアログを完了状態として整形する。
+
+    Args:
+        progress: QProgressDialog
+        title: ウィンドウタイトル
+        text: 完了文言
+        require_confirmation: True=通常登録（確認押下まで閉じない） / False=一括登録等（自動クローズ寄り）
+    """
+
+    from qt_compat.core import Qt, QCoreApplication, QTimer
+    from qt_compat.widgets import QPushButton
+
+    if require_confirmation:
+        try:
+            progress.setAutoClose(False)
+            progress.setAutoReset(False)
+            progress.setMinimumDuration(0)
+        except Exception:
+            pass
+
+        # 完了時はアプリ全体をブロック（他機能を操作させない）
+        try:
+            progress.setWindowModality(Qt.ApplicationModal)
+        except Exception:
+            pass
+        try:
+            progress.setModal(True)
+        except Exception:
+            pass
+    else:
+        # 一括登録など: 確認回数を減らすため、自動クローズ寄りにする
+        try:
+            progress.setAutoClose(True)
+            progress.setAutoReset(True)
+            progress.setMinimumDuration(0)
+        except Exception:
+            pass
+
+    try:
+        progress.setWindowTitle(title)
+    except Exception:
+        pass
+
+    try:
+        existing = progress.labelText() or ""
+    except Exception:
+        existing = ""
+    if existing:
+        progress.setLabelText(existing + "\n\n" + text)
+    else:
+        progress.setLabelText(text)
+
+    try:
+        progress.setValue(progress.maximum())
+    except Exception:
+        pass
+
+    if require_confirmation:
+        # run_data_register_logic 側で仕込んだ隠しボタンがあれば再利用し、確実に表示する
+        confirm_btn = None
+        try:
+            existing_btn = getattr(progress, "_hidden_cancel_button", None)
+            if isinstance(existing_btn, QPushButton):
+                confirm_btn = existing_btn
+        except Exception:
+            confirm_btn = None
+
+        if confirm_btn is not None:
+            # 既にセット済みのボタンを再セットすると Qt 側で警告 & 無視されることがあるため、
+            # setCancelButton() は呼ばずに表示・接続だけ行う。
+            try:
+                confirm_btn.setText("確認")
+                confirm_btn.setVisible(True)
+                confirm_btn.setEnabled(True)
+            except Exception:
+                pass
+            try:
+                confirm_btn.clicked.connect(progress.close)
+            except Exception:
+                pass
+            try:
+                setattr(progress, "_confirm_button", confirm_btn)
+            except Exception:
+                pass
+            try:
+                progress.setCancelButtonText("確認")
+            except Exception:
+                pass
+        else:
+            # hiddenボタンが無い場合のみ新規でボタンを差し込み
+            confirm_btn = QPushButton("確認")
+            try:
+                progress.setCancelButton(confirm_btn)
+                confirm_btn.clicked.connect(progress.close)
+                setattr(progress, "_confirm_button", confirm_btn)
+                progress.setCancelButtonText("確認")
+            except Exception:
+                # フォールバック: 標準キャンセルボタンのテキストだけ差し替える
+                try:
+                    progress.setCancelButtonText("確認")
+                    progress.canceled.connect(progress.close)
+                except Exception:
+                    pass
+
+    try:
+        flags = progress.windowFlags() | Qt.WindowStaysOnTopHint
+        if require_confirmation:
+            # 「確認」ボタンでのみ閉じる運用にしたいので、ウィンドウの×を無効化する
+            try:
+                flags = flags & ~Qt.WindowCloseButtonHint
+            except Exception:
+                pass
+        progress.setWindowFlags(flags)
+    except Exception:
+        pass
+    try:
+        parent = progress.parent()
+        if parent is not None and hasattr(parent, "frameGeometry"):
+            pg = progress.frameGeometry()
+            pg.moveCenter(parent.frameGeometry().center())
+            progress.move(pg.topLeft())
+    except Exception:
+        pass
+    try:
+        progress.show()
+        progress.raise_()
+        progress.activateWindow()
+    except Exception:
+        pass
+
+    QCoreApplication.processEvents()
+
+    if not require_confirmation:
+        # 一括登録側は「確認」を出さず、短時間で閉じる（呼び出し元でcloseする場合もある）
+        try:
+            QTimer.singleShot(800, progress.close)
+        except Exception:
+            pass
+
+
+def _resolve_parent_widget(parent):
+    """通常登録のダイアログ親ウィンドウを解決する。
+
+    呼び出し元が parent=None の場合、参照切れでダイアログが勝手に閉じることがあるため、
+    可能ならアクティブウィンドウを親として採用する。
+    """
+
+    if parent is not None:
+        return parent
+    try:
+        from qt_compat.widgets import QApplication
+
+        app = QApplication.instance()
+        if app is not None:
+            active = app.activeWindow()
+            if active is not None:
+                return active
+    except Exception:
+        pass
+    return None
 from copy import deepcopy
 from qt_compat.widgets import QMessageBox, QFileDialog
 from qt_compat.core import QCoreApplication
@@ -14,9 +203,29 @@ from config.common import get_dynamic_file_path
 # ロガー設定
 logger = logging.getLogger(__name__)
 
+
+def select_and_save_files_to_temp(parent=None) -> list[str]:
+    """ファイル選択ダイアログで選択したファイルを一時フォルダへコピーして返す。"""
+
+    import shutil
+
+    files, _ = QFileDialog.getOpenFileNames(parent, "登録するファイルを選択", "", "すべてのファイル (*)")
+    if not files:
+        return []
+
+    temp_dir = tempfile.mkdtemp(prefix="rde_upload_")
+    temp_file_paths: list[str] = []
+    for src_path in files:
+        filename = os.path.basename(src_path)
+        dst_path = os.path.join(temp_dir, filename)
+        shutil.copy2(src_path, dst_path)
+        temp_file_paths.append(dst_path)
+    return temp_file_paths
+
 def run_data_register_logic(parent=None, bearer_token=None, dataset_info=None, form_values=None, file_paths=None, attachment_paths=None):
     """データ登録ボタン押下時のロジック（ファイル選択・一時保存付き）"""
     try:
+        parent = _resolve_parent_widget(parent)
         # Bearer Token統一管理システムで取得
         if not bearer_token:
             bearer_token = BearerTokenManager.get_token_with_relogin_prompt(parent)
@@ -225,10 +434,46 @@ def _continue_data_register_process(parent, bearer_token, dataset_info, form_val
     progress = QProgressDialog("ファイルアップロード中...", "キャンセル", 0, total_files, parent)
     progress.setWindowTitle("アップロード進捗")
     progress.setWindowModality(Qt.WindowModal)
+    progress.setAutoClose(False)
+    progress.setAutoReset(False)
     progress.setMinimumDuration(0)
     progress.setValue(0)
-    progress.setCancelButton(None)
+    # 完了時に「確認」ボタンとして確実に表示するため、cancelボタン自体は保持しつつ非表示にする
+    try:
+        from qt_compat.widgets import QPushButton
+
+        hidden_btn = QPushButton("")
+        hidden_btn.setVisible(False)
+        progress.setCancelButton(hidden_btn)
+        setattr(progress, "_hidden_cancel_button", hidden_btn)
+    except Exception:
+        try:
+            progress.setCancelButtonText("")
+        except Exception:
+            pass
+    try:
+        progress.setWindowFlags(progress.windowFlags() | Qt.WindowStaysOnTopHint)
+    except Exception:
+        pass
     progress.show()
+    try:
+        if parent is not None:
+            # 親ウインドウの中央に重なるように配置
+            pg = progress.frameGeometry()
+            pg.moveCenter(parent.frameGeometry().center())
+            progress.move(pg.topLeft())
+    except Exception:
+        pass
+    try:
+        progress.raise_()
+        progress.activateWindow()
+    except Exception:
+        pass
+    try:
+        if parent is not None:
+            setattr(parent, "_data_register_progress_dialog", progress)
+    except Exception:
+        pass
     QCoreApplication.processEvents()
     current_file_idx = 0
     # データファイルアップロード
@@ -290,14 +535,36 @@ def _continue_data_register_process(parent, bearer_token, dataset_info, form_val
         logger.error("アップロードに失敗したファイルがあります。")
         logger.debug("失敗したファイル: %s", failedUploads)
         logger.debug("エントリー作成を中止します。")
-        if parent:
-            QMessageBox.critical(parent, "アップロード失敗", 
-                               f"ファイルのアップロードに失敗しました。\n失敗したファイル:\n{chr(10).join(failedUploads)}")
+        if progress:
+            text = _build_data_register_completion_text(
+                success=False,
+                upload_total=total_files,
+                upload_success_data_files=numberUploaded,
+                upload_success_attachments=len(attachments),
+                failed_files=failedUploads,
+                detail="アップロードに失敗したため、登録を中止しました。",
+            )
+            _finalize_progress_dialog(progress, title="アップロード失敗", text=text)
         return
     
     # アップロード後もプログレスバーを維持し、エントリー本体POSTまで進捗表示
     progress.setLabelText("エントリー登録バリデーション中...")
     QCoreApplication.processEvents()
+    if progress:
+        try:
+            setattr(
+                progress,
+                "_upload_summary",
+                {
+                    "upload_total": total_files,
+                    "upload_success_data_files": numberUploaded,
+                    "upload_success_attachments": len(attachments),
+                    "failed_files": list(failedUploads),
+                },
+            )
+        except Exception:
+            pass
+
     entry_result = entry_data(
         bearer_token, dataFiles, attachements=attachments, dataset_info=dataset_info, form_values=form_values, progress=progress
     )
@@ -305,23 +572,25 @@ def _continue_data_register_process(parent, bearer_token, dataset_info, form_val
     # エントリー登録結果の処理
     if entry_result.get("success"):
         logger.info("データ登録が正常に完了しました")
-        # 成功メッセージは entry_data 関数内で表示済み
+        # 成功メッセージは entry_data 関数内で進捗ダイアログへ表示済み
     else:
         error_type = entry_result.get("error", "unknown")
         error_detail = entry_result.get("detail", "詳細不明")
         logger.error(f"データ登録に失敗: {error_type} - {error_detail}")
-        if parent:
-            if error_type == "validation":
-                QMessageBox.warning(parent, "バリデーションエラー", 
-                                   f"データの検証に失敗しました。\n\nエラー詳細:\n{error_detail}")
-            else:
-                QMessageBox.critical(parent, "登録失敗", 
-                                   f"データの登録に失敗しました。\n\nエラー種別: {error_type}\nエラー詳細: {error_detail}")
+        # エラーメッセージは entry_data 関数内で進捗ダイアログへ表示済み
     # progress.close() は entry_data 内でのみ呼ぶ
 
 
 import re
-def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form_values=None, progress=None):
+def entry_data(
+    bearer_token,
+    dataFiles,
+    attachements=[],
+    dataset_info=None,
+    form_values=None,
+    progress=None,
+    require_confirmation: bool = True,
+):
     """
     エントリー作成
     """
@@ -483,6 +752,47 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
     print (f"headers: {headers}")
     print (f"payload: {payload}")
     from qt_compat.core import QCoreApplication
+    def _get_upload_summary_from_progress() -> dict:
+        if not progress:
+            return {}
+        try:
+            summary = getattr(progress, "_upload_summary", None)
+            if isinstance(summary, dict):
+                return summary
+        except Exception:
+            pass
+        return {}
+
+    def _finalize_with_summary(
+        *,
+        ok: bool,
+        title: str,
+        detail: str | None = None,
+        failed_files: list[str] | None = None,
+    ) -> None:
+        if not progress:
+            return
+        summary = _get_upload_summary_from_progress()
+        upload_total = int(summary.get("upload_total") or 0)
+        upload_success_data_files = int(summary.get("upload_success_data_files") or 0)
+        upload_success_attachments = int(summary.get("upload_success_attachments") or 0)
+        merged_failed_files: list[str] = []
+        try:
+            merged_failed_files.extend(list(summary.get("failed_files") or []))
+        except Exception:
+            pass
+        if failed_files:
+            merged_failed_files.extend(list(failed_files))
+        text = _build_data_register_completion_text(
+            success=ok,
+            upload_total=upload_total,
+            upload_success_data_files=upload_success_data_files,
+            upload_success_attachments=upload_success_attachments,
+            failed_files=merged_failed_files,
+            detail=detail,
+        )
+        _finalize_progress_dialog(progress, title=title, text=text, require_confirmation=require_confirmation)
+
     try:
         if progress:
             progress.setLabelText("エントリー登録バリデーション中...")
@@ -490,28 +800,14 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
         # bearer_token=Noneで自動選択を有効化
         resp_validation = api_request("POST", url_validation, bearer_token=None, headers=headers, json_data=payload, timeout=60)
         if resp_validation is None:
-            if progress:
-                progress.setLabelText("バリデーションエラー: リクエスト失敗")
-                QCoreApplication.processEvents()
-                import time
-                time.sleep(2)
-                progress.close()
-            
-            # バリデーション通信エラーダイアログを確実に表示
-            from qt_compat.widgets import QMessageBox
-            import time
-            time.sleep(0.5)  # プログレスバー閉じた後、少し間を置く
-            QCoreApplication.processEvents()  # UI更新を確実にする
-            
-            # バリデーション通信エラーメッセージボックスを表示
-            msg_box = QMessageBox()
-            msg_box.setIcon(QMessageBox.Critical)
-            msg_box.setWindowTitle("バリデーション通信エラー")
-            msg_box.setText("バリデーション処理でサーバーとの通信に失敗しました。")
-            msg_box.setInformativeText("ネットワーク接続とトークンの有効性を確認してください。\nRDEサーバーと構造化サーバー間でタイムアウトが発生している場合は登録は完了している可能性があります。\nRDEサイトを確認してください。")
-            msg_box.setStandardButtons(QMessageBox.Ok)
-            msg_box.exec()
-            
+            _finalize_with_summary(
+                ok=False,
+                title="データ登録失敗",
+                detail=(
+                    "バリデーション通信エラー: サーバーとの通信に失敗しました。\n"
+                    "ネットワーク接続とトークンの有効性を確認してください。"
+                ),
+            )
             return {"error": "validation", "detail": "Request failed"}
         if progress:
             progress.setLabelText(f"バリデーション応答: {resp_validation.status_code} {resp_validation.reason}")
@@ -519,28 +815,11 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
         logger.debug("response validation:   %s %s %s", resp_validation.status_code, resp_validation.reason, resp_validation.text)
         if resp_validation.status_code not in [200, 201, 202]:
             logger.error("バリデーションエラー: %s", resp_validation.text)
-            if progress:
-                progress.setLabelText("バリデーションエラー")
-                QCoreApplication.processEvents()
-                import time
-                time.sleep(2)
-                progress.close()
-            
-            # バリデーションエラーダイアログを確実に表示
-            from qt_compat.widgets import QMessageBox
-            import time
-            time.sleep(0.5)  # プログレスバー閉じた後、少し間を置く
-            QCoreApplication.processEvents()  # UI更新を確実にする
-            
-            # バリデーションエラーメッセージボックスを表示
-            msg_box = QMessageBox()
-            msg_box.setIcon(QMessageBox.Warning)
-            msg_box.setWindowTitle("バリデーションエラー")
-            msg_box.setText("データの検証に失敗しました。")
-            msg_box.setInformativeText(f"エラー詳細: {resp_validation.text}")
-            msg_box.setStandardButtons(QMessageBox.Ok)
-            msg_box.exec()
-            
+            _finalize_with_summary(
+                ok=False,
+                title="データ登録失敗",
+                detail=f"バリデーションエラー: データの検証に失敗しました。\n\n{resp_validation.text}",
+            )
             return {"error": "validation", "detail": resp_validation.text}
         if progress:
             progress.setLabelText("エントリー本体POST中...")
@@ -548,28 +827,14 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
         # bearer_token=Noneで自動選択を有効化
         resp = api_request("POST", url, bearer_token=None, headers=headers, json_data=payload, timeout=60)
         if resp is None:
-            if progress:
-                progress.setLabelText("POSTエラー: リクエスト失敗")
-                QCoreApplication.processEvents()
-                import time
-                time.sleep(2)
-                progress.close()
-            
-            # POSTエラーダイアログを確実に表示
-            from qt_compat.widgets import QMessageBox
-            import time
-            time.sleep(0.5)  # プログレスバー閉じた後、少し間を置く
-            QCoreApplication.processEvents()  # UI更新を確実にする
-            
-            # POSTエラーメッセージボックスを表示
-            msg_box = QMessageBox()
-            msg_box.setIcon(QMessageBox.Critical)
-            msg_box.setWindowTitle("通信エラー")
-            msg_box.setText("サーバーとの通信に失敗しました。")
-            msg_box.setInformativeText("ネットワーク接続とトークンの有効性を確認してください。\nRDEサーバーと構造化サーバー間でタイムアウトが発生している場合は登録は完了している可能性があります。\nRDEサイトを確認してください。")
-            msg_box.setStandardButtons(QMessageBox.Ok)
-            msg_box.exec()
-            
+            _finalize_with_summary(
+                ok=False,
+                title="データ登録失敗",
+                detail=(
+                    "通信エラー: サーバーとの通信に失敗しました。\n"
+                    "ネットワーク接続とトークンの有効性を確認してください。"
+                ),
+            )
             return {"error": "post", "detail": "Request failed"}
         if progress:
             progress.setLabelText(f"POST応答: {resp.status_code} {resp.reason}")
@@ -596,75 +861,27 @@ def entry_data(bearer_token, dataFiles, attachements=[], dataset_info=None, form
             logger.warning("サンプル情報の自動取得に失敗: %s", e)
         
         if progress:
-            progress.setLabelText("エントリー登録完了")
-            QCoreApplication.processEvents()
-            # 成功メッセージを少し長く表示
-            import time
-            time.sleep(1)
-            progress.close()
-        
-        # 成功ダイアログを確実に表示
-        from qt_compat.widgets import QMessageBox
-        import time
-        time.sleep(0.5)  # プログレスバー閉じた後、少し間を置く
-        QCoreApplication.processEvents()  # UI更新を確実にする
-        
-        # 成功メッセージボックスを表示
-        msg_box = QMessageBox()
-        msg_box.setIcon(QMessageBox.Information)
-        msg_box.setWindowTitle("データ登録完了")
-        msg_box.setText("データの登録が正常に完了しました。")
-        msg_box.setInformativeText("登録されたデータは出力フォルダに保存されています。")
-        msg_box.setStandardButtons(QMessageBox.Ok)
-        msg_box.exec()
+            _finalize_with_summary(
+                ok=True,
+                title="データ登録完了",
+                detail="登録が完了しました。内容を確認したら「確認」を押して閉じてください。",
+            )
         
         return {"success": True, "response": data}
     except Exception as e:
         logger.error("(create_entry.json)の取得・保存に失敗しました: %s", e)
         if progress:
-            progress.setLabelText(f"エラー: {e}")
-            QCoreApplication.processEvents()
-            # エラーメッセージを少し長く表示
-            import time
-            time.sleep(2)
-            progress.close()
-        
-        # エラーダイアログを確実に表示
-        from qt_compat.widgets import QMessageBox
-        import time
-        time.sleep(0.5)  # プログレスバー閉じた後、少し間を置く
-        QCoreApplication.processEvents()  # UI更新を確実にする
-        
-        # エラーメッセージボックスを表示
-        msg_box = QMessageBox()
-        msg_box.setIcon(QMessageBox.Critical)
-        msg_box.setWindowTitle("データ登録エラー")
-        msg_box.setText("データの登録に失敗しました。")
-        msg_box.setInformativeText(f"エラー詳細: {e}")
-        msg_box.setStandardButtons(QMessageBox.Ok)
-        msg_box.exec()
-        
+            _finalize_with_summary(
+                ok=False,
+                title="データ登録失敗",
+                detail=f"例外が発生しました: {e}",
+            )
+        else:
+            try:
+                QMessageBox.critical(None, "登録失敗", f"例外が発生しました: {e}")
+            except Exception:
+                pass
         return {"error": "exception", "detail": str(e)}
-
-
-
-def select_and_save_files_to_temp(parent=None):
-    """
-    複数ファイル選択ダイアログを開き、選択ファイルを一時フォルダに保存してパスリストを返す
-    """
-    temp_dir = get_dynamic_file_path('output/rde/temp/arim_upload')
-    os.makedirs(temp_dir, exist_ok=True)
-    file_paths, _ = QFileDialog.getOpenFileNames(parent, "アップロードするファイルを選択", "", "すべてのファイル (*)")
-    if not file_paths:
-        return []
-    temp_file_paths = []
-    for src_path in file_paths:
-        base = os.path.basename(src_path)
-        dst_path = os.path.join(temp_dir, base)
-        with open(src_path, "rb") as src, open(dst_path, "wb") as dst:
-            dst.write(src.read())
-        temp_file_paths.append(dst_path)
-    return temp_file_paths
 
 def upload_file(bearer_token, datasetId="a74b58c0-9907-40e7-a261-a75519730d82", file_path=None):
     """ファイルアップロード（net.http_helpers経由 / リトライ付き）

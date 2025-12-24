@@ -12,7 +12,7 @@ from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QComboBox,
     QFormLayout, QTextEdit, QMessageBox, QFileDialog,
-    QCheckBox, QProgressBar, QRadioButton, QButtonGroup
+    QCheckBox, QProgressBar, QRadioButton, QButtonGroup, QScrollArea
 )
 from qt_compat.core import Qt, Signal, QThread
 
@@ -91,52 +91,56 @@ class DatasetUploadTab(QWidget):
     
     def _init_ui(self):
         """UI初期化"""
-        layout = QVBoxLayout(self)
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+
+        self._scroll_area = QScrollArea()
+        self._scroll_area.setWidgetResizable(True)
+        self._scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self._scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        outer_layout.addWidget(self._scroll_area)
+
+        scroll_widget = QWidget()
+        self._scroll_area.setWidget(scroll_widget)
+
+        layout = QVBoxLayout(scroll_widget)
         layout.setSpacing(10)
-        
+
         # ステータス表示エリアを先に作成（他のUIコンポーネントがログ出力に使用するため）
         self.status_text = QTextEdit()
         self.status_text.setReadOnly(True)
         self.status_text.setMaximumHeight(200)
         self.status_text.setPlaceholderText("アップロードログがここに表示されます...")
-        self.status_text.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
-                color: {get_color(ThemeKey.INPUT_TEXT)};
-                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
-                border-radius: 4px;
-                padding: 8px;
-            }}
-        """)
-        
+        self._apply_status_style()
+
         # 環境選択セクション
         env_group = self._create_environment_selector()
         layout.addWidget(env_group)
-        
+
         # ファイル選択セクション
         file_group = self._create_file_selector()
         layout.addWidget(file_group)
-        
+
         # 匿名化オプションセクション
         anon_group = self._create_anonymization_options()
         layout.addWidget(anon_group)
-        
+
         # アップロードボタン
         upload_layout = self._create_upload_button_section()
         layout.addLayout(upload_layout)
-        
+
         # プログレスバー
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         layout.addWidget(self.progress_bar)
-        
+
         # ステータス表示エリアを追加
         layout.addWidget(QLabel("ステータス:"))
         layout.addWidget(self.status_text)
-        
+
         # 初期表示設定（データセット検索がデフォルト）
         self._on_file_mode_changed()
-        
+
         layout.addStretch()
     
     def _apply_status_style(self):
@@ -201,9 +205,46 @@ class DatasetUploadTab(QWidget):
             for c in self.findChildren(QCheckBox):
                 c.setStyleSheet(indicator_style)
             # Status text already handled
+            self._apply_file_list_theme()
             self.update()
         except Exception as e:
             logger.debug(f"DatasetUploadTab refresh_theme failed: {e}")
+
+    def _apply_file_list_theme(self) -> None:
+        """取得済みファイル一覧テーブルとプレビュー領域のテーマ追従を保証"""
+        try:
+            if hasattr(self, 'file_list_widget') and self.file_list_widget is not None:
+                self.file_list_widget.setStyleSheet(f"""
+                    QTableWidget {{
+                        background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                        color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                        border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                        gridline-color: {get_color(ThemeKey.BORDER_DEFAULT)};
+                        alternate-background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+                    }}
+                    QHeaderView::section {{
+                        background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+                        color: {get_color(ThemeKey.TEXT_SECONDARY)};
+                        border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                        padding: 4px 6px;
+                        font-weight: bold;
+                    }}
+                    QTableWidget::item:selected {{
+                        background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+                    }}
+                """)
+
+            if hasattr(self, 'thumbnail_title_label') and self.thumbnail_title_label is not None:
+                self.thumbnail_title_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_MUTED)};")
+            if hasattr(self, 'thumbnail_label') and self.thumbnail_label is not None:
+                self.thumbnail_label.setStyleSheet(
+                    f"border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)}; "
+                    f"background: {get_color(ThemeKey.PANEL_BACKGROUND)}; "
+                    f"color: {get_color(ThemeKey.TEXT_PRIMARY)};"
+                )
+        except Exception as exc:
+            logger.debug(f"DatasetUploadTab _apply_file_list_theme failed: {exc}")
     
     def _create_environment_selector(self) -> QGroupBox:
         """環境選択セクション"""
@@ -424,14 +465,18 @@ class DatasetUploadTab(QWidget):
         thumbnail_layout = QVBoxLayout(thumbnail_container)
         thumbnail_layout.setContentsMargins(10, 0, 0, 0)
         
-        thumbnail_title = QLabel("プレビュー")
-        thumbnail_title.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_MUTED)};")
-        thumbnail_layout.addWidget(thumbnail_title)
+        self.thumbnail_title_label = QLabel("プレビュー")
+        self.thumbnail_title_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_MUTED)};")
+        thumbnail_layout.addWidget(self.thumbnail_title_label)
         
         self.thumbnail_label = QLabel()
         self.thumbnail_label.setFixedSize(200, 200)
         self.thumbnail_label.setAlignment(Qt.AlignCenter)
-        self.thumbnail_label.setStyleSheet(f"border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)}; background: {get_color(ThemeKey.PANEL_BACKGROUND)};")
+        self.thumbnail_label.setStyleSheet(
+            f"border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)}; "
+            f"background: {get_color(ThemeKey.PANEL_BACKGROUND)}; "
+            f"color: {get_color(ThemeKey.TEXT_PRIMARY)};"
+        )
         self.thumbnail_label.setText("ファイルにマウスオーバーで\nプレビューを表示")
         thumbnail_layout.addWidget(self.thumbnail_label)
         thumbnail_layout.addStretch()
@@ -1603,7 +1648,7 @@ class DatasetUploadTab(QWidget):
     def _log_status(self, message: str, error: bool = False):
         """ステータスログ"""
         if error:
-            style = "color: red;"
+            style = f"color: {get_color(ThemeKey.TEXT_ERROR)};"
         else:
             style = f"color: {get_color(ThemeKey.INPUT_TEXT)};"
         

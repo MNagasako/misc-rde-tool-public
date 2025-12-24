@@ -6,13 +6,16 @@
 
 import json
 import logging
+import re
+import html as html_lib
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
     QLabel, QLineEdit, QComboBox, QTextEdit, QPushButton,
     QGroupBox, QMessageBox, QProgressDialog, QApplication, QScrollArea, QWidget, QCheckBox, QRadioButton, QButtonGroup, QListWidget, QAbstractItemView,
-    QTableWidget, QTableWidgetItem, QHeaderView, QDialogButtonBox, QDateTimeEdit
+    QTableWidget, QTableWidgetItem, QHeaderView, QDialogButtonBox, QDateTimeEdit, QGridLayout
 )
 from qt_compat.core import QDateTime, Qt
 from qt_compat import get_screen_geometry
@@ -61,6 +64,12 @@ def extract_equipment_code_only(text: str) -> str:
 
 class PortalEditDialog(QDialog):
     """データカタログ修正ダイアログ"""
+
+    _ZERO_DEFAULT_FIELDS = {
+        't_file_count',
+        't_meta_totalfilesize',
+        't_meta_totalfilesizeinthisversion',
+    }
     
     def __init__(self, form_data: Dict[str, Any], t_code: str, dataset_id: str, portal_client, parent=None, metadata: Optional[Dict[str, Any]] = None):
         """
@@ -107,6 +116,14 @@ class PortalEditDialog(QDialog):
         
         scroll_widget = QWidget()
         scroll_layout = QVBoxLayout(scroll_widget)
+
+        # 設定ダイアログ用の編集ウィジェット退避領域（常に非表示）
+        self._hidden_editors = QWidget()
+        self._hidden_editors_layout = QVBoxLayout(self._hidden_editors)
+        self._hidden_editors_layout.setContentsMargins(0, 0, 0, 0)
+        self._hidden_editors_layout.setSpacing(0)
+        self._hidden_editors.setVisible(False)
+        self._summary_labels: dict[str, QLabel] = {}
         
         # 主要項目グループ
         main_group = self._create_main_fields_group()
@@ -115,6 +132,9 @@ class PortalEditDialog(QDialog):
         # その他の項目グループ
         other_group = self._create_other_fields_group()
         scroll_layout.addWidget(other_group)
+
+        # 退避領域を末尾に追加（非表示のまま保持）
+        scroll_layout.addWidget(self._hidden_editors)
         
         scroll_layout.addStretch()
         scroll.setWidget(scroll_widget)
@@ -199,8 +219,65 @@ class PortalEditDialog(QDialog):
                     label = field_data.get('label', key)
                     layout.addRow(f"{label}:", combo)
         
+        self._apply_form_layout_row_styling(layout)
         group.setLayout(layout)
         return group
+
+    def _apply_form_layout_row_styling(self, form_layout: QFormLayout) -> None:
+        """QFormLayoutの各行を、ラベル強調 + 交互背景で視認性改善する（ThemeKey管理）"""
+        try:
+            rows = []
+            while form_layout.rowCount() > 0:
+                rows.append(form_layout.takeRow(0))
+
+            for row_idx, row in enumerate(rows):
+                label_item = row.labelItem
+                field_item = row.fieldItem
+
+                label_widget = label_item.widget() if label_item is not None else None
+                field_widget = field_item.widget() if field_item is not None else None
+
+                bg_key = ThemeKey.TABLE_ROW_BACKGROUND_ALTERNATE if (row_idx % 2 == 1) else ThemeKey.TABLE_ROW_BACKGROUND
+                bg = get_color(bg_key)
+
+                # label wrapper
+                label_container = QWidget()
+                label_container.setStyleSheet(f"background-color: {bg};")
+                label_layout = QHBoxLayout(label_container)
+                label_layout.setContentsMargins(8, 4, 8, 4)
+                label_layout.setSpacing(0)
+
+                if isinstance(label_widget, QLabel):
+                    label_widget.setStyleSheet(
+                        f"color: {get_color(ThemeKey.TEXT_SECONDARY)}; font-weight: bold;"
+                    )
+                    label_widget.setAlignment(Qt.AlignVCenter | Qt.AlignLeft)
+
+                if label_widget is not None:
+                    label_layout.addWidget(label_widget)
+
+                # field wrapper
+                field_container = QWidget()
+                field_container.setStyleSheet(f"background-color: {bg};")
+                field_layout = QHBoxLayout(field_container)
+                field_layout.setContentsMargins(8, 4, 8, 4)
+                field_layout.setSpacing(0)
+
+                if field_widget is not None:
+                    field_layout.addWidget(field_widget)
+
+                form_layout.addRow(label_container, field_container)
+        except Exception:
+            # スタイル適用は補助機能のため失敗しても致命ではない
+            return
+
+    def _set_compact_autoset_button_width(self, btn: QPushButton) -> None:
+        """自動設定ボタンの横幅を必要最小限に固定して、他行と揃える"""
+        try:
+            w = max(72, btn.sizeHint().width())
+            btn.setFixedWidth(w)
+        except Exception:
+            return
     
     def _create_editable_list_table(
         self,
@@ -225,16 +302,33 @@ class PortalEditDialog(QDialog):
             QTableWidget: テーブルウィジェット
         """
         table = QTableWidget()
+        table.verticalHeader().setSectionsMovable(True)  # 行番号ドラッグで並べ替え
+        table.verticalHeader().setSectionsClickable(True)
+
+        has_mapping_column = field_prefix == 't_equip_process'
         has_function_column = bool(function_column_label) and function_widget_factory is not None
         if has_function_column:
-            table.setColumnCount(2)
-            table.setHorizontalHeaderLabels([label, function_column_label])
-            table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-            table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+            if has_mapping_column:
+                table.setColumnCount(3)
+                table.setHorizontalHeaderLabels([label, '装置名', function_column_label])
+                table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+                table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+                table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+            else:
+                table.setColumnCount(2)
+                table.setHorizontalHeaderLabels([label, function_column_label])
+                table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+                table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
         else:
-            table.setColumnCount(1)
-            table.setHorizontalHeaderLabels([label])
-            table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+            if has_mapping_column:
+                table.setColumnCount(2)
+                table.setHorizontalHeaderLabels([label, '装置名'])
+                table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+                table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+            else:
+                table.setColumnCount(1)
+                table.setHorizontalHeaderLabels([label])
+                table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         
         # 常に20行表示
         table.setRowCount(max_rows)
@@ -251,9 +345,22 @@ class PortalEditDialog(QDialog):
             item = QTableWidgetItem(value)
             table.setItem(i - 1, 0, item)
 
+            if has_mapping_column:
+                display_name = ""
+                try:
+                    fn = getattr(self, '_get_equipment_display_name', None)
+                    if callable(fn):
+                        display_name = fn(value)
+                except Exception:
+                    display_name = ""
+                mapping_item = QTableWidgetItem(display_name)
+                mapping_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                table.setItem(i - 1, 1, mapping_item)
+
             if has_function_column:
                 widget = function_widget_factory(table, i - 1)
-                table.setCellWidget(i - 1, 1, widget)
+                func_col = 2 if has_mapping_column else 1
+                table.setCellWidget(i - 1, func_col, widget)
                 function_col_widths.append(widget.sizeHint().width())
         
         # 行の高さを設定
@@ -261,14 +368,88 @@ class PortalEditDialog(QDialog):
 
         if has_function_column and function_col_widths:
             # ボタン合計幅 + セル余白ぶん
-            table.setColumnWidth(1, max(function_col_widths) + 18)
+            func_col = 2 if has_mapping_column else 1
+            table.setColumnWidth(func_col, max(function_col_widths) + 18)
         
         # 5行分の表示高さに固定（それ以上はスクロール）
         table_height = visible_rows * 25 + table.horizontalHeader().height() + 2
         table.setMaximumHeight(table_height)
         table.setMinimumHeight(table_height)
         
+        # 装置・プロセスは入力変更で名称列を更新
+        if has_mapping_column:
+            def _safe_on_changed(it, t=table, owner=self):
+                try:
+                    fn = getattr(owner, '_on_equip_process_item_changed', None)
+                    if callable(fn):
+                        fn(t, it)
+                except Exception:
+                    return
+
+            table.itemChanged.connect(_safe_on_changed)
+
         return table
+
+    def _get_equipment_display_name(self, raw_text: str) -> str:
+        text = (raw_text or '').strip()
+        if not text:
+            return ''
+
+        # タグを含む場合は誤マッチしやすいため、最初からマッチング不可とする
+        if re.search(r"<[^>]+>", text):
+            return 'マッピング不可'
+
+        code = extract_equipment_code_only(text)
+        if not code:
+            m = re.search(r"[A-Za-z]{2}-\d{3}", text)
+            code = m.group(0) if m else ""
+
+        # 装置ID形式以外（プロセス等）は空表示
+        try:
+            if not re.match(r'^[A-Za-z]{2}-\d{3}$', code):
+                return ''
+        except Exception:
+            return ''
+
+        name_map = self._load_equipment_name_map()
+        if not name_map:
+            msg = getattr(self, '_equipment_name_map_missing_message', '')
+            return msg or 'マッピングファイルなし'
+
+        name = name_map.get(code)
+        return name if name else '未登録'
+
+    def _on_equip_process_item_changed(self, table: QTableWidget, item: Optional[QTableWidgetItem]) -> None:
+        try:
+            if item is None:
+                return
+            if table is None:
+                return
+            if item.column() != 0:
+                return
+            row = item.row()
+            # mapping列は常に1
+            mapping_item = table.item(row, 1)
+            if mapping_item is None:
+                mapping_item = QTableWidgetItem('')
+                mapping_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                table.setItem(row, 1, mapping_item)
+
+            mapping_item.setText(self._get_equipment_display_name(item.text()))
+        except Exception:
+            return
+
+    def _iter_table_values_in_visual_order(self, table: QTableWidget) -> list[str]:
+        values: list[str] = []
+        if table is None:
+            return values
+        header = table.verticalHeader()
+        for visual_row in range(table.rowCount()):
+            logical_row = header.logicalIndex(visual_row) if header is not None else visual_row
+            item = table.item(logical_row, 0)
+            if item and item.text().strip():
+                values.append(item.text().strip())
+        return values
 
     def _create_equip_process_function_cell(self, table: QTableWidget, row: int) -> QWidget:
         container = QWidget()
@@ -599,46 +780,41 @@ class PortalEditDialog(QDialog):
             layout.addRow("ライセンス:", combo)
         
         # 重要技術領域（主） (main_mita_code_array[]) - ドロップダウン（複数選択不可）
-        if 'main_mita_code_array[]' in self.metadata:
-            combo = QComboBox()
-            combo.setMaximumWidth(400)
-            combo.addItem("（選択なし）", "")
-            
-            # 既存の選択値を取得
-            selected_values = []
-            if 'main_mita_code_array[]' in self.form_data and self.form_data['main_mita_code_array[]']['type'] == 'checkbox_array':
-                selected_values = [item['value'] for item in self.form_data['main_mita_code_array[]']['values'] if item['checked']]
-            
-            for opt in self.metadata['main_mita_code_array[]']['options']:
-                combo.addItem(opt['label'], opt['value'])
-                if opt['value'] in selected_values:
-                    combo.setCurrentText(opt['label'])
-            
-            self.field_widgets['main_mita_code_array[]'] = combo
-            layout.addRow("重要技術領域（主）:", combo)
-        
-        # 重要技術領域（副） (sub_mita_code_array[]) - ドロップダウン（複数選択不可）
-        if 'sub_mita_code_array[]' in self.metadata:
-            combo = QComboBox()
-            combo.setMaximumWidth(400)
-            combo.addItem("（選択なし）", "")
-            
-            # 既存の選択値を取得
-            selected_values = []
-            if 'sub_mita_code_array[]' in self.form_data and self.form_data['sub_mita_code_array[]']['type'] == 'checkbox_array':
-                selected_values = [item['value'] for item in self.form_data['sub_mita_code_array[]']['values'] if item['checked']]
-            
-            for opt in self.metadata['sub_mita_code_array[]']['options']:
-                combo.addItem(opt['label'], opt['value'])
-                if opt['value'] in selected_values:
-                    combo.setCurrentText(opt['label'])
-            
-            self.field_widgets['sub_mita_code_array[]'] = combo
-            layout.addRow("重要技術領域（副）:", combo)
-        
-        # 重要技術領域（主・副）自動設定ボタン
         if 'main_mita_code_array[]' in self.metadata or 'sub_mita_code_array[]' in self.metadata:
-            auto_tech_btn = QPushButton("🤖 重要技術領域 自動設定")
+            container = QWidget()
+            grid = QGridLayout(container)
+            grid.setContentsMargins(0, 0, 0, 0)
+            grid.setHorizontalSpacing(8)
+            grid.setVerticalSpacing(6)
+
+            # 主
+            main_combo = QComboBox()
+            main_combo.setMaximumWidth(400)
+            main_combo.addItem("（選択なし）", "")
+            main_selected_values: list[str] = []
+            if 'main_mita_code_array[]' in self.form_data and self.form_data['main_mita_code_array[]']['type'] == 'checkbox_array':
+                main_selected_values = [item['value'] for item in self.form_data['main_mita_code_array[]']['values'] if item['checked']]
+            for opt in self.metadata.get('main_mita_code_array[]', {}).get('options', []):
+                main_combo.addItem(opt['label'], opt['value'])
+                if opt['value'] in main_selected_values:
+                    main_combo.setCurrentText(opt['label'])
+            self.field_widgets['main_mita_code_array[]'] = main_combo
+
+            # 副
+            sub_combo = QComboBox()
+            sub_combo.setMaximumWidth(400)
+            sub_combo.addItem("（選択なし）", "")
+            sub_selected_values: list[str] = []
+            if 'sub_mita_code_array[]' in self.form_data and self.form_data['sub_mita_code_array[]']['type'] == 'checkbox_array':
+                sub_selected_values = [item['value'] for item in self.form_data['sub_mita_code_array[]']['values'] if item['checked']]
+            for opt in self.metadata.get('sub_mita_code_array[]', {}).get('options', []):
+                sub_combo.addItem(opt['label'], opt['value'])
+                if opt['value'] in sub_selected_values:
+                    sub_combo.setCurrentText(opt['label'])
+            self.field_widgets['sub_mita_code_array[]'] = sub_combo
+
+            # 自動設定ボタン（2行分の高さで右側に配置）
+            auto_tech_btn = QPushButton("自動設定")
             auto_tech_btn.clicked.connect(self._on_auto_set_important_tech_areas)
             auto_tech_btn.setStyleSheet(f"""
                 QPushButton {{
@@ -654,22 +830,36 @@ class PortalEditDialog(QDialog):
                 }}
             """)
             auto_tech_btn.setToolTip("報告書またはAIから重要技術領域を自動設定します")
-            layout.addRow("", auto_tech_btn)
+
+            grid.addWidget(QLabel("（主）"), 0, 0)
+            grid.addWidget(main_combo, 0, 1)
+            grid.addWidget(QLabel("（副）"), 1, 0)
+            grid.addWidget(sub_combo, 1, 1)
+            grid.addWidget(auto_tech_btn, 0, 2, 2, 1)
+            grid.setColumnStretch(1, 1)
+
+            self._set_compact_autoset_button_width(auto_tech_btn)
+
+            layout.addRow("重要技術領域:", container)
         
         # 横断技術領域 (mcta_code_array[]) - チェックボックスグループ（複数選択可）
         if 'mcta_code_array[]' in self.metadata:
             container = QWidget()
-            layout_mcta = QVBoxLayout(container)
-            layout_mcta.setContentsMargins(0, 0, 0, 0)
+            outer = QGridLayout(container)
+            outer.setContentsMargins(0, 0, 0, 0)
+            outer.setHorizontalSpacing(8)
+            outer.setVerticalSpacing(0)
             
             scroll = QScrollArea()
             scroll.setWidgetResizable(True)
             scroll.setMaximumHeight(120)
-            scroll.setMinimumHeight(120)
+            #scroll.setMinimumHeight(120)
             
             scroll_content = QWidget()
-            scroll_layout = QVBoxLayout(scroll_content)
-            scroll_layout.setContentsMargins(5, 5, 5, 5)
+            scroll_layout = QGridLayout(scroll_content)
+            scroll_layout.setContentsMargins(0, 0, 0, 0)
+            scroll_layout.setHorizontalSpacing(2)
+            scroll_layout.setVerticalSpacing(0)
             
             # 既存の選択値を取得
             selected_values = []
@@ -677,24 +867,23 @@ class PortalEditDialog(QDialog):
                 selected_values = [item['value'] for item in self.form_data['mcta_code_array[]']['values'] if item['checked']]
             
             checkboxes = []
-            for opt in self.metadata['mcta_code_array[]']['options']:
+            for idx, opt in enumerate(self.metadata['mcta_code_array[]']['options']):
                 checkbox = QCheckBox(opt['label'])
                 checkbox.setProperty('value', opt['value'])
                 if opt['value'] in selected_values:
                     checkbox.setChecked(True)
                 checkboxes.append(checkbox)
-                scroll_layout.addWidget(checkbox)
-            
-            scroll_layout.addStretch()
+
+                row = idx // 4
+                col = idx % 4
+                scroll_layout.addWidget(checkbox, row, col)
+
+            for col in range(4):
+                scroll_layout.setColumnStretch(col, 1)
             scroll.setWidget(scroll_content)
-            layout_mcta.addWidget(scroll)
-            
-            self.field_widgets['mcta_code_array[]'] = checkboxes
-            layout.addRow("横断技術領域:", container)
-        
-        # 横断技術領域 自動設定ボタン
-        if 'mcta_code_array[]' in self.metadata:
-            auto_cross_tech_btn = QPushButton("🤖 横断技術領域 自動設定")
+
+            # 自動設定ボタン（2行分の高さで右側に配置）
+            auto_cross_tech_btn = QPushButton("自動設定")
             auto_cross_tech_btn.clicked.connect(self._on_auto_set_cross_tech_areas)
             auto_cross_tech_btn.setStyleSheet(f"""
                 QPushButton {{
@@ -710,118 +899,110 @@ class PortalEditDialog(QDialog):
                 }}
             """)
             auto_cross_tech_btn.setToolTip("報告書から横断技術領域を自動設定します")
-            layout.addRow("", auto_cross_tech_btn)
+
+            self._set_compact_autoset_button_width(auto_cross_tech_btn)
+
+            outer.addWidget(scroll, 0, 0)
+            outer.addWidget(auto_cross_tech_btn, 0, 1)
+            outer.setColumnStretch(0, 1)
+
+            self.field_widgets['mcta_code_array[]'] = checkboxes
+            layout.addRow("横断技術領域:", container)
         
-        # 設備分類 (mec_code_array[]) - フィルタ可能チェックボックステーブル
+        # 設備分類 (mec_code_array[]) - サマリ表示 + 設定ダイアログ
         if 'mec_code_array[]' in self.metadata:
             options = self.metadata['mec_code_array[]']['options']
-            # 既存のform_dataから選択済み値を取得
-            selected_values = []
+            selected_values: list[str] = []
             if 'mec_code_array[]' in self.form_data and self.form_data['mec_code_array[]']['type'] == 'checkbox_array':
                 selected_values = [item['value'] for item in self.form_data['mec_code_array[]']['values'] if item['checked']]
-            
+
             table_widget = FilterableCheckboxTable(
                 field_name='mec_code_array[]',
                 label='設備分類',
                 options=options,
                 selected_values=selected_values,
-                max_height=150  # 5行分の高さ
+                max_height=220,
             )
             self.field_widgets['mec_code_array[]'] = table_widget
-            layout.addRow("設備分類:", table_widget)
+            self._park_hidden_editor(table_widget)
 
-            # 自動設定（設備分類）
-            auto_btn = QPushButton("🤖 設備分類 自動設定")
-            auto_btn.setToolTip("専用ダイアログでAI提案を確認・適用します")
-            auto_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                    color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                    padding: 6px 12px;
-                    border: none;
-                    border-radius: 4px;
-                    font-weight: bold;
-                }}
-                QPushButton:hover {{
-                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
-                }}
-            """)
-            auto_btn.clicked.connect(lambda: self._open_checkbox_autoset_dialog('設備分類 自動設定', 'mec_code_array[]', 'equipment'))
-            layout.addRow("", auto_btn)
+            row_widget, summary_label = self._create_summary_settings_row(
+                field_key='mec_code_array[]',
+                button_object_name='btn_settings_mec_code_array',
+                on_open=lambda: self._open_checkbox_table_settings_dialog(
+                    title='設備分類 設定ダイアログ',
+                    field_key='mec_code_array[]',
+                    autoset_title='設備分類 自動設定',
+                    autoset_category='equipment',
+                ),
+            )
+            layout.addRow("設備分類:", row_widget)
+            self._summary_labels['mec_code_array[]'] = summary_label
+            self._refresh_checkbox_summary('mec_code_array[]')
         
-        # マテリアルインデックス (mmi_code_array[]) - フィルタ可能チェックボックステーブル
+        # マテリアルインデックス (mmi_code_array[]) - サマリ表示 + 設定ダイアログ
         if 'mmi_code_array[]' in self.metadata:
             options = self.metadata['mmi_code_array[]']['options']
-            # 既存のform_dataから選択済み値を取得
-            selected_values = []
+            selected_values: list[str] = []
             if 'mmi_code_array[]' in self.form_data and self.form_data['mmi_code_array[]']['type'] == 'checkbox_array':
                 selected_values = [item['value'] for item in self.form_data['mmi_code_array[]']['values'] if item['checked']]
-            
+
             table_widget = FilterableCheckboxTable(
                 field_name='mmi_code_array[]',
                 label='マテリアルインデックス',
                 options=options,
                 selected_values=selected_values,
-                max_height=150  # 5行分の高さ
+                max_height=220,
             )
             self.field_widgets['mmi_code_array[]'] = table_widget
-            layout.addRow("マテリアルインデックス:", table_widget)
+            self._park_hidden_editor(table_widget)
 
-            auto_btn = QPushButton("🤖 マテリアルインデックス 自動設定")
-            auto_btn.setToolTip("専用ダイアログでAI提案を確認・適用します")
-            auto_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                    color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                    padding: 6px 12px;
-                    border: none;
-                    border-radius: 4px;
-                    font-weight: bold;
-                }}
-                QPushButton:hover {{
-                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
-                }}
-            """)
-            auto_btn.clicked.connect(lambda: self._open_checkbox_autoset_dialog('マテリアルインデックス 自動設定', 'mmi_code_array[]', 'material_index'))
-            layout.addRow("", auto_btn)
+            row_widget, summary_label = self._create_summary_settings_row(
+                field_key='mmi_code_array[]',
+                button_object_name='btn_settings_mmi_code_array',
+                on_open=lambda: self._open_checkbox_table_settings_dialog(
+                    title='マテリアルインデックス 設定ダイアログ',
+                    field_key='mmi_code_array[]',
+                    autoset_title='マテリアルインデックス 自動設定',
+                    autoset_category='material_index',
+                ),
+            )
+            layout.addRow("マテリアルインデックス:", row_widget)
+            self._summary_labels['mmi_code_array[]'] = summary_label
+            self._refresh_checkbox_summary('mmi_code_array[]')
         
-        # タグ (mt_code_array[]) - フィルタ可能チェックボックステーブル
+        # タグ (mt_code_array[]) - サマリ表示 + 設定ダイアログ
         if 'mt_code_array[]' in self.metadata:
             options = self.metadata['mt_code_array[]']['options']
-            # 既存のform_dataから選択済み値を取得
-            selected_values = []
+            selected_values: list[str] = []
             if 'mt_code_array[]' in self.form_data and self.form_data['mt_code_array[]']['type'] == 'checkbox_array':
                 selected_values = [item['value'] for item in self.form_data['mt_code_array[]']['values'] if item['checked']]
-            
+
             table_widget = FilterableCheckboxTable(
                 field_name='mt_code_array[]',
                 label='タグ',
                 options=options,
                 selected_values=selected_values,
-                max_height=150  # 5行分の高さ
+                max_height=220,
             )
             self.field_widgets['mt_code_array[]'] = table_widget
-            layout.addRow("タグ:", table_widget)
+            self._park_hidden_editor(table_widget)
 
-            auto_btn = QPushButton("🤖 タグ 自動設定")
-            auto_btn.setToolTip("専用ダイアログでAI提案を確認・適用します")
-            auto_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                    color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                    padding: 6px 12px;
-                    border: none;
-                    border-radius: 4px;
-                    font-weight: bold;
-                }}
-                QPushButton:hover {{
-                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
-                }}
-            """)
-            auto_btn.clicked.connect(lambda: self._open_checkbox_autoset_dialog('タグ 自動設定', 'mt_code_array[]', 'tag'))
-            layout.addRow("", auto_btn)
+            row_widget, summary_label = self._create_summary_settings_row(
+                field_key='mt_code_array[]',
+                button_object_name='btn_settings_mt_code_array',
+                on_open=lambda: self._open_checkbox_table_settings_dialog(
+                    title='タグ 設定ダイアログ',
+                    field_key='mt_code_array[]',
+                    autoset_title='タグ 自動設定',
+                    autoset_category='tag',
+                ),
+            )
+            layout.addRow("タグ:", row_widget)
+            self._summary_labels['mt_code_array[]'] = summary_label
+            self._refresh_checkbox_summary('mt_code_array[]')
         
-        # 装置・プロセス - テーブル表示（20行固定、5行以上はスクロール）
+        # 装置・プロセス - サマリ表示 + 設定ダイアログ
         equip_process_table = self._create_editable_list_table(
             't_equip_process',
             '装置・プロセス',
@@ -831,31 +1012,38 @@ class PortalEditDialog(QDialog):
             function_widget_factory=self._create_equip_process_function_cell,
         )
         self.field_widgets['t_equip_process'] = equip_process_table
-        layout.addRow("装置・プロセス:", equip_process_table)
+        self._park_hidden_editor(equip_process_table)
+
+        row_widget, summary_label = self._create_summary_settings_row(
+            field_key='t_equip_process',
+            button_object_name='btn_settings_equip_process',
+            on_open=lambda: self._open_editable_table_settings_dialog(
+                title='装置・プロセス 設定ダイアログ',
+                field_key='t_equip_process',
+                show_auto_equipment=True,
+            ),
+        )
+        layout.addRow("装置・プロセス:", row_widget)
+        self._summary_labels['t_equip_process'] = summary_label
+        self._refresh_table_summary('t_equip_process')
         
-        # 装置・プロセス 自動設定ボタン
-        auto_equipment_btn = QPushButton("🤖 装置・プロセス 自動設定")
-        auto_equipment_btn.clicked.connect(self._on_auto_set_equipment)
-        auto_equipment_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                padding: 6px 12px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
-            }}
-        """)
-        auto_equipment_btn.setToolTip("報告書から利用した主な設備を自動設定します")
-        layout.addRow("", auto_equipment_btn)
-        
-        # 論文・プロシーディング - テーブル表示（20行固定、5行以上はスクロール）
+        # 論文・プロシーディング - サマリ表示 + 設定ダイアログ（自動設定は現状非表示）
         paper_proceed_table = self._create_editable_list_table('t_paper_proceed', '論文・プロシーディング（DOI URL）', max_rows=20, visible_rows=5)
         self.field_widgets['t_paper_proceed'] = paper_proceed_table
-        layout.addRow("論文・プロシーディング:", paper_proceed_table)
+        self._park_hidden_editor(paper_proceed_table)
+
+        row_widget, summary_label = self._create_summary_settings_row(
+            field_key='t_paper_proceed',
+            button_object_name='btn_settings_paper_proceed',
+            on_open=lambda: self._open_editable_table_settings_dialog(
+                title='論文・プロシーディング 設定ダイアログ',
+                field_key='t_paper_proceed',
+                show_auto_equipment=False,
+            ),
+        )
+        layout.addRow("論文・プロシーディング:", row_widget)
+        self._summary_labels['t_paper_proceed'] = summary_label
+        self._refresh_table_summary('t_paper_proceed')
         
         # 論文・プロシーディング 自動設定ボタン（将来復活する可能性あり、現在は非表示）
         # auto_publications_btn = QPushButton("🤖 論文・プロシーディング 自動設定")
@@ -902,7 +1090,10 @@ class PortalEditDialog(QDialog):
                 layout.addRow(f"{label}:", combo)
             
             elif field_data['type'] in ['text', 'number', 'datetime-local', 'date', 'time']:
-                line_edit = QLineEdit(field_data['value'])
+                value = field_data.get('value', '')
+                if key in self._ZERO_DEFAULT_FIELDS and (value is None or str(value).strip() == ''):
+                    value = '0'
+                line_edit = QLineEdit(str(value))
                 self.field_widgets[key] = line_edit
                 layout.addRow(f"{label}:", line_edit)
             
@@ -940,6 +1131,7 @@ class PortalEditDialog(QDialog):
             layout.addRow("", auto_file_stats_btn)
             self.file_stats_auto_button = auto_file_stats_btn
         
+        self._apply_form_layout_row_styling(layout)
         group.setLayout(layout)
         return group
     
@@ -1073,20 +1265,20 @@ class PortalEditDialog(QDialog):
                 # QTableWidget（装置・プロセス、論文・プロシーディング）
                 # サーバー側は20件固定を期待しているため、常に20件分送信
                 if isinstance(widget, QTableWidget):
-                    # テーブルから値を取得（圧縮されている可能性があるため実際の行数のみ）
-                    values = []
-                    for row in range(widget.rowCount()):
-                        item = widget.item(row, 0)
-                        if item and item.text().strip():
-                            values.append(item.text().strip())
-                    
-                    # 20件固定で送信（不足分は空文字列）
+                    # 20行固定で送信（視覚順を維持し、空行も位置情報として保持）
+                    header = widget.verticalHeader() if hasattr(widget, 'verticalHeader') else None
+                    values: list[str] = []
+                    for visual_row in range(20):
+                        if visual_row >= widget.rowCount():
+                            values.append("")
+                            continue
+
+                        logical_row = header.logicalIndex(visual_row) if header is not None else visual_row
+                        item = widget.item(logical_row, 0)
+                        values.append(item.text() if item is not None else "")
+
                     for i in range(1, 21):
-                        field_name = f"{key}{i}"
-                        if i - 1 < len(values):
-                            post_data[field_name] = values[i - 1]
-                        else:
-                            post_data[field_name] = ""
+                        post_data[f"{key}{i}"] = values[i - 1]
             elif isinstance(widget, QComboBox):
                 value = widget.currentData()
                 if value is not None and value != "":  # 空文字列は送信しない
@@ -1096,7 +1288,10 @@ class PortalEditDialog(QDialog):
                     else:
                         post_data[key] = value
             elif isinstance(widget, QLineEdit):
-                post_data[key] = widget.text()
+                text = widget.text()
+                if key in self._ZERO_DEFAULT_FIELDS and (text is None or str(text).strip() == ''):
+                    text = '0'
+                post_data[key] = text
             elif isinstance(widget, QTextEdit):
                 post_data[key] = widget.toPlainText()
             elif isinstance(widget, QButtonGroup):
@@ -2018,6 +2213,368 @@ class PortalEditDialog(QDialog):
         except Exception as e:
             logger.error(f"自動設定ダイアログエラー: {e}", exc_info=True)
             QMessageBox.critical(self, "エラー", f"自動設定ダイアログ処理中にエラーが発生しました:\n{e}")
+
+    def _park_hidden_editor(self, widget: QWidget) -> None:
+        if not hasattr(self, '_hidden_editors_layout'):
+            return
+        try:
+            self._hidden_editors_layout.addWidget(widget)
+            widget.setVisible(False)
+        except Exception:
+            # 退避に失敗しても致命ではない
+            pass
+
+    def _format_selected_summary(self, names: list[str], max_items: int = 10) -> str:
+        count = len(names)
+        if count <= 0:
+            return "(0件)"
+        if count <= max_items:
+            return f"{','.join(names)} ({count}件)"
+        return f"{','.join(names[:max_items])},… ({count}件)"
+
+    class _HeaderOnlyHTMLParser(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self._stack: list[str] = []
+            self.headers: list[str] = []
+
+        def handle_starttag(self, tag: str, attrs):
+            self._stack.append(tag.lower())
+
+        def handle_endtag(self, tag: str):
+            tag = tag.lower()
+            # pop until tag matches
+            while self._stack:
+                current = self._stack.pop()
+                if current == tag:
+                    break
+
+        def handle_data(self, data: str):
+            if not self._stack:
+                return
+            if self._stack[-1] in {"h1", "h2", "h3", "h4", "h5", "h6"}:
+                text = (data or "").strip()
+                if text:
+                    self.headers.append(text)
+
+    def _extract_header_texts_from_html(self, html_text: str) -> list[str]:
+        try:
+            parser = self._HeaderOnlyHTMLParser()
+            parser.feed(html_text or "")
+            return [html_lib.unescape(t) for t in parser.headers if t.strip()]
+        except Exception:
+            return []
+
+    def _load_equipment_name_map(self) -> dict[str, str]:
+        if hasattr(self, "_equipment_name_map") and isinstance(getattr(self, "_equipment_name_map"), dict):
+            return getattr(self, "_equipment_name_map")
+
+        mapping: dict[str, str] = {}
+        self._equipment_name_map_missing_message = ""
+
+        candidate_rel_paths = [
+            # 正式出力先
+            "output/arim-site/equipment/merged_data2.json",
+            # 想定外の配置（ユーザー環境で存在する場合に備える）
+            "config/facilities/merged_data2.json",
+            "setup/config/facilities/merged_data2.json",
+        ]
+
+        path: Optional[Path] = None
+        for rel in candidate_rel_paths:
+            try:
+                p = Path(get_dynamic_file_path(rel))
+                if p.exists() and p.is_file():
+                    path = p
+                    break
+            except Exception:
+                continue
+
+        if path is None:
+            self._equipment_name_map_missing_message = "マッピングファイルなし"
+            self._equipment_name_map = mapping
+            return mapping
+
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                for item in data:
+                    if not isinstance(item, dict):
+                        continue
+                    equip_id = str(
+                        item.get("設備ID")
+                        or item.get("equipment_id")
+                        or item.get("id")
+                        or ""
+                    ).strip()
+                    name = str(
+                        item.get("装置名_日")
+                        or item.get("装置名")
+                        or item.get("設備名称")
+                        or item.get("装置名_英")
+                        or item.get("equipment_name")
+                        or item.get("name")
+                        or ""
+                    ).strip()
+                    if equip_id and name:
+                        mapping[equip_id] = name
+            elif isinstance(data, dict):
+                # dict形式の場合はキー/値をそのまま採用
+                for k, v in data.items():
+                    equip_id = str(k or "").strip()
+                    name = str(v or "").strip()
+                    if equip_id and name:
+                        mapping[equip_id] = name
+        except Exception:
+            self._equipment_name_map_missing_message = "マッピングファイル読み込み失敗"
+            mapping = {}
+
+        if not mapping and not self._equipment_name_map_missing_message:
+            self._equipment_name_map_missing_message = "マッピングデータなし"
+
+        self._equipment_name_map = mapping
+        return mapping
+
+    def _format_equip_process_summary(self, raw_values: list[str], max_items: int = 10) -> str:
+        # HTML混在対応: ヘッダタグのみを抽出して採用
+        lines: list[str] = []
+        for v in raw_values:
+            text = (v or "").strip()
+            if not text:
+                continue
+            if "<" in text and ">" in text:
+                headers = self._extract_header_texts_from_html(text)
+                for h in headers:
+                    if h:
+                        lines.append(h)
+                continue
+            lines.append(text)
+
+        count = len(lines)
+        if count <= 0:
+            return "(0件)"
+
+        name_map = self._load_equipment_name_map()
+        missing_note = getattr(self, '_equipment_name_map_missing_message', '')
+        formatted: list[str] = []
+        id_pat = re.compile(r"^[A-Za-z]{2}-\d{3}$")
+        for line in lines[:max_items]:
+            if id_pat.match(line):
+                name = name_map.get(line)
+                if name:
+                    formatted.append(f"{html_lib.escape(name)}&ensp;({html_lib.escape(line)})")
+                else:
+                    formatted.append(html_lib.escape(line) + (f"&ensp;({html_lib.escape(missing_note)})" if missing_note else ""))
+            else:
+                formatted.append(html_lib.escape(line))
+
+        if count > max_items:
+            formatted.append(f"…&ensp;({count}件)")
+        else:
+            formatted[-1] = f"{formatted[-1]}&ensp;({count}件)"
+
+        return "<br>".join(formatted)
+
+    def _refresh_checkbox_summary(self, field_key: str) -> None:
+        label = self._summary_labels.get(field_key)
+        widget = self.field_widgets.get(field_key)
+        if label is None or not isinstance(widget, FilterableCheckboxTable):
+            return
+
+        selected = widget.get_selected_values()
+        value_to_label = {
+            str(opt.get('value')): (opt.get('label') or opt.get('value') or '')
+            for opt in self.metadata.get(field_key, {}).get('options', [])
+        }
+        names = [str(value_to_label.get(str(v), v)) for v in selected]
+        label.setText(self._format_selected_summary(names))
+
+    def _refresh_table_summary(self, field_key: str) -> None:
+        label = self._summary_labels.get(field_key)
+        widget = self.field_widgets.get(field_key)
+        if label is None or not isinstance(widget, QTableWidget):
+            return
+
+        values = self._iter_table_values_in_visual_order(widget)
+        if field_key == 't_equip_process':
+            label.setTextFormat(Qt.RichText)
+            label.setText(self._format_equip_process_summary(values))
+        else:
+            label.setText(self._format_selected_summary(values))
+
+    def _create_summary_settings_row(self, field_key: str, button_object_name: str, on_open: Callable[[], None]):
+        container = QWidget()
+        h = QHBoxLayout(container)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(8)
+
+        summary = QLabel("")
+        summary.setWordWrap(True)
+        summary.setObjectName(f"summary_{field_key}")
+        if field_key == 't_equip_process':
+            summary.setTextFormat(Qt.RichText)
+
+        btn = QPushButton("設定")
+        btn.setObjectName(button_object_name)
+        btn.clicked.connect(on_open)
+
+        h.addWidget(summary, 1)
+        h.addWidget(btn, 0)
+        return container, summary
+
+    def _open_checkbox_table_settings_dialog(self, title: str, field_key: str, autoset_title: str, autoset_category: str) -> None:
+        widget = self.field_widgets.get(field_key)
+        if not isinstance(widget, FilterableCheckboxTable):
+            QMessageBox.warning(self, "エラー", "対象フィールドが見つかりませんでした")
+            return
+
+        before = list(widget.get_selected_values())
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.setModal(True)
+        dialog_layout = QVBoxLayout(dialog)
+
+        # 退避領域から取り外してダイアログへ移動
+        try:
+            self._hidden_editors_layout.removeWidget(widget)
+        except Exception:
+            pass
+        widget.setParent(dialog)
+        widget.setVisible(True)
+        dialog_layout.addWidget(widget)
+
+        auto_btn = QPushButton(f"🤖 {autoset_title}")
+        auto_btn.setToolTip("専用ダイアログでAI提案を確認・適用します")
+        auto_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                padding: 6px 12px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+            }}
+        """)
+        auto_btn.clicked.connect(lambda: self._open_checkbox_autoset_dialog(autoset_title, field_key, autoset_category))
+        dialog_layout.addWidget(auto_btn)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        dialog_layout.addWidget(buttons)
+
+        result = dialog.exec_()
+
+        # ダイアログから退避領域へ戻す
+        widget.setParent(self._hidden_editors)
+        self._hidden_editors_layout.addWidget(widget)
+        widget.setVisible(False)
+
+        if result != QDialog.Accepted:
+            widget.set_selected_values(before)
+            return
+
+        self._refresh_checkbox_summary(field_key)
+
+    def _open_editable_table_settings_dialog(self, title: str, field_key: str, show_auto_equipment: bool) -> None:
+        widget = self.field_widgets.get(field_key)
+        if not isinstance(widget, QTableWidget):
+            QMessageBox.warning(self, "エラー", "対象フィールドが見つかりませんでした")
+            return
+
+        before_texts: list[str] = []
+        for row in range(widget.rowCount()):
+            item = widget.item(row, 0)
+            before_texts.append(item.text() if item else "")
+
+        header = widget.verticalHeader()
+        before_order = [header.logicalIndex(v) for v in range(widget.rowCount())] if header is not None else list(range(widget.rowCount()))
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        dialog.setModal(True)
+        dialog_layout = QVBoxLayout(dialog)
+
+        # 装置・プロセスは名称列があるため幅を広く
+        if field_key == 't_equip_process':
+            dialog.setMinimumWidth(980)
+
+        try:
+            self._hidden_editors_layout.removeWidget(widget)
+        except Exception:
+            pass
+        widget.setParent(dialog)
+        widget.setVisible(True)
+        dialog_layout.addWidget(widget)
+
+        if show_auto_equipment:
+            auto_equipment_btn = QPushButton("🤖 装置・プロセス 自動設定")
+            auto_equipment_btn.clicked.connect(self._on_auto_set_equipment)
+            auto_equipment_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                    padding: 6px 12px;
+                    border: none;
+                    border-radius: 4px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+                }}
+            """)
+            auto_equipment_btn.setToolTip("報告書から利用した主な設備を自動設定します")
+            dialog_layout.addWidget(auto_equipment_btn)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        dialog_layout.addWidget(buttons)
+
+        result = dialog.exec_()
+
+        widget.setParent(self._hidden_editors)
+        self._hidden_editors_layout.addWidget(widget)
+        widget.setVisible(False)
+
+        if result != QDialog.Accepted:
+            # テキスト復元
+            for row, text in enumerate(before_texts):
+                item = widget.item(row, 0)
+                if item is None:
+                    item = QTableWidgetItem("")
+                    widget.setItem(row, 0, item)
+                item.setText(text)
+
+            # 並び順（縦ヘッダ）復元
+            try:
+                vh = widget.verticalHeader()
+                if vh is not None:
+                    vh.setSectionsMovable(True)
+                    for target_visual, logical in enumerate(before_order):
+                        current_visual = vh.visualIndex(logical)
+                        if current_visual != target_visual:
+                            vh.moveSection(current_visual, target_visual)
+            except Exception:
+                pass
+
+            # 装置名列の更新
+            if field_key == 't_equip_process' and widget.columnCount() >= 2:
+                for r in range(widget.rowCount()):
+                    src = widget.item(r, 0)
+                    mapping_item = widget.item(r, 1)
+                    if mapping_item is None:
+                        mapping_item = QTableWidgetItem('')
+                        mapping_item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
+                        widget.setItem(r, 1, mapping_item)
+                    mapping_item.setText(self._get_equipment_display_name(src.text() if src else ''))
+            return
+
+        self._refresh_table_summary(field_key)
     
     def _on_facility_link_batch(self):
         """装置・プロセステーブル内の設備IDを一括リンク化"""

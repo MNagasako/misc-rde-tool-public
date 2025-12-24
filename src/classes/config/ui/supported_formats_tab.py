@@ -29,6 +29,7 @@ from datetime import datetime
 
 from classes.config.core.models import SupportedFileFormatEntry
 from classes.config.core import supported_formats_service as formats_service
+from classes.theme import get_color, ThemeKey
 
 
 class SupportedFormatsTab(QWidget):
@@ -80,7 +81,7 @@ class SupportedFormatsTab(QWidget):
         # 保存結果表示用ラベル
         self.save_status_label = QLabel("")
         self.save_status_label.setWordWrap(True)
-        self.save_status_label.setStyleSheet("color: #2e7d32;")
+        self.save_status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_SUCCESS)};")
         layout.addWidget(self.save_status_label)
 
         self.all_entries = []  # フィルタ用の全データ保持
@@ -109,7 +110,7 @@ class SupportedFormatsTab(QWidget):
                 self.file_link_label.setText(f"元ファイル: {target_source}")
         else:
             self.file_link_label.setText("")
-        self.save_status_label.setStyleSheet("color: #2e7d32;")
+        self.save_status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_SUCCESS)};")
         self.save_status_label.setText("")
     
     def _apply_filters(self):
@@ -310,9 +311,9 @@ class SupportedFormatsTab(QWidget):
                 json.dump(meta_out, f, ensure_ascii=False, indent=2)
 
             human_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self.save_status_label.setStyleSheet("color: #2e7d32;")
+            self.save_status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_SUCCESS)};")
             self.save_status_label.setText(f"✅ 拡張子の変更を保存しました ({human_time})")
         except Exception as exc:
             self._logger.error("対応ファイル拡張子の保存に失敗: %s", exc, exc_info=True)
-            self.save_status_label.setStyleSheet("color: #c62828;")
+            self.save_status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)};")
             self.save_status_label.setText(f"❌ 保存に失敗しました: {exc}")

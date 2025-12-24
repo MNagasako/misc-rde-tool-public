@@ -2,7 +2,6 @@
 QTextEdit stylesheet test script
 """
 import sys
-sys.path.insert(0, 'src')
 
 from classes.theme import get_color, ThemeKey, ThemeManager
 
@@ -16,11 +15,20 @@ for color in colors:
     print(f"\n=== Testing color: {color} ===")
     
     if color == "green":
-        style = f"QTextEdit {{ font-family: 'Consolas'; font-size: 9pt; border: 1px solid green; background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; }}"
+        style = (
+            f"QTextEdit {{ font-family: 'Consolas'; font-size: 9pt; border: 1px solid {get_color(ThemeKey.TEXT_SUCCESS)}; "
+            f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; }}"
+        )
     elif color == "red":
-        style = f"QTextEdit {{ font-family: 'Consolas'; font-size: 9pt; border: 1px solid red; background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; }}"
+        style = (
+            f"QTextEdit {{ font-family: 'Consolas'; font-size: 9pt; border: 1px solid {get_color(ThemeKey.TEXT_ERROR)}; "
+            f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; }}"
+        )
     elif color == "orange":
-        style = f"QTextEdit {{ font-family: 'Consolas'; font-size: 9pt; border: 1px solid orange; background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; }}"
+        style = (
+            f"QTextEdit {{ font-family: 'Consolas'; font-size: 9pt; border: 1px solid {get_color(ThemeKey.TEXT_WARNING)}; "
+            f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; }}"
+        )
     else:
         style = f"QTextEdit {{ font-family: 'Consolas'; font-size: 9pt; background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; }}"
     

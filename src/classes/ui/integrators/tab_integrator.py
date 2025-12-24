@@ -226,7 +226,7 @@ class MainWindowTabIntegrator:
         
         # 説明
         info_label = QLabel("報告書機能のインポートに失敗しました。")
-        info_label.setStyleSheet("color: red; font-weight: bold;")
+        info_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;")
         layout.addWidget(info_label)
         
         layout.addStretch()

@@ -9,6 +9,8 @@ EquipmentTabパターンに準拠した実装:
 
 import logging
 
+from classes.theme import get_color, ThemeKey
+
 try:
     from qt_compat.widgets import QWidget, QVBoxLayout
     PYQT5_AVAILABLE = True
@@ -57,14 +59,14 @@ class ReportTab(QWidget):
             # フォールバック表示
             from qt_compat.widgets import QLabel
             error_label = QLabel(f"報告書機能の読み込みに失敗しました\n{str(e)}")
-            error_label.setStyleSheet("color: red; padding: 20px;")
+            error_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; padding: 20px;")
             layout.addWidget(error_label)
             
         except Exception as e:
             logger.error(f"ReportTab.setup_ui: 予期しないエラー: {e}", exc_info=True)
             from qt_compat.widgets import QLabel
             error_label = QLabel(f"報告書タブの初期化中にエラーが発生しました\n{str(e)}")
-            error_label.setStyleSheet("color: red; padding: 20px;")
+            error_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; padding: 20px;")
             layout.addWidget(error_label)
         
         logger.info("ReportTab.setup_ui: 完了")

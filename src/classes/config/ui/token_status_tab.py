@@ -25,7 +25,7 @@ try:
         QGroupBox, QProgressBar, QFrame
     )
     from qt_compat.core import Qt, QTimer
-    from qt_compat.gui import QFont, QColor
+    from qt_compat.gui import QFont
     PYQT5_AVAILABLE = True
 except ImportError as e:
     logger.error(f"Qt互換レイヤーインポート失敗: {e}")
@@ -33,6 +33,7 @@ except ImportError as e:
     class QWidget: pass
 
 from classes.managers.token_manager import TokenManager, TokenData
+from classes.theme import get_color, get_qcolor, ThemeKey
 
 
 class TokenStatusTab(QWidget):
@@ -104,7 +105,7 @@ class TokenStatusTab(QWidget):
         layout.addWidget(self.auto_refresh_checkbox)
         
         info_label = QLabel("（有効期限の5分前に自動更新）")
-        info_label.setStyleSheet("color: gray;")
+        info_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
         layout.addWidget(info_label)
         
         layout.addStretch()
@@ -236,7 +237,7 @@ class TokenStatusTab(QWidget):
         
         # 有効期限
         status_item = QTableWidgetItem(status)
-        status_item.setForeground(QColor("red"))
+        status_item.setForeground(get_qcolor(ThemeKey.TEXT_ERROR))
         self.token_table.setItem(row, 1, status_item)
         
         # 残り時間
@@ -263,7 +264,7 @@ class TokenStatusTab(QWidget):
             if remaining.total_seconds() <= 0:
                 # 期限切れ
                 label = QLabel("期限切れ")
-                label.setStyleSheet("color: red; font-weight: bold;")
+                label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;")
                 self.token_table.setCellWidget(row, col, label)
             else:
                 # 残り時間表示
@@ -281,9 +282,13 @@ class TokenStatusTab(QWidget):
                 
                 # 警告色設定
                 if remaining.total_seconds() < 600:  # 10分以内
-                    progress_bar.setStyleSheet("QProgressBar::chunk { background-color: red; }")
+                    progress_bar.setStyleSheet(
+                        f"QProgressBar::chunk {{ background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)}; }}"
+                    )
                 elif remaining.total_seconds() < 1800:  # 30分以内
-                    progress_bar.setStyleSheet("QProgressBar::chunk { background-color: orange; }")
+                    progress_bar.setStyleSheet(
+                        f"QProgressBar::chunk {{ background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)}; }}"
+                    )
                 
                 self.token_table.setCellWidget(row, col, progress_bar)
         

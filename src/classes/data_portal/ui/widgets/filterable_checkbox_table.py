@@ -7,9 +7,12 @@
 from typing import List, Dict, Any
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QAbstractItemView
+    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
 )
 from qt_compat.core import Qt
+
+from classes.theme.theme_keys import ThemeKey
+from classes.theme.theme_manager import get_color
 
 from classes.managers.log_manager import get_logger
 
@@ -48,6 +51,9 @@ class FilterableCheckboxTable(QWidget):
         self.selected_values = set(selected_values or [])
         self.filter_text = ""
         self.max_height = max_height
+        self._populating = False
+        self._sort_column = 1
+        self._sort_order = Qt.SortOrder.AscendingOrder
         
         self._init_ui()
         self._populate_table()
@@ -81,9 +87,37 @@ class FilterableCheckboxTable(QWidget):
         self.table.setHorizontalHeaderLabels(["選択", self.label])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.table.horizontalHeader().setSortIndicatorShown(True)
         self.table.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.setSortingEnabled(True)
+        # NOTE: PySide6ではQTableWidgetItemの__lt__オーバーライド等が環境によって
+        #       アクセス違反を引き起こしうるため、ソートはヘッダクリックで独自実装する。
+        self.table.setSortingEnabled(False)
+        self.table.itemChanged.connect(self._on_item_changed)
+        self.table.horizontalHeader().sectionClicked.connect(self._on_header_clicked)
+
+        # 選択列（チェックボックス）の表示: 0/1は表示せず、塗りつぶしでチェックを明瞭化
+        # QTableWidgetItemのチェックボックスはindicatorとして描画されるためQSSでカスタム
+        self.table.setStyleSheet(
+            f"""
+            QTableWidget::indicator {{
+                width: 16px;
+                height: 16px;
+            }}
+            QTableWidget::indicator:unchecked {{
+                image: none;
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                background: transparent;
+                border-radius: 3px;
+            }}
+            QTableWidget::indicator:checked {{
+                image: none;
+                border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BORDER)};
+                background: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                border-radius: 3px;
+            }}
+            """
+        )
         
         # 行の高さを設定して5行確実に表示
         self.table.verticalHeader().setDefaultSectionSize(25)  # 各行25px
@@ -93,6 +127,8 @@ class FilterableCheckboxTable(QWidget):
     
     def _populate_table(self):
         """テーブルにデータを投入"""
+        self._populating = True
+        # 独自ソートのためQt標準ソートは常に無効
         self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
         
@@ -113,20 +149,18 @@ class FilterableCheckboxTable(QWidget):
             # 行を追加
             row = self.table.rowCount()
             self.table.insertRow(row)
-            
-            # チェックボックス
-            checkbox = QCheckBox()
-            checkbox.setChecked(is_checked)
-            checkbox.setProperty('value', value)
-            checkbox.toggled.connect(lambda checked, v=value: self._on_checkbox_toggled(v, checked))
-            
-            checkbox_widget = QWidget()
-            checkbox_layout = QHBoxLayout(checkbox_widget)
-            checkbox_layout.addWidget(checkbox)
-            checkbox_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            checkbox_layout.setContentsMargins(0, 0, 0, 0)
-            
-            self.table.setCellWidget(row, 0, checkbox_widget)
+
+            # 選択（チェック状態はチェックボックスで表現。数値表示はしない）
+            select_item = QTableWidgetItem("")
+            select_item.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsUserCheckable
+            )
+            select_item.setCheckState(Qt.CheckState.Checked if is_checked else Qt.CheckState.Unchecked)
+            select_item.setData(Qt.ItemDataRole.UserRole, value)
+            # 独自ソート用キー（表示しない）
+            select_item.setData(Qt.ItemDataRole.UserRole + 1, 1 if is_checked else 0)
+            self.table.setItem(row, 0, select_item)
             
             # ラベル
             label_item = QTableWidgetItem(label)
@@ -137,8 +171,16 @@ class FilterableCheckboxTable(QWidget):
             if is_checked:
                 checked_count += 1
         
-        self.table.setSortingEnabled(True)
+        self.table.setSortingEnabled(False)
         self._update_count_label(visible_count, checked_count)
+
+        # 直前のソート条件があれば適用
+        try:
+            self._apply_sort(self._sort_column, self._sort_order)
+        except Exception:
+            pass
+
+        self._populating = False
         
         logger.debug(f"{self.field_name}: 表示={visible_count}件, 選択={checked_count}件")
     
@@ -147,15 +189,103 @@ class FilterableCheckboxTable(QWidget):
         self.filter_text = text.strip()
         self._populate_table()
     
-    def _on_checkbox_toggled(self, value: str, checked: bool):
-        """チェックボックストグル時の処理"""
+    def _on_item_changed(self, item: QTableWidgetItem) -> None:
+        """選択列（チェック）の変更をselected_valuesへ反映"""
+        if self._populating:
+            return
+        if item is None:
+            return
+        if item.column() != 0:
+            return
+
+        value = str(item.data(Qt.ItemDataRole.UserRole) or "")
+        if not value:
+            return
+
+        checked = item.checkState() == Qt.CheckState.Checked
+
+        # 独自ソート用キー更新
+        try:
+            self._populating = True
+            item.setData(Qt.ItemDataRole.UserRole + 1, 1 if checked else 0)
+        finally:
+            self._populating = False
+
         if checked:
             self.selected_values.add(value)
         else:
             self.selected_values.discard(value)
-        
+
         self._update_count_label(self.table.rowCount(), len(self.selected_values))
         logger.debug(f"{self.field_name}: {value} {'選択' if checked else '解除'}, 合計={len(self.selected_values)}件")
+
+    def _on_header_clicked(self, section: int) -> None:
+        """ヘッダクリックで独自ソート（選択列はチェック状態でソート）"""
+        if section not in (0, 1):
+            return
+
+        # 同じ列を連続クリックしたら昇降順をトグル
+        if self._sort_column == section:
+            self._sort_order = (
+                Qt.SortOrder.DescendingOrder
+                if self._sort_order == Qt.SortOrder.AscendingOrder
+                else Qt.SortOrder.AscendingOrder
+            )
+        else:
+            self._sort_column = section
+            self._sort_order = Qt.SortOrder.AscendingOrder
+
+        self._apply_sort(self._sort_column, self._sort_order)
+
+    def _apply_sort(self, column: int, order: Qt.SortOrder) -> None:
+        """現在表示中の行をソートして並び替える（チェック状態/ラベル）"""
+        if self._populating:
+            return
+
+        row_count = self.table.rowCount()
+        if row_count <= 1:
+            return
+
+        def _row_key(row: int):
+            if column == 0:
+                item = self.table.item(row, 0)
+                checked = item is not None and item.checkState() == Qt.CheckState.Checked
+                # Asc: 未チェック→チェック, Desc: 逆
+                return (1 if checked else 0,)
+
+            item = self.table.item(row, 1)
+            text = item.text() if item is not None else ""
+            return (text.casefold(),)
+
+        reverse = order == Qt.SortOrder.DescendingOrder
+        new_order = sorted(range(row_count), key=_row_key, reverse=reverse)
+
+        # 並び替え（itemChangedが走らないようブロック）
+        self._populating = True
+        try:
+            snapshots: list[list[QTableWidgetItem | None]] = []
+            for r in range(row_count):
+                row_items: list[QTableWidgetItem | None] = []
+                for c in range(self.table.columnCount()):
+                    it = self.table.item(r, c)
+                    row_items.append(it.clone() if it is not None else None)
+                snapshots.append(row_items)
+
+            self.table.setRowCount(0)
+            for src_row in new_order:
+                dst_row = self.table.rowCount()
+                self.table.insertRow(dst_row)
+                for c, it in enumerate(snapshots[src_row]):
+                    if it is not None:
+                        self.table.setItem(dst_row, c, it)
+        finally:
+            self._populating = False
+
+        # ソートインジケータ更新
+        try:
+            self.table.horizontalHeader().setSortIndicator(column, order)
+        except Exception:
+            pass
     
     def _update_count_label(self, visible: int, checked: int):
         """件数ラベルを更新"""

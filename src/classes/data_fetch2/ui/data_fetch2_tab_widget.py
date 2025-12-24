@@ -126,7 +126,7 @@ class DataFetch2TabWidget(QTabWidget):
             logger.error(f"フィルタウィジェットのインポートに失敗: {e}")
             # フォールバック: 簡易フィルタUI
             fallback_label = QLabel("高度なフィルタ機能は利用できません")
-            fallback_label.setStyleSheet("color: red; font-weight: bold;")
+            fallback_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;")
             layout.addWidget(fallback_label)
             self.file_filter_widget = None
         
@@ -152,7 +152,7 @@ class DataFetch2TabWidget(QTabWidget):
                 fallback_widget = QWidget()
                 fallback_layout = QVBoxLayout(fallback_widget)
                 fallback_label = QLabel("データ取得機能は利用できません")
-                fallback_label.setStyleSheet("color: red; font-weight: bold;")
+                fallback_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;")
                 fallback_layout.addWidget(fallback_label)
                 self.data_fetch_widget = None
                 self.addTab(fallback_widget, "📊 データ取得")
@@ -161,7 +161,7 @@ class DataFetch2TabWidget(QTabWidget):
             fallback_widget = QWidget()
             fallback_layout = QVBoxLayout(fallback_widget)
             fallback_label = QLabel("データ取得機能は利用できません")
-            fallback_label.setStyleSheet("color: red; font-weight: bold;")
+            fallback_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;")
             fallback_layout.addWidget(fallback_label)
             self.data_fetch_widget = None
             self.addTab(fallback_widget, "📊 データ取得")

@@ -542,6 +542,28 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
     btn_layout.setSpacing(15)  # ボタン間隔を広げる
 
 
+    def _build_warning_button_style() -> str:
+        return (
+            f"background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};"
+            f"color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};"
+            "font-weight: bold;"
+            "border-radius: 8px;"
+            "padding: 10px 16px;"
+            f"border: 1px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)};"
+        )
+
+
+    def _build_warning_badge_style() -> str:
+        return (
+            f"padding: 6px 10px; "
+            f"background-color: {get_color(ThemeKey.PANEL_WARNING_BACKGROUND)}; "
+            f"color: {get_color(ThemeKey.PANEL_WARNING_TEXT)}; "
+            f"border: 1px solid {get_color(ThemeKey.PANEL_WARNING_BORDER)}; "
+            "border-radius: 4px; "
+            "font-weight: bold;"
+        )
+
+
     # --- ファイル検証関数 ---
     def update_file_validation():
         """選択されたファイルを検証して結果を表示"""
@@ -600,10 +622,18 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
     button_register_exec = parent_controller.create_auto_resize_button(
         button_register_exec_text, 220, 45, button_style
     )
-    button_register_exec.clicked.connect(parent_controller.on_register_exec_clicked)
-    button_register_exec.setEnabled(False)  # 初期状態は無効
+    # 必須未入力でも押せる（アラートで促す）
+    button_register_exec.setEnabled(True)
     parent_controller.register_exec_button = button_register_exec
     btn_layout.addWidget(button_register_exec)
+
+    # 必須未入力の表示（ボタン右側）
+    required_missing_label = QLabel("未入力必須項目有り")
+    required_missing_label.setWordWrap(True)
+    required_missing_label.setStyleSheet(_build_warning_badge_style())
+    required_missing_label.setVisible(False)
+    parent_controller.register_required_missing_label = required_missing_label
+    btn_layout.addWidget(required_missing_label)
 
     # ファイル選択状態に応じて登録実行ボタンの有効/無効を切り替える
     def update_register_button_state():
@@ -629,14 +659,58 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
             except RuntimeError:
                 return False
 
-        # 必須項目（データ名、ファイル選択）がすべて入力済みか判定（添付ファイルは判定に使わない）
-        files = getattr(parent_controller, 'selected_register_files', [])
-        file_selected = bool(files)
-        data_name = getattr(parent_controller, 'data_name_input', None)
-        try:
-            data_name_filled = bool(_alive(data_name) and data_name.text().strip() != "")
-        except RuntimeError:
-            data_name_filled = False
+        def _is_existing_sample_selected() -> bool:
+            sample_widgets = getattr(parent_controller, 'sample_input_widgets', None) or {}
+            sample_combo = None
+            if isinstance(sample_widgets, dict):
+                sample_combo = sample_widgets.get('sample_combo')
+            if sample_combo is None:
+                sample_combo = getattr(parent_controller, 'sample_combo', None)
+            if not _alive(sample_combo):
+                return False
+            try:
+                # index=0 は「新規作成」
+                current_index = sample_combo.currentIndex()
+                if not isinstance(current_index, int):
+                    try:
+                        current_index = int(current_index)
+                    except Exception:
+                        return False
+                if current_index <= 0:
+                    return False
+                return sample_combo.currentData() is not None
+            except RuntimeError:
+                return False
+
+        def _get_missing_required_items() -> list[str]:
+            missing: list[str] = []
+            existing_sample_selected = _is_existing_sample_selected()
+            # 必須: ファイル
+            if not bool(getattr(parent_controller, 'selected_register_files', [])):
+                missing.append("ファイル選択")
+            # 必須: データ名
+            data_name = getattr(parent_controller, 'data_name_input', None)
+            try:
+                if not (_alive(data_name) and data_name.text().strip() != ""):
+                    missing.append("データ名")
+            except RuntimeError:
+                missing.append("データ名")
+            # 必須: データ所有者（所属）
+            owner_combo = getattr(parent_controller, 'data_owner_combo', None)
+            if not _combo_selected(owner_combo):
+                missing.append("データ所有者(所属)")
+            # 必須: 試料管理者
+            # 既存試料選択時は、試料管理者は既に確定しているため必須から除外
+            if not existing_sample_selected:
+                sample_widgets = getattr(parent_controller, 'sample_input_widgets', None) or {}
+                manager_combo = sample_widgets.get('manager') if isinstance(sample_widgets, dict) else None
+                if not _combo_selected(manager_combo):
+                    missing.append("試料管理者")
+            return missing
+
+        # 必須項目（データ名、ファイル選択、所属、試料管理者）がすべて入力済みか判定（添付ファイルは判定に使わない）
+        missing_required = _get_missing_required_items()
+        required_ok = len(missing_required) == 0
 
         # 必須: データ所有者（所属）
         owner_combo = getattr(parent_controller, 'data_owner_combo', None)
@@ -652,30 +726,80 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
         sample_widgets = getattr(parent_controller, 'sample_input_widgets', None) or {}
         manager_combo = sample_widgets.get('manager') if isinstance(sample_widgets, dict) else None
         manager_label = sample_widgets.get('manager_label') if isinstance(sample_widgets, dict) else None
-        manager_selected = _combo_selected(manager_combo)
+        # 既存試料選択時は必須ではないため、エラー表示にしない
+        manager_required = not _is_existing_sample_selected()
+        manager_selected = _combo_selected(manager_combo) if manager_required else True
         try:
             if isinstance(manager_label, QLabel) and _alive(manager_label):
                 _set_required_label_state(manager_label, ok=manager_selected)
         except RuntimeError:
             pass
-        # QPushButtonが既に削除済みの場合は何もしない
+        # ボタン表示制御（押下は常に可能。未入力時は色変更＋表示）
         try:
-            if button_register_exec is not None and button_register_exec.parent() is not None:
-                if file_selected and data_name_filled and owner_selected and manager_selected:
-                    button_register_exec.setEnabled(True)
-                else:
-                    button_register_exec.setEnabled(False)
+            if _alive(button_register_exec):
+                button_register_exec.setStyleSheet(button_style if required_ok else _build_warning_button_style())
+            if hasattr(parent_controller, 'register_required_missing_label'):
+                try:
+                    parent_controller.register_required_missing_label.setStyleSheet(_build_warning_badge_style())
+                    if not required_ok:
+                        joined = " / ".join(missing_required) if missing_required else ""
+                        parent_controller.register_required_missing_label.setText(f"未入力: {joined}" if joined else "未入力必須項目有り")
+                        parent_controller.register_required_missing_label.setToolTip("\n".join(missing_required))
+                    parent_controller.register_required_missing_label.setVisible(not required_ok)
+                except RuntimeError:
+                    pass
         except RuntimeError:
-            # 既に削除済みの場合は無視
             pass
 
     parent_controller.update_register_button_state = update_register_button_state
+
+    def _show_required_missing_alert(missing: list[str]) -> None:
+        from qt_compat.widgets import QMessageBox
+        from qt_compat.core import Qt
+
+        msg_box = QMessageBox(widget)
+        msg_box.setIcon(QMessageBox.Warning)
+        msg_box.setWindowTitle("必須項目未入力")
+        msg_box.setText("必須項目の入力が完了していません。")
+        msg_box.setInformativeText("以下の必須項目を入力してください:\n- " + "\n- ".join(missing))
+        msg_box.setStandardButtons(QMessageBox.Ok)
+        try:
+            msg_box.setWindowFlags(msg_box.windowFlags() | Qt.WindowStaysOnTopHint)
+        except Exception:
+            pass
+        msg_box.show()
+        try:
+            msg_box.raise_()
+            msg_box.activateWindow()
+        except Exception:
+            pass
+        msg_box.exec()
 
     # データ所有者の選択変更でも状態更新
     try:
         owner_combo = getattr(parent_controller, 'data_owner_combo', None)
         if owner_combo is not None:
             owner_combo.currentIndexChanged.connect(update_register_button_state)
+    except Exception:
+        pass
+
+    # 試料管理者の選択変更でも状態更新（フォーム未生成の場合でも後付けされるケースがあるため）
+    try:
+        sample_widgets = getattr(parent_controller, 'sample_input_widgets', None) or {}
+        manager_combo = sample_widgets.get('manager') if isinstance(sample_widgets, dict) else None
+        if manager_combo is not None:
+            manager_combo.currentIndexChanged.connect(update_register_button_state)
+    except Exception:
+        pass
+
+    # 試料「新規/選択」切り替えでも状態更新
+    try:
+        sample_widgets = getattr(parent_controller, 'sample_input_widgets', None) or {}
+        sample_combo = sample_widgets.get('sample_combo') if isinstance(sample_widgets, dict) else None
+        if sample_combo is None:
+            sample_combo = getattr(parent_controller, 'sample_combo', None)
+        if sample_combo is not None:
+            sample_combo.currentIndexChanged.connect(update_register_button_state)
     except Exception:
         pass
 
@@ -697,6 +821,66 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
 
     # 初期状態も反映
     update_register_button_state()
+
+    # 登録実行ボタンのクリックは、必須未入力ならアラートを出して促す
+    if hasattr(parent_controller, 'on_register_exec_clicked'):
+        orig_register_exec = parent_controller.on_register_exec_clicked
+
+        def wrapped_register_exec():
+            try:
+                # ここでは state 計算を再利用できないため、同等判定を行う
+                files = getattr(parent_controller, 'selected_register_files', [])
+                file_selected = bool(files)
+                data_name = getattr(parent_controller, 'data_name_input', None)
+                try:
+                    data_name_filled = bool(data_name is not None and data_name.text().strip() != "")
+                except Exception:
+                    data_name_filled = False
+                owner_combo = getattr(parent_controller, 'data_owner_combo', None)
+                owner_selected = bool(owner_combo is not None and owner_combo.isEnabled() and owner_combo.currentData() is not None)
+
+                sample_widgets = getattr(parent_controller, 'sample_input_widgets', None) or {}
+                sample_combo = None
+                if isinstance(sample_widgets, dict):
+                    sample_combo = sample_widgets.get('sample_combo')
+                if sample_combo is None:
+                    sample_combo = getattr(parent_controller, 'sample_combo', None)
+                existing_sample_selected = False
+                try:
+                    if sample_combo is not None and sample_combo.currentIndex() > 0 and sample_combo.currentData() is not None:
+                        existing_sample_selected = True
+                except Exception:
+                    existing_sample_selected = False
+
+                manager_combo = sample_widgets.get('manager') if isinstance(sample_widgets, dict) else None
+                manager_required = not existing_sample_selected
+                if manager_required:
+                    manager_selected = bool(
+                        manager_combo is not None and manager_combo.isEnabled() and manager_combo.currentData() is not None
+                    )
+                else:
+                    manager_selected = True
+
+                required_ok = file_selected and data_name_filled and owner_selected and manager_selected
+                if not required_ok:
+                    missing_items = []
+                    if not file_selected:
+                        missing_items.append("ファイル選択")
+                    if not data_name_filled:
+                        missing_items.append("データ名")
+                    if not owner_selected:
+                        missing_items.append("データ所有者(所属)")
+                    if manager_required and not manager_selected:
+                        missing_items.append("試料管理者")
+                    _show_required_missing_alert(missing_items)
+                    update_register_button_state()
+                    return None
+            except Exception:
+                pass
+            return orig_register_exec()
+
+        parent_controller.on_register_exec_clicked = wrapped_register_exec
+        button_register_exec.clicked.connect(parent_controller.on_register_exec_clicked)
 
     # 添付ファイル選択ボタン（有効・無効判定から除外）
     button_attachment_file_select_text = "📎 添付ファイル選択(未選択)"

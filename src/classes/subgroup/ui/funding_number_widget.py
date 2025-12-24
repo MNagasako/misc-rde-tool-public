@@ -7,7 +7,7 @@ from qt_compat.widgets import (
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QMessageBox
 )
 from qt_compat.core import Signal, Qt
-from classes.theme import get_color, ThemeKey, ThemeManager
+from classes.theme import get_color, get_qcolor, ThemeKey, ThemeManager
 
 
 class FundingNumberWidget(QWidget):
@@ -110,11 +110,11 @@ class FundingNumberWidget(QWidget):
         self.table_widget.setColumnWidth(1, 60)   # 削除列
         
         # テーブルスタイル
-        from qt_compat.gui import QPalette, QColor
+        from qt_compat.gui import QPalette
         palette = self.table_widget.palette()
-        palette.setColor(QPalette.Base, QColor(get_color(ThemeKey.TABLE_BACKGROUND)))
-        palette.setColor(QPalette.AlternateBase, QColor(get_color(ThemeKey.TABLE_ROW_BACKGROUND_ALTERNATE)))
-        palette.setColor(QPalette.Text, QColor(get_color(ThemeKey.TABLE_ROW_TEXT)))
+        palette.setColor(QPalette.Base, get_qcolor(ThemeKey.TABLE_BACKGROUND))
+        palette.setColor(QPalette.AlternateBase, get_qcolor(ThemeKey.TABLE_ROW_BACKGROUND_ALTERNATE))
+        palette.setColor(QPalette.Text, get_qcolor(ThemeKey.TABLE_ROW_TEXT))
         self.table_widget.setPalette(palette)
         
         self.table_widget.setStyleSheet(f"""
@@ -160,20 +160,25 @@ class FundingNumberWidget(QWidget):
             
             # 削除ボタン
             delete_button = QPushButton("×")
-            delete_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #dc3545;
-                    color: white;
-                    border: none;
-                    padding: 2px 8px;
-                    border-radius: 2px;
-                    font-size: 12px;
-                    max-width: 40px;
-                }
-                QPushButton:hover {
-                    background-color: #c82333;
-                }
-            """)
+            delete_button.setStyleSheet(
+                f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
+                        border: none;
+                        padding: 2px 8px;
+                        border-radius: 2px;
+                        font-size: 12px;
+                        max-width: 40px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+                    }}
+                    QPushButton:pressed {{
+                        background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_PRESSED)};
+                    }}
+                """
+            )
             delete_button.clicked.connect(lambda checked, r=row: self.delete_row(r))
             self.table_widget.setCellWidget(row, 1, delete_button)
     
@@ -279,11 +284,11 @@ class FundingNumberWidget(QWidget):
             """)
             
             # テーブルスタイル再適用
-            from qt_compat.gui import QPalette, QColor
+            from qt_compat.gui import QPalette
             palette = self.table_widget.palette()
-            palette.setColor(QPalette.Base, QColor(get_color(ThemeKey.TABLE_BACKGROUND)))
-            palette.setColor(QPalette.AlternateBase, QColor(get_color(ThemeKey.TABLE_ROW_BACKGROUND_ALTERNATE)))
-            palette.setColor(QPalette.Text, QColor(get_color(ThemeKey.TABLE_ROW_TEXT)))
+            palette.setColor(QPalette.Base, get_qcolor(ThemeKey.TABLE_BACKGROUND))
+            palette.setColor(QPalette.AlternateBase, get_qcolor(ThemeKey.TABLE_ROW_BACKGROUND_ALTERNATE))
+            palette.setColor(QPalette.Text, get_qcolor(ThemeKey.TABLE_ROW_TEXT))
             self.table_widget.setPalette(palette)
             
             self.table_widget.setStyleSheet(f"""
@@ -302,6 +307,30 @@ class FundingNumberWidget(QWidget):
                     border: 1px solid {get_color(ThemeKey.TABLE_BORDER)};
                 }}
             """)
+
+            # 削除ボタン（×）のスタイルを再適用
+            for row in range(self.table_widget.rowCount()):
+                w = self.table_widget.cellWidget(row, 1)
+                if isinstance(w, QPushButton) and w.text() == "×":
+                    w.setStyleSheet(
+                        f"""
+                            QPushButton {{
+                                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                                color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
+                                border: none;
+                                padding: 2px 8px;
+                                border-radius: 2px;
+                                font-size: 12px;
+                                max-width: 40px;
+                            }}
+                            QPushButton:hover {{
+                                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+                            }}
+                            QPushButton:pressed {{
+                                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_PRESSED)};
+                            }}
+                        """
+                    )
             
             self.update()
         except Exception as e:

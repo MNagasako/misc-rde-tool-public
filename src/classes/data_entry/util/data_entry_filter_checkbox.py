@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, 
-    QCheckBox, QCompleter, QMessageBox
+    QCheckBox, QCompleter, QMessageBox, QPushButton
 )
 from qt_compat.core import Qt
 from qt_compat.gui import QFont
@@ -56,7 +56,7 @@ def get_colored_dataset_display_name(dataset):
         'ASSISTANT': '💁', 
         'MEMBER': '👥',
         'AGENT': '🤖'
-    }.get(user_role, '❓')
+    }.get(user_role, '') if user_role else ''
     
     # データセットタイプアイコンを設定
     type_icon = {
@@ -66,7 +66,7 @@ def get_colored_dataset_display_name(dataset):
     }.get(dataset_type, '📄')
     
     # 表示用フォーマット（詳細情報付き）
-    display_parts = [f"{role_icon}"] # {user_role}
+    display_parts = [f"{role_icon}"] if role_icon else []
     
 
     
@@ -505,6 +505,10 @@ def create_checkbox_filter_dropdown(parent=None):
     filter_label = QLabel("権限:")
     filter_label.setFont(QFont("", 9))
     filter_layout.addWidget(filter_label)
+
+    # フィルタなし（全データセット表示）
+    checkbox_no_filter = QCheckBox("フィルタなし")
+    checkbox_no_filter.setToolTip("権限フィルタを適用せず、全データセットから選択します")
     
     # 権限フィルタのチェックボックス
     checkbox_owner = QCheckBox("👑 管理者")
@@ -530,16 +534,25 @@ def create_checkbox_filter_dropdown(parent=None):
         height: 16px;
     }
     """
+
+    checkbox_no_filter.setStyleSheet(checkbox_style + f"QCheckBox {{ color: {get_color(ThemeKey.TEXT_PRIMARY)}; }}")
     
     checkbox_owner.setStyleSheet(checkbox_style + f"QCheckBox {{ color: {get_color(ThemeKey.ROLE_OWNER_TEXT)}; }}")
     checkbox_assistant.setStyleSheet(checkbox_style + f"QCheckBox {{ color: {get_color(ThemeKey.ROLE_ASSISTANT_TEXT)}; }}")
     checkbox_member.setStyleSheet(checkbox_style + f"QCheckBox {{ color: {get_color(ThemeKey.ROLE_MEMBER_TEXT)}; }}")
     checkbox_agent.setStyleSheet(checkbox_style + f"QCheckBox {{ color: {get_color(ThemeKey.ROLE_AGENT_TEXT)}; }}")
     
+    filter_layout.addWidget(checkbox_no_filter)
     filter_layout.addWidget(checkbox_owner)
     filter_layout.addWidget(checkbox_assistant)
     filter_layout.addWidget(checkbox_member)
     filter_layout.addWidget(checkbox_agent)
+
+    # フィルタなし専用: キャッシュ強制更新ボタン
+    refresh_no_filter_btn = QPushButton("更新")
+    refresh_no_filter_btn.setToolTip("フィルタなしのキャッシュを破棄して再読み込みします")
+    refresh_no_filter_btn.setEnabled(False)
+    filter_layout.addWidget(refresh_no_filter_btn)
     filter_layout.addStretch()
     
     # ドロップダウンの作成
@@ -561,6 +574,51 @@ def create_checkbox_filter_dropdown(parent=None):
     layout.addWidget(filter_widget)
     layout.addWidget(status_label)
     layout.addWidget(combo)
+
+    # フィルタなし専用キャッシュ（表示名生成のコストを削減）
+    no_filter_cache: dict = {
+        "items": None,  # list[tuple[str, dict]]
+        "count": 0,
+        "ready": False,
+    }
+
+    def _ensure_completer():
+        """QCompleterはcomboのモデルを直接使う（大量件数でのリスト生成を避ける）"""
+        completer = getattr(container, "_dataset_completer", None)
+        if completer is None:
+            completer = QCompleter(combo.model(), combo)
+            completer.setFilterMode(Qt.MatchContains)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            combo.setCompleter(completer)
+            container._dataset_completer = completer
+        else:
+            try:
+                completer.setModel(combo.model())
+            except Exception:
+                pass
+
+    def _populate_combo(items):
+        prev = combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItem("")
+            for display_name, dataset in items:
+                combo.addItem(display_name, dataset)
+            combo.setCurrentIndex(0)
+        finally:
+            combo.blockSignals(prev)
+        _ensure_completer()
+
+    def _build_no_filter_items(force_reload: bool = False):
+        if (not force_reload) and no_filter_cache.get("ready") and isinstance(no_filter_cache.get("items"), list):
+            return no_filter_cache["items"], int(no_filter_cache.get("count", 0))
+
+        all_datasets = get_datasets_for_data_entry()
+        items = [(get_colored_dataset_display_name(ds), ds) for ds in all_datasets]
+        no_filter_cache["items"] = items
+        no_filter_cache["count"] = len(all_datasets)
+        no_filter_cache["ready"] = True
+        return items, len(all_datasets)
     
     # データ読み込みと初期表示
     def update_filtered_datasets():
@@ -573,8 +631,21 @@ def create_checkbox_filter_dropdown(parent=None):
             status_label.setText("⚠️ ユーザー情報が取得できません")
             return
         
+        # フィルタなしの場合は全件表示
+        if checkbox_no_filter.isChecked():
+            try:
+                status_label.setText("🔍 フィルタなし: 読み込み中...")
+                items, total = _build_no_filter_items(force_reload=False)
+                _populate_combo(items)
+                status_label.setText(f"✅ フィルタなし: {total}件")
+                return
+            except Exception as e:
+                status_label.setText(f"❌ エラー: {str(e)}")
+                print(f"[ERROR] データセット更新エラー(フィルタなし): {e}")
+                return
+
         # 選択された権限を取得
-        selected_roles = []
+        selected_roles: List[str] = []
         if checkbox_owner.isChecked():
             selected_roles.append('OWNER')
         if checkbox_assistant.isChecked():
@@ -583,7 +654,7 @@ def create_checkbox_filter_dropdown(parent=None):
             selected_roles.append('MEMBER')
         if checkbox_agent.isChecked():
             selected_roles.append('AGENT')
-        
+
         # チェックボックスが何も選択されていない場合のエラーハンドリング
         if not selected_roles:
             QMessageBox.warning(container, "フィルタエラー", 
@@ -599,18 +670,6 @@ def create_checkbox_filter_dropdown(parent=None):
             
             # 最適化されたフィルタリング実行
             filtered_datasets = filter_datasets_by_checkbox_selection_optimized(current_user_id, selected_roles)
-
-            # フィルタ結果が0件の場合は全件フォールバック（UI空白防止）
-            if not filtered_datasets:
-                try:
-                    all_datasets = get_datasets_for_data_entry()
-                    if all_datasets:
-                        filtered_datasets = all_datasets
-                        status_label.setText(f"⚠ フィルタで0件 → 全件表示 ({len(filtered_datasets)}件)")
-                    else:
-                        status_label.setText("⚠ データセットが読み込まれていません")
-                except Exception as fallback_error:
-                    status_label.setText(f"❌ 全件フォールバック失敗: {fallback_error}")
             
             # ドロップダウンの更新
             # 先頭に空欄を維持
@@ -625,12 +684,7 @@ def create_checkbox_filter_dropdown(parent=None):
             selected_roles_str = "+".join(selected_roles)
             #status_label.setText(f"✅ {selected_roles_str}: {len(filtered_datasets)}件")
             status_label.setText(f"✅ {len(filtered_datasets)}件")
-            # オートコンプリート機能を設定
-            completion_items = [get_colored_dataset_display_name(ds) for ds in filtered_datasets]
-            completer = QCompleter(completion_items, combo)
-            completer.setFilterMode(Qt.MatchContains)
-            completer.setCaseSensitivity(Qt.CaseInsensitive)
-            combo.setCompleter(completer)
+            _ensure_completer()
             
         except Exception as e:
             status_label.setText(f"❌ エラー: {str(e)}")
@@ -639,12 +693,37 @@ def create_checkbox_filter_dropdown(parent=None):
     # フィルタ変更時の処理
     def on_filter_changed():
         update_filtered_datasets()
+
+    def on_no_filter_changed():
+        """フィルタなしのON/OFFで他チェックを無効化/復帰"""
+        enabled = not checkbox_no_filter.isChecked()
+        for cb in (checkbox_owner, checkbox_assistant, checkbox_member, checkbox_agent):
+            cb.setEnabled(enabled)
+        refresh_no_filter_btn.setEnabled(not enabled)
+        update_filtered_datasets()
+
+    def on_refresh_no_filter_cache():
+        """フィルタなしキャッシュを破棄して再構築"""
+        if not checkbox_no_filter.isChecked():
+            return
+        no_filter_cache["items"] = None
+        no_filter_cache["count"] = 0
+        no_filter_cache["ready"] = False
+        try:
+            status_label.setText("🔄 フィルタなし: 再読み込み中...")
+            items, total = _build_no_filter_items(force_reload=True)
+            _populate_combo(items)
+            status_label.setText(f"✅ フィルタなし: {total}件")
+        except Exception as e:
+            status_label.setText(f"❌ エラー: {str(e)}")
     
     # イベント接続（各チェックボックス）
     checkbox_owner.stateChanged.connect(on_filter_changed)
     checkbox_assistant.stateChanged.connect(on_filter_changed)
     checkbox_member.stateChanged.connect(on_filter_changed)
     checkbox_agent.stateChanged.connect(on_filter_changed)
+    checkbox_no_filter.stateChanged.connect(on_no_filter_changed)
+    refresh_no_filter_btn.clicked.connect(on_refresh_no_filter_cache)
     
     # 初回読み込み
     update_filtered_datasets()
@@ -661,6 +740,9 @@ def create_checkbox_filter_dropdown(parent=None):
                 try:
                     print("[INFO] フィルタ付きドロップダウン: データセットリスト更新開始")
                     clear_user_cache()  # キャッシュクリア
+                    no_filter_cache["items"] = None
+                    no_filter_cache["count"] = 0
+                    no_filter_cache["ready"] = False
                     update_filtered_datasets()  # データセット再読み込み
                     print("[INFO] フィルタ付きドロップダウン: データセットリスト更新完了")
                 except Exception as e:
@@ -690,6 +772,14 @@ def create_checkbox_filter_dropdown(parent=None):
     container.clear_cache = clear_user_cache
 
     def _apply_role_filter_state(owner=True, assistant=True, member=True, agent=True, force_reload=False):
+        # ロール指定が入る場合は「フィルタなし」を解除
+        if checkbox_no_filter.isChecked():
+            prev = checkbox_no_filter.blockSignals(True)
+            checkbox_no_filter.setChecked(False)
+            checkbox_no_filter.blockSignals(prev)
+            for cb in (checkbox_owner, checkbox_assistant, checkbox_member, checkbox_agent):
+                cb.setEnabled(True)
+
         checkboxes = [
             (checkbox_owner, owner),
             (checkbox_assistant, assistant),
@@ -715,6 +805,9 @@ def create_checkbox_filter_dropdown(parent=None):
 
     container.set_role_filters = set_role_filters
     container.relax_filters_for_launch = relax_filters_for_launch
+    container.no_filter_checkbox = checkbox_no_filter
+    container.no_filter_refresh_button = refresh_no_filter_btn
+    container.refresh_no_filter_cache = on_refresh_no_filter_cache
     
     return container
 

@@ -4,8 +4,7 @@
 """
 import re
 from qt_compat.widgets import QMessageBox
-from qt_compat.gui import QColor
-from classes.theme import get_color, ThemeKey
+from classes.theme import ThemeKey, get_qcolor
 
 import logging
 
@@ -318,22 +317,22 @@ class UIValidator:
         """
         if is_owner:
             # OWNER選択時: より濃い青色
-            return QColor.fromString(get_color(ThemeKey.ROLE_OWNER_BACKGROUND))
+            return get_qcolor(ThemeKey.ROLE_OWNER_BACKGROUND)
         elif is_assistant:
             # ASSISTANT選択時: 薄い青色
-            return QColor.fromString(get_color(ThemeKey.ROLE_ASSISTANT_BACKGROUND))
+            return get_qcolor(ThemeKey.ROLE_ASSISTANT_BACKGROUND)
         elif is_member:
             # MEMBER選択時: 薄い緑色
-            return QColor.fromString(get_color(ThemeKey.ROLE_MEMBER_BACKGROUND))
+            return get_qcolor(ThemeKey.ROLE_MEMBER_BACKGROUND)
         elif is_agent:
             # AGENT選択時: 薄い黄色
-            return QColor.fromString(get_color(ThemeKey.ROLE_AGENT_BACKGROUND))
+            return get_qcolor(ThemeKey.ROLE_AGENT_BACKGROUND)
         elif is_viewer:
             # VIEWER選択時: 薄い灰色
-            return QColor.fromString(get_color(ThemeKey.ROLE_VIEWER_BACKGROUND))
+            return get_qcolor(ThemeKey.ROLE_VIEWER_BACKGROUND)
         else:
             # 未選択時: デフォルト背景色
-            return QColor.fromString(get_color(ThemeKey.WINDOW_BACKGROUND))
+            return get_qcolor(ThemeKey.WINDOW_BACKGROUND)
 
 
 class SubgroupFilterValidator:

@@ -1103,10 +1103,10 @@ class ProxySettingsWidget(QWidget):
             ssl_verify = cert_config.get('verify', True)
             if ssl_verify:
                 verify_text = "有効"
-                verify_style = "color: green; font-weight: bold;"
+                verify_style = f"color: {get_color(ThemeKey.TEXT_SUCCESS)}; font-weight: bold;"
             else:
                 verify_text = "無効"
-                verify_style = "color: red; font-weight: bold;"
+                verify_style = f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;"
             
             self.current_ssl_verify_label.setText(verify_text)
             self.current_ssl_verify_label.setStyleSheet(verify_style)
@@ -1166,7 +1166,7 @@ class ProxySettingsWidget(QWidget):
             
             # プロキシ環境でSSL有効の場合は警告表示
             if is_proxy_env and ssl_verify:
-                self.current_cert_store_label.setStyleSheet("color: orange; font-size: 11px;")
+                self.current_cert_store_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_WARNING)}; font-size: 11px;")
                 self.current_cert_store_label.setToolTip("プロキシ環境でSSL検証が有効です。接続問題が発生する可能性があります。")
             else:
                 self.current_cert_store_label.setStyleSheet(f"color: {get_color(ThemeKey.INPUT_TEXT)}; font-size: 11px;")
@@ -2235,16 +2235,16 @@ class ProxySettingsWidget(QWidget):
                 
             if features:
                 status = f"利用可能機能: {', '.join(features)}"
-                self.enterprise_ca_status_label.setStyleSheet("color: green; font-size: 10px;")
+                self.enterprise_ca_status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_SUCCESS)}; font-size: 10px;")
             else:
                 status = "組織内CA機能は利用できません (パッケージ未インストール)"
-                self.enterprise_ca_status_label.setStyleSheet("color: orange; font-size: 10px;")
+                self.enterprise_ca_status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_WARNING)}; font-size: 10px;")
                 
             self.enterprise_ca_status_label.setText(status)
             
         except Exception as e:
             self.enterprise_ca_status_label.setText(f"機能確認エラー: {e}")
-            self.enterprise_ca_status_label.setStyleSheet("color: red; font-size: 10px;")
+            self.enterprise_ca_status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-size: 10px;")
             
     def test_pac_configuration(self):
         """PAC設定テスト"""
@@ -2474,7 +2474,11 @@ class ProxySettingsWidget(QWidget):
                 status = get_active_proxy_status()
                 trust_env = status.get('trust_env', False)
                 trust_env_text = "有効" if trust_env else "無効"
-                trust_env_style = "color: green; font-weight: bold;" if trust_env else "color: gray;"
+                trust_env_style = (
+                    f"color: {get_color(ThemeKey.TEXT_SUCCESS)}; font-weight: bold;"
+                    if trust_env
+                    else f"color: {get_color(ThemeKey.TEXT_MUTED)};"
+                )
                 self.current_trust_env_label.setText(trust_env_text)
                 self.current_trust_env_label.setStyleSheet(trust_env_style)
             except Exception as e:
@@ -2518,16 +2522,16 @@ class ProxySettingsWidget(QWidget):
             
             if app_mode == 'DIRECT' and (os_http != 'なし' or env_http != 'なし'):
                 # DIRECTモードだがOS/環境変数にプロキシ設定あり
-                self.os_http_proxy_label.setStyleSheet("color: orange; font-weight: bold;")
+                self.os_http_proxy_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_WARNING)}; font-weight: bold;")
                 self.os_http_proxy_label.setToolTip(
                     "⚠️ アプリは DIRECT モードですが、OSにプロキシ設定があります。\n"
                     "アプリはこの設定を無視して直接接続します。"
                 )
             elif app_mode == 'SYSTEM':
                 # SYSTEMモード - OS設定を使用することを明示
-                self.os_http_proxy_label.setStyleSheet("color: green; font-weight: bold;")
+                self.os_http_proxy_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_SUCCESS)}; font-weight: bold;")
                 self.os_http_proxy_label.setToolTip("✅ アプリはこのOS設定を使用しています。")
-                self.os_https_proxy_label.setStyleSheet("color: green; font-weight: bold;")
+                self.os_https_proxy_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_SUCCESS)}; font-weight: bold;")
                 self.os_https_proxy_label.setToolTip("✅ アプリはこのOS設定を使用しています。")
             else:
                 # 通常表示

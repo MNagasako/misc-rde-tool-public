@@ -14,7 +14,7 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt
 from config.common import INPUT_DIR, get_dynamic_file_path
-from classes.theme import get_color, ThemeKey
+from classes.theme import get_color, get_qcolor, ThemeKey
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -245,11 +245,11 @@ class RdeMemberEditorDialog(QDialog):
     def _apply_table_style(self):
         """テーブルスタイルを適用"""
         # Paletteを使って背景色を強制設定
-        from qt_compat.gui import QPalette, QColor
+        from qt_compat.gui import QPalette
         palette = self.table.palette()
-        palette.setColor(QPalette.Base, QColor(get_color(ThemeKey.TABLE_BACKGROUND)))
-        palette.setColor(QPalette.AlternateBase, QColor(get_color(ThemeKey.TABLE_ROW_BACKGROUND_ALTERNATE)))
-        palette.setColor(QPalette.Text, QColor(get_color(ThemeKey.TABLE_ROW_TEXT)))
+        palette.setColor(QPalette.Base, get_qcolor(ThemeKey.TABLE_BACKGROUND))
+        palette.setColor(QPalette.AlternateBase, get_qcolor(ThemeKey.TABLE_ROW_BACKGROUND_ALTERNATE))
+        palette.setColor(QPalette.Text, get_qcolor(ThemeKey.TABLE_ROW_TEXT))
         self.table.setPalette(palette)
         
         # QSSでその他のスタイルを設定
@@ -276,7 +276,35 @@ class RdeMemberEditorDialog(QDialog):
         """テーマ変更時のスタイル更新"""
         self._apply_table_style()
         if hasattr(self, 'save_button'):
-            self.save_button.setStyleSheet(f"background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; color: white; font-weight: bold; padding: 8px;")
+            self.save_button.setStyleSheet(
+                f"background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; "
+                f"color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; "
+                "font-weight: bold; padding: 8px;"
+            )
+
+        # 削除ボタン（×）のスタイルを再適用
+        for row in range(self.table.rowCount()):
+            w = self.table.cellWidget(row, 5)
+            if isinstance(w, QPushButton) and w.text() == "×":
+                w.setStyleSheet(
+                    f"""
+                        QPushButton {{
+                            background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                            color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
+                            font-weight: bold;
+                            font-size: 14px;
+                            border: none;
+                            border-radius: 3px;
+                            padding: 2px;
+                        }}
+                        QPushButton:hover {{
+                            background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+                        }}
+                        QPushButton:pressed {{
+                            background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_PRESSED)};
+                        }}
+                    """
+                )
         self.update()
     
     def load_email_to_user_map(self):
@@ -496,20 +524,25 @@ class RdeMemberEditorDialog(QDialog):
             # 削除ボタン
             delete_button = QPushButton("×")
             delete_button.setMaximumWidth(40)
-            delete_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #dc3545;
-                    color: white;
-                    font-weight: bold;
-                    font-size: 14px;
-                    border: none;
-                    border-radius: 3px;
-                    padding: 2px;
-                }
-                QPushButton:hover {
-                    background-color: #c82333;
-                }
-            """)
+            delete_button.setStyleSheet(
+                f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
+                        font-weight: bold;
+                        font-size: 14px;
+                        border: none;
+                        border-radius: 3px;
+                        padding: 2px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+                    }}
+                    QPushButton:pressed {{
+                        background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_PRESSED)};
+                    }}
+                """
+            )
             delete_button.clicked.connect(lambda checked, r=row: self.delete_member(r))
             self.table.setCellWidget(row, 5, delete_button)
     

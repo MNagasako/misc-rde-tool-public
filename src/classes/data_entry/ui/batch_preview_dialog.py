@@ -22,6 +22,8 @@ from qt_compat.core import Qt, Signal, QThread, Slot
 from qt_compat.gui import QFont, QColor
 from config.common import get_dynamic_file_path
 
+from classes.theme import get_color, ThemeKey
+
 from classes.data_entry.core.file_set_manager import FileSet, FileItem, FileType, PathOrganizeMethod, FileItemType
 
 logger = logging.getLogger(__name__)
@@ -150,41 +152,47 @@ class FileSetPreviewWidget(QWidget):
         batch_buttons_layout = QHBoxLayout()
         self.batch_upload_button = QPushButton("ファイル一括アップロード")
         self.batch_upload_button.clicked.connect(self._batch_upload_files)
-        self.batch_upload_button.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745;
-                color: white;
+        self.batch_upload_button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                 font-weight: bold;
                 padding: 8px 16px;
                 border: none;
                 border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #218838;
-            }
-            QPushButton:disabled {
-                background-color: #6c757d;
-            }
-        """)
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+            }}
+            """
+        )
         
         self.batch_register_button = QPushButton("データ登録")
         self.batch_register_button.clicked.connect(self._batch_register_data)
-        self.batch_register_button.setStyleSheet("""
-            QPushButton {
-                background-color: #007bff;
-                color: white;
+        self.batch_register_button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
                 font-weight: bold;
                 padding: 8px 16px;
                 border: none;
                 border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #0056b3;
-            }
-            QPushButton:disabled {
-                background-color: #6c757d;
-            }
-        """)
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+            }}
+            """
+        )
         
         batch_buttons_layout.addWidget(self.batch_upload_button)
         batch_buttons_layout.addWidget(self.batch_register_button)
@@ -261,10 +269,10 @@ class FileSetPreviewWidget(QWidget):
                 
                 # 重複チェック
                 if file_item.path in self.duplicate_files:
-                    item.setBackground(QColor("#ffcccc"))
+                    item.setBackground(QColor(get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)))
                     item.setToolTip("重複ファイル: 他のファイルセットに同じファイルが含まれています")
                 elif not file_exists:
-                    item.setBackground(QColor("#ffffcc"))
+                    item.setBackground(QColor(get_color(ThemeKey.PANEL_WARNING_BACKGROUND)))
                     item.setToolTip("ファイルが存在しません")
                 
                 self.files_table.setItem(row, 1, item)
@@ -309,11 +317,11 @@ class FileSetPreviewWidget(QWidget):
                 if file_item.path in self.duplicate_files:
                     status = "重複"
                     status_item = QTableWidgetItem(status)
-                    status_item.setForeground(QColor("#cc0000"))
+                    status_item.setForeground(QColor(get_color(ThemeKey.TEXT_ERROR)))
                 elif not file_exists:
                     status = "存在しない"
                     status_item = QTableWidgetItem(status)
-                    status_item.setForeground(QColor("#cc6600"))
+                    status_item.setForeground(QColor(get_color(ThemeKey.TEXT_WARNING)))
                 else:
                     status = "正常"
                     status_item = QTableWidgetItem(status)
@@ -322,22 +330,25 @@ class FileSetPreviewWidget(QWidget):
                 
                 # アップロードボタン
                 upload_btn = QPushButton("アップロード")
-                upload_btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #007bff;
-                        color: white;
+                upload_btn.setStyleSheet(
+                    f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
                         border: none;
                         padding: 4px 8px;
                         border-radius: 4px;
                         font-size: 12px;
-                    }
-                    QPushButton:hover {
-                        background-color: #0056b3;
-                    }
-                    QPushButton:disabled {
-                        background-color: #6c757d;
-                    }
-                """)
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+                    }}
+                    QPushButton:disabled {{
+                        background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                    }}
+                    """
+                )
                 
                 # ファイルが存在しない場合はボタンを無効化
                 if not file_exists:
@@ -2365,7 +2376,8 @@ API情報:
                     attachements=attachments,
                     dataset_info=dataset_info,
                     form_values=form_values,
-                    progress=progress
+                    progress=progress,
+                    require_confirmation=False,
                 )
                 
                 progress.close()
@@ -3437,7 +3449,8 @@ class BatchRegisterPreviewDialog(QDialog):
                     attachements=attachments,
                     dataset_info=dataset_info,
                     form_values=form_values,
-                    progress=progress
+                    progress=progress,
+                    require_confirmation=False,
                 )
                 
                 progress.close()
@@ -4721,7 +4734,8 @@ class BatchRegisterPreviewDialog(QDialog):
                 dataFiles=dataFiles,
                 attachements=attachments,
                 dataset_info=dataset_info,
-                form_values=form_values
+                form_values=form_values,
+                require_confirmation=False,
             )
             
             if result and not result.get('error'):

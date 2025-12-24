@@ -14,10 +14,9 @@ from qt_compat.widgets import (
     QHeaderView, QRadioButton, QButtonGroup, QLineEdit, QSizePolicy
 )
 from qt_compat.core import Qt
-from qt_compat.gui import QColor
 from config.common import SUBGROUP_JSON_PATH
 from net.http_helpers import proxy_get
-from classes.theme import get_color, ThemeKey, ThemeManager
+from classes.theme import get_color, get_qcolor, ThemeKey, ThemeManager
 from ..core import subgroup_api_helper
 
 # ロガー設定
@@ -305,6 +304,37 @@ class CommonSubgroupMemberSelector(QWidget):
                 self.parent_selector = parent_selector
                 self.column_sort_order = {}
                 self.horizontalHeader().sectionClicked.connect(self.on_header_clicked)
+
+            def _apply_remove_button_style(self, button: QPushButton) -> None:
+                button.setStyleSheet(
+                    f"""
+                        QPushButton {{
+                            background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                            color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
+                            font-weight: bold;
+                            font-size: 14px;
+                            border: none;
+                            border-radius: 3px;
+                            padding: 2px;
+                        }}
+                        QPushButton:hover {{
+                            background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+                        }}
+                        QPushButton:pressed {{
+                            background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_PRESSED)};
+                        }}
+                    """
+                )
+
+            def _refresh_remove_buttons_style(self) -> None:
+                # 除外ボタン（×）のスタイルを全行に再適用（テーマ切替対応）
+                try:
+                    for row in range(self.rowCount()):
+                        w = self.cellWidget(row, 7)
+                        if isinstance(w, QPushButton) and w.text() == "×":
+                            self._apply_remove_button_style(w)
+                except Exception as e:
+                    logger.debug(f"Remove button style refresh skipped: {e}")
             
             def on_header_clicked(self, logical_index):
                 """ヘッダークリック時の処理"""
@@ -455,20 +485,7 @@ class CommonSubgroupMemberSelector(QWidget):
                     from qt_compat.widgets import QPushButton
                     remove_btn = QPushButton("×")
                     remove_btn.setMaximumWidth(40)
-                    remove_btn.setStyleSheet("""
-                        QPushButton {
-                            background-color: #dc3545;
-                            color: white;
-                            font-weight: bold;
-                            font-size: 14px;
-                            border: none;
-                            border-radius: 3px;
-                            padding: 2px;
-                        }
-                        QPushButton:hover {
-                            background-color: #c82333;
-                        }
-                    """)
+                    self._apply_remove_button_style(remove_btn)
                     remove_btn.clicked.connect(lambda checked, r=new_row, uid=row_data['owner_user_id']: self.parent_selector._on_remove_member(r, uid))
                     self.setCellWidget(new_row, 7, remove_btn)
 
@@ -799,20 +816,28 @@ class CommonSubgroupMemberSelector(QWidget):
             # 除外ボタン（×印＋赤色）
             remove_btn = QPushButton("×")
             remove_btn.setMaximumWidth(40)
-            remove_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #dc3545;
-                    color: white;
-                    font-weight: bold;
-                    font-size: 14px;
-                    border: none;
-                    border-radius: 3px;
-                    padding: 2px;
-                }
-                QPushButton:hover {
-                    background-color: #c82333;
-                }
-            """)
+            if hasattr(self.table, "_apply_remove_button_style"):
+                self.table._apply_remove_button_style(remove_btn)
+            else:
+                remove_btn.setStyleSheet(
+                    f"""
+                        QPushButton {{
+                            background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                            color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
+                            font-weight: bold;
+                            font-size: 14px;
+                            border: none;
+                            border-radius: 3px;
+                            padding: 2px;
+                        }}
+                        QPushButton:hover {{
+                            background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+                        }}
+                        QPushButton:pressed {{
+                            background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_PRESSED)};
+                        }}
+                    """
+                )
             remove_btn.clicked.connect(lambda checked, r=row, uid=user_id: self._on_remove_member(r, uid))
             self.table.setCellWidget(row, 7, remove_btn)
             
@@ -1001,22 +1026,22 @@ class CommonSubgroupMemberSelector(QWidget):
 
         if is_owner:
             # OWNER選択時: より濃い青色
-            bg_color = QColor.fromString(get_color(ThemeKey.ROLE_OWNER_BACKGROUND))
+            bg_color = get_qcolor(ThemeKey.ROLE_OWNER_BACKGROUND)
         elif is_assistant:
             # ASSISTANT選択時: 薄い青色
-            bg_color = QColor.fromString(get_color(ThemeKey.ROLE_ASSISTANT_BACKGROUND))
+            bg_color = get_qcolor(ThemeKey.ROLE_ASSISTANT_BACKGROUND)
         elif is_member:
             # MEMBER選択時: 薄い緑色
-            bg_color = QColor.fromString(get_color(ThemeKey.ROLE_MEMBER_BACKGROUND))
+            bg_color = get_qcolor(ThemeKey.ROLE_MEMBER_BACKGROUND)
         elif is_agent:
             # AGENT選択時: 薄い黄色
-            bg_color = QColor.fromString(get_color(ThemeKey.ROLE_AGENT_BACKGROUND))
+            bg_color = get_qcolor(ThemeKey.ROLE_AGENT_BACKGROUND)
         elif is_viewer:
             # VIEWER選択時: 薄い灰色
-            bg_color = QColor.fromString(get_color(ThemeKey.ROLE_VIEWER_BACKGROUND))
+            bg_color = get_qcolor(ThemeKey.ROLE_VIEWER_BACKGROUND)
         else:
             # 未選択時: デフォルト背景色
-            bg_color = QColor.fromString(get_color(ThemeKey.WINDOW_BACKGROUND))
+            bg_color = get_qcolor(ThemeKey.WINDOW_BACKGROUND)
         
         # 行全体の背景色を設定
         for col in range(self.table.columnCount()):
@@ -1322,11 +1347,11 @@ class CommonSubgroupMemberSelector(QWidget):
         """テーブルスタイル適用（テーマ切替対応）- 初回とリフレッシュで同じスタイル"""
         if hasattr(self, 'table') and self.table:
             # Paletteを使って背景色を強制設定
-            from qt_compat.gui import QPalette, QColor
+            from qt_compat.gui import QPalette
             palette = self.table.palette()
-            palette.setColor(QPalette.Base, QColor(get_color(ThemeKey.TABLE_BACKGROUND)))
-            palette.setColor(QPalette.AlternateBase, QColor(get_color(ThemeKey.TABLE_ROW_BACKGROUND_ALTERNATE)))
-            palette.setColor(QPalette.Text, QColor(get_color(ThemeKey.TABLE_ROW_TEXT)))
+            palette.setColor(QPalette.Base, get_qcolor(ThemeKey.TABLE_BACKGROUND))
+            palette.setColor(QPalette.AlternateBase, get_qcolor(ThemeKey.TABLE_ROW_BACKGROUND_ALTERNATE))
+            palette.setColor(QPalette.Text, get_qcolor(ThemeKey.TABLE_ROW_TEXT))
             self.table.setPalette(palette)
             
             # QSSで全スタイル設定（初回setup_uiと完全に同じ）
@@ -1393,6 +1418,7 @@ class CommonSubgroupMemberSelector(QWidget):
         """テーマ切替時の更新処理"""
         try:
             self._apply_table_style()
+            self._refresh_remove_buttons_style()
             
             # フィルタUI更新（表示されている場合のみ）
             if self.show_filter and hasattr(self, 'filter_label'):

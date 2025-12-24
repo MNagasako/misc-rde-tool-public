@@ -8,6 +8,8 @@ except ImportError:
     from src.qt_compat.core import Signal
 
 from classes.config.core.supported_formats_service import copy_to_input, parse_and_save
+from classes.theme import get_color, ThemeKey
+from config.common import get_dynamic_file_path
 
 
 class UploadXlsxTab(QWidget):
@@ -75,7 +77,7 @@ class UploadXlsxTab(QWidget):
         src = self.path_edit.text().strip()
         if not src:
             self.result_label.setText("⚠ ファイルが選択されていません")
-            self.result_label.setStyleSheet("color: orange;")
+            self.result_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_WARNING)};")
             return
         
         self.progress_label.setText("⏳ 処理中...")
@@ -93,12 +95,12 @@ class UploadXlsxTab(QWidget):
             
             self.progress_label.setText("")
             self.result_label.setText(f"✅ 解析完了: {len(entries)}件のエントリを抽出しました。")
-            self.result_label.setStyleSheet("color: green; font-weight: bold;")
+            self.result_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_SUCCESS)}; font-weight: bold;")
             self.entriesParsed.emit(entries)
         except Exception as ex:
             self.progress_label.setText("")
             self.result_label.setText(f"❌ 解析失敗: {ex}")
-            self.result_label.setStyleSheet("color: red; font-weight: bold;")
+            self.result_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;")
             import traceback
             traceback.print_exc()
         finally:
@@ -109,17 +111,17 @@ class UploadXlsxTab(QWidget):
         """解析結果をリセット（JSONファイル削除）"""
         try:
             import os, pathlib
-            json_path = pathlib.Path("output/supported_formats.json")
+            json_path = pathlib.Path(get_dynamic_file_path("output/supported_formats.json"))
             if json_path.exists():
                 os.remove(json_path)
                 self.result_label.setText("✅ 解析結果をリセットしました。")
-                self.result_label.setStyleSheet("color: green;")
+                self.result_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_SUCCESS)};")
                 self.path_edit.clear()
                 # 一覧もクリア
                 self.entriesParsed.emit([])
             else:
                 self.result_label.setText("⚠ リセットする解析結果がありません。")
-                self.result_label.setStyleSheet("color: orange;")
+                self.result_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_WARNING)};")
         except Exception as ex:
             self.result_label.setText(f"❌ リセット失敗: {ex}")
-            self.result_label.setStyleSheet("color: red;")
+            self.result_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)};")

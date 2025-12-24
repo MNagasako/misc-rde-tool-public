@@ -739,7 +739,7 @@ class AutoLoginTabWidget(QWidget):
                 size = stat.st_size
                 mtime = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M')
                 self.legacy_status_label.setText(f"✅ 存在 ({size}バイト, 更新:{mtime})")
-                self.legacy_status_label.setStyleSheet("color: green;")
+                self.legacy_status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_SUCCESS)};")
                 
                 # ボタン状態を更新
                 self.create_legacy_button.setText("login.txt を更新")
@@ -747,7 +747,7 @@ class AutoLoginTabWidget(QWidget):
                 self.backup_legacy_button.setEnabled(True)
             else:
                 self.legacy_status_label.setText("❌ 存在しません")
-                self.legacy_status_label.setStyleSheet("color: red;")
+                self.legacy_status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)};")
                 
                 # ボタン状態を更新
                 self.create_legacy_button.setText("login.txt を作成")
@@ -756,7 +756,7 @@ class AutoLoginTabWidget(QWidget):
                 
         except Exception as e:
             self.legacy_status_label.setText(f"❌ 確認エラー: {e}")
-            self.legacy_status_label.setStyleSheet("color: red;")
+            self.legacy_status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)};")
     
     def create_legacy_file(self):
         """login.txtファイルを作成"""

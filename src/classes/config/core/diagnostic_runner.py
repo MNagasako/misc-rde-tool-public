@@ -106,24 +106,35 @@ class DiagnosticWorker(QtCore.QThread):
     def _run_diagnostics_direct(self) -> Dict[str, Any]:
         """診断を直接実行（バイナリ環境用）"""
         try:
+            import importlib.util
+
             # 診断スクリプトのパス確認（testsは静的リソース）
             from config.common import get_static_resource_path
             tests_proxy_dir = get_static_resource_path("tests/proxy")
             if not Path(tests_proxy_dir).exists():
                 raise FileNotFoundError(f"診断ディレクトリが見つかりません: {tests_proxy_dir}")
             
-            # sys.pathに追加（診断スクリプトのインポートに必要）
-            if tests_proxy_dir not in sys.path:
-                sys.path.insert(0, tests_proxy_dir)
-            
             # 診断実行
             self.progress_updated.emit("診断スクリプトをロード中...", 20)
             
             # run_all_diagnostics をインポートして実行
+            def _load_module_from_path(module_name: str, file_path: Path):
+                spec = importlib.util.spec_from_file_location(module_name, str(file_path))
+                if spec is None or spec.loader is None:
+                    raise ImportError(f"モジュールロードに失敗: {module_name} ({file_path})")
+                module = importlib.util.module_from_spec(spec)
+                sys.modules[module_name] = module
+                spec.loader.exec_module(module)
+                return module
+
             try:
-                from run_all_diagnostics import IntegratedDiagnostics
-                from diagnostic_utils import DiagnosticConfig
-            except ImportError as e:
+                proxy_dir = Path(tests_proxy_dir)
+                diag_utils = _load_module_from_path("diagnostic_utils", proxy_dir / "diagnostic_utils.py")
+                run_all = _load_module_from_path("run_all_diagnostics", proxy_dir / "run_all_diagnostics.py")
+
+                IntegratedDiagnostics = getattr(run_all, "IntegratedDiagnostics")
+                DiagnosticConfig = getattr(diag_utils, "DiagnosticConfig")
+            except Exception as e:
                 raise ImportError(f"診断スクリプトのインポートに失敗: {e}")
             
             self.progress_updated.emit("診断を実行中...", 30)

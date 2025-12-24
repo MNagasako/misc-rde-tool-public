@@ -21,7 +21,7 @@ try:
         QTableWidgetItem, QHeaderView, QFileDialog, QMessageBox
     )
     from qt_compat.core import Qt
-    from qt_compat.gui import QFont, QColor
+    from qt_compat.gui import QFont
     PYQT5_AVAILABLE = True
 except ImportError:
     PYQT5_AVAILABLE = False
@@ -32,6 +32,8 @@ except ImportError:
     class QHBoxLayout: pass
 
 logger = logging.getLogger(__name__)
+
+from classes.theme import get_color, get_qcolor, ThemeKey
 
 
 class DiagnosticResultDialog(QDialog):
@@ -91,10 +93,10 @@ class DiagnosticResultDialog(QDialog):
             # ステータスラベル
             if failed == 0:
                 status_text = f"✅ 全テスト合格: {passed}/{total} (100.0%)"
-                status_color = "green"
+                status_color = get_color(ThemeKey.TEXT_SUCCESS)
             else:
                 status_text = f"⚠️ 一部失敗: {passed}/{total} ({pass_rate:.1f}%)"
-                status_color = "orange"
+                status_color = get_color(ThemeKey.TEXT_WARNING)
             
             status_label = QLabel(status_text)
             status_font = QFont()
@@ -122,7 +124,7 @@ class DiagnosticResultDialog(QDialog):
             error_font.setPointSize(12)
             error_font.setBold(True)
             error_label.setFont(error_font)
-            error_label.setStyleSheet("color: red;")
+            error_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)};")
             layout.addWidget(error_label)
         
         return group
@@ -160,13 +162,13 @@ class DiagnosticResultDialog(QDialog):
             status = test.get('status', 'unknown')
             if status == 'passed':
                 status_text = "✅ 合格"
-                status_color = QColor(0, 200, 0)
+                status_color = get_qcolor(ThemeKey.TEXT_SUCCESS)
             elif status == 'failed':
                 status_text = "❌ 失敗"
-                status_color = QColor(255, 0, 0)
+                status_color = get_qcolor(ThemeKey.TEXT_ERROR)
             else:
                 status_text = "❓ 不明"
-                status_color = QColor(128, 128, 128)
+                status_color = get_qcolor(ThemeKey.TEXT_MUTED)
             
             status_item = QTableWidgetItem(status_text)
             status_item.setForeground(status_color)

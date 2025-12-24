@@ -551,7 +551,9 @@ class UIController(UIControllerCore):
                 QMessageBox.warning(None, "エラー", "データファイルが選択されていません。")
                 return
 
-            result = run_data_register_logic(parent=None, bearer_token=bearer_token, dataset_info=dataset_info, form_values=form_values, file_paths=file_paths, attachment_paths=attachment_paths)
+            # 通常登録の進捗ダイアログは「確認」押下まで閉じない仕様。
+            # parent=None だと参照切れで自動クローズすることがあるため、親ウィンドウを渡す。
+            result = run_data_register_logic(parent=self.parent, bearer_token=bearer_token, dataset_info=dataset_info, form_values=form_values, file_paths=file_paths, attachment_paths=attachment_paths)
             # 成功時ステータスダイアログ表示（最新1件確認）
             try:
                 if result and isinstance(result, dict) and result.get('success'):

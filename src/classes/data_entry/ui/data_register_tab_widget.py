@@ -253,7 +253,7 @@ class DataRegisterTabWidget(QWidget):
                 target_height = int(screen_size.height() * 0.90)
 
                 logger.debug("スクリーンサイズ: %sx%s", screen_size.width(), screen_size.height())
-                logger.debug("通常登録ターゲットサイズ: %sx%s (幅=標準, 高さ=95%)", standard_width, target_height)
+                logger.debug("通常登録ターゲットサイズ: %sx%s (幅=標準, 高さ=95%%)", standard_width, target_height)
                 
                 # サイズ制約をクリア
                 if hasattr(top_level, 'setMinimumSize'):
@@ -303,7 +303,7 @@ class DataRegisterTabWidget(QWidget):
                 target_height = int(screen_size.height() * 0.90)
                 
                 logger.debug("スクリーンサイズ: %sx%s", screen_size.width(), screen_size.height())
-                logger.debug("ターゲットサイズ(95%): %sx%s", target_width, target_height)
+                logger.debug("ターゲットサイズ(95%%): %sx%s", target_width, target_height)
                 
                 # サイズ制約をクリア
                 if hasattr(top_level, 'setMinimumSize'):

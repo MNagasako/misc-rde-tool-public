@@ -9,7 +9,7 @@ from qt_compat.widgets import (
 )
 from qt_compat.core import Qt, Signal
 from qt_compat.gui import QFont
-from classes.theme import get_color, ThemeKey, ThemeManager
+from classes.theme import get_color, get_qcolor, ThemeKey, ThemeManager
 
 
 class SubjectEntryWidget(QWidget):
@@ -143,11 +143,11 @@ class SubjectEntryWidget(QWidget):
             return
         
         # Paletteを使って背景色を強制設定（QSSよりも優先度が高い）
-        from qt_compat.gui import QPalette, QColor
+        from qt_compat.gui import QPalette
         palette = self.table.palette()
-        palette.setColor(QPalette.Base, QColor(get_color(ThemeKey.TABLE_BACKGROUND)))
-        palette.setColor(QPalette.AlternateBase, QColor(get_color(ThemeKey.TABLE_ROW_BACKGROUND_ALTERNATE)))
-        palette.setColor(QPalette.Text, QColor(get_color(ThemeKey.TABLE_ROW_TEXT)))
+        palette.setColor(QPalette.Base, get_qcolor(ThemeKey.TABLE_BACKGROUND))
+        palette.setColor(QPalette.AlternateBase, get_qcolor(ThemeKey.TABLE_ROW_BACKGROUND_ALTERNATE))
+        palette.setColor(QPalette.Text, get_qcolor(ThemeKey.TABLE_ROW_TEXT))
         self.table.setPalette(palette)
         
         # QSSでその他のスタイルを設定

@@ -491,7 +491,7 @@ def show_selected_user_ids(widget, checkbox_list, user_entries=None):
             truncated_id = user_id[:10] + "..." if len(user_id) > 10 else user_id
             user_display = user_name if user_name != user_id else f"<i>ID: {truncated_id}</i>"
             if user_name != user_id:
-                user_display = f"{user_name} <span style='color: gray; font-size: smaller;'>({truncated_id})</span>"
+                user_display = f"{user_name} <span style='color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: smaller;'>({truncated_id})</span>"
             result_lines.append(f"{user_display} : {', '.join(role)}")
     if result_lines:
         msg = "選択されたユーザーとロール:<br>" + "<br>".join(result_lines)

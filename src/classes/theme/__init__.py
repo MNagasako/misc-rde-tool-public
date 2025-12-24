@@ -14,7 +14,7 @@ Material Design準拠の配色を提供。
 """
 
 from .theme_keys import ThemeKey
-from .theme_manager import ThemeManager, ThemeMode, get_theme_manager, get_color
+from .theme_manager import ThemeManager, ThemeMode, get_theme_manager, get_color, get_qcolor
 from .light_theme import LightTheme
 from .dark_theme import DarkTheme
 from .window_frame import apply_window_frame_theme
@@ -25,6 +25,7 @@ __all__ = [
     'ThemeMode',
     'get_theme_manager',
     'get_color',
+    'get_qcolor',
     'LightTheme',
     'DarkTheme',
     'apply_window_frame_theme',

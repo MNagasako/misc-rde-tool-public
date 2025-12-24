@@ -3,6 +3,7 @@ from qt_compat.widgets import QDialog, QVBoxLayout, QLabel, QHBoxLayout, QLineEd
 from qt_compat.core import Qt
 import os
 import json
+from classes.theme import get_color, ThemeKey
 
 class PasswordAuthDialog(QDialog):
     """パスワード認証ダイアログ"""
@@ -35,7 +36,7 @@ class PasswordAuthDialog(QDialog):
         password_layout.addWidget(self.password_input)
         layout.addLayout(password_layout)
         self.warning_label = QLabel("")
-        self.warning_label.setStyleSheet("color: red; margin: 5px;")
+        self.warning_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; margin: 5px;")
         self.warning_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.warning_label)
         button_layout = QHBoxLayout()
