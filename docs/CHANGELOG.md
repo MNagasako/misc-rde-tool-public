@@ -4,6 +4,37 @@
 
 ---
 
+## v2.3.7 (2025-12-24) - AI安定化（Gemini MAX_TOKENS復旧）+ 設定画面のSSL警告抑制 + 規約準拠改善
+
+### 🤖 AI安定化 / デバッグ性向上
+
+- Gemini: `finishReason=MAX_TOKENS` で本文が欠落/空となるケースに対し、`maxOutputTokens` を自動増量して再試行し失敗を抑制。
+- AI: provider/model 等を含むパラメータを `request_params` / `response_params` として可視化し、デバッグ性を向上。
+
+### 🌐 ネットワーク
+
+- 設定タブの外部疎通系で `verify=False` を強制しないよう統一し、truststore/CAバンドル設定に追従。
+
+### 🎨 UI/テーマ/パス
+
+- 一部ハードコード色と `__file__` 依存を解消し、規約準拠とテーマ追従を改善。
+
+### 🧪 テスト・品質管理
+
+- 全テストスイートを実行し合格（環境依存の skip は継続）。
+
+### 📚 ドキュメント
+
+- VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.3.7 に統一。
+- `docs/RELEASE_NOTES_v2.3.7.md` を追加。
+
+### 🧪 テスト（推奨）
+
+- `./.venv/Scripts/python.exe -m pytest -q -k 'test_revision_sync'`
+- `./.venv/Scripts/python.exe -m pytest -q`
+
+---
+
 ## v2.3.6 (2025-12-24) - データ登録UX改善（通常/一括の完了挙動分離）+ テスト強化
 
 ### ✅ データ登録 UX 改善

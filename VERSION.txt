@@ -1,4 +1,13 @@
-2.3.6
+2.3.7
+
+
+2025-12-24 v2.3.7 - AI安定化（Gemini MAX_TOKENS復旧）+ 設定画面のSSL警告抑制 + 規約準拠改善
+	- Gemini: finishReason=MAX_TOKENS で本文が欠落/空となるケースに対し、maxOutputTokens を自動増量して再試行し失敗を抑制。
+	- AI: provider/model 等を含むパラメータを request_params / response_params として可視化し、デバッグ性を向上。
+	- ネットワーク: 設定タブの外部疎通系で verify=False を強制しないよう統一し、truststore/CAバンドル設定に追従。
+	- UI/テーマ/パス: 一部ハードコード色と __file__ 依存を解消し、規約準拠とテーマ追従を改善。
+	- 全テストスイートを実行し合格（環境依存の skip は継続）。
+
 
 
 2025-12-24 v2.3.6 - データ登録UX改善（通常/一括の完了挙動分離）+ テスト強化

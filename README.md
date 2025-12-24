@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.3.6** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.3.7** のバイナリ配布およびドキュメント公開用リポジトリです。
 
 **本ページはAIによる自動生成文が含まれています。**
 
@@ -20,14 +20,15 @@
 
 ## 🚀 最新情報
 
-**2025-12-24 最新リリース**: バージョン2.3.6（データ登録UX改善 - 通常/一括の完了挙動分離 + テスト強化）
+**2025-12-24 最新リリース**: バージョン2.3.7（AI安定化 + SSL警告抑制 + 規約準拠改善）
 
-### v2.3.6 の主な改善
+### v2.3.7 の主な改善
 
-- 通常登録: 必須未入力でも押せる導線を維持しつつ、未入力の可視化（項目名列挙）と押下時アラートで入力を促すように改善しました。
-- 通常登録: 完了時は「確認」押下まで閉じないようにし、結果を確実に読める挙動へ整理しました。
-- 一括登録: 確認回数を減らすため、完了時は確認を要求せず自動クローズ寄りの挙動に整理しました。
-- README / VERSION.txt / CHANGELOG / リリースノート等のバージョン表記を v2.3.6 に統一しました。
+- Gemini: `finishReason=MAX_TOKENS` で本文が欠落/空となるケースに対し、`maxOutputTokens` を自動増量して再試行し失敗を抑制しました。
+- AI: 実際に送受信した本文以外パラメータ（provider/model含む）を request/response params として可視化し、デバッグ性を向上しました。
+- ネットワーク: 設定タブの外部疎通系で `verify=False` を強制しないよう統一し、truststore/CAバンドル設定に追従するようにしました。
+- UI/テーマ/パス: 一部ハードコード色と `__file__` 依存を解消し、規約準拠とテーマ追従を改善しました。
+- README / VERSION.txt / CHANGELOG / リリースノート等のバージョン表記を v2.3.7 に統一しました。
 
 > ℹ️ リスティングタブは `output/arim-site/{equipment|reports}_latest.json` など最新エクスポートを前提とします。再読込前に各タブで「JSON再取得」を実行し、キャッシュディレクトリ（`output/arim-site/reports/cache/`）の残量にも留意してください。
 
