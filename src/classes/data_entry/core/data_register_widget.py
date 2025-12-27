@@ -134,22 +134,23 @@ class DataRegisterWidget(QWidget):
         # データ登録ボタン
         self.register_btn = QPushButton("データ登録実行")
         self.register_btn.setMinimumHeight(40)
-        self.register_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196f3;
-                color: white;
-                border: none;
+        self.register_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BORDER)};
                 border-radius: 5px;
                 font-size: 12px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #1976d2;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+            }}
         """)
         self.register_btn.clicked.connect(self.execute_data_register)
         self.register_btn.setEnabled(False)  # 初期状態では無効化

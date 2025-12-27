@@ -315,9 +315,9 @@ class AISettingsWidget(QWidget):
         form_layout.addRow("", models_table)
         
         # 価格参照リンク
-        pricing_link = QLabel('<a href="https://platform.openai.com/docs/pricing" style="color: #0078D4;">📊 OpenAI公式価格ページ</a>')
+        pricing_link = QLabel('<a href="https://platform.openai.com/docs/pricing">📊 OpenAI公式価格ページ</a>')
         pricing_link.setOpenExternalLinks(True)
-        pricing_link.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 11px;")
+        pricing_link.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_LINK)}; font-size: 11px;")
         form_layout.addRow("", pricing_link)
 
         details_layout.addLayout(form_layout)
@@ -430,9 +430,9 @@ class AISettingsWidget(QWidget):
         form_layout.addRow("", models_table)
         
         # 価格参照リンク
-        pricing_link = QLabel('<a href="https://ai.google.dev/gemini-api/docs/pricing?hl=ja" style="color: #0078D4;">📊 Gemini公式価格ページ</a>')
+        pricing_link = QLabel('<a href="https://ai.google.dev/gemini-api/docs/pricing?hl=ja">📊 Gemini公式価格ページ</a>')
         pricing_link.setOpenExternalLinks(True)
-        pricing_link.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 11px;")
+        pricing_link.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_LINK)}; font-size: 11px;")
         form_layout.addRow("", pricing_link)
 
         details_layout.addLayout(form_layout)
@@ -1929,6 +1929,7 @@ class AISettingsWidget(QWidget):
 
                 if result and result.get('response'):
                     tokens_used = result.get('tokens_used')
+                    response = result['response']
                     result_text = (
                         f"✅ {test_type}成功\n\n"
                         f"📋 テスト情報:\n"
@@ -1937,7 +1938,7 @@ class AISettingsWidget(QWidget):
                         f"  • 実行時間: {elapsed_time:.2f}秒\n"
                         + (f"  • 使用トークン: {tokens_used}\n" if isinstance(tokens_used, int) else "")
                         + "\n"
-                        "（プロンプト/AI応答本文は省略表示）"
+                        f"🤖 AI応答:\n{response}"
                     )
                     self.show_test_result(f"✅ {test_type}成功", result_text)
                 else:

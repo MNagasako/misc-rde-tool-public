@@ -529,6 +529,15 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
         launch_dataset_dataentry_button,
     ]  # type: ignore[attr-defined]
 
+    # テーマ切替時に「他機能連携」の個別styleSheetを再適用（更新漏れ対策）
+    try:
+        from classes.utils.launch_ui_styles import apply_launch_controls_theme, bind_launch_controls_to_theme
+
+        apply_launch_controls_theme(launch_label, widget._dataset_launch_buttons)
+        bind_launch_controls_to_theme(launch_label, widget._dataset_launch_buttons)
+    except Exception:
+        pass
+
     if combo is not None:
         combo.currentIndexChanged.connect(lambda *_: _update_launch_button_state())
     _update_launch_button_state()

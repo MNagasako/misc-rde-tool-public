@@ -35,6 +35,7 @@ class MarkdownEditor(QWidget):
     """
 
     textChanged = Signal()
+    previewUpdated = Signal()
 
     MODE_NORMAL = 1
     MODE_INPUT_ONLY = 2
@@ -170,6 +171,12 @@ class MarkdownEditor(QWidget):
         self.preview.setOpenExternalLinks(True)
         self.preview.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self.preview.setVisible(True)
+
+        # Markdownレンダリングの完了（文書更新）を検知する
+        try:
+            self.preview.document().contentsChanged.connect(self._on_preview_contents_changed)
+        except Exception:
+            pass
 
         try:
             self.preview.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
@@ -480,11 +487,47 @@ class MarkdownEditor(QWidget):
             self._update_preview()
 
     def _update_preview(self) -> None:
+        # NOTE:
+        # テスト全体実行時などで、ウィジェット破棄直前/直後にデバウンスタイマーが発火し
+        # 破棄済みのQtオブジェクトへ触ってしまうと、環境によっては access violation になり得る。
+        # shiboken6.isValid が利用可能な場合は、参照前に生存確認して早期returnする。
+        try:
+            if isValid is not None:
+                if not isValid(self):
+                    return
+                if getattr(self, "editor", None) is None or not isValid(self.editor):
+                    return
+                if getattr(self, "preview", None) is None or not isValid(self.preview):
+                    return
+        except Exception:
+            # isValid 自体が例外を投げる状況もあり得るため、ここでは安全側に倒す
+            return
+
         markdown_text = self.editor.toPlainText().strip() or "内容がありません"
         try:
             self.preview.document().setMarkdown(markdown_text)
         except Exception:
             self.preview.setPlainText(markdown_text)
+
+    def _on_preview_contents_changed(self) -> None:
+        try:
+            if isValid is not None and not isValid(self):
+                return
+        except Exception:
+            return
+
+        try:
+            self.previewUpdated.emit()
+        except Exception:
+            pass
+
+    def closeEvent(self, event) -> None:  # noqa: N802
+        # 破棄時にタイマーが発火してプレビュー更新が走るのを抑止
+        try:
+            self._preview_timer.stop()
+        except Exception:
+            pass
+        return super().closeEvent(event)
 
     def _detect_line_style(self, line_text: str) -> str | None:
         if line_text.startswith("### "):

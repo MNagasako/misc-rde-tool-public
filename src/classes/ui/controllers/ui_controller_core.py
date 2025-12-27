@@ -81,8 +81,14 @@ class UIControllerCore:
 
         kind: primary|secondary|danger|warning|inactive|active
         """
-        if kind in self._button_style_cache:
-            return self._button_style_cache[kind]
+        # テーマ切替後に旧配色が残らないよう、キャッシュキーにテーマモードを含める
+        try:
+            theme_mode = ThemeManager.instance().get_mode().value
+        except Exception:
+            theme_mode = "unknown"
+        cache_key = f"{kind}:{theme_mode}"
+        if cache_key in self._button_style_cache:
+            return self._button_style_cache[cache_key]
         from classes.theme import get_color, ThemeKey
         mapping = {
             'primary': (ThemeKey.BUTTON_PRIMARY_BACKGROUND, ThemeKey.BUTTON_PRIMARY_TEXT),
@@ -99,7 +105,7 @@ class UIControllerCore:
             f"color: {get_color(fg_key)}; "
             "font-weight: bold; border-radius: 6px; margin: 2px; padding: 4px 8px; }"
         )
-        self._button_style_cache[kind] = style
+        self._button_style_cache[cache_key] = style
         return style
     
     def adjust_button_font_size(self, button, max_width=None, max_height=None):
@@ -209,26 +215,48 @@ class UIControllerCore:
             """
             import time
             toggle_start = time.perf_counter_ns()
+
+            # テーマ切替中は操作ブロック（オーバーレイ表示）
+            overlay = None
+            try:
+                from PySide6.QtWidgets import QApplication
+                from classes.ui.utilities.theme_switch_overlay import ThemeSwitchOverlayDialog
+
+                overlay = ThemeSwitchOverlayDialog(self.parent)
+                overlay.show_centered()
+                try:
+                    QApplication.processEvents()
+                except Exception:
+                    pass
+            except Exception:
+                overlay = None
             
-            # テーマモード変更（ThemeManager内で詳細計測）
-            # 2状態トグル (AUTO廃止)
-            theme_manager.toggle_mode()
-            
-            # ボタン更新（軽量）
-            button_start = time.perf_counter_ns()
-            update_button_style()
-            button_elapsed = (time.perf_counter_ns() - button_start) / 1_000_000
-            
-            # 全UI色再適用（重い可能性）
-            refresh_start = time.perf_counter_ns()
-            self._refresh_all_ui_colors()
-            refresh_elapsed = (time.perf_counter_ns() - refresh_start) / 1_000_000
+            try:
+                # テーマモード変更（ThemeManager内で詳細計測）
+                # 2状態トグル (AUTO廃止)
+                theme_manager.toggle_mode()
+                
+                # ボタン更新（軽量）
+                button_start = time.perf_counter_ns()
+                update_button_style()
+                button_elapsed = (time.perf_counter_ns() - button_start) / 1_000_000
+                
+                # 全UI色再適用（重い可能性）
+                refresh_start = time.perf_counter_ns()
+                self._refresh_all_ui_colors()
+                refresh_elapsed = (time.perf_counter_ns() - refresh_start) / 1_000_000
+            finally:
+                if overlay is not None:
+                    try:
+                        overlay.close()
+                    except Exception:
+                        pass
             
             total_elapsed = (time.perf_counter_ns() - toggle_start) / 1_000_000
             logger.info(f"[ThemeToggle] 処理時間: button={button_elapsed:.2f}ms refresh={refresh_elapsed:.2f}ms total={total_elapsed:.2f}ms")
         
         self.theme_toggle_btn.clicked.connect(on_theme_toggle)
-        theme_manager.theme_changed.connect(lambda: update_button_style())
+        theme_manager.theme_changed.connect(lambda *_: update_button_style())
         
         update_button_style()
         menu_layout.addWidget(self.theme_toggle_btn)
@@ -288,6 +316,34 @@ class UIControllerCore:
             # メインウィンドウ背景色の更新
             if hasattr(self.parent, 'setStyleSheet'):
                 self.parent.setStyleSheet(f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};")
+
+            # WebView周辺の背景色も更新（透過/未描画領域が黒にならないように）
+            try:
+                right_widget = self.parent.findChild(QWidget, 'right_widget')
+                if right_widget is not None:
+                    right_widget.setStyleSheet(
+                        f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)}; "
+                        f"color: {get_color(ThemeKey.WINDOW_FOREGROUND)};"
+                    )
+                webview_widget = self.parent.findChild(QWidget, 'webview_widget')
+                if webview_widget is not None:
+                    webview_widget.setStyleSheet(
+                        f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)}; "
+                        f"color: {get_color(ThemeKey.WINDOW_FOREGROUND)};"
+                    )
+                if hasattr(self.parent, 'webview'):
+                    self.parent.webview.setStyleSheet(
+                        f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};"
+                    )
+                    try:
+                        from classes.theme import get_qcolor
+                        page = self.parent.webview.page() if hasattr(self.parent.webview, 'page') else None
+                        if page is not None and hasattr(page, 'setBackgroundColor'):
+                            page.setBackgroundColor(get_qcolor(ThemeKey.WINDOW_BACKGROUND))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
                 
             # 各タブウィジェットの再描画をトリガー
             tab_start = time.perf_counter_ns()
@@ -534,9 +590,22 @@ class UIControllerCore:
             self.parent.grant_form_layout = form_layout
 
             # 画像取得上限設定を追加
-            image_limit_layout = self.create_image_limit_dropdown()
-            if image_limit_layout:
-                data_fetch_layout.addLayout(image_limit_layout)
+            # 既に作成済みの場合は二重追加しない（データ取得ウィジェット二重表示対策）
+            needs_image_limit = True
+            existing_dropdown = getattr(self, 'image_limit_dropdown', None)
+            if existing_dropdown is not None:
+                try:
+                    # deleted済みだと例外になる
+                    _ = existing_dropdown.parent()
+                    needs_image_limit = False
+                except Exception:
+                    needs_image_limit = True
+                    self.image_limit_dropdown = None
+
+            if needs_image_limit:
+                image_limit_layout = self.create_image_limit_dropdown()
+                if image_limit_layout:
+                    data_fetch_layout.addLayout(image_limit_layout)
 
             # 結果表示用ラベル
             self.parent.result_label = QLabel()
@@ -568,7 +637,7 @@ class UIControllerCore:
         メインレイアウトの設定
         """
         try:
-            from qt_compat.widgets import QHBoxLayout, QWidget, QVBoxLayout
+            from qt_compat.widgets import QGridLayout, QHBoxLayout, QWidget, QVBoxLayout
             
             root_layout = QHBoxLayout()
 
@@ -617,6 +686,11 @@ class UIControllerCore:
 
             # 右側：上（WebView）・下（個別メニュー）に分割
             right_widget = QWidget()
+            right_widget.setObjectName('right_widget')
+            right_widget.setStyleSheet(
+                f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)}; "
+                f"color: {get_color(ThemeKey.WINDOW_FOREGROUND)};"
+            )
             right_main_layout = QVBoxLayout()
             right_main_layout.setSpacing(5)
             right_main_layout.setContentsMargins(5, 5, 5, 5)
@@ -624,6 +698,10 @@ class UIControllerCore:
             # 上部：WebView + 待機メッセージ専用エリア
             webview_widget = QWidget()
             webview_widget.setObjectName('webview_widget')
+            webview_widget.setStyleSheet(
+                f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)}; "
+                f"color: {get_color(ThemeKey.WINDOW_FOREGROUND)};"
+            )
             # 初期サイズを設定してネガティブサイズエラーを防止
             webview_widget.setMinimumSize(100, 50)
             # 初期ロード時にグローバルスタイル適用（右側コンテナ生成直後）
@@ -636,8 +714,28 @@ class UIControllerCore:
                 app.setStyleSheet(get_global_base_style())
             
             # WebViewレイアウト（WebView + ログインコントロール）
-            webview_layout = QHBoxLayout()
-            webview_layout.addWidget(self.parent.webview)
+            # WebView領域を右端まで広げ、ログインコントロールは上に重ねる。
+            webview_layout = QGridLayout()
+            webview_layout.setContentsMargins(0, 0, 0, 0)
+            webview_layout.setSpacing(0)
+            # WebViewの背景が透過指定されても下地が黒くならないよう、
+            # コンテナ側の背景色を明示しておく（WebView自身にも念のため適用）。
+            try:
+                self.parent.webview.setStyleSheet(
+                    f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};"
+                )
+
+                # QWebEnginePage側の背景色も明示（ページの未描画領域/透過で黒が出る対策）
+                try:
+                    from classes.theme import get_qcolor
+                    page = self.parent.webview.page() if hasattr(self.parent.webview, 'page') else None
+                    if page is not None and hasattr(page, 'setBackgroundColor'):
+                        page.setBackgroundColor(get_qcolor(ThemeKey.WINDOW_BACKGROUND))
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            webview_layout.addWidget(self.parent.webview, 0, 0)
             
             # ログインコントロールウィジェットを追加
             try:
@@ -647,11 +745,25 @@ class UIControllerCore:
                     self.parent.webview
                 )
                 self.parent.login_control_widget.setMaximumWidth(300)
-                webview_layout.addWidget(self.parent.login_control_widget)
+                from qt_compat.core import Qt
+                webview_layout.addWidget(
+                    self.parent.login_control_widget,
+                    0,
+                    0,
+                    alignment=Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignRight,
+                )
+                try:
+                    self.parent.login_control_widget.raise_()
+                except Exception:
+                    pass
             except Exception as e:
                 logger.error(f"ログインコントロールウィジェット初期化エラー: {e}")
                 # エラー時はスペーサーで代替
-                webview_layout.addSpacing(20)
+                try:
+                    # QGridLayoutにはaddSpacingが無い
+                    webview_layout.setRowMinimumHeight(0, 1)
+                except Exception:
+                    pass
             
             # v2.0.2: 待機メッセージ専用エリア（WebView直下に配置）
             vbox = QVBoxLayout()
@@ -710,12 +822,65 @@ class UIControllerCore:
             root_layout.addWidget(self.menu_widget)
             root_layout.addWidget(right_widget, 1)
             self.parent.setLayout(root_layout)
+
+            # 現象解析用: 起動直後の背景/geometryを一度だけダンプ
+            try:
+                from qt_compat.core import QTimer
+                QTimer.singleShot(0, self._debug_dump_webview_area)
+            except Exception:
+                pass
             
             # タブ統合機能を追加
             self._integrate_settings_tab()
             
         except Exception as e:
             logger.error("メインレイアウト設定エラー: %s", e)
+
+    def _debug_dump_webview_area(self):
+        """黒帯/余白の原因特定用に、主要ウィジェットの状態をDEBUGログへ出力"""
+        try:
+            from qt_compat.widgets import QWidget
+        except Exception:
+            return
+
+        def dump_widget(label: str, w: QWidget | None):
+            if w is None:
+                logger.info("[UIDump] %s: None", label)
+                return
+            try:
+                ss = w.styleSheet() if hasattr(w, 'styleSheet') else ''
+            except Exception:
+                ss = ''
+            try:
+                pal = w.palette() if hasattr(w, 'palette') else None
+                bg = pal.color(pal.Window).name() if pal is not None else None
+            except Exception:
+                bg = None
+            try:
+                logger.info(
+                    "[UIDump] %s: cls=%s obj=%s vis=%s geom=%s min=%s max=%s sizePolicy=%s bg=%s ss_len=%s",
+                    label,
+                    type(w).__name__,
+                    w.objectName() if hasattr(w, 'objectName') else None,
+                    w.isVisible() if hasattr(w, 'isVisible') else None,
+                    w.geometry() if hasattr(w, 'geometry') else None,
+                    w.minimumSize() if hasattr(w, 'minimumSize') else None,
+                    w.maximumSize() if hasattr(w, 'maximumSize') else None,
+                    w.sizePolicy() if hasattr(w, 'sizePolicy') else None,
+                    bg,
+                    len(ss) if ss is not None else 0,
+                )
+            except Exception:
+                pass
+
+        try:
+            dump_widget('parent', self.parent)
+            dump_widget('right_widget', self.parent.findChild(QWidget, 'right_widget'))
+            dump_widget('webview_widget', self.parent.findChild(QWidget, 'webview_widget'))
+            dump_widget('webview', getattr(self.parent, 'webview', None))
+            dump_widget('login_control_widget', getattr(self.parent, 'login_control_widget', None))
+        except Exception:
+            pass
             
     def _integrate_settings_tab(self):
         """設定タブをメインウィンドウに統合"""

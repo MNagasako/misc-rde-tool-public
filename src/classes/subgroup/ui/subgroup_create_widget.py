@@ -109,7 +109,7 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     apply_label_style(label, get_color(ThemeKey.TEXT_PRIMARY), bold=True, point_size=16)
     #layout.addWidget(label)
 
-    button_style = f"background-color: {color}; color: white; font-weight: bold; border-radius: 6px;"
+    button_style = f"background-color: {color}; color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; font-weight: bold; border-radius: 6px;"
 
     # --- メンバー選択部（共通化コード使用） ---
     from config.common import OUTPUT_RDE_DIR, INPUT_DIR

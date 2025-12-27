@@ -5,6 +5,7 @@
 
 import logging
 from typing import Optional
+import time
 
 try:
     from qt_compat.widgets import (
@@ -15,6 +16,7 @@ try:
         QCheckBox, QSpinBox
     )
     from qt_compat.core import Qt
+    from qt_compat.core import QTimer
     from qt_compat.gui import QFont
     PYQT5_AVAILABLE = True
 except ImportError:
@@ -30,10 +32,11 @@ logger = logging.getLogger(__name__)
 class DataFetch2TabWidget(QTabWidget):
     """データ取得2機能のタブウィジェット"""
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, prewarm_filter_widget: bool = True):
         super().__init__(parent)
         self.parent_controller = parent
         self.bearer_token = None
+        self._prewarm_filter_widget = bool(prewarm_filter_widget)
         
         # フィルタ設定の初期化
         try:
@@ -115,22 +118,94 @@ class DataFetch2TabWidget(QTabWidget):
         desc_label = QLabel("データ取得タブで一括取得するファイルの種類や条件を指定します")
         desc_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin-bottom: 10px;")
         layout.addWidget(desc_label)
-        
-        # ファイルフィルタウィジェット
+
+        # 重いFileFilterWidgetは、ウィンドウ初回描画をブロックしないように遅延構築する。
+        # ただしユーザーがタブを開く頃には構築済みになるよう、イベントループが回った後に自動でプレウォームする。
+        self.file_filter_widget = None
+        self._file_filter_container = QWidget(tab_widget)
+        self._file_filter_container_layout = QVBoxLayout(self._file_filter_container)
+        self._file_filter_container_layout.setContentsMargins(0, 0, 0, 0)
+        self._file_filter_placeholder = QLabel("読み込み中…")
+        self._file_filter_container_layout.addWidget(self._file_filter_placeholder)
+        # コンテナがタブ領域の高さに追従して伸びるようストレッチを付ける
+        layout.addWidget(self._file_filter_container, 1)
+
+        self._file_filter_tab_index = self.addTab(tab_widget, "🔍 ファイルフィルタ")
+
+        # タブ選択時に未構築なら構築
+        try:
+            self.currentChanged.connect(self._on_tab_changed)
+        except Exception:
+            pass
+
+        # プレウォーム（初回描画のあとに構築）
+        try:
+            if self._prewarm_filter_widget:
+                QTimer.singleShot(0, self._ensure_file_filter_widget)
+        except Exception:
+            pass
+
+    def _on_tab_changed(self, index: int):
+        try:
+            if index == getattr(self, '_file_filter_tab_index', -1):
+                self._ensure_file_filter_widget()
+        except Exception:
+            pass
+
+    def _ensure_file_filter_widget(self):
+        """必要ならFileFilterWidgetを構築してタブへ挿入（1回だけ）。"""
+        if getattr(self, 'file_filter_widget', None) is not None:
+            return
+
+        try:
+            from classes.utils.perf_monitor import PerfMonitor
+        except Exception:
+            PerfMonitor = None
+
+        t0 = time.perf_counter()
         try:
             from classes.data_fetch2.ui.file_filter_widget import create_file_filter_widget
-            self.file_filter_widget = create_file_filter_widget(tab_widget)
-            self.file_filter_widget.filterChanged.connect(self.on_file_filter_changed)
-            layout.addWidget(self.file_filter_widget)
+            widget = create_file_filter_widget(self._file_filter_container)
+            widget.filterChanged.connect(self.on_file_filter_changed)
+
+            # 現在のフィルタ状態があれば、初期反映（大量setCheckedのシグナル連発を避けるためウィジェット側で抑止する）
+            try:
+                if hasattr(self, 'current_filter_config') and self.current_filter_config:
+                    if hasattr(widget, 'set_filter_config'):
+                        widget.set_filter_config(self.current_filter_config)
+            except Exception:
+                pass
+
+            # プレースホルダを置き換える
+            try:
+                if getattr(self, '_file_filter_placeholder', None) is not None:
+                    self._file_filter_placeholder.setParent(None)
+                    self._file_filter_placeholder = None
+            except Exception:
+                pass
+            self._file_filter_container_layout.addWidget(widget)
+            self.file_filter_widget = widget
+            t1 = time.perf_counter()
+            logger.info(f"[DataFetch2TabWidget] FileFilterWidget build: {t1 - t0:.3f} sec")
+            try:
+                if PerfMonitor is not None:
+                    PerfMonitor.mark(
+                        "data_fetch2:file_filter_widget:built",
+                        logger=logging.getLogger("RDE_WebView"),
+                        build_sec=round(t1 - t0, 6),
+                    )
+            except Exception:
+                pass
         except ImportError as e:
             logger.error(f"フィルタウィジェットのインポートに失敗: {e}")
-            # フォールバック: 簡易フィルタUI
-            fallback_label = QLabel("高度なフィルタ機能は利用できません")
-            fallback_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;")
-            layout.addWidget(fallback_label)
-            self.file_filter_widget = None
-        
-        self.addTab(tab_widget, "🔍 ファイルフィルタ")
+            try:
+                if getattr(self, '_file_filter_placeholder', None) is not None:
+                    self._file_filter_placeholder.setText("高度なフィルタ機能は利用できません")
+                    self._file_filter_placeholder.setStyleSheet(
+                        f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;"
+                    )
+            except Exception:
+                pass
         
     def create_dataset_tab(self):
         """データセット選択・取得タブ"""
@@ -222,10 +297,11 @@ class DataFetch2TabWidget(QTabWidget):
             logger.debug(f"初期フィルタ同期エラー: {e}")
 
 
-def create_data_fetch2_tab_widget(parent=None):
+def create_data_fetch2_tab_widget(parent=None, *, prewarm_filter_widget: bool = True):
     """データ取得2タブウィジェットを作成"""
     try:
-        return DataFetch2TabWidget(parent)
+        # prewarm_filter_widget=True が従来挙動（初回描画をブロックしないため遅延構築）
+        return DataFetch2TabWidget(parent, prewarm_filter_widget=prewarm_filter_widget)
     except Exception as e:
         logger.error(f"データ取得2タブウィジェット作成エラー: {e}")
         return None

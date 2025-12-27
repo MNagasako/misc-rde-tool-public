@@ -41,9 +41,13 @@ class FundingNumberWidget(QWidget):
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
 
-        panel = QWidget()
-        panel.setStyleSheet(f"background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)}; border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; border-radius: 4px;")
-        layout = QVBoxLayout(panel)
+        self.panel = QWidget()
+        self.panel.setObjectName("subgroup_funding_panel")
+        self.panel.setStyleSheet(
+            f"background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)}; "
+            f"border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; border-radius: 4px;"
+        )
+        layout = QVBoxLayout(self.panel)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
         
@@ -137,7 +141,7 @@ class FundingNumberWidget(QWidget):
         layout.addWidget(self.table_widget)
         layout.addLayout(form_layout)
 
-        outer_layout.addWidget(panel)
+        outer_layout.addWidget(self.panel)
         
         # Enterキーで追加
         self.number_input.returnPressed.connect(self.add_funding_number)
@@ -255,6 +259,12 @@ class FundingNumberWidget(QWidget):
     def refresh_theme(self):
         """テーマ切替時の更新処理"""
         try:
+            if hasattr(self, "panel") and self.panel:
+                self.panel.setStyleSheet(
+                    f"background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)}; "
+                    f"border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; border-radius: 4px;"
+                )
+
             # ボタンスタイル再適用
             self.add_button.setStyleSheet(f"""
                 QPushButton {{

@@ -207,7 +207,7 @@ class PopupDialog:
                 background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)};
                 line-height: 1.5;
                 selection-background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
-                selection-color: white;
+                selection-color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
             }}
         """)
         

@@ -321,6 +321,26 @@ QScrollBar::handle:vertical {{
 QScrollBar::handle:vertical:hover {{
     background-color: {get_color(ThemeKey.SCROLLBAR_HANDLE_HOVER)};
 }}
+QScrollBar:horizontal {{
+    background-color: {get_color(ThemeKey.SCROLLBAR_BACKGROUND)};
+    height: 10px;
+    border-radius: 5px;
+}}
+QScrollBar::handle:horizontal {{
+    background-color: {get_color(ThemeKey.SCROLLBAR_HANDLE)};
+    border-radius: 5px;
+    min-width: 16px;
+}}
+QScrollBar::handle:horizontal:hover {{
+    background-color: {get_color(ThemeKey.SCROLLBAR_HANDLE_HOVER)};
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical, QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+    background: none;
+    border: none;
+}}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical, QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+    background: none;
+}}
 """
 
 # 一括登録UI用スタイル

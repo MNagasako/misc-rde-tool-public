@@ -11,7 +11,7 @@ try:
         QWidget, QVBoxLayout, QPushButton, 
         QMessageBox, QGroupBox, QLabel
     )
-    from qt_compat.core import QUrl
+    from qt_compat.core import QUrl, Qt
     PYQT5_AVAILABLE = True
 except ImportError:
     PYQT5_AVAILABLE = False
@@ -37,11 +37,24 @@ class LoginControlWidget(QWidget):
         self.parent_widget = parent
         self.webview = webview
         self.config_manager = get_config_manager()
+
+        # グローバルQSSの QWidget 背景が乗ると、環境によって黒化することがある。
+        # LoginControlはWebView上に重ねるため「外枠は透過」が正しい。
+        try:
+            self.setObjectName("login_control_widget")
+            self.setAttribute(Qt.WA_TranslucentBackground, True)
+            self.setAutoFillBackground(False)
+        except Exception:
+            pass
         
         self.init_ui()
     
     def init_ui(self):
         """UI初期化（v2.0.3: 簡素化・ログアウトボタン削除）"""
+        # WebViewに重ねるため、ウィジェット自体の背景は透過。
+        # （内部のGroupBox等は個別に背景を持つ）
+        self.setStyleSheet("#login_control_widget { background-color: transparent; }")
+
         layout = QVBoxLayout(self)
         layout.setSpacing(5)
         layout.setContentsMargins(5, 5, 5, 5)

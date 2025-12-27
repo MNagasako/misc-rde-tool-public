@@ -700,55 +700,22 @@ def create_json_status_widget(parent=None):
         def init_ui(self):
             layout = QVBoxLayout(self)
             
-            # タイトル
-            #title_label = QLabel("JSON取得状況")
-            #title_label.setStyleSheet("font-weight: bold; font-size: 12pt; color: #2E86AB;")
-            #layout.addWidget(title_label)
+            # タイトル（必要ならここでラベル追加）
             
             # ボタンレイアウト（更新・デバッグ）
             btn_layout = QHBoxLayout()
             
             # 更新ボタン
-            refresh_btn = QPushButton("状況更新")
-            refresh_btn.setMaximumWidth(100)
-            refresh_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
-                    color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
-                    border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BORDER)};
-                    border-radius: 4px;
-                    padding: 5px;
-                }}
-                QPushButton:hover {{
-                    background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
-                }}
-                QPushButton:pressed {{
-                    background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_PRESSED)};
-                }}
-            """)
-            refresh_btn.clicked.connect(self.update_status)
-            btn_layout.addWidget(refresh_btn)
+            self.refresh_btn = QPushButton("状況更新")
+            self.refresh_btn.setMaximumWidth(100)
+            self.refresh_btn.clicked.connect(self.update_status)
+            btn_layout.addWidget(self.refresh_btn)
             
             # API デバッグボタン
-            debug_btn = QPushButton("🔍 API Debug")
-            debug_btn.setMaximumWidth(120)
-            debug_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: #6F42C1;
-                    color: white;
-                    border: 1px solid #5A32A3;
-                    border-radius: 4px;
-                    padding: 5px;
-                }}
-                QPushButton:hover {{
-                    background-color: #7A52D5;
-                }}
-                QPushButton:pressed {{
-                    background-color: #5A32A3;
-                }}
-            """)
-            debug_btn.clicked.connect(self.show_api_debug)
-            btn_layout.addWidget(debug_btn)
+            self.debug_btn = QPushButton("🔍 API Debug")
+            self.debug_btn.setMaximumWidth(120)
+            self.debug_btn.clicked.connect(self.show_api_debug)
+            btn_layout.addWidget(self.debug_btn)
             
             btn_layout.addStretch()
             layout.addLayout(btn_layout)
@@ -757,18 +724,13 @@ def create_json_status_widget(parent=None):
             self.status_text = QTextEdit()
             self.status_text.setReadOnly(True)
             self.status_text.setMaximumHeight(200)
-            self.status_text.setStyleSheet(f"""
-                font-family: 'Consolas';
-                font-size: 9pt;
-                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
-                color: {get_color(ThemeKey.TEXT_PRIMARY)};
-                border: 1px solid {get_color(ThemeKey.PANEL_BORDER)};
-                border-radius: 4px;
-            """)
             layout.addWidget(self.status_text)
             
             # 初期状態を表示
             self.update_status()
+
+            # テーマ依存スタイル適用
+            self.refresh_theme()
             
         def update_status(self):
             try:
@@ -809,11 +771,51 @@ def create_json_status_widget(parent=None):
                 self.status_text.setPlainText(f"モジュールインポートエラー: {e}")
             except Exception as e:
                 self.status_text.setPlainText(f"状況取得エラー: {e}")
-        def refresh_theme(self):
-            """テーマ変更時にステータス表示のスタイルを再適用"""
+        def refresh_theme(self, *_args, **_kwargs):
+            """テーマ変更時に必要なスタイルを再適用"""
             try:
+                self.refresh_btn.setStyleSheet(
+                    f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+                        border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BORDER)};
+                        border-radius: 4px;
+                        padding: 5px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+                    }}
+                    QPushButton:pressed {{
+                        background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_PRESSED)};
+                    }}
+                    """
+                )
+
+                self.debug_btn.setStyleSheet(
+                    f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)};
+                        border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)};
+                        border-radius: 4px;
+                        padding: 5px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)};
+                    }}
+                    """
+                )
+
                 self.status_text.setStyleSheet(
-                    f"border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; border-radius: 4px; font-family: 'Consolas'; font-size: 9pt; }}"
+                    f"""
+                    font-family: 'Consolas';
+                    font-size: 9pt;
+                    background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                    color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                    border: 1px solid {get_color(ThemeKey.PANEL_BORDER)};
+                    border-radius: 4px;
+                    """
                 )
             except Exception as e:
                 logger.debug("JsonStatusWidget refresh_theme failed: %s", e)
@@ -821,7 +823,7 @@ def create_json_status_widget(parent=None):
         def _connect_theme_signal(self):
             try:
                 from classes.theme.theme_manager import ThemeManager
-                ThemeManager.get_instance().theme_changed.connect(self.refresh_theme)
+                ThemeManager.instance().theme_changed.connect(self.refresh_theme)
                 self.refresh_theme()
             except Exception as e:
                 logger.debug("JsonStatusWidget theme signal connect failed: %s", e)
@@ -1013,7 +1015,7 @@ def create_individual_execution_widget(parent=None):
             
             # タイトル
             #title_label = QLabel("段階別個別実行")
-            #title_label.setStyleSheet("font-weight: bold; font-size: 11pt; color: #2E86AB;")
+            # title_label のスタイルはテーマ側で制御
             #layout.addWidget(title_label)
             
             # 実行コントロール行

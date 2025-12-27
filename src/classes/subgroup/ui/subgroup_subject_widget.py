@@ -35,9 +35,13 @@ class SubjectEntryWidget(QWidget):
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
 
-        panel = QWidget()
-        panel.setStyleSheet(f"background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)}; border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; border-radius: 4px;")
-        layout = QVBoxLayout(panel)
+        self.panel = QWidget()
+        self.panel.setObjectName("subgroup_subject_panel")
+        self.panel.setStyleSheet(
+            f"background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)}; "
+            f"border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; border-radius: 4px;"
+        )
+        layout = QVBoxLayout(self.panel)
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(6)
         
@@ -53,7 +57,7 @@ class SubjectEntryWidget(QWidget):
         self.add_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
-                color: white;
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                 border: none;
                 padding: 5px 10px;
                 border-radius: 3px;
@@ -112,7 +116,7 @@ class SubjectEntryWidget(QWidget):
         self.add_from_form_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
-                color: white;
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
                 font-weight: bold;
                 padding: 6px 12px;
                 border-radius: 4px;
@@ -130,7 +134,7 @@ class SubjectEntryWidget(QWidget):
         self.grant_number_edit.returnPressed.connect(self.add_from_form)
         self.title_edit.returnPressed.connect(self.add_from_form)
         
-        outer_layout.addWidget(panel)
+        outer_layout.addWidget(self.panel)
         self.setLayout(outer_layout)
         
         # ThemeManager接続
@@ -170,11 +174,20 @@ class SubjectEntryWidget(QWidget):
     
     def refresh_theme(self):
         """テーマ変更時のスタイル更新"""
+        try:
+            if hasattr(self, "panel") and self.panel:
+                self.panel.setStyleSheet(
+                    f"background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)}; "
+                    f"border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; border-radius: 4px;"
+                )
+        except Exception:
+            pass
+
         self._apply_table_style()
         self.add_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
-                color: white;
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                 border: none;
                 padding: 5px 10px;
                 border-radius: 3px;
@@ -187,7 +200,7 @@ class SubjectEntryWidget(QWidget):
         self.add_from_form_button.setStyleSheet(f"""
             QPushButton {{
                 background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
-                color: white;
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
                 font-weight: bold;
                 padding: 6px 12px;
                 border-radius: 4px;
@@ -203,7 +216,7 @@ class SubjectEntryWidget(QWidget):
                 delete_button.setStyleSheet(f"""
                     QPushButton {{
                         background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
-                        color: white;
+                        color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
                         border: none;
                         padding: 2px 8px;
                         border-radius: 2px;
@@ -235,7 +248,7 @@ class SubjectEntryWidget(QWidget):
             delete_button.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
-                    color: white;
+                    color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
                     border: none;
                     padding: 2px 8px;
                     border-radius: 2px;

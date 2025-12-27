@@ -244,7 +244,7 @@ class UIControllerForms:
                     padding: 4px 6px;
                     border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                     border-radius: 3px;
-                    background-color: white;
+                    background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
                     font-size: 10pt;
                     min-height: 24px;
                 }}
@@ -573,6 +573,7 @@ class UIControllerForms:
             limit_layout.addWidget(limit_label)
             
             dropdown = QComboBox()
+            dropdown.setObjectName("image_limit_dropdown")
             dropdown.addItems(["制限なし", "1枚まで", "3枚まで", "5枚まで", "10枚まで", "20枚まで"])
             dropdown.setCurrentText("3枚まで")  # デフォルト値
             dropdown.setStyleSheet(f"""

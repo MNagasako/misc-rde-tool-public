@@ -13,7 +13,7 @@ from qt_compat.widgets import (
     QMessageBox, QDialog, QTextEdit, QTableWidget, QTableWidgetItem, 
     QHeaderView, QRadioButton, QButtonGroup, QLineEdit, QSizePolicy
 )
-from qt_compat.core import Qt
+from qt_compat.core import Qt, QTimer
 from config.common import SUBGROUP_JSON_PATH
 from net.http_helpers import proxy_get
 from classes.theme import get_color, get_qcolor, ThemeKey, ThemeManager
@@ -47,6 +47,7 @@ class CommonSubgroupMemberSelector(QWidget):
             show_filter: フィルタUIを表示するか（True=新規作成タブ、False=修正タブ）
         """
         super().__init__()
+        self._theme_connected = False
         self.subgroup_id = subgroup_id
         self.show_filter = show_filter
         self.disable_internal_scroll = disable_internal_scroll
@@ -254,11 +255,23 @@ class CommonSubgroupMemberSelector(QWidget):
             layout.addWidget(self.table)
         
         self.setLayout(layout)
-        
-        # ThemeManager接続
-        theme_manager = ThemeManager.instance()
-        theme_manager.theme_changed.connect(self.refresh_theme)
+
+        # ThemeManager接続（setup_uiが複数回呼ばれても重複接続しない）
+        try:
+            theme_manager = ThemeManager.instance()
+            if not self._theme_connected:
+                theme_manager.theme_changed.connect(self.refresh_theme)
+                self._theme_connected = True
+        except Exception:
+            pass
+
         self.apply_filter()
+
+        # 初回表示時も現在テーマを反映（生成タイミング差による色残り対策）
+        try:
+            QTimer.singleShot(0, self.refresh_theme)
+        except Exception:
+            pass
 
     def refresh_all_entries(self):
         """全行の氏名・メールをAPIで再フェッチしてキャッシュ更新"""
@@ -1416,16 +1429,24 @@ class CommonSubgroupMemberSelector(QWidget):
     
     def refresh_theme(self):
         """テーマ切替時の更新処理"""
+        # NOTE: テーマ更新は部分的に失敗しても他に波及させない（初回表示/再適用を確実にする）
         try:
             self._apply_table_style()
-            self._refresh_remove_buttons_style()
-            
-            # フィルタUI更新（表示されている場合のみ）
+        except Exception as e:
+            logger.debug(f"CommonSubgroupMemberSelector: table style refresh skipped: {e}")
+
+        # 除外ボタン（×）は CustomTableWidget 側の責務
+        try:
+            if hasattr(self, 'table') and self.table and hasattr(self.table, '_refresh_remove_buttons_style'):
+                self.table._refresh_remove_buttons_style()
+        except Exception as e:
+            logger.debug(f"CommonSubgroupMemberSelector: remove button style refresh skipped: {e}")
+
+        # フィルタUI更新（表示されている場合のみ）
+        try:
             if self.show_filter and hasattr(self, 'filter_label'):
-                # フィルタラベル更新
                 self.filter_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_PRIMARY)};")
-                
-                # チェックボックススタイル更新
+
                 checkbox_style = f"""
                     QCheckBox {{
                         spacing: 5px;
@@ -1446,15 +1467,18 @@ class CommonSubgroupMemberSelector(QWidget):
                         border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
                     }}
                 """
-                
+
                 if hasattr(self, 'filter_institution_cb'):
                     self.filter_institution_cb.setStyleSheet(checkbox_style)
                 if hasattr(self, 'filter_custom_cb'):
                     self.filter_custom_cb.setStyleSheet(checkbox_style)
-            
-            self.update()
         except Exception as e:
-            logger.error(f"CommonSubgroupMemberSelector: テーマ更新エラー: {e}")
+            logger.debug(f"CommonSubgroupMemberSelector: filter ui style refresh skipped: {e}")
+
+        try:
+            self.update()
+        except Exception:
+            pass
 
 
 def create_common_subgroup_member_selector(initial_roles=None, prechecked_user_ids=None, show_filter=True, user_entries=None, disable_internal_scroll: bool = False):

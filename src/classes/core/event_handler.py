@@ -189,6 +189,10 @@ class EventHandler:
         # WebViewイベント接続
         if hasattr(self.parent, 'webview'):
             self.parent.webview.page().loadFinished.connect(self.on_load_finished)
+            try:
+                self.parent.webview.loadStarted.connect(self.on_load_started)
+            except Exception:
+                pass
             self.parent.webview.urlChanged.connect(self.on_url_changed)
         
         # Cookieイベント接続
@@ -268,6 +272,43 @@ class EventHandler:
             if self.auto_close:
                 from qt_compat.widgets import QApplication
                 QTimer.singleShot(1000, lambda: QApplication.quit())
+
+        def on_load_started(self):
+            """ページロード開始時の処理。
+
+            環境によっては遷移中にQWebEngineViewが黒くクリアされるため、
+            loadStartedのタイミングでも背景色を明示しておく。
+            """
+            try:
+                from classes.theme import get_color, get_qcolor, ThemeKey
+
+                bg = get_color(ThemeKey.WINDOW_BACKGROUND)
+
+                # WebView周辺の下地（未描画領域が黒にならないように）
+                try:
+                    right_widget = self.parent.findChild(QWidget, 'right_widget')
+                    if right_widget is not None:
+                        right_widget.setStyleSheet(f"background-color: {bg};")
+                except Exception:
+                    pass
+                try:
+                    webview_widget = self.parent.findChild(QWidget, 'webview_widget')
+                    if webview_widget is not None:
+                        webview_widget.setStyleSheet(f"background-color: {bg};")
+                except Exception:
+                    pass
+
+                # WebView自身
+                try:
+                    if hasattr(self.parent, 'webview'):
+                        self.parent.webview.setStyleSheet(f"background-color: {bg};")
+                        page = self.parent.webview.page() if hasattr(self.parent.webview, 'page') else None
+                        if page is not None and hasattr(page, 'setBackgroundColor'):
+                            page.setBackgroundColor(get_qcolor(ThemeKey.WINDOW_BACKGROUND))
+                except Exception:
+                    pass
+            except Exception:
+                return
     
     def on_url_changed(self, url):
         """

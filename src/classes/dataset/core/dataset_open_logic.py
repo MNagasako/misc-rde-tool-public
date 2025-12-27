@@ -1058,7 +1058,7 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     form_layout.addRow(label_template, template_combo)
     form_layout.addRow(share_core_scope_checkbox)
     form_layout.addRow(anonymize_checkbox)
-    # インラインの固定色指定 (#228B22 など) を撤去しテーマ統一へ移行
+    # インラインの固定色指定（例: 緑系の直書き）を撤去しテーマ統一へ移行
     # 必要なら placeholder などは ThemeKey.TEXT_PLACEHOLDER へ後続で再指定可能
     from classes.theme.theme_keys import ThemeKey
     from classes.theme.theme_manager import get_color

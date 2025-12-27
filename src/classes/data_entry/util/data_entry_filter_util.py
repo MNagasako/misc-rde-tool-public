@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 
 from config.common import SELF_JSON_PATH, DATASET_JSON_PATH
+from classes.theme import get_color, ThemeKey
 
 # キャッシュ機能は削除済み - 高速検索機能で十分な性能を実現
 
@@ -400,15 +401,15 @@ def get_dataset_display_name_with_role(dataset_item):
     role_source = dataset_item.get('_role_source')
     
     if user_role and user_role != "NONE":
-        # 権限別の絵文字と背景色
+        # 権限別の絵文字表示（色はテーマ側で制御するためここでは持たない）
         role_display = {
-            "OWNER": {"emoji": "👑", "color": "#FFD700", "text": "OWNER"},
-            "ASSISTANT": {"emoji": "💁", "color": "#87CEEB", "text": "ASSIST"}, 
-            "MEMBER": {"emoji": "👥", "color": "#98FB98", "text": "MEMBER"},
-            "AGENT": {"emoji": "🤖", "color": "#DDA0DD", "text": "AGENT"}
+            "OWNER": {"emoji": "👑", "text": "OWNER"},
+            "ASSISTANT": {"emoji": "💁", "text": "ASSIST"},
+            "MEMBER": {"emoji": "👥", "text": "MEMBER"},
+            "AGENT": {"emoji": "🤖", "text": "AGENT"},
         }
         
-        role_info = role_display.get(user_role, {"emoji": "❓", "color": "#D3D3D3", "text": user_role})
+        role_info = role_display.get(user_role, {"emoji": "❓", "text": user_role})
         
         # 権限表示部分を作成
         role_part = f"{role_info['emoji']} {role_info['text']}"
@@ -433,18 +434,61 @@ def create_role_display_html(user_role, role_source=None):
         str: HTML形式の権限表示
     """
     role_styles = {
-        "OWNER": {"emoji": "👑", "bg": "#FFD700", "color": "#000", "text": "OWNER"},
-        "ASSISTANT": {"emoji": "💁", "bg": "#4169E1", "color": "#FFF", "text": "ASSIST"}, 
-        "MEMBER": {"emoji": "👥", "bg": "#32CD32", "color": "#000", "text": "MEMBER"},
-        "AGENT": {"emoji": "🤖", "bg": "#9370DB", "color": "#FFF", "text": "AGENT"}
+        "OWNER": {
+            "emoji": "👑",
+            "bg_key": ThemeKey.ROLE_OWNER_BACKGROUND,
+            "text_key": ThemeKey.ROLE_OWNER_TEXT,
+            "text": "OWNER",
+        },
+        "ASSISTANT": {
+            "emoji": "💁",
+            "bg_key": ThemeKey.ROLE_ASSISTANT_BACKGROUND,
+            "text_key": ThemeKey.ROLE_ASSISTANT_TEXT,
+            "text": "ASSIST",
+        },
+        "MEMBER": {
+            "emoji": "👥",
+            "bg_key": ThemeKey.ROLE_MEMBER_BACKGROUND,
+            "text_key": ThemeKey.ROLE_MEMBER_TEXT,
+            "text": "MEMBER",
+        },
+        "AGENT": {
+            "emoji": "🤖",
+            "bg_key": ThemeKey.ROLE_AGENT_BACKGROUND,
+            "text_key": ThemeKey.ROLE_AGENT_TEXT,
+            "text": "AGENT",
+        },
+        "VIEWER": {
+            "emoji": "👁️",
+            "bg_key": ThemeKey.ROLE_VIEWER_BACKGROUND,
+            "text_key": ThemeKey.ROLE_VIEWER_TEXT,
+            "text": "VIEWER",
+        },
     }
-    
-    style = role_styles.get(user_role, {"emoji": "❓", "bg": "#808080", "color": "#FFF", "text": user_role})
-    
-    html = f'<span style="background-color: {style["bg"]}; color: {style["color"]}; padding: 2px 6px; border-radius: 3px; font-weight: bold; margin-right: 5px;">{style["emoji"]} {style["text"]}</span>'
-    
+
+    style = role_styles.get(
+        user_role,
+        {
+            "emoji": "❓",
+            "bg_key": ThemeKey.PANEL_NEUTRAL_BACKGROUND,
+            "text_key": ThemeKey.TEXT_PRIMARY,
+            "text": user_role,
+        },
+    )
+
+    bg = get_color(style["bg_key"])
+    fg = get_color(style["text_key"])
+    html = (
+        f'<span style="background-color: {bg}; color: {fg}; padding: 2px 6px; '
+        f'border-radius: 3px; font-weight: bold; margin-right: 5px;">'
+        f'{style["emoji"]} {style["text"]}</span>'
+    )
+
     if role_source:
-        html += f' <span style="color: #666; font-size: 90%;">via {role_source}</span>'
+        html += (
+            f' <span style="color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 90%;">'
+            f'via {role_source}</span>'
+        )
     
     return html
 

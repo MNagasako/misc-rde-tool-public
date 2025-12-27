@@ -9,6 +9,7 @@ except ImportError:
 
 from classes.config.core.supported_formats_service import copy_to_input, parse_and_save
 from classes.theme import get_color, ThemeKey
+from classes.theme import ThemeManager
 from config.common import get_dynamic_file_path
 
 
@@ -47,7 +48,9 @@ class UploadXlsxTab(QWidget):
 
         # ステータス表示（進行状況）
         self.progress_label = QLabel("")
-        self.progress_label.setStyleSheet("color: blue; font-weight: bold;")
+        self.progress_label.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_INFO)}; font-weight: bold;"
+        )
         layout.addWidget(self.progress_label)
         
         # 結果表示（成功/失敗）
@@ -65,6 +68,19 @@ class UploadXlsxTab(QWidget):
         note = QLabel("※ XLSXを選択後、[解析を実行]を押すと、装置IDや拡張子情報を抽出します。")
         note.setWordWrap(True)
         layout.addWidget(note)
+
+        try:
+            ThemeManager.instance().theme_changed.connect(self.refresh_theme)
+        except Exception:
+            pass
+
+    def refresh_theme(self, *_):
+        try:
+            self.progress_label.setStyleSheet(
+                f"color: {get_color(ThemeKey.TEXT_INFO)}; font-weight: bold;"
+            )
+        except Exception:
+            pass
 
     def _pick_file(self):
         path, _ = QFileDialog.getOpenFileName(self, "XLSXを選択", "", "Excel Files (*.xlsx *.xls)")

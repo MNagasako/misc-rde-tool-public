@@ -16,6 +16,7 @@ from classes.equipment.util.output_paths import (
     get_equipment_backups_root,
     get_equipment_root_dir,
 )
+from classes.utils.button_styles import get_button_style
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,27 @@ class FetchTab(QWidget):
         
         self.setup_ui()
         self.connect_signals()
+        self._connect_theme_signal()
+        self.refresh_theme()
+
+    def _connect_theme_signal(self) -> None:
+        try:
+            from classes.theme.theme_manager import ThemeManager
+
+            ThemeManager.instance().theme_changed.connect(self.refresh_theme)
+        except Exception:
+            pass
+
+    def refresh_theme(self, *_args, **_kwargs) -> None:
+        try:
+            if hasattr(self, "fetch_button"):
+                self.fetch_button.setStyleSheet(get_button_style("success"))
+            if hasattr(self, "batch_process_button"):
+                self.batch_process_button.setStyleSheet(get_button_style("warning"))
+            if hasattr(self, "cancel_button"):
+                self.cancel_button.setStyleSheet(get_button_style("danger"))
+        except Exception:
+            pass
     
     def setup_ui(self):
         """UI構築"""
@@ -197,65 +219,20 @@ class FetchTab(QWidget):
         # 取得開始ボタン
         self.fetch_button = QPushButton("取得開始")
         self.fetch_button.setMinimumHeight(40)
-        self.fetch_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-weight: bold;
-                border-radius: 4px;
-                padding: 8px 16px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
-        """)
+        self.fetch_button.setStyleSheet(get_button_style("success"))
         layout.addWidget(self.fetch_button)
         
         # 一括処理ボタン（取得→変換→マージ）
         self.batch_process_button = QPushButton("🚀 一括処理（取得→変換→マージ）")
         self.batch_process_button.setMinimumHeight(40)
-        self.batch_process_button.setStyleSheet("""
-            QPushButton {
-                background-color: #FF9800;
-                color: white;
-                font-weight: bold;
-                border-radius: 4px;
-                padding: 8px 16px;
-            }
-            QPushButton:hover {
-                background-color: #e68900;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
-        """)
+        self.batch_process_button.setStyleSheet(get_button_style("warning"))
         layout.addWidget(self.batch_process_button)
         
         # キャンセルボタン
         self.cancel_button = QPushButton("キャンセル")
         self.cancel_button.setMinimumHeight(40)
         self.cancel_button.setEnabled(False)
-        self.cancel_button.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                font-weight: bold;
-                border-radius: 4px;
-                padding: 8px 16px;
-            }
-            QPushButton:hover {
-                background-color: #da190b;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
-        """)
+        self.cancel_button.setStyleSheet(get_button_style("danger"))
         layout.addWidget(self.cancel_button)
         
         # ログクリアボタン

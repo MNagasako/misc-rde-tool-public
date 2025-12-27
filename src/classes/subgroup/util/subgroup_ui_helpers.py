@@ -160,7 +160,7 @@ class SubgroupFormBuilder:
             button_manual.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
-                    color: white;
+                    color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
                     font-weight: bold;
                     font-size: 13px;
                     border-radius: 6px;

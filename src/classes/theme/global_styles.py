@@ -19,6 +19,7 @@ QComboBox QAbstractItemView {{ background-color: {get_color(ThemeKey.COMBO_DROPD
 QComboBox::drop-down {{ width: 18px; background-color: {get_color(ThemeKey.COMBO_ARROW_BACKGROUND)}; border-left: 1px solid {get_color(ThemeKey.COMBO_BORDER)}; }}
 QComboBox::drop-down:pressed {{ background-color: {get_color(ThemeKey.COMBO_ARROW_BACKGROUND_PRESSED)}; }}
 QComboBox:disabled {{ background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)}; color: {get_color(ThemeKey.INPUT_TEXT_DISABLED)}; border: 1px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)}; }}
+QComboBox QLineEdit {{ background: transparent; border: none; padding: 0px; margin: 0px; }}
 """
     combo_simple = f"""
 QComboBox {{ background-color: {get_color(ThemeKey.COMBO_BACKGROUND)}; color: {get_color(ThemeKey.TEXT_PRIMARY)}; border: 1px solid {get_color(ThemeKey.COMBO_BORDER)}; border-radius: 4px; padding: 2px 6px; }}
@@ -37,6 +38,11 @@ QScrollArea > QWidget > QWidget {{ background-color: {get_color(ThemeKey.PANEL_B
 QScrollBar:vertical {{ background-color: {get_color(ThemeKey.SCROLLBAR_BACKGROUND)}; width: 10px; border-radius: 5px; }}
 QScrollBar::handle:vertical {{ background-color: {get_color(ThemeKey.SCROLLBAR_HANDLE)}; border-radius: 5px; min-height: 16px; }}
 QScrollBar::handle:vertical:hover {{ background-color: {get_color(ThemeKey.SCROLLBAR_HANDLE_HOVER)}; }}
+QScrollBar:horizontal {{ background-color: {get_color(ThemeKey.SCROLLBAR_BACKGROUND)}; height: 10px; border-radius: 5px; }}
+QScrollBar::handle:horizontal {{ background-color: {get_color(ThemeKey.SCROLLBAR_HANDLE)}; border-radius: 5px; min-width: 16px; }}
+QScrollBar::handle:horizontal:hover {{ background-color: {get_color(ThemeKey.SCROLLBAR_HANDLE_HOVER)}; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical, QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{ background: none; border: none; }}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical, QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: none; }}
 {combo_section}
 QPushButton {{ background-color: {get_color(ThemeKey.BUTTON_DEFAULT_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_DEFAULT_TEXT)}; border: 1px solid {get_color(ThemeKey.BUTTON_DEFAULT_BORDER)}; border-radius: 4px; padding: 4px 8px; }}
 QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_DEFAULT_BACKGROUND_HOVER)}; }}
@@ -73,17 +79,16 @@ QLineEdit:disabled, QPlainTextEdit:disabled {{ background-color: {get_color(Them
     }}
     QTextEdit:disabled, QTextBrowser:disabled {{
         background-color: {get_color(ThemeKey.TEXT_AREA_BACKGROUND_DISABLED)};
-        color: {get_color(ThemeKey.INPUT_TEXT_DISABLED)};
+        color: {get_color(ThemeKey.TEXT_AREA_TEXT_DISABLED)};
         border: 1px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)};
     }}
     QTextEdit:disabled::viewport, QTextBrowser:disabled::viewport,
     QTextEdit:disabled QWidget#qt_scrollarea_viewport, QTextBrowser:disabled QWidget#qt_scrollarea_viewport {{
         background-color: {get_color(ThemeKey.TEXT_AREA_BACKGROUND_DISABLED)};
-        color: {get_color(ThemeKey.INPUT_TEXT_DISABLED)};
+        color: {get_color(ThemeKey.TEXT_AREA_TEXT_DISABLED)};
         border: 1px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)};
     }}
-QLineEdit::placeholder, QPlainTextEdit::placeholder, QTextEdit::placeholder {{ color: {get_color(ThemeKey.TEXT_PLACEHOLDER)}; }}
-QComboBox QLineEdit::placeholder {{ color: {get_color(ThemeKey.TEXT_PLACEHOLDER)}; }}
+/* placeholder は QPalette(Active/Disabled)で制御する（無効時の色分岐を確実にするため） */
 QCheckBox, QRadioButton {{ color: {get_color(ThemeKey.TEXT_PRIMARY)}; spacing: 4px; }}
 QCheckBox::indicator, QRadioButton::indicator {{ width: 14px; height: 14px; border: 1px solid {get_color(ThemeKey.INPUT_BORDER)}; background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)}; }}
 QCheckBox::indicator:hover, QRadioButton::indicator:hover {{ border: 1px solid {get_color(ThemeKey.INPUT_BORDER_FOCUS)}; }}

@@ -6,6 +6,7 @@
 import logging
 from typing import Dict, List, Any, Optional, TYPE_CHECKING
 
+from qt_compat import QtCore
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QLineEdit, QSpinBox, QCheckBox, QComboBox,
@@ -92,6 +93,11 @@ class FileFilterWidget(QWidget):
                 border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
             }}
         """
+
+        # これまで各チェックボックスに同一のスタイルを個別適用していたが、
+        # 大量生成時に setStyleSheet が大きなオーバーヘッドになるため、親で一括適用する。
+        # （見た目は同一）
+        self.setStyleSheet(self.checkbox_style)
         
         # ボタン共通スタイル（視認性向上）
         self.button_style = f"""
@@ -175,7 +181,8 @@ class FileFilterWidget(QWidget):
         
         # スクロールエリアへ設定（まだ更新は無効のまま）
         scroll_area.setWidget(content_widget)
-        layout.addWidget(scroll_area)
+        # スクロール領域がウィンドウ高に追従して伸びるようストレッチを付ける
+        layout.addWidget(scroll_area, 1)
         self._filter_scroll_area = scroll_area
         
         # レイアウトを確定させる（ジオメトリ計算を完了）
@@ -199,10 +206,13 @@ class FileFilterWidget(QWidget):
             self._filter_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         except Exception:
             pass
-        self._stabilized = False
+
+        # NOTE:
+        # ここでスクロールエリアの minimumHeight をタイマー/resizeEvent で調整すると、
+        # 表示後に scroll range が再計算され続け、スクロールバーの長さが「じわじわ」変化して見える。
+        # レイアウトと sizePolicy に任せて安定させる。
+        self._stabilized = True
         self._stabilize_timer = None
-        # 初期高さの確定をデバウンスして実行
-        self._schedule_stabilize_height()
 
         t_end = time.perf_counter()
         logger.info(f"[FileFilter] UI構築完了: {t_end - t0:.3f}秒")
@@ -218,15 +228,7 @@ class FileFilterWidget(QWidget):
         self.setup_ui_content()
 
     def resizeEvent(self, event):
-        """リサイズ時: 初期はデバウンス、安定後は即時反映"""
-        try:
-            if not getattr(self, '_stabilized', False):
-                # 初期安定までは度々の高さ変更を抑制
-                self._schedule_stabilize_height()
-            else:
-                self._set_scroll_height()
-        except Exception:
-            pass
+        """リサイズ時: スクロール領域の高さはQtに任せる（後追い調整で段階表示に見えるのを防ぐ）"""
         super().resizeEvent(event)
 
     def _set_scroll_height(self):
@@ -240,8 +242,9 @@ class FileFilterWidget(QWidget):
             header_height += self._filter_header_actions.sizeHint().height()
         # パディング分を差し引き、ウインドウに合わせる
         available = max(self.height() - header_height - 20, 200)
+        # maxHeightまで固定すると起動中のレイアウト確定で段階的に値が変わりやすい。
+        # ここでは最低高さのみ確保し、見た目の段階的変化を抑える。
         self._filter_scroll_area.setMinimumHeight(available)
-        self._filter_scroll_area.setMaximumHeight(available)
 
     def _schedule_stabilize_height(self):
         """初期描画時の高さ確定をデバウンス"""
@@ -281,11 +284,10 @@ class FileFilterWidget(QWidget):
         self.filetype_checkboxes = {}
         for file_type in FILE_TYPES:
             checkbox = QCheckBox(file_type)
-            checkbox.setStyleSheet(self.checkbox_style)
-            checkbox.stateChanged.connect(self.on_filter_changed)
             # デフォルト設定を反映
             if file_type in self.filter_config["file_types"]:
                 checkbox.setChecked(True)
+            checkbox.stateChanged.connect(self.on_filter_changed)
             self.filetype_checkboxes[file_type] = checkbox
             layout.addWidget(checkbox)
             
@@ -313,7 +315,6 @@ class FileFilterWidget(QWidget):
         self.mediatype_checkboxes = {}
         for media_type in getattr(self, '_media_candidates', MEDIA_TYPES):
             checkbox = QCheckBox(media_type)
-            checkbox.setStyleSheet(self.checkbox_style)
             checkbox.stateChanged.connect(self.on_filter_changed)
             self.mediatype_checkboxes[media_type] = checkbox
             layout.addWidget(checkbox)
@@ -340,7 +341,6 @@ class FileFilterWidget(QWidget):
                 return
             if text not in self.mediatype_checkboxes:
                 cb = QCheckBox(text)
-                cb.setStyleSheet(self.checkbox_style)
                 cb.setChecked(True)
                 cb.stateChanged.connect(self.on_filter_changed)
                 self.mediatype_checkboxes[text] = cb
@@ -365,7 +365,6 @@ class FileFilterWidget(QWidget):
             # 新規候補で再追加
             for media_type in FileFilterWidget._CACHED_MEDIA:
                 checkbox = QCheckBox(media_type)
-                checkbox.setStyleSheet(self.checkbox_style)
                 checkbox.stateChanged.connect(self.on_filter_changed)
                 self.mediatype_checkboxes[media_type] = checkbox
                 layout.addWidget(checkbox)
@@ -415,7 +414,6 @@ class FileFilterWidget(QWidget):
         pending_checkboxes: List[QCheckBox] = []
         for extension in getattr(self, '_ext_candidates', FILE_EXTENSIONS):
             checkbox = QCheckBox(f".{extension}", parent=container)
-            checkbox.setStyleSheet(self.checkbox_style)
             self.extension_checkboxes[extension] = checkbox
             grid_layout.addWidget(checkbox, row, col)
             pending_checkboxes.append(checkbox)
@@ -450,7 +448,6 @@ class FileFilterWidget(QWidget):
             ext = raw.lstrip('.')
             if ext not in self.extension_checkboxes:
                 cb = QCheckBox(f".{ext}")
-                cb.setStyleSheet(self.checkbox_style)
                 cb.setChecked(True)
                 cb.stateChanged.connect(self.on_filter_changed)
                 self.extension_checkboxes[ext] = cb
@@ -488,7 +485,6 @@ class FileFilterWidget(QWidget):
             row, col = 0, 0
             for extension in FileFilterWidget._CACHED_EXTS:
                 checkbox = QCheckBox(f".{extension}")
-                checkbox.setStyleSheet(self.checkbox_style)
                 checkbox.stateChanged.connect(self.on_filter_changed)
                 self.extension_checkboxes[extension] = checkbox
                 grid_layout.addWidget(checkbox, row, col)
@@ -697,39 +693,69 @@ class FileFilterWidget(QWidget):
     def set_filter_config(self, config: Dict[str, Any]):
         """フィルタ設定を適用"""
         self.filter_config = config.copy()
-        
-        # ファイルタイプ
-        file_types = config.get("file_types", [])
-        for file_type, checkbox in getattr(self, 'filetype_checkboxes', {}).items():
-            checkbox.setChecked(file_type in file_types)
-            
-        # メディアタイプ
-        media_types = config.get("media_types", [])
-        for media_type, checkbox in getattr(self, 'mediatype_checkboxes', {}).items():
-            checkbox.setChecked(media_type in media_types)
-            
-        # 拡張子
-        extensions = config.get("extensions", [])
-        for ext, checkbox in getattr(self, 'extension_checkboxes', {}).items():
-            checkbox.setChecked(ext in extensions)
-            
-        # ファイルサイズ
-        if hasattr(self, 'size_min_input'):
-            self.size_min_input.setText(str(config.get("size_min", 0)))
-        if hasattr(self, 'size_max_input'):
-            self.size_max_input.setText(str(config.get("size_max", 0)))
-        
-        # ファイル名パターン
-        if hasattr(self, 'filename_pattern_input'):
-            self.filename_pattern_input.setText(config.get("filename_pattern", ""))
-        
-        # ダウンロード上限
-        max_count = config.get("max_download_count", 0)
-        self.limit_checkbox.setChecked(max_count > 0)
-        self.limit_spinbox.setEnabled(max_count > 0)
-        if max_count > 0:
-            self.limit_spinbox.setValue(max_count)
-            
+
+        # 大量のチェックボックスを切り替える際に stateChanged→on_filter_changed が連発すると遅くなるため、
+        # ここでは一時的にシグナル/再描画を抑止して一括反映する。
+        self.setUpdatesEnabled(False)
+        try:
+            def _block_all(flag: bool):
+                for cb in getattr(self, 'filetype_checkboxes', {}).values():
+                    cb.blockSignals(flag)
+                for cb in getattr(self, 'mediatype_checkboxes', {}).values():
+                    cb.blockSignals(flag)
+                for cb in getattr(self, 'extension_checkboxes', {}).values():
+                    cb.blockSignals(flag)
+                if hasattr(self, 'size_preset_combo'):
+                    self.size_preset_combo.blockSignals(flag)
+                if hasattr(self, 'size_min_input'):
+                    self.size_min_input.blockSignals(flag)
+                if hasattr(self, 'size_max_input'):
+                    self.size_max_input.blockSignals(flag)
+                if hasattr(self, 'filename_pattern_input'):
+                    self.filename_pattern_input.blockSignals(flag)
+                if hasattr(self, 'limit_checkbox'):
+                    self.limit_checkbox.blockSignals(flag)
+                if hasattr(self, 'limit_spinbox'):
+                    self.limit_spinbox.blockSignals(flag)
+
+            _block_all(True)
+            try:
+                # ファイルタイプ
+                file_types = config.get("file_types", [])
+                for file_type, checkbox in getattr(self, 'filetype_checkboxes', {}).items():
+                    checkbox.setChecked(file_type in file_types)
+
+                # メディアタイプ
+                media_types = config.get("media_types", [])
+                for media_type, checkbox in getattr(self, 'mediatype_checkboxes', {}).items():
+                    checkbox.setChecked(media_type in media_types)
+
+                # 拡張子
+                extensions = config.get("extensions", [])
+                for ext, checkbox in getattr(self, 'extension_checkboxes', {}).items():
+                    checkbox.setChecked(ext in extensions)
+
+                # ファイルサイズ
+                if hasattr(self, 'size_min_input'):
+                    self.size_min_input.setText(str(config.get("size_min", 0)))
+                if hasattr(self, 'size_max_input'):
+                    self.size_max_input.setText(str(config.get("size_max", 0)))
+
+                # ファイル名パターン
+                if hasattr(self, 'filename_pattern_input'):
+                    self.filename_pattern_input.setText(config.get("filename_pattern", ""))
+
+                # ダウンロード上限
+                max_count = config.get("max_download_count", 0)
+                self.limit_checkbox.setChecked(max_count > 0)
+                self.limit_spinbox.setEnabled(max_count > 0)
+                if max_count > 0:
+                    self.limit_spinbox.setValue(max_count)
+            finally:
+                _block_all(False)
+        finally:
+            self.setUpdatesEnabled(True)
+
         self.update_status_display()
         
     # イベントハンドラ
@@ -850,6 +876,9 @@ class FileFilterWidget(QWidget):
                     border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
                 }}
             """
+
+            # 大量のチェックボックスに個別 setStyleSheet をかけると重いため、親で一括適用する。
+            self.setStyleSheet(self.checkbox_style)
             
             # ボタンスタイル再生成
             self.button_style = f"""
@@ -870,14 +899,6 @@ class FileFilterWidget(QWidget):
                     color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
                 }}
             """
-            
-            # 全チェックボックスにスタイル適用
-            for checkbox in self.filetype_checkboxes.values():
-                checkbox.setStyleSheet(self.checkbox_style)
-            for checkbox in self.mediatype_checkboxes.values():
-                checkbox.setStyleSheet(self.checkbox_style)
-            for checkbox in self.extension_checkboxes.values():
-                checkbox.setStyleSheet(self.checkbox_style)
             
             # 全選択/全解除ボタンにのみスタイル適用（個別スタイルを持つボタンは除外）
             # findChildrenで全ボタンを取得せず、GroupBox内の全選択/全解除ボタンのみ対象

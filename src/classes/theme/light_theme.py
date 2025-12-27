@@ -1,5 +1,5 @@
 """
-ライトテーマ定義 - ARIM RDE Tool v2.3.7
+ライトテーマ定義 - ARIM RDE Tool v2.3.8
 
 Material Design準拠のライトモード配色。
 現行アプリの配色を忠実に再現。
@@ -178,12 +178,16 @@ class LightTheme:
         ThemeKey.INPUT_BACKGROUND: "#f8f9fa",  # 微灰色（WINDOW背景と差別化）
         ThemeKey.INPUT_BORDER: "#1C1D1F",
         ThemeKey.INPUT_TEXT: "#212529",
-        ThemeKey.INPUT_PLACEHOLDER: "#6c757d",  # TEXT_PLACEHOLDERと統一
+        # プレースホルダ: 通常時は寒色系（既存テーマのシアン/Teal系）、無効時は灰色系
+        ThemeKey.INPUT_PLACEHOLDER: "#009688",  # Teal 500 (BUTTON_WEB_BACKGROUND)
+        ThemeKey.INPUT_PLACEHOLDER_DISABLED: "#6c757d",
         # TextArea（QTextEdit/QTextBrowser）
         # 背景同化を避けるため、周囲のパネル背景より明確に明るくする
         ThemeKey.TEXT_AREA_BACKGROUND: "#ffffff",
         ThemeKey.TEXT_AREA_BACKGROUND_FOCUS: "#ffffff",
         ThemeKey.TEXT_AREA_BACKGROUND_DISABLED: "#f5f5f5",
+        # 無効テキストエリアの文字色はコントラスト優先（入力の無効よりは読みやすく）
+        ThemeKey.TEXT_AREA_TEXT_DISABLED: "#495057",
 
         # 枠線太さ（QSS向け）
         ThemeKey.INPUT_BORDER_WIDTH: "1px",

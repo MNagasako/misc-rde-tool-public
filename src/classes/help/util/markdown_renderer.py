@@ -7,6 +7,8 @@ from typing import Optional
 
 from config.common import get_base_dir, get_static_resource_path
 
+from classes.theme import ThemeKey, get_color
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -33,25 +35,27 @@ def render_markdown_to_html(markdown_text: str) -> str:
             margin: 0;
             padding: 0;
             font-size: 11pt;
+            background: transparent;
+            color: ''' + get_color(ThemeKey.TEXT_PRIMARY) + ''';
         }
         h1 { 
-            color: #2c3e50; 
-            border-bottom: 2px solid #3498db; 
+            color: ''' + get_color(ThemeKey.MARKDOWN_H1_TEXT) + '''; 
+            border-bottom: 2px solid ''' + get_color(ThemeKey.MARKDOWN_H1_BORDER) + '''; 
             padding-bottom: 8px;
             margin-top: 16px;
             margin-bottom: 12px;
             font-size: 16pt;
         }
         h2 { 
-            color: #34495e; 
-            border-bottom: 1px solid #bdc3c7; 
+            color: ''' + get_color(ThemeKey.MARKDOWN_H2_TEXT) + '''; 
+            border-bottom: 1px solid ''' + get_color(ThemeKey.MARKDOWN_H2_BORDER) + '''; 
             padding-bottom: 4px; 
             margin-top: 14px;
             margin-bottom: 10px;
             font-size: 13pt;
         }
         h3 { 
-            color: #7f8c8d; 
+            color: ''' + get_color(ThemeKey.MARKDOWN_H3_TEXT) + '''; 
             margin-top: 12px;
             margin-bottom: 8px;
             font-size: 11.5pt;
@@ -61,14 +65,14 @@ def render_markdown_to_html(markdown_text: str) -> str:
             margin-bottom: 6px;
         }
         code { 
-            background-color: #f4f4f4; 
+            background-color: ''' + get_color(ThemeKey.MARKDOWN_CODE_BACKGROUND) + '''; 
             padding: 1px 4px; 
             border-radius: 3px; 
             font-family: "Consolas", monospace;
             font-size: 10pt;
         }
         pre { 
-            background-color: #f4f4f4; 
+            background-color: ''' + get_color(ThemeKey.MARKDOWN_CODE_BACKGROUND) + '''; 
             padding: 8px; 
             border-radius: 4px; 
             overflow-x: auto;
@@ -86,15 +90,15 @@ def render_markdown_to_html(markdown_text: str) -> str:
             margin: 3px 0;
         }
         blockquote { 
-            border-left: 3px solid #3498db; 
+            border-left: 3px solid ''' + get_color(ThemeKey.MARKDOWN_BLOCKQUOTE_BORDER) + '''; 
             padding-left: 12px; 
-            color: #7f8c8d;
+            color: ''' + get_color(ThemeKey.MARKDOWN_BLOCKQUOTE_TEXT) + ''';
             margin-top: 8px;
             margin-bottom: 8px;
             margin-left: 4px;
         }
         a { 
-            color: #3498db; 
+            color: ''' + get_color(ThemeKey.MARKDOWN_LINK) + '''; 
             text-decoration: none; 
         }
         a:hover { 

@@ -84,7 +84,7 @@ class DatasetUploadTab(QWidget):
         # テーマ変更時に再適用
         try:
             from classes.theme.theme_manager import ThemeManager
-            ThemeManager.get_instance().theme_changed.connect(self.refresh_theme)
+            ThemeManager.instance().theme_changed.connect(self.refresh_theme)
         except Exception as e:
             logger.debug(f"DatasetUploadTab theme signal connect failed: {e}")
         self.refresh_theme()

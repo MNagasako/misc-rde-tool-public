@@ -108,6 +108,8 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     import os
     from qt_compat.widgets import QWidget, QVBoxLayout, QComboBox, QLabel, QHBoxLayout, QRadioButton, QLineEdit, QPushButton, QButtonGroup, QCompleter
     from qt_compat.core import Qt, QObject, QEvent
+    from qt_compat import QtGui
+    import time
     
     def check_global_sharing_enabled(dataset_item):
         """広域シェアが有効かどうかをチェック"""
@@ -410,6 +412,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     def load_and_filter_datasets():
         """フィルタリング設定を適用してコンボボックスを更新"""
         try:
+            t0 = time.perf_counter()
             # フィルタ設定を取得
             share_filter_types = {0: "both", 1: "enabled", 2: "disabled"}
             member_filter_types = {0: "both", 1: "member", 2: "non_member"}
@@ -427,8 +430,10 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
                 count_label.setText("表示中: 0/0 件")
                 return
             
+            t_read0 = time.perf_counter()
             with open(dataset_json_path, 'r', encoding='utf-8') as f:
                 dataset_data = json.load(f)
+            t_read1 = time.perf_counter()
             
             # データセットリストを取得（data配下かルート配下かを判定）
             if isinstance(dataset_data, dict) and 'data' in dataset_data:
@@ -444,6 +449,8 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
             # フィルタリング処理
             filtered_datasets = []
             total_count = len(dataset_items)
+
+            t_filter0 = time.perf_counter()
             
             for dataset in dataset_items:
                 if not isinstance(dataset, dict):
@@ -472,6 +479,8 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
                     continue
                 
                 filtered_datasets.append(dataset)
+
+            t_filter1 = time.perf_counter()
             
             # 最新フィルタ結果をキャッシュ
             try:
@@ -483,47 +492,58 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
             except Exception:
                 container.dataset_map = {}
 
-            # コンボボックスを更新（ダミー項目は追加しない）
-            combo.clear()
-            
-            display_list = []
-            
-            for dataset in filtered_datasets:
-                attrs = dataset.get("attributes", {})
-                dataset_id = dataset.get("id", "")
-                name = attrs.get("name", "名前なし")
-                grant_number = attrs.get("grantNumber", "")
-                dataset_type = attrs.get("datasetType", "")
-                subject_title = attrs.get("subjectTitle", "")
-                
-                # データセットタイプの日本語表示
-                type_display = type_display_map.get(dataset_type, dataset_type) if dataset_type else ""
-                
-                # 広域シェア状態とメンバーシップ状態の表示
-                share_status = "🌐" if is_global_share_enabled else "🔒"
-                member_status = "👤" if is_user_member else "👥"
-                
-                # 表示文字列を構築
-                display_parts = []
-                if grant_number:
-                    display_parts.append(grant_number)
-                if subject_title:
-                    display_parts.append(f"{subject_title[:30]}...")
-                display_parts.append(name[:40] + ("..." if len(name) > 40 else ""))
-                
-                if type_display:
-                    display_parts.append(f"[{type_display}]")
-                
-                display_text = f"{share_status}{member_status} {' '.join(display_parts)}"
-                
-                combo.addItem(display_text, dataset_id)
-                display_list.append(display_text)
-            
-            # QCompleter設定
-            completer = QCompleter(display_list, combo)
-            completer.setCaseSensitivity(Qt.CaseInsensitive)
-            completer.setFilterMode(Qt.MatchContains)
-            combo.setCompleter(completer)
+            # コンボボックスを更新（逐次 addItem による再描画/レイアウト更新を避け、モデルを一括差し替え）
+            t_pop0 = time.perf_counter()
+            combo.setUpdatesEnabled(False)
+            combo.blockSignals(True)
+            try:
+                model = QtGui.QStandardItemModel()
+
+                for dataset in filtered_datasets:
+                    attrs = dataset.get("attributes", {})
+                    dataset_id = dataset.get("id", "")
+                    name = attrs.get("name", "名前なし")
+                    grant_number = attrs.get("grantNumber", "")
+                    dataset_type = attrs.get("datasetType", "")
+                    subject_title = attrs.get("subjectTitle", "")
+
+                    # データセットタイプの日本語表示
+                    type_display = type_display_map.get(dataset_type, dataset_type) if dataset_type else ""
+
+                    # 広域シェア状態とメンバーシップ状態（各datasetごとに評価する）
+                    ds_share_enabled = check_global_sharing_enabled(dataset)
+                    ds_user_member = check_user_is_member(dataset, current_user_id) if current_user_id else False
+                    share_status = "🌐" if ds_share_enabled else "🔒"
+                    member_status = "👤" if ds_user_member else "👥"
+
+                    # 表示文字列を構築
+                    display_parts = []
+                    if grant_number:
+                        display_parts.append(grant_number)
+                    if subject_title:
+                        display_parts.append(f"{subject_title[:30]}...")
+                    display_parts.append(name[:40] + ("..." if len(name) > 40 else ""))
+                    if type_display:
+                        display_parts.append(f"[{type_display}]")
+                    display_text = f"{share_status}{member_status} {' '.join(display_parts)}"
+
+                    item = QtGui.QStandardItem(display_text)
+                    item.setData(dataset_id, Qt.UserRole)
+                    model.appendRow(item)
+
+                combo.setModel(model)
+                combo.setModelColumn(0)
+
+                # QCompleter設定（モデルベースで一括）
+                completer = QCompleter(model, combo)
+                completer.setCompletionColumn(0)
+                completer.setCaseSensitivity(Qt.CaseInsensitive)
+                completer.setFilterMode(Qt.MatchContains)
+                combo.setCompleter(completer)
+            finally:
+                combo.blockSignals(False)
+                combo.setUpdatesEnabled(True)
+            t_pop1 = time.perf_counter()
             
             # 件数表示を更新
             filtered_count = len(filtered_datasets)
@@ -536,6 +556,21 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
                 combo.lineEdit().setReadOnly(False)
             
             logger.info("データセットフィルタリング完了: 広域シェア=%s, メンバー=%s, タイプ=%s, 課題番号='%s', 結果=%s/%s件", share_filter_type, member_filter_type, dtype_filter, grant_filter, filtered_count, total_count)
+
+            # 計測ログ（遅い環境の切り分け用）
+            try:
+                timings = {
+                    'read_json_sec': round(t_read1 - t_read0, 6),
+                    'filter_sec': round(t_filter1 - t_filter0, 6),
+                    'populate_combo_sec': round(t_pop1 - t_pop0, 6),
+                    'total_sec': round(time.perf_counter() - t0, 6),
+                    'total_count': total_count,
+                    'filtered_count': filtered_count,
+                }
+                container.dataset_dropdown_timing = timings
+                logger.info("[DataFetch2] dataset_dropdown timing: %s", timings)
+            except Exception:
+                pass
             
         except Exception as e:
             logger.error("データセット読み込みエラー: %s", e)
@@ -1025,6 +1060,57 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
     """)
     layout.addWidget(fetch_files_btn)
 
+    # テーマ切替時にこのウィジェット内の「個別styleSheet埋め込み」を再適用（更新漏れ対策）
+    def _refresh_theme_local(*_args):
+        try:
+            path_label.setStyleSheet(
+                f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 9pt; padding: 0px 0px;"
+            )
+        except Exception:
+            pass
+
+        try:
+            filter_status_label.setStyleSheet(f"""
+                background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                padding: 8px 12px;
+                border-radius: 4px;
+                border: 1px solid {get_color(ThemeKey.PANEL_BORDER)};
+                font-size: 12px;
+            """)
+        except Exception:
+            pass
+
+        try:
+            apply_label_style(launch_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
+        except Exception:
+            pass
+
+        try:
+            new_launch_button_style = get_launch_button_style()
+            for b in launch_buttons:
+                b.setStyleSheet(new_launch_button_style)
+        except Exception:
+            pass
+
+        try:
+            fetch_files_btn.setStyleSheet(f"""
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+                font-weight: bold;
+                font-size: 13px;
+                padding: 8px 16px;
+                border-radius: 6px;
+            """)
+        except Exception:
+            pass
+
+    try:
+        from classes.theme.theme_manager import ThemeManager
+        ThemeManager.instance().theme_changed.connect(_refresh_theme_local)
+    except Exception:
+        pass
+
     # エクスプローラーでdataFilesフォルダを開くボタン
     open_folder_btn = QPushButton("出力フォルダ(dataFiles)をエクスプローラーで開く")
     layout.addWidget(open_folder_btn)
@@ -1237,14 +1323,85 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
     # ダウンロード予定内訳の表示ラベル
     summary_label = QLabel("📦 ダウンロード予定内訳: 未選択")
     summary_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-size: 11px;")
+
+    # 内訳テキストは非同期に更新されるため、テキスト変更に伴うラベルの高さ変化が
+    # スクロールバーの長さを「じわじわ」変化させないよう、表示領域を先に確保しておく。
+    try:
+        from qt_compat.widgets import QSizePolicy
+
+        summary_label.setWordWrap(True)
+        summary_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        line_h = int(summary_label.fontMetrics().lineSpacing())
+        # 2行ぶん確保（詳細が長くてもUI全体の高さは変化しない）
+        summary_label.setMinimumHeight(line_h * 2)
+        summary_label.setMaximumHeight(line_h * 2)
+    except Exception:
+        pass
+
     layout.addWidget(summary_label)
     try:
         widget.planned_summary_label = summary_label
     except Exception:
         pass
 
+    # シグナル接続は1回だけ（update_planned_summaryごとにconnectすると多重接続で更新が増幅する）
+    try:
+        if not getattr(widget, "_planned_summary_signal_connected", False):
+            _summary_signal.update_text.connect(summary_label.setText)
+            widget._planned_summary_signal_connected = True
+    except Exception:
+        pass
+
+    # 古いスレッド結果の反映を防ぐための世代管理
+    try:
+        if not hasattr(widget, "_planned_summary_request_id"):
+            widget._planned_summary_request_id = 0
+    except Exception:
+        pass
+
     def update_planned_summary():
         try:
+            try:
+                widget._planned_summary_request_id = int(getattr(widget, "_planned_summary_request_id", 0)) + 1
+                request_id = widget._planned_summary_request_id
+            except Exception:
+                request_id = None
+
+            try:
+                from shiboken6 import isValid as _qt_is_valid
+            except Exception:
+                _qt_is_valid = None
+
+            def _safe_emit_update_text(text: str) -> None:
+                try:
+                    if request_id is not None and getattr(widget, "_planned_summary_request_id", None) != request_id:
+                        return
+                except Exception:
+                    pass
+
+                try:
+                    if _qt_is_valid is not None and not _qt_is_valid(widget):
+                        return
+                except Exception:
+                    pass
+
+                try:
+                    if _qt_is_valid is not None and not _qt_is_valid(_summary_signal):
+                        return
+                except Exception:
+                    pass
+
+                try:
+                    _summary_signal.update_text.emit(text)
+                except RuntimeError:
+                    # Widget teardown / interpreter shutdown などで QObject が破棄済みのケース。
+                    return
+                except Exception:
+                    try:
+                        summary_label.setText(text)
+                    except Exception:
+                        pass
+
             combo = getattr(fetch2_dropdown_widget, 'dataset_dropdown', None)
             if not combo or combo.currentIndex() < 0:
                 summary_label.setText("📦 ダウンロード予定内訳: 未選択")
@@ -1253,6 +1410,9 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
             if not dataset_id:
                 summary_label.setText("📦 ダウンロード予定内訳: 未選択")
                 return
+
+            # 非同期集計中であることを明示（後でテキストが更新されても高さは固定）
+            _safe_emit_update_text("📦 ダウンロード予定内訳: 集計中…")
 
             # Bearer Token取得
             from core.bearer_token_manager import BearerTokenManager
@@ -1296,14 +1456,12 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
                     text = "、".join(parts) if parts else "対象ファイルなし"
                     logger.info(f"内訳更新完了: total={total}, detail={text}")
                     new_text = f"📦 ダウンロード予定内訳: 合計 {total} 件({text})"
-                    # シグナル経由でメインスレッドに確実に更新
-                    _summary_signal.update_text.emit(new_text)
+                    # シグナル経由でメインスレッドに確実に更新（テスト/終了処理では破棄済みの場合がある）
+                    _safe_emit_update_text(new_text)
                 except Exception as e:
                     logger.warning(f"内訳更新失敗: {e}")
-                    _summary_signal.update_text.emit("📦 ダウンロード予定内訳: 取得に失敗しました")
+                    _safe_emit_update_text("📦 ダウンロード予定内訳: 取得に失敗しました")
             
-            # シグナルをラベルに接続
-            _summary_signal.update_text.connect(summary_label.setText)
             Thread(target=worker, daemon=True).start()
         except Exception:
             summary_label.setText("📦 ダウンロード予定内訳: 取得に失敗しました")

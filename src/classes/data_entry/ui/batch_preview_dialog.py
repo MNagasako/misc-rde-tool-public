@@ -3738,42 +3738,46 @@ class BatchRegisterPreviewDialog(QDialog):
         
         self.batch_upload_all_button = QPushButton("全ファイルセット一括アップロード")
         self.batch_upload_all_button.clicked.connect(self._batch_upload_all)
-        self.batch_upload_all_button.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745;
-                color: white;
+        self.batch_upload_all_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)};
                 font-weight: bold;
                 padding: 10px 20px;
-                border: none;
                 border-radius: 6px;
                 font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #218838;
-            }
-            QPushButton:disabled {
-                background-color: #6c757d;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+            }}
         """)
         
         self.batch_register_all_button = QPushButton("全ファイルセット一括データ登録")
         self.batch_register_all_button.clicked.connect(self._batch_register_all)
-        self.batch_register_all_button.setStyleSheet("""
-            QPushButton {
-                background-color: #007bff;
-                color: white;
+        self.batch_register_all_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BORDER)};
                 font-weight: bold;
                 padding: 10px 20px;
-                border: none;
                 border-radius: 6px;
                 font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #0056b3;
-            }
-            QPushButton:disabled {
-                background-color: #6c757d;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+            }}
         """)
         
         batch_buttons_layout.addWidget(self.batch_upload_all_button)

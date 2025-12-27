@@ -28,7 +28,7 @@ try:
     )
     from qt_compat.core import QTimer, QThread, Signal, Qt
     from qt_compat.gui import QFont, QPalette
-    from classes.theme import get_color, ThemeKey
+    from classes.theme import get_color, ThemeKey, ThemeManager
     PYQT5_AVAILABLE = True
 except ImportError:
     # PyQt5が利用できない場合のフォールバック
@@ -520,7 +520,17 @@ class ProxySettingsWidget(QWidget):
         super().__init__(parent)
         self.current_config = {}
         self.test_worker = None
+        self._theme_connected = False
+
+        # テーマ切替で styleSheet に埋め込んだ色が更新漏れしないようにする
+        try:
+            ThemeManager.instance().theme_changed.connect(lambda *_: self.refresh_theme())
+            self._theme_connected = True
+        except Exception:
+            self._theme_connected = False
+
         self.init_ui()
+        self.refresh_theme()
         self.load_current_settings()
         
     def init_ui(self):
@@ -569,7 +579,7 @@ class ProxySettingsWidget(QWidget):
     def setup_quick_config_section(self, layout):
         """簡易設定セクション（Fiddler等のテスト用）"""
         quick_group = QGroupBox("🚀 簡易設定（テスト用）")
-        quick_group.setStyleSheet(f"QGroupBox {{ font-weight: bold; color: {get_color(ThemeKey.TEXT_PRIMARY)}; }}")
+        self._quick_group = quick_group
         quick_layout = QVBoxLayout(quick_group)
         
         # 説明ラベル
@@ -577,7 +587,7 @@ class ProxySettingsWidget(QWidget):
             "Fiddler等のプロキシツールでテストする際に便利な設定です。\n"
             "ワンクリックで推奨設定を適用できます。"
         )
-        info_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 10px;")
+        self._quick_info_label = info_label
         quick_layout.addWidget(info_label)
         
         # ボタンレイアウト
@@ -585,7 +595,7 @@ class ProxySettingsWidget(QWidget):
         
         # Fiddler設定ボタン
         fiddler_btn = QPushButton("📡 Fiddler設定 (localhost:8888 + OS証明書)")
-        fiddler_btn.setStyleSheet(f"background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)}; font-weight: bold; padding: 8px;")
+        self._quick_fiddler_btn = fiddler_btn
         fiddler_btn.setToolTip(
             "Fiddler用の推奨設定:\n"
             "・HTTPプロキシ: http://localhost:8888\n"
@@ -597,14 +607,14 @@ class ProxySettingsWidget(QWidget):
         
         # プロキシなし設定ボタン
         direct_btn = QPushButton("🔓 プロキシなし（直接接続）")
-        direct_btn.setStyleSheet(f"background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; font-weight: bold; padding: 8px;")
+        self._quick_direct_btn = direct_btn
         direct_btn.setToolTip("プロキシを使用せず直接インターネットに接続")
         direct_btn.clicked.connect(self.apply_direct_quick_config)
         button_layout.addWidget(direct_btn)
         
         # プロキシあり・SSL無効ボタン
         no_ssl_btn = QPushButton("⚠️ プロキシあり・SSL検証無効")
-        no_ssl_btn.setStyleSheet(f"background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)}; font-weight: bold; padding: 8px;")
+        self._quick_no_ssl_btn = no_ssl_btn
         no_ssl_btn.setToolTip(
             "CAなしプロキシ用:\n"
             "・現在のプロキシ設定を維持\n"
@@ -624,13 +634,13 @@ class ProxySettingsWidget(QWidget):
         
         # ========== アプリケーション設定セクション ==========
         app_header = QLabel("【アプリケーション設定】")
-        app_header.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.PANEL_SUCCESS_TEXT)}; font-size: 12px;")
+        self._status_app_header = app_header
         status_layout.addWidget(app_header, 0, 0, 1, 2)
         
         # 現在のモード
         status_layout.addWidget(QLabel("プロキシモード:"), 1, 0)
         self.current_mode_label = QLabel("読み込み中...")
-        self.current_mode_label.setStyleSheet("font-weight: bold; color: blue;")
+        # 旧実装の "blue" はテーマ非追従なので refresh_theme() で ThemeKey.TEXT_INFO を適用する
         status_layout.addWidget(self.current_mode_label, 1, 1)
         
         # 現在のプロキシ
@@ -658,29 +668,29 @@ class ProxySettingsWidget(QWidget):
         
         # ========== OS/システム設定セクション ==========
         os_header = QLabel("【OS/システム設定】")
-        os_header.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-size: 12px; margin-top: 10px;")
+        self._status_os_header = os_header
         status_layout.addWidget(os_header, 7, 0, 1, 2)
         
         # OSプロキシ設定
         status_layout.addWidget(QLabel("OS HTTPプロキシ:"), 8, 0)
         self.os_http_proxy_label = QLabel("取得中...")
-        self.os_http_proxy_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
+        self._os_http_proxy_label = self.os_http_proxy_label
         status_layout.addWidget(self.os_http_proxy_label, 8, 1)
         
         status_layout.addWidget(QLabel("OS HTTPSプロキシ:"), 9, 0)
         self.os_https_proxy_label = QLabel("取得中...")
-        self.os_https_proxy_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
+        self._os_https_proxy_label = self.os_https_proxy_label
         status_layout.addWidget(self.os_https_proxy_label, 9, 1)
         
         # 環境変数プロキシ設定
         status_layout.addWidget(QLabel("環境変数 HTTP_PROXY:"), 10, 0)
         self.env_http_proxy_label = QLabel("取得中...")
-        self.env_http_proxy_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
+        self._env_http_proxy_label = self.env_http_proxy_label
         status_layout.addWidget(self.env_http_proxy_label, 10, 1)
         
         status_layout.addWidget(QLabel("環境変数 HTTPS_PROXY:"), 11, 0)
         self.env_https_proxy_label = QLabel("取得中...")
-        self.env_https_proxy_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
+        self._env_https_proxy_label = self.env_https_proxy_label
         status_layout.addWidget(self.env_https_proxy_label, 11, 1)
         
         # ボタン行
@@ -693,14 +703,96 @@ class ProxySettingsWidget(QWidget):
         
         # 実際の適用状態表示ボタン
         show_active_btn = QPushButton("📊 実際に適用されているプロキシを表示")
-        show_active_btn.setStyleSheet(f"font-weight: bold; background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};")
+        self._status_show_active_btn = show_active_btn
         show_active_btn.clicked.connect(self.show_active_proxy_status)
         button_layout.addWidget(show_active_btn)
         
         status_layout.addLayout(button_layout, 12, 0, 1, 2)
-        
+
+        # 親レイアウトへ追加しないと status_group がGCされ、子ウィジェットが破棄される
         layout.addWidget(status_group)
-        
+
+    def refresh_theme(self) -> None:
+        """テーマ変更時に、このウィジェット内の手動 styleSheet を再適用する。
+
+        グローバルQSS/Paletteだけでは、個別 setStyleSheet() に埋め込んだ色は自動更新されないため、
+        重要な“直表示文字列”（説明文・状態表示・簡易設定ボタン等）を ThemeKey で再適用する。
+        """
+        if not PYQT5_AVAILABLE:
+            return
+
+        try:
+            # 簡易設定（テスト用）
+            if hasattr(self, "_quick_group") and self._quick_group is not None:
+                self._quick_group.setStyleSheet(
+                    f"QGroupBox {{ font-weight: bold; color: {get_color(ThemeKey.TEXT_PRIMARY)}; }}"
+                )
+
+            # 説明文はダークでも読めるように secondary へ寄せる（ラベルより控えめは維持）
+            if hasattr(self, "_quick_info_label") and self._quick_info_label is not None:
+                self._quick_info_label.setStyleSheet(
+                    f"color: {get_color(ThemeKey.TEXT_SECONDARY)}; font-size: 10px;"
+                )
+
+            # 簡易設定ボタン
+            if hasattr(self, "_quick_fiddler_btn") and self._quick_fiddler_btn is not None:
+                self._quick_fiddler_btn.setStyleSheet(
+                    f"background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)}; "
+                    f"color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)}; "
+                    "font-weight: bold; padding: 8px;"
+                )
+
+            if hasattr(self, "_quick_direct_btn") and self._quick_direct_btn is not None:
+                self._quick_direct_btn.setStyleSheet(
+                    f"background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; "
+                    f"color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; "
+                    "font-weight: bold; padding: 8px;"
+                )
+
+            if hasattr(self, "_quick_no_ssl_btn") and self._quick_no_ssl_btn is not None:
+                self._quick_no_ssl_btn.setStyleSheet(
+                    f"background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)}; "
+                    f"color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)}; "
+                    "font-weight: bold; padding: 8px;"
+                )
+
+            # 状態表示ヘッダ
+            if hasattr(self, "_status_app_header") and self._status_app_header is not None:
+                self._status_app_header.setStyleSheet(
+                    f"font-weight: bold; color: {get_color(ThemeKey.PANEL_SUCCESS_TEXT)}; font-size: 12px;"
+                )
+            if hasattr(self, "_status_os_header") and self._status_os_header is not None:
+                self._status_os_header.setStyleSheet(
+                    f"font-weight: bold; color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-size: 12px; margin-top: 10px;"
+                )
+
+            # 状態値（直表示文字列）
+            if hasattr(self, "current_mode_label") and self.current_mode_label is not None:
+                self.current_mode_label.setStyleSheet(
+                    f"font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)};"
+                )
+
+            # 補助情報（OS/環境変数系）は secondary/muted 系で統一
+            muted = f"color: {get_color(ThemeKey.TEXT_SECONDARY)};"
+            for attr in (
+                "_os_http_proxy_label",
+                "_os_https_proxy_label",
+                "_env_http_proxy_label",
+                "_env_https_proxy_label",
+            ):
+                w = getattr(self, attr, None)
+                if w is not None:
+                    w.setStyleSheet(muted)
+
+            if hasattr(self, "_status_show_active_btn") and self._status_show_active_btn is not None:
+                self._status_show_active_btn.setStyleSheet(
+                    f"font-weight: bold; background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)}; "
+                    f"color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};"
+                )
+        except Exception:
+            # スタイル更新失敗は動作継続を優先
+            return
+
     def setup_ssl_certificate_details_section(self, layout):
         """SSL証明書詳細情報セクション"""
         cert_group = QGroupBox("SSL証明書詳細情報")

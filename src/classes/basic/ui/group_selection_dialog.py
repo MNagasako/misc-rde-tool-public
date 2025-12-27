@@ -28,17 +28,18 @@ logger = logging.getLogger(__name__)
 _SELECTION_HISTORY_PATH = Path(GROUP_SELECTION_HISTORY_FILE)
 
 
-class _DialogInvoker(QtCore.QObject):
-    """Execute the selection dialog on the UI thread to avoid cross-thread parenting warnings."""
+def _exec_dialog_on_ui_thread(groups, parent, context_name, force_dialog, default_group_id, remember_context):
+    """Run the selection dialog on the UI thread.
 
-    def __init__(self):
-        super().__init__()
-        self._loop: Optional[QEventLoop] = None
-        self._result: Optional[Dict[str, str]] = None
-
-    @QtCore.Slot(list, object, str, bool, object, object)
-    def _run_dialog(self, groups, parent, context_name, force_dialog, default_group_id, remember_context):
-        self._result = show_group_selection_dialog(
+    Note:
+        Qt forbids calling QObject.moveToThread() from a thread other than the object's
+        current thread. In practice, module import timing can create helper QObjects on
+        non-UI threads, so we avoid moveToThread entirely and instead schedule execution
+        onto QCoreApplication's thread.
+    """
+    app = QCoreApplication.instance()
+    if not app:
+        return show_group_selection_dialog(
             groups,
             parent,
             context_name,
@@ -46,35 +47,68 @@ class _DialogInvoker(QtCore.QObject):
             default_group_id=default_group_id,
             remember_context=remember_context,
         )
-        if self._loop and self._loop.isRunning():
-            self._loop.quit()
-        return self._result
 
-    def exec_dialog(self, groups, parent, context_name, force_dialog, default_group_id, remember_context):
-        app = QCoreApplication.instance()
-        if app and self.thread() != app.thread():
-            # Ensure this invoker lives on the UI thread so queued work executes there
-            self.moveToThread(app.thread())
+    # Already on UI thread -> run directly
+    if QThread.currentThread() == app.thread():
+        return show_group_selection_dialog(
+            groups,
+            parent,
+            context_name,
+            force_dialog=force_dialog,
+            default_group_id=default_group_id,
+            remember_context=remember_context,
+        )
 
-        # If called from a worker thread, queue execution to the UI thread and block until completion
-        if app and QThread.currentThread() != app.thread():
-            self._result = None
-            self._loop = QEventLoop()
+    # Called from worker thread -> queue to UI thread and block until completion.
+    # NOTE: PySide6 QMetaObject.invokeMethod does NOT accept Python callables, so we
+    # use a QObject + Signal/Slot to guarantee UI-thread execution.
+    result_holder: Dict[str, Optional[Dict[str, str]]] = {"result": None}
+    loop = QEventLoop()
 
-            def _deferred_run():
-                self._run_dialog(groups, parent, context_name, force_dialog, default_group_id, remember_context)
-                if self._loop.isRunning():
-                    self._loop.quit()
+    class _WorkerReceiver(QtCore.QObject):
+        @QtCore.Slot(object)
+        def on_finished(self, res):
+            result_holder["result"] = res
+            # This slot runs on the worker thread (QueuedConnection), so quitting
+            # the worker-thread event loop is safe.
+            try:
+                loop.quit()
+            except Exception:
+                pass
 
-            # Use the QObject-aware overload so the callback runs on the UI thread
-            QTimer.singleShot(0, self, _deferred_run)
-            self._loop.exec()
-            return self._result
+    class _DialogInvoker(QtCore.QObject):
+        requested = QtCore.Signal(object, object, object, object, object, object)
+        finished = QtCore.Signal(object)
 
-        return self._run_dialog(groups, parent, context_name, force_dialog, default_group_id, remember_context)
+        def __init__(self):
+            super().__init__()
+            self.requested.connect(self._run, QtCore.Qt.ConnectionType.QueuedConnection)
+            self.finished.connect(self.deleteLater)
 
+        @QtCore.Slot(object, object, object, object, object, object)
+        def _run(self, _groups, _parent, _context_name, _force_dialog, _default_group_id, _remember_context):
+            try:
+                res = show_group_selection_dialog(
+                    _groups,
+                    _parent,
+                    _context_name,
+                    force_dialog=bool(_force_dialog),
+                    default_group_id=_default_group_id,
+                    remember_context=_remember_context,
+                )
+            except Exception:
+                res = None
+            self.finished.emit(res)
 
-_dialog_invoker = _DialogInvoker()
+    invoker = _DialogInvoker()
+    # Create in current (worker) thread, then move to UI thread from its own thread (safe).
+    invoker.moveToThread(app.thread())
+
+    worker_receiver = _WorkerReceiver()
+    invoker.finished.connect(worker_receiver.on_finished, QtCore.Qt.ConnectionType.QueuedConnection)
+    invoker.requested.emit(groups, parent, context_name, force_dialog, default_group_id, remember_context)
+    loop.exec()
+    return result_holder.get("result")
 
 
 def _load_selection_history() -> Dict[str, Dict[str, str]]:
@@ -470,7 +504,7 @@ def show_group_selection_if_needed(
     
     logger.info(f"{context_name}が{len(groups)}件あります。選択ダイアログを表示します。")
 
-    return _dialog_invoker.exec_dialog(
+    return _exec_dialog_on_ui_thread(
         groups,
         parent,
         context_name,

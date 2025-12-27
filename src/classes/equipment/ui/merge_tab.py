@@ -15,6 +15,7 @@ from classes.equipment.util.output_paths import (
     get_equipment_backups_root,
     get_equipment_root_dir,
 )
+from classes.utils.button_styles import get_button_style
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,23 @@ class MergeTab(QWidget):
         
         self.setup_ui()
         self.connect_signals()
+        self._connect_theme_signal()
+        self.refresh_theme()
+
+    def _connect_theme_signal(self) -> None:
+        try:
+            from classes.theme.theme_manager import ThemeManager
+
+            ThemeManager.instance().theme_changed.connect(self.refresh_theme)
+        except Exception:
+            pass
+
+    def refresh_theme(self, *_args, **_kwargs) -> None:
+        try:
+            if hasattr(self, "merge_button"):
+                self.merge_button.setStyleSheet(get_button_style("warning"))
+        except Exception:
+            pass
     
     def setup_ui(self):
         """UI構築"""
@@ -162,22 +180,7 @@ class MergeTab(QWidget):
         # マージ開始ボタン
         self.merge_button = QPushButton("マージ開始")
         self.merge_button.setMinimumHeight(40)
-        self.merge_button.setStyleSheet("""
-            QPushButton {
-                background-color: #FF9800;
-                color: white;
-                font-weight: bold;
-                border-radius: 4px;
-                padding: 8px 16px;
-            }
-            QPushButton:hover {
-                background-color: #e68900;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
-        """)
+        self.merge_button.setStyleSheet(get_button_style("warning"))
         layout.addWidget(self.merge_button)
         
         # ログクリアボタン

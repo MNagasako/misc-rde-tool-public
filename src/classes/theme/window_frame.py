@@ -11,6 +11,7 @@ import re
 import sys
 from typing import Iterable, Optional
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QWidget
 
 from .theme_keys import ThemeKey
@@ -87,6 +88,17 @@ def _apply_windows_titlebar(widget: QWidget, mode: ThemeMode, theme_manager: The
 
 
 def _get_hwnd(widget: QWidget) -> int:
+    # NOTE:
+    # QWidget.winId() は未生成のネイティブハンドルを生成し得る。
+    # その結果 WinIdChange 等が再発火して eventFilter が再入し、
+    # 環境によっては stack overflow になることがあるため、生成済みの場合のみ参照する。
+    try:
+        if not widget.testAttribute(Qt.WidgetAttribute.WA_WState_Created):
+            return 0
+    except Exception:
+        # testAttribute が使えない/失敗する場合は安全側に倒す
+        return 0
+
     try:
         win_id = widget.winId()
     except Exception:

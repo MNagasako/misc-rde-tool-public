@@ -289,7 +289,9 @@ class SettingsTabWidget(QWidget):
         
         status_layout.addWidget(QLabel("プロキシモード:"), 0, 0)
         self.current_mode_label = QLabel("読み込み中...")
-        self.current_mode_label.setStyleSheet("font-weight: bold; color: blue;")
+        self.current_mode_label.setStyleSheet(
+            f"font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)};"
+        )
         status_layout.addWidget(self.current_mode_label, 0, 1)
         
         status_layout.addWidget(QLabel("HTTPプロキシ:"), 1, 0)

@@ -9,6 +9,7 @@ import os
 import logging
 import re
 from qt_compat.core import QTimer, QUrl
+from qt_compat.widgets import QSizePolicy
 from qt_compat.webengine import QWebEngineView
 from config.common import get_dynamic_file_path
 from config.site_rde import URLS
@@ -50,7 +51,9 @@ class BrowserController:
         self.logger = logging.getLogger("RDE_WebView")  # メインロガーに統一
         
         # ブラウザ関連の状態変数
-        self._webview_fixed_width = 900
+        # 旧実装では固定幅/固定高でレイアウトを崩していたため、
+        # 現在は最小幅の目安としてのみ保持（最大は固定しない）。
+        self._webview_min_width = 900
         
         self.logger.info("BrowserController初期化完了")
     
@@ -63,8 +66,15 @@ class BrowserController:
             webview: QWebEngineViewインスタンス
         """
         # WebViewサイズ設定
-        webview.setFixedHeight(500)
-        webview.setFixedWidth(self._webview_fixed_width)
+        # 固定サイズは黒帯/重なりの原因になるため禁止。
+        # レイアウトに任せつつ、最低限の可読領域のみ確保する。
+        try:
+            webview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            webview.setMinimumWidth(self._webview_min_width)
+            webview.setMinimumHeight(300)
+            webview.setMaximumSize(16777215, 16777215)
+        except Exception:
+            pass
         
         # URL読み込み
         webview.load(QUrl(URLS["web"]["base"]))

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-ARIM RDE Tool v2.3.7 - PySide6によるRDE→ARIMデータポータル移行ツール
+ARIM RDE Tool v2.3.8 - PySide6によるRDE→ARIMデータポータル移行ツール
 
 主要機能:
 - RDEシステムへの自動ログイン・データセット一括取得・画像保存
@@ -226,6 +226,10 @@ class Browser(QWidget):
         custom_page = WebEnginePageWithConsole(default_profile, self.webview)
         self.webview.setPage(custom_page)
         logger.info("[WEBENGINE] カスタムPageを設定してJavaScriptコンソールを有効化")
+
+        # WebEngineのレンダラ異常終了検知（黒化/真っ黒画面の原因切り分け・自動復旧）
+        self._last_webengine_renderer_terminated_monotonic = 0.0
+        self._connect_webengine_diagnostics(custom_page)
         
         self._recent_blob_hashes = set()
         self._data_id_image_counts = {}
@@ -240,6 +244,65 @@ class Browser(QWidget):
         # 設定管理から自動ログイン設定を取得
         self.auto_login_enabled = self.config_manager.get("app.auto_login_enabled", False)
 
+    def _connect_webengine_diagnostics(self, page=None):
+        """QtWebEngineの異常検知シグナルを接続する。
+
+        NOTE: Windows環境でWebView領域が黒化するケースでは、
+        レンダラプロセス終了/クラッシュが原因となることがあるため、
+        まずはログ化できるようにしておく。
+        """
+        try:
+            if page is None and hasattr(self, "webview") and hasattr(self.webview, "page"):
+                page = self.webview.page()
+            if page is None:
+                return
+
+            # QWebEnginePage.renderProcessTerminated(status, exitCode)
+            if hasattr(page, "renderProcessTerminated"):
+                try:
+                    page.renderProcessTerminated.connect(self._on_webengine_render_process_terminated)
+                except Exception:
+                    # 既に接続済みなどは無視
+                    pass
+        except Exception as e:
+            logger.debug("[WEBENGINE] diagnostics hook failed: %s", e)
+
+    @debug_log
+    def _on_webengine_render_process_terminated(self, termination_status, exit_code):
+        """WebEngineレンダラ終了時のハンドラ。
+
+        画面が黒化/描画停止する現象に対して、まずはログを残し、
+        可能なら reload で復旧を試みる。
+        """
+        import time
+
+        # 連続発火で無限リロードになるのを避ける
+        now = time.monotonic()
+        last = float(getattr(self, "_last_webengine_renderer_terminated_monotonic", 0.0) or 0.0)
+        if now - last < 1.0:
+            return
+        self._last_webengine_renderer_terminated_monotonic = now
+
+        logger.error(
+            "[WEBENGINE] render process terminated: status=%s exit_code=%s",
+            termination_status,
+            exit_code,
+        )
+
+        try:
+            if hasattr(self, "display_manager"):
+                self.display_manager.set_message(
+                    "WebView描画プロセスが終了しました。再読み込みを試行します…"
+                )
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, "webview") and hasattr(self.webview, "reload"):
+                self.webview.reload()
+        except Exception as e:
+            logger.error("[WEBENGINE] reload after termination failed: %s", e)
+
     def _init_ui_elements(self):
         """UI要素の初期化"""
         # オーバーレイマネージャーの初期化（webview生成直後に必ず実行）
@@ -250,7 +313,15 @@ class Browser(QWidget):
         self.event_handler = EventHandler(self)
         self.event_handler.set_auto_close(self.auto_close)
 
-        self.webview.setFixedHeight(500)
+        # WebViewの固定サイズは黒帯/重なりの原因になるため禁止。
+        # レイアウトに任せつつ、最低限の可読領域のみ確保する。
+        try:
+            from qt_compat.widgets import QSizePolicy
+            self.webview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            self.webview.setMinimumHeight(300)
+            self.webview.setMaximumSize(16777215, 16777215)
+        except Exception:
+            pass
         #self.webview.setFixedWidth(900)
         #self._webview_fixed_width = 900
         # v2.0.2: 待機メッセージ専用ラベル（目立つスタイル）
@@ -629,7 +700,21 @@ class Browser(QWidget):
 
     def resizeEvent(self, event):
         self.event_handler.handle_resize_event(event)
+        try:
+            if hasattr(self, 'overlay_manager') and self.overlay_manager:
+                self.overlay_manager.resize_overlay()
+        except Exception:
+            pass
         super().resizeEvent(event)
+
+    def moveEvent(self, event):
+        # Top-level overlay must follow window moves.
+        try:
+            if hasattr(self, 'overlay_manager') and self.overlay_manager:
+                self.overlay_manager.resize_overlay()
+        except Exception:
+            pass
+        super().moveEvent(event)
 
     def eventFilter(self, obj, event):
         if self.event_handler.handle_event_filter(obj, event):
@@ -836,6 +921,7 @@ def main():
         parser.add_argument('--auto-close', action='store_true', help='自動終了を有効にする（デフォルト: 手動終了）')
         parser.add_argument('--test', action='store_true', help='テストモードで自動ログイン・自動検索・自動終了')
         parser.add_argument('--keep-tokens', action='store_true', help='開発モード: トークン・認証情報を起動/終了時に削除しない')
+        parser.add_argument('--perf', action='store_true', help='性能計測ログを有効化（起動/ログイン/モード切替の区間計測を出力）')
         parser.add_argument('--force-dialog', action='store_true', help='v2.1.17: 単一プロジェクトグループの場合でもダイアログを表示')
         parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], default='INFO', help='ログレベルを指定 (デフォルト: INFO)')
         parser.add_argument('--version', '-v', action='store_true', help='バージョン情報を表示して終了')
@@ -846,7 +932,23 @@ def main():
         if args.log_level:
             config_manager = get_config_manager()
             config_manager.set("logging.level", args.log_level)
+            try:
+                # 既に生成済みのロガーにも即時反映（--log-level が効かない問題の対策）
+                log_manager.set_log_level(args.log_level)
+            except Exception:
+                pass
             logger.info("ログレベルを %s に設定しました", args.log_level)
+
+        # 性能計測（DEBUG時 or --perf 指定時に有効化）
+        try:
+            from classes.utils.perf_monitor import PerfMonitor
+
+            if args.perf or args.log_level == 'DEBUG':
+                PerfMonitor.enable(True)
+                logger.info("[PERF] 性能計測ログを有効化しました (--perf or DEBUG)")
+            PerfMonitor.mark("main:args_parsed", logger=logger, log_level=args.log_level)
+        except Exception:
+            PerfMonitor = None
     
         # v2.1.17: 単一プロジェクトグループでもダイアログを表示するフラグ
         if args.force_dialog:
@@ -945,9 +1047,26 @@ def main():
                 logger.debug("src配下の__version__定義: なし")
             sys.exit(0)
         
-        show_splash_screen()
-        app = QApplication(sys.argv)
-        browser = Browser(auto_close=args.auto_close, test_mode=args.test)
+        if 'PerfMonitor' in locals() and PerfMonitor is not None:
+            with PerfMonitor.span("startup:show_splash", logger=logger):
+                show_splash_screen()
+        else:
+            show_splash_screen()
+
+        if 'PerfMonitor' in locals() and PerfMonitor is not None:
+            with PerfMonitor.span("startup:create_qapplication", logger=logger):
+                app = QApplication(sys.argv)
+        else:
+            app = QApplication(sys.argv)
+
+        if 'PerfMonitor' in locals() and PerfMonitor is not None:
+            with PerfMonitor.span("startup:create_browser", logger=logger, test_mode=args.test, auto_close=args.auto_close):
+                browser = Browser(auto_close=args.auto_close, test_mode=args.test)
+        else:
+            browser = Browser(auto_close=args.auto_close, test_mode=args.test)
+
+        if 'PerfMonitor' in locals() and PerfMonitor is not None:
+            PerfMonitor.mark("startup:enter_event_loop", logger=logger)
         app.exec()
     except Exception as e:
         logger.error(f"メイン関数でエラーが発生しました: {e}")

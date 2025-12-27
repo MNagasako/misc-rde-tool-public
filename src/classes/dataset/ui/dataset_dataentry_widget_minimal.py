@@ -292,6 +292,15 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         launch_controls_layout.addWidget(btn)
         launch_buttons.append(btn)
 
+    # テーマ切替時に「他機能連携」の個別styleSheetを再適用（更新漏れ対策）
+    try:
+        from classes.utils.launch_ui_styles import apply_launch_controls_theme, bind_launch_controls_to_theme
+
+        apply_launch_controls_theme(launch_label, launch_buttons)
+        bind_launch_controls_to_theme(launch_label, launch_buttons)
+    except Exception:
+        pass
+
     launch_controls_layout.addStretch()
     launch_controls_widget.setLayout(launch_controls_layout)
     layout.addWidget(launch_controls_widget)
@@ -1019,7 +1028,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             QApplication.processEvents()
             
             success = fetch_dataset_dataentry(dataset_id, bearer_token, force_refresh)
-            #return #debug 一時的
+            # return debug (一時的)
             progress.setValue(90)
             QApplication.processEvents()
             logger.debug("fetch_dataset_dataentry result: %s", success)

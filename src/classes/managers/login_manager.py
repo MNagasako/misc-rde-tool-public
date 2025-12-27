@@ -519,14 +519,27 @@ class LoginManager:
             initial_delay: 初回取得前の遅延時間（ミリ秒、デフォルト: 0）
             on_completed: 完了時コールバック (success: bool) -> None
         """
+        # 性能計測（有効時のみ）
+        try:
+            from classes.utils.perf_monitor import PerfMonitor
+        except Exception:
+            PerfMonitor = None
+
+        perf_key = f"token_acquire:{host}"
+
         # PySide6対応：初回取得時はsessionStorageが設定されるまで待機
         if initial_delay > 0:
+            if PerfMonitor is not None:
+                PerfMonitor.start(perf_key, logger=logger, initial_delay_ms=initial_delay)
             logger.info(f"[TOKEN] {initial_delay}ms待機してからBearerトークン取得開始")
             QTimer.singleShot(initial_delay, lambda: self.try_get_bearer_token(retries, host, 0, on_completed))
             return
         
         logger.info(f"[TOKEN] Bearerトークン取得開始: host={host}, retries={retries}")
         logger.debug("トークン取得開始: host=%s", host)
+
+        if PerfMonitor is not None:
+            PerfMonitor.start(perf_key, logger=logger, retries=retries, total_timeout_ms=total_timeout_ms)
         
         # v1.20.3: PySide6対応 - sessionStorageとlocalStorageの両方から取得
         js_code = load_js_template('extract_bearer_token_localStorage.js')
@@ -542,6 +555,14 @@ class LoginManager:
         }
 
         def _complete(success: bool):
+            if PerfMonitor is not None:
+                PerfMonitor.end(
+                    perf_key,
+                    logger=logger,
+                    success=success,
+                    attempt=poll_state.get('attempt'),
+                    host=host,
+                )
             if on_completed:
                 on_completed(success)
 

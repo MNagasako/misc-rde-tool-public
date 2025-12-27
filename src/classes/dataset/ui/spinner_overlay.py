@@ -162,23 +162,5 @@ class SpinnerOverlay(QWidget):
                     """
                 )
         except Exception:
-            # テーマ取得失敗時はデフォルトスタイルにフォールバック
-            self.setStyleSheet("background-color: rgba(255, 255, 255, 200);")
-            self.spinner_label.setStyleSheet("color: #333333;")
-            self.message_label.setStyleSheet("color: #333333;")
-            if self.cancel_button:
-                self.cancel_button.setStyleSheet(
-                    """
-                    QPushButton {
-                        background-color: #f44336;
-                        color: white;
-                        border: none;
-                        border-radius: 5px;
-                        padding: 6px 12px;
-                        min-width: 100px;
-                        font-weight: bold;
-                    }
-                    QPushButton:hover { background-color: #d32f2f; }
-                    QPushButton:disabled { background-color: #BDBDBD; color: #E0E0E0; }
-                    """
-                )
+            # テーマ取得失敗時でもアプリは継続（色のハードコードはしない）
+            return

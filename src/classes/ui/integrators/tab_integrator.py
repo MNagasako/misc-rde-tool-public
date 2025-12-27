@@ -117,7 +117,9 @@ class MainWindowTabIntegrator:
         
         # 現在のモード表示
         self.current_mode_label = QLabel("現在のモード: 初期化中")
-        self.current_mode_label.setStyleSheet("font-weight: bold; color: blue; padding: 5px;")
+        self.current_mode_label.setStyleSheet(
+            f"font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)}; padding: 5px;"
+        )
         layout.addWidget(self.current_mode_label)
         
         # 状態表示エリア

@@ -820,7 +820,7 @@ def create_subgroup_edit_widget(parent, title, color, create_auto_resize_button)
     apply_label_style(title_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True, point_size=16)
     #layout.addWidget(title_label)
     
-    button_style = f"background-color: {color}; color: white; font-weight: bold; border-radius: 6px;"
+    button_style = f"background-color: {color}; color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; font-weight: bold; border-radius: 6px;"
     
     # === 1. 既存サブグループ選択UI ===
     selection_section = _create_selection_section(layout)

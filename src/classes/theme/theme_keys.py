@@ -1,5 +1,5 @@
 """
-テーマキー定義 - ARIM RDE Tool v2.3.7
+テーマキー定義 - ARIM RDE Tool v2.3.8
 
 UI要素の色を参照するためのキー定義。
 セマンティックな命名規則に基づく階層構造。
@@ -176,6 +176,7 @@ class ThemeKey(str, Enum):
     INPUT_BORDER = "input.border"
     INPUT_TEXT = "input.text"
     INPUT_PLACEHOLDER = "input.placeholder"
+    INPUT_PLACEHOLDER_DISABLED = "input.placeholder.disabled"
 
     # TextArea - テキストエリア（QTextEdit/QTextBrowser）
     # QAbstractScrollArea系は環境によって QSS の ::viewport が効かない/揺れることがあるため、
@@ -184,6 +185,7 @@ class ThemeKey(str, Enum):
     TEXT_AREA_BACKGROUND = "text_area.background"
     TEXT_AREA_BACKGROUND_FOCUS = "text_area.background.focus"
     TEXT_AREA_BACKGROUND_DISABLED = "text_area.background.disabled"
+    TEXT_AREA_TEXT_DISABLED = "text_area.text.disabled"
 
     # 枠線太さ（QSS向け。"1px" のような値を想定）
     INPUT_BORDER_WIDTH = "input.border.width"

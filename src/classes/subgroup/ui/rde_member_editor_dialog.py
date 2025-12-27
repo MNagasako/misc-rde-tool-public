@@ -104,7 +104,11 @@ class RdeMemberEditorDialog(QDialog):
         button_layout = QHBoxLayout()
         
         self.save_button = QPushButton("保存")
-        self.save_button.setStyleSheet(f"background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; color: white; font-weight: bold; padding: 8px;")
+        self.save_button.setStyleSheet(
+            f"background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; "
+            f"color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; "
+            "font-weight: bold; padding: 8px;"
+        )
         save_button = self.save_button
         save_button.clicked.connect(self.save_members)
         button_layout.addWidget(save_button)

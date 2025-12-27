@@ -15,6 +15,7 @@ from classes.equipment.util.output_paths import (
     get_equipment_backups_root,
     get_equipment_root_dir,
 )
+from classes.utils.button_styles import get_button_style
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,23 @@ class ConvertTab(QWidget):
         
         self.setup_ui()
         self.connect_signals()
+        self._connect_theme_signal()
+        self.refresh_theme()
+
+    def _connect_theme_signal(self) -> None:
+        try:
+            from classes.theme.theme_manager import ThemeManager
+
+            ThemeManager.instance().theme_changed.connect(self.refresh_theme)
+        except Exception:
+            pass
+
+    def refresh_theme(self, *_args, **_kwargs) -> None:
+        try:
+            if hasattr(self, "convert_button"):
+                self.convert_button.setStyleSheet(get_button_style("info"))
+        except Exception:
+            pass
     
     def setup_ui(self):
         """UI構築"""
@@ -150,22 +168,7 @@ class ConvertTab(QWidget):
         # 変換開始ボタン
         self.convert_button = QPushButton("変換開始")
         self.convert_button.setMinimumHeight(40)
-        self.convert_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                font-weight: bold;
-                border-radius: 4px;
-                padding: 8px 16px;
-            }
-            QPushButton:hover {
-                background-color: #0b7dda;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-                color: #666666;
-            }
-        """)
+        self.convert_button.setStyleSheet(get_button_style("info"))
         layout.addWidget(self.convert_button)
         
         # ログクリアボタン

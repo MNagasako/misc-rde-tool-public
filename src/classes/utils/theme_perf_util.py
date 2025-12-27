@@ -10,6 +10,7 @@ except Exception:  # pragma: no cover - Qt import guard
 
 logger = logging.getLogger("ThemePerf")
 _LARGE_COMBO_CACHE: List[weakref.ReferenceType] = []  # weak refs to large combos
+_LARGE_COMBO_CACHE_SCANNED = False
 
 def classify_combo_size(count: int) -> str:
     if count >= 5000:
@@ -119,14 +120,15 @@ def optimize_global_large_combos(threshold: int = 500, deferred: bool = True) ->
     processed = 0
     size_classes: List[Tuple[str, int]] = []
     # Rebuild cache if empty (first run)
-    global _LARGE_COMBO_CACHE
-    if not _LARGE_COMBO_CACHE:
+    global _LARGE_COMBO_CACHE, _LARGE_COMBO_CACHE_SCANNED
+    if (not _LARGE_COMBO_CACHE) and (not _LARGE_COMBO_CACHE_SCANNED):
         try:
             for w in app.allWidgets():
                 if isinstance(w, QComboBox) and w.count() >= threshold:
                     _LARGE_COMBO_CACHE.append(weakref.ref(w))
         except Exception:
             pass
+        _LARGE_COMBO_CACHE_SCANNED = True
 
     # Iterate cached combos; drop dead references
     alive_cache: List[weakref.ReferenceType] = []

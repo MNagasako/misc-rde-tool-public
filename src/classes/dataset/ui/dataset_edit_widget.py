@@ -1148,6 +1148,15 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         launch_controls_layout.addWidget(btn)
         launch_buttons.append(btn)
 
+    # テーマ切替時に「他機能連携」の個別styleSheetを再適用（更新漏れ対策）
+    try:
+        from classes.utils.launch_ui_styles import apply_launch_controls_theme, bind_launch_controls_to_theme
+
+        apply_launch_controls_theme(launch_label, launch_buttons)
+        bind_launch_controls_to_theme(launch_label, launch_buttons)
+    except Exception:
+        pass
+
     launch_controls_layout.addStretch()
     launch_controls_widget.setLayout(launch_controls_layout)
     layout.addWidget(launch_controls_widget)
@@ -2723,7 +2732,20 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                         score_label = QLabel(f"スコア")
                         score_label.setStyleSheet("font-weight: bold; font-size: 13px;")
                         score_value = QLabel(f"{score}/10")
-                        score_value.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {'green' if score in ['8', '9', '10'] or (isinstance(score, (int, float)) and score >= 8) else 'orange' if score in ['6', '7'] or (isinstance(score, (int, float)) and 6 <= score < 8) else 'red'};")
+                        try:
+                            score_num = float(score)
+                        except Exception:
+                            score_num = None
+
+                        if score_num is not None and score_num >= 8:
+                            score_color = get_color(ThemeKey.TEXT_SUCCESS)
+                        elif score_num is not None and 6 <= score_num < 8:
+                            score_color = get_color(ThemeKey.TEXT_WARNING)
+                        else:
+                            score_color = get_color(ThemeKey.TEXT_ERROR)
+                        score_value.setStyleSheet(
+                            f"font-size: 24px; font-weight: bold; color: {score_color};"
+                        )
                         header_layout.addWidget(score_label)
                         header_layout.addWidget(score_value)
                         header_layout.addSpacing(20)
@@ -2746,8 +2768,17 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                         main_layout.addWidget(judge_header)
                         
                         judge_value = QLabel(judge)
-                        judge_color = 'green' if judge in ['合格', '微修正推奨（合格）'] else 'red' if judge in ['要修正（不合格）', '判定不能（不合格）'] else 'orange'
-                        judge_value.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {judge_color}; padding: 10px; background-color: #f0f0f0; border-radius: 4px;")
+                        if judge in ['合格', '微修正推奨（合格）']:
+                            judge_color = get_color(ThemeKey.TEXT_SUCCESS)
+                        elif judge in ['要修正（不合格）', '判定不能（不合格）']:
+                            judge_color = get_color(ThemeKey.TEXT_ERROR)
+                        else:
+                            judge_color = get_color(ThemeKey.TEXT_WARNING)
+                        judge_value.setStyleSheet(
+                            f"font-size: 18px; font-weight: bold; color: {judge_color}; padding: 10px; "
+                            f"background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)}; "
+                            f"border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; border-radius: 4px;"
+                        )
                         main_layout.addWidget(judge_value)
                         main_layout.addSpacing(10)
                         

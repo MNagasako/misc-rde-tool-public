@@ -201,7 +201,19 @@ class UIController(UIControllerCore):
         """
         if hasattr(self.parent, 'webview'):
             self.parent.webview.setVisible(True)
-            self.parent.webview.setFixedSize(800, 500)  # 小さくするサイズ例
+            # NOTE:
+            # QWebEngineView を固定サイズにすると、レイアウトの余白や未描画領域が
+            # 黒く見える（プラットフォーム依存）/overlayの重なりが不正になることがある。
+            # ここでは「固定サイズ」を廃止し、通常のレイアウト伸縮に任せる。
+            try:
+                from qt_compat.widgets import QSizePolicy
+                self.parent.webview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            except Exception:
+                pass
+            try:
+                self.parent.webview.setMinimumSize(800, 500)
+            except Exception:
+                pass
         if hasattr(self.parent, 'overlay_manager'):
             self.parent.overlay_manager.resize_overlay()
             # オーバーレイはデータ取得モード（data_fetch）のみ表示
@@ -220,6 +232,16 @@ class UIController(UIControllerCore):
         import logging
         logger = logging.getLogger(__name__)
         logger.info("[UI] ログイン完了 - 全機能ボタンを有効化")
+
+        # 性能計測: ログイン完了時点でサマリを出力（有効時のみ）
+        try:
+            from classes.utils.perf_monitor import PerfMonitor
+
+            perf_logger = logging.getLogger("RDE_WebView")
+            PerfMonitor.mark("login:complete", logger=perf_logger)
+            PerfMonitor.dump_summary(logger=perf_logger, top=15)
+        except Exception:
+            pass
         
         # 全ボタンを有効化
         if hasattr(self, 'menu_buttons'):
@@ -666,6 +688,11 @@ class UIController(UIControllerCore):
 
         # データセット連携マネージャーへUIコントローラーを登録
         DatasetLaunchManager.instance().set_ui_controller(self)
+
+        # --- request_analyzer: WebView signal connection flags ---
+        # disconnect() on an unconnected signal emits RuntimeWarning on some PySide builds.
+        self._request_analyzer_webview_monitoring_connected = False
+        self._request_analyzer_overlay_prevention_connected = False
     
     @property
     def bearer_token(self):
@@ -856,6 +883,23 @@ class UIController(UIControllerCore):
     
     def switch_mode(self, mode):
         import os
+        import time
+
+        try:
+            from classes.utils.qt_paint_perf_probe import QtPaintPerfProbe
+        except Exception:
+            QtPaintPerfProbe = None
+
+        try:
+            from classes.utils.perf_monitor import PerfMonitor
+        except Exception:
+            PerfMonitor = None
+
+        perf_key = f"ui:switch_mode:{mode}"
+        perf_logger = logging.getLogger("RDE_WebView")
+        if PerfMonitor is not None:
+            PerfMonitor.start(perf_key, logger=perf_logger)
+        _t0 = time.perf_counter()
 
         is_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
@@ -896,25 +940,34 @@ class UIController(UIControllerCore):
             if hasattr(self.parent, 'webview_msg_label'):
                 self.parent.webview_msg_label.setVisible(False)
         
+        # オーバーレイは「WebViewが見えている間」に先に剥がす
+        # （Windows+WebEngineで、hidden後のrunJavaScriptが不安定になる環境があるため）
+        if hasattr(self.parent, 'overlay_manager'):
+            self.parent.overlay_manager.hide_overlay()
+
         # WebViewとwebview_widgetの状態を一旦リセット
         if hasattr(self.parent, 'webview'):
             self.parent.webview.setVisible(False)
-            self.parent.webview.setFixedHeight(0)
-        
+            # NOTE: forcing fixedHeight(0) can destabilize QWebEngineView on Windows.
+            # Invisible widgets already collapse in layouts.
+
         webview_widget = self.parent.findChild(QWidget, 'webview_widget')
         if webview_widget:
             webview_widget.setVisible(False)
-            webview_widget.setFixedHeight(0)
-        
-        # オーバーレイも一旦非表示
-        if hasattr(self.parent, 'overlay_manager'):
-            self.parent.overlay_manager.hide_overlay()
+            # NOTE: keep size constraints untouched; visibility is enough.
 
         # 前のモードがリクエスト解析だった場合はクリーンアップ
         if self.current_mode == "request_analyzer":
             self.cleanup_request_analyzer_mode()
 
         self.current_mode = mode
+        # Keep parent (Browser) mode in sync.
+        # Menu buttons often call UIController.switch_mode() directly, bypassing Browser.switch_mode().
+        try:
+            if hasattr(self.parent, "current_mode"):
+                self.parent.current_mode = mode
+        except Exception:
+            pass
         self.update_menu_button_styles(mode)
 
         # タブ統合機能がある場合はタブの状態も更新
@@ -940,6 +993,40 @@ class UIController(UIControllerCore):
             if widget:
                 self.parent.menu_area_layout.addWidget(widget)
 
+                # 描画の「初回Paint」と「収束」を計測（ロジック完了後も描画が続くケースの切り分け）
+                if (
+                    QtPaintPerfProbe is not None
+                    and PerfMonitor is not None
+                    and PerfMonitor.is_enabled(perf_logger)
+                ):
+                    try:
+                        if not hasattr(self, "_qt_paint_perf_probes"):
+                            self._qt_paint_perf_probes = []
+
+                        label = f"mode:{mode}"
+
+                        def _on_finished(probe):
+                            try:
+                                self._qt_paint_perf_probes.remove(probe)
+                            except Exception:
+                                pass
+
+                        probe = QtPaintPerfProbe(
+                            widget,
+                            label=label,
+                            logger=perf_logger,
+                            # UIが「じわじわ」変化するケース（遅延更新が秒単位で飛ぶ）では
+                            # settle_ms が短いと早期に settled 扱いになってしまうため長めに取る。
+                            settle_ms=1000,
+                            timeout_ms=15000,
+                            switch_t0=_t0,
+                            on_finished=_on_finished,
+                        )
+                        if probe.start():
+                            self._qt_paint_perf_probes.append(probe)
+                    except Exception:
+                        pass
+
         # --- WebView/オーバーレイの表示・非表示とサイズ切替 ---
         if mode == "login":
             # ログインモード：WebViewを表示してログインページを読み込む（オーバーレイは非表示）
@@ -959,7 +1046,13 @@ class UIController(UIControllerCore):
             
             if hasattr(self.parent, 'webview'):
                 self.parent.webview.setVisible(True)
-                self.parent.webview.setFixedSize(900, 500)
+                try:
+                    from qt_compat.widgets import QSizePolicy
+                    self.parent.webview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+                    self.parent.webview.setMinimumSize(600, 300)
+                    self.parent.webview.setMaximumSize(16777215, 16777215)
+                except Exception:
+                    pass
                 # ログインURLを毎回読み込む
                 from config.site_rde import URLS
                 from qt_compat.core import QUrl
@@ -967,14 +1060,8 @@ class UIController(UIControllerCore):
             webview_widget = self.parent.findChild(QWidget, 'webview_widget')
             if webview_widget:
                 webview_widget.setVisible(True)
-                webview_widget.setMinimumHeight(1)
+                webview_widget.setMinimumHeight(200)
                 webview_widget.setMaximumHeight(16777215)
-                # sizeHintが負の値を返す場合は適切なデフォルト値を使用
-                hint_height = webview_widget.sizeHint().height()
-                if hint_height > 0:
-                    webview_widget.setFixedHeight(hint_height)
-                else:
-                    webview_widget.setFixedHeight(200)  # デフォルト高さ
             if hasattr(self.parent, 'overlay_manager'):
                 self.parent.overlay_manager.hide_overlay()
             
@@ -1003,7 +1090,7 @@ class UIController(UIControllerCore):
             webview_widget = self.parent.findChild(QWidget, 'webview_widget')
             if webview_widget:
                 webview_widget.setVisible(False)
-                webview_widget.setFixedHeight(0)
+                # NOTE: visibility is enough; avoid fixedHeight(0).
             if hasattr(self.parent, 'overlay_manager'):
                 self.parent.overlay_manager.hide_overlay()
 
@@ -1059,7 +1146,13 @@ class UIController(UIControllerCore):
             
             if hasattr(self.parent, 'webview'):
                 self.parent.webview.setVisible(True)
-                self.parent.webview.setFixedSize(900, 500)
+                try:
+                    from qt_compat.widgets import QSizePolicy
+                    self.parent.webview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+                    self.parent.webview.setMinimumSize(600, 300)
+                    self.parent.webview.setMaximumSize(16777215, 16777215)
+                except Exception:
+                    pass
             
             # ログインコントロールウィジェットを非表示
             if hasattr(self.parent, 'login_control_widget'):
@@ -1068,17 +1161,21 @@ class UIController(UIControllerCore):
             webview_widget = self.parent.findChild(QWidget, 'webview_widget')
             if webview_widget:
                 webview_widget.setVisible(True)
-                webview_widget.setMinimumHeight(1)
+                webview_widget.setMinimumHeight(200)
                 webview_widget.setMaximumHeight(16777215)
-                # sizeHintが負の値を返す場合は適切なデフォルト値を使用
-                hint_height = webview_widget.sizeHint().height()
-                if hint_height > 0:
-                    webview_widget.setFixedHeight(hint_height)
-                else:
-                    webview_widget.setFixedHeight(200)  # デフォルト高さ
             if hasattr(self.parent, 'overlay_manager'):
                 self.parent.overlay_manager.resize_overlay()
                 self.parent.overlay_manager.show_overlay()
+
+            # data_fetch に戻った直後にWebEngineが黒化する環境があるため、
+            # 背景色の再適用と再描画を遅延実行して復旧を促す。
+            if not is_pytest:
+                try:
+                    from qt_compat.core import QTimer
+
+                    QTimer.singleShot(0, self._refresh_webview_after_show)
+                except Exception:
+                    pass
             
         elif mode == "data_fetch2":
             # データ取得2モード：ブラウザ表示は不要のため完全に非表示
@@ -1090,7 +1187,7 @@ class UIController(UIControllerCore):
             webview_widget = self.parent.findChild(QWidget, 'webview_widget')
             if webview_widget:
                 webview_widget.setVisible(False)
-                webview_widget.setFixedHeight(0)
+                # NOTE: visibility is enough; avoid fixedHeight(0).
             
             # オーバーレイも非表示
             if hasattr(self.parent, 'overlay_manager'):
@@ -1111,28 +1208,31 @@ class UIController(UIControllerCore):
                     top_level.resize(top_level.width(), 600)
             
         elif mode == "request_analyzer":
-            if hasattr(self.parent, 'webview'):
-                self.parent.webview.setVisible(True)
-                self.parent.webview.setFixedSize(900, 500)
-            webview_widget = self.parent.findChild(QWidget, 'webview_widget')
-            if webview_widget:
-                webview_widget.setVisible(True)
-                webview_widget.setFixedHeight(-1)
-            self.setup_request_analyzer_mode()
-
-        else:
-            # その他のモードはデフォルトでWebView表示
+            # リクエスト解析モード：WebViewは使用しないため常に非表示
             if hasattr(self.parent, 'webview'):
                 self.parent.webview.setVisible(False)
-                self.parent.webview.setFixedSize(900, 500)
+
+            if hasattr(self.parent, 'login_control_widget'):
+                self.parent.login_control_widget.setVisible(False)
+
             webview_widget = self.parent.findChild(QWidget, 'webview_widget')
             if webview_widget:
                 webview_widget.setVisible(False)
-                webview_widget.setFixedHeight(-1)
+
             if hasattr(self.parent, 'overlay_manager'):
                 self.parent.overlay_manager.hide_overlay()
-            
 
+            self.setup_request_analyzer_mode()
+
+        # Final safety: overlay must only be visible in data_fetch mode.
+        # Async WebView events can fire during/after mode switches.
+        if mode != "data_fetch" and hasattr(self.parent, 'overlay_manager'):
+            try:
+                from qt_compat.core import QTimer
+
+                QTimer.singleShot(0, self.parent.overlay_manager.hide_overlay)
+            except Exception:
+                pass
 
         # メッセージラベルの位置を動的に調整
         self.update_message_labels_position(mode)
@@ -1151,6 +1251,61 @@ class UIController(UIControllerCore):
             pass
         elif mode == "data_portal":
             # データポータルは個別のウィジェットで処理
+            pass
+
+        if PerfMonitor is not None:
+            PerfMonitor.end(
+                perf_key,
+                logger=perf_logger,
+                mode=mode,
+                elapsed_sec=round(time.perf_counter() - _t0, 6),
+            )
+
+    def _refresh_webview_after_show(self):
+        """WebViewの背景色と再描画を強制して黒化を緩和する（実行はdata_fetch復帰直後）。"""
+        try:
+            from qt_compat.widgets import QWidget
+            from classes.theme import get_qcolor
+            from classes.theme import get_color, ThemeKey
+
+            right_widget = None
+            webview_widget = None
+            try:
+                right_widget = self.parent.findChild(QWidget, 'right_widget')
+                webview_widget = self.parent.findChild(QWidget, 'webview_widget')
+            except Exception:
+                right_widget = None
+                webview_widget = None
+
+            if right_widget is not None:
+                right_widget.setStyleSheet(
+                    f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)}; "
+                    f"color: {get_color(ThemeKey.WINDOW_FOREGROUND)};"
+                )
+            if webview_widget is not None:
+                webview_widget.setStyleSheet(
+                    f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)}; "
+                    f"color: {get_color(ThemeKey.WINDOW_FOREGROUND)};"
+                )
+            if hasattr(self.parent, 'webview'):
+                webview = self.parent.webview
+                webview.setStyleSheet(
+                    f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};"
+                )
+                try:
+                    page = webview.page() if hasattr(webview, 'page') else None
+                    if page is not None and hasattr(page, 'setBackgroundColor'):
+                        page.setBackgroundColor(get_qcolor(ThemeKey.WINDOW_BACKGROUND))
+                except Exception:
+                    pass
+
+                try:
+                    webview.updateGeometry()
+                    webview.update()
+                    webview.repaint()
+                except Exception:
+                    pass
+        except Exception:
             pass
     
     def update_menu_button_styles(self, active_mode):
@@ -1463,7 +1618,7 @@ class UIController(UIControllerCore):
             except Exception as e:
                 logger.debug("BasicInfo theme refresh failed: %s", e)
         try:
-            ThemeManager.get_instance().theme_changed.connect(_refresh_basic_info_theme)
+            ThemeManager.instance().theme_changed.connect(_refresh_basic_info_theme)
         except Exception as e:
             logger.debug("BasicInfo theme signal connect failed: %s", e)
         _refresh_basic_info_theme()
@@ -1559,13 +1714,53 @@ class UIController(UIControllerCore):
         # DataFetch2TabWidgetを使ってタブUI化
         try:
             from classes.data_fetch2.ui.data_fetch2_tab_widget import create_data_fetch2_tab_widget
+            try:
+                from classes.utils.perf_monitor import PerfMonitor
+            except Exception:
+                PerfMonitor = None
+
             # bearer_tokenを明示的に渡す
             bearer_token = getattr(self.parent, 'bearer_token', None)
-            self._fetch2_tab_widget = create_data_fetch2_tab_widget(widget)
+
+            perf_logger = logging.getLogger("RDE_WebView")
+            if PerfMonitor is not None:
+                with PerfMonitor.span("data_fetch2:build_tab_widget", logger=perf_logger):
+                    self._fetch2_tab_widget = create_data_fetch2_tab_widget(widget, prewarm_filter_widget=True)
+            else:
+                self._fetch2_tab_widget = create_data_fetch2_tab_widget(widget, prewarm_filter_widget=True)
+
             # bearer_tokenを個別に設定
             if hasattr(self._fetch2_tab_widget, 'set_bearer_token') and bearer_token:
                 self._fetch2_tab_widget.set_bearer_token(bearer_token)
-            layout.addWidget(self._fetch2_tab_widget)
+
+            # 重要: 表示後にスクロールバーが伸び縮みする原因になりやすい「重いフィルタUIの遅延構築」を、
+            # mode widget を画面に載せる前に完了させておく（表示開始前に時間がかかるのは許容）。
+            try:
+                ensure = getattr(self._fetch2_tab_widget, '_ensure_file_filter_widget', None)
+                if callable(ensure):
+                    if PerfMonitor is not None:
+                        with PerfMonitor.span("data_fetch2:prebuild_file_filter", logger=perf_logger):
+                            ensure()
+                    else:
+                        ensure()
+            except Exception:
+                pass
+
+            # フィルタの初期状態（デフォルト）をデータ取得タブへ反映（表示後の追従更新を減らす）
+            try:
+                init_sync = getattr(self._fetch2_tab_widget, 'init_filter_state', None)
+                if callable(init_sync):
+                    if PerfMonitor is not None:
+                        with PerfMonitor.span("data_fetch2:sync_initial_filter_state", logger=perf_logger):
+                            init_sync()
+                    else:
+                        init_sync()
+            except Exception:
+                pass
+
+            # get_mode_widget() は末尾に addStretch() を入れるため、
+            # ここで伸びるウィジェットにストレッチを与えないと下に大きな余白が残る。
+            layout.addWidget(self._fetch2_tab_widget, 1)
         except ImportError as e:
             from qt_compat.widgets import QLabel
             self.show_error(f"データ取得2タブウィジェットのインポートに失敗しました: {e}")
@@ -1939,7 +2134,9 @@ class UIController(UIControllerCore):
                 webview = self.parent.webview
                 
                 # 既存のloadFinishedシグナルに追加で接続（強制オーバーレイ制御）
-                webview.page().loadFinished.connect(self.prevent_overlay_on_navigation)
+                if not self._request_analyzer_overlay_prevention_connected:
+                    webview.page().loadFinished.connect(self.prevent_overlay_on_navigation)
+                    self._request_analyzer_overlay_prevention_connected = True
                 logger.debug("オーバーレイ防止監視を開始しました")
                 
         except Exception as e:
@@ -1969,12 +2166,16 @@ class UIController(UIControllerCore):
         
         if hasattr(self.parent, 'webview') and self.analyzer_gui:
             webview = self.parent.webview
+
+            if self._request_analyzer_webview_monitoring_connected:
+                return
             
             # URLが変更された時のシグナルを接続
             try:
                 webview.urlChanged.connect(self.on_webview_url_changed)
                 webview.loadStarted.connect(self.on_webview_load_started)
                 webview.page().loadFinished.connect(self.on_webview_load_finished)
+                self._request_analyzer_webview_monitoring_connected = True
                 logger.debug("WebView監視を開始しました")
             except Exception as e:
                 logger.error("WebView監視設定エラー: %s", e)
@@ -1993,6 +2194,45 @@ class UIController(UIControllerCore):
             if hasattr(self.parent, 'webview'):
                 current_url = self.parent.webview.url().toString()
                 self.analyzer_gui.log_webview_navigation(current_url, "ロード開始")
+
+        # 遷移中にWebViewが黒くクリアされる環境があるため、
+        # loadStartedのタイミングでも背景色を明示しておく。
+        try:
+            from qt_compat.widgets import QWidget
+            from classes.theme import get_qcolor
+            from classes.theme import get_color, ThemeKey
+
+            right_widget = None
+            webview_widget = None
+            try:
+                right_widget = self.parent.findChild(QWidget, 'right_widget')
+                webview_widget = self.parent.findChild(QWidget, 'webview_widget')
+            except Exception:
+                right_widget = None
+                webview_widget = None
+
+            if right_widget is not None:
+                right_widget.setStyleSheet(
+                    f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)}; "
+                    f"color: {get_color(ThemeKey.WINDOW_FOREGROUND)};"
+                )
+            if webview_widget is not None:
+                webview_widget.setStyleSheet(
+                    f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)}; "
+                    f"color: {get_color(ThemeKey.WINDOW_FOREGROUND)};"
+                )
+            if hasattr(self.parent, 'webview'):
+                self.parent.webview.setStyleSheet(
+                    f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};"
+                )
+                try:
+                    page = self.parent.webview.page() if hasattr(self.parent.webview, 'page') else None
+                    if page is not None and hasattr(page, 'setBackgroundColor'):
+                        page.setBackgroundColor(get_qcolor(ThemeKey.WINDOW_BACKGROUND))
+                except Exception:
+                    pass
+        except Exception:
+            pass
     
     def on_webview_load_finished(self, ok):
         """WebViewのロード完了時の処理（オーバーレイ防止強化）"""
@@ -2047,13 +2287,28 @@ class UIController(UIControllerCore):
             # WebView監視を停止
             if hasattr(self.parent, 'webview'):
                 webview = self.parent.webview
-                try:
-                    webview.urlChanged.disconnect(self.on_webview_url_changed)
-                    webview.loadStarted.disconnect(self.on_webview_load_started)
-                    webview.page().loadFinished.disconnect(self.on_webview_load_finished)
-                    webview.page().loadFinished.disconnect(self.prevent_overlay_on_navigation)  # オーバーレイ防止監視も停止
-                except:
-                    pass  # 既に切断されている場合は無視
+                if self._request_analyzer_webview_monitoring_connected:
+                    try:
+                        webview.urlChanged.disconnect(self.on_webview_url_changed)
+                    except Exception:
+                        pass
+                    try:
+                        webview.loadStarted.disconnect(self.on_webview_load_started)
+                    except Exception:
+                        pass
+                    try:
+                        webview.page().loadFinished.disconnect(self.on_webview_load_finished)
+                    except Exception:
+                        pass
+                    self._request_analyzer_webview_monitoring_connected = False
+
+                # overlay prevention (optional)
+                if self._request_analyzer_overlay_prevention_connected:
+                    try:
+                        webview.page().loadFinished.disconnect(self.prevent_overlay_on_navigation)
+                    except Exception:
+                        pass
+                    self._request_analyzer_overlay_prevention_connected = False
             
             # 解析ツールGUIを閉じる
             if self.analyzer_gui:

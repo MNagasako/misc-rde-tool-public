@@ -165,7 +165,7 @@ class AISuggestionDialog(QDialog):
         
         # タブウィジェット
         self.tab_widget = QTabWidget()
-        layout.addWidget(self.tab_widget)
+        layout.addWidget(self.tab_widget, 1)
         
         # モードに応じてタブを選択的に追加
         if self.mode == "dataset_suggestion":
@@ -277,6 +277,17 @@ class AISuggestionDialog(QDialog):
             if screen is None:
                 return
             geo = screen.availableGeometry()
+
+            # 縦方向はできるだけ高く（スクロール軽減）。ただし画面外には出さない。
+            # 幅は既定(900)を基本に、画面に収まる範囲で調整。
+            margin_px = 24
+            max_w = max(400, int(geo.width() - margin_px))
+            max_h = max(300, int(geo.height() - margin_px))
+            desired_w = min(max(self.width(), 900), int(max_w))
+            desired_h = min(max(self.height(), int(max_h * 0.95)), int(max_h))
+            if desired_w != self.width() or desired_h != self.height():
+                self.resize(int(desired_w), int(desired_h))
+
             target_x = geo.x() + (geo.width() - self.width()) // 2
             target_y = geo.y()
             if target_x < geo.x():
@@ -295,7 +306,7 @@ class AISuggestionDialog(QDialog):
         
         # コンテンツエリア
         content_splitter = QSplitter(Qt.Horizontal)
-        layout.addWidget(content_splitter)
+        layout.addWidget(content_splitter, 1)
         
         # 候補リスト
         list_widget = QWidget()
@@ -326,7 +337,7 @@ class AISuggestionDialog(QDialog):
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
         self.preview_text.setHtml(
-            '<div style="padding: 20px; color: #666; text-align: center;">'
+            f'<div style="padding: 20px; color: {get_color(ThemeKey.TEXT_MUTED)}; text-align: center;">'
             '<h3>AI提案生成後に全候補が表示されます</h3>'
             '<p>候補リストで選択した候補が強調表示されます。<br>'
             '実際に適用する説明文を選択してください。</p>'
@@ -353,7 +364,7 @@ class AISuggestionDialog(QDialog):
         self.full_prompt_display = QTextEdit()
         self.full_prompt_display.setReadOnly(True)
         self.full_prompt_display.setPlainText("プロンプトはAI提案生成時に表示されます。")
-        layout.addWidget(self.full_prompt_display)
+        layout.addWidget(self.full_prompt_display, 1)
         
         # 統計情報
         stats_label = QLabel("統計情報:")
@@ -962,11 +973,17 @@ class AISuggestionDialog(QDialog):
         for i, suggestion in enumerate(self.suggestions):
             if i == selected_index:
                 # 選択された候補は背景色を変更
-                preview_html += f'<div style=" border: 1px solid #0066cc; padding: 10px; margin: 5px 0; border-radius: 5px;">'
+                preview_html += (
+                    f'<div style=" border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BORDER)}; '
+                    'padding: 10px; margin: 5px 0; border-radius: 5px;">'
+                )
                 preview_html += f'<h3 style=" margin: 0 0 10px 0;">【選択中】{suggestion["title"]}</h3>'
             else:
                 # その他の候補は通常表示
-                preview_html += f'<div style="border: 1px solid #ccc; padding: 10px; margin: 5px 0; border-radius: 5px;">'
+                preview_html += (
+                    f'<div style="border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)}; '
+                    'padding: 10px; margin: 5px 0; border-radius: 5px;">'
+                )
                 preview_html += f'<h3 style="margin: 0 0 10px 0;">{suggestion["title"]}</h3>'
             
             # HTMLエスケープして改行を<br>に変換（XSS対策）
@@ -1066,7 +1083,7 @@ class AISuggestionDialog(QDialog):
             dataset_type = "タイプ未設定"
         
         dataset_info_html = f"""
-        <div style="border: 1px solid #dee2e6; border-radius: 5px; padding: 10px; margin: 5px 0;">
+        <div style="border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)}; border-radius: 5px; padding: 10px; margin: 5px 0;">
             <h4 style="margin: 0 0 8px 0;">📊 対象データセット情報</h4>
             <table style="width: 100%; border-collapse: collapse;">
                 <tr>
@@ -1153,102 +1170,101 @@ class AISuggestionDialog(QDialog):
             "• 改善提案\n\n"
             "各ボタンを右クリックするとプロンプトの編集・プレビューが可能です。"
         )
-        self.extension_response_display.setStyleSheet("""
-            QTextBrowser {
-                border: 1px solid #dee2e6;
+        self.extension_response_display.setStyleSheet(f"""
+            QTextBrowser {{
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                 border-radius: 5px;
                 font-family: 'Yu Gothic', 'Meiryo', sans-serif;
                 font-size: 12px;
                 line-height: 1.3;
                 padding: 6px;
-            }
-            QTextBrowser h1 {
+            }}
+            QTextBrowser h1 {{
                 font-size: 16px;
                 font-weight: bold;
                 margin: 8px 0 4px 0;
-                border-bottom: 2px solid #3498db;
+                border-bottom: 2px solid {get_color(ThemeKey.MARKDOWN_H1_BORDER)};
                 padding-bottom: 2px;
-            }
-            QTextBrowser h2 {
+            }}
+            QTextBrowser h2 {{
   
                 font-size: 15px;
                 font-weight: bold;
                 margin: 6px 0 3px 0;
-                border-bottom: 1px solid #bdc3c7;
+                border-bottom: 1px solid {get_color(ThemeKey.MARKDOWN_H2_BORDER)};
                 padding-bottom: 1px;
-            }
-            QTextBrowser h3 {
+            }}
+            QTextBrowser h3 {{
   
                 font-size: 14px;
                 font-weight: bold;
                 margin: 5px 0 2px 0;
-            }
-            QTextBrowser p {
+            }}
+            QTextBrowser p {{
                 margin: 3px 0;
                 line-height: 1.3;
-            }
-            QTextBrowser ul {
+            }}
+            QTextBrowser ul {{
                 margin: 3px 0 3px 12px;
-            }
-            QTextBrowser li {
+            }}
+            QTextBrowser li {{
                 margin: 1px 0;
                 line-height: 1.3;
-            }
-            QTextBrowser code {
+            }}
+            QTextBrowser code {{
 
                 padding: 1px 3px;
                 border-radius: 2px;
                 font-family: 'Consolas', 'Monaco', monospace;
                 font-size: 11px;
-            }
-            QTextBrowser pre {
+            }}
+            QTextBrowser pre {{
 
-                border: 1px solid #e9ecef;
+                border: 1px solid {get_color(ThemeKey.BORDER_LIGHT)};
                 border-radius: 3px;
                 padding: 6px;
                 margin: 4px 0;
                 font-family: 'Consolas', 'Monaco', monospace;
                 font-size: 11px;
                 overflow-x: auto;
-            }
-            QTextBrowser blockquote {
-                border-left: 3px solid #3498db;
+            }}
+            QTextBrowser blockquote {{
+                border-left: 3px solid {get_color(ThemeKey.MARKDOWN_BLOCKQUOTE_BORDER)};
                 margin: 4px 0;
                 padding: 4px 8px;
    
                 font-style: italic;
-            }
-            QTextBrowser strong {
+            }}
+            QTextBrowser strong {{
                 font-weight: bold;
        
-            }
-            QTextBrowser em {
+            }}
+            QTextBrowser em {{
                 font-style: italic;
    
-            }
-            QTextBrowser table {
+            }}
+            QTextBrowser table {{
                 border-collapse: collapse;
                 width: 100%;
                 margin: 6px 0;
                 font-size: 11px;
-                border: 1px solid #dee2e6;
+                border: 1px solid {get_color(ThemeKey.TABLE_BORDER)};
     
-            }
-            QTextBrowser th {
-
-                border: 1px solid #dee2e6;
+            }}
+            QTextBrowser th {{
+                border: 1px solid {get_color(ThemeKey.TABLE_BORDER)};
                 padding: 6px 8px;
                 text-align: left;
                 font-weight: bold;
       
-            }
-            QTextBrowser td {
-                border: 1px solid #dee2e6;
+            }}
+            QTextBrowser td {{
+                border: 1px solid {get_color(ThemeKey.TABLE_BORDER)};
                 padding: 6px 8px;
                 text-align: left;
                 vertical-align: top;
                 line-height: 1.3;
-            }
+            }}
         """)
         response_container_layout.addWidget(self.extension_response_display)
 
@@ -1318,22 +1334,23 @@ class AISuggestionDialog(QDialog):
         # プロンプト表示ボタンを追加
         self.show_prompt_button = QPushButton("📄 使用プロンプト表示")
         self.show_prompt_button.clicked.connect(self.show_used_prompt)
-        self.show_prompt_button.setStyleSheet("""
-            QPushButton {
-                background-color: #007bff;
-                color: white;
+        self.show_prompt_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
                 border: none;
                 border-radius: 4px;
                 padding: 6px 12px;
                 font-size: 12px;
                 font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #0056b3;
-            }
-            QPushButton:disabled {
-                background-color: #6c757d;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+            }}
         """)
         self.show_prompt_button.setEnabled(False)  # 初期状態は無効
         
@@ -1382,7 +1399,9 @@ class AISuggestionDialog(QDialog):
         
         # ヘッダー
         header_label = QLabel("⚙️ ファイルテキスト抽出設定")
-        header_label.setStyleSheet("font-size: 14px; font-weight: bold; margin-bottom: 10px; color: #2c3e50;")
+        header_label.setStyleSheet(
+            f"font-size: 14px; font-weight: bold; margin-bottom: 10px; color: {get_color(ThemeKey.TEXT_PRIMARY)};"
+        )
         layout.addWidget(header_label)
         
         description_label = QLabel(
@@ -1390,7 +1409,9 @@ class AISuggestionDialog(QDialog):
             "これらの設定は、データセットのSTRUCTUREDファイルからテキストを抽出する際に適用されます。"
         )
         description_label.setWordWrap(True)
-        description_label.setStyleSheet("color: #6c757d; margin-bottom: 10px; font-size: 11px;")
+        description_label.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin-bottom: 10px; font-size: 11px;"
+        )
         layout.addWidget(description_label)
         
         # スクロールエリア
@@ -1409,20 +1430,24 @@ class AISuggestionDialog(QDialog):
         
         file_types_desc = QLabel("テキスト抽出対象とするファイルの拡張子を指定します（カンマ区切り）")
         file_types_desc.setWordWrap(True)
-        file_types_desc.setStyleSheet("color: #6c757d; font-size: 10px; margin-bottom: 5px;")
+        file_types_desc.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 10px; margin-bottom: 5px;"
+        )
         file_types_layout.addWidget(file_types_desc)
         
         from qt_compat.widgets import QLineEdit
         self.file_extensions_input = QLineEdit()
         self.file_extensions_input.setPlaceholderText("例: .txt, .csv, .xlsx, .json, .md")
         self.file_extensions_input.setText(".txt, .csv, .xlsx, .json, .md, .log, .xml")
-        self.file_extensions_input.setStyleSheet("""
-            QLineEdit {
+        self.file_extensions_input.setStyleSheet(f"""
+            QLineEdit {{
                 padding: 6px;
-                border: 1px solid #ced4da;
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                color: {get_color(ThemeKey.INPUT_TEXT)};
                 border-radius: 4px;
                 font-size: 11px;
-            }
+            }}
         """)
         file_types_layout.addWidget(self.file_extensions_input)
         
@@ -1434,7 +1459,9 @@ class AISuggestionDialog(QDialog):
         
         exclude_desc = QLabel("除外するファイル名のパターンを指定します（正規表現、改行区切り）")
         exclude_desc.setWordWrap(True)
-        exclude_desc.setStyleSheet("color: #6c757d; font-size: 10px; margin-bottom: 5px;")
+        exclude_desc.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 10px; margin-bottom: 5px;"
+        )
         exclude_layout.addWidget(exclude_desc)
         
         self.exclude_patterns_input = QTextEdit()
@@ -1449,14 +1476,16 @@ class AISuggestionDialog(QDialog):
             "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.json"
         )
         self.exclude_patterns_input.setMaximumHeight(100)
-        self.exclude_patterns_input.setStyleSheet("""
-            QTextEdit {
+        self.exclude_patterns_input.setStyleSheet(f"""
+            QTextEdit {{
                 padding: 6px;
-                border: 1px solid #ced4da;
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                background-color: {get_color(ThemeKey.TEXT_AREA_BACKGROUND)};
+                color: {get_color(ThemeKey.INPUT_TEXT)};
                 border-radius: 4px;
                 font-size: 10px;
                 font-family: 'Consolas', 'Monaco', monospace;
-            }
+            }}
         """)
         exclude_layout.addWidget(self.exclude_patterns_input)
         
@@ -1464,12 +1493,61 @@ class AISuggestionDialog(QDialog):
         
         # 3. 処理ファイル数上限
         from qt_compat.widgets import QSpinBox
+        from qt_compat import QtWidgets
+
+        def _make_pm_buttons(spinbox: QSpinBox, base_name: str) -> tuple[QtWidgets.QPushButton, QtWidgets.QPushButton]:
+            """スピンボックスの増減を分かりやすくするため、明示的な -/+ ボタンを返す。"""
+            try:
+                spinbox.setButtonSymbols(QtWidgets.QAbstractSpinBox.NoButtons)
+            except Exception:
+                pass
+
+            minus_btn = QtWidgets.QPushButton("−")
+            plus_btn = QtWidgets.QPushButton("＋")
+            minus_btn.setObjectName(f"{base_name}_minus_button")
+            plus_btn.setObjectName(f"{base_name}_plus_button")
+            minus_btn.setToolTip("減らす")
+            plus_btn.setToolTip("増やす")
+
+            # 連打/長押しでの操作性
+            try:
+                minus_btn.setAutoRepeat(True)
+                plus_btn.setAutoRepeat(True)
+                minus_btn.setAutoRepeatDelay(300)
+                plus_btn.setAutoRepeatDelay(300)
+                minus_btn.setAutoRepeatInterval(60)
+                plus_btn.setAutoRepeatInterval(60)
+            except Exception:
+                pass
+
+            try:
+                minus_btn.clicked.connect(spinbox.stepDown)
+                plus_btn.clicked.connect(spinbox.stepUp)
+            except Exception:
+                # テスト環境でMock化される可能性への防御
+                pass
+
+            btn_style = (
+                f"QPushButton {{ "
+                f"min-width: 28px; min-height: 24px; "
+                f"border: 1px solid {get_color(ThemeKey.INPUT_BORDER)}; "
+                f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; "
+                f"color: {get_color(ThemeKey.INPUT_TEXT)}; "
+                f"border-radius: 4px; font-size: 12px; padding: 0px; "
+                f"}} "
+                f"QPushButton:pressed {{ background-color: {get_color(ThemeKey.BUTTON_DEFAULT_BACKGROUND_HOVER)}; }}"
+            )
+            minus_btn.setStyleSheet(btn_style)
+            plus_btn.setStyleSheet(btn_style)
+            return minus_btn, plus_btn
         max_files_group = QGroupBox("📊 処理ファイル数上限")
         max_files_layout = QVBoxLayout(max_files_group)
         
         max_files_desc = QLabel("一度に処理するファイルの最大数を設定します")
         max_files_desc.setWordWrap(True)
-        max_files_desc.setStyleSheet("color: #6c757d; font-size: 10px; margin-bottom: 5px;")
+        max_files_desc.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 10px; margin-bottom: 5px;"
+        )
         max_files_layout.addWidget(max_files_desc)
         
         max_files_h_layout = QHBoxLayout()
@@ -1478,15 +1556,20 @@ class AISuggestionDialog(QDialog):
         self.max_files_spinbox.setMaximum(100)
         self.max_files_spinbox.setValue(10)
         self.max_files_spinbox.setSuffix(" 件")
-        self.max_files_spinbox.setStyleSheet("""
-            QSpinBox {
+        self.max_files_spinbox.setStyleSheet(f"""
+            QSpinBox {{
                 padding: 6px;
-                border: 1px solid #ced4da;
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                color: {get_color(ThemeKey.INPUT_TEXT)};
                 border-radius: 4px;
                 font-size: 11px;
-            }
+            }}
         """)
+        max_files_minus_btn, max_files_plus_btn = _make_pm_buttons(self.max_files_spinbox, "max_files")
         max_files_h_layout.addWidget(self.max_files_spinbox)
+        max_files_h_layout.addWidget(max_files_minus_btn)
+        max_files_h_layout.addWidget(max_files_plus_btn)
         max_files_h_layout.addStretch()
         max_files_layout.addLayout(max_files_h_layout)
         
@@ -1498,7 +1581,9 @@ class AISuggestionDialog(QDialog):
         
         max_file_size_desc = QLabel("処理対象とするファイルの最大サイズを設定します")
         max_file_size_desc.setWordWrap(True)
-        max_file_size_desc.setStyleSheet("color: #6c757d; font-size: 10px; margin-bottom: 5px;")
+        max_file_size_desc.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 10px; margin-bottom: 5px;"
+        )
         max_file_size_layout.addWidget(max_file_size_desc)
         
         max_file_size_h_layout = QHBoxLayout()
@@ -1507,15 +1592,20 @@ class AISuggestionDialog(QDialog):
         self.max_file_size_spinbox.setMaximum(100)
         self.max_file_size_spinbox.setValue(10)
         self.max_file_size_spinbox.setSuffix(" MB")
-        self.max_file_size_spinbox.setStyleSheet("""
-            QSpinBox {
+        self.max_file_size_spinbox.setStyleSheet(f"""
+            QSpinBox {{
                 padding: 6px;
-                border: 1px solid #ced4da;
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                color: {get_color(ThemeKey.INPUT_TEXT)};
                 border-radius: 4px;
                 font-size: 11px;
-            }
+            }}
         """)
+        max_file_size_minus_btn, max_file_size_plus_btn = _make_pm_buttons(self.max_file_size_spinbox, "max_file_size")
         max_file_size_h_layout.addWidget(self.max_file_size_spinbox)
+        max_file_size_h_layout.addWidget(max_file_size_minus_btn)
+        max_file_size_h_layout.addWidget(max_file_size_plus_btn)
         max_file_size_h_layout.addStretch()
         max_file_size_layout.addLayout(max_file_size_h_layout)
         
@@ -1527,7 +1617,9 @@ class AISuggestionDialog(QDialog):
         
         max_chars_desc = QLabel("抽出したテキストの最大文字数を設定します（1ファイルあたり）")
         max_chars_desc.setWordWrap(True)
-        max_chars_desc.setStyleSheet("color: #6c757d; font-size: 10px; margin-bottom: 5px;")
+        max_chars_desc.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 10px; margin-bottom: 5px;"
+        )
         max_chars_layout.addWidget(max_chars_desc)
         
         max_chars_h_layout = QHBoxLayout()
@@ -1537,15 +1629,20 @@ class AISuggestionDialog(QDialog):
         self.max_chars_spinbox.setSingleStep(1000)
         self.max_chars_spinbox.setValue(10000)
         self.max_chars_spinbox.setSuffix(" 文字")
-        self.max_chars_spinbox.setStyleSheet("""
-            QSpinBox {
+        self.max_chars_spinbox.setStyleSheet(f"""
+            QSpinBox {{
                 padding: 6px;
-                border: 1px solid #ced4da;
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                color: {get_color(ThemeKey.INPUT_TEXT)};
                 border-radius: 4px;
                 font-size: 11px;
-            }
+            }}
         """)
+        max_chars_minus_btn, max_chars_plus_btn = _make_pm_buttons(self.max_chars_spinbox, "max_chars")
         max_chars_h_layout.addWidget(self.max_chars_spinbox)
+        max_chars_h_layout.addWidget(max_chars_minus_btn)
+        max_chars_h_layout.addWidget(max_chars_plus_btn)
         max_chars_h_layout.addStretch()
         max_chars_layout.addLayout(max_chars_h_layout)
         
@@ -1557,7 +1654,9 @@ class AISuggestionDialog(QDialog):
         
         excel_desc = QLabel("Excelファイルの処理に関する設定")
         excel_desc.setWordWrap(True)
-        excel_desc.setStyleSheet("color: #6c757d; font-size: 10px; margin-bottom: 5px;")
+        excel_desc.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 10px; margin-bottom: 5px;"
+        )
         excel_layout.addWidget(excel_desc)
         
         from qt_compat.widgets import QCheckBox
@@ -1577,15 +1676,20 @@ class AISuggestionDialog(QDialog):
         self.excel_max_rows_spinbox.setSingleStep(100)
         self.excel_max_rows_spinbox.setValue(1000)
         self.excel_max_rows_spinbox.setSuffix(" 行")
-        self.excel_max_rows_spinbox.setStyleSheet("""
-            QSpinBox {
+        self.excel_max_rows_spinbox.setStyleSheet(f"""
+            QSpinBox {{
                 padding: 4px;
-                border: 1px solid #ced4da;
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                color: {get_color(ThemeKey.INPUT_TEXT)};
                 border-radius: 4px;
                 font-size: 11px;
-            }
+            }}
         """)
+        excel_max_rows_minus_btn, excel_max_rows_plus_btn = _make_pm_buttons(self.excel_max_rows_spinbox, "excel_max_rows")
         excel_max_rows_h_layout.addWidget(self.excel_max_rows_spinbox)
+        excel_max_rows_h_layout.addWidget(excel_max_rows_minus_btn)
+        excel_max_rows_h_layout.addWidget(excel_max_rows_plus_btn)
         excel_max_rows_h_layout.addStretch()
         excel_layout.addLayout(excel_max_rows_h_layout)
         
@@ -1594,7 +1698,7 @@ class AISuggestionDialog(QDialog):
         scroll_layout.addStretch()
         
         scroll_area.setWidget(scroll_widget)
-        layout.addWidget(scroll_area)
+        layout.addWidget(scroll_area, 1)
         
         # ボタンエリア
         button_layout = QHBoxLayout()
@@ -1894,31 +1998,29 @@ class AISuggestionDialog(QDialog):
         button.setToolTip(tooltip_text)
         
         # 改良されたボタンスタイル（複数行対応）
-        button.setStyleSheet("""
-            QPushButton {
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                    stop: 0 #4CAF50, stop: 1 #45a049);
-                color: white;
+        button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)};
                 font-size: 11px;
                 font-weight: bold;
-                border: none;
                 border-radius: 6px;
                 padding: 8px 12px;
                 text-align: left;
                 margin: 2px;
-            }
-            QPushButton:hover {
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                    stop: 0 #66BB6A, stop: 1 #4CAF50);
-            }
-            QPushButton:pressed {
-                background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
-                    stop: 0 #388E3C, stop: 1 #2E7D32);
-            }
-            QPushButton:disabled {
-                background-color: #E0E0E0;
-                color: #9E9E9E;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_PRESSED)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+            }}
         """)
         
         # ボタンにconfigを保存
@@ -2388,8 +2490,8 @@ class AISuggestionDialog(QDialog):
             
             # HTMLフォーマット（コンパクトヘッダー付き）
             formatted_html = f"""
-            <div style="border: 1px solid #e1e5e9; border-radius: 6px; padding: 0; margin: 3px 0;  box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 8px 12px; border-radius: 6px 6px 0 0; margin-bottom: 0;">
+            <div style="border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)}; border-radius: 6px; padding: 0; margin: 3px 0;">
+                <div style="background-color: {get_color(ThemeKey.PANEL_INFO_BACKGROUND)}; color: {get_color(ThemeKey.PANEL_INFO_TEXT)}; padding: 8px 12px; border-radius: 6px 6px 0 0; margin-bottom: 0;">
                     <h3 style="margin: 0; font-size: 14px; font-weight: bold;">{icon} {label}</h3>
                     <small style="opacity: 0.9; font-size: 10px;">実行時刻: {timestamp}</small>
                 </div>
@@ -2406,7 +2508,10 @@ class AISuggestionDialog(QDialog):
             # フォールバック
             import html
             escaped_text = html.escape(response_text)
-            return f"<div style='padding: 10px; border: 1px solid #ccc;'><pre>{escaped_text}</pre></div>"
+            return (
+                f"<div style='padding: 10px; border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};'>"
+                f"<pre>{escaped_text}</pre></div>"
+            )
     
     def convert_markdown_to_html(self, markdown_text):
         """シンプルなマークダウン→HTML変換"""
@@ -2482,7 +2587,7 @@ class AISuggestionDialog(QDialog):
             # コードブロック（```code``` → <pre><code>code</code></pre>）- コンパクトスタイル
             html_text = re.sub(
                 r'```([^`]*?)```', 
-                r'<pre style=" padding: 6px; border-radius: 3px; border: 1px solid #e9ecef; overflow-x: auto; margin: 4px 0;"><code>\1</code></pre>', 
+                rf'<pre style=" padding: 6px; border-radius: 3px; border: 1px solid {get_color(ThemeKey.BORDER_LIGHT)}; overflow-x: auto; margin: 4px 0;"><code>\1</code></pre>', 
                 html_text, 
                 flags=re.DOTALL
             )
@@ -2640,15 +2745,15 @@ class AISuggestionDialog(QDialog):
             prompt_display = QTextEdit()
             prompt_display.setReadOnly(True)
             prompt_display.setPlainText(self.last_used_prompt)
-            prompt_display.setStyleSheet("""
-                QTextEdit {
-                    border: 1px solid #dee2e6;
+            prompt_display.setStyleSheet(f"""
+                QTextEdit {{
+                    border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
                     border-radius: 5px;
            
                     font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
                     font-size: 11px;
                     padding: 8px;
-                }
+                }}
             """)
             layout.addWidget(prompt_display)
             
@@ -2689,19 +2794,19 @@ class AISuggestionDialog(QDialog):
             # 閉じるボタン
             close_button = QPushButton("閉じる")
             close_button.clicked.connect(prompt_dialog.accept)
-            close_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #6c757d;
-                    color: white;
-                    border: none;
+            close_button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)};
+                    color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)};
+                    border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)};
                     border-radius: 4px;
                     padding: 8px 16px;
                     font-size: 12px;
                     font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #5a6268;
-                }
+                }}
+                QPushButton:hover {{
+                    background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)};
+                }}
             """)
             button_layout.addWidget(close_button)
             
@@ -3283,7 +3388,7 @@ class AISuggestionDialog(QDialog):
             
             # HTMLを更新
             dataset_info_html = f"""
-        <div style="border: 1px solid #dee2e6; border-radius: 5px; padding: 10px; margin: 5px 0;">
+        <div style="border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)}; border-radius: 5px; padding: 10px; margin: 5px 0;">
             <h4 style="margin: 0 0 8px 0; ">📊 対象データセット情報</h4>
             <table style="width: 100%; border-collapse: collapse;">
                 <tr>

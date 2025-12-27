@@ -2310,6 +2310,15 @@ class BatchRegisterWidget(QWidget):
             launch_controls_layout.addWidget(btn)
             self._launch_buttons.append(btn)
 
+        # テーマ切替時に「他機能連携」の個別styleSheetを再適用（更新漏れ対策）
+        try:
+            from classes.utils.launch_ui_styles import apply_launch_controls_theme, bind_launch_controls_to_theme
+
+            apply_launch_controls_theme(launch_label, self._launch_buttons)
+            bind_launch_controls_to_theme(launch_label, self._launch_buttons)
+        except Exception:
+            pass
+
         launch_controls_layout.addStretch()
         launch_controls_widget.setLayout(launch_controls_layout)
         detail_layout.addWidget(launch_controls_widget)
