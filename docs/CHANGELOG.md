@@ -4,6 +4,30 @@
 
 ---
 
+## v2.3.8 (2025-12-27) - テスト安定化（Windows/Qt）+ テーマ切替/モジュール汚染の不具合修正 + ドキュメント更新
+
+### 🧪 テスト安定化（Windows/Qt）
+
+- Windows/pytest環境で稀に発生する 0x8001010d 系のノイズ/クラッシュ要因を抑制し、フルスイートの安定実行を改善。
+- `sys.modules` 直書きによるモジュール汚染を解消し、後続テストでの ImportError を防止。
+- パフォーマンス計測ログの終了時ダンプをテスト実行では抑制し、不要なログエラー出力を防止。
+
+### 🎨 UI/テーマ
+
+- pytest実行時のテーマ切替でイベント処理が原因の不安定化が起きないように調整（通常実行の挙動は維持）。
+
+### 📚 ドキュメント
+
+- VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.3.8 に統一。
+- `docs/RELEASE_NOTES_v2.3.8.md` を追加。
+
+### 🧪 テスト（推奨）
+
+- `./.venv/Scripts/python.exe -m pytest -q -k 'test_revision_sync'`
+- `./.venv/Scripts/python.exe -m pytest -q`
+
+---
+
 ## v2.3.7 (2025-12-24) - AI安定化（Gemini MAX_TOKENS復旧）+ 設定画面のSSL警告抑制 + 規約準拠改善
 
 ### 🤖 AI安定化 / デバッグ性向上

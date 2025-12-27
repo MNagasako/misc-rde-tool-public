@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.3.7** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.3.8** のバイナリ配布およびドキュメント公開用リポジトリです。
 
 **本ページはAIによる自動生成文が含まれています。**
 
@@ -20,15 +20,14 @@
 
 ## 🚀 最新情報
 
-**2025-12-24 最新リリース**: バージョン2.3.7（AI安定化 + SSL警告抑制 + 規約準拠改善）
+**2025-12-27 最新リリース**: バージョン2.3.8（テスト安定化 + テーマ切替/モジュール汚染修正 + ドキュメント更新）
 
-### v2.3.7 の主な改善
+### v2.3.8 の主な改善
 
-- Gemini: `finishReason=MAX_TOKENS` で本文が欠落/空となるケースに対し、`maxOutputTokens` を自動増量して再試行し失敗を抑制しました。
-- AI: 実際に送受信した本文以外パラメータ（provider/model含む）を request/response params として可視化し、デバッグ性を向上しました。
-- ネットワーク: 設定タブの外部疎通系で `verify=False` を強制しないよう統一し、truststore/CAバンドル設定に追従するようにしました。
-- UI/テーマ/パス: 一部ハードコード色と `__file__` 依存を解消し、規約準拠とテーマ追従を改善しました。
-- README / VERSION.txt / CHANGELOG / リリースノート等のバージョン表記を v2.3.7 に統一しました。
+- Windows/Qt 環境で稀に発生する 0x8001010d 系のクラッシュ/ノイズ要因を抑制し、テストスイートの安定実行を改善しました。
+- テストの `sys.modules` 差し替えによるモジュール汚染を解消し、後続テストでの ImportError を防止しました。
+- pytest実行時のテーマ切替でイベント処理が原因の不安定化が起きないように調整しました（通常実行の挙動は維持）。
+- README / VERSION.txt / CHANGELOG / リリースノート等のバージョン表記を v2.3.8 に統一しました。
 
 > ℹ️ リスティングタブは `output/arim-site/{equipment|reports}_latest.json` など最新エクスポートを前提とします。再読込前に各タブで「JSON再取得」を実行し、キャッシュディレクトリ（`output/arim-site/reports/cache/`）の残量にも留意してください。
 
@@ -50,35 +49,6 @@
 常に最新の安定版: https://github.com/MNagasako/misc-rde-tool-public/releases/latest
 
 過去バージョンを含む全一覧: https://github.com/MNagasako/misc-rde-tool-public/releases
-
-### 上級者向け: Python環境で実行する
-ソースコードから直接実行することも可能です。
-
-* **動作環境**: Windows 10/11 64bit, Python 3.13+
-* **手順**:
-    1. リポジトリをクローンまたはダウンロードします。
-    2. 仮想環境を作成し、依存パッケージをインストールします。
-       ```powershell
-       python -m venv .venv
-       ./.venv/Scripts/Activate
-       pip install -r src/requirements.txt
-       ```
-    3. アプリケーションを起動します。
-       ```powershell
-       python src/arim_rde_tool.py
-       ```
-
-#### PyInstaller による単一ファイル EXE の再生成（参考）
-ドキュメント: `docs/binary_build_notes.md` を参照（開発者向け）。
-
-```powershell
-pyinstaller arim_rde_tool.spec --clean --noconfirm
-```
-
-生成物例: `dist/arim_rde_tool.exe`
-
----
-
 
 > **暫定マニュアル（Notion）**
 > 開発中の最新情報や補足事項は [こちらのNotionページ](https://cuddly-stinger-40d.notion.site/v2-0-0-2a4fc2cb5fc380978d95fbd07c6fa37e?pvs=74) も参照してください。
@@ -145,18 +115,6 @@ pyinstaller arim_rde_tool.spec --clean --noconfirm
 
 ---
 
-## 🐍 Python / PySide6 対応バージョン
-
-| コンポーネント | 現在の想定サポート | 備考 |
-|---------------|--------------------|------|
-| Python | 3.11 / 3.12 / 3.13 | 開発環境は 3.13 系で検証。将来 3.14 以降は PySide6 対応状況要確認 |
-| PySide6 | 現行リリースが 3.13 まで対応 | 最新対応範囲は公式リリースノートを参照 |
-| truststore | Windows 証明書ストア連携 | 企業内 CA をストア登録している場合は自動反映 |
-
-上記は執筆時点の確認であり、将来のバージョン更新で変更される可能性があります。
-
----
-
 ## 📄 ライセンス
 
 本ソフトウェアは **LGPLv3** (GNU Lesser General Public License v3) の下で配布されています。
@@ -168,16 +126,14 @@ pyinstaller arim_rde_tool.spec --clean --noconfirm
 
 * **[変更履歴 (CHANGELOG)](docs/CHANGELOG.md)**
 * **[過去のリリースノート](docs/archive/)**
-* **[ビルド手順書](docs/binary_build_notes.md)** (開発者向け)
 * **[ドキュメント一覧マップ](docs/DOCUMENT_MAP.md)**
-* **[リリースノート作成テンプレート](docs/RELEASE_TEMPLATE.md)**
 * **[第三者ライセンス通知](THIRD_PARTY_NOTICES/)**
 
 ---
 
 ## 🔢 バージョン情報
 
-現在配布バージョン: `v2.3.2` （`VERSION.txt` に基づく）
+現在配布バージョン: `v2.3.8` （`VERSION.txt` に基づく）
 
 更新履歴の詳細は `docs/CHANGELOG.md` を参照してください。
 
@@ -248,14 +204,6 @@ v2.0.0 以降、ライセンス変更（LGPLv3）に伴いソースコードは�
 1. 新しいセットアップ EXE を取得
 2. 旧版アンインストール（任意）
 3. 新版インストール
-
-Python 実行版:
-```powershell
-git pull
-./.venv/Scripts/Activate
-pip install -r src/requirements.txt --upgrade
-python src/arim_rde_tool.py
-```
 
 ---
 
