@@ -4,6 +4,29 @@
 
 ---
 
+## v2.3.10 (2025-12-28) - AI説明文提案（報告書）: 結果一覧に重要技術領域（主/副）列を追加 + テスト決定性改善
+
+### 🤖 AI説明文提案（報告書）
+
+- 「結果一覧」タブで対象=報告書の場合、`target_key` のARIM課題番号と報告書リストを結合し、
+  「重要技術領域（主）」および「重要技術領域（副）」の列を追加表示。
+
+### 🧪 テスト
+
+- 報告書タブ/結果一覧タブのウィジェットテストがローカルの実データやキャッシュに影響されないよう決定性を改善。
+
+### 📚 ドキュメント
+
+- VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.3.10 に統一。
+- `docs/RELEASE_NOTES_v2.3.10.md` を追加。
+
+### 🧪 テスト（推奨）
+
+- `./.venv/Scripts/python.exe -m pytest -q -k 'test_revision_sync'`
+- `./.venv/Scripts/python.exe -m pytest -q`
+
+---
+
 ## v2.3.9 (2025-12-28) - テスト安定化（Windows/Qt・長時間スイート）+ テーマ追従の破棄後コールバック抑制 + ドキュメント更新
 
 ### 🧪 テスト安定化（Windows/Qt・長時間スイート）
@@ -18,7 +41,7 @@
 ### 📚 ドキュメント
 
 - VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.3.9 に統一。
-- `docs/RELEASE_NOTES_v2.3.9.md` を追加。
+- `docs/archive/release_notes/RELEASE_NOTES_v2.3.9.md` を追加。
 
 ### 🧪 テスト（推奨）
 
