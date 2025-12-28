@@ -7,12 +7,13 @@ import os
 import datetime
 import json
 import logging
-from typing import Optional
+import re
+from typing import Optional, List
 from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QListWidget, QListWidgetItem, QTextEdit, QProgressBar,
     QMessageBox, QSplitter, QWidget, QTabWidget, QGroupBox,
-    QComboBox
+    QComboBox, QCheckBox
 )
 from qt_compat.core import Qt, QThread, Signal, QTimer
 from classes.ai.core.ai_manager import AIManager
@@ -115,6 +116,18 @@ class AISuggestionDialog(QDialog):
         self.extension_ai_threads = []  # AI拡張用のスレッドリスト
         self._active_extension_button = None  # AI拡張で実行中のボタン
         self.extension_buttons = []  # AI拡張ボタンのリスト（複数クリック防止用）
+        # 報告書タブ（converted.xlsx）用
+        self.report_ai_threads = []
+        self._active_report_button = None
+        self.report_buttons = []
+        self._report_entries = []
+        self._selected_report_record = None
+        self._selected_report_placeholders = {}
+        # 報告書一括問い合わせ用
+        self._bulk_report_queue = []
+        self._bulk_report_index = 0
+        self._bulk_report_running = False
+        self._bulk_report_cancelled = False
         self.auto_generate = auto_generate  # 自動生成フラグ
         self.last_used_prompt = None  # 最後に使用したプロンプトを保存
         self.last_api_request_params = None  # 最後に使用したAPIリクエストパラメータ（本文除外）
@@ -190,6 +203,14 @@ class AISuggestionDialog(QDialog):
                 self.setup_extension_tab(extension_tab)
             except Exception as e:
                 logger.warning("AI拡張タブの初期化に失敗しました: %s", e)
+
+            # 報告書タブ（converted.xlsx）
+            try:
+                report_tab = QWidget()
+                self.tab_widget.addTab(report_tab, "報告書")
+                self.setup_report_tab(report_tab)
+            except Exception as e:
+                logger.warning("報告書タブの初期化に失敗しました: %s", e)
             
             try:
                 extraction_settings_tab = QWidget()
@@ -197,6 +218,14 @@ class AISuggestionDialog(QDialog):
                 self.setup_extraction_settings_tab(extraction_settings_tab)
             except Exception as e:
                 logger.warning("ファイル抽出設定タブの初期化に失敗しました: %s", e)
+
+            # 結果一覧タブ（ログ表示）
+            try:
+                results_tab = QWidget()
+                self.tab_widget.addTab(results_tab, "結果一覧")
+                self.setup_results_tab(results_tab)
+            except Exception as e:
+                logger.warning("結果一覧タブの初期化に失敗しました: %s", e)
         
         # 注: データセット開設タブでの将来的な利用も想定
         # データセット開設タブから呼び出す場合は、mode="dataset_suggestion"を使用
@@ -1266,6 +1295,11 @@ class AISuggestionDialog(QDialog):
                 line-height: 1.3;
             }}
         """)
+        # 報告書タブでも同じ表示スタイルを流用する
+        try:
+            self._extension_response_display_stylesheet = self.extension_response_display.styleSheet()
+        except Exception:
+            self._extension_response_display_stylesheet = ""
         response_container_layout.addWidget(self.extension_response_display)
 
         # AI応答待機用スピナー（キャンセル付き）
@@ -1390,6 +1424,1619 @@ class AISuggestionDialog(QDialog):
         self.initialize_dataset_dropdown()
         
         # データセット選択のシグナル接続は初期化処理内で設定
+
+    def setup_report_tab(self, tab_widget):
+        """報告書タブのセットアップ（converted.xlsx エントリーを対象）"""
+        from qt_compat.widgets import QTableWidget, QTableWidgetItem, QTextBrowser, QLineEdit, QAbstractItemView
+        from qt_compat.widgets import QSplitter
+
+        layout = QVBoxLayout(tab_widget)
+
+        # ヘッダー
+        header_layout = QHBoxLayout()
+        title_label = QLabel("報告書（converted.xlsx）")
+        title_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 5px;")
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+
+        # デフォルトAI設定表示（AI拡張と同様）
+        try:
+            ai_manager = AIManager()
+            default_provider = ai_manager.get_default_provider()
+            default_model = ai_manager.get_default_model(default_provider)
+            ai_config_label = QLabel(f"🤖 使用AI: {default_provider.upper()} / {default_model}")
+            ai_config_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin: 5px; font-size: 11px;")
+            ai_config_label.setToolTip("グローバル設定で指定されたデフォルトAIを使用します")
+            header_layout.addWidget(ai_config_label)
+        except Exception:
+            pass
+
+        # 設定ボタン（AI拡張タブと同様）
+        config_button = QPushButton("設定編集")
+        config_button.setToolTip("AIサジェスト機能定義を編集")
+        config_button.clicked.connect(self.edit_extension_config)
+        config_button.setMaximumWidth(80)
+        header_layout.addWidget(config_button)
+
+        layout.addLayout(header_layout)
+
+        # フィルタ & 一覧
+        filter_widget = QWidget()
+        filter_container_layout = QVBoxLayout(filter_widget)
+        filter_container_layout.setContentsMargins(10, 5, 10, 5)
+
+        row1 = QHBoxLayout()
+        row2 = QHBoxLayout()
+
+        row1.addWidget(QLabel("ARIM課題番号:"))
+        self.report_arimno_filter_input = QLineEdit()
+        self.report_arimno_filter_input.setPlaceholderText("ARIM課題番号で絞り込み")
+        self.report_arimno_filter_input.setMinimumWidth(220)
+        row1.addWidget(self.report_arimno_filter_input)
+
+        row1.addSpacing(10)
+        row1.addWidget(QLabel("年度:"))
+        self.report_year_filter_combo = QComboBox()
+        self.report_year_filter_combo.setMinimumWidth(120)
+        self.report_year_filter_combo.addItem("全て")
+        row1.addWidget(self.report_year_filter_combo)
+
+        row1.addSpacing(10)
+        row1.addWidget(QLabel("重要技術領域(主):"))
+        self.report_important_main_filter_combo = QComboBox()
+        self.report_important_main_filter_combo.setMinimumWidth(200)
+        self.report_important_main_filter_combo.addItem("全て")
+        row1.addWidget(self.report_important_main_filter_combo)
+
+        row1.addSpacing(10)
+        row1.addWidget(QLabel("重要技術領域(副):"))
+        self.report_important_sub_filter_combo = QComboBox()
+        self.report_important_sub_filter_combo.setMinimumWidth(200)
+        self.report_important_sub_filter_combo.addItem("全て")
+        row1.addWidget(self.report_important_sub_filter_combo)
+        row1.addStretch()
+
+        row2.addWidget(QLabel("機関コード:"))
+        self.report_inst_code_filter_input = QLineEdit()
+        self.report_inst_code_filter_input.setPlaceholderText("機関コードで絞り込み")
+        self.report_inst_code_filter_input.setMinimumWidth(140)
+        row2.addWidget(self.report_inst_code_filter_input)
+
+        row2.addSpacing(10)
+        row2.addWidget(QLabel("所属名:"))
+        self.report_affiliation_filter_input = QLineEdit()
+        self.report_affiliation_filter_input.setPlaceholderText("所属名で絞り込み")
+        self.report_affiliation_filter_input.setMinimumWidth(180)
+        row2.addWidget(self.report_affiliation_filter_input)
+
+        row2.addSpacing(10)
+        row2.addWidget(QLabel("利用課題名:"))
+        self.report_title_filter_input = QLineEdit()
+        self.report_title_filter_input.setPlaceholderText("利用課題名で絞り込み")
+        self.report_title_filter_input.setMinimumWidth(220)
+        row2.addWidget(self.report_title_filter_input)
+
+        row2.addStretch()
+
+        filter_container_layout.addLayout(row1)
+        filter_container_layout.addLayout(row2)
+
+        self.report_refresh_button = QPushButton("更新")
+        self.report_refresh_button.setMaximumWidth(70)
+        row1.addWidget(self.report_refresh_button)
+
+        layout.addWidget(filter_widget)
+
+        self.report_entries_table = QTableWidget()
+        self.report_entries_table.setColumnCount(7)
+        self.report_entries_table.setHorizontalHeaderLabels([
+            "ARIM課題番号",
+            "年度",
+            "機関コード",
+            "所属名",
+            "利用課題名",
+            "重要技術領域（主）",
+            "重要技術領域（副）",
+        ])
+        self.report_entries_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        # 一括問い合わせ（選択複数）に備えて複数選択可能にする
+        self.report_entries_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.report_entries_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.report_entries_table.setMinimumHeight(180)
+        try:
+            self.report_entries_table.setSortingEnabled(True)
+        except Exception:
+            pass
+        layout.addWidget(self.report_entries_table)
+
+        # メインコンテンツエリア（左右分割）
+        content_splitter = QSplitter(Qt.Horizontal)
+        layout.addWidget(content_splitter)
+
+        # 左側: ボタン
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(5, 5, 5, 5)
+
+        buttons_label = QLabel("🤖 AIサジェスト機能（報告書）")
+        buttons_label.setStyleSheet(
+            f"font-weight: bold; margin: 5px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};"
+        )
+        left_layout.addWidget(buttons_label)
+
+        self.report_bulk_checkbox = QCheckBox("一括問い合わせ")
+        self.report_bulk_checkbox.setToolTip(
+            "チェックONの状態でボタンを押すと、表示全件（または選択行）に対して一括で問い合わせを行い結果を保存します。"
+        )
+        left_layout.addWidget(self.report_bulk_checkbox)
+
+        self.report_buttons_widget = QWidget()
+        self.report_buttons_layout = QVBoxLayout(self.report_buttons_widget)
+        self.report_buttons_layout.setContentsMargins(5, 5, 5, 5)
+        self.report_buttons_layout.setSpacing(6)
+        left_layout.addWidget(self.report_buttons_widget)
+        left_layout.addStretch()
+
+        left_widget.setMaximumWidth(280)
+        left_widget.setMinimumWidth(250)
+        content_splitter.addWidget(left_widget)
+
+        # 右側: 応答表示
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(5, 5, 5, 5)
+
+        response_label = QLabel("📝 AI応答結果")
+        response_label.setStyleSheet(
+            f"font-weight: bold; margin: 5px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};"
+        )
+        right_layout.addWidget(response_label)
+
+        response_container = QWidget()
+        response_container_layout = QVBoxLayout(response_container)
+        response_container_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.report_response_display = QTextBrowser()
+        self.report_response_display.setReadOnly(True)
+        self.report_response_display.setOpenExternalLinks(False)
+        self.report_response_display.setPlaceholderText(
+            "左側のボタンをクリックすると、選択した報告書エントリーに基づくAI結果がここに表示されます。\n\n"
+            "上部のARIMNO/年度で絞り込み、一覧から1件選択してください。"
+        )
+        try:
+            if getattr(self, '_extension_response_display_stylesheet', ''):
+                self.report_response_display.setStyleSheet(self._extension_response_display_stylesheet)
+        except Exception:
+            pass
+        response_container_layout.addWidget(self.report_response_display)
+
+        # スピナー（キャンセル付き）
+        try:
+            self.report_spinner_overlay = SpinnerOverlay(
+                response_container,
+                "AI応答を待機中...",
+                show_cancel=True,
+                cancel_text="⏹ キャンセル"
+            )
+            self.report_spinner_overlay.cancel_requested.connect(self.cancel_report_ai_requests)
+        except Exception as _e:
+            logger.debug("report spinner overlay init failed: %s", _e)
+            self.report_spinner_overlay = None
+
+        right_layout.addWidget(response_container)
+
+        # 応答制御ボタン（AI拡張タブと同等）
+        response_button_layout = QHBoxLayout()
+
+        self.report_clear_response_button = QPushButton("🗑️ クリア")
+        self.report_clear_response_button.clicked.connect(self.clear_report_response)
+        self.report_clear_response_button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_PRESSED)};
+            }}
+        """
+        )
+
+        self.report_copy_response_button = QPushButton("📋 コピー")
+        self.report_copy_response_button.clicked.connect(self.copy_report_response)
+        self.report_copy_response_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)};
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_PRESSED)};
+            }}
+        """)
+
+        self.report_show_prompt_button = QPushButton("📄 使用プロンプト表示")
+        self.report_show_prompt_button.clicked.connect(self.show_used_prompt)
+        self.report_show_prompt_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+            }}
+        """)
+        self.report_show_prompt_button.setEnabled(False)
+
+        self.report_show_api_params_button = QPushButton("🔎 API req/resp")
+        self.report_show_api_params_button.clicked.connect(self.show_api_request_response_params)
+        self.report_show_api_params_button.setStyleSheet(self.report_show_prompt_button.styleSheet())
+        self.report_show_api_params_button.setEnabled(False)
+
+        response_button_layout.addWidget(self.report_clear_response_button)
+        response_button_layout.addWidget(self.report_copy_response_button)
+        response_button_layout.addWidget(self.report_show_prompt_button)
+        response_button_layout.addWidget(self.report_show_api_params_button)
+        response_button_layout.addStretch()
+        right_layout.addLayout(response_button_layout)
+
+        content_splitter.addWidget(right_widget)
+
+        # 接続
+        self.report_refresh_button.clicked.connect(self.refresh_report_entries)
+        self.report_arimno_filter_input.textChanged.connect(self.refresh_report_entries)
+        self.report_inst_code_filter_input.textChanged.connect(self.refresh_report_entries)
+        self.report_affiliation_filter_input.textChanged.connect(self.refresh_report_entries)
+        self.report_title_filter_input.textChanged.connect(self.refresh_report_entries)
+        self.report_year_filter_combo.currentIndexChanged.connect(self.refresh_report_entries)
+        self.report_important_main_filter_combo.currentIndexChanged.connect(self.refresh_report_entries)
+        self.report_important_sub_filter_combo.currentIndexChanged.connect(self.refresh_report_entries)
+        self.report_entries_table.itemSelectionChanged.connect(self.on_report_entry_selected)
+
+        # 初期ロード
+        self.refresh_report_entries()
+        try:
+            self.load_report_buttons()
+        except Exception as e:
+            logger.warning("報告書タブのボタン読み込みに失敗しました: %s", e)
+
+    def _get_report_record_value(self, record: dict, candidates: List[str]) -> str:
+        for key in candidates:
+            try:
+                if key in record and record.get(key) is not None:
+                    v = str(record.get(key)).strip()
+                    if v:
+                        return v
+            except Exception:
+                continue
+        # fallback: partial match
+        try:
+            for k, v in record.items():
+                if v is None:
+                    continue
+                for c in candidates:
+                    if c and c in str(k):
+                        sv = str(v).strip()
+                        if sv:
+                            return sv
+        except Exception:
+            pass
+        return ""
+
+    def _truncate_table_text(self, text: str, max_chars: int) -> str:
+        s = (text or "").strip()
+        if max_chars <= 0:
+            return ""
+        if len(s) <= max_chars:
+            return s
+        # 末尾を省略
+        return s[: max_chars - 1] + "…"
+
+    def _get_prompt_file_for_target(self, prompt_file: str, target_kind: str, button_id: str) -> str:
+        """AI拡張(データセット)と報告書でプロンプト保存先を分離する"""
+        if not prompt_file:
+            return prompt_file
+        if target_kind != "report":
+            return prompt_file
+
+        # normalize separators for matching
+        norm = prompt_file.replace('\\', '/')
+        if '/input/ai/prompts/ext/' in f"/{norm}":
+            # input/ai/prompts/ext/<id>.txt -> input/ai/prompts/report/<id>.txt
+            return norm.replace('/input/ai/prompts/ext/', '/input/ai/prompts/report/')
+        if norm.startswith('input/ai/prompts/ext/'):
+            return norm.replace('input/ai/prompts/ext/', 'input/ai/prompts/report/')
+
+        # fallback: suffix
+        base, ext = os.path.splitext(norm)
+        if not ext:
+            ext = '.txt'
+        return f"{base}_report{ext}"
+
+    def refresh_report_entries(self):
+        """converted.xlsx のエントリーを読み込み、フィルタして表示"""
+        try:
+            from qt_compat.widgets import QTableWidgetItem
+            from classes.dataset.util.ai_extension_helper import load_converted_xlsx_report_entries
+
+            self._report_entries = load_converted_xlsx_report_entries()
+
+            # 年度候補を更新（全件から抽出）
+            years = []
+            important_mains = []
+            important_subs = []
+            for rec in self._report_entries:
+                y = self._get_report_record_value(rec, ["年度", "利用年度"])
+                if y and y not in years:
+                    years.append(y)
+
+                im = self._get_report_record_value(rec, ["重要技術領域・主", "重要技術領域（主）", "important_tech_main", "重要技術領域 主"])
+                if im and im not in important_mains:
+                    important_mains.append(im)
+                isub = self._get_report_record_value(rec, ["重要技術領域・副", "重要技術領域（副）", "important_tech_sub", "重要技術領域 副"])
+                if isub and isub not in important_subs:
+                    important_subs.append(isub)
+            years_sorted = sorted(years)
+            important_mains_sorted = sorted(important_mains)
+            important_subs_sorted = sorted(important_subs)
+
+            current_year = self.report_year_filter_combo.currentText() if hasattr(self, 'report_year_filter_combo') else "全て"
+            self.report_year_filter_combo.blockSignals(True)
+            self.report_year_filter_combo.clear()
+            self.report_year_filter_combo.addItem("全て")
+            for y in years_sorted:
+                self.report_year_filter_combo.addItem(y)
+            # 元の選択を復元
+            idx = self.report_year_filter_combo.findText(current_year)
+            if idx >= 0:
+                self.report_year_filter_combo.setCurrentIndex(idx)
+            self.report_year_filter_combo.blockSignals(False)
+
+            # 重要技術領域（主/副）候補を更新
+            current_main = self.report_important_main_filter_combo.currentText() if hasattr(self, 'report_important_main_filter_combo') else "全て"
+            self.report_important_main_filter_combo.blockSignals(True)
+            self.report_important_main_filter_combo.clear()
+            self.report_important_main_filter_combo.addItem("全て")
+            for v in important_mains_sorted:
+                self.report_important_main_filter_combo.addItem(v)
+            idx = self.report_important_main_filter_combo.findText(current_main)
+            if idx >= 0:
+                self.report_important_main_filter_combo.setCurrentIndex(idx)
+            self.report_important_main_filter_combo.blockSignals(False)
+
+            current_sub = self.report_important_sub_filter_combo.currentText() if hasattr(self, 'report_important_sub_filter_combo') else "全て"
+            self.report_important_sub_filter_combo.blockSignals(True)
+            self.report_important_sub_filter_combo.clear()
+            self.report_important_sub_filter_combo.addItem("全て")
+            for v in important_subs_sorted:
+                self.report_important_sub_filter_combo.addItem(v)
+            idx = self.report_important_sub_filter_combo.findText(current_sub)
+            if idx >= 0:
+                self.report_important_sub_filter_combo.setCurrentIndex(idx)
+            self.report_important_sub_filter_combo.blockSignals(False)
+
+            arimno_filter = self.report_arimno_filter_input.text().strip() if hasattr(self, 'report_arimno_filter_input') else ""
+            year_filter = self.report_year_filter_combo.currentText().strip() if hasattr(self, 'report_year_filter_combo') else "全て"
+            inst_code_filter = self.report_inst_code_filter_input.text().strip() if hasattr(self, 'report_inst_code_filter_input') else ""
+            affiliation_filter = self.report_affiliation_filter_input.text().strip() if hasattr(self, 'report_affiliation_filter_input') else ""
+            title_filter = self.report_title_filter_input.text().strip() if hasattr(self, 'report_title_filter_input') else ""
+            important_main_filter = self.report_important_main_filter_combo.currentText().strip() if hasattr(self, 'report_important_main_filter_combo') else "全て"
+            important_sub_filter = self.report_important_sub_filter_combo.currentText().strip() if hasattr(self, 'report_important_sub_filter_combo') else "全て"
+
+            filtered = []
+            for rec in self._report_entries:
+                arimno = self._get_report_record_value(rec, ["ARIMNO", "課題番号"])
+                year = self._get_report_record_value(rec, ["年度", "利用年度"])
+                inst_code = self._get_report_record_value(rec, ["機関コード", "実施機関コード"])
+                affiliation = self._get_report_record_value(rec, ["所属名", "所属"])
+                title = self._get_report_record_value(rec, ["利用課題名", "Title"])
+                important_main = self._get_report_record_value(rec, ["重要技術領域・主", "重要技術領域（主）"])
+                important_sub = self._get_report_record_value(rec, ["重要技術領域・副", "重要技術領域（副）"])
+
+                if arimno_filter and arimno_filter not in arimno:
+                    continue
+                if year_filter and year_filter != "全て" and year_filter != year:
+                    continue
+                if inst_code_filter and inst_code_filter not in inst_code:
+                    continue
+                if affiliation_filter and affiliation_filter not in affiliation:
+                    continue
+                if title_filter and title_filter not in title:
+                    continue
+                if important_main_filter and important_main_filter != "全て" and important_main_filter not in important_main:
+                    continue
+                if important_sub_filter and important_sub_filter != "全て" and important_sub_filter not in important_sub:
+                    continue
+                filtered.append(rec)
+
+            try:
+                self.report_entries_table.setSortingEnabled(False)
+            except Exception:
+                pass
+
+            self.report_entries_table.setRowCount(len(filtered))
+            for row_idx, rec in enumerate(filtered):
+                arimno = self._get_report_record_value(rec, ["ARIMNO", "課題番号"])
+                year = self._get_report_record_value(rec, ["年度", "利用年度"])
+                inst_code = self._get_report_record_value(rec, ["機関コード", "実施機関コード"])
+                affiliation = self._get_report_record_value(rec, ["所属名", "所属"])
+                title = self._get_report_record_value(rec, ["利用課題名", "Title"])
+                important_main = self._get_report_record_value(rec, ["重要技術領域・主", "重要技術領域（主）"])
+                important_sub = self._get_report_record_value(rec, ["重要技術領域・副", "重要技術領域（副）"])
+
+                affiliation_disp = self._truncate_table_text(affiliation, 22)
+                title_disp = self._truncate_table_text(title, 28)
+                important_main_disp = self._truncate_table_text(important_main, 22)
+                important_sub_disp = self._truncate_table_text(important_sub, 22)
+
+                # 表示順: ARIM課題番号, 年度, 機関コード, 所属名, 利用課題名, 重要技術領域(主), 重要技術領域(副)
+                for col_idx, value in enumerate([arimno, year, inst_code, affiliation_disp, title_disp, important_main_disp, important_sub_disp]):
+                    item = QTableWidgetItem(value)
+                    item.setData(Qt.UserRole, rec)
+                    self.report_entries_table.setItem(row_idx, col_idx, item)
+
+            try:
+                self.report_entries_table.resizeColumnsToContents()
+            except Exception:
+                pass
+
+            try:
+                self.report_entries_table.setSortingEnabled(True)
+            except Exception:
+                pass
+
+            # 選択解除
+            self.report_entries_table.clearSelection()
+            self._selected_report_record = None
+            self._selected_report_placeholders = {}
+
+        except Exception as e:
+            logger.debug("refresh_report_entries failed: %s", e)
+            try:
+                self.report_entries_table.setRowCount(0)
+            except Exception:
+                pass
+
+    def on_report_entry_selected(self):
+        """一覧で選択された報告書エントリーを保持"""
+        try:
+            selected_items = self.report_entries_table.selectedItems() if hasattr(self, 'report_entries_table') else []
+            if not selected_items:
+                self._selected_report_record = None
+                self._selected_report_placeholders = {}
+                return
+
+            rec = selected_items[0].data(Qt.UserRole)
+            if not isinstance(rec, dict):
+                self._selected_report_record = None
+                self._selected_report_placeholders = {}
+                return
+
+            self._selected_report_record = rec
+            self._selected_report_placeholders = self._build_report_placeholders_for_record(rec)
+        except Exception as e:
+            logger.debug("on_report_entry_selected failed: %s", e)
+            self._selected_report_record = None
+            self._selected_report_placeholders = {}
+
+    def _build_report_placeholders_for_record(self, rec: dict) -> dict:
+        from classes.dataset.util.ai_extension_helper import placeholders_from_converted_xlsx_record
+
+        placeholders = placeholders_from_converted_xlsx_record(rec)
+
+        # ファイル由来の情報（抽出済み）を報告書コンテキストにも載せる
+        try:
+            for k in ['file_tree', 'text_from_structured_files', 'json_from_structured_files']:
+                if k in self.context_data and self.context_data.get(k) is not None:
+                    placeholders.setdefault(k, self.context_data.get(k))
+        except Exception:
+            pass
+
+        # 互換キー（AI拡張テンプレートを使い回せるように）
+        arimno = self._get_report_record_value(rec, ["ARIMNO", "課題番号"])
+        title = self._get_report_record_value(rec, ["利用課題名", "Title"])
+        affiliation = self._get_report_record_value(rec, ["所属名", "所属"])
+
+        if arimno:
+            placeholders.setdefault('grant_number', arimno)
+            placeholders.setdefault('arim_report_project_number', arimno)
+            placeholders.setdefault('report_project_number', arimno)
+        if title:
+            placeholders.setdefault('name', title)
+            placeholders.setdefault('arim_report_title', title)
+            placeholders.setdefault('report_title', title)
+        if affiliation:
+            placeholders.setdefault('arim_report_affiliation', affiliation)
+            placeholders.setdefault('report_affiliation', affiliation)
+
+        return placeholders
+
+    def _get_report_target_key(self, rec: dict) -> str:
+        arimno = self._get_report_record_value(rec or {}, ["ARIMNO", "課題番号"])
+        year = self._get_report_record_value(rec or {}, ["年度", "利用年度"])
+        inst_code = self._get_report_record_value(rec or {}, ["機関コード", "実施機関コード"])
+        return "|".join([x for x in [arimno, year, inst_code] if x]) or (arimno or "unknown")
+
+    def _get_selected_report_records(self) -> List[dict]:
+        if not hasattr(self, 'report_entries_table'):
+            return []
+        try:
+            sm = self.report_entries_table.selectionModel()
+            if sm is None:
+                return []
+            rows = sm.selectedRows(0)
+            recs = []
+            for mi in rows:
+                try:
+                    item = self.report_entries_table.item(mi.row(), 0)
+                    if item is None:
+                        continue
+                    rec = item.data(Qt.UserRole)
+                    if isinstance(rec, dict):
+                        recs.append(rec)
+                except Exception:
+                    continue
+            return recs
+        except Exception:
+            return []
+
+    def _get_displayed_report_records(self) -> List[dict]:
+        if not hasattr(self, 'report_entries_table'):
+            return []
+        try:
+            recs = []
+            seen = set()
+            for row in range(self.report_entries_table.rowCount()):
+                item = self.report_entries_table.item(row, 0)
+                if item is None:
+                    continue
+                rec = item.data(Qt.UserRole)
+                if not isinstance(rec, dict):
+                    continue
+                key = self._get_report_target_key(rec)
+                if key in seen:
+                    continue
+                seen.add(key)
+                recs.append(rec)
+            return recs
+        except Exception:
+            return []
+
+    def load_report_buttons(self):
+        """AI拡張設定からボタンを読み込んで、報告書タブに表示"""
+        try:
+            from classes.dataset.util.ai_extension_helper import load_ai_extension_config, infer_ai_suggest_target_kind
+            config = load_ai_extension_config()
+
+            while self.report_buttons_layout.count():
+                item = self.report_buttons_layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    widget.setParent(None)
+                    widget.deleteLater()
+
+            self.report_buttons.clear()
+
+            ui_settings = config.get('ui_settings', {})
+            button_height = ui_settings.get('button_height', 60)
+            button_width = ui_settings.get('button_width', 140)
+            show_icons = ui_settings.get('show_icons', True)
+
+            buttons_config = config.get('buttons', [])
+            default_buttons = config.get('default_buttons', [])
+            all_buttons = buttons_config + default_buttons
+
+            # 報告書向けのみ
+            all_buttons = [b for b in all_buttons if infer_ai_suggest_target_kind(b) == 'report']
+
+            if not all_buttons:
+                no_buttons_label = QLabel("AI拡張ボタンが設定されていません。\n設定編集ボタンから設定ファイルを確認してください。")
+                no_buttons_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; text-align: center; padding: 20px;")
+                no_buttons_label.setAlignment(Qt.AlignCenter)
+                self.report_buttons_layout.addWidget(no_buttons_label)
+                return
+
+            for button_config in all_buttons:
+                button = self.create_extension_button(
+                    button_config,
+                    button_height,
+                    button_width,
+                    show_icons,
+                    clicked_handler=self.on_report_button_clicked,
+                    buttons_list=self.report_buttons,
+                    target_kind="report",
+                )
+                self.report_buttons_layout.addWidget(button)
+
+            self.report_buttons_layout.addStretch()
+
+        except Exception as e:
+            error_label = QLabel(f"AI拡張設定の読み込みエラー: {str(e)}")
+            error_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; padding: 10px;")
+            self.report_buttons_layout.addWidget(error_label)
+
+    def on_report_button_clicked(self, button_config):
+        """報告書タブのAIボタンクリック時の処理"""
+        try:
+            # 一括問い合わせ
+            if getattr(self, 'report_bulk_checkbox', None) is not None and self.report_bulk_checkbox.isChecked():
+                self._start_bulk_report_requests(button_config)
+                return
+
+            if not self._selected_report_placeholders:
+                QMessageBox.warning(self, "警告", "報告書エントリーを選択してください（上部一覧から1件選択）。")
+                return
+
+            # 既存結果の検出（同一ボタン + 同一対象）
+            try:
+                from classes.dataset.util.ai_suggest_result_log import read_latest_result
+
+                button_id = button_config.get('id', 'unknown')
+                arimno = self._get_report_record_value(self._selected_report_record or {}, ["ARIMNO", "課題番号"])
+                year = self._get_report_record_value(self._selected_report_record or {}, ["年度", "利用年度"])
+                inst_code = self._get_report_record_value(self._selected_report_record or {}, ["機関コード", "実施機関コード"])
+                target_key = "|".join([x for x in [arimno, year, inst_code] if x]) or (arimno or "unknown")
+
+                latest = read_latest_result('report', target_key, button_id)
+                if latest:
+                    # pytest環境ではモーダル表示を避け、既存結果を自動表示して終了
+                    if os.environ.get("PYTEST_CURRENT_TEST"):
+                        fmt = (latest.get('display_format') or 'text').lower()
+                        content = latest.get('display_content') or ''
+                        if fmt == 'html':
+                            self.report_response_display.setHtml(content)
+                        else:
+                            self.report_response_display.setText(content)
+                        self.last_used_prompt = latest.get('prompt')
+                        self.last_api_request_params = latest.get('request_params')
+                        self.last_api_response_params = latest.get('response_params')
+                        self.last_api_provider = latest.get('provider')
+                        self.last_api_model = latest.get('model')
+                        if hasattr(self, 'report_show_prompt_button'):
+                            self.report_show_prompt_button.setEnabled(bool(self.last_used_prompt))
+                        if hasattr(self, 'report_show_api_params_button'):
+                            self.report_show_api_params_button.setEnabled(bool(self.last_api_request_params or self.last_api_response_params))
+                        return
+
+                    ts = (latest.get('timestamp') or '').strip()
+                    box = QMessageBox(self)
+                    box.setIcon(QMessageBox.Question)
+                    box.setWindowTitle("既存結果あり")
+                    box.setText(
+                        f"同一ボタン・同一対象の既存結果が見つかりました。" + (f"（{ts}）" if ts else "")
+                    )
+                    box.setInformativeText("既存の最新結果を表示しますか？それとも新規に問い合わせますか？")
+                    show_existing_btn = box.addButton("既存結果を表示", QMessageBox.AcceptRole)
+                    run_new_btn = box.addButton("新規問い合わせ", QMessageBox.ActionRole)
+                    cancel_btn = box.addButton(QMessageBox.Cancel)
+                    box.setDefaultButton(show_existing_btn)
+                    box.exec()
+
+                    chosen = box.clickedButton()
+                    if chosen == cancel_btn:
+                        return
+                    if chosen == show_existing_btn:
+                        fmt = (latest.get('display_format') or 'text').lower()
+                        content = latest.get('display_content') or ''
+                        if fmt == 'html':
+                            self.report_response_display.setHtml(content)
+                        else:
+                            self.report_response_display.setText(content)
+
+                        # show prompt / api params 用の状態も復元
+                        self.last_used_prompt = latest.get('prompt')
+                        self.last_api_request_params = latest.get('request_params')
+                        self.last_api_response_params = latest.get('response_params')
+                        self.last_api_provider = latest.get('provider')
+                        self.last_api_model = latest.get('model')
+                        if hasattr(self, 'report_show_prompt_button'):
+                            self.report_show_prompt_button.setEnabled(bool(self.last_used_prompt))
+                        if hasattr(self, 'report_show_api_params_button'):
+                            self.report_show_api_params_button.setEnabled(bool(self.last_api_request_params or self.last_api_response_params))
+                        return
+
+                    # run_new_btn の場合はそのまま問い合わせ続行
+            except Exception:
+                # ログ機能は失敗しても問い合わせ自体は継続
+                pass
+
+            clicked_button = self.sender()
+            self._active_report_button = clicked_button if hasattr(clicked_button, 'start_loading') else None
+            if clicked_button and hasattr(clicked_button, 'start_loading'):
+                clicked_button.start_loading("AI処理中")
+
+            prompt = self.build_report_prompt(button_config)
+            if not prompt:
+                if clicked_button:
+                    clicked_button.stop_loading()
+                QMessageBox.warning(self, "警告", "プロンプトの構築に失敗しました。")
+                return
+
+            self.execute_report_ai_request(prompt, button_config, clicked_button)
+
+        except Exception as e:
+            QMessageBox.critical(self, "エラー", f"報告書ボタン処理エラー: {str(e)}")
+
+    def _start_bulk_report_requests(self, button_config):
+        """報告書タブ: 一括問い合わせ（選択 or 表示全件）"""
+        try:
+            selected = self._get_selected_report_records()
+            displayed = self._get_displayed_report_records()
+            use_selected = len(selected) > 0
+            candidates = selected if use_selected else displayed
+            if not candidates:
+                QMessageBox.information(self, "情報", "一括問い合わせの対象がありません。")
+                return
+
+            try:
+                from classes.dataset.util.ai_suggest_result_log import read_latest_result
+            except Exception:
+                read_latest_result = None
+
+            planned_total = len(candidates)
+            existing = 0
+            tasks = []
+            for rec in candidates:
+                target_key = self._get_report_target_key(rec)
+                latest = None
+                if read_latest_result is not None:
+                    try:
+                        latest = read_latest_result('report', target_key, button_config.get('id', 'unknown'))
+                    except Exception:
+                        latest = None
+                if latest:
+                    existing += 1
+                tasks.append({
+                    'record': rec,
+                    'target_key': target_key,
+                    'has_existing': bool(latest),
+                })
+
+            missing = planned_total - existing
+            scope_label = f"選択 {planned_total} 件" if use_selected else f"表示全件 {planned_total} 件"
+
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Question)
+            box.setWindowTitle("一括問い合わせ")
+            box.setText(f"一括問い合わせを開始します。\n\n対象: {scope_label}")
+            box.setInformativeText(
+                f"予定件数: {planned_total} 件\n"
+                f"既存結果あり: {existing} 件\n"
+                f"既存結果なし: {missing} 件\n\n"
+                "実行方法を選択してください。"
+            )
+
+            overwrite_btn = box.addButton("上書きして全件問い合わせ", QMessageBox.AcceptRole)
+            missing_only_btn = box.addButton("既存なしのみ問い合わせ", QMessageBox.ActionRole)
+            cancel_btn = box.addButton(QMessageBox.Cancel)
+            box.setDefaultButton(missing_only_btn if missing > 0 else overwrite_btn)
+
+            # pytest環境ではモーダルを避け、既存なしのみを選択
+            if os.environ.get("PYTEST_CURRENT_TEST"):
+                chosen = missing_only_btn
+            else:
+                box.exec()
+                chosen = box.clickedButton()
+
+            if chosen == cancel_btn:
+                return
+            if chosen == missing_only_btn:
+                tasks = [t for t in tasks if not t.get('has_existing')]
+            # overwrite_btn は tasks 全件
+
+            if not tasks:
+                QMessageBox.information(self, "情報", "問い合わせ対象（既存なし）がありません。")
+                return
+
+            self._bulk_report_queue = tasks
+            self._bulk_report_index = 0
+            self._bulk_report_running = True
+            self._bulk_report_cancelled = False
+            self._bulk_report_button_config = button_config
+
+            # ボタン無効化
+            for b in list(getattr(self, 'report_buttons', [])):
+                try:
+                    b.setEnabled(False)
+                except Exception:
+                    pass
+
+            self._run_next_bulk_report_request()
+        except Exception as e:
+            QMessageBox.critical(self, "エラー", f"一括問い合わせエラー: {str(e)}")
+
+    def _run_next_bulk_report_request(self):
+        if not self._bulk_report_running or self._bulk_report_cancelled:
+            self._finish_bulk_report_requests()
+            return
+        if self._bulk_report_index >= len(self._bulk_report_queue):
+            self._finish_bulk_report_requests()
+            return
+
+        task = self._bulk_report_queue[self._bulk_report_index]
+        rec = task.get('record')
+        if not isinstance(rec, dict):
+            self._bulk_report_index += 1
+            self._run_next_bulk_report_request()
+            return
+
+        placeholders = self._build_report_placeholders_for_record(rec)
+        button_config = getattr(self, '_bulk_report_button_config', {}) or {}
+        prompt = self.build_report_prompt(button_config, placeholders=placeholders)
+        if not prompt:
+            self._bulk_report_index += 1
+            self._run_next_bulk_report_request()
+            return
+
+        if getattr(self, 'report_spinner_overlay', None):
+            label = button_config.get('label', 'AI')
+            self.report_spinner_overlay.set_message(
+                f"一括処理中 {self._bulk_report_index + 1}/{len(self._bulk_report_queue)}: {label}"
+            )
+
+        self.execute_report_ai_request(
+            prompt,
+            button_config,
+            button_widget=None,
+            report_record=rec,
+            report_placeholders=placeholders,
+            report_target_key=task.get('target_key') or self._get_report_target_key(rec),
+            _bulk_continue=True,
+        )
+
+    def _finish_bulk_report_requests(self):
+        self._bulk_report_running = False
+        self._bulk_report_cancelled = False
+        self._bulk_report_queue = []
+        self._bulk_report_index = 0
+        try:
+            if getattr(self, 'report_spinner_overlay', None):
+                self.report_spinner_overlay.set_message("AI応答を待機中...")
+        except Exception:
+            pass
+        for b in list(getattr(self, 'report_buttons', [])):
+            try:
+                b.setEnabled(True)
+            except Exception:
+                pass
+
+    def setup_results_tab(self, tab_widget):
+        """結果一覧タブ（ログの最新結果を一覧表示）"""
+        from qt_compat.widgets import QTableWidget, QTableWidgetItem, QAbstractItemView
+        from qt_compat.widgets import QLineEdit
+        from qt_compat.widgets import QFileDialog
+
+        layout = QVBoxLayout(tab_widget)
+
+        header = QHBoxLayout()
+        header.addWidget(QLabel("結果一覧（問い合わせログ）"))
+        header.addStretch()
+        layout.addLayout(header)
+
+        filters = QHBoxLayout()
+        filters.addWidget(QLabel("対象:"))
+        self.results_target_kind_combo = QComboBox()
+        self.results_target_kind_combo.addItem("報告書", 'report')
+        self.results_target_kind_combo.addItem("AI拡張（従来）", 'dataset')
+        filters.addWidget(self.results_target_kind_combo)
+
+        filters.addSpacing(10)
+        filters.addWidget(QLabel("表示:"))
+        self.results_view_mode_combo = QComboBox()
+        self.results_view_mode_combo.addItem("先頭表示", 'snippet')
+        self.results_view_mode_combo.addItem("JSON列表示", 'json_columns')
+        filters.addWidget(self.results_view_mode_combo)
+
+        filters.addSpacing(10)
+        filters.addWidget(QLabel("ボタン:"))
+        self.results_button_combo = QComboBox()
+        self.results_button_combo.addItem("全て", '')
+        filters.addWidget(self.results_button_combo)
+
+        filters.addSpacing(10)
+        filters.addWidget(QLabel("フィルタ:"))
+        self.results_filter_edit = QLineEdit()
+        self.results_filter_edit.setPlaceholderText("表示中の行を絞り込み")
+        self.results_filter_edit.setMaximumWidth(240)
+        filters.addWidget(self.results_filter_edit)
+
+        filters.addSpacing(10)
+        self.results_refresh_button = QPushButton("更新")
+        self.results_refresh_button.setMaximumWidth(70)
+        filters.addWidget(self.results_refresh_button)
+
+        filters.addSpacing(10)
+        filters.addWidget(QLabel("形式:"))
+        self.results_export_format_combo = QComboBox()
+        self.results_export_format_combo.addItem("CSV", 'csv')
+        self.results_export_format_combo.addItem("XLSX", 'xlsx')
+        self.results_export_format_combo.addItem("JSON", 'json')
+        self.results_export_format_combo.setMaximumWidth(90)
+        filters.addWidget(self.results_export_format_combo)
+
+        self.results_export_button = QPushButton("エクスポート")
+        self.results_export_button.setMaximumWidth(110)
+        filters.addWidget(self.results_export_button)
+        filters.addStretch()
+        layout.addLayout(filters)
+
+        self.results_table = QTableWidget()
+        self.results_table.setColumnCount(5)
+        self.results_table.setHorizontalHeaderLabels([
+            "日時",
+            "対象キー",
+            "ボタン",
+            "モデル",
+            "結果(先頭)",
+        ])
+        self.results_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.results_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.results_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        try:
+            self.results_table.setSortingEnabled(True)
+        except Exception:
+            pass
+        layout.addWidget(self.results_table, 1)
+
+        # 接続
+        self.results_target_kind_combo.currentIndexChanged.connect(self._populate_results_button_combo)
+        self.results_button_combo.currentIndexChanged.connect(self.refresh_results_list)
+        self.results_view_mode_combo.currentIndexChanged.connect(self.refresh_results_list)
+        self.results_filter_edit.textChanged.connect(self._apply_results_filter)
+        self.results_refresh_button.clicked.connect(self.refresh_results_list)
+        self.results_export_button.clicked.connect(self.export_results_table)
+
+        self._populate_results_button_combo()
+        self.refresh_results_list()
+
+    def _collect_results_table_visible_data(self):
+        """現在表示されている（フィルタで非表示の行は除外）テーブルデータを取得。"""
+        if not hasattr(self, 'results_table'):
+            return [], []
+
+        headers = []
+        for c in range(self.results_table.columnCount()):
+            item = self.results_table.horizontalHeaderItem(c)
+            headers.append(item.text() if item else '')
+
+        rows = []
+        for r in range(self.results_table.rowCount()):
+            try:
+                if self.results_table.isRowHidden(r):
+                    continue
+            except Exception:
+                pass
+            row = []
+            for c in range(self.results_table.columnCount()):
+                cell = self.results_table.item(r, c)
+                row.append(cell.text() if cell else '')
+            rows.append(row)
+
+        return headers, rows
+
+    @staticmethod
+    def _write_results_export_csv(path: str, headers, rows) -> None:
+        import csv
+
+        with open(path, 'w', encoding='utf-8-sig', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(list(headers))
+            for row in rows:
+                writer.writerow(list(row))
+
+    @staticmethod
+    def _write_results_export_json(path: str, headers, rows) -> None:
+        import json
+
+        keys = list(headers)
+        data = []
+        for row in rows:
+            obj = {keys[i]: (row[i] if i < len(row) else '') for i in range(len(keys))}
+            data.append(obj)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+    @staticmethod
+    def _write_results_export_xlsx(path: str, headers, rows) -> None:
+        try:
+            from openpyxl import Workbook  # type: ignore
+        except Exception as e:
+            raise RuntimeError(f"openpyxl が利用できません: {e}")
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "results"
+        ws.append(list(headers))
+        for row in rows:
+            ws.append(list(row))
+        wb.save(path)
+
+    def export_results_table(self):
+        """結果一覧タブのテーブル表示内容をエクスポート（CSV/XLSX/JSON）。"""
+        try:
+            from qt_compat.widgets import QFileDialog
+            from config.common import get_dynamic_file_path
+            from datetime import datetime
+            import os
+
+            fmt = 'csv'
+            try:
+                fmt = self.results_export_format_combo.currentData() if hasattr(self, 'results_export_format_combo') else 'csv'
+            except Exception:
+                fmt = 'csv'
+            fmt = (fmt or 'csv').strip().lower()
+            if fmt not in {'csv', 'xlsx', 'json'}:
+                fmt = 'csv'
+
+            kind = self.results_target_kind_combo.currentData() if hasattr(self, 'results_target_kind_combo') else 'report'
+            bid = self.results_button_combo.currentData() if hasattr(self, 'results_button_combo') else ''
+            bid = (bid or '').strip() or 'all'
+
+            headers, rows = self._collect_results_table_visible_data()
+            if not headers:
+                QMessageBox.information(self, "情報", "エクスポートするデータがありません。")
+                return
+
+            default_dir = get_dynamic_file_path('output')
+            os.makedirs(default_dir, exist_ok=True)
+            ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+            default_name = f"ai_suggest_results_{kind}_{bid}_{ts}.{fmt}"
+            default_path = os.path.join(default_dir, default_name)
+
+            if fmt == 'csv':
+                file_filter = "CSV (*.csv)"
+            elif fmt == 'xlsx':
+                file_filter = "Excel (*.xlsx)"
+            else:
+                file_filter = "JSON (*.json)"
+
+            path, _ = QFileDialog.getSaveFileName(self, "結果一覧をエクスポート", default_path, file_filter)
+            if not path:
+                return
+
+            # 拡張子補正
+            ext = f".{fmt}"
+            if not path.lower().endswith(ext):
+                path += ext
+
+            if fmt == 'csv':
+                self._write_results_export_csv(path, headers, rows)
+            elif fmt == 'xlsx':
+                self._write_results_export_xlsx(path, headers, rows)
+            else:
+                self._write_results_export_json(path, headers, rows)
+
+            QMessageBox.information(self, "エクスポート完了", f"保存しました:\n{path}")
+        except Exception as e:
+            QMessageBox.critical(self, "エラー", f"エクスポートに失敗しました: {e}")
+
+    def _populate_results_button_combo(self):
+        try:
+            from classes.dataset.util.ai_extension_helper import load_ai_extension_config, infer_ai_suggest_target_kind
+            kind = self.results_target_kind_combo.currentData() if hasattr(self, 'results_target_kind_combo') else 'report'
+            config = load_ai_extension_config()
+            buttons_config = (config.get('buttons', []) or []) + (config.get('default_buttons', []) or [])
+            filtered = []
+            for b in buttons_config:
+                try:
+                    if infer_ai_suggest_target_kind(b) == ('report' if kind == 'report' else 'dataset'):
+                        filtered.append(b)
+                except Exception:
+                    continue
+
+            self.results_button_combo.blockSignals(True)
+            self.results_button_combo.clear()
+            self.results_button_combo.addItem("全て", '')
+            for b in filtered:
+                bid = b.get('id', 'unknown')
+                label = b.get('label', bid)
+                self.results_button_combo.addItem(f"{label} ({bid})", bid)
+            self.results_button_combo.blockSignals(False)
+        except Exception:
+            # fail safe
+            try:
+                self.results_button_combo.blockSignals(True)
+                self.results_button_combo.clear()
+                self.results_button_combo.addItem("全て", '')
+                self.results_button_combo.blockSignals(False)
+            except Exception:
+                pass
+
+    def refresh_results_list(self):
+        try:
+            from qt_compat.widgets import QTableWidgetItem
+            from classes.dataset.util.ai_suggest_result_log import list_latest_results
+            from classes.dataset.util.ai_extension_helper import load_ai_extension_config
+            from classes.dataset.util.ai_extension_helper import normalize_results_json_keys
+
+            kind = self.results_target_kind_combo.currentData() if hasattr(self, 'results_target_kind_combo') else 'report'
+            bid = self.results_button_combo.currentData() if hasattr(self, 'results_button_combo') else ''
+            bid = (bid or '').strip() or None
+
+            view_mode = 'snippet'
+            try:
+                view_mode = self.results_view_mode_combo.currentData() if hasattr(self, 'results_view_mode_combo') else 'snippet'
+            except Exception:
+                view_mode = 'snippet'
+
+            recs = list_latest_results(kind, bid)
+
+            # Helper: parse JSON-path like "a.b[0].c"
+            def _get_json_value(obj, key_path: str):
+                if obj is None:
+                    return None
+                if not key_path:
+                    return None
+                cur = obj
+                # Split by '.' but keep bracket segments
+                parts = [p for p in str(key_path).split('.') if p != '']
+                for part in parts:
+                    # handle bracket indexing, e.g. "items[0]" or "[0]"
+                    m = re.match(r"^(?P<name>[^\[]+)?(?P<rest>(\[\d+\])*)$", part)
+                    if not m:
+                        return None
+                    name = m.group('name')
+                    rest = m.group('rest') or ''
+
+                    if name:
+                        if isinstance(cur, dict):
+                            cur = cur.get(name)
+                        else:
+                            return None
+
+                    for im in re.finditer(r"\[(\d+)\]", rest):
+                        idx = int(im.group(1))
+                        if isinstance(cur, list) and 0 <= idx < len(cur):
+                            cur = cur[idx]
+                        else:
+                            return None
+                return cur
+
+            def _display_cell_value(v) -> str:
+                if v is None:
+                    return ''
+                if isinstance(v, (dict, list)):
+                    try:
+                        s = json.dumps(v, ensure_ascii=False)
+                    except Exception:
+                        s = str(v)
+                else:
+                    s = str(v)
+                s = re.sub(r"\s+", " ", s).strip()
+                return s[:160] + ('…' if len(s) > 160 else '')
+
+            def _parse_json_from_record(rec: dict):
+                text = rec.get('display_content')
+                if text is None:
+                    return None
+                try:
+                    return json.loads(text)
+                except Exception:
+                    return None
+
+            def _snippet(rec: dict) -> str:
+                fmt = (rec.get('display_format') or 'text').lower()
+                content = rec.get('display_content') or ''
+                if fmt == 'html':
+                    # strip tags (simple)
+                    content = re.sub(r'<[^>]+>', ' ', content)
+                content = re.sub(r'\s+', ' ', str(content)).strip()
+                return content[:120] + ('…' if len(content) > 120 else '')
+
+            # JSON列表示はボタン指定が必須（キー設定がボタン定義に紐づくため）
+            if view_mode == 'json_columns' and not bid:
+                view_mode = 'snippet'
+
+            try:
+                self.results_table.setSortingEnabled(False)
+            except Exception:
+                pass
+
+            if view_mode == 'snippet':
+                self.results_table.setColumnCount(5)
+                self.results_table.setHorizontalHeaderLabels([
+                    "日時",
+                    "対象キー",
+                    "ボタン",
+                    "モデル",
+                    "結果(先頭)",
+                ])
+                self.results_table.setRowCount(len(recs))
+                for row_idx, rec in enumerate(recs):
+                    ts = str(rec.get('timestamp') or '')
+                    tkey = str(rec.get('target_key') or '')
+                    blabel = str(rec.get('button_label') or rec.get('button_id') or '')
+                    model = str(rec.get('model') or '')
+                    snip = _snippet(rec)
+
+                    for col_idx, value in enumerate([ts, tkey, blabel, model, snip]):
+                        item = QTableWidgetItem(value)
+                        item.setData(Qt.UserRole, rec)
+                        self.results_table.setItem(row_idx, col_idx, item)
+            else:
+                # JSON列表示
+                config = load_ai_extension_config()
+                buttons_config = (config.get('buttons', []) or []) + (config.get('default_buttons', []) or [])
+                btn_conf = None
+                for b in buttons_config:
+                    if b.get('id') == bid:
+                        btn_conf = b
+                        break
+                keys = normalize_results_json_keys((btn_conf or {}).get('results_json_keys'))
+
+                rows = []
+                for rec in recs:
+                    ts = str(rec.get('timestamp') or '')
+                    tkey = str(rec.get('target_key') or '')
+                    blabel = str(rec.get('button_label') or rec.get('button_id') or '')
+                    model = str(rec.get('model') or '')
+
+                    obj = _parse_json_from_record(rec)
+                    if isinstance(obj, list):
+                        for i, elem in enumerate(obj):
+                            if isinstance(elem, dict):
+                                data_obj = elem
+                            else:
+                                data_obj = {'_value': elem}
+                            row = {
+                                'ts': ts,
+                                'tkey': tkey,
+                                'elem': str(i),
+                                'blabel': blabel,
+                                'model': model,
+                                'json': data_obj,
+                                'rec': rec,
+                            }
+                            rows.append(row)
+                    elif isinstance(obj, dict):
+                        rows.append({'ts': ts, 'tkey': tkey, 'elem': '', 'blabel': blabel, 'model': model, 'json': obj, 'rec': rec})
+                    else:
+                        # 非JSON（またはパース失敗）
+                        rows.append({'ts': ts, 'tkey': tkey, 'elem': '', 'blabel': blabel, 'model': model, 'json': {}, 'rec': rec})
+
+                include_elem = any((r.get('elem') or '') != '' for r in rows)
+                base_headers = ["日時", "対象キー"] + (["要素"] if include_elem else []) + ["ボタン", "モデル"]
+                headers = base_headers + keys
+                self.results_table.setColumnCount(len(headers))
+                self.results_table.setHorizontalHeaderLabels(headers)
+
+                self.results_table.setRowCount(len(rows))
+                for row_idx, row in enumerate(rows):
+                    rec = row['rec']
+                    base_values = [row['ts'], row['tkey']] + ([row['elem']] if include_elem else []) + [row['blabel'], row['model']]
+                    for col_idx, value in enumerate(base_values):
+                        item = QTableWidgetItem(str(value))
+                        item.setData(Qt.UserRole, rec)
+                        self.results_table.setItem(row_idx, col_idx, item)
+
+                    for k_idx, key in enumerate(keys):
+                        v = _get_json_value(row['json'], key)
+                        item = QTableWidgetItem(_display_cell_value(v))
+                        item.setData(Qt.UserRole, rec)
+                        self.results_table.setItem(row_idx, len(base_headers) + k_idx, item)
+
+            try:
+                self.results_table.setSortingEnabled(True)
+            except Exception:
+                pass
+
+            self._apply_results_filter()
+
+            try:
+                self.results_table.resizeColumnsToContents()
+            except Exception:
+                pass
+        except Exception as e:
+            logger.debug("refresh_results_list failed: %s", e)
+            try:
+                self.results_table.setRowCount(0)
+            except Exception:
+                pass
+
+    def _apply_results_filter(self):
+        try:
+            if not hasattr(self, 'results_table'):
+                return
+            q = ''
+            try:
+                q = (self.results_filter_edit.text() if hasattr(self, 'results_filter_edit') else '') or ''
+            except Exception:
+                q = ''
+            q = q.strip().lower()
+            for r in range(self.results_table.rowCount()):
+                if not q:
+                    self.results_table.setRowHidden(r, False)
+                    continue
+                hit = False
+                for c in range(self.results_table.columnCount()):
+                    item = self.results_table.item(r, c)
+                    if item and q in (item.text() or '').lower():
+                        hit = True
+                        break
+                self.results_table.setRowHidden(r, not hit)
+        except Exception:
+            pass
+
+    def build_report_prompt(self, button_config, placeholders: Optional[dict] = None):
+        """報告書タブ用プロンプトを構築"""
+        try:
+            prompt_file = button_config.get('prompt_file')
+            prompt_template = button_config.get('prompt_template')
+
+            button_id = button_config.get('id', 'unknown')
+            if prompt_file:
+                prompt_file = self._get_prompt_file_for_target(prompt_file, 'report', button_id)
+
+            if prompt_file:
+                from classes.dataset.util.ai_extension_helper import load_prompt_file
+                template_content = load_prompt_file(prompt_file)
+                if not template_content:
+                    template_content = f"""報告書について分析してください。
+
+ARIMNO: {{ARIMNO}}
+利用課題名: {{利用課題名}}
+所属名: {{所属名}}
+年度: {{年度}}
+機関コード: {{機関コード}}
+
+上記の情報を基に、「{button_config.get('label', 'AI分析')}」の観点から分析してください。"""
+            elif prompt_template:
+                template_content = prompt_template
+            else:
+                template_content = f"""報告書について分析してください。
+
+ARIMNO: {{ARIMNO}}
+利用課題名: {{利用課題名}}
+所属名: {{所属名}}
+年度: {{年度}}
+機関コード: {{機関コード}}
+
+上記の情報を基に、「{button_config.get('label', 'AI分析')}」の観点から分析してください。"""
+
+            context_data = (placeholders or {}).copy() if placeholders is not None else (self._selected_report_placeholders.copy() if self._selected_report_placeholders else {})
+
+            from classes.dataset.util.ai_extension_helper import format_prompt_with_context
+            formatted_prompt = format_prompt_with_context(template_content, context_data)
+            return formatted_prompt
+
+        except Exception as e:
+            logger.error("報告書プロンプト構築エラー: %s", e)
+            return None
+
+    def execute_report_ai_request(
+        self,
+        prompt,
+        button_config,
+        button_widget,
+        retry_count: int = 0,
+        report_record: Optional[dict] = None,
+        report_placeholders: Optional[dict] = None,
+        report_target_key: Optional[str] = None,
+        _bulk_continue: bool = False,
+    ):
+        """報告書タブ用のAIリクエストを実行（表示先を report_response_display にする）"""
+        try:
+            self.last_used_prompt = prompt
+            self.last_api_request_params = None
+            self.last_api_response_params = None
+            self.last_api_provider = None
+            self.last_api_model = None
+
+            if hasattr(self, 'report_show_api_params_button'):
+                self.report_show_api_params_button.setEnabled(False)
+
+            if hasattr(self, 'report_show_prompt_button'):
+                self.report_show_prompt_button.setEnabled(True)
+
+            # ボタン無効化
+            for b in list(self.report_buttons):
+                try:
+                    b.setEnabled(False)
+                except Exception:
+                    pass
+
+            # スピナー
+            button_label = button_config.get('label', 'AI処理')
+            button_icon = button_config.get('icon', '🤖')
+            if getattr(self, 'report_spinner_overlay', None):
+                self.report_spinner_overlay.set_message(f"{button_icon} {button_label} 実行中...")
+
+            # AIリクエストスレッド
+            ai_thread = AIRequestThread(prompt, self._selected_report_placeholders)
+            self.report_ai_threads.append(ai_thread)
+
+            self.update_report_spinner_visibility()
+
+            def on_success(result):
+                try:
+                    try:
+                        self.last_api_request_params = result.get('request_params')
+                        self.last_api_response_params = result.get('response_params')
+                        self.last_api_provider = result.get('provider')
+                        self.last_api_model = result.get('model')
+                        if hasattr(self, 'report_show_api_params_button'):
+                            self.report_show_api_params_button.setEnabled(bool(self.last_api_request_params or self.last_api_response_params))
+                    except Exception:
+                        pass
+
+                    response_text = result.get('response') or result.get('content', '')
+                    if response_text:
+                        fmt = button_config.get('output_format', 'text')
+                        if fmt == 'json':
+                            valid, fixed_text = self._validate_and_fix_json_response(response_text)
+                            if valid:
+                                self.report_response_display.setText(fixed_text)
+                            else:
+                                if retry_count < 2:
+                                    if ai_thread in self.report_ai_threads:
+                                        self.report_ai_threads.remove(ai_thread)
+                                    self.update_report_spinner_visibility()
+                                    self.execute_report_ai_request(prompt, button_config, button_widget, retry_count + 1)
+                                    return
+                                else:
+                                    self.report_response_display.setText(self._wrap_json_error(
+                                        error_message="JSONの検証に失敗しました（最大リトライ到達）",
+                                        raw_output=response_text,
+                                        retries=retry_count
+                                    ))
+                        else:
+                            formatted_response = self.format_extension_response(response_text, button_config)
+                            self.report_response_display.setHtml(formatted_response)
+                    else:
+                        self.report_response_display.setText("AI応答が空でした。")
+
+                    # ログ保存
+                    try:
+                        from classes.dataset.util.ai_suggest_result_log import append_result
+
+                        button_id = button_config.get('id', 'unknown')
+                        button_label = button_config.get('label', 'Unknown')
+                        if report_target_key:
+                            target_key = report_target_key
+                        else:
+                            rec_for_key = report_record if isinstance(report_record, dict) else (self._selected_report_record or {})
+                            target_key = self._get_report_target_key(rec_for_key)
+
+                        if fmt == 'json':
+                            display_format = 'text'
+                            display_content = self.report_response_display.toPlainText()
+                        else:
+                            display_format = 'html'
+                            display_content = self.report_response_display.toHtml()
+
+                        append_result(
+                            target_kind='report',
+                            target_key=target_key,
+                            button_id=button_id,
+                            button_label=button_label,
+                            prompt=self.last_used_prompt or prompt,
+                            display_format=display_format,
+                            display_content=display_content,
+                            provider=self.last_api_provider,
+                            model=self.last_api_model,
+                            request_params=self.last_api_request_params,
+                            response_params=self.last_api_response_params,
+                        )
+                    except Exception:
+                        pass
+                finally:
+                    if button_widget:
+                        button_widget.stop_loading()
+                    if self._active_report_button is button_widget:
+                        self._active_report_button = None
+                    if ai_thread in self.report_ai_threads:
+                        self.report_ai_threads.remove(ai_thread)
+                    self.update_report_spinner_visibility()
+                    if not self._bulk_report_running and getattr(self, 'report_spinner_overlay', None):
+                        self.report_spinner_overlay.set_message("AI応答を待機中...")
+                    if not self._bulk_report_running:
+                        for b in list(self.report_buttons):
+                            try:
+                                b.setEnabled(True)
+                            except Exception:
+                                pass
+
+                    # 一括継続
+                    if _bulk_continue and self._bulk_report_running:
+                        self._bulk_report_index += 1
+                        self._run_next_bulk_report_request()
+
+            def on_error(error_message):
+                try:
+                    self.report_response_display.setText(f"エラー: {error_message}")
+                finally:
+                    if button_widget:
+                        button_widget.stop_loading()
+                    if self._active_report_button is button_widget:
+                        self._active_report_button = None
+                    if ai_thread in self.report_ai_threads:
+                        self.report_ai_threads.remove(ai_thread)
+                    self.update_report_spinner_visibility()
+                    if not self._bulk_report_running and getattr(self, 'report_spinner_overlay', None):
+                        self.report_spinner_overlay.set_message("AI応答を待機中...")
+                    if not self._bulk_report_running:
+                        for b in list(self.report_buttons):
+                            try:
+                                b.setEnabled(True)
+                            except Exception:
+                                pass
+
+                    if _bulk_continue and self._bulk_report_running:
+                        self._bulk_report_index += 1
+                        self._run_next_bulk_report_request()
+
+                    self.last_api_request_params = None
+                    self.last_api_response_params = None
+                    self.last_api_provider = None
+                    self.last_api_model = None
+                    if hasattr(self, 'report_show_api_params_button'):
+                        self.report_show_api_params_button.setEnabled(False)
+
+            ai_thread.result_ready.connect(on_success)
+            ai_thread.error_occurred.connect(on_error)
+            ai_thread.start()
+
+        except Exception as e:
+            if button_widget:
+                button_widget.stop_loading()
+            if self._active_report_button is button_widget:
+                self._active_report_button = None
+            for b in list(self.report_buttons):
+                try:
+                    b.setEnabled(True)
+                except Exception:
+                    pass
+            QMessageBox.critical(self, "エラー", f"報告書AIリクエスト実行エラー: {str(e)}")
+
+    def update_report_spinner_visibility(self):
+        try:
+            if getattr(self, 'report_spinner_overlay', None):
+                if len(self.report_ai_threads) > 0:
+                    self.report_spinner_overlay.start()
+                else:
+                    self.report_spinner_overlay.stop()
+        except Exception as _e:
+            logger.debug("update_report_spinner_visibility failed: %s", _e)
+
+    def cancel_report_ai_requests(self):
+        """報告書タブの実行中リクエストをキャンセル"""
+        try:
+            # 一括処理の残タスクも中断
+            self._bulk_report_cancelled = True
+            self._bulk_report_running = False
+            self._bulk_report_queue = []
+            for thread in list(self.report_ai_threads):
+                try:
+                    if thread and thread.isRunning():
+                        thread.stop()
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.debug("cancel_report_ai_requests failed: %s", e)
         
     def setup_extraction_settings_tab(self, tab_widget):
         """ファイル抽出設定タブのセットアップ"""
@@ -1892,7 +3539,7 @@ class AISuggestionDialog(QDialog):
     def load_extension_buttons(self):
         """AI拡張設定からボタンを読み込んで表示"""
         try:
-            from classes.dataset.util.ai_extension_helper import load_ai_extension_config
+            from classes.dataset.util.ai_extension_helper import load_ai_extension_config, infer_ai_suggest_target_kind
             config = load_ai_extension_config()
             
             # 既存のボタンをクリア（ストレッチやスペーサにも対応）
@@ -1920,6 +3567,9 @@ class AISuggestionDialog(QDialog):
             
             # 全ボタンをまとめる
             all_buttons = buttons_config + default_buttons
+
+            # AI拡張(従来)向けのみ
+            all_buttons = [b for b in all_buttons if infer_ai_suggest_target_kind(b) != 'report']
             
             if not all_buttons:
                 no_buttons_label = QLabel("AI拡張ボタンが設定されていません。\n設定編集ボタンから設定ファイルを確認してください。")
@@ -1966,8 +3616,47 @@ class AISuggestionDialog(QDialog):
             button = self.create_extension_button(button_config, button_height, button_width, show_icons)
             self.buttons_layout.addWidget(button)
     
-    def create_extension_button(self, button_config, button_height, button_width, show_icons):
-        """AI拡張ボタンを作成（改良版）"""
+    def create_extension_button(
+        self,
+        button_config,
+        button_height,
+        button_width,
+        show_icons,
+        clicked_handler=None,
+        buttons_list=None,
+        target_kind: str = "dataset",
+    ):
+        """AI拡張ボタンを作成（改良版）
+
+        互換性のため、従来の呼び出し（4引数）も維持しつつ、
+        報告書タブなど別ターゲット用にクリックハンドラ/ボタンリストを差し替え可能。
+        """
+        return self._create_extension_button_impl(
+            button_config,
+            button_height,
+            button_width,
+            show_icons,
+            clicked_handler=clicked_handler,
+            buttons_list=buttons_list,
+            target_kind=target_kind,
+        )
+
+    def _create_extension_button_impl(
+        self,
+        button_config,
+        button_height,
+        button_width,
+        show_icons,
+        clicked_handler=None,
+        buttons_list=None,
+        target_kind: str = "dataset",
+    ):
+        """Create a button for AI extension tabs (dataset/report).
+
+        clicked_handler: callable(button_config)
+        buttons_list: list to store created buttons for disable/enable
+        target_kind: "dataset" or "report" (used for preview behavior)
+        """
         from classes.dataset.ui.spinner_button import SpinnerButton
         
         button_id = button_config.get('id', 'unknown')
@@ -2026,15 +3715,25 @@ class AISuggestionDialog(QDialog):
         # ボタンにconfigを保存
         button.button_config = button_config
         
-        # ボタンクリック時の処理
-        button.clicked.connect(lambda checked, config=button_config: self.on_extension_button_clicked(config))
+        # クリックハンドラ（デフォルトはデータセット向け）
+        handler = clicked_handler or self.on_extension_button_clicked
+        button.clicked.connect(lambda checked, config=button_config: handler(config))
         
+        # ターゲット種別を保持（コンテキストメニューのプレビュー切替用）
+        try:
+            button._ai_target_kind = target_kind
+        except Exception:
+            pass
+
         # 右クリックメニューでプロンプト編集を追加
         button.setContextMenuPolicy(Qt.CustomContextMenu)
         button.customContextMenuRequested.connect(lambda pos, config=button_config, btn=button: self.show_button_context_menu(pos, config, btn))
         
         # ボタンリストに追加（複数クリック防止用）
-        self.extension_buttons.append(button)
+        try:
+            (buttons_list if buttons_list is not None else self.extension_buttons).append(button)
+        except Exception:
+            self.extension_buttons.append(button)
         
         return button
     
@@ -2046,10 +3745,112 @@ class AISuggestionDialog(QDialog):
             
             logger.debug("AI拡張ボタンクリック: %s (%s)", button_id, label)
             
+            # 既存結果の検出（同一ボタン + 同一対象）
+            try:
+                from classes.dataset.util.ai_suggest_result_log import read_latest_result
+
+                # ログ保存と同じ優先順（dataset_id > grant_number > name）で target_key を作る
+                dataset_id = ''
+                grant_number = ''
+                name = ''
+                try:
+                    if hasattr(self, 'extension_dataset_combo') and self.extension_dataset_combo.currentIndex() > 0:
+                        selected_dataset = self.extension_dataset_combo.itemData(self.extension_dataset_combo.currentIndex())
+                        if isinstance(selected_dataset, dict):
+                            dataset_id = (selected_dataset.get('id') or '').strip()
+                            attrs = selected_dataset.get('attributes', {}) if isinstance(selected_dataset.get('attributes', {}), dict) else {}
+                            grant_number = (attrs.get('grantNumber') or '').strip()
+                            name = (attrs.get('name') or '').strip()
+                except Exception:
+                    pass
+                if not dataset_id:
+                    try:
+                        if hasattr(self, 'context_data') and isinstance(self.context_data, dict):
+                            dataset_id = (self.context_data.get('dataset_id') or '').strip()
+                            grant_number = (self.context_data.get('grant_number') or '').strip()
+                            name = (self.context_data.get('name') or '').strip()
+                    except Exception:
+                        pass
+                if not grant_number:
+                    try:
+                        grant_number = getattr(self, 'grant_number_input', None).text() if hasattr(self, 'grant_number_input') and self.grant_number_input else ''
+                        grant_number = (grant_number or '').strip()
+                    except Exception:
+                        pass
+                if not name:
+                    try:
+                        name = getattr(self, 'name_input', None).text() if hasattr(self, 'name_input') and self.name_input else ''
+                        name = (name or '').strip()
+                    except Exception:
+                        pass
+
+                target_key = dataset_id or grant_number or name or 'unknown'
+                latest = read_latest_result('dataset', target_key, button_id)
+                if latest:
+                    # pytest環境ではモーダル表示を避け、既存結果を自動表示して終了
+                    if os.environ.get("PYTEST_CURRENT_TEST"):
+                        fmt = (latest.get('display_format') or 'text').lower()
+                        content = latest.get('display_content') or ''
+                        if fmt == 'html':
+                            self.extension_response_display.setHtml(content)
+                        else:
+                            self.extension_response_display.setText(content)
+                        self.last_used_prompt = latest.get('prompt')
+                        self.last_api_request_params = latest.get('request_params')
+                        self.last_api_response_params = latest.get('response_params')
+                        self.last_api_provider = latest.get('provider')
+                        self.last_api_model = latest.get('model')
+                        if hasattr(self, 'show_prompt_button'):
+                            self.show_prompt_button.setEnabled(bool(self.last_used_prompt))
+                        if hasattr(self, 'show_api_params_button'):
+                            self.show_api_params_button.setEnabled(bool(self.last_api_request_params or self.last_api_response_params))
+                        return
+
+                    ts = (latest.get('timestamp') or '').strip()
+                    box = QMessageBox(self)
+                    box.setIcon(QMessageBox.Question)
+                    box.setWindowTitle("既存結果あり")
+                    box.setText(
+                        f"同一ボタン・同一対象の既存結果が見つかりました。" + (f"（{ts}）" if ts else "")
+                    )
+                    box.setInformativeText("既存の最新結果を表示しますか？それとも新規に問い合わせますか？")
+                    show_existing_btn = box.addButton("既存結果を表示", QMessageBox.AcceptRole)
+                    run_new_btn = box.addButton("新規問い合わせ", QMessageBox.ActionRole)
+                    cancel_btn = box.addButton(QMessageBox.Cancel)
+                    box.setDefaultButton(show_existing_btn)
+                    box.exec()
+
+                    chosen = box.clickedButton()
+                    if chosen == cancel_btn:
+                        return
+                    if chosen == show_existing_btn:
+                        fmt = (latest.get('display_format') or 'text').lower()
+                        content = latest.get('display_content') or ''
+                        if fmt == 'html':
+                            self.extension_response_display.setHtml(content)
+                        else:
+                            self.extension_response_display.setText(content)
+
+                        self.last_used_prompt = latest.get('prompt')
+                        self.last_api_request_params = latest.get('request_params')
+                        self.last_api_response_params = latest.get('response_params')
+                        self.last_api_provider = latest.get('provider')
+                        self.last_api_model = latest.get('model')
+                        if hasattr(self, 'show_prompt_button'):
+                            self.show_prompt_button.setEnabled(bool(self.last_used_prompt))
+                        if hasattr(self, 'show_api_params_button'):
+                            self.show_api_params_button.setEnabled(bool(self.last_api_request_params or self.last_api_response_params))
+                        return
+
+                    # run_new_btn の場合はそのまま問い合わせ続行
+            except Exception:
+                # ログ機能は失敗しても問い合わせ自体は継続
+                pass
+
             # senderからクリックされたボタンを取得
             clicked_button = self.sender()
             self._active_extension_button = clicked_button if hasattr(clicked_button, 'start_loading') else None
-            
+
             if clicked_button and hasattr(clicked_button, 'start_loading'):
                 clicked_button.start_loading("AI処理中")
             
@@ -2293,6 +4094,39 @@ class AISuggestionDialog(QDialog):
                             self.extension_response_display.setHtml(formatted_response)
                     else:
                         self.extension_response_display.setText("AI応答が空でした。")
+
+                    # ログ保存（データセット）
+                    try:
+                        from classes.dataset.util.ai_suggest_result_log import append_result
+
+                        ctx = self.prepare_extension_context() if hasattr(self, 'prepare_extension_context') else (self.context_data or {})
+                        dataset_id = (ctx.get('dataset_id') or '').strip() if isinstance(ctx, dict) else ''
+                        grant_number = (ctx.get('grant_number') or '').strip() if isinstance(ctx, dict) else ''
+                        name = (ctx.get('name') or '').strip() if isinstance(ctx, dict) else ''
+                        target_key = dataset_id or grant_number or name or 'unknown'
+
+                        if fmt == 'json':
+                            display_format = 'text'
+                            display_content = self.extension_response_display.toPlainText()
+                        else:
+                            display_format = 'html'
+                            display_content = self.extension_response_display.toHtml()
+
+                        append_result(
+                            target_kind='dataset',
+                            target_key=target_key,
+                            button_id=button_config.get('id', 'unknown'),
+                            button_label=button_config.get('label', 'Unknown'),
+                            prompt=self.last_used_prompt or prompt,
+                            display_format=display_format,
+                            display_content=display_content,
+                            provider=self.last_api_provider,
+                            model=self.last_api_model,
+                            request_params=self.last_api_request_params,
+                            response_params=self.last_api_response_params,
+                        )
+                    except Exception:
+                        pass
                 finally:
                     if button_widget:
                         button_widget.stop_loading()
@@ -2695,11 +4529,21 @@ class AISuggestionDialog(QDialog):
         """AI拡張設定ファイルを編集"""
         try:
             dialog = AIExtensionConfigDialog(self)
-            dialog.config_saved.connect(self.load_extension_buttons)
+            dialog.config_saved.connect(self._on_ai_suggest_config_saved)
             dialog.exec()
             
         except Exception as e:
             QMessageBox.critical(self, "エラー", f"設定編集エラー: {str(e)}")
+
+    def _on_ai_suggest_config_saved(self):
+        try:
+            self.load_extension_buttons()
+        except Exception:
+            pass
+        try:
+            self.load_report_buttons()
+        except Exception:
+            pass
     
     def clear_extension_response(self):
         """AI拡張応答をクリア"""
@@ -3049,12 +4893,14 @@ class AISuggestionDialog(QDialog):
             
             # プロンプト編集アクション
             edit_action = QAction("📝 プロンプト編集", menu)
-            edit_action.triggered.connect(lambda: self.edit_button_prompt(button_config))
+            target_kind = getattr(button_widget, '_ai_target_kind', 'dataset')
+            edit_action.triggered.connect(lambda: self.edit_button_prompt(button_config, target_kind=target_kind))
             menu.addAction(edit_action)
             
             # プロンプトプレビューアクション
             preview_action = QAction("👁️ プロンプトプレビュー", menu)
-            preview_action.triggered.connect(lambda: self.preview_button_prompt(button_config))
+            target_kind = getattr(button_widget, '_ai_target_kind', 'dataset')
+            preview_action.triggered.connect(lambda: self.preview_button_prompt(button_config, target_kind=target_kind))
             menu.addAction(preview_action)
             
             # メニューを表示
@@ -3064,68 +4910,96 @@ class AISuggestionDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "エラー", f"コンテキストメニューエラー: {str(e)}")
     
-    def edit_button_prompt(self, button_config):
-        """ボタンのプロンプトを編集"""
+    def edit_button_prompt(self, button_config, target_kind: str = "dataset"):
+        """ボタンのプロンプトを編集（ターゲット別に保存先を分離）"""
         try:
             prompt_file = button_config.get('prompt_file')
-            
+
             if prompt_file:
-                # ファイルベースのプロンプトを編集
                 from classes.dataset.ui.ai_extension_prompt_edit_dialog import AIExtensionPromptEditDialog
-                
+
+                button_id = button_config.get('id', 'unknown')
+                prompt_file_for_target = self._get_prompt_file_for_target(prompt_file, target_kind, button_id)
+
                 dialog = AIExtensionPromptEditDialog(
                     parent=self,
-                    prompt_file_path=prompt_file,
-                    button_config=button_config
+                    prompt_file_path=prompt_file_for_target,
+                    button_config=button_config,
+                    target_kind=target_kind,
                 )
-                
                 dialog.exec()
+                return
+
+            reply = QMessageBox.question(
+                self,
+                "プロンプトファイル作成",
+                f"ボタン '{button_config.get('label', 'Unknown')}' はデフォルトテンプレートを使用しています。\n"
+                "プロンプトファイルを作成して編集しますか？",
+                QMessageBox.Yes | QMessageBox.No
+            )
+
+            if reply != QMessageBox.Yes:
+                return
+
+            button_id = button_config.get('id', 'unknown')
+            if target_kind == 'report':
+                new_prompt_file = f"input/ai/prompts/report/{button_id}.txt"
             else:
-                # デフォルトテンプレートの場合は新しいファイルを作成するか尋ねる
-                reply = QMessageBox.question(
-                    self,
-                    "プロンプトファイル作成",
-                    f"ボタン '{button_config.get('label', 'Unknown')}' はデフォルトテンプレートを使用しています。\n"
-                    "プロンプトファイルを作成して編集しますか？",
-                    QMessageBox.Yes | QMessageBox.No
-                )
-                
-                if reply == QMessageBox.Yes:
-                    # 新しいプロンプトファイルパスを生成
-                    button_id = button_config.get('id', 'unknown')
-                    new_prompt_file = f"input/ai/prompts/ext/{button_id}.txt"
-                    
-                    # デフォルトテンプレートを初期内容として使用
-                    initial_content = button_config.get('prompt_template', self.get_default_template_for_button(button_config))
-                    
-                    # ファイルを作成
-                    from classes.dataset.util.ai_extension_helper import save_prompt_file
-                    if save_prompt_file(new_prompt_file, initial_content):
-                        # 設定ファイルを更新（今後の拡張で実装）
-                        QMessageBox.information(
-                            self,
-                            "ファイル作成完了",
-                            f"プロンプトファイルを作成しました:\n{new_prompt_file}\n\n"
-                            "設定ファイルの更新は手動で行ってください。"
-                        )
-                        
-                        # 編集ダイアログを開く
-                        dialog = AIExtensionPromptEditDialog(
-                            parent=self,
-                            prompt_file_path=new_prompt_file,
-                            button_config=button_config
-                        )
-                        dialog.exec()
-                    else:
-                        QMessageBox.critical(self, "エラー", "プロンプトファイルの作成に失敗しました。")
-                        
+                new_prompt_file = f"input/ai/prompts/ext/{button_id}.txt"
+
+            initial_content = button_config.get('prompt_template', self.get_default_template_for_button(button_config))
+            from classes.dataset.util.ai_extension_helper import save_prompt_file
+            if not save_prompt_file(new_prompt_file, initial_content):
+                QMessageBox.critical(self, "エラー", "プロンプトファイルの作成に失敗しました。")
+                return
+
+            QMessageBox.information(
+                self,
+                "ファイル作成完了",
+                f"プロンプトファイルを作成しました:\n{new_prompt_file}\n\n"
+                "設定ファイルの更新は手動で行ってください。"
+            )
+
+            from classes.dataset.ui.ai_extension_prompt_edit_dialog import AIExtensionPromptEditDialog
+            dialog = AIExtensionPromptEditDialog(
+                parent=self,
+                prompt_file_path=new_prompt_file,
+                button_config=button_config,
+                target_kind=target_kind,
+            )
+            dialog.exec()
+
         except Exception as e:
             QMessageBox.critical(self, "エラー", f"プロンプト編集エラー: {str(e)}")
+
+    def clear_report_response(self):
+        """報告書タブのAI応答をクリア"""
+        try:
+            self.report_response_display.clear()
+        except Exception:
+            pass
+
+    def copy_report_response(self):
+        """報告書タブのAI応答をクリップボードにコピー"""
+        try:
+            from qt_compat.widgets import QApplication
+            text = self.report_response_display.toPlainText()
+            if text:
+                clipboard = QApplication.clipboard()
+                clipboard.setText(text)
+                QMessageBox.information(self, "コピー完了", "応答内容をクリップボードにコピーしました。")
+            else:
+                QMessageBox.warning(self, "警告", "コピーする内容がありません。")
+        except Exception as e:
+            QMessageBox.critical(self, "エラー", f"コピーエラー: {str(e)}")
     
-    def preview_button_prompt(self, button_config):
+    def preview_button_prompt(self, button_config, target_kind: str = "dataset"):
         """ボタンのプロンプトをプレビュー"""
         try:
-            prompt = self.build_extension_prompt(button_config)
+            if target_kind == "report":
+                prompt = self.build_report_prompt(button_config)
+            else:
+                prompt = self.build_extension_prompt(button_config)
             
             if prompt:
                 # プレビューダイアログを表示
@@ -3198,9 +5072,23 @@ class AISuggestionDialog(QDialog):
                     if thread.isRunning():
                         logger.warning("AI拡張スレッドの強制終了")
                         thread.terminate()
+
+            # 報告書タブのスレッド停止
+            for thread in getattr(self, 'report_ai_threads', []):
+                if thread and thread.isRunning():
+                    logger.debug("報告書AIスレッドを停止中...")
+                    thread.stop()
+                    thread.wait(3000)
+                    if thread.isRunning():
+                        logger.warning("報告書AIスレッドの強制終了")
+                        thread.terminate()
             
             # スレッドリストをクリア
             self.extension_ai_threads.clear()
+            try:
+                self.report_ai_threads.clear()
+            except Exception:
+                pass
             logger.debug("すべてのスレッドのクリーンアップ完了")
             
         except Exception as e:

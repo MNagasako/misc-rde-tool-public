@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 データセットJSONアップロードタブ UI
 
@@ -7,22 +9,22 @@ JSONファイルをデータポータルにアップロードする機能を提�
 import os
 import json
 from pathlib import Path
-from typing import Tuple, Any, Dict, Set, Optional
+from typing import Tuple, Any, Dict, Set, Optional, TYPE_CHECKING
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QComboBox,
     QFormLayout, QTextEdit, QMessageBox, QFileDialog,
     QCheckBox, QProgressBar, QRadioButton, QButtonGroup, QScrollArea
 )
-from qt_compat.core import Qt, Signal, QThread
+from qt_compat.core import Qt, Signal, QThread, QTimer
 
 from config.common import OUTPUT_DIR, get_dynamic_file_path
 from classes.theme import get_color, ThemeKey
 from classes.managers.log_manager import get_logger
 from ..core.auth_manager import get_auth_manager
-from ..core.portal_client import PortalClient
-from ..core.uploader import Uploader
-from classes.utils.arim_anonymizer import ARIMAnonymizer
+if TYPE_CHECKING:
+    from ..core.portal_client import PortalClient
+    from ..core.uploader import Uploader
 
 logger = get_logger("DataPortal.DatasetUploadTab")
 
@@ -78,6 +80,10 @@ class DatasetUploadTab(QWidget):
         self.current_public_key = None   # 公開ページURL用 key
         self._existing_images_cache: Dict[str, Set[str]] = {}
         self._image_caption_cache: Dict[str, str] = {}
+
+        # データセットドロップダウン（重い生成処理）の遅延初期化
+        self._dataset_dropdown_initialized = False
+        self._dataset_dropdown_init_scheduled = False
         
         self._init_ui()
         logger.info("データセットアップロードタブ初期化完了")
@@ -187,10 +193,24 @@ class DatasetUploadTab(QWidget):
             for w in self.findChildren(QComboBox):
                 w.setStyleSheet(combo_style)
             # Buttons (簡易共通適用 - variant未設定のみ)
-            btn_style_default = f"QPushButton {{ background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)}; border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)}; border-radius: 4px; padding: 6px 10px; font-weight: bold; }} QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)}; }} QPushButton:pressed {{ background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_PRESSED)}; }}"
+            pressed_bg_key = getattr(
+                ThemeKey,
+                "BUTTON_SECONDARY_BACKGROUND_PRESSED",
+                ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER,
+            )
+            btn_style_default = (
+                f"QPushButton {{ background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)}; border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)}; border-radius: 4px; padding: 6px 10px; font-weight: bold; }} "
+                f"QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)}; }} "
+                f"QPushButton:pressed {{ background-color: {get_color(pressed_bg_key)}; }} "
+                f"QPushButton:disabled {{ background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)}; border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)}; }}"
+            )
             for b in self.findChildren(QPushButton):
                 if not b.property("variant"):
                     b.setStyleSheet(btn_style_default)
+
+            # DatasetUploadTab 内の主要アクションボタンは個別スタイルを持つため、
+            # refresh_theme で上書きされた後に再適用してテーマ追従させる。
+            self._apply_action_button_styles()
             # GroupBox
             gb_style = f"QGroupBox {{ border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; border-radius: 6px; margin-top: 8px; background-color: {get_color(ThemeKey.PANEL_BACKGROUND)}; }} QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 2px 4px; color: {get_color(ThemeKey.TEXT_SECONDARY)}; font-weight: bold; }}"
             for g in self.findChildren(QGroupBox):
@@ -209,6 +229,153 @@ class DatasetUploadTab(QWidget):
             self.update()
         except Exception as e:
             logger.debug(f"DatasetUploadTab refresh_theme failed: {e}")
+
+    def _apply_action_button_styles(self) -> None:
+        """主要アクションボタンのスタイルをテーマに合わせて再適用"""
+        try:
+            # 画像ファイル一括取得
+            if hasattr(self, "bulk_download_btn") and self.bulk_download_btn is not None:
+                self.bulk_download_btn.setStyleSheet(
+                    f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                        padding: 8px 16px;
+                        border: none;
+                        border-radius: 4px;
+                        font-weight: bold;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+                    }}
+                    QPushButton:disabled {{
+                        background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                        border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+                    }}
+                    """
+                )
+
+            # 画像アップロード
+            if hasattr(self, "upload_images_btn") and self.upload_images_btn is not None:
+                self.upload_images_btn.setStyleSheet(
+                    f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
+                        padding: 8px 16px;
+                        border: none;
+                        border-radius: 4px;
+                        font-weight: bold;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
+                    }}
+                    QPushButton:disabled {{
+                        background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                        border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+                    }}
+                    """
+                )
+
+            # 書誌情報JSONアップロード
+            if hasattr(self, "upload_btn") and self.upload_btn is not None:
+                self.upload_btn.setStyleSheet(
+                    f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
+                        padding: 10px 20px;
+                        border: none;
+                        border-radius: 4px;
+                        font-weight: bold;
+                        font-size: 14px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+                    }}
+                    QPushButton:disabled {{
+                        background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                        border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+                    }}
+                    """
+                )
+
+            # データカタログ修正
+            if hasattr(self, "edit_portal_btn") and self.edit_portal_btn is not None:
+                self.edit_portal_btn.setStyleSheet(
+                    f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                        padding: 10px 20px;
+                        border: none;
+                        border-radius: 4px;
+                        font-weight: bold;
+                        font-size: 14px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+                    }}
+                    QPushButton:disabled {{
+                        background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                        border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+                    }}
+                    """
+                )
+
+            # 公開ページ表示
+            if hasattr(self, "public_view_btn") and self.public_view_btn is not None:
+                self.public_view_btn.setStyleSheet(
+                    f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                        padding: 10px 20px;
+                        border: none;
+                        border-radius: 4px;
+                        font-weight: bold;
+                        font-size: 14px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+                    }}
+                    QPushButton:disabled {{
+                        background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                        border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+                    }}
+                    """
+                )
+
+            # ステータス変更
+            if hasattr(self, "toggle_status_btn") and self.toggle_status_btn is not None:
+                self.toggle_status_btn.setStyleSheet(
+                    f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
+                        padding: 10px 20px;
+                        border: none;
+                        border-radius: 4px;
+                        font-weight: bold;
+                        font-size: 14px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
+                    }}
+                    QPushButton:disabled {{
+                        background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                        border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+                    }}
+                    """
+                )
+        except Exception as e:
+            logger.debug(f"DatasetUploadTab _apply_action_button_styles failed: {e}")
 
     def _apply_file_list_theme(self) -> None:
         """取得済みファイル一覧テーブルとプレビュー領域のテーマ追従を保証"""
@@ -304,49 +471,14 @@ class DatasetUploadTab(QWidget):
         self.dataset_search_widget = QWidget()
         dataset_layout = QVBoxLayout(self.dataset_search_widget)
         dataset_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # データ取得2の高度なドロップダウンUIを統合
-        try:
-            from classes.data_fetch2.core.ui.data_fetch2_widget import create_dataset_dropdown_all
-            
-            dataset_json_path = get_dynamic_file_path("output/rde/data/dataset.json")
-            
-            # データセットドロップダウンウィジェット作成
-            self.dataset_dropdown_widget = create_dataset_dropdown_all(
-                dataset_json_path, 
-                self,
-                global_share_filter="both"
-            )
-            
-            # ドロップダウン変更時のイベント接続
-            if hasattr(self.dataset_dropdown_widget, 'dataset_dropdown'):
-                self.dataset_dropdown_widget.dataset_dropdown.currentIndexChanged.connect(
-                    self._on_dataset_selected_advanced
-                )
-            
-            dataset_layout.addWidget(self.dataset_dropdown_widget)
-            
-            self._log_status("✅ データ取得2の高度なドロップダウンを統合しました")
-            
-        except ImportError as e:
-            logger.error(f"データセットドロップダウン統合失敗: {e}")
-            self._log_status(f"⚠️ 高度なドロップダウン統合失敗、シンプル版を使用します", error=True)
-            
-            # フォールバック: シンプル版
-            search_row = QHBoxLayout()
-            self.dataset_combo = QComboBox()
-            self.dataset_combo.setEditable(True)
-            self.dataset_combo.setInsertPolicy(QComboBox.NoInsert)
-            self.dataset_combo.setPlaceholderText("データセットを検索...")
-            self.dataset_combo.setMinimumWidth(500)
-            self.dataset_combo.currentIndexChanged.connect(self._on_dataset_selected)
-            search_row.addWidget(self.dataset_combo)
-            
-            self.load_datasets_btn = QPushButton("🔄 データセット読込")
-            self.load_datasets_btn.clicked.connect(self._on_load_datasets)
-            search_row.addWidget(self.load_datasets_btn)
-            
-            dataset_layout.addLayout(search_row)
+
+        # データセットドロップダウンは生成が重いので、初回ペイント後に遅延生成する
+        self._dataset_dropdown_container = QWidget(self.dataset_search_widget)
+        self._dataset_dropdown_container_layout = QVBoxLayout(self._dataset_dropdown_container)
+        self._dataset_dropdown_container_layout.setContentsMargins(0, 0, 0, 0)
+        self._dataset_dropdown_placeholder_label = QLabel("データセット一覧を準備中...")
+        self._dataset_dropdown_container_layout.addWidget(self._dataset_dropdown_placeholder_label)
+        dataset_layout.addWidget(self._dataset_dropdown_container)
         
         # 選択されたデータセット情報表示
         self.dataset_info_label = QLabel("")
@@ -519,6 +651,76 @@ class DatasetUploadTab(QWidget):
         
         group.setLayout(layout)
         return group
+
+    def _schedule_dataset_dropdown_init(self) -> None:
+        if self._dataset_dropdown_initialized or self._dataset_dropdown_init_scheduled:
+            return
+        self._dataset_dropdown_init_scheduled = True
+        QTimer.singleShot(0, self._ensure_dataset_dropdown_initialized)
+
+    def _ensure_dataset_dropdown_initialized(self) -> None:
+        if self._dataset_dropdown_initialized:
+            self._dataset_dropdown_init_scheduled = False
+            return
+
+        self._dataset_dropdown_init_scheduled = False
+
+        try:
+            from classes.data_fetch2.core.ui.data_fetch2_widget import create_dataset_dropdown_all
+
+            dataset_json_path = get_dynamic_file_path("output/rde/data/dataset.json")
+            self.dataset_dropdown_widget = create_dataset_dropdown_all(
+                dataset_json_path,
+                self,
+                global_share_filter="both",
+            )
+
+            if hasattr(self.dataset_dropdown_widget, 'dataset_dropdown'):
+                self.dataset_dropdown_widget.dataset_dropdown.currentIndexChanged.connect(
+                    self._on_dataset_selected_advanced
+                )
+
+            # placeholder と置換
+            if hasattr(self, '_dataset_dropdown_container_layout'):
+                while self._dataset_dropdown_container_layout.count():
+                    item = self._dataset_dropdown_container_layout.takeAt(0)
+                    w = item.widget()
+                    if w is not None:
+                        w.setParent(None)
+                self._dataset_dropdown_container_layout.addWidget(self.dataset_dropdown_widget)
+
+            self._log_status("✅ データ取得2の高度なドロップダウンを統合しました")
+            self._dataset_dropdown_initialized = True
+            return
+
+        except ImportError as e:
+            logger.error(f"データセットドロップダウン統合失敗: {e}")
+            self._log_status("⚠️ 高度なドロップダウン統合失敗、シンプル版を使用します", error=True)
+
+        # フォールバック: シンプル版
+        search_row = QHBoxLayout()
+        self.dataset_combo = QComboBox()
+        self.dataset_combo.setEditable(True)
+        self.dataset_combo.setInsertPolicy(QComboBox.NoInsert)
+        self.dataset_combo.setPlaceholderText("データセットを検索...")
+        self.dataset_combo.setMinimumWidth(500)
+        self.dataset_combo.currentIndexChanged.connect(self._on_dataset_selected)
+        search_row.addWidget(self.dataset_combo)
+
+        self.load_datasets_btn = QPushButton("🔄 データセット読込")
+        self.load_datasets_btn.clicked.connect(self._on_load_datasets)
+        search_row.addWidget(self.load_datasets_btn)
+
+        # placeholder と置換
+        if hasattr(self, '_dataset_dropdown_container_layout'):
+            while self._dataset_dropdown_container_layout.count():
+                item = self._dataset_dropdown_container_layout.takeAt(0)
+                w = item.widget()
+                if w is not None:
+                    w.setParent(None)
+            self._dataset_dropdown_container_layout.addLayout(search_row)
+
+        self._dataset_dropdown_initialized = True
     
     def _create_anonymization_options(self) -> QGroupBox:
         """匿名化オプションセクション"""
@@ -681,6 +883,7 @@ class DatasetUploadTab(QWidget):
         self._existing_images_cache.clear()
         
         # PortalClientを作成（環境が変わったら再作成）
+        from ..core.portal_client import PortalClient
         self.portal_client = PortalClient(environment=environment)
         
         # 認証情報チェックと自動読込
@@ -703,6 +906,9 @@ class DatasetUploadTab(QWidget):
         
         self.direct_file_widget.setVisible(is_direct)
         self.dataset_search_widget.setVisible(not is_direct)
+
+        if not is_direct:
+            self._schedule_dataset_dropdown_init()
         
         # 選択解除
         self.selected_json_path = None
@@ -1514,6 +1720,7 @@ class DatasetUploadTab(QWidget):
             str: 匿名化後のファイルパス（匿名化不要の場合は元のパス）
         """
         try:
+            from classes.utils.arim_anonymizer import ARIMAnonymizer
             anonymizer = ARIMAnonymizer(logger=logger)
             
             # JSONファイルを読み込み
@@ -1596,6 +1803,8 @@ class DatasetUploadTab(QWidget):
             self.progress_bar.setRange(0, 0)  # インデターミネート
             
             # クライアント作成
+            from ..core.portal_client import PortalClient
+            from ..core.uploader import Uploader
             self.portal_client = PortalClient(environment)
             self.portal_client.set_credentials(credentials)
             

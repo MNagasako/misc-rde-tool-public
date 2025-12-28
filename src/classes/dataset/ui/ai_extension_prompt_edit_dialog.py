@@ -11,7 +11,11 @@ from qt_compat.widgets import (
     QComboBox, QSizePolicy
 )
 from qt_compat.core import Qt, Signal
-from classes.dataset.util.ai_extension_helper import load_prompt_file, save_prompt_file
+from classes.dataset.util.ai_extension_helper import (
+    load_prompt_file,
+    save_prompt_file,
+    list_available_placeholders,
+)
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
 from config.common import get_dynamic_file_path
@@ -21,10 +25,11 @@ class AIExtensionPromptEditDialog(QDialog):
     
     prompt_updated = Signal(str)  # プロンプト更新シグナル
     
-    def __init__(self, parent=None, prompt_file_path="", button_config=None):
+    def __init__(self, parent=None, prompt_file_path="", button_config=None, target_kind: str = "dataset"):
         super().__init__(parent)
         self.prompt_file_path = prompt_file_path
         self.button_config = button_config or {}
+        self.target_kind = target_kind  # "dataset"(AI拡張) / "report"(報告書)
         self.original_content = ""
         
         self.setup_ui()
@@ -32,84 +37,99 @@ class AIExtensionPromptEditDialog(QDialog):
         
     def setup_ui(self):
         """UI要素のセットアップ"""
-        self.setWindowTitle("AI拡張プロンプト編集")
+        if self.target_kind == "report":
+            self.setWindowTitle("報告書プロンプト編集")
+        else:
+            self.setWindowTitle("AI拡張プロンプト編集")
         if os.environ.get("PYTEST_CURRENT_TEST"):
             self.setAttribute(Qt.WA_DontShowOnScreen, True)
         if not os.environ.get("PYTEST_CURRENT_TEST"):
             self.setModal(True)
         self.resize(800, 600)
-        # ユーザーが高さを変更できるようサイズグリップを有効化
         self.setSizeGripEnabled(True)
-        
+
         layout = QVBoxLayout(self)
-        
+
         # ヘッダー情報
         header_layout = QVBoxLayout()
-        
         button_label = self.button_config.get('label', 'Unknown')
         description = self.button_config.get('description', '')
-        
+
         title_label = QLabel(f"プロンプト編集: {button_label}")
         title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin: 10px;")
         header_layout.addWidget(title_label)
-        
+
         if description:
             desc_label = QLabel(f"説明: {description}")
             desc_label.setStyleSheet(
                 f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin: 5px 10px;"
             )
             header_layout.addWidget(desc_label)
-        
+
         file_label = QLabel(f"ファイル: {self.prompt_file_path}")
         file_label.setStyleSheet(
             f"font-family: 'Consolas'; color: {get_color(ThemeKey.TEXT_MUTED)}; margin: 5px 10px;"
         )
         header_layout.addWidget(file_label)
-        
+
         layout.addLayout(header_layout)
-        
+
         # タブウィジェット
         self.tab_widget = QTabWidget()
         layout.addWidget(self.tab_widget)
-        
-        # プロンプト編集タブ
+
         edit_tab = QWidget()
         self.tab_widget.addTab(edit_tab, "プロンプト編集")
         self.setup_edit_tab(edit_tab)
-        
-        # テンプレート変数タブ
+
         variables_tab = QWidget()
         self.tab_widget.addTab(variables_tab, "テンプレート変数")
         self.setup_variables_tab(variables_tab)
-        
-        # プレビュータブ
+
         preview_tab = QWidget()
         self.tab_widget.addTab(preview_tab, "プレビュー")
         self.setup_preview_tab(preview_tab)
-        
+
         # ボタンエリア
         button_layout = QHBoxLayout()
-        
         self.save_button = QPushButton("保存")
         self.save_button.setProperty("variant", "success")
-        
+
         self.cancel_button = QPushButton("キャンセル")
         self.cancel_button.setProperty("variant", "secondary")
-        
+
         self.preview_button = QPushButton("プレビュー更新")
         self.preview_button.setProperty("variant", "info")
-        
+
         button_layout.addWidget(self.preview_button)
         button_layout.addStretch()
         button_layout.addWidget(self.save_button)
         button_layout.addWidget(self.cancel_button)
-        
+
         layout.addLayout(button_layout)
-        
+
         # シグナル接続
         self.save_button.clicked.connect(self.save_prompt)
         self.cancel_button.clicked.connect(self.reject)
         self.preview_button.clicked.connect(self.update_preview)
+
+    def _load_latest_button_config(self) -> dict:
+        """ai_ext_conf.json から最新のボタン定義を取得（表示/初期値用）。"""
+        try:
+            from classes.dataset.util.ai_extension_helper import load_ai_extension_config
+
+            btn_id = (self.button_config or {}).get('id')
+            if not btn_id:
+                return self.button_config or {}
+
+            config = load_ai_extension_config()
+            for key in ['buttons', 'default_buttons']:
+                for btn in config.get(key, []) or []:
+                    if isinstance(btn, dict) and btn.get('id') == btn_id:
+                        return btn
+        except Exception:
+            pass
+        return self.button_config or {}
         
     def setup_edit_tab(self, tab_widget):
         """プロンプト編集タブのセットアップ"""
@@ -122,7 +142,7 @@ class AIExtensionPromptEditDialog(QDialog):
 
         self.prompt_edit = QTextEdit()
         self.prompt_edit.setPlaceholderText(
-            "プロンプトテンプレートを入力してください...\n\nテンプレート変数の例:\n{name} - データセット名\n{type} - データセットタイプ\n{description} - 説明"
+            "プロンプトテンプレートを入力してください..."
         )
         # 最小高さを抑えて、ダイアログの縮小を妨げないようにする
         self.prompt_edit.setMinimumHeight(240)
@@ -144,37 +164,37 @@ class AIExtensionPromptEditDialog(QDialog):
         fmt_layout.addWidget(self.output_format_combo)
         layout.addWidget(fmt_group)
 
-        # ヘルプ情報
-        help_group = QGroupBox("ヘルプ")
-        help_layout = QVBoxLayout(help_group)
-        help_text = QLabel(
-            """
-<b>基本テンプレート変数:</b><br>
-• <code>{name}</code> - データセット名<br>
-• <code>{type}</code> - データセットタイプ<br>
-• <code>{grant_number}</code> - 課題番号<br>
-• <code>{description}</code> - 既存の説明文<br>
-• <code>{experiment_data}</code> - 実験データ（JSON形式）<br>
-• <code>{material_index_data}</code> - マテリアルインデックスデータ<br>
-• <code>{equipment_data}</code> - 装置情報データ<br><br>
-<b>ARIM利用報告書データ:</b><br>
-• <code>{arim_report_title}</code> - 利用課題名 など<br><br>
-<b>データポータルマスタデータ:</b><br>
-• <code>{dataportal_material_index}</code> - マテリアルインデックスマスタ<br>
-• <code>{dataportal_tag}</code> - タグマスタ<br>
-• <code>{dataportal_equipment}</code> - 装置分類マスタ<br><br>
-<b>静的データ:</b><br>
-• <code>{static_material_index}</code> - MI.json（input/ai/MI.json）
-            """
-        )
-        help_text.setWordWrap(True)
-        help_layout.addWidget(help_text)
-        # ヘルプセクションはスクロール可能にして、ダイアログの最小サイズを抑制
-        help_scroll = QScrollArea()
-        help_scroll.setWidget(help_group)
-        help_scroll.setWidgetResizable(True)
-        help_scroll.setMaximumHeight(240)
-        layout.addWidget(help_scroll)
+        # 結果一覧(JSON)表示キー（報告書のみ）
+        self.results_json_keys_edit = None
+        if self.target_kind == "report":
+            keys_group = QGroupBox("結果一覧(JSON)表示キー")
+            keys_layout = QVBoxLayout(keys_group)
+            keys_note = QLabel("結果一覧タブの『JSON列表示』で表示するキーを指定します（複数可、改行/カンマ区切り）。")
+            keys_note.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin: 2px;")
+            keys_note.setWordWrap(True)
+            keys_layout.addWidget(keys_note)
+
+            self.results_json_keys_edit = QTextEdit()
+            self.results_json_keys_edit.setPlaceholderText("例: report_title\nreport_institute\narim_report_cross_tech_main")
+            self.results_json_keys_edit.setFixedHeight(90)
+
+            try:
+                from classes.dataset.util.ai_extension_helper import normalize_results_json_keys
+
+                latest_btn = self._load_latest_button_config()
+                init_keys = normalize_results_json_keys((latest_btn or {}).get('results_json_keys'))
+                if init_keys:
+                    self.results_json_keys_edit.setPlainText("\n".join(init_keys))
+            except Exception:
+                pass
+
+            keys_layout.addWidget(self.results_json_keys_edit)
+            layout.addWidget(keys_group)
+
+        help_note = QLabel("※使用可能なテンプレート変数は『テンプレート変数』タブに集約しています。")
+        help_note.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin: 5px;")
+        help_note.setWordWrap(True)
+        layout.addWidget(help_note)
 
         # 変数リスト（挿入支援）は変数タブで構築
         
@@ -208,26 +228,17 @@ class AIExtensionPromptEditDialog(QDialog):
 
         # 利用可能な変数リスト
         self.variables_list = QListWidget()
-        variables = [
-            ("name", "データセット名", "サンプルデータセット"),
-            ("type", "データセットタイプ", "experimental"),
-            ("grant_number", "課題番号", "JPMXP1234567890"),
-            ("description", "説明", "説明文..."),
-            ("experiment_data", "実験データ", "{\"測定項目\": \"材料特性\"}"),
-            ("material_index_data", "マテリアルインデックスデータ", "{\"材料分類\": \"金属\"}"),
-            ("equipment_data", "装置情報データ", "{\"装置名\": \"分析装置A\"}"),
-            ("arim_report_title", "ARIM 利用課題名", "..."),
-            ("arim_extension_data", "ARIM 拡張データ", "..."),
-            ("file_tree", "ファイル構成", "..."),
-            ("dataportal_material_index", "データポータル マテリアルインデックスマスタ", "{...JSON...}"),
-            ("dataportal_tag", "データポータル タグマスタ", "{...JSON...}"),
-            ("dataportal_equipment", "データポータル 装置分類マスタ", "{...JSON...}"),
-            ("static_material_index", "静的マテリアルインデックス (MI.json)", "{...JSON...}"),
-        ]
-        for var_name, var_desc, var_example in variables:
-            item_text = f"{{{var_name}}} - {var_desc}\n    {var_example}"
-            item = QListWidgetItem(item_text)
-            self.variables_list.addItem(item)
+        placeholders = list_available_placeholders()
+        if self.target_kind == "report":
+            placeholders = [ph for ph in placeholders if self._is_placeholder_allowed_for_report(ph)]
+
+        for ph in placeholders:
+            label = f"{{{ph.name}}}"
+            if ph.description:
+                label += f"  - {ph.description}"
+            if ph.source:
+                label += f"  [{ph.source}]"
+            self.variables_list.addItem(QListWidgetItem(label))
         layout.addWidget(self.variables_list)
 
         # 変数挿入ボタン
@@ -243,6 +254,35 @@ class AIExtensionPromptEditDialog(QDialog):
 
         # 変数リスト選択時の挿入
         self.variables_list.itemDoubleClicked.connect(self.insert_variable_from_list)
+
+    def _is_placeholder_allowed_for_report(self, ph) -> bool:
+        """報告書タブで使用可能なテンプレート変数のみ表示する。
+
+        方針:
+          - 報告書由来: arim_report_*, report_*（alias）, converted.xlsx列
+          - ファイル由来: file_tree/text_from_structured_files/json_from_structured_files
+          - 互換キーとして grant_number/name も許可（報告書選択から供給される）
+        """
+        try:
+            name = getattr(ph, 'name', '') or ''
+            source = getattr(ph, 'source', '') or ''
+        except Exception:
+            return False
+
+        if name in {"grant_number", "name"}:
+            return True
+
+        if name in {"file_tree", "text_from_structured_files", "json_from_structured_files"}:
+            return True
+
+        if source in {"arim_report", "alias", "converted.xlsx", "dataset_context"}:
+            return True
+
+        # 追加の安全策: プレフィックスでも許可
+        if name.startswith("arim_report_") or name.startswith("report_") or name.startswith("converted_xlsx_"):
+            return True
+
+        return False
         
     def load_prompt_content(self):
         """プロンプトファイルの内容を読み込む"""
@@ -347,15 +387,35 @@ class AIExtensionPromptEditDialog(QDialog):
             # 設定ファイルの更新（ai_ext_conf.json の対象ボタンの output_format）
             try:
                 from classes.dataset.util.ai_extension_helper import load_ai_extension_config
+                from classes.dataset.util.ai_extension_helper import normalize_results_json_keys
                 import json
 
                 config = load_ai_extension_config()
                 btn_id = self.button_config.get('id')
 
-                if btn_id and 'buttons' in config:
-                    for btn in config['buttons']:
-                        if btn.get('id') == btn_id:
-                            btn['output_format'] = selected_fmt
+                if btn_id:
+                    updated = False
+                    for btn_list_key in ['buttons', 'default_buttons']:
+                        for btn in config.get(btn_list_key, []) or []:
+                            if btn.get('id') == btn_id:
+                                btn['output_format'] = selected_fmt
+                                if self.target_kind == 'report' and self.results_json_keys_edit is not None:
+                                    raw = self.results_json_keys_edit.toPlainText()
+                                    keys = normalize_results_json_keys(raw)
+                                    btn['results_json_keys'] = keys
+                                    # 同一プロセス内で再オープンしても初期値に反映されるよう更新
+                                    try:
+                                        self.button_config['results_json_keys'] = list(keys)
+                                    except Exception:
+                                        pass
+                                # 同一プロセス内で反映
+                                try:
+                                    self.button_config['output_format'] = selected_fmt
+                                except Exception:
+                                    pass
+                                updated = True
+                                break
+                        if updated:
                             break
 
                     conf_path = get_dynamic_file_path('input/ai/ai_ext_conf.json')

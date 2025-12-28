@@ -256,7 +256,30 @@ class UIControllerCore:
             logger.info(f"[ThemeToggle] 処理時間: button={button_elapsed:.2f}ms refresh={refresh_elapsed:.2f}ms total={total_elapsed:.2f}ms")
         
         self.theme_toggle_btn.clicked.connect(on_theme_toggle)
-        theme_manager.theme_changed.connect(lambda *_: update_button_style())
+
+        # NOTE:
+        # Avoid connecting ThemeManager.theme_changed to a lambda that closes over
+        # widget/controller objects. In long-running test suites this can leak
+        # connections and keep calling into already-destroyed widgets.
+        def _on_theme_changed(*_args):
+            update_button_style()
+
+        try:
+            theme_manager.theme_changed.connect(_on_theme_changed)
+        except Exception:
+            pass
+
+        # Ensure we disconnect when the button is destroyed.
+        try:
+            def _disconnect_theme_changed(*_args):
+                try:
+                    theme_manager.theme_changed.disconnect(_on_theme_changed)
+                except Exception:
+                    pass
+
+            self.theme_toggle_btn.destroyed.connect(_disconnect_theme_changed)
+        except Exception:
+            pass
         
         update_button_style()
         menu_layout.addWidget(self.theme_toggle_btn)

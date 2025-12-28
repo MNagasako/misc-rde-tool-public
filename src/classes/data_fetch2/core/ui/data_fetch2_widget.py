@@ -702,6 +702,36 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     def refresh_theme():
         """テーマ切替時の更新処理"""
         try:
+            try:
+                from shiboken6 import isValid as _qt_is_valid
+            except Exception:
+                _qt_is_valid = None
+
+            def _is_alive(w) -> bool:
+                try:
+                    if w is None:
+                        return False
+                    if _qt_is_valid is None:
+                        return True
+                    return bool(_qt_is_valid(w))
+                except Exception:
+                    return False
+
+            required_widgets = [
+                container,
+                share_label,
+                member_label,
+                share_both_radio,
+                share_enabled_radio,
+                share_disabled_radio,
+                member_both_radio,
+                member_only_radio,
+                member_non_radio,
+                count_label,
+            ]
+            if not all(_is_alive(w) for w in required_widgets):
+                return
+
             # ラベルの色更新
             apply_label_style(share_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
             apply_label_style(member_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
@@ -806,6 +836,18 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     from classes.theme.theme_manager import ThemeManager
     theme_manager = ThemeManager.instance()
     theme_manager.theme_changed.connect(refresh_theme)
+
+    # Widget破棄後に theme_changed が飛ぶと、削除済みWidget参照で不安定になるため切断する
+    def _disconnect_theme_changed(*_args):
+        try:
+            theme_manager.theme_changed.disconnect(refresh_theme)
+        except Exception:
+            pass
+
+    try:
+        container.destroyed.connect(_disconnect_theme_changed)
+    except Exception:
+        pass
     
     return container
 

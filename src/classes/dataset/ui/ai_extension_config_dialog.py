@@ -24,6 +24,7 @@ from qt_compat.widgets import (
 from qt_compat.core import Qt, Signal
 
 from classes.dataset.util.ai_extension_config_manager import AIExtensionConfigManager
+from classes.dataset.util.ai_extension_helper import infer_ai_suggest_target_kind
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
 
@@ -116,6 +117,11 @@ class AIExtensionConfigDialog(QDialog):
         self.prompt_file_edit = QLineEdit()
         form.addRow("プロンプトファイル", self.prompt_file_edit)
 
+        self.target_kind_combo = QComboBox()
+        self.target_kind_combo.addItem("AI拡張（従来）", "dataset")
+        self.target_kind_combo.addItem("報告書", "report")
+        form.addRow("対象", self.target_kind_combo)
+
         self.output_format_combo = QComboBox()
         self.output_format_combo.addItems(["text", "json"])
         form.addRow("出力形式", self.output_format_combo)
@@ -170,7 +176,10 @@ class AIExtensionConfigDialog(QDialog):
             prefix = '🔒 ' if not button.get('allow_delete', False) else ''
             icon = button.get('icon', '') or ''
             label = button.get('label', '(ラベル未設定)')
-            item = QListWidgetItem(f"{prefix}{icon} {label} ({button.get('id', '???')})")
+
+            target_kind = infer_ai_suggest_target_kind(button)
+            target_tag = '［報告書］' if target_kind == 'report' else '［AI拡張］'
+            item = QListWidgetItem(f"{prefix}{target_tag} {icon} {label} ({button.get('id', '???')})")
             self.button_list.addItem(item)
         if self._manager.buttons:
             index = select_index if select_index is not None else min(self._current_index, len(self._manager.buttons) - 1)
@@ -201,6 +210,13 @@ class AIExtensionConfigDialog(QDialog):
             self.icon_edit.setText(button.get('icon', ''))
             self.category_edit.setText(button.get('category', ''))
             self.prompt_file_edit.setText(button.get('prompt_file', ''))
+
+            target_kind = infer_ai_suggest_target_kind(button)
+            idx = self.target_kind_combo.findData(target_kind)
+            if idx >= 0:
+                self.target_kind_combo.setCurrentIndex(idx)
+            else:
+                self.target_kind_combo.setCurrentIndex(0)
             current_format = button.get('output_format', 'text')
             if self.output_format_combo.findText(current_format) == -1:
                 self.output_format_combo.addItem(current_format)
@@ -224,6 +240,7 @@ class AIExtensionConfigDialog(QDialog):
         self.description_edit.clear()
         self.prompt_template_edit.clear()
         self.output_format_combo.setCurrentText("text")
+        self.target_kind_combo.setCurrentIndex(0)
         self.allow_delete_checkbox.setChecked(False)
         self.allow_delete_checkbox.setEnabled(False)
         self.id_edit.setEnabled(False)
@@ -244,6 +261,7 @@ class AIExtensionConfigDialog(QDialog):
         button['icon'] = self.icon_edit.text().strip() or '🤖'
         button['category'] = self.category_edit.text().strip()
         button['prompt_file'] = self.prompt_file_edit.text().strip()
+        button['target_kind'] = self.target_kind_combo.currentData() or infer_ai_suggest_target_kind(button)
         button['output_format'] = self.output_format_combo.currentText()
         button['description'] = self.description_edit.toPlainText().strip()
         button['prompt_template'] = self.prompt_template_edit.toPlainText().strip()

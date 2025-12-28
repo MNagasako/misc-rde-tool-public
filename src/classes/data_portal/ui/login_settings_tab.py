@@ -15,7 +15,6 @@ from classes.theme import get_color, ThemeKey
 
 from classes.managers.log_manager import get_logger
 from ..core.auth_manager import get_auth_manager, PortalCredentials, AuthManager
-from ..core.portal_client import PortalClient
 from ..conf.config import get_data_portal_config
 
 logger = get_logger("DataPortal.LoginSettingsTab")
@@ -380,6 +379,7 @@ class LoginSettingsTab(QWidget):
         self.test_login_btn.setText("テスト中...")
         
         try:
+            from ..core.portal_client import PortalClient
             # PortalClient作成
             client = PortalClient(environment)
             client.set_credentials(credentials)

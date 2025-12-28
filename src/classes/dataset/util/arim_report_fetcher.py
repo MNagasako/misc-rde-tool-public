@@ -144,6 +144,15 @@ class ARIMReportFetcher:
                     next_element = h5.find_next_sibling(['p', 'ol'])
                     if next_element:
                         value_text = next_element.get_text(strip=True)
+
+                        # 技術領域は専用パーサで処理（横断/重要 主副）
+                        if '技術領域' in header_text:
+                            try:
+                                tech = self._extract_technology_areas_from_h5(h5)
+                                if tech:
+                                    report_data.update(tech)
+                            except Exception as e:
+                                logger.debug("技術領域パース失敗: %s", e)
                         
                         # データマッピング
                         key = self.map_header_to_key(header_text)
@@ -155,7 +164,7 @@ class ARIMReportFetcher:
                                     value_text = value_text.split('利用者と利用形態')[0].strip()
                                 if value_text.endswith('</p>'):
                                     value_text = value_text.replace('</p>', '').strip()
-                            
+
                             report_data[key] = value_text
                             logger.debug("データ抽出: %s = %s...", key, value_text[:50])
                     
@@ -185,6 +194,55 @@ class ARIMReportFetcher:
         except Exception as e:
             logger.error("報告書コンテンツ解析エラー: %s", e)
             return {}
+
+    def _parse_main_sub_fields(self, text: str) -> tuple[str, str]:
+        """主・副フィールドをパース
+
+        形式例: （主 / Main）<主の値>（副 / Sub）<副の値>
+        """
+        main = ""
+        sub = ""
+
+        main_match = re.search(r'[（(][^）)]*主[^）)]*[）)]\s*([^（(]+?)(?=[（(]|$)', text)
+        if main_match:
+            main = main_match.group(1).strip()
+            if '/' in main:
+                main = main.split('/')[0].strip()
+
+        sub_match = re.search(r'[（(][^）)]*副[^）)]*[）)]\s*(.+?)$', text)
+        if sub_match:
+            sub = sub_match.group(1).strip()
+            if '/' in sub:
+                sub = sub.split('/')[0].strip()
+            if sub == '-':
+                sub = ""
+
+        return main, sub
+
+    def _extract_technology_areas_from_h5(self, h5_tag) -> dict:
+        """技術領域 / Technology Area の横断/重要（主・副）を抽出する。
+
+        このセクションは通常、h5の次に2つのpが続く。
+        1つ目: 横断技術領域、2つ目: 重要技術領域
+        """
+        result: dict = {}
+        cross_p = h5_tag.find_next_sibling('p')
+        if cross_p is None:
+            return result
+        important_p = cross_p.find_next_sibling('p')
+
+        cross_text = cross_p.get_text(strip=True)
+        cross_main, cross_sub = self._parse_main_sub_fields(cross_text)
+        result['arim_report_cross_tech_main'] = cross_main
+        result['arim_report_cross_tech_sub'] = cross_sub
+
+        if important_p is not None:
+            important_text = important_p.get_text(strip=True)
+            imp_main, imp_sub = self._parse_main_sub_fields(important_text)
+            result['arim_report_important_tech_main'] = imp_main
+            result['arim_report_important_tech_sub'] = imp_sub
+
+        return result
     
     def map_header_to_key(self, header_text):
         """ヘッダーテキストをプレースホルダキーにマッピング"""

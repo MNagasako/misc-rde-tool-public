@@ -409,7 +409,8 @@ class ReportScraper:
 
         max_page = 0
         for link in page_links:
-            href = link.get('href', '')
+            href_value = link.get('href', '')
+            href = str(href_value) if href_value is not None else ''
             if 'page=' not in href:
                 continue
             try:

@@ -9,6 +9,7 @@ import logging
 from classes.dataset.util.ai_extension_helper import (
     load_ai_extension_config,
     save_ai_extension_config,
+    infer_ai_suggest_target_kind,
 )
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,8 @@ class AIExtensionConfigManager:
                 cloned['allow_delete'] = False
             if 'output_format' not in cloned:
                 cloned['output_format'] = 'text'
+            if 'target_kind' not in cloned:
+                cloned['target_kind'] = infer_ai_suggest_target_kind(cloned)
             normalized.append(cloned)
         return normalized
 

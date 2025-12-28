@@ -166,6 +166,23 @@ class QtPaintPerfProbe:
         _, _, _, QWidget = self._qt
         if obj is None or not isinstance(obj, QWidget):
             return False
+
+        # In long-running widget test suites on Windows, Qt objects can be in a
+        # transitional teardown state while still delivering events. Calling Qt
+        # APIs (e.g. isAncestorOf) on such objects can crash the interpreter.
+        try:
+            from shiboken6 import isValid as _qt_is_valid  # type: ignore
+        except Exception:
+            _qt_is_valid = None
+
+        try:
+            if _qt_is_valid is not None:
+                if not _qt_is_valid(self._root):
+                    return False
+                if not _qt_is_valid(obj):
+                    return False
+        except Exception:
+            return False
         try:
             return obj is self._root or self._root.isAncestorOf(obj)
         except Exception:
