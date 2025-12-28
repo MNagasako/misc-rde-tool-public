@@ -31,4 +31,4 @@ v2.3.9 は、Windows/Qt 環境での長時間テストスイート実行時に�
 
 ## ドキュメント/配布物の版数表記
 
-- `VERSION.txt` / `README.md` / `docs/CHANGELOG.md` / `docs/RELEASE_NOTES_v2.3.9.md` 等 → v2.3.9
+- `VERSION.txt` / `README.md` / `docs/CHANGELOG.md` / `docs/archive/release_notes/RELEASE_NOTES_v2.3.9.md` 等 → v2.3.9
