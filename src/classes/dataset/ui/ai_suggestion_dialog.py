@@ -2572,6 +2572,11 @@ class AISuggestionDialog(QDialog):
             from classes.dataset.util.ai_suggest_result_log import list_latest_results
             from classes.dataset.util.ai_extension_helper import load_ai_extension_config
             from classes.dataset.util.ai_extension_helper import normalize_results_json_keys
+            from classes.dataset.util.report_listing_helper import (
+                build_task_number_to_key_technology_areas_index,
+                extract_task_number_from_report_target_key,
+                load_latest_report_records,
+            )
 
             kind = self.results_target_kind_combo.currentData() if hasattr(self, 'results_target_kind_combo') else 'report'
             bid = self.results_button_combo.currentData() if hasattr(self, 'results_button_combo') else ''
@@ -2584,6 +2589,22 @@ class AISuggestionDialog(QDialog):
                 view_mode = 'snippet'
 
             recs = list_latest_results(kind, bid)
+
+            tech_index = {}
+            if kind == 'report':
+                try:
+                    report_records = self._get_displayed_report_records()
+                except Exception:
+                    report_records = []
+                if not report_records:
+                    try:
+                        report_records = load_latest_report_records()
+                    except Exception:
+                        report_records = []
+                try:
+                    tech_index = build_task_number_to_key_technology_areas_index(report_records)
+                except Exception:
+                    tech_index = {}
 
             # Helper: parse JSON-path like "a.b[0].c"
             def _get_json_value(obj, key_path: str):
@@ -2657,14 +2678,26 @@ class AISuggestionDialog(QDialog):
                 pass
 
             if view_mode == 'snippet':
-                self.results_table.setColumnCount(5)
-                self.results_table.setHorizontalHeaderLabels([
-                    "日時",
-                    "対象キー",
-                    "ボタン",
-                    "モデル",
-                    "結果(先頭)",
-                ])
+                if kind == 'report':
+                    self.results_table.setColumnCount(7)
+                    self.results_table.setHorizontalHeaderLabels([
+                        "日時",
+                        "対象キー",
+                        "重要技術領域（主）",
+                        "重要技術領域（副）",
+                        "ボタン",
+                        "モデル",
+                        "結果(先頭)",
+                    ])
+                else:
+                    self.results_table.setColumnCount(5)
+                    self.results_table.setHorizontalHeaderLabels([
+                        "日時",
+                        "対象キー",
+                        "ボタン",
+                        "モデル",
+                        "結果(先頭)",
+                    ])
                 self.results_table.setRowCount(len(recs))
                 for row_idx, rec in enumerate(recs):
                     ts = str(rec.get('timestamp') or '')
@@ -2673,7 +2706,14 @@ class AISuggestionDialog(QDialog):
                     model = str(rec.get('model') or '')
                     snip = _snippet(rec)
 
-                    for col_idx, value in enumerate([ts, tkey, blabel, model, snip]):
+                    if kind == 'report':
+                        task_number = extract_task_number_from_report_target_key(tkey)
+                        main_area, sub_area = tech_index.get(task_number, ('', ''))
+                        values = [ts, tkey, str(main_area or ''), str(sub_area or ''), blabel, model, snip]
+                    else:
+                        values = [ts, tkey, blabel, model, snip]
+
+                    for col_idx, value in enumerate(values):
                         item = QTableWidgetItem(value)
                         item.setData(Qt.UserRole, rec)
                         self.results_table.setItem(row_idx, col_idx, item)
@@ -2719,7 +2759,10 @@ class AISuggestionDialog(QDialog):
                         rows.append({'ts': ts, 'tkey': tkey, 'elem': '', 'blabel': blabel, 'model': model, 'json': {}, 'rec': rec})
 
                 include_elem = any((r.get('elem') or '') != '' for r in rows)
-                base_headers = ["日時", "対象キー"] + (["要素"] if include_elem else []) + ["ボタン", "モデル"]
+                if kind == 'report':
+                    base_headers = ["日時", "対象キー", "重要技術領域（主）", "重要技術領域（副）"] + (["要素"] if include_elem else []) + ["ボタン", "モデル"]
+                else:
+                    base_headers = ["日時", "対象キー"] + (["要素"] if include_elem else []) + ["ボタン", "モデル"]
                 headers = base_headers + keys
                 self.results_table.setColumnCount(len(headers))
                 self.results_table.setHorizontalHeaderLabels(headers)
@@ -2727,7 +2770,16 @@ class AISuggestionDialog(QDialog):
                 self.results_table.setRowCount(len(rows))
                 for row_idx, row in enumerate(rows):
                     rec = row['rec']
-                    base_values = [row['ts'], row['tkey']] + ([row['elem']] if include_elem else []) + [row['blabel'], row['model']]
+
+                    if kind == 'report':
+                        task_number = extract_task_number_from_report_target_key(row['tkey'])
+                        main_area, sub_area = tech_index.get(task_number, ('', ''))
+                        base_values = [row['ts'], row['tkey'], str(main_area or ''), str(sub_area or '')] + ([row['elem']] if include_elem else []) + [row['blabel'], row['model']]
+                        json_base_headers = ["日時", "対象キー", "重要技術領域（主）", "重要技術領域（副）"] + (["要素"] if include_elem else []) + ["ボタン", "モデル"]
+                    else:
+                        base_values = [row['ts'], row['tkey']] + ([row['elem']] if include_elem else []) + [row['blabel'], row['model']]
+                        json_base_headers = ["日時", "対象キー"] + (["要素"] if include_elem else []) + ["ボタン", "モデル"]
+
                     for col_idx, value in enumerate(base_values):
                         item = QTableWidgetItem(str(value))
                         item.setData(Qt.UserRole, rec)
@@ -2737,7 +2789,7 @@ class AISuggestionDialog(QDialog):
                         v = _get_json_value(row['json'], key)
                         item = QTableWidgetItem(_display_cell_value(v))
                         item.setData(Qt.UserRole, rec)
-                        self.results_table.setItem(row_idx, len(base_headers) + k_idx, item)
+                        self.results_table.setItem(row_idx, len(json_base_headers) + k_idx, item)
 
             try:
                 self.results_table.setSortingEnabled(True)
