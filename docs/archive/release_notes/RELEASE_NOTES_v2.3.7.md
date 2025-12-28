@@ -35,4 +35,4 @@ v2.3.7 は、AI連携（特に Gemini）の不安定レスポンスに対する�
 
 ## ドキュメント/配布物の版数表記
 
-- `VERSION.txt` / `README.md` / `docs/CHANGELOG.md` / `docs/RELEASE_NOTES_v2.3.7.md` 等 → v2.3.7
+- `VERSION.txt` / `README.md` / `docs/CHANGELOG.md` / `docs/archive/release_notes/RELEASE_NOTES_v2.3.7.md` 等 → v2.3.7

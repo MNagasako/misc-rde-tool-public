@@ -32,4 +32,4 @@ v2.3.8 は、Windows/Qt環境でのテスト実行を安定化しつつ、テー
 
 ## ドキュメント/配布物の版数表記
 
-- `VERSION.txt` / `README.md` / `docs/CHANGELOG.md` / `docs/RELEASE_NOTES_v2.3.8.md` 等 → v2.3.8
+- `VERSION.txt` / `README.md` / `docs/CHANGELOG.md` / `docs/archive/release_notes/RELEASE_NOTES_v2.3.8.md` 等 → v2.3.8

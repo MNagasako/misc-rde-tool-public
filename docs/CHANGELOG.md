@@ -4,6 +4,29 @@
 
 ---
 
+## v2.3.9 (2025-12-28) - テスト安定化（Windows/Qt・長時間スイート）+ テーマ追従の破棄後コールバック抑制 + ドキュメント更新
+
+### 🧪 テスト安定化（Windows/Qt・長時間スイート）
+
+- 長時間のpytest実行で発生しうる「破棄済みQtオブジェクト参照」起因の不安定化を抑制（destroyed時のdisconnect/弱参照化/生存チェック）。
+- Windowsのウィジェットテストがネイティブウィンドウ資源に影響されにくいよう調整し、フルスイート完走性を改善。
+
+### 🎨 UI/テーマ
+
+- テーマ変更シグナルの接続管理を整理し、破棄後コールバックによるエラー/不安定化を抑制（通常実行の挙動は維持）。
+
+### 📚 ドキュメント
+
+- VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.3.9 に統一。
+- `docs/RELEASE_NOTES_v2.3.9.md` を追加。
+
+### 🧪 テスト（推奨）
+
+- `./.venv/Scripts/python.exe -m pytest -q -k 'test_revision_sync'`
+- `./.venv/Scripts/python.exe -m pytest -q`
+
+---
+
 ## v2.3.8 (2025-12-27) - テスト安定化（Windows/Qt）+ テーマ切替/モジュール汚染の不具合修正 + ドキュメント更新
 
 ### 🧪 テスト安定化（Windows/Qt）
@@ -19,7 +42,7 @@
 ### 📚 ドキュメント
 
 - VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.3.8 に統一。
-- `docs/RELEASE_NOTES_v2.3.8.md` を追加。
+- `docs/archive/release_notes/RELEASE_NOTES_v2.3.8.md` を追加。
 
 ### 🧪 テスト（推奨）
 
@@ -50,7 +73,7 @@
 ### 📚 ドキュメント
 
 - VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.3.7 に統一。
-- `docs/RELEASE_NOTES_v2.3.7.md` を追加。
+- `docs/archive/release_notes/RELEASE_NOTES_v2.3.7.md` を追加。
 
 ### 🧪 テスト（推奨）
 
@@ -74,7 +97,7 @@
 ### 📚 ドキュメント
 
 - VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.3.6 に統一。
-- `docs/RELEASE_NOTES_v2.3.6.md` を追加。
+- `docs/archive/release_notes/RELEASE_NOTES_v2.3.6.md` を追加。
 
 ### 🧪 テスト（推奨）
 
@@ -99,7 +122,7 @@
 ### 📚 ドキュメント
 
 - VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.3.4 に統一。
-- `docs/RELEASE_NOTES_v2.3.4.md` を追加。
+- `docs/archive/release_notes/RELEASE_NOTES_v2.3.4.md` を追加。
 
 ### 🧪 テスト（推奨）
 
@@ -123,7 +146,7 @@
 ### 📚 ドキュメント
 
 - VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.3.3 に統一。
-- `docs/RELEASE_NOTES_v2.3.3.md` を追加。
+- `docs/archive/release_notes/RELEASE_NOTES_v2.3.3.md` を追加。
 
 ### 🧪 テスト（推奨）
 
@@ -146,7 +169,7 @@
 ### 📚 ドキュメント
 
 - VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.3.2 に統一。
-- `docs/RELEASE_NOTES_v2.3.2.md` を追加。
+- `docs/archive/release_notes/RELEASE_NOTES_v2.3.2.md` を追加。
 
 ### 🧪 テスト（推奨）
 
@@ -166,7 +189,7 @@
 ### 📚 ドキュメント
 
 - VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.3.1 に統一。
-- `docs/RELEASE_NOTES_v2.3.1.md` を追加。
+- `docs/archive/release_notes/RELEASE_NOTES_v2.3.1.md` を追加。
 
 ### 🧪 テスト（推奨）
 
@@ -189,7 +212,7 @@
 ### 📚 ドキュメント
 
 - VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.3.0 に統一。
-- `docs/RELEASE_NOTES_v2.3.0.md` を追加。
+- `docs/archive/release_notes/RELEASE_NOTES_v2.3.0.md` を追加。
 
 ### 🧪 テスト（推奨）
 
@@ -217,7 +240,7 @@
 ### 📚 ドキュメント
 
 - VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.2.9 に統一。
-- `docs/RELEASE_NOTES_v2.2.9.md` を追加。
+- `docs/archive/release_notes/RELEASE_NOTES_v2.2.9.md` を追加。
 
 ### 🧪 テスト（推奨）
 
@@ -236,7 +259,7 @@
 ### 📚 ドキュメント
 
 - VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.2.8 に統一。
-- `docs/RELEASE_NOTES_v2.2.8.md` を追加。
+- `docs/archive/release_notes/RELEASE_NOTES_v2.2.8.md` を追加。
 
 ### 🧪 テスト（推奨）
 
@@ -302,7 +325,7 @@
 ### 📚 ドキュメント整備
 
 - README / readme.txt / LICENSE-dist / ヘルプ群 / セットアップスクリプトを含む各種ドキュメントのバージョンを 2.2.5 へ統一し、ユーザー向け表記ゆれを解消。
-- v2.2.4 リリースノートを `docs/archive/` 配下へ退避し、新しい `docs/RELEASE_NOTES_v2.2.5.md` を追加して履歴管理を継続。
+- v2.2.4 リリースノートを `docs/archive/` 配下へ退避し、新しい `docs/archive/release_notes/RELEASE_NOTES_v2.2.5.md` を追加して履歴管理を継続。
 
 ### 🧪 テスト
 
@@ -497,7 +520,7 @@
 ### 📦 配布・リリース
 
 - バージョンリビジョン更新（2.1.15）
-- 公開配布ドキュメント整備（`VERSION.txt`, `README.md`, `docs/RELEASE_NOTES_v2.1.15.md`）
+- 公開配布ドキュメント整備（`VERSION.txt`, `README.md`, `docs/archive/release_notes/RELEASE_NOTES_v2.1.15.md`）
 - Gitタグ `v2.1.15` 作成・GitHubリリース公開
 - バイナリ添付: `dist/arim_rde_tool_setup.2.1.15.exe`
 

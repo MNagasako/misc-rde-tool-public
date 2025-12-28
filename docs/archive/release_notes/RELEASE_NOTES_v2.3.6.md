@@ -34,4 +34,4 @@ v2.3.6 は、データ登録（通常登録/一括登録）のUXと完了表示�
 
 ## ドキュメント/配布物の版数表記
 
-- `VERSION.txt` / `README.md` / `docs/CHANGELOG.md` / `docs/RELEASE_NOTES_v2.3.6.md` 等 → v2.3.6
+- `VERSION.txt` / `README.md` / `docs/CHANGELOG.md` / `docs/archive/release_notes/RELEASE_NOTES_v2.3.6.md` 等 → v2.3.6

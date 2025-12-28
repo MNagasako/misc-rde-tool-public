@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.3.8** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.3.9** のバイナリ配布およびドキュメント公開用リポジトリです。
 
 **本ページはAIによる自動生成文が含まれています。**
 
@@ -20,14 +20,14 @@
 
 ## 🚀 最新情報
 
-**2025-12-27 最新リリース**: バージョン2.3.8（テスト安定化 + テーマ切替/モジュール汚染修正 + ドキュメント更新）
+**2025-12-28 最新リリース**: バージョン2.3.9（長時間テスト安定化 + テーマ追従の破棄後コールバック抑制 + ドキュメント更新）
 
-### v2.3.8 の主な改善
+### v2.3.9 の主な改善
 
-- Windows/Qt 環境で稀に発生する 0x8001010d 系のクラッシュ/ノイズ要因を抑制し、テストスイートの安定実行を改善しました。
-- テストの `sys.modules` 差し替えによるモジュール汚染を解消し、後続テストでの ImportError を防止しました。
-- pytest実行時のテーマ切替でイベント処理が原因の不安定化が起きないように調整しました（通常実行の挙動は維持）。
-- README / VERSION.txt / CHANGELOG / リリースノート等のバージョン表記を v2.3.8 に統一しました。
+- 長時間の pytest 実行で発生しうる「破棄済み Qt オブジェクト参照」起因の不安定化を抑制し、フルスイートの完走性を改善しました。
+- Windows のウィジェットテストがネイティブウィンドウ資源に影響されにくいよう調整し、フレークを低減しました。
+- テーマ変更シグナル周りの接続管理を整理し、破棄後コールバックによるエラー/不安定化を抑制しました（通常実行の挙動は維持）。
+- README / VERSION.txt / CHANGELOG / リリースノート等のバージョン表記を v2.3.9 に統一しました。
 
 > ℹ️ リスティングタブは `output/arim-site/{equipment|reports}_latest.json` など最新エクスポートを前提とします。再読込前に各タブで「JSON再取得」を実行し、キャッシュディレクトリ（`output/arim-site/reports/cache/`）の残量にも留意してください。
 
@@ -133,7 +133,7 @@
 
 ## 🔢 バージョン情報
 
-現在配布バージョン: `v2.3.8` （`VERSION.txt` に基づく）
+現在配布バージョン: `v2.3.9` （`VERSION.txt` に基づく）
 
 更新履歴の詳細は `docs/CHANGELOG.md` を参照してください。
 
