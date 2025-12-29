@@ -11,7 +11,7 @@ import time
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
 from classes.theme.theme_keys import ThemeKey
-from classes.theme.theme_manager import get_color
+from classes.theme.theme_manager import get_color, get_qcolor
 from classes.data_entry.util.template_format_validator import TemplateFormatValidator
 from config.common import get_dynamic_file_path
 from classes.utils.dataset_launch_manager import DatasetLaunchManager, DatasetPayload
@@ -28,7 +28,10 @@ from qt_compat.widgets import (
     QInputDialog, QRadioButton, QButtonGroup
 )
 from qt_compat.core import Qt, Signal, QTimer, QThread
-from qt_compat.gui import QFont, QIcon, QPixmap, QPainter, QColor, QBrush
+from qt_compat.gui import QFont, QIcon, QPixmap, QPainter, QBrush
+
+# 直接 QColor() を生成せず、テーマのヘルパーを経由する
+QColor = get_qcolor
 
 from ..core.file_set_manager import (
     FileSetManager, FileSet, FileItem, FileType, PathOrganizeMethod, FileItemType

@@ -19,10 +19,10 @@ from qt_compat.widgets import (
     QDialogButtonBox, QComboBox, QProgressDialog, QApplication
 )
 from qt_compat.core import Qt, Signal, QThread, Slot
-from qt_compat.gui import QFont, QColor
+from qt_compat.gui import QFont
 from config.common import get_dynamic_file_path
 
-from classes.theme import get_color, ThemeKey
+from classes.theme import get_color, get_qcolor, ThemeKey
 
 from classes.data_entry.core.file_set_manager import FileSet, FileItem, FileType, PathOrganizeMethod, FileItemType
 
@@ -269,10 +269,10 @@ class FileSetPreviewWidget(QWidget):
                 
                 # 重複チェック
                 if file_item.path in self.duplicate_files:
-                    item.setBackground(QColor(get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)))
+                    item.setBackground(get_qcolor(ThemeKey.BUTTON_DANGER_BACKGROUND))
                     item.setToolTip("重複ファイル: 他のファイルセットに同じファイルが含まれています")
                 elif not file_exists:
-                    item.setBackground(QColor(get_color(ThemeKey.PANEL_WARNING_BACKGROUND)))
+                    item.setBackground(get_qcolor(ThemeKey.PANEL_WARNING_BACKGROUND))
                     item.setToolTip("ファイルが存在しません")
                 
                 self.files_table.setItem(row, 1, item)
@@ -317,11 +317,11 @@ class FileSetPreviewWidget(QWidget):
                 if file_item.path in self.duplicate_files:
                     status = "重複"
                     status_item = QTableWidgetItem(status)
-                    status_item.setForeground(QColor(get_color(ThemeKey.TEXT_ERROR)))
+                    status_item.setForeground(get_qcolor(ThemeKey.TEXT_ERROR))
                 elif not file_exists:
                     status = "存在しない"
                     status_item = QTableWidgetItem(status)
-                    status_item.setForeground(QColor(get_color(ThemeKey.TEXT_WARNING)))
+                    status_item.setForeground(get_qcolor(ThemeKey.TEXT_WARNING))
                 else:
                     status = "正常"
                     status_item = QTableWidgetItem(status)

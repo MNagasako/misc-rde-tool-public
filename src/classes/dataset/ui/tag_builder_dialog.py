@@ -512,6 +512,29 @@ class TagBuilderDialog(QDialog):
             else:
                 response_text = ''
 
+            # ログ保存（結果一覧タブで参照できるようにする）
+            try:
+                from classes.dataset.util.ai_suggest_result_log import append_result
+
+                append_result(
+                    target_kind='dataset',
+                    target_key=str(self.dataset_id or '').strip() or 'unknown',
+                    button_id='tag_suggest',
+                    button_label='TAG提案',
+                    prompt=self._last_ai_prompt,
+                    display_format='text',
+                    display_content=str(response_text or ''),
+                    provider=(result.get('provider') if isinstance(result, dict) else None),
+                    model=(result.get('model') if isinstance(result, dict) else None),
+                    request_params=(result.get('request_params') if isinstance(result, dict) else None),
+                    response_params=(result.get('response_params') if isinstance(result, dict) else None),
+                    started_at=(result.get('started_at') if isinstance(result, dict) else None),
+                    finished_at=(result.get('finished_at') if isinstance(result, dict) else None),
+                    elapsed_seconds=(result.get('elapsed_seconds') if isinstance(result, dict) else None),
+                )
+            except Exception:
+                pass
+
             self._last_ai_response_text = str(response_text)
             self.ai_response_button.setEnabled(bool(self._last_ai_response_text.strip()))
 

@@ -308,7 +308,8 @@ def build_gemini_generate_content_body(
         generation_config[mapped] = value
 
     body: Dict[str, Any] = {
-        "contents": [{"parts": [{"text": prompt}]}],
+        # Vertex AI publisher models の generateContent は role が必須となる場合があるため、常に付与する。
+        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
     }
 
     if generation_config:

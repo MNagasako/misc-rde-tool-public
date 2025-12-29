@@ -284,7 +284,7 @@ def download_file_for_data_id(data_id, bearer_token=None, save_dir_base=None, fi
             safe_show_message(parent, "認証エラー", "Bearer Tokenが取得できません。ログインを確認してください。", "critical")
             return False
     from urllib.parse import unquote, urlparse
-    #base_dir = os.path.abspath(os.path.dirname(__file__))
+
 
     safe_dataset_name = (replace_invalid_path_chars(dataset_name) or "unknown_dataset").strip()
     safe_tile_name = (replace_invalid_path_chars(tile_name) or "unknown_tile").strip()

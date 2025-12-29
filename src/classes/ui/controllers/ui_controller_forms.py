@@ -537,8 +537,9 @@ class UIControllerForms:
             margin_bottom: 下マージン (レイアウト余白用)
         """
         try:
-            from PySide6.QtGui import QFont, QColor
+            from PySide6.QtGui import QFont
             from PySide6.QtWidgets import QWidget
+            from classes.theme import get_qcolor
             # フォント設定
             font = target.font() if isinstance(target.font(), QFont) else QFont()
             font.setPointSize(point_size)
@@ -546,7 +547,7 @@ class UIControllerForms:
             target.setFont(font)
             # パレット設定
             pal = target.palette()
-            pal.setColor(target.foregroundRole(), QColor(get_color(color_key)))
+            pal.setColor(target.foregroundRole(), get_qcolor(color_key))
             target.setPalette(pal)
             # QWidget の周辺余白はレイアウト側で扱うのが理想だが暫定的に property 付与
             # レイアウト余白は親レイアウトが margin を持つため、ここでは objectName に情報のみ保存（将来調整用）

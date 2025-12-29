@@ -19,7 +19,7 @@ from qt_compat.widgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                              QDialog, QDialogButtonBox)
 from qt_compat.core import Qt, QTimer
 from qt_compat.gui import QFont, QTextCursor
-from classes.theme import get_color, ThemeKey
+from classes.theme import get_color, get_qcolor, ThemeKey
 
 # パス設定（上記で一元化）
 
@@ -83,7 +83,7 @@ class RDEDatasetCreationGUI(QMainWindow):
             font.setBold(bold)
             label.setFont(font)
             pal = label.palette()
-            pal.setColor(label.foregroundRole(), QColor(color_str))
+            pal.setColor(label.foregroundRole(), get_qcolor(color_str))
             label.setPalette(pal)
         except Exception:
             try:

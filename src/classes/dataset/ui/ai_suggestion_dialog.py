@@ -4,6 +4,7 @@ AI提案ダイアログ
 """
 
 import os
+import time
 import datetime
 import json
 import logging
@@ -13,7 +14,7 @@ from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QListWidget, QListWidgetItem, QTextEdit, QProgressBar,
     QMessageBox, QSplitter, QWidget, QTabWidget, QGroupBox,
-    QComboBox, QCheckBox
+    QComboBox, QCheckBox, QSpinBox
 )
 from qt_compat.core import Qt, QThread, Signal, QTimer
 from classes.ai.core.ai_manager import AIManager
@@ -125,7 +126,11 @@ class AISuggestionDialog(QDialog):
         self._selected_report_placeholders = {}
         # 報告書一括問い合わせ用
         self._bulk_report_queue = []
-        self._bulk_report_index = 0
+        self._bulk_report_index = 0  # 完了件数（互換のため名称は維持）
+        self._bulk_report_total = 0
+        self._bulk_report_next_index = 0
+        self._bulk_report_inflight = 0
+        self._bulk_report_max_concurrency = 5
         self._bulk_report_running = False
         self._bulk_report_cancelled = False
         self.auto_generate = auto_generate  # 自動生成フラグ
@@ -1570,6 +1575,18 @@ class AISuggestionDialog(QDialog):
         )
         left_layout.addWidget(self.report_bulk_checkbox)
 
+        # 一括問い合わせの並列数（標準5、最大20）
+        parallel_row = QHBoxLayout()
+        parallel_row.addWidget(QLabel("並列数:"))
+        self.report_bulk_parallel_spinbox = QSpinBox()
+        self.report_bulk_parallel_spinbox.setMinimum(1)
+        self.report_bulk_parallel_spinbox.setMaximum(20)
+        self.report_bulk_parallel_spinbox.setValue(5)
+        self.report_bulk_parallel_spinbox.setToolTip("一括問い合わせ時の同時実行数（標準5、最大20）")
+        parallel_row.addWidget(self.report_bulk_parallel_spinbox)
+        parallel_row.addStretch()
+        left_layout.addLayout(parallel_row)
+
         self.report_buttons_widget = QWidget()
         self.report_buttons_layout = QVBoxLayout(self.report_buttons_widget)
         self.report_buttons_layout.setContentsMargins(5, 5, 5, 5)
@@ -1976,10 +1993,9 @@ class AISuggestionDialog(QDialog):
         return placeholders
 
     def _get_report_target_key(self, rec: dict) -> str:
+        # ログファイル名はARIMNOのみ（要件）
         arimno = self._get_report_record_value(rec or {}, ["ARIMNO", "課題番号"])
-        year = self._get_report_record_value(rec or {}, ["年度", "利用年度"])
-        inst_code = self._get_report_record_value(rec or {}, ["機関コード", "実施機関コード"])
-        return "|".join([x for x in [arimno, year, inst_code] if x]) or (arimno or "unknown")
+        return (arimno or "unknown")
 
     def _get_selected_report_records(self) -> List[dict]:
         if not hasattr(self, 'report_entries_table'):
@@ -2096,10 +2112,7 @@ class AISuggestionDialog(QDialog):
                 from classes.dataset.util.ai_suggest_result_log import read_latest_result
 
                 button_id = button_config.get('id', 'unknown')
-                arimno = self._get_report_record_value(self._selected_report_record or {}, ["ARIMNO", "課題番号"])
-                year = self._get_report_record_value(self._selected_report_record or {}, ["年度", "利用年度"])
-                inst_code = self._get_report_record_value(self._selected_report_record or {}, ["機関コード", "実施機関コード"])
-                target_key = "|".join([x for x in [arimno, year, inst_code] if x]) or (arimno or "unknown")
+                target_key = self._get_report_target_key(self._selected_report_record or {})
 
                 latest = read_latest_result('report', target_key, button_id)
                 if latest:
@@ -2254,9 +2267,20 @@ class AISuggestionDialog(QDialog):
 
             self._bulk_report_queue = tasks
             self._bulk_report_index = 0
+            self._bulk_report_total = len(tasks)
+            self._bulk_report_next_index = 0
+            self._bulk_report_inflight = 0
             self._bulk_report_running = True
             self._bulk_report_cancelled = False
             self._bulk_report_button_config = button_config
+
+            # 最大並列数（標準5、最大20）
+            requested = None
+            try:
+                requested = int(getattr(self, 'report_bulk_parallel_spinbox', None).value())
+            except Exception:
+                requested = None
+            self._bulk_report_max_concurrency = self._normalize_bulk_report_concurrency(requested)
 
             # ボタン無効化
             for b in list(getattr(self, 'report_buttons', [])):
@@ -2265,54 +2289,129 @@ class AISuggestionDialog(QDialog):
                 except Exception:
                     pass
 
-            self._run_next_bulk_report_request()
+            self._update_bulk_report_status_message()
+            self._kick_bulk_report_scheduler()
         except Exception as e:
             QMessageBox.critical(self, "エラー", f"一括問い合わせエラー: {str(e)}")
 
     def _run_next_bulk_report_request(self):
+        """後方互換: 旧実装の直列次処理は新スケジューラに委譲"""
+        self._kick_bulk_report_scheduler()
+
+    def _normalize_bulk_report_concurrency(self, requested: Optional[int]) -> int:
+        """一括問い合わせの最大並列数を正規化（標準5、最大20）"""
+        try:
+            value = int(requested) if requested is not None else 5
+        except Exception:
+            value = 5
+        if value < 1:
+            value = 1
+        if value > 20:
+            value = 20
+        return value
+
+    def _update_bulk_report_status_message(self):
+        try:
+            if getattr(self, 'report_spinner_overlay', None):
+                label = (getattr(self, '_bulk_report_button_config', {}) or {}).get('label', 'AI')
+                total = int(self._bulk_report_total or len(self._bulk_report_queue) or 0)
+                done = int(self._bulk_report_index or 0)
+                inflight = int(self._bulk_report_inflight or 0)
+                if total > 0:
+                    self.report_spinner_overlay.set_message(
+                        f"一括処理中 完了 {done}/{total} / 実行中 {inflight}: {label}"
+                    )
+        except Exception:
+            pass
+
+    def _kick_bulk_report_scheduler(self):
+        """一括問い合わせの並列スケジューラ（空きがあれば次タスクを起動）"""
         if not self._bulk_report_running or self._bulk_report_cancelled:
+            # 実行中タスクが無くなったら終了
+            if int(self._bulk_report_inflight or 0) <= 0:
+                self._finish_bulk_report_requests()
+            return
+
+        total = int(self._bulk_report_total or len(self._bulk_report_queue) or 0)
+        if total <= 0:
             self._finish_bulk_report_requests()
             return
-        if self._bulk_report_index >= len(self._bulk_report_queue):
-            self._finish_bulk_report_requests()
-            return
 
-        task = self._bulk_report_queue[self._bulk_report_index]
-        rec = task.get('record')
-        if not isinstance(rec, dict):
-            self._bulk_report_index += 1
-            self._run_next_bulk_report_request()
-            return
+        max_conc = self._normalize_bulk_report_concurrency(getattr(self, '_bulk_report_max_concurrency', 5))
 
-        placeholders = self._build_report_placeholders_for_record(rec)
-        button_config = getattr(self, '_bulk_report_button_config', {}) or {}
-        prompt = self.build_report_prompt(button_config, placeholders=placeholders)
-        if not prompt:
-            self._bulk_report_index += 1
-            self._run_next_bulk_report_request()
-            return
+        while (
+            self._bulk_report_inflight < max_conc
+            and self._bulk_report_next_index < len(self._bulk_report_queue)
+            and self._bulk_report_running
+            and not self._bulk_report_cancelled
+        ):
+            task = self._bulk_report_queue[self._bulk_report_next_index]
+            self._bulk_report_next_index += 1
 
-        if getattr(self, 'report_spinner_overlay', None):
-            label = button_config.get('label', 'AI')
-            self.report_spinner_overlay.set_message(
-                f"一括処理中 {self._bulk_report_index + 1}/{len(self._bulk_report_queue)}: {label}"
+            rec = task.get('record')
+            if not isinstance(rec, dict):
+                # 不正データはスキップ（完了として扱う）
+                self._bulk_report_index += 1
+                continue
+
+            placeholders = self._build_report_placeholders_for_record(rec)
+            button_config = getattr(self, '_bulk_report_button_config', {}) or {}
+            prompt = self.build_report_prompt(button_config, placeholders=placeholders)
+            if not prompt:
+                self._bulk_report_index += 1
+                continue
+
+            self._bulk_report_inflight += 1
+            self._update_bulk_report_status_message()
+
+            self.execute_report_ai_request(
+                prompt,
+                button_config,
+                button_widget=None,
+                report_record=rec,
+                report_placeholders=placeholders,
+                report_target_key=task.get('target_key') or self._get_report_target_key(rec),
+                _bulk_continue=True,
             )
 
-        self.execute_report_ai_request(
-            prompt,
-            button_config,
-            button_widget=None,
-            report_record=rec,
-            report_placeholders=placeholders,
-            report_target_key=task.get('target_key') or self._get_report_target_key(rec),
-            _bulk_continue=True,
-        )
+        # すべて投入済み & 実行中なしなら終了
+        if (
+            self._bulk_report_running
+            and not self._bulk_report_cancelled
+            and self._bulk_report_next_index >= len(self._bulk_report_queue)
+            and self._bulk_report_inflight <= 0
+            and self._bulk_report_index >= total
+        ):
+            self._finish_bulk_report_requests()
+
+    def _on_bulk_report_task_done(self):
+        """一括問い合わせの1タスク完了通知（成功/失敗共通）"""
+        try:
+            if self._bulk_report_inflight > 0:
+                self._bulk_report_inflight -= 1
+        except Exception:
+            self._bulk_report_inflight = 0
+
+        # 完了件数を進める（上限はtotalでクリップ）
+        try:
+            self._bulk_report_index += 1
+            total = int(self._bulk_report_total or len(self._bulk_report_queue) or 0)
+            if total > 0 and self._bulk_report_index > total:
+                self._bulk_report_index = total
+        except Exception:
+            pass
+
+        self._update_bulk_report_status_message()
+        self._kick_bulk_report_scheduler()
 
     def _finish_bulk_report_requests(self):
         self._bulk_report_running = False
         self._bulk_report_cancelled = False
         self._bulk_report_queue = []
         self._bulk_report_index = 0
+        self._bulk_report_total = 0
+        self._bulk_report_next_index = 0
+        self._bulk_report_inflight = 0
         try:
             if getattr(self, 'report_spinner_overlay', None):
                 self.report_spinner_overlay.set_message("AI応答を待機中...")
@@ -2385,12 +2484,13 @@ class AISuggestionDialog(QDialog):
         layout.addLayout(filters)
 
         self.results_table = QTableWidget()
-        self.results_table.setColumnCount(5)
+        self.results_table.setColumnCount(6)
         self.results_table.setHorizontalHeaderLabels([
             "日時",
             "対象キー",
             "ボタン",
             "モデル",
+            "所要時間(秒)",
             "結果(先頭)",
         ])
         self.results_table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -2668,6 +2768,39 @@ class AISuggestionDialog(QDialog):
                 content = re.sub(r'\s+', ' ', str(content)).strip()
                 return content[:120] + ('…' if len(content) > 120 else '')
 
+            def _format_elapsed_seconds(rec: dict) -> str:
+                v = rec.get('elapsed_seconds')
+                if v is not None and v != '':
+                    try:
+                        fv = float(v)
+                        if fv < 0:
+                            return ''
+                        return f"{fv:.2f}"
+                    except Exception:
+                        return ''
+
+                started = rec.get('started_at')
+                finished = rec.get('finished_at')
+                if not started or not finished:
+                    return ''
+                try:
+                    from datetime import datetime
+
+                    def _parse_iso(s: str) -> datetime:
+                        s = str(s).strip()
+                        if s.endswith('Z'):
+                            s = s[:-1] + '+00:00'
+                        return datetime.fromisoformat(s)
+
+                    dt0 = _parse_iso(started)
+                    dt1 = _parse_iso(finished)
+                    sec = (dt1 - dt0).total_seconds()
+                    if sec < 0:
+                        return ''
+                    return f"{sec:.2f}"
+                except Exception:
+                    return ''
+
             # JSON列表示はボタン指定が必須（キー設定がボタン定義に紐づくため）
             if view_mode == 'json_columns' and not bid:
                 view_mode = 'snippet'
@@ -2679,7 +2812,7 @@ class AISuggestionDialog(QDialog):
 
             if view_mode == 'snippet':
                 if kind == 'report':
-                    self.results_table.setColumnCount(7)
+                    self.results_table.setColumnCount(8)
                     self.results_table.setHorizontalHeaderLabels([
                         "日時",
                         "対象キー",
@@ -2687,15 +2820,17 @@ class AISuggestionDialog(QDialog):
                         "重要技術領域（副）",
                         "ボタン",
                         "モデル",
+                        "所要時間(秒)",
                         "結果(先頭)",
                     ])
                 else:
-                    self.results_table.setColumnCount(5)
+                    self.results_table.setColumnCount(6)
                     self.results_table.setHorizontalHeaderLabels([
                         "日時",
                         "対象キー",
                         "ボタン",
                         "モデル",
+                        "所要時間(秒)",
                         "結果(先頭)",
                     ])
                 self.results_table.setRowCount(len(recs))
@@ -2704,14 +2839,15 @@ class AISuggestionDialog(QDialog):
                     tkey = str(rec.get('target_key') or '')
                     blabel = str(rec.get('button_label') or rec.get('button_id') or '')
                     model = str(rec.get('model') or '')
+                    elapsed = _format_elapsed_seconds(rec)
                     snip = _snippet(rec)
 
                     if kind == 'report':
                         task_number = extract_task_number_from_report_target_key(tkey)
                         main_area, sub_area = tech_index.get(task_number, ('', ''))
-                        values = [ts, tkey, str(main_area or ''), str(sub_area or ''), blabel, model, snip]
+                        values = [ts, tkey, str(main_area or ''), str(sub_area or ''), blabel, model, elapsed, snip]
                     else:
-                        values = [ts, tkey, blabel, model, snip]
+                        values = [ts, tkey, blabel, model, elapsed, snip]
 
                     for col_idx, value in enumerate(values):
                         item = QTableWidgetItem(value)
@@ -2760,9 +2896,9 @@ class AISuggestionDialog(QDialog):
 
                 include_elem = any((r.get('elem') or '') != '' for r in rows)
                 if kind == 'report':
-                    base_headers = ["日時", "対象キー", "重要技術領域（主）", "重要技術領域（副）"] + (["要素"] if include_elem else []) + ["ボタン", "モデル"]
+                    base_headers = ["日時", "対象キー", "重要技術領域（主）", "重要技術領域（副）"] + (["要素"] if include_elem else []) + ["ボタン", "モデル", "所要時間(秒)"]
                 else:
-                    base_headers = ["日時", "対象キー"] + (["要素"] if include_elem else []) + ["ボタン", "モデル"]
+                    base_headers = ["日時", "対象キー"] + (["要素"] if include_elem else []) + ["ボタン", "モデル", "所要時間(秒)"]
                 headers = base_headers + keys
                 self.results_table.setColumnCount(len(headers))
                 self.results_table.setHorizontalHeaderLabels(headers)
@@ -2771,14 +2907,16 @@ class AISuggestionDialog(QDialog):
                 for row_idx, row in enumerate(rows):
                     rec = row['rec']
 
+                    elapsed = _format_elapsed_seconds(rec)
+
                     if kind == 'report':
                         task_number = extract_task_number_from_report_target_key(row['tkey'])
                         main_area, sub_area = tech_index.get(task_number, ('', ''))
-                        base_values = [row['ts'], row['tkey'], str(main_area or ''), str(sub_area or '')] + ([row['elem']] if include_elem else []) + [row['blabel'], row['model']]
-                        json_base_headers = ["日時", "対象キー", "重要技術領域（主）", "重要技術領域（副）"] + (["要素"] if include_elem else []) + ["ボタン", "モデル"]
+                        base_values = [row['ts'], row['tkey'], str(main_area or ''), str(sub_area or '')] + ([row['elem']] if include_elem else []) + [row['blabel'], row['model'], elapsed]
+                        json_base_headers = ["日時", "対象キー", "重要技術領域（主）", "重要技術領域（副）"] + (["要素"] if include_elem else []) + ["ボタン", "モデル", "所要時間(秒)"]
                     else:
-                        base_values = [row['ts'], row['tkey']] + ([row['elem']] if include_elem else []) + [row['blabel'], row['model']]
-                        json_base_headers = ["日時", "対象キー"] + (["要素"] if include_elem else []) + ["ボタン", "モデル"]
+                        base_values = [row['ts'], row['tkey']] + ([row['elem']] if include_elem else []) + [row['blabel'], row['model'], elapsed]
+                        json_base_headers = ["日時", "対象キー"] + (["要素"] if include_elem else []) + ["ボタン", "モデル", "所要時間(秒)"]
 
                     for col_idx, value in enumerate(base_values):
                         item = QTableWidgetItem(str(value))
@@ -2915,7 +3053,13 @@ ARIMNO: {{ARIMNO}}
             button_label = button_config.get('label', 'AI処理')
             button_icon = button_config.get('icon', '🤖')
             if getattr(self, 'report_spinner_overlay', None):
-                self.report_spinner_overlay.set_message(f"{button_icon} {button_label} 実行中...")
+                # 一括実行中はスケジューラ側で進捗メッセージを管理する
+                if not (_bulk_continue and self._bulk_report_running):
+                    self.report_spinner_overlay.set_message(f"{button_icon} {button_label} 実行中...")
+
+            # 開始時刻/所要時間計測（ログ保存用）
+            started_at = datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec='seconds')
+            started_perf = time.perf_counter()
 
             # AIリクエストスレッド
             ai_thread = AIRequestThread(prompt, self._selected_report_placeholders)
@@ -2992,6 +3136,9 @@ ARIMNO: {{ARIMNO}}
                             model=self.last_api_model,
                             request_params=self.last_api_request_params,
                             response_params=self.last_api_response_params,
+                            started_at=started_at,
+                            finished_at=datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec='seconds'),
+                            elapsed_seconds=round(time.perf_counter() - started_perf, 3),
                         )
                     except Exception:
                         pass
@@ -3014,8 +3161,7 @@ ARIMNO: {{ARIMNO}}
 
                     # 一括継続
                     if _bulk_continue and self._bulk_report_running:
-                        self._bulk_report_index += 1
-                        self._run_next_bulk_report_request()
+                        self._on_bulk_report_task_done()
 
             def on_error(error_message):
                 try:
@@ -3038,8 +3184,7 @@ ARIMNO: {{ARIMNO}}
                                 pass
 
                     if _bulk_continue and self._bulk_report_running:
-                        self._bulk_report_index += 1
-                        self._run_next_bulk_report_request()
+                        self._on_bulk_report_task_done()
 
                     self.last_api_request_params = None
                     self.last_api_response_params = None
@@ -3081,6 +3226,9 @@ ARIMNO: {{ARIMNO}}
             self._bulk_report_cancelled = True
             self._bulk_report_running = False
             self._bulk_report_queue = []
+            self._bulk_report_total = 0
+            self._bulk_report_next_index = 0
+            self._bulk_report_inflight = 0
             for thread in list(self.report_ai_threads):
                 try:
                     if thread and thread.isRunning():
@@ -4176,6 +4324,9 @@ ARIMNO: {{ARIMNO}}
                             model=self.last_api_model,
                             request_params=self.last_api_request_params,
                             response_params=self.last_api_response_params,
+                            started_at=(result.get('started_at') if isinstance(result, dict) else None),
+                            finished_at=(result.get('finished_at') if isinstance(result, dict) else None),
+                            elapsed_seconds=(result.get('elapsed_seconds') if isinstance(result, dict) else None),
                         )
                     except Exception:
                         pass

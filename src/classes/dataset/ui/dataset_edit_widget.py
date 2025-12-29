@@ -2692,6 +2692,29 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 def on_check_success(result):
                     """チェック完了"""
                     response_text = result.get('response', '')
+
+                    # ログ保存（結果一覧タブで参照できるようにする）
+                    try:
+                        from classes.dataset.util.ai_suggest_result_log import append_result
+
+                        append_result(
+                            target_kind='dataset',
+                            target_key=str(dataset_id or '').strip() or str(selected_dataset.get('attributes', {}).get('grantNumber', '') or '').strip() or 'unknown',
+                            button_id='ai_check',
+                            button_label='AI CHECK',
+                            prompt=prompt,
+                            display_format='text',
+                            display_content=str(response_text or ''),
+                            provider=(result.get('provider') if isinstance(result, dict) else None),
+                            model=(result.get('model') if isinstance(result, dict) else None),
+                            request_params=(result.get('request_params') if isinstance(result, dict) else None),
+                            response_params=(result.get('response_params') if isinstance(result, dict) else None),
+                            started_at=(result.get('started_at') if isinstance(result, dict) else None),
+                            finished_at=(result.get('finished_at') if isinstance(result, dict) else None),
+                            elapsed_seconds=(result.get('elapsed_seconds') if isinstance(result, dict) else None),
+                        )
+                    except Exception:
+                        pass
                     
                     # JSON検証・修正
                     try:
@@ -2715,7 +2738,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                         
                         # 見やすいカスタムダイアログを作成
                         from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit, QPushButton
-                        from PySide6.QtGui import QFont, QColor
+                        from PySide6.QtGui import QFont
                         from PySide6.QtCore import Qt
                         
                         result_dialog = QDialog(widget)

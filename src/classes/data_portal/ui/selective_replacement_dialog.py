@@ -17,9 +17,9 @@ from qt_compat.widgets import (
     QWidget
 )
 from qt_compat.core import Qt
-from qt_compat.gui import QBrush, QColor
+from qt_compat.gui import QBrush
 
-from classes.theme import get_color, ThemeKey
+from classes.theme import get_color, get_qcolor, ThemeKey
 from classes.managers.log_manager import get_logger
 
 logger = get_logger("DataPortal.SelectiveReplacementDialog")
@@ -229,16 +229,16 @@ class SelectiveReplacementDialog(QDialog):
             current_item = QTableWidgetItem(data['current'])
             current_item.setFlags(Qt.ItemIsEnabled)  # 編集不可
             if data['type'] == 'current_only':
-                current_item.setBackground(QBrush(QColor(get_color(ThemeKey.TABLE_ROW_BACKGROUND_ALTERNATE))))
+                current_item.setBackground(QBrush(get_qcolor(ThemeKey.TABLE_ROW_BACKGROUND_ALTERNATE)))
             self.table.setItem(row, 1, current_item)
 
             # 新規候補
             suggested_item = QTableWidgetItem(data['suggested'])
             suggested_item.setFlags(Qt.ItemIsEnabled)
             if data['type'] == 'suggested_only':
-                suggested_item.setBackground(QBrush(QColor(get_color(ThemeKey.PANEL_INFO_BACKGROUND))))
+                suggested_item.setBackground(QBrush(get_qcolor(ThemeKey.PANEL_INFO_BACKGROUND)))
             elif data['type'] == 'duplicate':
-                suggested_item.setBackground(QBrush(QColor(get_color(ThemeKey.PANEL_WARNING_BACKGROUND))))
+                suggested_item.setBackground(QBrush(get_qcolor(ThemeKey.PANEL_WARNING_BACKGROUND)))
             self.table.setItem(row, 2, suggested_item)
 
             # 拡張機能ボタン（装置・プロセスのみ）

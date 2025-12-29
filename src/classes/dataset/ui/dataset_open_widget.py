@@ -394,6 +394,31 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
                 except Exception:
                     pass
                 response_text = result.get("response", "")
+
+                # ログ保存（結果一覧タブで参照できるようにする）
+                try:
+                    from classes.dataset.util.ai_suggest_result_log import append_result
+
+                    target_key = (grant_number or '').strip() or (name or '').strip() or 'unknown'
+                    append_result(
+                        target_kind='dataset',
+                        target_key=target_key,
+                        button_id='ai_check',
+                        button_label='AI CHECK',
+                        prompt=prompt,
+                        display_format='text',
+                        display_content=str(response_text or ''),
+                        provider=(result.get('provider') if isinstance(result, dict) else None),
+                        model=(result.get('model') if isinstance(result, dict) else None),
+                        request_params=(result.get('request_params') if isinstance(result, dict) else None),
+                        response_params=(result.get('response_params') if isinstance(result, dict) else None),
+                        started_at=(result.get('started_at') if isinstance(result, dict) else None),
+                        finished_at=(result.get('finished_at') if isinstance(result, dict) else None),
+                        elapsed_seconds=(result.get('elapsed_seconds') if isinstance(result, dict) else None),
+                    )
+                except Exception:
+                    pass
+
                 summary_text = response_text
                 try:
                     import json as _json

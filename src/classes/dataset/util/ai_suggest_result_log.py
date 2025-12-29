@@ -34,10 +34,72 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).astimezone().isoformat(timespec='seconds')
 
 
+def _extract_report_arimno(target_key: str) -> str:
+    """報告書ログのファイル名はARIMNOのみとする。
+
+    旧実装では target_key が 'ARIMNO|年度|機関コード' など複合だったため、
+    先頭要素（ARIMNO）を抽出して返す。
+    """
+    text = (target_key or '').strip()
+    if not text:
+        return "unknown"
+
+    # 新/旧両方を想定: 'ARIM|2024|A01' / 'ARIM_2024_A01'
+    if '|' in text:
+        head = (text.split('|', 1)[0] or '').strip()
+        return head or "unknown"
+    if '_' in text:
+        head = (text.split('_', 1)[0] or '').strip()
+        return head or "unknown"
+    return text
+
+
+def _iter_candidate_report_log_paths(button_id: str, target_key: str) -> List[str]:
+    """報告書ログの候補パス（新形式 + 旧形式）を返す。"""
+    bid = _safe_filename(button_id)
+    arimno = _safe_filename(_extract_report_arimno(target_key))
+
+    base_rel = f"output/ai_suggest_logs/report/{bid}"
+    base_dir = get_dynamic_file_path(base_rel)
+
+    candidates: List[str] = []
+
+    # 新形式（ARIMNO.jsonl）
+    candidates.append(os.path.join(base_dir, f"{arimno}.jsonl"))
+
+    # 旧形式（ARIMNO_*.jsonl）も拾う
+    try:
+        if os.path.exists(base_dir):
+            for fn in os.listdir(base_dir):
+                if not fn.lower().endswith('.jsonl'):
+                    continue
+                if fn == f"{arimno}.jsonl":
+                    continue
+                if fn.startswith(f"{arimno}_"):
+                    candidates.append(os.path.join(base_dir, fn))
+    except Exception:
+        pass
+
+    # 実在するものを優先（重複除去）
+    seen = set()
+    existing: List[str] = []
+    for p in candidates:
+        if p in seen:
+            continue
+        seen.add(p)
+        if os.path.exists(p):
+            existing.append(p)
+
+    return existing
+
+
 def build_log_path(target_kind: str, button_id: str, target_key: str) -> str:
     kind = 'report' if (target_kind or '').strip().lower() == 'report' else 'dataset'
     bid = _safe_filename(button_id)
-    tkey = _safe_filename(target_key)
+    if kind == 'report':
+        tkey = _safe_filename(_extract_report_arimno(target_key))
+    else:
+        tkey = _safe_filename(target_key)
     rel = f"output/ai_suggest_logs/{kind}/{bid}/{tkey}.jsonl"
     return get_dynamic_file_path(rel)
 
@@ -55,6 +117,9 @@ def append_result(
     model: Optional[str] = None,
     request_params: Optional[Dict[str, Any]] = None,
     response_params: Optional[Dict[str, Any]] = None,
+    started_at: Optional[str] = None,
+    finished_at: Optional[str] = None,
+    elapsed_seconds: Optional[float] = None,
 ) -> str:
     """Append a result to per-target+button log (jsonl). Returns log file path."""
     path = build_log_path(target_kind, button_id, target_key)
@@ -73,6 +138,9 @@ def append_result(
         'model': model,
         'request_params': request_params,
         'response_params': response_params,
+        'started_at': started_at,
+        'finished_at': finished_at,
+        'elapsed_seconds': elapsed_seconds,
     }
 
     with open(path, 'a', encoding='utf-8') as f:
@@ -83,8 +151,31 @@ def append_result(
 
 def read_latest_result(target_kind: str, target_key: str, button_id: str) -> Optional[Dict[str, Any]]:
     """Return the latest logged result record for target+button, if exists."""
-    path = build_log_path(target_kind, button_id, target_key)
-    return _read_latest_record_from_jsonl(path)
+    kind = 'report' if (target_kind or '').strip().lower() == 'report' else 'dataset'
+    if kind != 'report':
+        path = build_log_path(target_kind, button_id, target_key)
+        return _read_latest_record_from_jsonl(path)
+
+    # report: 新形式 + 旧形式を横断して最新を返す
+    direct_path = build_log_path(target_kind, button_id, target_key)
+    direct = _read_latest_record_from_jsonl(direct_path)
+    if isinstance(direct, dict):
+        return direct
+
+    best: Optional[Dict[str, Any]] = None
+    best_ts = ''
+    for path in _iter_candidate_report_log_paths(button_id, target_key):
+        rec = _read_latest_record_from_jsonl(path)
+        if not isinstance(rec, dict):
+            continue
+        ts = (rec.get('timestamp') or '').strip()
+        ts = re.sub(r'\.\d+(?=[+-]\\d\\d:\\d\\d$)', '', ts)
+        if ts and ts > best_ts:
+            best_ts = ts
+            best = rec
+        elif not best and rec:
+            best = rec
+    return best
 
 
 def _read_latest_record_from_jsonl(path: str) -> Optional[Dict[str, Any]]:

@@ -51,15 +51,44 @@ class AIManager:
         config = {
             "ai_providers": {
                 "openai": {"enabled": False, "api_key": "", "models": ["gpt-5-mini"]},
-                "gemini": {"enabled": False, "api_key": "", "models": ["gemini-1.5-flash"]},
+                "gemini": {
+                    "enabled": False,
+                    "api_key": "",
+                    "models": ["gemini-1.5-flash"],
+                    # 認証方式: 'api_key' または 'vertex_sa'
+                    "auth_mode": "api_key",
+                    # Vertex AI（サービスアカウントJSON）利用時
+                    # - vertex_service_account_json: input配下などの相対パスを推奨
+                    # - vertex_project_id: 空の場合はJSON内 project_id を使用
+                    # - vertex_location: 例) asia-northeast1, us-central1
+                    "vertex_service_account_json": "",
+                    "vertex_project_id": "",
+                    "vertex_location": "asia-northeast1",
+                },
                 "local_llm": {"enabled": False, "base_url": "http://localhost:11434/v1", "models": ["llama3.2:3b"]}
             },
             "default_provider": "gemini",
             "timeout": 30,
             "max_tokens": 1000,
-            "temperature": 0.7
+            "temperature": 0.7,
+            # AI APIリクエストの最大試行回数（失敗時に再試行）
+            # 既定: 3回（1回目 + リトライ2回） / 最大: 5回
+            "request_max_attempts": 3,
         }
         return normalize_ai_config_inplace(config)
+
+    def _get_request_max_attempts(self) -> int:
+        """AI APIリクエストの最大試行回数（既定3、最大5）"""
+        try:
+            raw = self.config.get("request_max_attempts", 3)
+            value = int(raw)
+        except Exception:
+            value = 3
+        if value < 1:
+            value = 1
+        if value > 5:
+            value = 5
+        return value
     
     def get_available_providers(self) -> List[str]:
         """利用可能なAIプロバイダーのリストを取得"""
@@ -72,7 +101,22 @@ class AIManager:
     def get_models_for_provider(self, provider: str) -> List[str]:
         """指定されたプロバイダーのモデル一覧を取得"""
         if provider in self.config["ai_providers"]:
-            return self.config["ai_providers"][provider].get("models", [])
+            provider_config = self.config["ai_providers"][provider]
+
+            # Geminiは認証方式（APIキー / Vertex SA）ごとにモデル一覧を分離できる
+            if provider == 'gemini':
+                try:
+                    auth_mode = (provider_config.get('auth_mode') or 'api_key').strip().lower()
+                except Exception:
+                    auth_mode = 'api_key'
+
+                models_by_auth = provider_config.get('models_by_auth')
+                if isinstance(models_by_auth, dict):
+                    models = models_by_auth.get(auth_mode)
+                    if isinstance(models, list):
+                        return models
+
+            return provider_config.get("models", [])
         return []
     
     def get_default_provider(self) -> str:
@@ -83,11 +127,25 @@ class AIManager:
         """指定されたプロバイダーのデフォルトモデルを取得"""
         if provider in self.config["ai_providers"]:
             provider_config = self.config["ai_providers"][provider]
+
+            # Geminiは認証方式（APIキー / Vertex SA）ごとにデフォルトモデルを分離できる
+            if provider == 'gemini':
+                try:
+                    auth_mode = (provider_config.get('auth_mode') or 'api_key').strip().lower()
+                except Exception:
+                    auth_mode = 'api_key'
+
+                default_by_auth = provider_config.get('default_model_by_auth')
+                if isinstance(default_by_auth, dict):
+                    v = default_by_auth.get(auth_mode)
+                    if isinstance(v, str) and v.strip():
+                        return v.strip()
+
             default_model = provider_config.get("default_model", "")
             
             # default_modelが設定されていない場合は最初のモデルを返す
             if not default_model:
-                models = provider_config.get("models", [])
+                models = self.get_models_for_provider(provider)
                 if models:
                     return models[0]
             
@@ -96,44 +154,233 @@ class AIManager:
     
     def send_prompt(self, prompt: str, provider: str, model: str) -> Dict[str, Any]:
         """プロンプトをAIに送信して応答を取得"""
-        try:
-            # プロンプト長の制限チェック（文字数ベース）
-            max_prompt_length = 50000  # 約12,500トークン相当（4文字=1トークン想定）
-            if len(prompt) > max_prompt_length:
-                # プロンプトを切り詰める
-                truncated_prompt = prompt[:max_prompt_length]
-                truncated_prompt += "\n\n[注意: プロンプトが長すぎるため切り詰められました]"
-                logger.debug("プロンプトが長すぎます。元の長さ: %s, 切り詰め後: %s", len(prompt), len(truncated_prompt))
-                prompt = truncated_prompt
-            
-            if provider == "openai":
-                result = self._send_openai_request(prompt, model)
-            elif provider == "gemini":
-                result = self._send_gemini_request(prompt, model)
-            elif provider == "local_llm":
-                result = self._send_local_llm_request(prompt, model)
-            else:
-                result = {"success": False, "error": f"未対応のプロバイダー: {provider}"}
+        import datetime as _dt
 
-            # 呼び出し側で参照できるように provider/model を常に付与
+        # プロンプト長の制限チェック（文字数ベース）
+        max_prompt_length = 50000  # 約12,500トークン相当（4文字=1トークン想定）
+        if len(prompt) > max_prompt_length:
+            truncated_prompt = prompt[:max_prompt_length]
+            truncated_prompt += "\n\n[注意: プロンプトが長すぎるため切り詰められました]"
+            logger.debug("プロンプトが長すぎます。元の長さ: %s, 切り詰め後: %s", len(prompt), len(truncated_prompt))
+            prompt = truncated_prompt
+
+        started_at = _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(timespec='seconds')
+        started_perf = time.perf_counter()
+
+        def _attach_timing(res: Dict[str, Any]) -> Dict[str, Any]:
+            try:
+                finished_at = _dt.datetime.now(_dt.timezone.utc).astimezone().isoformat(timespec='seconds')
+            except Exception:
+                finished_at = None
+            try:
+                elapsed = round(time.perf_counter() - started_perf, 3)
+            except Exception:
+                elapsed = None
+
+            if isinstance(res, dict):
+                res.setdefault('started_at', started_at)
+                res.setdefault('finished_at', finished_at)
+                res.setdefault('elapsed_seconds', elapsed)
+            return res
+
+        max_attempts = self._get_request_max_attempts()
+        last_result: Dict[str, Any] = {"success": False, "error": "AI呼び出し失敗（未実行）"}
+
+        # Gemini は内部でリトライを完結させる（外側で再試行すると試行回数が二重化する）
+        if provider == "gemini":
+            try:
+                result = self._send_gemini_request(prompt, model, retry_count=0, max_retries=max_attempts - 1)
+            except Exception as e:
+                logger.error("AI API呼び出し例外 (%s): %s", provider, e)
+                result = {"success": False, "error": str(e)}
+
             if isinstance(result, dict):
                 result.setdefault("provider", provider)
                 result.setdefault("model", model)
+                result.setdefault("retry_count", 0)
 
                 req_params = result.get("request_params")
                 if isinstance(req_params, dict):
                     req_params.setdefault("provider", provider)
                     req_params.setdefault("model", model)
+                    req_params.setdefault("max_attempts", max_attempts)
 
                 resp_params = result.get("response_params")
                 if isinstance(resp_params, dict):
                     resp_params.setdefault("provider", provider)
                     resp_params.setdefault("model", model)
+                    resp_params.setdefault("max_attempts", max_attempts)
 
-            return result
+            if isinstance(result, dict):
+                return _attach_timing(result)
+            return _attach_timing({"success": False, "error": "AI応答形式が不正です", "provider": provider, "model": model})
+
+        for attempt_index in range(max_attempts):
+            try:
+                if provider == "openai":
+                    result = self._send_openai_request(prompt, model)
+                elif provider == "local_llm":
+                    result = self._send_local_llm_request(prompt, model)
+                else:
+                    result = {"success": False, "error": f"未対応のプロバイダー: {provider}"}
+            except Exception as e:
+                logger.error("AI API呼び出し例外 (%s): %s", provider, e)
+                result = {"success": False, "error": str(e)}
+
+            # 呼び出し側で参照できるように provider/model を常に付与
+            if isinstance(result, dict):
+                result.setdefault("provider", provider)
+                result.setdefault("model", model)
+                result.setdefault("retry_count", attempt_index)
+
+                req_params = result.get("request_params")
+                if isinstance(req_params, dict):
+                    req_params.setdefault("provider", provider)
+                    req_params.setdefault("model", model)
+                    req_params.setdefault("attempt", attempt_index + 1)
+                    req_params.setdefault("max_attempts", max_attempts)
+
+                resp_params = result.get("response_params")
+                if isinstance(resp_params, dict):
+                    resp_params.setdefault("provider", provider)
+                    resp_params.setdefault("model", model)
+                    resp_params.setdefault("attempt", attempt_index + 1)
+                    resp_params.setdefault("max_attempts", max_attempts)
+
+            last_result = result if isinstance(result, dict) else {"success": False, "error": "AI応答形式が不正です"}
+
+            if isinstance(result, dict) and result.get("success") is True:
+                return _attach_timing(result)
+
+            # 失敗時: 次の試行へ
+            if attempt_index < max_attempts - 1 and provider != "gemini":
+                # UIフリーズを避けるため、短い待ち時間のみ入れる（pytestではスキップ）
+                if not os.environ.get("PYTEST_CURRENT_TEST"):
+                    time.sleep(0.2)
+
+        if isinstance(last_result, dict):
+            return _attach_timing(last_result)
+        return _attach_timing({"success": False, "error": "AI応答形式が不正です", "provider": provider, "model": model})
+
+    @staticmethod
+    def _b64url(data: bytes) -> str:
+        import base64
+
+        return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+
+    def _load_service_account_json(self, path_or_rel: str) -> Dict[str, Any]:
+        import os
+
+        raw = (path_or_rel or "").strip()
+        if not raw:
+            raise ValueError("サービスアカウントJSONが未設定です")
+
+        # 相対パスは input/.. のように指定される想定
+        path = raw
+        try:
+            if not os.path.isabs(path):
+                path = get_dynamic_file_path(path)
+        except Exception:
+            # get_dynamic_file_path が失敗しても、raw を試す
+            path = raw
+
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"サービスアカウントJSONが見つかりません: {path}")
+
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            raise ValueError("サービスアカウントJSONの形式が不正です")
+        return data
+
+    def _get_vertex_access_token(self, sa_info: Dict[str, Any]) -> str:
+        """サービスアカウントJSONからOAuthアクセストークンを取得（キャッシュあり）。"""
+        import time
+
+        # キャッシュ
+        cache = getattr(self, "_vertex_token_cache", None)
+        now = int(time.time())
+        if isinstance(cache, dict):
+            token = cache.get("access_token")
+            exp = cache.get("exp")
+            try:
+                if token and int(exp) - 60 > now:
+                    return str(token)
+            except Exception:
+                pass
+
+        token_uri = str(sa_info.get("token_uri") or "https://oauth2.googleapis.com/token")
+        client_email = str(sa_info.get("client_email") or "").strip()
+        private_key = str(sa_info.get("private_key") or "").strip()
+        if not client_email or not private_key:
+            raise ValueError("サービスアカウントJSONに client_email/private_key がありません")
+
+        scope = "https://www.googleapis.com/auth/cloud-platform"
+
+        # JWT assertion
+        iat = now
+        exp = now + 3600
+        header = {"alg": "RS256", "typ": "JWT"}
+        payload = {
+            "iss": client_email,
+            "scope": scope,
+            "aud": token_uri,
+            "iat": iat,
+            "exp": exp,
+        }
+
+        signing_input = (
+            f"{self._b64url(json.dumps(header, separators=(',', ':')).encode('utf-8'))}."
+            f"{self._b64url(json.dumps(payload, separators=(',', ':')).encode('utf-8'))}"
+        ).encode("ascii")
+
+        try:
+            from Cryptodome.PublicKey import RSA  # type: ignore
+            from Cryptodome.Signature import pkcs1_15  # type: ignore
+            from Cryptodome.Hash import SHA256  # type: ignore
         except Exception as e:
-            logger.error(f"AI API呼び出しエラー ({provider}): {e}")
-            return {"success": False, "error": str(e), "provider": provider, "model": model}
+            raise RuntimeError(f"pycryptodomex が利用できません: {e}")
+
+        try:
+            key = RSA.import_key(private_key)
+            h = SHA256.new(signing_input)
+            signature = pkcs1_15.new(key).sign(h)
+        except Exception as e:
+            raise RuntimeError(f"サービスアカウント鍵での署名に失敗しました: {e}")
+
+        assertion = signing_input.decode("ascii") + "." + self._b64url(signature)
+
+        # Token request
+        body = {
+            "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion": assertion,
+        }
+
+        # NOTE: ここはフォームで送る
+        resp = self.session.post(token_uri, data=body, timeout=self.config.get("timeout", 120))
+        if resp.status_code != 200:
+            raise RuntimeError(f"OAuthトークン取得に失敗: {resp.status_code} - {resp.text}")
+        try:
+            token_json = resp.json()
+        except Exception as e:
+            raise RuntimeError(f"OAuthトークン応答JSONの解析に失敗: {type(e).__name__}")
+
+        access_token = token_json.get("access_token")
+        if not access_token:
+            raise RuntimeError("OAuthトークン応答に access_token がありません")
+
+        # 応答のexpires_in（秒）を優先
+        try:
+            expires_in = int(token_json.get("expires_in") or 3600)
+        except Exception:
+            expires_in = 3600
+        exp_cache = now + max(60, min(expires_in, 3600))
+        try:
+            self._vertex_token_cache = {"access_token": access_token, "exp": exp_cache}
+        except Exception:
+            pass
+
+        return str(access_token)
     
     def _send_openai_request(self, prompt: str, model: str) -> Dict[str, Any]:
         """OpenAI APIにリクエストを送信"""
@@ -253,7 +500,7 @@ class AIManager:
                 },
             }
     
-    def _send_gemini_request(self, prompt: str, model: str, retry_count: int = 0) -> Dict[str, Any]:
+    def _send_gemini_request(self, prompt: str, model: str, retry_count: int = 0, max_retries: int = None) -> Dict[str, Any]:
         """Gemini APIにリクエストを送信（リトライ対応）
         
         Args:
@@ -265,16 +512,91 @@ class AIManager:
             APIレスポンスの辞書
         """        
         config = self.config["ai_providers"]["gemini"]
-        api_key = config.get("api_key", "")
-        max_retries = 2  # 最大リトライ回数
-        
-        if not api_key:
-            return {"success": False, "error": "Gemini APIキーが設定されていません"}
-        
-        url = f"{config.get('base_url', 'https://generativelanguage.googleapis.com/v1beta')}/models/{model}:generateContent"
-        headers = {
-            "Content-Type": "application/json"
-        }
+
+        def _safe_error_detail(err: Exception, max_len: int = 500) -> str:
+            try:
+                msg = str(err)
+            except Exception:
+                msg = ""
+            msg = (msg or "").strip()
+            if not msg:
+                return type(err).__name__
+            if len(msg) > max_len:
+                msg = msg[:max_len] + "..."
+            return f"{type(err).__name__}: {msg}"
+
+        def _safe_request_url_for_log(url: str) -> str:
+            # APIキーがクエリに含まれる場合があるため、ログ用途はクエリを除去
+            try:
+                return (url or "").split("?", 1)[0]
+            except Exception:
+                return url
+        auth_mode = (config.get("auth_mode") or "api_key").strip().lower()
+        use_vertex = auth_mode == "vertex_sa"
+        api_key = "" if use_vertex else config.get("api_key", "")
+        if max_retries is None:
+            max_retries = max(0, self._get_request_max_attempts() - 1)
+        try:
+            max_retries = int(max_retries)
+        except Exception:
+            max_retries = 2
+        if max_retries < 0:
+            max_retries = 0
+        if max_retries > 4:
+            max_retries = 4
+
+        def _build_vertex_generate_url(project_id: str, location: str, model: str) -> str:
+            loc = (location or "").strip()
+            host = "https://aiplatform.googleapis.com" if loc == "global" else f"https://{loc}-aiplatform.googleapis.com"
+            return (
+                f"{host}/v1/projects/{project_id}"
+                f"/locations/{loc}/publishers/google/models/{model}:generateContent"
+            )
+
+        # 認証モード: api_key (従来) / vertex_sa
+        if use_vertex:
+            sa_json_path = (config.get("vertex_service_account_json") or "").strip()
+            project_id = (config.get("vertex_project_id") or "").strip()
+            location = (config.get("vertex_location") or "").strip()
+
+            if not sa_json_path:
+                return {"success": False, "error": "Vertex AI サービスアカウントJSONが設定されていません"}
+            if not location:
+                return {"success": False, "error": "Vertex AI Locationが設定されていません"}
+
+            try:
+                sa = self._load_service_account_json(sa_json_path)
+            except Exception as e:
+                return {"success": False, "error": f"Vertex AI サービスアカウントJSONの読み込みに失敗しました: {_safe_error_detail(e)}"}
+
+            # project_id が未設定の場合は、サービスアカウントJSON内の project_id をフォールバック
+            if not project_id:
+                try:
+                    project_id = str(sa.get("project_id") or "").strip()
+                except Exception:
+                    project_id = ""
+            if not project_id:
+                return {"success": False, "error": "Vertex AI Project IDが設定されていません（設定値またはサービスアカウントJSONの project_id を確認してください）"}
+
+            try:
+                access_token = self._get_vertex_access_token(sa)
+            except Exception as e:
+                return {"success": False, "error": f"Vertex AI アクセストークン取得に失敗しました: {_safe_error_detail(e)}"}
+
+            url = _build_vertex_generate_url(project_id=project_id, location=location, model=model)
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {access_token}",
+            }
+            request_url = url
+        else:
+            if not api_key:
+                return {"success": False, "error": "Gemini APIキーが設定されていません"}
+
+            base_url = config.get("base_url", "https://generativelanguage.googleapis.com/v1")
+            url = f"{base_url}/models/{model}:generateContent"
+            headers = {"Content-Type": "application/json"}
+            request_url = f"{url}?key={api_key}"
 
         def _bump_max_output_tokens(body: Dict[str, Any]) -> Dict[str, Any]:
             bumped = copy.deepcopy(body)
@@ -310,24 +632,119 @@ class AIManager:
         last_request_params: Dict[str, Any] = {}
 
         # retry_count は「追加試行回数」を返すため、成功時は attempt_index をセットする
+        fallback_vertex_location_used = False
         for attempt_index in range(max_retries + 1):
             # 表示/デバッグ用: 本文（contents）以外のリクエストパラメータ
             request_params = {k: v for k, v in data.items() if k != "contents"}
             request_params["contents_count"] = len(data.get("contents", []) or [])
+            request_params["auth_mode"] = "vertex_sa" if use_vertex else "api_key"
+            if use_vertex:
+                request_params["vertex_project_id"] = project_id
+                request_params["vertex_location"] = location
+                request_params["vertex_endpoint"] = _safe_request_url_for_log(request_url)
+            else:
+                request_params["gemini_endpoint"] = _safe_request_url_for_log(request_url)
             if adjustments:
                 request_params["auto_adjustments"] = adjustments
 
             last_request_params = request_params
 
             start_time = time.time()
-            response = self.session.post(
-                f"{url}?key={api_key}",
-                headers=headers,
-                json=data,
-                timeout=self.config.get("timeout", 120)
-            )
+            try:
+                response = self.session.post(
+                    request_url,
+                    headers=headers,
+                    json=data,
+                    timeout=self.config.get("timeout", 120)
+                )
+            except _requests_types.exceptions.RequestException as e:
+                # 企業ネットワーク等で regional endpoint がDNS/プロキシ制限されるケースがあるため、Vertex時のみ global endpoint を1回だけ試す
+                if use_vertex:
+                    try:
+                        regional_prefix = f"https://{location}-aiplatform.googleapis.com"
+                        if isinstance(request_url, str) and request_url.startswith(regional_prefix):
+                            alt_url = "https://aiplatform.googleapis.com" + request_url[len(regional_prefix):]
+                            adjustments.append({"kind": "fallback_vertex_endpoint", "from": regional_prefix, "to": "https://aiplatform.googleapis.com"})
+                            response = self.session.post(
+                                alt_url,
+                                headers=headers,
+                                json=data,
+                                timeout=self.config.get("timeout", 120)
+                            )
+                            request_url = alt_url
+                        else:
+                            raise
+                    except Exception:
+                        last_response_time = time.time() - start_time
+                        return {
+                            "success": False,
+                            "error": f"通信エラー: {_safe_error_detail(e)}",
+                            "model": model,
+                            "response_time": last_response_time,
+                            "request_params": last_request_params,
+                            "response_params": {
+                                "status_code": 0,
+                                "response_time": last_response_time,
+                                "model": model,
+                                "retry_count": attempt_index,
+                            },
+                        }
+                else:
+                    last_response_time = time.time() - start_time
+                    return {
+                        "success": False,
+                        "error": f"通信エラー: {_safe_error_detail(e)}",
+                        "model": model,
+                        "response_time": last_response_time,
+                        "request_params": last_request_params,
+                        "response_params": {
+                            "status_code": 0,
+                            "response_time": last_response_time,
+                            "model": model,
+                            "retry_count": attempt_index,
+                        },
+                    }
+
             last_response_time = time.time() - start_time
             last_status_code = response.status_code
+
+            # Vertex: locationによって publisher model が見つからない場合があるため、404(NOT_FOUND)時は locations/global へ1回だけフォールバック
+            if (
+                use_vertex
+                and response.status_code == 404
+                and not fallback_vertex_location_used
+                and str(location or "").strip() != "global"
+            ):
+                try:
+                    text_lower = (response.text or "").lower()
+                except Exception:
+                    text_lower = ""
+                if "publisher model" in text_lower and "not found" in text_lower:
+                    try:
+                        prev_location = location
+                        location = "global"
+                        request_url = _build_vertex_generate_url(project_id=project_id, location=location, model=model)
+                        adjustments.append({"kind": "fallback_vertex_location", "from": prev_location, "to": "global"})
+
+                        # 表示/ログ用のリクエストパラメータも更新
+                        try:
+                            last_request_params["vertex_location"] = location
+                            last_request_params["vertex_endpoint"] = _safe_request_url_for_log(request_url)
+                        except Exception:
+                            pass
+
+                        retry_resp = self.session.post(
+                            request_url,
+                            headers=headers,
+                            json=data,
+                            timeout=self.config.get("timeout", 120),
+                        )
+                        response = retry_resp
+                        last_status_code = response.status_code
+                        fallback_vertex_location_used = True
+                    except Exception:
+                        # フォールバック中の例外は通常のエラー処理へ
+                        fallback_vertex_location_used = True
 
             # Gemini: 一部パラメータ（penalty系など）が未対応の場合があるため、400時はexperimentalを落として1回だけ再試行
             if response.status_code == 400 and not dropped_experimental:
@@ -348,7 +765,7 @@ class AIManager:
                     adjustments.append({"kind": "drop_experimental_generation_config", "keys": ["presencePenalty", "frequencyPenalty"]})
                     # 同じ attempt_index 内で即再試行（これ自体はカウントしない）
                     retry_resp = self.session.post(
-                        f"{url}?key={api_key}",
+                        request_url,
                         headers=headers,
                         json=data,
                         timeout=self.config.get("timeout", 120)
