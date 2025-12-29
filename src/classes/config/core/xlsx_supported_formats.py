@@ -12,6 +12,62 @@ from .models import SupportedFileFormatEntry
 VERSION_RE = re.compile(r"[【(\[]?\s*[Vv]\s*(\d+)(?:\s*版)?\s*[】)\]]?")
 
 
+def _is_nonempty_cell_value(v: object) -> bool:
+    """Excelセル値として「値が入っている」を判定する。
+
+    - NaN/None/空白のみは空
+    - それ以外（数値/文字列）は値あり
+    """
+    try:
+        if v is None:
+            return False
+        # pandas NaN
+        if isinstance(v, float) and pd.isna(v):
+            return False
+        if hasattr(pd, "isna") and pd.isna(v):
+            return False
+    except Exception:
+        # pd.isna が扱えない型は後続で判定
+        pass
+
+    if isinstance(v, str):
+        return bool(v.strip())
+    return True
+
+
+def _extract_versioned_template_columns(df: pd.DataFrame) -> tuple[Dict[int, str], Dict[int, str]]:
+    """見出しに【Vn版】を含むテンプレート列を収集する。
+
+    Returns:
+        (name_cols, id_cols): {version_int: column_name}
+    """
+    name_cols: Dict[int, str] = {}
+    id_cols: Dict[int, str] = {}
+
+    for col in df.columns:
+        col_s = str(col)
+        ver = _extract_version(col_s)
+        if ver is None:
+            continue
+
+        # 日本語/英語両対応で緩く判定
+        col_lower = col_s.lower()
+        has_template = ("テンプレ" in col_s) or ("template" in col_lower)
+        if not has_template:
+            continue
+
+        is_id = ("id" in col_lower) or ("id" in col_s) or ("テンプレートid" in col_s.lower()) or ("テンプレートid" in col_lower)
+        # 「テンプレート名」「template_name」等
+        is_name = ("名" in col_s) or ("名称" in col_s) or ("name" in col_lower)
+
+        if is_id:
+            id_cols[ver] = col
+        elif is_name:
+            name_cols[ver] = col
+
+    return name_cols, id_cols
+
+
 def _normalize_ext(raw: str) -> str:
     """拡張子を正規化（.txt → txt, .JPEG → jpg 等）"""
     s = raw.strip().lower()
@@ -252,21 +308,47 @@ def parse_supported_formats(xlsx_path: str) -> List[SupportedFileFormatEntry]:
         ver_col = resolve(df, "template_version_label")
         dataset_col = resolve(df, "dataset_id")
 
-        # 必須列がなければスキップ
-        if not (equipment_col and file_col and tmpl_col):
+        # 【Vn版】列が複数あるケースに対応（行ごとに最新版を選ぶ）
+        versioned_name_cols, versioned_id_cols = _extract_versioned_template_columns(df)
+        has_versioned_templates = bool(versioned_name_cols or versioned_id_cols)
+
+        # 必須列がなければスキップ（テンプレ列は通常列 or 版付き列のいずれかで良い）
+        if not (equipment_col and file_col and (tmpl_col or has_versioned_templates)):
             continue
 
         for _, row in df.iterrows():
             equipment_id = str(row[equipment_col]).strip() if pd.notna(row.get(equipment_col)) else ""
             file_fmt_raw = str(row[file_col]).strip() if pd.notna(row.get(file_col)) else ""
-            template_name = str(row[tmpl_col]).strip() if pd.notna(row.get(tmpl_col)) else ""
+            template_name = ""
+            template_version: Optional[int] = None
+
+            if has_versioned_templates:
+                # 行ごとに「最新版（値が入っている最大Vn）」を選ぶ
+                candidate_versions = sorted(set(versioned_name_cols.keys()) | set(versioned_id_cols.keys()), reverse=True)
+                for v in candidate_versions:
+                    id_col = versioned_id_cols.get(v)
+                    name_col = versioned_name_cols.get(v)
+                    id_val = row.get(id_col) if id_col is not None else None
+                    name_val = row.get(name_col) if name_col is not None else None
+
+                    if _is_nonempty_cell_value(id_val) or _is_nonempty_cell_value(name_val):
+                        template_version = v
+                        chosen = id_val if _is_nonempty_cell_value(id_val) else name_val
+                        template_name = str(chosen).strip() if chosen is not None else ""
+                        break
+
+            # 版付き列で取れない場合は従来列を使用
+            if not template_name and tmpl_col:
+                template_name = str(row[tmpl_col]).strip() if pd.notna(row.get(tmpl_col)) else ""
+
             version_label = str(row[ver_col]).strip() if (ver_col and pd.notna(row.get(ver_col))) else ""
             dataset_id = str(row[dataset_col]).strip() if (dataset_col and pd.notna(row.get(dataset_col))) else None
 
             if not equipment_id or not file_fmt_raw or not template_name:
                 continue
 
-            template_version = _extract_version(version_label)
+            if template_version is None:
+                template_version = _extract_version(version_label)
             ext_desc_map = _extract_exts_with_desc(file_fmt_raw)
             if not ext_desc_map:
                 # フォールバック
