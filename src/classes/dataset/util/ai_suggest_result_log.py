@@ -104,6 +104,34 @@ def build_log_path(target_kind: str, button_id: str, target_key: str) -> str:
     return get_dynamic_file_path(rel)
 
 
+def resolve_log_path(target_kind: str, button_id: str, target_key: str) -> str:
+    """ログファイルのパスを解決して返す。
+
+    - dataset: build_log_path() のみ
+    - report: 新形式（ARIMNO.jsonl）を優先し、存在しない場合は旧形式（ARIMNO_*.jsonl）も探索
+
+    存在するファイルが見つからない場合でも、想定されるパス（build_log_path）を返す。
+    """
+    kind = 'report' if (target_kind or '').strip().lower() == 'report' else 'dataset'
+    direct = build_log_path(kind, button_id, target_key)
+    if kind != 'report':
+        return direct
+
+    try:
+        if os.path.exists(direct):
+            return direct
+    except Exception:
+        pass
+
+    try:
+        for p in _iter_candidate_report_log_paths(button_id, target_key):
+            return p
+    except Exception:
+        pass
+
+    return direct
+
+
 def append_result(
     *,
     target_kind: str,

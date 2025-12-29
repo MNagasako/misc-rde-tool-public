@@ -9,6 +9,7 @@ import datetime
 import json
 import logging
 import re
+import math
 from typing import Optional, List
 from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
@@ -2509,9 +2510,146 @@ class AISuggestionDialog(QDialog):
         self.results_filter_edit.textChanged.connect(self._apply_results_filter)
         self.results_refresh_button.clicked.connect(self.refresh_results_list)
         self.results_export_button.clicked.connect(self.export_results_table)
+        # 行クリックでログファイル表示
+        try:
+            self.results_table.cellClicked.connect(self._on_results_table_cell_clicked)
+        except Exception:
+            pass
 
         self._populate_results_button_combo()
         self.refresh_results_list()
+
+    def _on_results_table_cell_clicked(self, row: int, _col: int) -> None:
+        """結果一覧の行クリックで、対応するログファイルを表示する。"""
+        try:
+            if not hasattr(self, 'results_table'):
+                return
+            item = self.results_table.item(row, 0)
+            if item is None:
+                return
+            rec = item.data(Qt.UserRole)
+            if not isinstance(rec, dict):
+                return
+            self._show_results_log_for_record(rec)
+        except Exception as e:
+            try:
+                QMessageBox.warning(self, "警告", f"ログ表示に失敗しました: {e}")
+            except Exception:
+                pass
+
+    @staticmethod
+    def _is_empty_or_nan(value) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, float):
+            try:
+                return math.isnan(value)
+            except Exception:
+                return False
+        text = str(value).strip()
+        if text == "":
+            return True
+        return text.lower() == "nan"
+
+    def _show_results_log_for_record(self, rec: dict) -> None:
+        """ログファイルを読み込み、JSONはキー/値対応、テキストはそのまま表示する。"""
+        from qt_compat.widgets import QDialog, QVBoxLayout, QLabel, QTextEdit, QTableWidget, QTableWidgetItem
+        from qt_compat.widgets import QHeaderView
+        from classes.dataset.util.ai_suggest_result_log import resolve_log_path
+
+        target_kind = (rec.get('target_kind') or '').strip() or (self.results_target_kind_combo.currentData() if hasattr(self, 'results_target_kind_combo') else 'report')
+        button_id = (rec.get('button_id') or '').strip()
+        target_key = (rec.get('target_key') or '').strip()
+
+        path = resolve_log_path(str(target_kind), str(button_id), str(target_key))
+
+        # 子ダイアログ（open() で非同期モーダル: テストでもブロックしない）
+        dlg = QDialog(self)
+        dlg.setObjectName('ai_suggest_log_viewer')
+        dlg.setWindowTitle('ログファイル表示')
+        dlg.resize(900, 600)
+
+        layout = QVBoxLayout(dlg)
+        path_label = QLabel(f"{path}")
+        try:
+            path_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        except Exception:
+            pass
+        layout.addWidget(path_label)
+
+        # 読み込み
+        raw_text = ""
+        try:
+            with open(path, 'r', encoding='utf-8', errors='replace') as f:
+                raw_text = f.read()
+        except Exception as e:
+            QMessageBox.warning(self, "警告", f"ログファイルを読み込めませんでした:\n{path}\n\n{e}")
+            return
+
+        obj = None
+        ext = os.path.splitext(path)[1].lower()
+        if ext in {'.json', '.jsonl'}:
+            try:
+                if ext == '.jsonl':
+                    # jsonl: 最終行（最後のJSONレコード）を表示
+                    last = None
+                    for line in raw_text.splitlines():
+                        if line.strip():
+                            last = line
+                    if last is not None:
+                        obj = json.loads(last)
+                else:
+                    obj = json.loads(raw_text)
+            except Exception:
+                obj = None
+        else:
+            # 拡張子に依らず JSON っぽければ試す
+            try:
+                obj = json.loads(raw_text)
+            except Exception:
+                obj = None
+
+        if isinstance(obj, dict):
+            table = QTableWidget()
+            table.setObjectName('ai_suggest_log_table')
+            table.setColumnCount(2)
+            table.setHorizontalHeaderLabels(['キー', '値'])
+            table.setRowCount(len(obj))
+            for i, (k, v) in enumerate(obj.items()):
+                key_item = QTableWidgetItem(str(k))
+                if isinstance(v, (dict, list)):
+                    try:
+                        val_text = json.dumps(v, ensure_ascii=False, indent=2)
+                    except Exception:
+                        val_text = str(v)
+                else:
+                    val_text = '' if self._is_empty_or_nan(v) else str(v)
+                # 極端に長い値はUIが重くなるため軽く上限
+                if len(val_text) > 20000:
+                    val_text = val_text[:20000] + '…'
+                val_item = QTableWidgetItem(val_text)
+                table.setItem(i, 0, key_item)
+                table.setItem(i, 1, val_item)
+
+            try:
+                table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+                table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+            except Exception:
+                pass
+            layout.addWidget(table, 1)
+        else:
+            text = QTextEdit()
+            text.setObjectName('ai_suggest_log_text')
+            text.setReadOnly(True)
+            text.setPlainText(raw_text)
+            layout.addWidget(text, 1)
+
+        # 参照保持（GC防止）
+        self._results_log_viewer = dlg
+        try:
+            dlg.open()
+        except Exception:
+            dlg.show()
 
     def _collect_results_table_visible_data(self):
         """現在表示されている（フィルタで非表示の行は除外）テーブルデータを取得。"""
@@ -2845,7 +2983,9 @@ class AISuggestionDialog(QDialog):
                     if kind == 'report':
                         task_number = extract_task_number_from_report_target_key(tkey)
                         main_area, sub_area = tech_index.get(task_number, ('', ''))
-                        values = [ts, tkey, str(main_area or ''), str(sub_area or ''), blabel, model, elapsed, snip]
+                        main_txt = '' if self._is_empty_or_nan(main_area) else str(main_area)
+                        sub_txt = '' if self._is_empty_or_nan(sub_area) else str(sub_area)
+                        values = [ts, tkey, main_txt, sub_txt, blabel, model, elapsed, snip]
                     else:
                         values = [ts, tkey, blabel, model, elapsed, snip]
 
@@ -2912,7 +3052,9 @@ class AISuggestionDialog(QDialog):
                     if kind == 'report':
                         task_number = extract_task_number_from_report_target_key(row['tkey'])
                         main_area, sub_area = tech_index.get(task_number, ('', ''))
-                        base_values = [row['ts'], row['tkey'], str(main_area or ''), str(sub_area or '')] + ([row['elem']] if include_elem else []) + [row['blabel'], row['model'], elapsed]
+                        main_txt = '' if self._is_empty_or_nan(main_area) else str(main_area)
+                        sub_txt = '' if self._is_empty_or_nan(sub_area) else str(sub_area)
+                        base_values = [row['ts'], row['tkey'], main_txt, sub_txt] + ([row['elem']] if include_elem else []) + [row['blabel'], row['model'], elapsed]
                         json_base_headers = ["日時", "対象キー", "重要技術領域（主）", "重要技術領域（副）"] + (["要素"] if include_elem else []) + ["ボタン", "モデル", "所要時間(秒)"]
                     else:
                         base_values = [row['ts'], row['tkey']] + ([row['elem']] if include_elem else []) + [row['blabel'], row['model'], elapsed]

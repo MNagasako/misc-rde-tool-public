@@ -1,8 +1,9 @@
 import json
-import os
 
-# datatree.jsonのパス
-DATATREE_PATH = r"c:\vscode\rde\src\output\datasets\.datatree.json"
+from config.common import get_dynamic_file_path
+
+# datatree.jsonのパス（CWD非依存・ソース/バイナリ透過）
+DATATREE_PATH = get_dynamic_file_path("output/datasets/.datatree.json")
 
 # 正しいgrantNumberとsubjectTitleの対応表（例）
 GRANT_TITLE_MAP = {
