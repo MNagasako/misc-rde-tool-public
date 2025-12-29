@@ -26,4 +26,4 @@ v2.3.10 は、AI説明文提案（対象=報告書）の「結果一覧」表示
 
 ## ドキュメント/配布物の版数表記
 
-- `VERSION.txt` / `README.md` / `docs/CHANGELOG.md` / `docs/RELEASE_NOTES_v2.3.10.md` 等 → v2.3.10
+- `VERSION.txt` / `README.md` / `docs/CHANGELOG.md` / `docs/archive/release_notes/RELEASE_NOTES_v2.3.10.md` 等 → v2.3.10
