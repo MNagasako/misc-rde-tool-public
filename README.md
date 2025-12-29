@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.3.10** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.3.11** のバイナリ配布およびドキュメント公開用リポジトリです。
 
 **本ページはAIによる自動生成文が含まれています。**
 
@@ -20,13 +20,13 @@
 
 ## 🚀 最新情報
 
-**2025-12-28 最新リリース**: バージョン2.3.10（AI説明文提案（報告書）: 重要技術領域（主/副）列の追加 + テスト決定性改善）
+**2025-12-29 最新リリース**: バージョン2.3.11（Gemini: 認証方式別モデル管理 + APIキー無しフォールバック + テスト安定化）
 
-### v2.3.10 の主な改善
+### v2.3.11 の主な改善
 
-- AI説明文提案（対象=報告書）の結果一覧で、`target_key` の ARIM課題番号と報告書リストを結合し、「重要技術領域（主/副）」列を追加表示しました。
-- 報告書タブ/結果一覧タブのウィジェットテストがローカルの実データやキャッシュに影響されないよう調整し、フルスイートでの決定性を改善しました。
-- README / VERSION.txt / CHANGELOG / リリースノート等のバージョン表記を v2.3.10 に統一しました。
+- Gemini（AI）で、認証方式（API Key / Vertex サービスアカウント）ごとにモデル一覧とデフォルトモデルを保存・復元できるよう改善しました。
+- Gemini の API キー未設定時でも、公式モデルページ解析によりモデル候補を取得できるフォールバックを追加しました（取得結果は環境により変わる場合があります）。
+- テストの headless 実行で不安定になりやすい統合テストを見直し、安定性を改善しました。
 
 > ℹ️ リスティングタブは `output/arim-site/{equipment|reports}_latest.json` など最新エクスポートを前提とします。再読込前に各タブで「JSON再取得」を実行し、キャッシュディレクトリ（`output/arim-site/reports/cache/`）の残量にも留意してください。
 
@@ -132,7 +132,7 @@
 
 ## 🔢 バージョン情報
 
-現在配布バージョン: `v2.3.10` （`VERSION.txt` に基づく）
+現在配布バージョン: `v2.3.11` （`VERSION.txt` に基づく）
 
 更新履歴の詳細は `docs/CHANGELOG.md` を参照してください。
 
