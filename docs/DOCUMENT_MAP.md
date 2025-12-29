@@ -10,7 +10,7 @@
 - API_ENDPOINTS_COMPLETE_MAP.md
 - API_INVESTIGATION_FINAL_REPORT.md
 - README.txt
-- RELEASE_NOTES_v2.3.12.md (最新)
+- RELEASE_NOTES_v2.3.13.md (最新)
 
 ## 機能別ドキュメント（docs/features/）
 - README.md
@@ -66,4 +66,4 @@
 - src/ （ソースコード - 配布方針により今後非公開化予定）
 - dist/ （ビルド成果物 - 公開時は Releases にアップロード）
 
-更新日: 2025-12-28
+更新日: 2025-12-29

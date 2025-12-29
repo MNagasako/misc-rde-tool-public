@@ -75,4 +75,6 @@ v2.1.x〜v2.3.x の旧リリースノートを `docs/archive/release_notes/` に
 - RELEASE_NOTES_v2.3.10.md
 - RELEASE_NOTES_v2.3.11.md
 
-現行維持: 最新安定版 v2.3.12 のみ `docs/` 直下に残置。
+- RELEASE_NOTES_v2.3.12.md
+
+現行維持: 最新安定版 v2.3.13 のみ `docs/` 直下に残置。

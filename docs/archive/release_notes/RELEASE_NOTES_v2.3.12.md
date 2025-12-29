@@ -26,4 +26,4 @@ v2.3.12 は、AI説明文提案の「結果一覧」表示を改善し、クリ�
 
 ## ドキュメント/配布物の版数表記
 
-- `VERSION.txt` / `README.md` / `docs/CHANGELOG.md` / `docs/RELEASE_NOTES_v2.3.12.md` 等 → v2.3.12
+- `VERSION.txt` / `README.md` / `docs/CHANGELOG.md` / `docs/archive/release_notes/RELEASE_NOTES_v2.3.12.md` 等 → v2.3.12
