@@ -27,4 +27,4 @@ v2.3.13 は、設定→データ構造化（対応ファイル形式: XLSX）に
 
 ## ドキュメント/配布物の版数表記
 
-- `VERSION.txt` / `README.md` / `docs/CHANGELOG.md` / `docs/RELEASE_NOTES_v2.3.13.md` 等 → v2.3.13
+- `VERSION.txt` / `README.md` / `docs/CHANGELOG.md` / `docs/archive/release_notes/RELEASE_NOTES_v2.3.13.md` 等 → v2.3.13
