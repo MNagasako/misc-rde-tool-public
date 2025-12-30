@@ -2,6 +2,7 @@
 データセット編集専用ウィジェット
 """
 import os
+import sys
 import json
 import datetime
 import webbrowser
@@ -10,10 +11,6 @@ import codecs
 import logging
 import re
 from typing import Iterable, Callable, Optional
-try:
-    from unittest.mock import MagicMock
-except ImportError:  # pragma: no cover - fallback for restricted runtimes
-    MagicMock = None
 
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGridLayout, 
@@ -297,77 +294,9 @@ def relax_dataset_edit_filters_for_launch(
         except Exception:  # pragma: no cover - defensive fallback
             logger.debug("dataset_edit: filter reload failed", exc_info=True)
     return changed
-
-
-def _ensure_real_qt_widgets():
-    """Replace MagicMock Qt classes with real PySide6 widgets when available."""
-    global QTableWidget, QTableWidgetItem, QHeaderView
-    if MagicMock is None:
-        return
-    contaminated = any(isinstance(cls, MagicMock) for cls in (QTableWidget, QTableWidgetItem, QHeaderView))
-    if not contaminated:
-        return
-    from PySide6.QtWidgets import QTableWidget as _RealQTableWidget, QTableWidgetItem as _RealQTableWidgetItem, QHeaderView as _RealQHeaderView
-    QTableWidget = _RealQTableWidget
-    QTableWidgetItem = _RealQTableWidgetItem
-    QHeaderView = _RealQHeaderView
-
-
-_ensure_real_qt_widgets()
-
-
-def _resolve_refresh_widget_class():
-    """Return a usable RefreshOnShowWidget implementation even if mocks replaced it."""
-    if MagicMock is None or not isinstance(RefreshOnShowWidget, MagicMock):
-        return RefreshOnShowWidget
-    try:
-        import importlib
-        from classes.dataset.util import show_event_refresh as refresh_module
-        refreshed = importlib.reload(refresh_module)
-        real_cls = getattr(refreshed, "RefreshOnShowWidget", None)
-        if real_cls and not isinstance(real_cls, MagicMock):
-            return real_cls
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.debug("Failed to reload RefreshOnShowWidget: %s", exc)
-    try:
-        from PySide6.QtWidgets import QWidget as _RealQWidget
-    except Exception:  # pragma: no cover - fallback to qt_compat
-        from qt_compat.widgets import QWidget as _RealQWidget
-
-    class _FallbackRefreshOnShowWidget(_RealQWidget):
-        """Lightweight stand-in that stores callbacks locally."""
-
-        def __init__(self, parent=None):
-            super().__init__(parent)
-            self._callbacks = []
-            self._auto_refresh = True
-
-        def add_show_refresh_callback(self, callback):
-            if callable(callback) and callback not in self._callbacks:
-                self._callbacks.append(callback)
-
-        def trigger_show_refresh(self, reason="manual"):
-            for cb in list(self._callbacks):
-                try:
-                    cb()
-                except Exception as exc:  # pragma: no cover - diagnostic only
-                    logger.debug("Fallback refresh callback failed (%s): %s", reason, exc)
-
-        def set_auto_refresh_enabled(self, enabled: bool):
-            self._auto_refresh = bool(enabled)
-
-        def showEvent(self, event):  # noqa: N802 - Qt override
-            super().showEvent(event)
-            if self._auto_refresh and self.isVisible():
-                self.trigger_show_refresh("showEvent")
-
-    return _FallbackRefreshOnShowWidget
-
-
 def _create_refresh_on_show_widget(parent=None):
-    """Instantiate RefreshOnShowWidget even if the symbol was mocked elsewhere."""
-    widget_cls = _resolve_refresh_widget_class()
-    return widget_cls(parent)
+    return RefreshOnShowWidget(parent)
+
 
 def match_registration_candidates(dataset_name: str, data_name: str, owner_id: str, instrument_id: str | None,
                                   created_ts: str | None, registration_entries: list, threshold_seconds: int = 7200):
@@ -1657,71 +1586,77 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     def update_combo_box_ui(datasets, display_names, filter_type, grant_number_filter, dataset_count):
         """コンボボックスのUIを更新する"""
         refresh_update_controls(filter_type, grant_number_filter)
-        
-        # コンボボックスを完全にクリア（キャッシュも含む）
-        existing_dataset_combo.clear()
-        if hasattr(existing_dataset_combo, '_datasets_cache'):
-            delattr(existing_dataset_combo, '_datasets_cache')
-        if hasattr(existing_dataset_combo, '_display_names_cache'):
-            delattr(existing_dataset_combo, '_display_names_cache')
-        
-        # 既存のCompleterがあればクリア
-        if existing_dataset_combo.completer():
-            existing_dataset_combo.completer().deleteLater()
-        
-        # コンボボックスにアイテムを追加（重要：カーソルキー操作に必要）
-        if not datasets or not display_names:
-            existing_dataset_combo.addItem("-- データセットを選択してください --", None)
-            logger.debug("データセットなし: プレースホルダのみ追加")
-        else:
-            # 全データセットをコンボボックスに追加
-            for i in range(min(len(display_names), len(datasets))):
-                display_text = display_names[i]
-                dataset = datasets[i]
-                if isinstance(dataset, dict):
-                    existing_dataset_combo.addItem(display_text, dataset)
-                else:
-                    logger.warning("データセットが辞書ではありません: index=%s, type=%s", i, type(dataset))
-            logger.debug("コンボボックスに %s 件のアイテムを追加", len(datasets))
-        
-        # QCompleterを設定
-        completer = QCompleter(display_names, existing_dataset_combo)
-        completer.setCaseSensitivity(Qt.CaseInsensitive)
-        completer.setFilterMode(Qt.MatchContains)
-        # 検索時の補完リスト（popup）の高さを12行分に制限
-        popup_view = completer.popup()
-        popup_view.setMinimumHeight(240)
-        popup_view.setMaximumHeight(240)
-        existing_dataset_combo.setCompleter(completer)
-        # Completerからの選択シグナルを接続
-        completer.activated.connect(on_completer_activated)
-        
-        # プレースホルダーテキストを設定
-        if existing_dataset_combo.lineEdit():
-            filter_desc = f"フィルタ: {filter_type}"
-            if grant_number_filter:
-                filter_desc += f", 課題番号: '{grant_number_filter}'"
-            existing_dataset_combo.lineEdit().setPlaceholderText(f"データセット ({dataset_count}件) から検索... [{filter_desc}]")
-        
-        # データセット一覧をComboBoxに保存（mousePressEvent用）
-        existing_dataset_combo._datasets_cache = datasets
-        existing_dataset_combo._display_names_cache = display_names
-        # 表示テキスト→データセット(dict)の高速マップを構築（Completer選択用）
-        # キーを正規化してCompleter選択時のマッチング精度を向上
+
+        was_blocked = existing_dataset_combo.signalsBlocked()
+        existing_dataset_combo.blockSignals(True)
         try:
-            existing_dataset_combo._display_to_dataset_map = {
-                _normalize_display_text(display_names[i]): datasets[i]
-                for i in range(min(len(display_names), len(datasets)))
-                if isinstance(datasets[i], dict)
-            }
-            logger.debug("display_to_dataset_map 構築完了: %s エントリ", len(existing_dataset_combo._display_to_dataset_map))
-        except Exception as map_err:
-            logger.debug("display_to_dataset_map 構築失敗: %s", map_err)
-        # コンボを未選択状態にする（ヘッダー/プレースホルダのみ）
-        try:
-            existing_dataset_combo.setCurrentIndex(-1)
-        except Exception:
-            pass
+            # コンボボックスを完全にクリア（キャッシュも含む）
+            existing_dataset_combo.clear()
+            if hasattr(existing_dataset_combo, '_datasets_cache'):
+                delattr(existing_dataset_combo, '_datasets_cache')
+            if hasattr(existing_dataset_combo, '_display_names_cache'):
+                delattr(existing_dataset_combo, '_display_names_cache')
+
+            # 既存のCompleterがあればクリア
+            if existing_dataset_combo.completer():
+                existing_dataset_combo.completer().deleteLater()
+
+            # コンボボックスにアイテムを追加（重要：カーソルキー操作に必要）
+            if not datasets or not display_names:
+                existing_dataset_combo.addItem("-- データセットを選択してください --", None)
+                logger.debug("データセットなし: プレースホルダのみ追加")
+            else:
+                # 全データセットをコンボボックスに追加
+                for i in range(min(len(display_names), len(datasets))):
+                    display_text = display_names[i]
+                    dataset = datasets[i]
+                    if isinstance(dataset, dict):
+                        existing_dataset_combo.addItem(display_text, dataset)
+                    else:
+                        logger.warning("データセットが辞書ではありません: index=%s, type=%s", i, type(dataset))
+                logger.debug("コンボボックスに %s 件のアイテムを追加", len(datasets))
+
+            # QCompleterを設定
+            completer = QCompleter(display_names, existing_dataset_combo)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchContains)
+            # 検索時の補完リスト（popup）の高さを12行分に制限
+            popup_view = completer.popup()
+            popup_view.setMinimumHeight(240)
+            popup_view.setMaximumHeight(240)
+            existing_dataset_combo.setCompleter(completer)
+            # Completerからの選択シグナルを接続
+            completer.activated.connect(on_completer_activated)
+
+            # プレースホルダーテキストを設定
+            if existing_dataset_combo.lineEdit():
+                filter_desc = f"フィルタ: {filter_type}"
+                if grant_number_filter:
+                    filter_desc += f", 課題番号: '{grant_number_filter}'"
+                existing_dataset_combo.lineEdit().setPlaceholderText(f"データセット ({dataset_count}件) から検索... [{filter_desc}]")
+
+            # データセット一覧をComboBoxに保存（mousePressEvent用）
+            existing_dataset_combo._datasets_cache = datasets
+            existing_dataset_combo._display_names_cache = display_names
+            # 表示テキスト→データセット(dict)の高速マップを構築（Completer選択用）
+            # キーを正規化してCompleter選択時のマッチング精度を向上
+            try:
+                existing_dataset_combo._display_to_dataset_map = {
+                    _normalize_display_text(display_names[i]): datasets[i]
+                    for i in range(min(len(display_names), len(datasets)))
+                    if isinstance(datasets[i], dict)
+                }
+                logger.debug("display_to_dataset_map 構築完了: %s エントリ", len(existing_dataset_combo._display_to_dataset_map))
+            except Exception as map_err:
+                logger.debug("display_to_dataset_map 構築失敗: %s", map_err)
+
+            # コンボを未選択状態にする（ヘッダー/プレースホルダのみ）
+            try:
+                existing_dataset_combo.setCurrentIndex(-1)
+            except Exception:
+                pass
+        finally:
+            existing_dataset_combo.blockSignals(was_blocked)
 
     # データセット情報を読み込んでドロップダウンに追加
     def load_existing_datasets(
@@ -1882,6 +1817,17 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             
             # キャッシュからデータを取得
             all_datasets = dataset_cache["raw_data"]
+            # RDE側で削除済み（404/410確認済み）のデータセットはローカル候補から除外
+            try:
+                from classes.utils.remote_resource_pruner import filter_out_marked_missing_ids
+
+                all_datasets = filter_out_marked_missing_ids(
+                    all_datasets or [],
+                    resource_type="dataset",
+                    id_key="id",
+                )
+            except Exception:
+                pass
             user_grant_numbers = dataset_cache["user_grant_numbers"]
             logger.debug("データセット数: %s", len(all_datasets))
             logger.debug("ユーザーのgrantNumber一覧: %s", sorted(user_grant_numbers))
@@ -3631,38 +3577,19 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     entries_button_layout.addStretch()
     entries_panel_layout.addLayout(entries_button_layout)
 
-    # MagicMock汚染の影響を避けるため、ここで動的に実体クラスを解決
-    try:
-        from qt_compat.widgets import QTableWidget as _QTableWidget, QTableWidgetItem as _QTableWidgetItem, QPushButton as _QPushButton, QHeaderView as _QHeaderView
-    except Exception:
-        from PySide6.QtWidgets import QTableWidget as _QTableWidget, QTableWidgetItem as _QTableWidgetItem, QPushButton as _QPushButton, QHeaderView as _QHeaderView
-
-    if MagicMock is not None:
-        try:
-            if isinstance(_QTableWidget, MagicMock):
-                from PySide6.QtWidgets import QTableWidget as _QTableWidget  # type: ignore
-            if isinstance(_QTableWidgetItem, MagicMock):
-                from PySide6.QtWidgets import QTableWidgetItem as _QTableWidgetItem  # type: ignore
-            if isinstance(_QPushButton, MagicMock):
-                from PySide6.QtWidgets import QPushButton as _QPushButton  # type: ignore
-            if isinstance(_QHeaderView, MagicMock):
-                from PySide6.QtWidgets import QHeaderView as _QHeaderView  # type: ignore
-        except Exception as exc:  # pragma: no cover - defensive fallback
-            logger.debug("PySide6 widget fallback failed: %s", exc)
-
-    entries_table = _QTableWidget()
+    entries_table = QTableWidget()
     # 列拡張: 登録状況開始日時とリンク列を追加 (複数候補は行分割表示)
     entries_table.setColumnCount(6)
     entries_table.setHorizontalHeaderLabels(["データエントリーID", "名称", "登録状況ID", "登録状況ステータス", "登録開始日時", "リンク"])
     entries_header = entries_table.horizontalHeader()
-    entries_header.setSectionResizeMode(0, _QHeaderView.ResizeToContents)
-    entries_header.setSectionResizeMode(1, _QHeaderView.Stretch)
-    entries_header.setSectionResizeMode(2, _QHeaderView.ResizeToContents)
-    entries_header.setSectionResizeMode(3, _QHeaderView.ResizeToContents)
-    entries_header.setSectionResizeMode(4, _QHeaderView.ResizeToContents)
-    entries_header.setSectionResizeMode(5, _QHeaderView.ResizeToContents)
+    entries_header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+    entries_header.setSectionResizeMode(1, QHeaderView.Stretch)
+    entries_header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+    entries_header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
+    entries_header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
+    entries_header.setSectionResizeMode(5, QHeaderView.ResizeToContents)
     entries_table.setSortingEnabled(True)
-    entries_table.setEditTriggers(_QTableWidget.NoEditTriggers)
+    entries_table.setEditTriggers(QTableWidget.NoEditTriggers)
 
     # 外側（タブ全体）のスクロールに集約するため、内側スクロールバーは表示しない
     try:
@@ -3809,30 +3736,30 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             for row, rdata in enumerate(expanded_rows):
                 full_id = str(rdata['data_entry_id'])
                 trunc_id = (full_id[:10] + "…") if len(full_id) > 10 else full_id
-                id_item = _QTableWidgetItem(trunc_id)
+                id_item = QTableWidgetItem(trunc_id)
                 id_item.setToolTip(full_id)
-                name_item = _QTableWidgetItem(str(rdata['data_name']))
+                name_item = QTableWidgetItem(str(rdata['data_name']))
                 full_reg_id = str(rdata['reg_id'])
                 trunc_reg_id = (full_reg_id[:10] + "…") if len(full_reg_id) > 10 else full_reg_id
-                reg_id_item = _QTableWidgetItem(trunc_reg_id)
+                reg_id_item = QTableWidgetItem(trunc_reg_id)
                 reg_id_item.setToolTip(full_reg_id)
-                reg_status_item = _QTableWidgetItem(str(rdata['reg_status']))
+                reg_status_item = QTableWidgetItem(str(rdata['reg_status']))
                 entries_table.setItem(row, 0, id_item)
                 entries_table.setItem(row, 1, name_item)
                 entries_table.setItem(row, 2, reg_id_item)
                 entries_table.setItem(row, 3, reg_status_item)
                 # 列4: 登録開始日時（JST年月日時分秒）
                 start_time_jst = format_start_time_jst(rdata.get('start_time', ''))
-                start_time_item = _QTableWidgetItem(start_time_jst)
+                start_time_item = QTableWidgetItem(start_time_jst)
                 entries_table.setItem(row, 4, start_time_item)
                 # 列5: リンクボタン
                 if rdata['linkable']:
-                    btn = _QPushButton("開く")
+                    btn = QPushButton("開く")
                     rid_local = rdata['reg_id']
                     btn.clicked.connect(lambda _=None, rid=rid_local: webbrowser.open(f"https://rde-entry-arim.nims.go.jp/data-entry/datasets/entries/{rid}"))
                     entries_table.setCellWidget(row, 5, btn)
                 else:
-                    btn = _QPushButton("開く")
+                    btn = QPushButton("開く")
                     btn.setEnabled(False)
                     entries_table.setCellWidget(row, 5, btn)
 
@@ -4232,12 +4159,79 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         reset_update_override("データセット選択変更")
         _update_launch_button_state()
 
+        def _running_under_pytest() -> bool:
+            try:
+                return bool(os.environ.get("PYTEST_CURRENT_TEST")) or ("pytest" in sys.modules)
+            except Exception:
+                return False
+
         selected_dataset = _get_selected_dataset_from_combo()
         if not selected_dataset:
             logger.debug("データセット未選択状態 - フォームをクリアします")
             clear_edit_form()
             update_entries_table_for_dataset(None, None)
             return
+
+        # RDE側で削除済みのデータセットを選択してしまうケースの対策
+        # - 404/410 が確定した場合のみ、候補から除外する（ネットワーク不調時は除外しない）
+        if not _running_under_pytest():
+            try:
+                from classes.utils.remote_resource_pruner import check_dataset_exists
+
+                dataset_id = str(selected_dataset.get("id", "") or "")
+                check = check_dataset_exists(dataset_id, timeout=3.0)
+                if check.exists is False:
+                    try:
+                        existing_dataset_combo.blockSignals(True)
+                        # コンボから除去
+                        for i in range(existing_dataset_combo.count()):
+                            data = existing_dataset_combo.itemData(i)
+                            if isinstance(data, dict) and str(data.get("id", "") or "") == dataset_id:
+                                existing_dataset_combo.removeItem(i)
+                                break
+
+                        # 遅延展開キャッシュからも除去（再出現防止）
+                        cached_datasets = getattr(existing_dataset_combo, "_datasets_cache", None)
+                        if isinstance(cached_datasets, list):
+                            cached_datasets[:] = [
+                                d
+                                for d in cached_datasets
+                                if not (isinstance(d, dict) and str(d.get("id", "") or "") == dataset_id)
+                            ]
+                        cached_display = getattr(existing_dataset_combo, "_display_names_cache", None)
+                        if isinstance(cached_display, list) and isinstance(cached_datasets, list):
+                            # display_names 側は完全同期が難しいため、長さ不一致時は再構築を後続処理に委ねる
+                            pass
+                        display_map = getattr(existing_dataset_combo, "_display_to_dataset_map", None)
+                        if isinstance(display_map, dict):
+                            try:
+                                # 値側が一致するものを掃除
+                                for k in list(display_map.keys()):
+                                    v = display_map.get(k)
+                                    if isinstance(v, dict) and str(v.get("id", "") or "") == dataset_id:
+                                        display_map.pop(k, None)
+                            except Exception:
+                                pass
+
+                        existing_dataset_combo.setCurrentIndex(-1)
+                    finally:
+                        existing_dataset_combo.blockSignals(False)
+
+                    clear_edit_form()
+                    update_entries_table_for_dataset(None, None)
+                    try:
+                        QMessageBox.warning(
+                            widget,
+                            "データセット削除検知",
+                            "選択したデータセットはRDE上で削除済みのため、候補から除外しました。\n"
+                            "基本情報タブでJSONを再取得してください。",
+                        )
+                    except Exception:
+                        pass
+                    return
+            except Exception:
+                # 判定不能時は従来どおり継続
+                pass
 
         resolved_dataset = _resolve_dataset_for_edit(selected_dataset) or selected_dataset
         dataset_name = resolved_dataset.get("attributes", {}).get("name", "不明")

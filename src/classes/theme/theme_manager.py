@@ -68,6 +68,10 @@ class ThemeManager(QObject):
         self._text_area_viewport_styler = None
         self._text_area_viewport_targets = weakref.WeakSet()
         self._text_area_viewport_bootstrapped = False
+        # QScrollArea viewport へ直接スタイルを当てる仕組み（未塗り領域の黒化対策）
+        self._scroll_area_viewport_styler = None
+        self._scroll_area_viewport_targets = weakref.WeakSet()
+        self._scroll_area_viewport_bootstrapped = False
         # QComboBox(非editable) placeholder の互換モード適用
         self._combo_placeholder_compat_styler = None
         self._combo_placeholder_compat_bootstrapped = False
@@ -234,6 +238,101 @@ class ThemeManager(QObject):
             f" border: 1px solid {self.get_color(ThemeKey.INPUT_BORDER_DISABLED)};"
             " }"
         )
+
+    def _build_scroll_area_viewport_style_sheet(self) -> str:
+        """QScrollArea の viewport へ直接当てるQSSを生成。
+
+        NOTE:
+        - QScrollArea は内部に viewport(QWidget) を持ち、そこが未塗り/透明のままだと
+          Windows環境で黒い矩形が見えるケースがある。
+        - セレクタ (::viewport 等) の揺れを避け、viewportウィジェット自身へ設定する。
+        """
+
+        return (
+            "QWidget {"
+            f" background-color: {self.get_color(ThemeKey.WINDOW_BACKGROUND)};"
+            f" color: {self.get_color(ThemeKey.WINDOW_FOREGROUND)};"
+            " }"
+        )
+
+    def _apply_scroll_area_viewport_style(self, widget: object, *, only_when_visible: bool = False) -> None:
+        """対象ウィジェットが QScrollArea なら viewport へ直接スタイルを当てる。"""
+        try:
+            from PySide6.QtCore import Qt
+            from PySide6.QtWidgets import QScrollArea
+
+            if not isinstance(widget, QScrollArea):
+                return
+
+            # テーマ切替時の全走査で、過去のテスト/ウィジェットで生成された
+            # 非表示ScrollAreaまで大量に再スタイルするとpytestがタイムアウトし得る。
+            # 非表示のものは Show イベントで拾えるため、必要に応じて可視に限定する。
+            if only_when_visible:
+                try:
+                    if not widget.isVisible():
+                        return
+                except Exception:
+                    pass
+
+            try:
+                self._scroll_area_viewport_targets.add(widget)
+            except Exception:
+                pass
+
+            if not hasattr(widget, "viewport"):
+                return
+            vp = widget.viewport()
+            try:
+                widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+                vp.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            except Exception:
+                pass
+
+            qss = self._build_scroll_area_viewport_style_sheet()
+            try:
+                if getattr(vp, "styleSheet", None) and vp.styleSheet() == qss:
+                    return
+            except Exception:
+                pass
+            vp.setStyleSheet(qss)
+        except Exception:
+            return
+
+    def _ensure_scroll_area_viewport_styler(self, app: QApplication) -> None:
+        """新規生成される QScrollArea にも自動適用するイベントフィルタを導入。"""
+        if self._scroll_area_viewport_styler is None:
+            theme_manager = self
+
+            class _ScrollAreaViewportStyler(QObject):
+                def eventFilter(self, obj, event):  # type: ignore[override]
+                    try:
+                        et = event.type()
+                        if et in (event.Type.Polish, event.Type.Show, event.Type.ParentChange):
+                            theme_manager._apply_scroll_area_viewport_style(obj)
+                    except Exception:
+                        pass
+                    return False
+
+            self._scroll_area_viewport_styler = _ScrollAreaViewportStyler(app)
+            try:
+                app.installEventFilter(self._scroll_area_viewport_styler)
+            except Exception:
+                self._scroll_area_viewport_styler = None
+                return
+
+        if not self._scroll_area_viewport_bootstrapped:
+            try:
+                for w in QApplication.allWidgets():
+                    self._apply_scroll_area_viewport_style(w, only_when_visible=True)
+            except Exception:
+                pass
+            self._scroll_area_viewport_bootstrapped = True
+        else:
+            try:
+                for w in list(self._scroll_area_viewport_targets):
+                    self._apply_scroll_area_viewport_style(w, only_when_visible=True)
+            except Exception:
+                pass
 
     def _apply_text_area_viewport_style(self, widget: object) -> None:
         """対象ウィジェットがテキストエリアなら viewport へ直接スタイルを当てる。"""
@@ -461,6 +560,12 @@ class ThemeManager(QObject):
                 # QTextEdit/QTextBrowser の viewport へ直接スタイル適用（環境差対策）
                 try:
                     self._ensure_text_area_viewport_styler(app)
+                except Exception:
+                    pass
+
+                # QScrollArea の viewport へ直接スタイル適用（未塗り領域の黒化対策）
+                try:
+                    self._ensure_scroll_area_viewport_styler(app)
                 except Exception:
                     pass
 

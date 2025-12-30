@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-ARIM RDE Tool v2.3.13 - PySide6によるRDE→ARIMデータポータル移行ツール
+ARIM RDE Tool v2.3.14 - PySide6によるRDE→ARIMデータポータル移行ツール
 
 主要機能:
 - RDEシステムへの自動ログイン・データセット一括取得・画像保存

@@ -442,6 +442,19 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
                 dataset_items = dataset_data
             else:
                 dataset_items = []
+
+            # RDE側で削除済みのデータセット（404/410確認済み）は候補から除外
+            try:
+                from classes.utils.remote_resource_pruner import filter_out_marked_missing_ids
+
+                dataset_items = filter_out_marked_missing_ids(
+                    dataset_items or [],
+                    resource_type="dataset",
+                    id_key="id",
+                )
+            except Exception:
+                # 失敗してもフィルタリング自体は継続（除外はあくまで最適化）
+                pass
             
             # 現在のユーザーIDを取得
             current_user_id = get_current_user_id()
