@@ -20,7 +20,7 @@ from qt_compat.widgets import (
     QPushButton, QMessageBox, QComboBox, 
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
     QCheckBox, QRadioButton, QProgressDialog, QApplication,
-    QLineEdit, QButtonGroup, QGridLayout, QCompleter
+    QLineEdit, QButtonGroup, QGridLayout, QCompleter, QDialog
 )
 from qt_compat.core import Qt, QTimer, QUrl, QStringListModel
 from qt_compat.gui import QDesktopServices
@@ -411,6 +411,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     base_col_count = len(base_headers)
     browser_column_index = len(all_headers) - 1
     entry_table = EntryTableWidget()
+    entry_table.setObjectName("datasetDataEntryTable")
     entry_table.setColumnCount(len(all_headers))
     entry_table.setHorizontalHeaderLabels(all_headers)
     header = entry_table.horizontalHeader()
@@ -571,7 +572,11 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         data_number = str(attributes.get("dataNumber", ""))
         if prefix_dataset:
             data_number = f"{dataset_id}-{data_number}"
-        entry_table.setItem(row_index, 0, QTableWidgetItem(data_number))
+        entry_id = entry.get("id", "")
+        number_item = QTableWidgetItem(data_number)
+        if entry_id:
+            number_item.setData(Qt.UserRole, str(entry_id))
+        entry_table.setItem(row_index, 0, number_item)
         entry_table.setItem(row_index, 1, QTableWidgetItem(attributes.get("name", "")))
         entry_table.setItem(row_index, 2, QTableWidgetItem(attributes.get("description", "")))
         num_files = safe_int(attributes.get("numberOfFiles", 0))
@@ -600,7 +605,6 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         summary["images"]["count"] += num_image_files
         summary["images"]["bytes"] += image_bytes
 
-        entry_id = entry.get("id", "")
         link_button = QPushButton("開く")
         link_button.setStyleSheet(f"""
             background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
@@ -1194,6 +1198,51 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     def on_filter_changed():
         """フィルタ変更時のハンドラー"""
         populate_dataset_combo_with_filter(get_selected_dataset_id())
+
+    def _get_entry_id_from_row(row: int):
+        try:
+            item = entry_table.item(row, 0)
+            if item is None:
+                return None
+            value = item.data(Qt.UserRole)
+            if not value:
+                return None
+            return str(value)
+        except Exception:
+            return None
+
+    def on_entry_table_double_clicked(row: int, _col: int):
+        """一覧の行ダブルクリックで送り状（invoice）編集ダイアログを開く"""
+        try:
+            if getattr(entry_table, "_footer_row_index", None) == row:
+                return
+            entry_id = _get_entry_id_from_row(row)
+            if not entry_id:
+                return
+
+            dataset_id = get_selected_dataset_id()
+            template_id = ""
+            if dataset_id:
+                dataset_record = _load_dataset_record(dataset_id)
+                rel = dataset_record.get("relationships") if isinstance(dataset_record, dict) else {}
+                template = rel.get("template") if isinstance(rel, dict) else {}
+                data = template.get("data") if isinstance(template, dict) else {}
+                if isinstance(data, dict):
+                    template_id = str(data.get("id") or "").strip()
+
+            try:
+                from classes.dataset.ui.invoice_edit_dialog import InvoiceEditDialog
+            except Exception as exc:
+                QMessageBox.warning(widget, "機能未利用", f"編集ダイアログの読み込みに失敗しました:\n{exc}")
+                return
+
+            dialog = InvoiceEditDialog(widget, entry_id=entry_id, template_id=template_id)
+            if dialog.exec() == QDialog.Accepted:
+                if dataset_id:
+                    update_dataentry_display(dataset_id, force_refresh=True)
+        except Exception as exc:
+            logger.debug("dataentry: open edit dialog failed", exc_info=True)
+            QMessageBox.warning(widget, "エラー", f"編集ダイアログの表示に失敗しました:\n{exc}")
     
     # イベント接続
     dataset_combo.currentTextChanged.connect(on_dataset_selection_changed)
@@ -1201,6 +1250,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     fetch_button.clicked.connect(on_fetch_button_clicked)
     refresh_dataset_button.clicked.connect(on_refresh_dataset_clicked)
     show_all_entries_button.clicked.connect(show_all_entries)
+    entry_table.cellDoubleClicked.connect(on_entry_table_double_clicked)
     
     # フィルタ変更時のイベント接続
     filter_user_only_radio.toggled.connect(on_filter_changed)
