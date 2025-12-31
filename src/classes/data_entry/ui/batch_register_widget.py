@@ -30,8 +30,9 @@ from qt_compat.widgets import (
 from qt_compat.core import Qt, Signal, QTimer, QThread
 from qt_compat.gui import QFont, QIcon, QPixmap, QPainter, QBrush
 
-# 直接 QColor() を生成せず、テーマのヘルパーを経由する
-QColor = get_qcolor
+
+def _theme_brush(key: ThemeKey) -> QBrush:
+    return QBrush(get_qcolor(key))
 
 from ..core.file_set_manager import (
     FileSetManager, FileSet, FileItem, FileType, PathOrganizeMethod, FileItemType
@@ -188,13 +189,13 @@ class FileTreeWidget(QTreeWidget):
             # スタイル設定
             if file_item.is_excluded:
                 for col in range(5):  # 拡張子列まで（サイズ列含む）
-                    tree_item.setForeground(col, QColor(get_color(ThemeKey.TEXT_MUTED)))
+                    tree_item.setForeground(col, _theme_brush(ThemeKey.TEXT_MUTED))
             else:
                 # サイズ列の色分け（ファイルとディレクトリで色を変える）
                 if file_item.file_type == FileType.FILE:
-                    tree_item.setForeground(4, QColor(get_color(ThemeKey.TEXT_SUCCESS)))  # ファイル：緑系
+                    tree_item.setForeground(4, _theme_brush(ThemeKey.TEXT_SUCCESS))  # ファイル：緑系
                 else:
-                    tree_item.setForeground(4, QColor(get_color(ThemeKey.TEXT_INFO)))  # ディレクトリ：青系
+                    tree_item.setForeground(4, _theme_brush(ThemeKey.TEXT_INFO))  # ディレクトリ：青系
             
             # マッピング保存
             self.file_items[id(tree_item)] = file_item
@@ -319,13 +320,13 @@ class FileTreeWidget(QTreeWidget):
             
             # 視覚的フィードバック
             if file_item.is_excluded:
-                tree_item.setForeground(0, QColor(get_color(ThemeKey.TEXT_MUTED)))
-                tree_item.setForeground(1, QColor(get_color(ThemeKey.TEXT_MUTED)))
-                tree_item.setForeground(2, QColor(get_color(ThemeKey.TEXT_MUTED)))
+                tree_item.setForeground(0, _theme_brush(ThemeKey.TEXT_MUTED))
+                tree_item.setForeground(1, _theme_brush(ThemeKey.TEXT_MUTED))
+                tree_item.setForeground(2, _theme_brush(ThemeKey.TEXT_MUTED))
             else:
-                tree_item.setForeground(0, QColor(get_color(ThemeKey.TEXT_PRIMARY)))
-                tree_item.setForeground(1, QColor(get_color(ThemeKey.TEXT_PRIMARY)))
-                tree_item.setForeground(2, QColor(get_color(ThemeKey.TEXT_PRIMARY)))
+                tree_item.setForeground(0, _theme_brush(ThemeKey.TEXT_PRIMARY))
+                tree_item.setForeground(1, _theme_brush(ThemeKey.TEXT_PRIMARY))
+                tree_item.setForeground(2, _theme_brush(ThemeKey.TEXT_PRIMARY))
             
             # 選択状態をシグナルで通知
             selected_items = self.get_selected_items()
@@ -387,10 +388,10 @@ class FileTreeWidget(QTreeWidget):
         
         # 視覚的なインジケーターを追加（アイコンやテキスト色の変更）
         if is_zip:
-            tree_item.setForeground(0, QColor(get_color(ThemeKey.TEXT_INFO)))  # 青色でZIP化対象を示す
+            tree_item.setForeground(0, _theme_brush(ThemeKey.TEXT_INFO))  # 青色でZIP化対象を示す
             tree_item.setText(0, f"📦 {file_item.name}")
         else:
-            tree_item.setForeground(0, QColor(get_color(ThemeKey.TEXT_PRIMARY)))  # 通常の色に戻す
+            tree_item.setForeground(0, _theme_brush(ThemeKey.TEXT_PRIMARY))  # 通常の色に戻す
             tree_item.setText(0, file_item.name)
         
         logger.debug("ZIP化フラグ設定: %s -> %s", file_item.name, is_zip)
@@ -740,17 +741,17 @@ class FileTreeWidget(QTreeWidget):
         """アイテムの表示スタイルを更新"""
         if file_item.is_excluded:
             for col in range(4):
-                tree_item.setForeground(col, QColor(get_color(ThemeKey.TEXT_MUTED)))
+                tree_item.setForeground(col, _theme_brush(ThemeKey.TEXT_MUTED))
         else:
             # 通常色に戻す
             for col in range(4):
-                tree_item.setForeground(col, QColor(get_color(ThemeKey.TEXT_PRIMARY)))
+                tree_item.setForeground(col, _theme_brush(ThemeKey.TEXT_PRIMARY))
             
             # サイズ列の色分け
             if file_item.file_type == FileType.FILE:
-                tree_item.setForeground(3, QColor(get_color(ThemeKey.TEXT_SUCCESS)))  # ファイル：緑系
+                tree_item.setForeground(3, _theme_brush(ThemeKey.TEXT_SUCCESS))  # ファイル：緑系
             else:
-                tree_item.setForeground(3, QColor(get_color(ThemeKey.TEXT_INFO)))  # ディレクトリ：青系
+                tree_item.setForeground(3, _theme_brush(ThemeKey.TEXT_INFO))  # ディレクトリ：青系
     
     def on_item_changed(self, item, column):
         """アイテム変更時の処理（未使用だが、互換性のため残す）"""
@@ -770,15 +771,15 @@ class FileTreeWidget(QTreeWidget):
         
         # スタイル更新
         if exclude:
-            tree_item.setForeground(0, QColor(get_color(ThemeKey.TEXT_MUTED)))
-            tree_item.setForeground(1, QColor(get_color(ThemeKey.TEXT_MUTED)))
-            tree_item.setForeground(2, QColor(get_color(ThemeKey.TEXT_MUTED)))
-            tree_item.setForeground(3, QColor(get_color(ThemeKey.TEXT_MUTED)))
+            tree_item.setForeground(0, _theme_brush(ThemeKey.TEXT_MUTED))
+            tree_item.setForeground(1, _theme_brush(ThemeKey.TEXT_MUTED))
+            tree_item.setForeground(2, _theme_brush(ThemeKey.TEXT_MUTED))
+            tree_item.setForeground(3, _theme_brush(ThemeKey.TEXT_MUTED))
         else:
-            tree_item.setForeground(0, QColor(get_color(ThemeKey.TEXT_PRIMARY)))
-            tree_item.setForeground(1, QColor(get_color(ThemeKey.TEXT_PRIMARY)))
-            tree_item.setForeground(2, QColor(get_color(ThemeKey.TEXT_PRIMARY)))
-            tree_item.setForeground(3, QColor(get_color(ThemeKey.TEXT_PRIMARY)))
+            tree_item.setForeground(0, _theme_brush(ThemeKey.TEXT_PRIMARY))
+            tree_item.setForeground(1, _theme_brush(ThemeKey.TEXT_PRIMARY))
+            tree_item.setForeground(2, _theme_brush(ThemeKey.TEXT_PRIMARY))
+            tree_item.setForeground(3, _theme_brush(ThemeKey.TEXT_PRIMARY))
     
     def find_tree_item_by_file_item(self, target_file_item: FileItem) -> Optional[QTreeWidgetItem]:
         """FileItemに対応するQTreeWidgetItemを検索"""

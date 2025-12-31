@@ -118,6 +118,22 @@ class AISuggestionDialog(QDialog):
         self.extension_ai_threads = []  # AI拡張用のスレッドリスト
         self._active_extension_button = None  # AI拡張で実行中のボタン
         self.extension_buttons = []  # AI拡張ボタンのリスト（複数クリック防止用）
+        # データセットタブ（一覧選択）用
+        self.dataset_ai_threads = []
+        self._active_dataset_button = None
+        self.dataset_buttons = []
+        self._dataset_entries = []
+        self._selected_dataset_record = None
+
+        # データセット一括問い合わせ用（報告書タブ相当）
+        self._bulk_dataset_queue = []
+        self._bulk_dataset_index = 0
+        self._bulk_dataset_total = 0
+        self._bulk_dataset_next_index = 0
+        self._bulk_dataset_inflight = 0
+        self._bulk_dataset_max_concurrency = 5
+        self._bulk_dataset_running = False
+        self._bulk_dataset_cancelled = False
         # 報告書タブ（converted.xlsx）用
         self.report_ai_threads = []
         self._active_report_button = None
@@ -209,6 +225,14 @@ class AISuggestionDialog(QDialog):
                 self.setup_extension_tab(extension_tab)
             except Exception as e:
                 logger.warning("AI拡張タブの初期化に失敗しました: %s", e)
+
+            # データセットタブ（一覧選択）
+            try:
+                dataset_tab = QWidget()
+                self.tab_widget.addTab(dataset_tab, "データセット")
+                self.setup_dataset_tab(dataset_tab)
+            except Exception as e:
+                logger.warning("データセットタブの初期化に失敗しました: %s", e)
 
             # 報告書タブ（converted.xlsx）
             try:
@@ -1742,6 +1766,1196 @@ class AISuggestionDialog(QDialog):
         except Exception as e:
             logger.warning("報告書タブのボタン読み込みに失敗しました: %s", e)
 
+    # ------------------------------------------------------------------
+    # Dataset tab (table-based selection)
+    # ------------------------------------------------------------------
+    def setup_dataset_tab(self, tab_widget):
+        """データセットタブのセットアップ（dataset.json エントリーを対象）"""
+        from qt_compat.widgets import QTableWidget, QTableWidgetItem, QTextBrowser, QLineEdit, QAbstractItemView
+        from qt_compat.widgets import QSplitter
+
+        layout = QVBoxLayout(tab_widget)
+
+        # ヘッダー
+        header_layout = QHBoxLayout()
+        title_label = QLabel("データセット（dataset.json）")
+        title_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 5px;")
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+
+        # デフォルトAI設定表示（AI拡張/報告書と同様）
+        try:
+            ai_manager = AIManager()
+            default_provider = ai_manager.get_default_provider()
+            default_model = ai_manager.get_default_model(default_provider)
+            ai_config_label = QLabel(f"🤖 使用AI: {default_provider.upper()} / {default_model}")
+            ai_config_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin: 5px; font-size: 11px;")
+            ai_config_label.setToolTip("グローバル設定で指定されたデフォルトAIを使用します")
+            header_layout.addWidget(ai_config_label)
+        except Exception:
+            pass
+
+        config_button = QPushButton("設定編集")
+        config_button.setToolTip("AIサジェスト機能定義を編集")
+        config_button.clicked.connect(self.edit_extension_config)
+        config_button.setMaximumWidth(80)
+        header_layout.addWidget(config_button)
+
+        layout.addLayout(header_layout)
+
+        # フィルタ & 一覧
+        filter_widget = QWidget()
+        filter_container_layout = QVBoxLayout(filter_widget)
+        filter_container_layout.setContentsMargins(10, 5, 10, 5)
+
+        row1 = QHBoxLayout()
+        row2 = QHBoxLayout()
+
+        row1.addWidget(QLabel("データセットID:"))
+        self.dataset_id_filter_input = QLineEdit()
+        self.dataset_id_filter_input.setPlaceholderText("IDで絞り込み")
+        self.dataset_id_filter_input.setMinimumWidth(200)
+        row1.addWidget(self.dataset_id_filter_input)
+
+        row1.addSpacing(10)
+        row1.addWidget(QLabel("課題番号:"))
+        self.dataset_grant_filter_input = QLineEdit()
+        self.dataset_grant_filter_input.setPlaceholderText("課題番号で絞り込み")
+        self.dataset_grant_filter_input.setMinimumWidth(220)
+        row1.addWidget(self.dataset_grant_filter_input)
+
+        row1.addSpacing(10)
+        row1.addWidget(QLabel("年度:"))
+        self.dataset_year_filter_combo = QComboBox()
+        self.dataset_year_filter_combo.setMinimumWidth(120)
+        self.dataset_year_filter_combo.addItem("全て")
+        row1.addWidget(self.dataset_year_filter_combo)
+
+        row1.addSpacing(10)
+        row1.addWidget(QLabel("機関コード:"))
+        self.dataset_inst_code_filter_combo = QComboBox()
+        self.dataset_inst_code_filter_combo.setMinimumWidth(140)
+        self.dataset_inst_code_filter_combo.addItem("全て")
+        row1.addWidget(self.dataset_inst_code_filter_combo)
+
+        row1.addStretch()
+        self.dataset_refresh_button = QPushButton("更新")
+        self.dataset_refresh_button.setMaximumWidth(70)
+        row1.addWidget(self.dataset_refresh_button)
+
+        row2.addWidget(QLabel("申請者:"))
+        self.dataset_applicant_filter_input = QLineEdit()
+        self.dataset_applicant_filter_input.setPlaceholderText("申請者で絞り込み")
+        self.dataset_applicant_filter_input.setMinimumWidth(180)
+        row2.addWidget(self.dataset_applicant_filter_input)
+
+        row2.addSpacing(10)
+        row2.addWidget(QLabel("課題名:"))
+        self.dataset_subject_title_filter_input = QLineEdit()
+        self.dataset_subject_title_filter_input.setPlaceholderText("課題名で絞り込み")
+        self.dataset_subject_title_filter_input.setMinimumWidth(220)
+        row2.addWidget(self.dataset_subject_title_filter_input)
+
+        row2.addSpacing(10)
+        row2.addWidget(QLabel("データセット名:"))
+        self.dataset_name_filter_input = QLineEdit()
+        self.dataset_name_filter_input.setPlaceholderText("データセット名で絞り込み")
+        self.dataset_name_filter_input.setMinimumWidth(220)
+        row2.addWidget(self.dataset_name_filter_input)
+
+        row2.addSpacing(10)
+        row2.addWidget(QLabel("テンプレート:"))
+        self.dataset_template_filter_input = QLineEdit()
+        self.dataset_template_filter_input.setPlaceholderText("テンプレートIDで絞り込み")
+        self.dataset_template_filter_input.setMinimumWidth(220)
+        row2.addWidget(self.dataset_template_filter_input)
+        row2.addStretch()
+
+        filter_container_layout.addLayout(row1)
+        filter_container_layout.addLayout(row2)
+        layout.addWidget(filter_widget)
+
+        self.dataset_entries_table = QTableWidget()
+        self.dataset_entries_table.setColumnCount(8)
+        self.dataset_entries_table.setHorizontalHeaderLabels([
+            "データセットID",
+            "課題番号",
+            "年度",
+            "機関コード",
+            "申請者",
+            "課題名",
+            "データセット名",
+            "データセットテンプレート",
+        ])
+        self.dataset_entries_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.dataset_entries_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.dataset_entries_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.dataset_entries_table.setMinimumHeight(180)
+        try:
+            self.dataset_entries_table.setSortingEnabled(True)
+        except Exception:
+            pass
+        layout.addWidget(self.dataset_entries_table)
+
+        # メインコンテンツ（左右分割）
+        content_splitter = QSplitter(Qt.Horizontal)
+        layout.addWidget(content_splitter)
+
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(5, 5, 5, 5)
+
+        buttons_label = QLabel("🤖 AIサジェスト機能（データセット）")
+        buttons_label.setStyleSheet(
+            f"font-weight: bold; margin: 5px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};"
+        )
+        left_layout.addWidget(buttons_label)
+
+        self.dataset_bulk_checkbox = QCheckBox("一括問い合わせ")
+        self.dataset_bulk_checkbox.setToolTip(
+            "チェックONの状態でボタンを押すと、表示全件（または選択行）に対して一括で問い合わせを行い結果を保存します。"
+        )
+        left_layout.addWidget(self.dataset_bulk_checkbox)
+
+        parallel_row = QHBoxLayout()
+        parallel_row.addWidget(QLabel("並列数:"))
+        self.dataset_bulk_parallel_spinbox = QSpinBox()
+        self.dataset_bulk_parallel_spinbox.setMinimum(1)
+        self.dataset_bulk_parallel_spinbox.setMaximum(20)
+        self.dataset_bulk_parallel_spinbox.setValue(5)
+        self.dataset_bulk_parallel_spinbox.setToolTip("一括問い合わせ時の同時実行数（標準5、最大20）")
+        parallel_row.addWidget(self.dataset_bulk_parallel_spinbox)
+        parallel_row.addStretch()
+        left_layout.addLayout(parallel_row)
+
+        self.dataset_buttons_widget = QWidget()
+        self.dataset_buttons_layout = QVBoxLayout(self.dataset_buttons_widget)
+        self.dataset_buttons_layout.setContentsMargins(5, 5, 5, 5)
+        self.dataset_buttons_layout.setSpacing(6)
+        left_layout.addWidget(self.dataset_buttons_widget)
+        left_layout.addStretch()
+
+        left_widget.setMaximumWidth(280)
+        left_widget.setMinimumWidth(250)
+        content_splitter.addWidget(left_widget)
+
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(5, 5, 5, 5)
+
+        response_label = QLabel("📝 AI応答結果")
+        response_label.setStyleSheet(
+            f"font-weight: bold; margin: 5px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};"
+        )
+        right_layout.addWidget(response_label)
+
+        response_container = QWidget()
+        response_container_layout = QVBoxLayout(response_container)
+        response_container_layout.setContentsMargins(0, 0, 0, 0)
+
+        self.dataset_response_display = QTextBrowser()
+        self.dataset_response_display.setReadOnly(True)
+        self.dataset_response_display.setOpenExternalLinks(False)
+        self.dataset_response_display.setPlaceholderText(
+            "左側のボタンをクリックすると、選択したデータセットに基づくAI結果がここに表示されます。\n\n"
+            "上部の各列フィルタで絞り込み、一覧から1件選択してください。"
+        )
+        try:
+            if getattr(self, '_extension_response_display_stylesheet', ''):
+                self.dataset_response_display.setStyleSheet(self._extension_response_display_stylesheet)
+        except Exception:
+            pass
+        response_container_layout.addWidget(self.dataset_response_display)
+
+        # スピナー（キャンセル付き）
+        try:
+            self.dataset_spinner_overlay = SpinnerOverlay(
+                response_container,
+                "AI応答を待機中...",
+                show_cancel=True,
+                cancel_text="⏹ キャンセル"
+            )
+            self.dataset_spinner_overlay.cancel_requested.connect(self.cancel_dataset_ai_requests)
+        except Exception as _e:
+            logger.debug("dataset spinner overlay init failed: %s", _e)
+            self.dataset_spinner_overlay = None
+
+        right_layout.addWidget(response_container)
+
+        response_button_layout = QHBoxLayout()
+        self.dataset_clear_response_button = QPushButton("🗑️ クリア")
+        self.dataset_clear_response_button.clicked.connect(self.clear_dataset_response)
+        self.dataset_clear_response_button.setStyleSheet(
+            f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_PRESSED)};
+            }}
+        """
+        )
+
+        self.dataset_copy_response_button = QPushButton("📋 コピー")
+        self.dataset_copy_response_button.clicked.connect(self.copy_dataset_response)
+        self.dataset_copy_response_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)};
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_PRESSED)};
+            }}
+        """
+        )
+
+        self.dataset_show_prompt_button = QPushButton("📄 使用プロンプト表示")
+        self.dataset_show_prompt_button.clicked.connect(self.show_used_prompt)
+        self.dataset_show_prompt_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-size: 12px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+            }}
+        """
+        )
+        self.dataset_show_prompt_button.setEnabled(False)
+
+        self.dataset_show_api_params_button = QPushButton("🔎 API req/resp")
+        self.dataset_show_api_params_button.clicked.connect(self.show_api_request_response_params)
+        self.dataset_show_api_params_button.setStyleSheet(self.dataset_show_prompt_button.styleSheet())
+        self.dataset_show_api_params_button.setEnabled(False)
+
+        response_button_layout.addWidget(self.dataset_clear_response_button)
+        response_button_layout.addWidget(self.dataset_copy_response_button)
+        response_button_layout.addWidget(self.dataset_show_prompt_button)
+        response_button_layout.addWidget(self.dataset_show_api_params_button)
+        response_button_layout.addStretch()
+        right_layout.addLayout(response_button_layout)
+
+        content_splitter.addWidget(right_widget)
+
+        # 接続
+        self.dataset_refresh_button.clicked.connect(self.refresh_dataset_entries)
+        self.dataset_id_filter_input.textChanged.connect(self.refresh_dataset_entries)
+        self.dataset_grant_filter_input.textChanged.connect(self.refresh_dataset_entries)
+        self.dataset_applicant_filter_input.textChanged.connect(self.refresh_dataset_entries)
+        self.dataset_subject_title_filter_input.textChanged.connect(self.refresh_dataset_entries)
+        self.dataset_name_filter_input.textChanged.connect(self.refresh_dataset_entries)
+        self.dataset_template_filter_input.textChanged.connect(self.refresh_dataset_entries)
+        self.dataset_year_filter_combo.currentIndexChanged.connect(self.refresh_dataset_entries)
+        self.dataset_inst_code_filter_combo.currentIndexChanged.connect(self.refresh_dataset_entries)
+        self.dataset_entries_table.itemSelectionChanged.connect(self.on_dataset_entry_selected)
+
+        # 初期ロード
+        self.refresh_dataset_entries()
+        try:
+            self.load_dataset_tab_buttons()
+        except Exception as e:
+            logger.warning("データセットタブのボタン読み込みに失敗しました: %s", e)
+
+    def _truncate_dataset_table_text(self, text: str, max_chars: int) -> str:
+        s = (text or "").strip()
+        if max_chars <= 0:
+            return ""
+        if len(s) <= max_chars:
+            return s
+        return s[: max_chars - 1] + "…"
+
+    def refresh_dataset_entries(self):
+        """dataset.json のエントリーを読み込み、フィルタして表示"""
+        try:
+            from qt_compat.widgets import QTableWidgetItem
+            from config.common import get_dynamic_file_path
+            from classes.dataset.util.dataset_listing_records import load_dataset_listing_rows
+
+            dataset_json_path = get_dynamic_file_path('output/rde/data/dataset.json')
+            info_json_path = get_dynamic_file_path('output/rde/data/info.json')
+
+            self._dataset_entries = load_dataset_listing_rows(dataset_json_path, info_json_path)
+
+            # 年度/機関コード候補を更新（全件から抽出）
+            years = []
+            inst_codes = []
+            for rec in self._dataset_entries:
+                y = (rec.get('year') or '').strip()
+                if y and y not in years:
+                    years.append(y)
+                ic = (rec.get('inst_code') or '').strip()
+                if ic and ic not in inst_codes:
+                    inst_codes.append(ic)
+
+            years_sorted = sorted(years)
+            inst_sorted = sorted(inst_codes)
+
+            current_year = self.dataset_year_filter_combo.currentText() if hasattr(self, 'dataset_year_filter_combo') else "全て"
+            self.dataset_year_filter_combo.blockSignals(True)
+            self.dataset_year_filter_combo.clear()
+            self.dataset_year_filter_combo.addItem("全て")
+            for y in years_sorted:
+                self.dataset_year_filter_combo.addItem(y)
+            idx = self.dataset_year_filter_combo.findText(current_year)
+            if idx >= 0:
+                self.dataset_year_filter_combo.setCurrentIndex(idx)
+            self.dataset_year_filter_combo.blockSignals(False)
+
+            current_inst = self.dataset_inst_code_filter_combo.currentText() if hasattr(self, 'dataset_inst_code_filter_combo') else "全て"
+            self.dataset_inst_code_filter_combo.blockSignals(True)
+            self.dataset_inst_code_filter_combo.clear()
+            self.dataset_inst_code_filter_combo.addItem("全て")
+            for ic in inst_sorted:
+                self.dataset_inst_code_filter_combo.addItem(ic)
+            idx = self.dataset_inst_code_filter_combo.findText(current_inst)
+            if idx >= 0:
+                self.dataset_inst_code_filter_combo.setCurrentIndex(idx)
+            self.dataset_inst_code_filter_combo.blockSignals(False)
+
+            id_filter = self.dataset_id_filter_input.text().strip() if hasattr(self, 'dataset_id_filter_input') else ""
+            grant_filter = self.dataset_grant_filter_input.text().strip() if hasattr(self, 'dataset_grant_filter_input') else ""
+            year_filter = self.dataset_year_filter_combo.currentText().strip() if hasattr(self, 'dataset_year_filter_combo') else "全て"
+            inst_filter = self.dataset_inst_code_filter_combo.currentText().strip() if hasattr(self, 'dataset_inst_code_filter_combo') else "全て"
+            applicant_filter = self.dataset_applicant_filter_input.text().strip() if hasattr(self, 'dataset_applicant_filter_input') else ""
+            subject_filter = self.dataset_subject_title_filter_input.text().strip() if hasattr(self, 'dataset_subject_title_filter_input') else ""
+            name_filter = self.dataset_name_filter_input.text().strip() if hasattr(self, 'dataset_name_filter_input') else ""
+            template_filter = self.dataset_template_filter_input.text().strip() if hasattr(self, 'dataset_template_filter_input') else ""
+
+            filtered = []
+            for rec in self._dataset_entries:
+                dataset_id = (rec.get('dataset_id') or '').strip()
+                grant_number = (rec.get('grant_number') or '').strip()
+                year = (rec.get('year') or '').strip()
+                inst_code = (rec.get('inst_code') or '').strip()
+                applicant = (rec.get('applicant') or '').strip()
+                subject_title = (rec.get('subject_title') or '').strip()
+                dataset_name = (rec.get('dataset_name') or '').strip()
+                dataset_template = (rec.get('dataset_template') or '').strip()
+
+                if id_filter and id_filter not in dataset_id:
+                    continue
+                if grant_filter and grant_filter not in grant_number:
+                    continue
+                if year_filter and year_filter != "全て" and year_filter != year:
+                    continue
+                if inst_filter and inst_filter != "全て" and inst_filter != inst_code:
+                    continue
+                if applicant_filter and applicant_filter not in applicant:
+                    continue
+                if subject_filter and subject_filter not in subject_title:
+                    continue
+                if name_filter and name_filter not in dataset_name:
+                    continue
+                if template_filter and template_filter not in dataset_template:
+                    continue
+                filtered.append(rec)
+
+            try:
+                self.dataset_entries_table.setSortingEnabled(False)
+            except Exception:
+                pass
+
+            self.dataset_entries_table.setRowCount(len(filtered))
+            for row_idx, rec in enumerate(filtered):
+                dataset_id = (rec.get('dataset_id') or '').strip()
+                grant_number = (rec.get('grant_number') or '').strip()
+                year = (rec.get('year') or '').strip()
+                inst_code = (rec.get('inst_code') or '').strip()
+                applicant = (rec.get('applicant') or '').strip()
+                subject_title = (rec.get('subject_title') or '').strip()
+                dataset_name = (rec.get('dataset_name') or '').strip()
+                dataset_template = (rec.get('dataset_template') or '').strip()
+
+                subject_disp = self._truncate_dataset_table_text(subject_title, 28)
+                name_disp = self._truncate_dataset_table_text(dataset_name, 28)
+                template_disp = self._truncate_dataset_table_text(dataset_template, 28)
+
+                raw = rec.get('_raw')
+                for col_idx, value in enumerate([
+                    dataset_id,
+                    grant_number,
+                    year,
+                    inst_code,
+                    applicant,
+                    subject_disp,
+                    name_disp,
+                    template_disp,
+                ]):
+                    item = QTableWidgetItem(value)
+                    # dataset.json形式のdictを保持
+                    item.setData(Qt.UserRole, raw if isinstance(raw, dict) else None)
+                    self.dataset_entries_table.setItem(row_idx, col_idx, item)
+
+            try:
+                self.dataset_entries_table.resizeColumnsToContents()
+            except Exception:
+                pass
+
+            try:
+                self.dataset_entries_table.setSortingEnabled(True)
+            except Exception:
+                pass
+
+            self.dataset_entries_table.clearSelection()
+            self._selected_dataset_record = None
+
+        except Exception as e:
+            logger.debug("refresh_dataset_entries failed: %s", e)
+            try:
+                self.dataset_entries_table.setRowCount(0)
+            except Exception:
+                pass
+
+    def on_dataset_entry_selected(self):
+        """一覧で選択されたデータセットエントリーを保持し、context_data を更新"""
+        try:
+            selected_items = self.dataset_entries_table.selectedItems() if hasattr(self, 'dataset_entries_table') else []
+            if not selected_items:
+                self._selected_dataset_record = None
+                return
+
+            rec = selected_items[0].data(Qt.UserRole)
+            if not isinstance(rec, dict):
+                self._selected_dataset_record = None
+                return
+
+            self._selected_dataset_record = rec
+
+            # 既存の更新ロジックを再利用（dataset.json形式）
+            try:
+                self.update_context_from_dataset(rec)
+            except Exception:
+                pass
+            # AI拡張タブ側の表示も同期（存在する場合）
+            try:
+                self.update_dataset_info_display()
+            except Exception:
+                pass
+        except Exception as e:
+            logger.debug("on_dataset_entry_selected failed: %s", e)
+            self._selected_dataset_record = None
+
+    def _get_dataset_target_key(self, rec: dict) -> str:
+        dataset_id = ''
+        grant_number = ''
+        name = ''
+        try:
+            dataset_id = (rec.get('id') or '').strip()
+            attrs = rec.get('attributes', {}) if isinstance(rec.get('attributes', {}), dict) else {}
+            grant_number = (attrs.get('grantNumber') or '').strip()
+            name = (attrs.get('name') or '').strip()
+        except Exception:
+            pass
+        # dataset_id > grant_number > name
+        return dataset_id or grant_number or name or 'unknown'
+
+    def _get_selected_dataset_records(self) -> List[dict]:
+        if not hasattr(self, 'dataset_entries_table'):
+            return []
+        try:
+            sm = self.dataset_entries_table.selectionModel()
+            if sm is None:
+                return []
+            rows = sm.selectedRows(0)
+            recs = []
+            for mi in rows:
+                try:
+                    item = self.dataset_entries_table.item(mi.row(), 0)
+                    if item is None:
+                        continue
+                    rec = item.data(Qt.UserRole)
+                    if isinstance(rec, dict):
+                        recs.append(rec)
+                except Exception:
+                    continue
+            return recs
+        except Exception:
+            return []
+
+    def _get_displayed_dataset_records(self) -> List[dict]:
+        if not hasattr(self, 'dataset_entries_table'):
+            return []
+        try:
+            recs = []
+            seen = set()
+            for row in range(self.dataset_entries_table.rowCount()):
+                item = self.dataset_entries_table.item(row, 0)
+                if item is None:
+                    continue
+                rec = item.data(Qt.UserRole)
+                if not isinstance(rec, dict):
+                    continue
+                key = self._get_dataset_target_key(rec)
+                if key in seen:
+                    continue
+                seen.add(key)
+                recs.append(rec)
+            return recs
+        except Exception:
+            return []
+
+    def load_dataset_tab_buttons(self):
+        """AI拡張設定からボタンを読み込み、データセットタブに表示"""
+        try:
+            from classes.dataset.util.ai_extension_helper import load_ai_extension_config, infer_ai_suggest_target_kind
+            config = load_ai_extension_config()
+
+            while self.dataset_buttons_layout.count():
+                item = self.dataset_buttons_layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    widget.setParent(None)
+                    widget.deleteLater()
+
+            self.dataset_buttons.clear()
+
+            ui_settings = config.get('ui_settings', {})
+            button_height = ui_settings.get('button_height', 60)
+            button_width = ui_settings.get('button_width', 140)
+            show_icons = ui_settings.get('show_icons', True)
+
+            buttons_config = config.get('buttons', [])
+            default_buttons = config.get('default_buttons', [])
+            all_buttons = buttons_config + default_buttons
+
+            # dataset向けのみ
+            all_buttons = [b for b in all_buttons if infer_ai_suggest_target_kind(b) != 'report']
+
+            if not all_buttons:
+                no_buttons_label = QLabel("AI拡張ボタンが設定されていません。\n設定編集ボタンから設定ファイルを確認してください。")
+                no_buttons_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; text-align: center; padding: 20px;")
+                no_buttons_label.setAlignment(Qt.AlignCenter)
+                self.dataset_buttons_layout.addWidget(no_buttons_label)
+                return
+
+            for button_config in all_buttons:
+                button = self.create_extension_button(
+                    button_config,
+                    button_height,
+                    button_width,
+                    show_icons,
+                    clicked_handler=self.on_dataset_tab_button_clicked,
+                    buttons_list=self.dataset_buttons,
+                    target_kind="dataset",
+                )
+                self.dataset_buttons_layout.addWidget(button)
+
+            self.dataset_buttons_layout.addStretch()
+
+        except Exception as e:
+            error_label = QLabel(f"AI拡張設定の読み込みエラー: {str(e)}")
+            error_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; padding: 10px;")
+            self.dataset_buttons_layout.addWidget(error_label)
+
+    def on_dataset_tab_button_clicked(self, button_config):
+        """データセットタブのAIボタンクリック時の処理"""
+        try:
+            button_id = button_config.get('id', 'unknown')
+
+            # 一括問い合わせ
+            if getattr(self, 'dataset_bulk_checkbox', None) is not None and self.dataset_bulk_checkbox.isChecked():
+                self._start_bulk_dataset_requests(button_config)
+                return
+
+            if not isinstance(getattr(self, '_selected_dataset_record', None), dict):
+                QMessageBox.warning(self, "警告", "データセットエントリーを選択してください（上部一覧から1件選択）。")
+                return
+
+            target_key = self._get_dataset_target_key(self._selected_dataset_record)
+
+            # 既存結果の検出（同一ボタン + 同一対象）
+            try:
+                from classes.dataset.util.ai_suggest_result_log import read_latest_result
+
+                latest = read_latest_result('dataset', target_key, button_id)
+                if latest:
+                    if os.environ.get("PYTEST_CURRENT_TEST"):
+                        fmt = (latest.get('display_format') or 'text').lower()
+                        content = latest.get('display_content') or ''
+                        if fmt == 'html':
+                            self.dataset_response_display.setHtml(content)
+                        else:
+                            self.dataset_response_display.setText(content)
+                        self.last_used_prompt = latest.get('prompt')
+                        self.last_api_request_params = latest.get('request_params')
+                        self.last_api_response_params = latest.get('response_params')
+                        self.last_api_provider = latest.get('provider')
+                        self.last_api_model = latest.get('model')
+                        if hasattr(self, 'dataset_show_prompt_button'):
+                            self.dataset_show_prompt_button.setEnabled(bool(self.last_used_prompt))
+                        if hasattr(self, 'dataset_show_api_params_button'):
+                            self.dataset_show_api_params_button.setEnabled(bool(self.last_api_request_params or self.last_api_response_params))
+                        return
+
+                    ts = (latest.get('timestamp') or '').strip()
+                    box = QMessageBox(self)
+                    box.setIcon(QMessageBox.Question)
+                    box.setWindowTitle("既存結果あり")
+                    box.setText(f"同一ボタン・同一対象の既存結果が見つかりました。" + (f"（{ts}）" if ts else ""))
+                    box.setInformativeText("既存の最新結果を表示しますか？それとも新規に問い合わせますか？")
+                    show_existing_btn = box.addButton("既存結果を表示", QMessageBox.AcceptRole)
+                    run_new_btn = box.addButton("新規問い合わせ", QMessageBox.ActionRole)
+                    cancel_btn = box.addButton(QMessageBox.Cancel)
+                    box.setDefaultButton(show_existing_btn)
+                    box.exec()
+
+                    chosen = box.clickedButton()
+                    if chosen == cancel_btn:
+                        return
+                    if chosen == show_existing_btn:
+                        fmt = (latest.get('display_format') or 'text').lower()
+                        content = latest.get('display_content') or ''
+                        if fmt == 'html':
+                            self.dataset_response_display.setHtml(content)
+                        else:
+                            self.dataset_response_display.setText(content)
+
+                        self.last_used_prompt = latest.get('prompt')
+                        self.last_api_request_params = latest.get('request_params')
+                        self.last_api_response_params = latest.get('response_params')
+                        self.last_api_provider = latest.get('provider')
+                        self.last_api_model = latest.get('model')
+                        if hasattr(self, 'dataset_show_prompt_button'):
+                            self.dataset_show_prompt_button.setEnabled(bool(self.last_used_prompt))
+                        if hasattr(self, 'dataset_show_api_params_button'):
+                            self.dataset_show_api_params_button.setEnabled(bool(self.last_api_request_params or self.last_api_response_params))
+                        return
+
+                    # run_new_btn の場合はそのまま問い合わせ続行
+            except Exception:
+                pass
+
+            clicked_button = self.sender()
+            self._active_dataset_button = clicked_button if hasattr(clicked_button, 'start_loading') else None
+            if clicked_button and hasattr(clicked_button, 'start_loading'):
+                clicked_button.start_loading("AI処理中")
+
+            # 選択データセットを context_data に反映
+            try:
+                self.update_context_from_dataset(self._selected_dataset_record)
+            except Exception:
+                pass
+
+            prompt = self.build_extension_prompt(button_config)
+            if not prompt:
+                if clicked_button:
+                    clicked_button.stop_loading()
+                QMessageBox.warning(self, "警告", "プロンプトの構築に失敗しました。")
+                return
+
+            self.execute_dataset_ai_request(prompt, button_config, clicked_button, dataset_target_key=target_key)
+
+        except Exception as e:
+            QMessageBox.critical(self, "エラー", f"データセットボタン処理エラー: {str(e)}")
+
+    def _normalize_bulk_dataset_concurrency(self, requested: Optional[int]) -> int:
+        try:
+            value = int(requested) if requested is not None else 5
+        except Exception:
+            value = 5
+        if value < 1:
+            value = 1
+        if value > 20:
+            value = 20
+        return value
+
+    def _update_bulk_dataset_status_message(self):
+        try:
+            if getattr(self, 'dataset_spinner_overlay', None):
+                label = (getattr(self, '_bulk_dataset_button_config', {}) or {}).get('label', 'AI')
+                total = int(self._bulk_dataset_total or len(self._bulk_dataset_queue) or 0)
+                done = int(self._bulk_dataset_index or 0)
+                inflight = int(self._bulk_dataset_inflight or 0)
+                if total > 0:
+                    self.dataset_spinner_overlay.set_message(
+                        f"一括処理中 完了 {done}/{total} / 実行中 {inflight}: {label}"
+                    )
+        except Exception:
+            pass
+
+    def _on_bulk_dataset_task_done(self):
+        try:
+            if self._bulk_dataset_inflight > 0:
+                self._bulk_dataset_inflight -= 1
+        except Exception:
+            self._bulk_dataset_inflight = 0
+
+        try:
+            self._bulk_dataset_index += 1
+            total = int(self._bulk_dataset_total or len(self._bulk_dataset_queue) or 0)
+            if total > 0 and self._bulk_dataset_index > total:
+                self._bulk_dataset_index = total
+        except Exception:
+            pass
+
+        self._update_bulk_dataset_status_message()
+        self._kick_bulk_dataset_scheduler()
+
+    def _finish_bulk_dataset_requests(self):
+        self._bulk_dataset_running = False
+        self._bulk_dataset_cancelled = False
+        self._bulk_dataset_queue = []
+        self._bulk_dataset_index = 0
+        self._bulk_dataset_total = 0
+        self._bulk_dataset_next_index = 0
+        self._bulk_dataset_inflight = 0
+        try:
+            if getattr(self, 'dataset_spinner_overlay', None):
+                self.dataset_spinner_overlay.set_message("AI応答を待機中...")
+        except Exception:
+            pass
+        for b in list(getattr(self, 'dataset_buttons', [])):
+            try:
+                b.setEnabled(True)
+            except Exception:
+                pass
+
+    def _kick_bulk_dataset_scheduler(self):
+        if not self._bulk_dataset_running or self._bulk_dataset_cancelled:
+            if int(self._bulk_dataset_inflight or 0) <= 0:
+                self._finish_bulk_dataset_requests()
+            return
+
+        total = int(self._bulk_dataset_total or len(self._bulk_dataset_queue) or 0)
+        if total <= 0:
+            self._finish_bulk_dataset_requests()
+            return
+
+        max_conc = self._normalize_bulk_dataset_concurrency(getattr(self, '_bulk_dataset_max_concurrency', 5))
+
+        while (
+            self._bulk_dataset_inflight < max_conc
+            and self._bulk_dataset_next_index < len(self._bulk_dataset_queue)
+            and self._bulk_dataset_running
+            and not self._bulk_dataset_cancelled
+        ):
+            task = self._bulk_dataset_queue[self._bulk_dataset_next_index]
+            self._bulk_dataset_next_index += 1
+
+            rec = task.get('record')
+            if not isinstance(rec, dict):
+                self._bulk_dataset_index += 1
+                continue
+
+            # context_data をその都度更新
+            try:
+                self.update_context_from_dataset(rec)
+            except Exception:
+                pass
+
+            button_config = getattr(self, '_bulk_dataset_button_config', {}) or {}
+            prompt = self.build_extension_prompt(button_config)
+            if not prompt:
+                self._bulk_dataset_index += 1
+                continue
+
+            self._bulk_dataset_inflight += 1
+            self._update_bulk_dataset_status_message()
+
+            self.execute_dataset_ai_request(
+                prompt,
+                button_config,
+                button_widget=None,
+                dataset_target_key=task.get('target_key') or self._get_dataset_target_key(rec),
+                _bulk_continue=True,
+            )
+
+        if (
+            self._bulk_dataset_running
+            and not self._bulk_dataset_cancelled
+            and self._bulk_dataset_next_index >= len(self._bulk_dataset_queue)
+            and self._bulk_dataset_inflight <= 0
+            and self._bulk_dataset_index >= total
+        ):
+            self._finish_bulk_dataset_requests()
+
+    def _start_bulk_dataset_requests(self, button_config):
+        """データセットタブ: 一括問い合わせ（選択 or 表示全件）"""
+        try:
+            selected = self._get_selected_dataset_records()
+            displayed = self._get_displayed_dataset_records()
+            use_selected = len(selected) > 0
+            candidates = selected if use_selected else displayed
+            if not candidates:
+                QMessageBox.information(self, "情報", "一括問い合わせの対象がありません。")
+                return
+
+            try:
+                from classes.dataset.util.ai_suggest_result_log import read_latest_result
+            except Exception:
+                read_latest_result = None
+
+            planned_total = len(candidates)
+            existing = 0
+            tasks = []
+            for rec in candidates:
+                target_key = self._get_dataset_target_key(rec)
+                latest = None
+                if read_latest_result is not None:
+                    try:
+                        latest = read_latest_result('dataset', target_key, button_config.get('id', 'unknown'))
+                    except Exception:
+                        latest = None
+                if latest:
+                    existing += 1
+                tasks.append({'record': rec, 'target_key': target_key, 'has_existing': bool(latest)})
+
+            missing = planned_total - existing
+            scope_label = f"選択 {planned_total} 件" if use_selected else f"表示全件 {planned_total} 件"
+
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Question)
+            box.setWindowTitle("一括問い合わせ")
+            box.setText(f"一括問い合わせを開始します。\n\n対象: {scope_label}")
+            box.setInformativeText(
+                f"予定件数: {planned_total} 件\n"
+                f"既存結果あり: {existing} 件\n"
+                f"既存結果なし: {missing} 件\n\n"
+                "実行方法を選択してください。"
+            )
+
+            overwrite_btn = box.addButton("上書きして全件問い合わせ", QMessageBox.AcceptRole)
+            missing_only_btn = box.addButton("既存なしのみ問い合わせ", QMessageBox.ActionRole)
+            cancel_btn = box.addButton(QMessageBox.Cancel)
+            box.setDefaultButton(missing_only_btn if missing > 0 else overwrite_btn)
+
+            if os.environ.get("PYTEST_CURRENT_TEST"):
+                chosen = missing_only_btn
+            else:
+                box.exec()
+                chosen = box.clickedButton()
+
+            if chosen == cancel_btn:
+                return
+            if chosen == missing_only_btn:
+                tasks = [t for t in tasks if not t.get('has_existing')]
+
+            if not tasks:
+                QMessageBox.information(self, "情報", "問い合わせ対象（既存なし）がありません。")
+                return
+
+            self._bulk_dataset_queue = tasks
+            self._bulk_dataset_index = 0
+            self._bulk_dataset_total = len(tasks)
+            self._bulk_dataset_next_index = 0
+            self._bulk_dataset_inflight = 0
+            self._bulk_dataset_running = True
+            self._bulk_dataset_cancelled = False
+            self._bulk_dataset_button_config = button_config
+
+            requested = None
+            try:
+                requested = int(getattr(self, 'dataset_bulk_parallel_spinbox', None).value())
+            except Exception:
+                requested = None
+            self._bulk_dataset_max_concurrency = self._normalize_bulk_dataset_concurrency(requested)
+
+            for b in list(getattr(self, 'dataset_buttons', [])):
+                try:
+                    b.setEnabled(False)
+                except Exception:
+                    pass
+
+            self._update_bulk_dataset_status_message()
+            self._kick_bulk_dataset_scheduler()
+        except Exception as e:
+            QMessageBox.critical(self, "エラー", f"一括問い合わせエラー: {str(e)}")
+
+    def update_dataset_spinner_visibility(self):
+        try:
+            if getattr(self, 'dataset_spinner_overlay', None):
+                if len(self.dataset_ai_threads) > 0:
+                    self.dataset_spinner_overlay.start()
+                else:
+                    self.dataset_spinner_overlay.stop()
+        except Exception as _e:
+            logger.debug("update_dataset_spinner_visibility failed: %s", _e)
+
+    def cancel_dataset_ai_requests(self):
+        """データセットタブの実行中リクエストをキャンセル"""
+        try:
+            self._bulk_dataset_cancelled = True
+            self._bulk_dataset_running = False
+            self._bulk_dataset_queue = []
+            self._bulk_dataset_total = 0
+            self._bulk_dataset_next_index = 0
+            self._bulk_dataset_inflight = 0
+
+            for thread in list(self.dataset_ai_threads):
+                try:
+                    if thread and thread.isRunning():
+                        thread.stop()
+                except Exception:
+                    pass
+                finally:
+                    if thread in self.dataset_ai_threads:
+                        self.dataset_ai_threads.remove(thread)
+
+            if self._active_dataset_button:
+                try:
+                    self._active_dataset_button.stop_loading()
+                except Exception:
+                    pass
+                finally:
+                    self._active_dataset_button = None
+
+            if getattr(self, 'dataset_spinner_overlay', None):
+                self.dataset_spinner_overlay.stop()
+                self.dataset_spinner_overlay.set_message("AI応答を待機中...")
+
+            for b in list(getattr(self, 'dataset_buttons', [])):
+                try:
+                    b.setEnabled(True)
+                except Exception:
+                    pass
+
+            if hasattr(self, 'dataset_response_display'):
+                self.dataset_response_display.append("\n<em>⏹ AI処理をキャンセルしました。</em>")
+        except Exception as e:
+            logger.debug("cancel_dataset_ai_requests failed: %s", e)
+
+    def clear_dataset_response(self):
+        try:
+            if hasattr(self, 'dataset_response_display'):
+                self.dataset_response_display.clear()
+        except Exception:
+            pass
+
+    def copy_dataset_response(self):
+        try:
+            if hasattr(self, 'dataset_response_display'):
+                from qt_compat.widgets import QApplication
+                text = self.dataset_response_display.toPlainText()
+                if text:
+                    QApplication.clipboard().setText(text)
+        except Exception:
+            pass
+
+    def execute_dataset_ai_request(
+        self,
+        prompt,
+        button_config,
+        button_widget,
+        dataset_target_key: Optional[str] = None,
+        _bulk_continue: bool = False,
+        retry_count: int = 0,
+    ):
+        """データセットタブ向けAIリクエスト実行（AI拡張相当、表示先だけ分離）"""
+        try:
+            self.last_used_prompt = prompt
+            self.last_api_request_params = None
+            self.last_api_response_params = None
+            self.last_api_provider = None
+            self.last_api_model = None
+            if hasattr(self, 'dataset_show_api_params_button'):
+                self.dataset_show_api_params_button.setEnabled(False)
+            if hasattr(self, 'dataset_show_prompt_button'):
+                self.dataset_show_prompt_button.setEnabled(True)
+
+            for b in list(getattr(self, 'dataset_buttons', [])):
+                try:
+                    b.setEnabled(False)
+                except Exception:
+                    pass
+
+            button_label = button_config.get('label', 'AI処理')
+            button_icon = button_config.get('icon', '🤖')
+            if getattr(self, 'dataset_spinner_overlay', None):
+                self.dataset_spinner_overlay.set_message(f"{button_icon} {button_label} 実行中...")
+
+            ai_thread = AIRequestThread(prompt, self.context_data)
+            self.dataset_ai_threads.append(ai_thread)
+            self.update_dataset_spinner_visibility()
+
+            def on_success(result):
+                try:
+                    try:
+                        self.last_api_request_params = result.get('request_params')
+                        self.last_api_response_params = result.get('response_params')
+                        self.last_api_provider = result.get('provider')
+                        self.last_api_model = result.get('model')
+                        if hasattr(self, 'dataset_show_api_params_button'):
+                            self.dataset_show_api_params_button.setEnabled(bool(self.last_api_request_params or self.last_api_response_params))
+                    except Exception as _e:
+                        logger.debug("API req/resp params capture failed: %s", _e)
+
+                    response_text = result.get('response') or result.get('content', '')
+                    fmt = button_config.get('output_format', 'text')
+                    if response_text:
+                        if fmt == 'json':
+                            valid, fixed_text = self._validate_and_fix_json_response(response_text)
+                            if valid:
+                                self.dataset_response_display.setText(fixed_text)
+                            else:
+                                if retry_count < 2:
+                                    if ai_thread in self.dataset_ai_threads:
+                                        self.dataset_ai_threads.remove(ai_thread)
+                                    self.update_dataset_spinner_visibility()
+                                    self.execute_dataset_ai_request(
+                                        prompt,
+                                        button_config,
+                                        button_widget,
+                                        dataset_target_key=dataset_target_key,
+                                        _bulk_continue=_bulk_continue,
+                                        retry_count=retry_count + 1,
+                                    )
+                                    return
+                                import json as _json
+                                try:
+                                    _json.loads(response_text)
+                                    self.dataset_response_display.setText(response_text)
+                                except Exception:
+                                    error_json_str = self._wrap_json_error(
+                                        error_message="JSONの検証に失敗しました（最大リトライ到達）",
+                                        raw_output=response_text,
+                                        retries=retry_count,
+                                    )
+                                    self.dataset_response_display.setText(error_json_str)
+                        else:
+                            formatted_response = self.format_extension_response(response_text, button_config)
+                            self.dataset_response_display.setHtml(formatted_response)
+                    else:
+                        self.dataset_response_display.setText("AI応答が空でした。")
+
+                    # ログ保存（dataset）
+                    try:
+                        from classes.dataset.util.ai_suggest_result_log import append_result
+
+                        target_key = (dataset_target_key or '').strip()
+                        if not target_key:
+                            try:
+                                target_key = self._get_dataset_target_key(getattr(self, '_selected_dataset_record', {}) or {})
+                            except Exception:
+                                target_key = 'unknown'
+
+                        if fmt == 'json':
+                            display_format = 'text'
+                            display_content = self.dataset_response_display.toPlainText()
+                        else:
+                            display_format = 'html'
+                            display_content = self.dataset_response_display.toHtml()
+
+                        append_result(
+                            target_kind='dataset',
+                            target_key=target_key,
+                            button_id=button_config.get('id', 'unknown'),
+                            button_label=button_config.get('label', 'Unknown'),
+                            prompt=self.last_used_prompt or prompt,
+                            display_format=display_format,
+                            display_content=display_content,
+                            provider=self.last_api_provider,
+                            model=self.last_api_model,
+                            request_params=self.last_api_request_params,
+                            response_params=self.last_api_response_params,
+                            started_at=(result.get('started_at') if isinstance(result, dict) else None),
+                            finished_at=(result.get('finished_at') if isinstance(result, dict) else None),
+                            elapsed_seconds=(result.get('elapsed_seconds') if isinstance(result, dict) else None),
+                        )
+                    except Exception:
+                        pass
+
+                finally:
+                    if button_widget:
+                        try:
+                            button_widget.stop_loading()
+                        except Exception:
+                            pass
+                    if self._active_dataset_button is button_widget:
+                        self._active_dataset_button = None
+                    if ai_thread in self.dataset_ai_threads:
+                        self.dataset_ai_threads.remove(ai_thread)
+                    self.update_dataset_spinner_visibility()
+                    if not self._bulk_dataset_running and getattr(self, 'dataset_spinner_overlay', None):
+                        self.dataset_spinner_overlay.set_message("AI応答を待機中...")
+
+                    if not self._bulk_dataset_running:
+                        for b in list(getattr(self, 'dataset_buttons', [])):
+                            try:
+                                b.setEnabled(True)
+                            except Exception:
+                                pass
+
+                    if _bulk_continue and self._bulk_dataset_running:
+                        self._on_bulk_dataset_task_done()
+
+            def on_error(error_message):
+                try:
+                    self.dataset_response_display.setText(f"エラー: {error_message}")
+                finally:
+                    if button_widget:
+                        try:
+                            button_widget.stop_loading()
+                        except Exception:
+                            pass
+                    if self._active_dataset_button is button_widget:
+                        self._active_dataset_button = None
+                    if ai_thread in self.dataset_ai_threads:
+                        self.dataset_ai_threads.remove(ai_thread)
+                    self.update_dataset_spinner_visibility()
+                    if not self._bulk_dataset_running and getattr(self, 'dataset_spinner_overlay', None):
+                        self.dataset_spinner_overlay.set_message("AI応答を待機中...")
+                    if not self._bulk_dataset_running:
+                        for b in list(getattr(self, 'dataset_buttons', [])):
+                            try:
+                                b.setEnabled(True)
+                            except Exception:
+                                pass
+
+                    if _bulk_continue and self._bulk_dataset_running:
+                        self._on_bulk_dataset_task_done()
+
+                    self.last_api_request_params = None
+                    self.last_api_response_params = None
+                    self.last_api_provider = None
+                    self.last_api_model = None
+                    if hasattr(self, 'dataset_show_api_params_button'):
+                        self.dataset_show_api_params_button.setEnabled(False)
+
+            ai_thread.result_ready.connect(on_success)
+            ai_thread.error_occurred.connect(on_error)
+            ai_thread.start()
+
+        except Exception as e:
+            if button_widget:
+                try:
+                    button_widget.stop_loading()
+                except Exception:
+                    pass
+            if self._active_dataset_button is button_widget:
+                self._active_dataset_button = None
+            for b in list(getattr(self, 'dataset_buttons', [])):
+                try:
+                    b.setEnabled(True)
+                except Exception:
+                    pass
+            QMessageBox.critical(self, "エラー", f"データセットAIリクエスト実行エラー: {str(e)}")
+
     def _get_report_record_value(self, record: dict, candidates: List[str]) -> str:
         for key in candidates:
             try:
@@ -2441,7 +3655,7 @@ class AISuggestionDialog(QDialog):
         filters.addWidget(QLabel("対象:"))
         self.results_target_kind_combo = QComboBox()
         self.results_target_kind_combo.addItem("報告書", 'report')
-        self.results_target_kind_combo.addItem("AI拡張（従来）", 'dataset')
+        self.results_target_kind_combo.addItem("データセット", 'dataset')
         filters.addWidget(self.results_target_kind_combo)
 
         filters.addSpacing(10)
@@ -2552,9 +3766,20 @@ class AISuggestionDialog(QDialog):
         return text.lower() == "nan"
 
     def _show_results_log_for_record(self, rec: dict) -> None:
-        """ログファイルを読み込み、JSONはキー/値対応、テキストはそのまま表示する。"""
-        from qt_compat.widgets import QDialog, QVBoxLayout, QLabel, QTextEdit, QTableWidget, QTableWidgetItem
-        from qt_compat.widgets import QHeaderView
+        """ログファイルを読み込み、JSONは全文/階層ツリー切替、テキストはそのまま表示する。"""
+        from qt_compat.widgets import (
+            QDialog,
+            QVBoxLayout,
+            QLabel,
+            QTextEdit,
+            QTabWidget,
+            QTreeWidget,
+            QTreeWidgetItem,
+            QPushButton,
+            QHBoxLayout,
+        )
+        from qt_compat.gui import QDesktopServices
+        from qt_compat.core import QUrl
         from classes.dataset.util.ai_suggest_result_log import resolve_log_path
 
         target_kind = (rec.get('target_kind') or '').strip() or (self.results_target_kind_combo.currentData() if hasattr(self, 'results_target_kind_combo') else 'report')
@@ -2576,6 +3801,37 @@ class AISuggestionDialog(QDialog):
         except Exception:
             pass
         layout.addWidget(path_label)
+
+        # 標準エディタで開く
+        open_row = QHBoxLayout()
+        open_row.addStretch()
+        open_button = QPushButton("標準テキストエディタで開く")
+        open_button.setObjectName('ai_suggest_log_open_in_editor')
+        open_button.setToolTip("OSの標準関連付けでログファイルを開きます")
+
+        def _open_in_editor() -> None:
+            try:
+                if not path or not os.path.exists(path):
+                    QMessageBox.warning(self, "警告", f"ファイルが見つかりません: {path}")
+                    return
+                try:
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+                    return
+                except Exception:
+                    pass
+                try:
+                    os.startfile(path)  # noqa: S606
+                except Exception as e:
+                    QMessageBox.warning(self, "警告", f"標準エディタで開けませんでした:\n{path}\n\n{e}")
+            except Exception:
+                pass
+
+        try:
+            open_button.clicked.connect(_open_in_editor)
+        except Exception:
+            pass
+        open_row.addWidget(open_button)
+        layout.addLayout(open_row)
 
         # 読み込み
         raw_text = ""
@@ -2610,33 +3866,146 @@ class AISuggestionDialog(QDialog):
                 obj = None
 
         if isinstance(obj, dict):
-            table = QTableWidget()
-            table.setObjectName('ai_suggest_log_table')
-            table.setColumnCount(2)
-            table.setHorizontalHeaderLabels(['キー', '値'])
-            table.setRowCount(len(obj))
-            for i, (k, v) in enumerate(obj.items()):
-                key_item = QTableWidgetItem(str(k))
-                if isinstance(v, (dict, list)):
-                    try:
-                        val_text = json.dumps(v, ensure_ascii=False, indent=2)
-                    except Exception:
-                        val_text = str(v)
+            tabs = QTabWidget()
+            tabs.setObjectName('ai_suggest_log_tabs')
+
+            # ツリー表示
+            tree = QTreeWidget()
+            tree.setObjectName('ai_suggest_log_tree')
+            tree.setColumnCount(2)
+            tree.setHeaderLabels(['キー', '値'])
+
+            def _value_summary(v) -> str:
+                if v is None:
+                    return ''
+                if isinstance(v, dict):
+                    return f"{{...}} ({len(v)})"
+                if isinstance(v, list):
+                    return f"[...] ({len(v)})"
+                try:
+                    text = '' if self._is_empty_or_nan(v) else str(v)
+                except Exception:
+                    text = str(v)
+                if len(text) > 200:
+                    return text[:200] + '…'
+                return text
+
+            def _add_tree_nodes(parent_item: Optional[QTreeWidgetItem], key: str, value) -> None:
+                item = QTreeWidgetItem([str(key), _value_summary(value)])
+                # 長文はツールチップで全文
+                try:
+                    if not isinstance(value, (dict, list)):
+                        text = '' if self._is_empty_or_nan(value) else str(value)
+                        if len(text) > 200:
+                            item.setToolTip(1, text)
+                except Exception:
+                    pass
+
+                if parent_item is None:
+                    tree.addTopLevelItem(item)
                 else:
-                    val_text = '' if self._is_empty_or_nan(v) else str(v)
-                # 極端に長い値はUIが重くなるため軽く上限
-                if len(val_text) > 20000:
-                    val_text = val_text[:20000] + '…'
-                val_item = QTableWidgetItem(val_text)
-                table.setItem(i, 0, key_item)
-                table.setItem(i, 1, val_item)
+                    parent_item.addChild(item)
+
+                if isinstance(value, dict):
+                    for k2, v2 in value.items():
+                        _add_tree_nodes(item, str(k2), v2)
+                elif isinstance(value, list):
+                    for idx, v2 in enumerate(value):
+                        _add_tree_nodes(item, f"[{idx}]", v2)
+
+            for k, v in obj.items():
+                _add_tree_nodes(None, str(k), v)
 
             try:
-                table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-                table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+                tree.expandToDepth(1)
+                tree.resizeColumnToContents(0)
             except Exception:
                 pass
-            layout.addWidget(table, 1)
+
+            tabs.addTab(tree, 'ツリー')
+
+            # JSON全文表示
+            json_text = QTextEdit()
+            json_text.setObjectName('ai_suggest_log_json_text')
+            json_text.setReadOnly(True)
+            try:
+                if ext == '.jsonl':
+                    json_text.setPlainText(raw_text)
+                else:
+                    json_text.setPlainText(json.dumps(obj, ensure_ascii=False, indent=2))
+            except Exception:
+                json_text.setPlainText(raw_text)
+            tabs.addTab(json_text, 'JSON')
+
+            layout.addWidget(tabs, 1)
+        elif isinstance(obj, list):
+            tabs = QTabWidget()
+            tabs.setObjectName('ai_suggest_log_tabs')
+
+            tree = QTreeWidget()
+            tree.setObjectName('ai_suggest_log_tree')
+            tree.setColumnCount(2)
+            tree.setHeaderLabels(['キー', '値'])
+
+            def _value_summary(v) -> str:
+                if v is None:
+                    return ''
+                if isinstance(v, dict):
+                    return f"{{...}} ({len(v)})"
+                if isinstance(v, list):
+                    return f"[...] ({len(v)})"
+                try:
+                    text = '' if self._is_empty_or_nan(v) else str(v)
+                except Exception:
+                    text = str(v)
+                if len(text) > 200:
+                    return text[:200] + '…'
+                return text
+
+            def _add_tree_nodes(parent_item: Optional[QTreeWidgetItem], key: str, value) -> None:
+                item = QTreeWidgetItem([str(key), _value_summary(value)])
+                try:
+                    if not isinstance(value, (dict, list)):
+                        text = '' if self._is_empty_or_nan(value) else str(value)
+                        if len(text) > 200:
+                            item.setToolTip(1, text)
+                except Exception:
+                    pass
+
+                if parent_item is None:
+                    tree.addTopLevelItem(item)
+                else:
+                    parent_item.addChild(item)
+
+                if isinstance(value, dict):
+                    for k2, v2 in value.items():
+                        _add_tree_nodes(item, str(k2), v2)
+                elif isinstance(value, list):
+                    for idx, v2 in enumerate(value):
+                        _add_tree_nodes(item, f"[{idx}]", v2)
+
+            for idx, v in enumerate(obj):
+                _add_tree_nodes(None, f"[{idx}]", v)
+
+            try:
+                tree.expandToDepth(1)
+                tree.resizeColumnToContents(0)
+            except Exception:
+                pass
+            tabs.addTab(tree, 'ツリー')
+
+            json_text = QTextEdit()
+            json_text.setObjectName('ai_suggest_log_json_text')
+            json_text.setReadOnly(True)
+            try:
+                if ext == '.jsonl':
+                    json_text.setPlainText(raw_text)
+                else:
+                    json_text.setPlainText(json.dumps(obj, ensure_ascii=False, indent=2))
+            except Exception:
+                json_text.setPlainText(raw_text)
+            tabs.addTab(json_text, 'JSON')
+            layout.addWidget(tabs, 1)
         else:
             text = QTextEdit()
             text.setObjectName('ai_suggest_log_text')

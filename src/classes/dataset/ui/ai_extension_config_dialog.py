@@ -118,7 +118,7 @@ class AIExtensionConfigDialog(QDialog):
         form.addRow("プロンプトファイル", self.prompt_file_edit)
 
         self.target_kind_combo = QComboBox()
-        self.target_kind_combo.addItem("AI拡張（従来）", "dataset")
+        self.target_kind_combo.addItem("データセット", "dataset")
         self.target_kind_combo.addItem("報告書", "report")
         form.addRow("対象", self.target_kind_combo)
 
