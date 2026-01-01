@@ -336,20 +336,29 @@ class DataRegisterTabWidget(QWidget):
                     QApplication.processEvents()
                 final_size = top_level.size()
                 logger.debug("最終確認サイズ: %sx%s", final_size.width(), final_size.height())
-        else:
-            # 通常登録タブや他メニュー: 横幅900+メニュー+余白で固定、アスペクト比も固定
-            webview_width = getattr(top_level, '_webview_fixed_width', 900)
-            menu_width = 120
-            margin = 40
-            fixed_width = webview_width + menu_width + margin
-            if hasattr(top_level, 'setFixedWidth'):
-                top_level.setFixedWidth(fixed_width)
+        elif index == 2:  # 登録状況タブ
+            # 登録状況タブは横幅固定を行わず、ユーザーのリサイズ操作を妨げない。
             if hasattr(top_level, '_fixed_aspect_ratio'):
-                # 必ず900+メニュー+余白の幅と現在の高さでアスペクト比を再設定
-                if hasattr(top_level, 'height') and top_level.height() != 0:
-                    top_level._fixed_aspect_ratio = fixed_width / top_level.height()
-                else:
-                    top_level._fixed_aspect_ratio = 1.0
+                top_level._fixed_aspect_ratio = None
+            if hasattr(top_level, 'setMinimumWidth'):
+                top_level.setMinimumWidth(200)
+            if hasattr(top_level, 'setMaximumWidth'):
+                top_level.setMaximumWidth(16777215)
+            if hasattr(top_level, 'setMinimumSize'):
+                top_level.setMinimumSize(200, 200)
+            if hasattr(top_level, 'setMaximumSize'):
+                top_level.setMaximumSize(16777215, 16777215)
+            if hasattr(top_level, 'setSizePolicy'):
+                top_level.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+            if hasattr(top_level, 'showNormal'):
+                top_level.showNormal()
+
+            # pytest中はWindowsで不安定になり得るため processEvents を避ける
+            if not os.environ.get("PYTEST_CURRENT_TEST"):
+                QApplication.processEvents()
+        else:
+            # 想定外インデックスは何もしない
+            return
 
     # （高さ固定は行わず、ウインドウサイズに追従させる）
         

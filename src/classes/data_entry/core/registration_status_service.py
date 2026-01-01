@@ -17,6 +17,9 @@ _CACHE_DIR = OUTPUT_RDE_DIR  # output/rde
 _LATEST_FILE = get_dynamic_file_path('output/rde/entries_latest.json')
 _ALL_FILE = get_dynamic_file_path('output/rde/entries_all.json')
 
+# 個別エントリーJSONの保存先: output/rde/data/entry/<entry_id>.json
+_ENTRY_DETAIL_DIR = get_dynamic_file_path('output/rde/data/entry')
+
 # キャッシュTTL: 最大1日
 _CACHE_TTL = timedelta(days=1)
 _UTC = timezone.utc
@@ -29,8 +32,14 @@ class EntrySummary:
 				 start_time: Optional[str],
 				 data_name: Optional[str],
 				 dataset_name: Optional[str],
+				 error_code: Optional[str],
+				 error_message: Optional[str],
 				 created_by_user_id: Optional[str],
 				 created_by_name: Optional[str],
+				 created_by_org: Optional[str],
+				 data_owner_user_id: Optional[str],
+				 data_owner_name: Optional[str],
+				 data_owner_org: Optional[str],
 				 instrument_id: Optional[str],
 				 instrument_name_ja: Optional[str],
 				 instrument_name_en: Optional[str]):
@@ -39,8 +48,14 @@ class EntrySummary:
 		self.startTime = start_time
 		self.dataName = data_name
 		self.datasetName = dataset_name
+		self.errorCode = error_code
+		self.errorMessage = error_message
 		self.createdByUserId = created_by_user_id
 		self.createdByName = created_by_name
+		self.createdByOrg = created_by_org
+		self.dataOwnerUserId = data_owner_user_id
+		self.dataOwnerName = data_owner_name
+		self.dataOwnerOrg = data_owner_org
 		self.instrumentId = instrument_id
 		self.instrumentNameJa = instrument_name_ja
 		self.instrumentNameEn = instrument_name_en
@@ -52,12 +67,51 @@ class EntrySummary:
 			"startTime": self.startTime,
 			"dataName": self.dataName,
 			"datasetName": self.datasetName,
+			"errorCode": self.errorCode,
+			"errorMessage": self.errorMessage,
 			"createdByUserId": self.createdByUserId,
 			"createdByName": self.createdByName,
+			"createdByOrg": self.createdByOrg,
+			"dataOwnerUserId": self.dataOwnerUserId,
+			"dataOwnerName": self.dataOwnerName,
+			"dataOwnerOrg": self.dataOwnerOrg,
 			"instrumentId": self.instrumentId,
 			"instrumentNameJa": self.instrumentNameJa,
 			"instrumentNameEn": self.instrumentNameEn,
 		}
+
+
+def has_all_cache(*, ignore_ttl: bool = False) -> bool:
+	"""全件キャッシュが利用可能か判定する。"""
+	import os
+	if ignore_ttl:
+		return os.path.exists(_ALL_FILE)
+	return _is_cache_valid(_ALL_FILE)
+
+
+def load_all_cache(*, ignore_ttl: bool = False) -> List[Dict]:
+	"""全件キャッシュをネットワーク無しで読み込む。"""
+	if not has_all_cache(ignore_ttl=ignore_ttl):
+		return []
+	return _load_cache(_ALL_FILE)
+
+
+def _has_any_all_cache_file() -> bool:
+	import os
+	return os.path.exists(_ALL_FILE)
+
+
+def _merge_into_all_cache(entries: List[Dict]) -> None:
+	"""全件キャッシュが存在する場合、指定entriesで該当IDを上書き更新する。"""
+	if not _has_any_all_cache_file():
+		return
+	try:
+		all_entries = {e.get('id'): e for e in _load_cache(_ALL_FILE)}
+		for e in entries:
+			all_entries[e.get('id')] = e
+		_save_cache(_ALL_FILE, list(all_entries.values()))
+	except Exception as exc:
+		logger.debug("全件キャッシュへのマージに失敗: %s", exc)
 
 
 def _now() -> datetime:
@@ -91,6 +145,148 @@ def _save_cache(path: str, entries: List[Dict]) -> None:
 			json.dump(entries, f, ensure_ascii=False, indent=2)
 	except Exception as e:
 		logger.warning(f"キャッシュ保存に失敗: {path}: {e}")
+
+
+def _ensure_dir(path: str) -> None:
+	import os
+	os.makedirs(path, exist_ok=True)
+
+
+def get_entry_detail_file_path(entry_id: str) -> str:
+	"""個別エントリーJSONの保存先パスを返す。"""
+	import os
+	return os.path.join(_ENTRY_DETAIL_DIR, f"{entry_id}.json")
+
+
+def _build_entry_detail_url(entry_id: str) -> str:
+	base = f"https://rde-entry-api-arim.nims.go.jp/entries/{entry_id}"
+	params = (
+		"include=instrument%2CcreatedBy%2CdataOwner"
+		"&fields%5Binstrument%5D=nameJa%2CnameEn"
+		"&fields%5Buser%5D=userName%2CorganizationName"
+	)
+	return f"{base}?{params}"
+
+
+def fetch_entry_detail(entry_id: str, *, overwrite: bool = True) -> Optional[Dict[str, Any]]:
+	"""エントリー個別JSONを取得してファイル保存し、JSON(dict)を返す。
+
+	Args:
+		entry_id: entry UUID
+		overwrite: Trueの場合は既存ファイルがあっても上書き保存する
+	"""
+	import os
+	if not entry_id:
+		return None
+
+	path = get_entry_detail_file_path(entry_id)
+	if (not overwrite) and os.path.exists(path):
+		try:
+			with open(path, 'r', encoding='utf-8') as f:
+				return json.load(f)
+		except Exception:
+			# 壊れている場合は取り直す
+			pass
+
+	url = _build_entry_detail_url(entry_id)
+	headers = {
+		'Accept': 'application/vnd.api+json',
+		'Cache-Control': 'no-cache',
+		'Pragma': 'no-cache',
+		'Origin': 'https://rde-entry-arim.nims.go.jp',
+		'Referer': 'https://rde-entry-arim.nims.go.jp/',
+	}
+	try:
+		logger.debug(f"[登録状況] GET {url}")
+		resp = proxy_get(url, headers=headers)
+		if not resp or resp.status_code != 200:
+			logger.warning(f"entry detail取得に失敗: id={entry_id} status={getattr(resp, 'status_code', None)}")
+			return None
+		payload = resp.json()
+		_ensure_dir(_ENTRY_DETAIL_DIR)
+		with open(path, 'w', encoding='utf-8') as f:
+			json.dump(payload, f, ensure_ascii=False, indent=2)
+		return payload
+	except Exception as e:
+		logger.exception(f"entry detail取得で例外: id={entry_id} err={e}")
+		return None
+
+
+def ensure_entry_detail_cached(entry_id: str) -> Optional[str]:
+	"""個別JSONファイルが未作成の場合のみ取得して保存する（既存なら更新しない）。"""
+	import os
+	if not entry_id:
+		return None
+	path = get_entry_detail_file_path(entry_id)
+	if os.path.exists(path):
+		return path
+	result = fetch_entry_detail(entry_id, overwrite=True)
+	return path if result is not None else None
+
+
+def entry_detail_to_summary(detail_json: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+	"""個別JSONレスポンスを一覧表示用のサマリ(dict)へ変換する。"""
+	if not detail_json:
+		return None
+	data = detail_json.get('data') or {}
+	entry_id = data.get('id')
+	attrs = data.get('attributes') or {}
+	status = attrs.get('status')
+	start_time = attrs.get('startTime')
+	data_name = attrs.get('dataName')
+	dataset_name = attrs.get('datasetName')
+	error_code = attrs.get('errorCode')
+	error_message = attrs.get('errorMessage')
+
+	rel = data.get('relationships') or {}
+	created_by = rel.get('createdBy', {}).get('data') or {}
+	created_user_id = created_by.get('id')
+	data_owner = rel.get('dataOwner', {}).get('data') or {}
+	data_owner_user_id = data_owner.get('id')
+	instr = rel.get('instrument', {}).get('data') or {}
+	instrument_id = instr.get('id')
+
+	created_user_name = None
+	created_user_org = None
+	data_owner_user_name = None
+	data_owner_user_org = None
+	instrument_name_ja = None
+	instrument_name_en = None
+	included = detail_json.get('included') or []
+	for inc in included:
+		if inc.get('type') == 'user' and created_user_id and inc.get('id') == created_user_id:
+			ua = inc.get('attributes') or {}
+			created_user_name = ua.get('userName')
+			created_user_org = ua.get('organizationName')
+		if inc.get('type') == 'user' and data_owner_user_id and inc.get('id') == data_owner_user_id:
+			ua = inc.get('attributes') or {}
+			data_owner_user_name = ua.get('userName')
+			data_owner_user_org = ua.get('organizationName')
+		if inc.get('type') == 'instrument' and instrument_id and inc.get('id') == instrument_id:
+			ia = inc.get('attributes') or {}
+			instrument_name_ja = ia.get('nameJa')
+			instrument_name_en = ia.get('nameEn')
+
+	if not entry_id:
+		return None
+	return EntrySummary(
+		entry_id,
+		status,
+		start_time,
+		data_name,
+		dataset_name,
+		error_code,
+		error_message,
+		created_user_id,
+		created_user_name,
+		created_user_org,
+		data_owner_user_id,
+		data_owner_user_name,
+		data_owner_user_org,
+		instrument_id,
+		instrument_name_ja,
+		instrument_name_en,
+	).to_dict()
 
 def clear_cache() -> None:
 	"""最新/全件キャッシュを削除"""
@@ -151,9 +347,9 @@ def _build_entries_url(limit: int, offset: int) -> str:
 	params = (
 		f"page%5Blimit%5D={limit}"
 		f"&page%5Boffset%5D={offset}"
-		f"&include=instrument%2CcreatedBy%2CrestructureRequest"
-		f"&fields%5Bentry%5D=startTime%2CdataName%2CdatasetName%2Cstatus"
-		f"&fields%5Buser%5D=createdBy%2CuserName"
+		f"&include=instrument%2CcreatedBy%2CdataOwner%2CrestructureRequest"
+		f"&fields%5Bentry%5D=startTime%2CdataName%2CdatasetName%2Cstatus%2CerrorCode%2CerrorMessage"
+		f"&fields%5Buser%5D=userName%2CorganizationName"
 		f"&fields%5Binstrument%5D=nameJa%2CnameEn"
 	)
 	return f"{base}?{params}"
@@ -180,15 +376,30 @@ def _parse_entries(resp_json: Dict) -> List[EntrySummary]:
 		start_time = attrs.get("startTime")
 		data_name = attrs.get("dataName")
 		dataset_name = attrs.get("datasetName")
+		error_code = attrs.get("errorCode")
+		error_message = attrs.get("errorMessage")
 
 		created_by = rel.get("createdBy", {}).get("data") or {}
 		created_user_id = created_by.get("id")
 		created_user_name = None
+		created_user_org = None
 		if created_user_id:
 			u = inc_by_id.get(("user", created_user_id))
 			if u:
 				ua = u.get("attributes") or {}
 				created_user_name = ua.get("userName")
+				created_user_org = ua.get("organizationName")
+
+		data_owner = rel.get("dataOwner", {}).get("data") or {}
+		data_owner_user_id = data_owner.get("id")
+		data_owner_user_name = None
+		data_owner_user_org = None
+		if data_owner_user_id:
+			u = inc_by_id.get(("user", data_owner_user_id))
+			if u:
+				ua = u.get("attributes") or {}
+				data_owner_user_name = ua.get("userName")
+				data_owner_user_org = ua.get("organizationName")
 
 		instr = rel.get("instrument", {}).get("data") or {}
 		instrument_id = instr.get("id")
@@ -208,8 +419,14 @@ def _parse_entries(resp_json: Dict) -> List[EntrySummary]:
 				start_time,
 				data_name,
 				dataset_name,
+				error_code,
+				error_message,
 				created_user_id,
 				created_user_name,
+				created_user_org,
+				data_owner_user_id,
+				data_owner_user_name,
+				data_owner_user_org,
 				instrument_id,
 				instrument_name_ja,
 				instrument_name_en,
@@ -223,13 +440,8 @@ def fetch_latest(limit: int = 100, use_cache: bool = True) -> List[Dict]:
 	if use_cache and _is_cache_valid(_LATEST_FILE):
 		logger.debug("[登録状況] 最新キャッシュ有効 - 読み込み")
 		latest = _load_cache(_LATEST_FILE)
-		# 全件キャッシュがある場合はマージ
-		if _is_cache_valid(_ALL_FILE):
-			logger.debug("[登録状況] 全件キャッシュ有効 - 最新とマージ")
-			all_entries = {e.get('id'): e for e in _load_cache(_ALL_FILE)}
-			for e in latest:
-				all_entries[e.get('id')] = e
-			_save_cache(_ALL_FILE, list(all_entries.values()))
+		# 全件キャッシュが存在する場合はマージ（TTLに依存しない）
+		_merge_into_all_cache(latest)
 		return latest
 
 	# API 取得
@@ -250,12 +462,8 @@ def fetch_latest(limit: int = 100, use_cache: bool = True) -> List[Dict]:
 			return _load_cache(_LATEST_FILE) if use_cache else []
 		items = [e.to_dict() for e in _parse_entries(resp.json())]
 		_save_cache(_LATEST_FILE, items)
-		# 全件キャッシュが有効ならマージ
-		if _is_cache_valid(_ALL_FILE):
-			all_entries = {e.get('id'): e for e in _load_cache(_ALL_FILE)}
-			for e in items:
-				all_entries[e.get('id')] = e
-			_save_cache(_ALL_FILE, list(all_entries.values()))
+		# 全件キャッシュが存在する場合はマージ（TTLに依存しない）
+		_merge_into_all_cache(items)
 		return items
 	except Exception as e:
 		logger.exception(f"entries 最新取得で例外: {e}")
