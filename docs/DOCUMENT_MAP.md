@@ -10,7 +10,7 @@
 - API_ENDPOINTS_COMPLETE_MAP.md
 - API_INVESTIGATION_FINAL_REPORT.md
 - README.txt
-- RELEASE_NOTES_v2.3.16.md (最新)
+- RELEASE_NOTES_v2.4.0.md (最新)
 
 ## 機能別ドキュメント（docs/features/）
 - README.md
@@ -30,7 +30,7 @@
 ## アーカイブ（docs/archive/）
 - ARCHIVE_LOG.md
 - MODULE_LICENSES_v1.17.0.md
-- release_notes/ (v2.1.x〜v2.3.x の旧リリースノート)
+- release_notes/ (v2.1.x〜v2.4.x の旧リリースノート)
 - RELEASE_NOTES_v1.13.2.md
 - RELEASE_NOTES_v1.15.2.md
 - RELEASE_NOTES_v1.16.0.md
@@ -66,4 +66,4 @@
 - src/ （ソースコード - 配布方針により今後非公開化予定）
 - dist/ （ビルド成果物 - 公開時は Releases にアップロード）
 
-更新日: 2025-12-31
+更新日: 2026-01-01
