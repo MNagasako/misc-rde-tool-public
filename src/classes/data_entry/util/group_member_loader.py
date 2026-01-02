@@ -4,6 +4,7 @@ import json
 from typing import List, Dict, Any
 from net.http_helpers import proxy_get
 from config.common import SUBGROUP_DETAILS_DIR, SUBGROUP_REL_DETAILS_DIR
+from classes.subgroup.core.subgroup_data_manager import SubgroupDataManager
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,19 @@ def load_group_members(group_id: str) -> List[Dict[str, Any]]:
     """
     if not group_id:
         return []
+
+    # 0. subGroup.json(included) を使えるのは「その subGroup.json の groupId と一致する場合のみ」
+    #    そうでない場合に使うと、別グループの問い合わせでも誤ったメンバー一覧を返してしまう。
+    try:
+        subgroup_data = SubgroupDataManager.load_subgroups_data()
+        if isinstance(subgroup_data, dict):
+            current_group_id = str(((subgroup_data.get("data") or {}) if subgroup_data else {}).get("id") or "")
+            if current_group_id and current_group_id == str(group_id):
+                users = SubgroupDataManager.load_user_entries()
+                if users and not isinstance(users, str):
+                    return list(users)
+    except Exception:
+        pass
 
     # 1. ローカルファイルから取得を試みる
     users = _load_from_local_file(group_id)
@@ -60,7 +74,8 @@ def _load_from_local_file(group_id: str) -> List[Dict[str, Any]]:
     return users
 
 def _load_from_api(group_id: str) -> List[Dict[str, Any]]:
-    url = f"https://rde-api.nims.go.jp/groups/{group_id}?include=members"
+    # NOTE: include=members は環境によって 404 になる事例があるため、まずは基本のgroupsエンドポイントを使用する。
+    url = f"https://rde-api.nims.go.jp/groups/{group_id}"
     
     try:
         response = proxy_get(url)

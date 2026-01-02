@@ -89,3 +89,44 @@ def parse_and_save(xlsx_path: str) -> List[SupportedFileFormatEntry]:
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
     return entries
+
+
+def load_saved_formats() -> tuple[List[SupportedFileFormatEntry], str]:
+    """保存済みの対応ファイル形式一覧（supported_formats.json）を読み込む。
+
+    Returns:
+        (entries, source_file)
+        - entries: SupportedFileFormatEntry のリスト（未存在/読込失敗時は空リスト）
+        - source_file: 元となったXLSXファイルパス（未存在/不明時は空文字）
+    """
+    path = get_default_output_path()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except FileNotFoundError:
+        return ([], "")
+    except Exception:
+        # 破損/途中書き込み等は、呼び出し側で「初回扱い」にできるよう空で返す
+        return ([], "")
+
+    source = meta.get("source_file", "")
+    entries_data = meta.get("entries", [])
+    entries: List[SupportedFileFormatEntry] = []
+    for e in entries_data:
+        try:
+            entries.append(
+                SupportedFileFormatEntry(
+                    equipment_id=e["equipment_id"],
+                    file_exts=e.get("file_exts", []),
+                    file_descs=e.get("file_descs", {}),
+                    template_name=e.get("template_name", ""),
+                    template_version=e.get("template_version"),
+                    source_sheet=e.get("source_sheet", ""),
+                    original_format=e.get("original_format", ""),
+                )
+            )
+        except Exception:
+            # 1件だけ壊れていても、残りは表示できるようにする
+            continue
+
+    return (entries, source)

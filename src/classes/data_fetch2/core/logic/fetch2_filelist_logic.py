@@ -660,7 +660,7 @@ def fetch_files_json_for_dataset(parent, dataset_obj, bearer_token=None, save_di
             if not progress_callback(0, 1, "匿名化ファイルを作成中..."):
                 return None
 
-        #C:\vscode\rde\src\classes\anonymizer.py を参考にoriginal_dataset_json_path　の匿名化版を同じディレクトリに保存
+        # anonymize_json() の実装（classes.anonymizer 相当）を使い、original_dataset_json_path の匿名化版を同じディレクトリに保存
         dataset_anonymized_path = os.path.join(dataset_dir, f"{dataset_id}_anonymized.json")
         if os.path.exists(original_dataset_json_path):
             with open(original_dataset_json_path, "r", encoding="utf-8") as f:

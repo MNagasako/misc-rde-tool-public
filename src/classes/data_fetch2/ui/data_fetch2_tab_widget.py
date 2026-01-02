@@ -240,6 +240,9 @@ class DataFetch2TabWidget(QTabWidget):
             fallback_layout.addWidget(fallback_label)
             self.data_fetch_widget = None
             self.addTab(fallback_widget, "📊 データ取得")
+
+    def create_mail_notification_tab(self):
+        pass  # メール通知タブの作成を削除
             
     def on_file_filter_changed(self, filter_config):
         """ファイルフィルタ変更時のハンドラー"""

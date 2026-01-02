@@ -75,6 +75,9 @@ class SettingsTabWidget(QWidget):
         # データ構造化タブ（アップロード + 解析結果表示）
         self.setup_data_structuring_tab()
 
+        # メールタブ（Gmail: アプリパスワードを先行実装）
+        self.setup_mail_tab()
+
         # 除外されたタブ（ユーザー要望）:
         # - ネットワーク設定タブ
         # - アプリケーション設定タブ
@@ -518,13 +521,11 @@ class SettingsTabWidget(QWidget):
     def _update_formats_with_source(self, entries):
         """解析完了時にentriesと元ファイルパスを一覧へ渡す"""
         try:
-            import json, pathlib
-            json_path = pathlib.Path("output/supported_formats.json")
-            if json_path.exists():
-                with open(json_path, 'r', encoding='utf-8') as f:
-                    meta = json.load(f)
-                    source = meta.get("source_file", "")
-                    self.supported_formats_tab.set_entries(entries, source)
+            from classes.config.core import supported_formats_service as formats_service
+            loaded_entries, source = formats_service.load_saved_formats()
+            # parse_and_save直後はentriesが最新だが、source_fileは保存側のメタを優先
+            if source:
+                self.supported_formats_tab.set_entries(entries, source)
             else:
                 self.supported_formats_tab.set_entries(entries)
         except Exception as e:
@@ -534,29 +535,12 @@ class SettingsTabWidget(QWidget):
     def _load_existing_formats(self):
         """起動時に既存のsupported_formats.jsonを読み込んで一覧へ表示"""
         try:
-            import json, pathlib
-            from classes.config.core.models import SupportedFileFormatEntry
-            json_path = pathlib.Path("output/supported_formats.json")
-            if not json_path.exists():
+            from classes.config.core import supported_formats_service as formats_service
+            entries, source = formats_service.load_saved_formats()
+            if not entries:
                 return
-            with open(json_path, 'r', encoding='utf-8') as f:
-                meta = json.load(f)
-                source = meta.get("source_file", "")
-                entries_data = meta.get("entries", [])
-                entries = [
-                    SupportedFileFormatEntry(
-                        equipment_id=e["equipment_id"],
-                        file_exts=e.get("file_exts", []),
-                        file_descs=e.get("file_descs", {}),
-                        template_name=e.get("template_name", ""),
-                        template_version=e.get("template_version"),
-                        source_sheet=e.get("source_sheet", ""),
-                        original_format=e.get("original_format", ""),
-                    )
-                    for e in entries_data
-                ]
-                self.supported_formats_tab.set_entries(entries, source)
-                logger.info(f"既存データを読み込みました: {len(entries)}件")
+            self.supported_formats_tab.set_entries(entries, source)
+            logger.info(f"既存データを読み込みました: {len(entries)}件")
         except Exception as e:
             logger.debug(f"既存データ読み込み失敗（初回起動？）: {e}")
     
@@ -675,6 +659,11 @@ class SettingsTabWidget(QWidget):
             if hasattr(self, 'ai_widget') and hasattr(self.ai_widget, 'save_settings'):
                 self.ai_widget.save_settings()
                 applied_settings.append("AI設定")
+
+            # メール設定の適用
+            if hasattr(self, 'mail_widget') and hasattr(self.mail_widget, 'save_settings'):
+                self.mail_widget.save_settings()
+                applied_settings.append("メール")
             
             if applied_settings:
                 message = f"以下の設定が適用されました:\n• " + "\n• ".join(applied_settings)
@@ -708,6 +697,11 @@ class SettingsTabWidget(QWidget):
             if hasattr(self, 'ai_widget') and hasattr(self.ai_widget, 'load_current_settings'):
                 self.ai_widget.load_current_settings()
                 reloaded_settings.append("AI設定")
+
+            # メール設定の再読み込み
+            if hasattr(self, 'mail_widget') and hasattr(self.mail_widget, 'load_current_settings'):
+                self.mail_widget.load_current_settings()
+                reloaded_settings.append("メール")
                 
             if reloaded_settings:
                 message = f"以下の設定が再読み込みされました:\n• " + "\n• ".join(reloaded_settings)
@@ -719,6 +713,16 @@ class SettingsTabWidget(QWidget):
         except Exception as e:
             logger.error(f"設定再読み込みエラー: {e}")
             QMessageBox.warning(self, "エラー", f"設定の再読み込みに失敗しました: {e}")
+
+    def setup_mail_tab(self):
+        """メール設定タブ（Gmail先行実装）"""
+        try:
+            from classes.config.ui.mail_settings_tab import MailSettingsTab
+
+            self.mail_widget = MailSettingsTab(self)
+            self.tab_widget.addTab(self.mail_widget, "メール")
+        except Exception as e:
+            logger.warning("メールタブのロードに失敗: %s", e)
 
     def setup_autologin_tab(self):
         """自動ログインタブを設定"""

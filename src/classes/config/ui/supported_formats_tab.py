@@ -99,9 +99,8 @@ class SupportedFormatsTab(QWidget):
         # ファイルリンク表示
         target_source = source_file or self._source_file
         if target_source:
-            import pathlib
             try:
-                out_json = pathlib.Path("output/supported_formats.json").resolve()
+                out_json = formats_service.get_default_output_path()
                 self.file_link_label.setText(
                     f"元ファイル: {target_source}\n"
                     f"抽出済みファイル: {out_json}"

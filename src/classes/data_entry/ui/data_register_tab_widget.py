@@ -99,6 +99,9 @@ class DataRegisterTabWidget(QWidget):
         # 登録状況タブ
         self.create_status_tab()
 
+        # メール通知タブ
+        self.create_mail_notification_tab()
+
         # 一括登録タブのインデックスを記録（明示的に保持）
         self._batch_tab_index = batch_index
 
@@ -447,6 +450,24 @@ class DataRegisterTabWidget(QWidget):
             self.tab_widget.addTab(status_widget, "登録状況")
         except Exception as e:
             logger.error(f"登録状況タブの作成に失敗: {e}")
+
+    def create_mail_notification_tab(self):
+        """メール通知タブを作成"""
+        try:
+            from classes.data_entry.ui.mail_notification_tab import MailNotificationTab
+
+            tab = MailNotificationTab(self)
+            self.tab_widget.addTab(tab, "✉️ メール通知")
+        except Exception as e:
+            logger.error(f"メール通知タブの作成に失敗: {e}")
+            try:
+                # 失敗してもUI上で分かるよう、簡易プレースホルダを出す
+                fallback = QWidget()
+                layout = QVBoxLayout(fallback)
+                layout.addWidget(QLabel("メール通知タブの初期化に失敗しました。"))
+                self.tab_widget.addTab(fallback, "✉️ メール通知")
+            except Exception:
+                pass
         
     def get_current_tab_index(self):
         """現在選択されているタブのインデックスを取得"""

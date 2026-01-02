@@ -110,6 +110,33 @@ class AppConfigManager:
                 "credential_storage": "auto",  # auto | os_keychain | encrypted_file | legacy_file | none
                 "warn_on_legacy_file": True,
                 "remember_credentials": True
+            },
+
+            # メール設定（Gmailを先行実装）
+            # 注意: アプリパスワード等の機微情報はここには保存しない（OSキーチェーンへ保存）
+            "mail": {
+                "provider": "gmail",  # gmail | microsoft365 | smtp
+                "gmail": {
+                    "from_address": "",
+                    "remember_app_password": False
+                },
+                "microsoft365": {
+                    "client_id": "",
+                    "tenant": "common"
+                },
+                "smtp": {
+                    "host": "",
+                    "port": 465,
+                    "security": "ssl",  # ssl | starttls | none
+                    "username": "",
+                    "from_address": "",
+                    "remember_password": False
+                },
+                "test": {
+                    "to_address": "",
+                    "subject": "ARIM RDE Tool テストメール",
+                    "body": "これは ARIM RDE Tool のテストメールです。"
+                }
             }
         }
     
