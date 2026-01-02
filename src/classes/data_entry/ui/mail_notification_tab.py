@@ -594,7 +594,7 @@ class MailNotificationTab(QWidget):
 
         self._email_map = self._build_email_map(selected)
 
-        production = bool(self.production_checkbox.isChecked())
+        production = self._is_production_mode()
         planned = build_planned_notification_rows(
             entries=selected,
             email_map=self._email_map,
