@@ -1994,7 +1994,7 @@ class ProxySettingsWidget(QWidget):
             
         except ImportError as e:
             # 診断ツールが見つからない
-            error_msg = f"診断ツールのインポートに失敗しました:\n{e}\n\n診断機能を使用するには、tests/proxy/ディレクトリに診断スクリプトが必要です。"
+            error_msg = f"診断ツールのインポートに失敗しました:\n{e}\n\n診断機能を使用するには、本体に同梱された診断モジュールが必要です。"
             self.test_result_text.setPlainText(f"❌ {error_msg}")
             self.add_log(f"診断ツールエラー: {e}")
             QMessageBox.critical(self, "エラー", error_msg)

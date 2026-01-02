@@ -10,8 +10,6 @@ a = Analysis(
         ('src/resources', 'resources'),
         ('config', 'config'),
         ('src/js_templates', 'js_templates'),
-        # tests配下を完全に含める（診断機能に必要）
-        ('tests', 'tests'),
     ],
     hiddenimports=[],
     hookspath=[],
@@ -35,7 +33,10 @@ a = Analysis(
         'PIL.Jpeg2KImagePlugin', 'PIL.SpiderImagePlugin', 'olefile',
         # その他未使用
         'curses', 'readline', 'pdb', 'pydoc',
-        'setuptools', 'distutils', 'pkg_resources', 'wheel',
+        # setuptools/distutils/wheel/pkg_resources は PyInstaller のフック処理で参照され得るため除外しない
+        # (Python 3.13 では distutils が setuptools._distutils として扱われ、
+        #  distutils を excludes に入れると hook-distutils と衝突してビルドが失敗する)
+        
         'secretstorage', 'gi', 'dbus',
         # PySide6未使用モジュール（削減効果中）
         'PySide6.QtPositioning', 'PySide6.QtQuick', 'PySide6.QtQml',

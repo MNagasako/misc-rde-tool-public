@@ -1,0 +1,72 @@
+# プロキシ診断ツール設定ファイル v2.1.6
+# このファイルで診断ツールの挙動をカスタマイズできます
+
+# タイムアウト設定（秒）
+timeout:
+  # HTTPリクエストのタイムアウト
+  request: 30
+  
+  # サブプロセス実行のタイムアウト
+  subprocess: 300
+  
+  # ソケット接続チェックのタイムアウト
+  socket: 1
+
+# MitM（Man-in-the-Middle）プロキシ設定
+mitm:
+  # ローカルMitMプロキシ（Fiddler等）を許容するか
+  # true: SSL検証エラーを警告扱いにする
+  # false: SSL検証エラーを失敗扱いにする
+  allow: true
+  
+  # MitM検出時の挙動
+  # "warn": 警告を出してテスト続行
+  # "skip": テストをスキップ
+  # "fail": テストを失敗扱い
+  on_detect: "warn"
+
+# 連続接続テスト設定
+connection_stability:
+  # 連続リクエスト回数（セッション再利用）
+  consecutive_count: 10
+  
+  # 新規セッションテスト回数
+  new_session_count: 5
+  
+  # セッション再設定テスト回数
+  reconfiguration_count: 5
+  
+  # リクエスト間隔（秒）
+  delay: 0.3
+
+# リトライ設定
+retry:
+  # リトライ回数
+  max_attempts: 3
+  
+  # リトライ間隔（秒）
+  delay: 1
+  
+  # リトライ対象エラー
+  on_errors:
+    - "Timeout"
+    - "ConnectionError"
+
+# ログ設定
+logging:
+  # ログレベル: DEBUG, INFO, WARNING, ERROR
+  level: "INFO"
+  
+  # 詳細ログを表示するか
+  verbose: false
+
+# テストURL
+test_urls:
+  # 基本テスト用URL
+  primary: "https://httpbin.org/get"
+  
+  # SSL検証テスト用URL
+  ssl: "https://httpbin.org/get"
+  
+  # 代替URL（primaryが使えない場合）
+  fallback: "https://www.google.com"

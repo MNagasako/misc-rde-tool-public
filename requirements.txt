@@ -1,47 +1,81 @@
-altgraph==0.17.4
-beautifulsoup4==4.14.2
-certifi==2025.11.12
-chardet==5.2.0
-charset-normalizer==3.4.4
-colorama==0.4.6
-dukpy==0.5.0
-et_xmlfile==2.0.0
-filelock==3.20.0
-idna==3.11
-jaraco.classes==3.4.0
-jaraco.context==6.0.1
-jaraco.functools==4.3.0
-keyring==25.7.0
-more-itertools==10.8.0
-numpy==2.3.5
-openpyxl==3.1.5
-packaging==25.0
-pandas==2.3.3
-pefile==2023.2.7
-pillow==12.0.0
-pycryptodomex==3.23.0
-pyinstaller==6.16.0
-pyinstaller-hooks-contrib==2025.9
-PyPAC==0.17.2
+# ARIM RDE to Data Portal Migration Tool - Production Dependencies
+# Python 3.13.5+
+# Optimized: Removed unused packages (dukpy, colorama, tldextract, six, xlsxwriter, et_xmlfile, soupsieve, requests-file)
+# Coverage moved to requirements-test.txt
+
+# Core Framework & UI
 PySide6==6.10.0
 PySide6_Addons==6.10.0
 PySide6_Essentials==6.10.0
-python-dateutil==2.9.0.post0
-python-dotenv==1.2.1
-pytz==2025.2
-pywin32==311
-pywin32-ctypes==0.2.3
-PyYAML==6.0.3
-requests==2.32.5
-requests-file==3.0.1
-setuptools==80.9.0
 shiboken6==6.10.0
-six==1.17.0
-soupsieve==2.8
-tldextract==5.3.0
-truststore==0.10.4
-typing_extensions==4.15.0
-tzdata==2025.2
+
+# HTTP & Network
+requests==2.32.5
 urllib3==2.5.0
+truststore==0.10.4
+certifi==2025.11.12
 wincertstore==0.2.1
-xlsxwriter==3.2.9
+
+# Data Processing & Excel
+pandas==2.3.3
+numpy==2.3.5
+openpyxl==3.1.5
+python-dateutil==2.9.0.post0
+
+# Template Engine (pandas Styler / HTML rendering)
+Jinja2==3.1.6
+MarkupSafe==3.0.3
+
+# HTML/XML Processing
+beautifulsoup4==4.14.2
+
+# Image Processing
+pillow==12.0.0
+
+# Encoding Detection (requests dependency)
+charset-normalizer==3.4.4
+chardet==5.2.0
+
+# Configuration & Environment
+PyYAML==6.0.3
+python-dotenv==1.2.1
+
+# Cryptography (Windows credential store integration)
+pycryptodomex==3.23.0
+
+# System Integration
+keyring==25.7.0
+pywin32==311
+pywin32-ctypes==0.2.2
+
+# Microsoft 365 OAuth (Device Code) + Graph
+msal==1.34.0
+
+# Clipboard Support
+pyperclip==1.11.0
+
+# Proxy Support (Optional)
+PyPAC==0.17.2
+
+# Timezone Support
+pytz==2025.2
+tzdata==2025.2
+
+# Type Hints (Python 3.11+ backport)
+typing_extensions==4.15.0
+
+# PyInstaller (Binary Building)
+pyinstaller==6.16.0
+pyinstaller-hooks-contrib==2025.9
+pefile==2023.2.7
+altgraph==0.17.4
+filelock==3.20.0
+setuptools==80.9.0
+jaraco.classes==3.4.0
+jaraco.context==6.0.1
+jaraco.functools==4.3.0
+packaging==25.0
+more-itertools==10.8.0
+
+# DNS Resolution
+idna==3.11
