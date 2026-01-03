@@ -1,12 +1,13 @@
-"""
-設備データHTML解析ユーティリティ
+"""設備データHTML解析ユーティリティ
 
 ARIM設備情報サイトのHTMLからデータを抽出・整形する機能を提供します。
 """
 
+import html as html_lib
 import re
 from typing import Dict, Optional
 from classes.equipment.conf.field_definitions import FACILITY_FIELDS
+from classes.equipment.util.name_parser import split_device_name_from_facility_name
 
 
 def extract_facility_detail(html: str, facility_id: int) -> Dict[str, str]:
@@ -38,8 +39,9 @@ def extract_facility_detail(html: str, facility_id: int) -> Dict[str, str]:
     
     # 追加フィールドの生成
     if "設備名称" in result:
-        result["装置名_日"] = result["設備名称"]
-        result["装置名_英"] = result["設備名称"]  # 英語名がない場合は日本語名
+        ja, en = split_device_name_from_facility_name(result.get("設備名称") or "")
+        result["装置名_日"] = ja
+        result["装置名_英"] = en
     
     # PREFIX（設備IDの接頭辞）を抽出
     if "設備ID" in result and result["設備ID"]:
@@ -87,7 +89,7 @@ def clean_html_value(value: str, field_name: str = "") -> str:
     Returns:
         str: クリーニングされた文字列
     """
-    # タブと&nbsp;を削除
+    # タブと nbsp を削除（その他の実体参照は後段でunescape）
     value = re.sub(r'\t|&nbsp;', '', value, flags=re.DOTALL)
     
     # <th>タグと<td>タグを削除
@@ -103,6 +105,12 @@ def clean_html_value(value: str, field_name: str = "") -> str:
     
     # <br>タグを改行に変換
     value = re.sub(r'<br>|<br />', '\n', value, flags=re.DOTALL)
+
+    # HTML実体参照をデコード（&ensp; 等）
+    try:
+        value = html_lib.unescape(value)
+    except Exception:
+        pass
     
     # 先頭・末尾の空白を削除
     value = value.strip()

@@ -86,6 +86,10 @@ def select_failed_entries_by_reference(
 class PlannedNotificationRow:
     entry_id: str
     start_time_jst: str
+    equipment_id: str
+    device_name_ja: str
+    dataset_template_name: str
+    dataset_name: str
     data_name: str
     created_name: str
     created_org: str
@@ -93,6 +97,9 @@ class PlannedNotificationRow:
     owner_name: str
     owner_org: str
     owner_mail: str
+    test_to: str
+    production_to: str
+    production_sent_at: str
     effective_to: str
     error_code: str
     error_message: str
@@ -112,12 +119,24 @@ def _format_template(template: str, entry: Dict[str, Any]) -> str:
             "startTime": format_start_time_jst(str(entry.get("startTime") or "")) or (entry.get("startTime") or ""),
             "dataName": entry.get("dataName") or "",
             "datasetName": entry.get("datasetName") or "",
+            "datasetTemplateName": entry.get("datasetTemplateName") or "",
+            "equipmentId": entry.get("equipmentId") or "",
+            "deviceNameJa": entry.get("deviceNameJa") or "",
             "errorCode": entry.get("errorCode") or "",
             "errorMessage": entry.get("errorMessage") or "",
             "createdByUserId": entry.get("createdByUserId") or "",
             "createdByName": entry.get("createdByName") or "",
+            "createdByOrg": entry.get("createdByOrg") or "",
+            "createdByMail": entry.get("createdByMail") or "",
             "dataOwnerUserId": entry.get("dataOwnerUserId") or "",
             "dataOwnerName": entry.get("dataOwnerName") or "",
+            "dataOwnerOrg": entry.get("dataOwnerOrg") or "",
+            "dataOwnerMail": entry.get("dataOwnerMail") or "",
+            "testToAddress": entry.get("testToAddress") or "",
+            "productionToAddress": entry.get("productionToAddress") or "",
+            "equipmentManagerNames": entry.get("equipmentManagerNames") or "",
+            "equipmentManagerEmails": entry.get("equipmentManagerEmails") or "",
+            "equipmentManagerNotes": entry.get("equipmentManagerNotes") or "",
         }
     )
     try:
@@ -131,9 +150,12 @@ def build_planned_notification_rows(
     entries: Iterable[Dict[str, Any]],
     email_map: Dict[str, str],
     production_mode: bool,
+    include_creator: bool,
+    include_owner: bool,
     test_to_address: str,
     subject_template: str,
     body_template: str,
+    production_sent_at_by_entry_id: Optional[Dict[str, str]] = None,
 ) -> List[PlannedNotificationRow]:
     """通知対象リスト（テーブル表示用）を生成する。
 
@@ -146,6 +168,7 @@ def build_planned_notification_rows(
     for e in entries or []:
         entry_id = str(e.get("id") or "")
         start_time_jst = format_start_time_jst(str(e.get("startTime") or ""))
+        dataset_name = str(e.get("datasetName") or "")
         data_name = str(e.get("dataName") or "")
 
         created_name = str(e.get("createdByName") or "")
@@ -158,20 +181,49 @@ def build_planned_notification_rows(
         created_mail = (email_map.get(created_id) or "").strip()
         owner_mail = (email_map.get(owner_id) or "").strip()
 
+        production_targets: List[str] = []
+        if include_creator:
+            production_targets.append(created_mail)
+        if include_owner:
+            production_targets.append(owner_mail)
+        # Preserve order / unique
+        seen: set[str] = set()
+        production_targets = [m for m in production_targets if m and not (m in seen or seen.add(m))]
+        production_to = "; ".join(production_targets) if production_targets else "(未解決)"
+        test_to = (test_to_address or "").strip() or "(未設定)"
+
+        prod_sent_at = ""
+        try:
+            prod_sent_at = str((production_sent_at_by_entry_id or {}).get(entry_id) or "")
+        except Exception:
+            prod_sent_at = ""
+
+        # テンプレ置換用にも載せておく（フォーマット側で拾えるように）
+        try:
+            e["createdByMail"] = created_mail
+            e["dataOwnerMail"] = owner_mail
+            e["testToAddress"] = test_to
+            e["productionToAddress"] = production_to
+        except Exception:
+            pass
+
         subject = _format_template(subject_template, e)
         body = _format_template(body_template, e)
 
-        # テーブルの「実送信先」表示は代表1件（投入者優先、無ければ所有者）
-        representative_real = created_mail or owner_mail
+        # テーブルの「実送信先」表示は現運用モードの送信先を表示
         if production_mode:
-            effective_to = representative_real
+            effective_to = production_to
         else:
-            effective_to = (test_to_address or "").strip()
+            effective_to = test_to
 
         rows.append(
             PlannedNotificationRow(
                 entry_id=entry_id,
                 start_time_jst=start_time_jst,
+                equipment_id=str(e.get("equipmentId") or ""),
+                device_name_ja=str(e.get("deviceNameJa") or ""),
+                dataset_template_name=str(e.get("datasetTemplateName") or ""),
+                dataset_name=dataset_name,
                 data_name=data_name,
                 created_name=created_name,
                 created_org=created_org,
@@ -179,6 +231,9 @@ def build_planned_notification_rows(
                 owner_name=owner_name,
                 owner_org=owner_org,
                 owner_mail=owner_mail or "(不明)",
+                test_to=test_to,
+                production_to=production_to,
+                production_sent_at=prod_sent_at,
                 effective_to=effective_to or "(未設定)",
                 error_code=str(e.get("errorCode") or ""),
                 error_message=str(e.get("errorMessage") or ""),

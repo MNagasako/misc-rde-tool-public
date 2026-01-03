@@ -39,6 +39,9 @@ class DataRegisterTabWidget(QWidget):
         self._batch_tab_alert_shown = False  # 警告表示フラグ
         self._normal_tab_index = None
         self._batch_tab_index = None
+        self._mail_tab_index = None
+        self._last_normal_window_size = None
+        self._last_other_window_size = None
         self.setup_ui()
         
         # テーマ変更シグナルに接続（Singletonを必ず使用）
@@ -100,7 +103,8 @@ class DataRegisterTabWidget(QWidget):
         self.create_status_tab()
 
         # メール通知タブ
-        self.create_mail_notification_tab()
+        mail_index = self.create_mail_notification_tab()
+        self._mail_tab_index = mail_index
 
         # 一括登録タブのインデックスを記録（明示的に保持）
         self._batch_tab_index = batch_index
@@ -248,7 +252,14 @@ class DataRegisterTabWidget(QWidget):
             if hasattr(top_level, 'setMaximumWidth'):
                 top_level.setMaximumWidth(16777215)
                 
-            # 通常登録タブ：標準的なサイズに設定（初回呼び出し時と同じ幅・95%高さ）
+            # 切替前サイズの保存（カテゴリ別）
+            try:
+                if top_level and top_level.size().isValid():
+                    self._last_other_window_size = top_level.size()
+            except Exception:
+                pass
+
+            # 通常登録タブ：標準的なサイズに設定（初回は標準幅、以降はユーザーが調整した通常サイズを復元）
             if screen:
                 screen_size = screen.size()
                 # 標準的な幅（データセット選択時に適切な幅）と90%高さを設定
@@ -275,7 +286,10 @@ class DataRegisterTabWidget(QWidget):
                     top_level.showNormal()
                     logger.debug("showNormal()実行")
                 if hasattr(top_level, 'resize'):
-                    top_level.resize(standard_width, target_height)
+                    if self._last_normal_window_size is not None:
+                        top_level.resize(self._last_normal_window_size)
+                    else:
+                        top_level.resize(standard_width, target_height)
                     logger.debug("resize(%sx%s)実行", standard_width, target_height)
                     # リサイズ直後のサイズを確認
                     actual_size = top_level.size()
@@ -289,6 +303,11 @@ class DataRegisterTabWidget(QWidget):
                     QApplication.processEvents()
                 final_size = top_level.size()
                 logger.debug("最終確認サイズ: %sx%s", final_size.width(), final_size.height())
+                try:
+                    if final_size.isValid():
+                        self._last_normal_window_size = final_size
+                except Exception:
+                    pass
                 
         elif index == 1:  # 一括登録タブ
             # アスペクト比・横幅制限解除
@@ -299,7 +318,14 @@ class DataRegisterTabWidget(QWidget):
             if hasattr(top_level, 'setMaximumWidth'):
                 top_level.setMaximumWidth(16777215)
 
-            # 一括登録タブ：画面サイズの90%にリサイズ
+            # 切替前サイズの保存（カテゴリ別）
+            try:
+                if top_level and top_level.size().isValid():
+                    self._last_normal_window_size = top_level.size()
+            except Exception:
+                pass
+
+            # 一括登録タブ：初回は画面サイズの90%、以降は「その他」サイズを復元
             if screen:
                 screen_size = screen.size()
                 target_width = int(screen_size.width() * 0.90)
@@ -325,7 +351,10 @@ class DataRegisterTabWidget(QWidget):
                     top_level.showNormal()
                     logger.debug("showNormal()実行")
                 if hasattr(top_level, 'resize'):
-                    top_level.resize(target_width, target_height)
+                    if self._last_other_window_size is not None:
+                        top_level.resize(self._last_other_window_size)
+                    else:
+                        top_level.resize(target_width, target_height)
                     logger.debug("resize(%sx%s)実行", target_width, target_height)
                     # リサイズ直後のサイズを確認
                     actual_size = top_level.size()
@@ -339,6 +368,11 @@ class DataRegisterTabWidget(QWidget):
                     QApplication.processEvents()
                 final_size = top_level.size()
                 logger.debug("最終確認サイズ: %sx%s", final_size.width(), final_size.height())
+                try:
+                    if final_size.isValid():
+                        self._last_other_window_size = final_size
+                except Exception:
+                    pass
         elif index == 2:  # 登録状況タブ
             # 登録状況タブは横幅固定を行わず、ユーザーのリサイズ操作を妨げない。
             if hasattr(top_level, '_fixed_aspect_ratio'):
@@ -359,6 +393,49 @@ class DataRegisterTabWidget(QWidget):
             # pytest中はWindowsで不安定になり得るため processEvents を避ける
             if not os.environ.get("PYTEST_CURRENT_TEST"):
                 QApplication.processEvents()
+            # 登録状況タブは固定しないが、ユーザーが調整した「その他」サイズとしては記憶
+            try:
+                if top_level and top_level.size().isValid():
+                    self._last_other_window_size = top_level.size()
+            except Exception:
+                pass
+        elif self._mail_tab_index is not None and index == self._mail_tab_index:
+            # メール通知タブ：初回は画面幅90%、以降は「その他」サイズを復元
+            if hasattr(top_level, '_fixed_aspect_ratio'):
+                top_level._fixed_aspect_ratio = None
+            if hasattr(top_level, 'setMinimumWidth'):
+                top_level.setMinimumWidth(200)
+            if hasattr(top_level, 'setMaximumWidth'):
+                top_level.setMaximumWidth(16777215)
+            if hasattr(top_level, 'setMinimumSize'):
+                top_level.setMinimumSize(200, 200)
+            if hasattr(top_level, 'setMaximumSize'):
+                top_level.setMaximumSize(16777215, 16777215)
+            if hasattr(top_level, 'setSizePolicy'):
+                top_level.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+            if hasattr(top_level, 'showNormal'):
+                top_level.showNormal()
+
+            if screen:
+                screen_size = screen.size()
+                target_width = int(screen_size.width() * 0.90)
+                target_height = int(screen_size.height() * 0.90)
+
+                if hasattr(top_level, 'resize'):
+                    if self._last_other_window_size is not None:
+                        top_level.resize(self._last_other_window_size)
+                    else:
+                        top_level.resize(target_width, target_height)
+
+                if not os.environ.get("PYTEST_CURRENT_TEST"):
+                    QApplication.processEvents()
+
+                try:
+                    final_size = top_level.size()
+                    if final_size.isValid():
+                        self._last_other_window_size = final_size
+                except Exception:
+                    pass
         else:
             # 想定外インデックスは何もしない
             return
@@ -457,7 +534,8 @@ class DataRegisterTabWidget(QWidget):
             from classes.data_entry.ui.mail_notification_tab import MailNotificationTab
 
             tab = MailNotificationTab(self)
-            self.tab_widget.addTab(tab, "✉️ メール通知")
+            idx = self.tab_widget.addTab(tab, "✉️ メール通知")
+            return idx
         except Exception as e:
             logger.error(f"メール通知タブの作成に失敗: {e}")
             try:
@@ -465,9 +543,11 @@ class DataRegisterTabWidget(QWidget):
                 fallback = QWidget()
                 layout = QVBoxLayout(fallback)
                 layout.addWidget(QLabel("メール通知タブの初期化に失敗しました。"))
-                self.tab_widget.addTab(fallback, "✉️ メール通知")
+                idx = self.tab_widget.addTab(fallback, "✉️ メール通知")
+                return idx
             except Exception:
                 pass
+        return None
         
     def get_current_tab_index(self):
         """現在選択されているタブのインデックスを取得"""

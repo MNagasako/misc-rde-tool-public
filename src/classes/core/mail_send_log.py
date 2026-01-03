@@ -86,6 +86,87 @@ def record_sent(*, to_addr: str, subject: str, sent_at: Optional[datetime] = Non
     _save_json(path, data)
 
 
+def record_sent_ex(
+    *,
+    to_addr: str,
+    subject: str,
+    sent_at: Optional[datetime] = None,
+    mode: Optional[str] = None,
+    entry_id: Optional[str] = None,
+    template_name: Optional[str] = None,
+) -> None:
+    """拡張版: mode/entryId/templateName 等を含めて永続ログに追記する。
+
+    - 既存の record_sent() と同じログファイルを使用
+    - 既存ログと共存できるように、追加フィールドは任意
+    """
+
+    if not to_addr.strip() or not subject.strip():
+        return
+
+    sent_at = sent_at or _utc_now()
+    path = _log_path()
+    data = _load_json(path)
+
+    history = data.get("history")
+    if not isinstance(history, list):
+        history = []
+
+    item: Dict[str, Any] = {
+        "sentAt": sent_at.isoformat(),
+        "to": to_addr,
+        "subject": subject,
+    }
+    m = (mode or "").strip().lower()
+    if m:
+        item["mode"] = m
+    eid = (entry_id or "").strip()
+    if eid:
+        item["entryId"] = eid
+    tn = (template_name or "").strip()
+    if tn:
+        item["templateName"] = tn
+
+    history.append(item)
+
+    last = data.get("last_sent")
+    if not isinstance(last, dict):
+        last = {}
+    last[_key(to_addr, subject)] = sent_at.isoformat()
+
+    data["history"] = history
+    data["last_sent"] = last
+
+    _save_json(path, data)
+
+
+def load_last_sent_at_by_entry_id(*, mode: Optional[str] = None) -> Dict[str, str]:
+    """entryIdごとの最新送信日時(ISO文字列)を返す。
+
+    Args:
+        mode: "production" / "test" など。指定時は一致するもののみ。
+    """
+
+    items = load_history(limit=0)
+    m = (mode or "").strip().lower()
+    result: Dict[str, str] = {}
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        eid = str(it.get("entryId") or "").strip()
+        if not eid:
+            continue
+        if m:
+            if str(it.get("mode") or "").strip().lower() != m:
+                continue
+        ts = str(it.get("sentAt") or "").strip()
+        if not ts:
+            continue
+        # historyは新しい順だが、limit=0で全取得時はソート済みのはず
+        result.setdefault(eid, ts)
+    return result
+
+
 def load_history(*, limit: int = 200) -> List[Dict[str, Any]]:
     """送信履歴（新しい順）を返す。"""
     try:

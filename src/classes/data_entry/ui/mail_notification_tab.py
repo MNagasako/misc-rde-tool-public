@@ -25,8 +25,10 @@ try:
         QAbstractItemView,
         QDateTimeEdit,
         QComboBox,
+        QScrollArea,
         QMessageBox,
         QInputDialog,
+        QDialog,
     )
     from qt_compat.core import Qt, QThread, Signal
 except Exception:
@@ -49,15 +51,16 @@ except Exception:
         QAbstractItemView,
         QDateTimeEdit,
         QComboBox,
+        QScrollArea,
         QMessageBox,
         QInputDialog,
+        QDialog,
     )
     from PySide6.QtCore import Qt, QThread, Signal
 
 from config.common import SUBGROUP_JSON_PATH
 from classes.core.mail_dispatcher import send_using_app_mail_settings
-from classes.core.mail_send_log import record_sent, should_send
-from classes.core.mail_send_log import load_history
+from classes.core.mail_send_log import load_history, load_last_sent_at_by_entry_id, record_sent_ex, should_send
 from classes.data_entry.core import registration_status_service as regsvc
 from classes.data_entry.core.logic.notification_selection import (
     PlannedNotificationRow,
@@ -65,11 +68,22 @@ from classes.data_entry.core.logic.notification_selection import (
     select_failed_entries_by_reference,
     select_failed_entries_in_range,
 )
+from classes.data_entry.util.entry_dataset_template_resolver import build_dataset_template_name_map_for_entry_ids
 from classes.data_entry.util.group_member_loader import load_group_members
 from classes.data_entry.util.entry_group_email_resolver import build_email_map_for_entry_ids
 from classes.subgroup.core.subgroup_data_manager import SubgroupDataManager
 from classes.managers.app_config_manager import get_config_manager
 from classes.theme import ThemeKey, get_color
+from classes.equipment.util import equipment_manager_store
+from classes.equipment.ui.equipment_manager_dialog import EquipmentManagerListDialog
+from classes.utils.facility_link_helper import (
+    extract_equipment_id,
+    load_equipment_name_map_from_merged_data2,
+    load_instrument_local_id_map_from_instruments_json,
+    lookup_device_name_ja,
+    lookup_equipment_id_by_device_name,
+    lookup_instrument_local_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +93,209 @@ _UTC = timezone.utc
 _RECIPIENT_BOTH = "both"
 _RECIPIENT_CREATOR = "creator"
 _RECIPIENT_OWNER = "owner"
+
+
+class _TemplateEditDialog(QDialog):
+    def __init__(self, parent: QWidget, *, template_name: str, subject: str, body: str):
+        super().__init__(parent)
+        self.setWindowTitle(f"テンプレ編集: {template_name}")
+        layout = QVBoxLayout(self)
+
+        row_subj = QHBoxLayout()
+        row_subj.addWidget(QLabel("件名テンプレ:"))
+        self.subject_edit = QLineEdit()
+        self.subject_edit.setText(subject or "")
+        row_subj.addWidget(self.subject_edit)
+        layout.addLayout(row_subj)
+
+        layout.addWidget(QLabel("本文テンプレ:"))
+        self.body_edit = QTextEdit()
+        self.body_edit.setPlainText(body or "")
+        layout.addWidget(self.body_edit)
+
+        placeholders = (
+            "利用可能プレースホルダ（例: {entryId}）\n"
+            "- {entryId}\n"
+            "- {startTime}\n"
+            "- {dataName}\n"
+            "- {datasetName}\n"
+            "- {datasetTemplateName}\n"
+            "- {equipmentId}\n"
+            "- {deviceNameJa}\n"
+            "- {errorCode}\n"
+            "- {errorMessage}\n"
+            "- {createdByUserId} / {createdByName} / {createdByOrg} / {createdByMail}\n"
+            "- {dataOwnerUserId} / {dataOwnerName} / {dataOwnerOrg} / {dataOwnerMail}\n"
+            "- {testToAddress} / {productionToAddress}\n"
+            "- {equipmentManagerNames} / {equipmentManagerEmails} / {equipmentManagerNotes}\n"
+        )
+        ph = QLabel(placeholders)
+        ph.setWordWrap(True)
+        layout.addWidget(ph)
+
+        btn_row = QHBoxLayout()
+        self.ok_btn = QPushButton("OK")
+        self.ok_btn.clicked.connect(self.accept)
+        self.cancel_btn = QPushButton("キャンセル")
+        self.cancel_btn.clicked.connect(self.reject)
+        btn_row.addStretch()
+        btn_row.addWidget(self.ok_btn)
+        btn_row.addWidget(self.cancel_btn)
+        layout.addLayout(btn_row)
+
+    def values(self) -> tuple[str, str]:
+        return (self.subject_edit.text() or ""), (self.body_edit.toPlainText() or "")
+
+
+class _NotificationConfirmDialog(QDialog):
+    def __init__(
+        self,
+        parent: QWidget,
+        *,
+        template_name: str,
+        row: PlannedNotificationRow,
+    ):
+        super().__init__(parent)
+        self.setWindowTitle("メール通知確認")
+        try:
+            if parent is not None:
+                self.resize(int(parent.width() * 0.5), max(400, int(parent.height() * 0.7)))
+        except Exception:
+            pass
+        layout = QVBoxLayout(self)
+
+        info = (
+            f"テンプレ: {template_name}\n"
+            f"設備ID: {row.equipment_id}\n"
+            f"装置名_日: {row.device_name_ja}\n"
+            f"データセットテンプレ: {row.dataset_template_name}\n"
+            f"データ名: {row.data_name}\n"
+            f"投入者メール: {row.created_mail}\n"
+            f"所有者メール: {row.owner_mail}\n"
+            f"テスト送信先: {row.test_to}\n"
+            f"本番送信先: {row.production_to}\n"
+        )
+        lbl = QLabel(info)
+        lbl.setWordWrap(True)
+        layout.addWidget(lbl)
+
+        layout.addWidget(QLabel("件名（適用後）:"))
+        self.subject_view = QLineEdit()
+        self.subject_view.setReadOnly(True)
+        self.subject_view.setText(row.subject)
+        layout.addWidget(self.subject_view)
+
+        layout.addWidget(QLabel("本文（適用後）:"))
+        self.body_view = QTextEdit()
+        self.body_view.setReadOnly(True)
+        self.body_view.setPlainText(row.body)
+        layout.addWidget(self.body_view)
+
+        btn_row = QHBoxLayout()
+        self.send_test_btn = QPushButton("テスト送信")
+        self.send_prod_btn = QPushButton("本番送信")
+        self.close_btn = QPushButton("閉じる")
+        btn_row.addStretch()
+        btn_row.addWidget(self.send_test_btn)
+        btn_row.addWidget(self.send_prod_btn)
+        btn_row.addWidget(self.close_btn)
+        layout.addLayout(btn_row)
+
+        self.close_btn.clicked.connect(self.reject)
+
+
+def _format_iso_to_jst(value: str) -> str:
+    text = (value or "").strip()
+    if not text:
+        return ""
+    try:
+        if text.endswith("Z"):
+            text = text[:-1] + "+00:00"
+        dt = datetime.fromisoformat(text)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_UTC)
+        jst = dt.astimezone(_JST)
+        return jst.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return ""
+
+
+class _SendLogDialog(QDialog):
+    def __init__(self, parent: QWidget, *, items: List[Dict[str, Any]]):
+        super().__init__(parent)
+        self.setWindowTitle("送信ログ")
+        layout = QVBoxLayout(self)
+
+        self._headers = ["送信日時(JST)", "mode", "to", "subject", "entryId", "templateName"]
+
+        filter_area = QScrollArea(self)
+        filter_area.setWidgetResizable(True)
+        filter_widget = QWidget(filter_area)
+        filter_layout = QHBoxLayout(filter_widget)
+        filter_layout.setContentsMargins(0, 0, 0, 0)
+        self._filters: List[QLineEdit] = []
+        for h in self._headers:
+            e = QLineEdit()
+            e.setPlaceholderText(h)
+            e.setClearButtonEnabled(True)
+            e.textChanged.connect(self._apply_filters)
+            e.setMinimumWidth(140)
+            self._filters.append(e)
+            filter_layout.addWidget(e)
+        filter_layout.addStretch()
+        filter_area.setWidget(filter_widget)
+        layout.addWidget(filter_area)
+
+        self.table = QTableWidget(0, len(self._headers), self)
+        self.table.setHorizontalHeaderLabels(self._headers)
+        self.table.setSortingEnabled(True)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setTextElideMode(Qt.ElideRight)
+        layout.addWidget(self.table)
+
+        self._populate(items)
+
+        btn_row = QHBoxLayout()
+        close_btn = QPushButton("閉じる")
+        close_btn.clicked.connect(self.accept)
+        btn_row.addStretch()
+        btn_row.addWidget(close_btn)
+        layout.addLayout(btn_row)
+
+        try:
+            if parent is not None:
+                self.resize(int(parent.width() * 0.8), max(400, int(parent.height() * 0.8)))
+        except Exception:
+            pass
+
+    def _populate(self, items: List[Dict[str, Any]]):
+        self.table.setRowCount(0)
+        for it in items or []:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self.table.setItem(row, 0, QTableWidgetItem(_format_iso_to_jst(str(it.get("sentAt") or ""))))
+            self.table.setItem(row, 1, QTableWidgetItem(str(it.get("mode") or "")))
+            self.table.setItem(row, 2, QTableWidgetItem(str(it.get("to") or "")))
+            self.table.setItem(row, 3, QTableWidgetItem(str(it.get("subject") or "")))
+            self.table.setItem(row, 4, QTableWidgetItem(str(it.get("entryId") or "")))
+            self.table.setItem(row, 5, QTableWidgetItem(str(it.get("templateName") or "")))
+        self._apply_filters()
+
+    def _apply_filters(self):
+        texts = [(f.text() or "").strip().lower() for f in self._filters]
+        for r in range(self.table.rowCount()):
+            hide = False
+            for c, t in enumerate(texts):
+                if not t:
+                    continue
+                item = self.table.item(r, c)
+                cell = (item.text() if item else "").lower()
+                if t not in cell:
+                    hide = True
+                    break
+            self.table.setRowHidden(r, hide)
+
 
 
 def _load_selected_subgroup_id() -> str:
@@ -190,16 +407,20 @@ class MailNotificationTab(QWidget):
         mode_layout.addWidget(self.production_mode_radio)
 
         mode_layout.addWidget(QLabel("本番送信先:"))
-        self.production_recipient_combo = QComboBox()
-        self.production_recipient_combo.addItem("所有者・投入者", _RECIPIENT_BOTH)
-        self.production_recipient_combo.addItem("投入者のみ", _RECIPIENT_CREATOR)
-        self.production_recipient_combo.addItem("所有者のみ", _RECIPIENT_OWNER)
-        self.production_recipient_combo.setCurrentIndex(0)
-        mode_layout.addWidget(self.production_recipient_combo)
+        self.production_send_creator_checkbox = QCheckBox("投入者")
+        self.production_send_owner_checkbox = QCheckBox("所有者")
+        self.production_send_creator_checkbox.setChecked(True)
+        self.production_send_owner_checkbox.setChecked(True)
+        mode_layout.addWidget(self.production_send_creator_checkbox)
+        mode_layout.addWidget(self.production_send_owner_checkbox)
 
         self.view_log_btn = QPushButton("送信ログ表示")
         self.view_log_btn.clicked.connect(self._show_send_log)
         mode_layout.addWidget(self.view_log_btn)
+
+        self.equipment_manager_btn = QPushButton("設備管理者リスト")
+        self.equipment_manager_btn.clicked.connect(self._open_equipment_manager_dialog)
+        mode_layout.addWidget(self.equipment_manager_btn)
         mode_layout.addStretch()
         layout.addWidget(mode_group)
 
@@ -286,6 +507,9 @@ class MailNotificationTab(QWidget):
         tmpl_top.addWidget(QLabel("テンプレート:"))
         self.template_combo = QComboBox()
         tmpl_top.addWidget(self.template_combo)
+        self.template_edit_btn = QPushButton("編集")
+        self.template_edit_btn.clicked.connect(self._edit_template_dialog)
+        tmpl_top.addWidget(self.template_edit_btn)
         self.template_new_btn = QPushButton("新規")
         self.template_new_btn.clicked.connect(self._new_template)
         tmpl_top.addWidget(self.template_new_btn)
@@ -298,55 +522,87 @@ class MailNotificationTab(QWidget):
         tmpl_top.addStretch()
         tmpl.addLayout(tmpl_top)
 
-        row_subj = QHBoxLayout()
-        row_subj.addWidget(QLabel("件名テンプレ:"))
-        self.subject_template_edit = QLineEdit()
-        self.subject_template_edit.setText("[RDE] 登録失敗: {dataName} ({entryId})")
-        row_subj.addWidget(self.subject_template_edit)
-        tmpl.addLayout(row_subj)
-
-        self.body_template_edit = QTextEdit()
-        self.body_template_edit.setPlainText(
-            "登録状況: FAILED\n"
-            "開始時刻(JST): {startTime}\n"
-            "データ名: {dataName}\n"
-            "データセット: {datasetName}\n"
-            "エラーコード: {errorCode}\n"
-            "エラーメッセージ: {errorMessage}\n"
-            "投入者: {createdByName} ({createdByUserId})\n"
-            "所有者: {dataOwnerName} ({dataOwnerUserId})\n"
-            "エントリID: {entryId}\n"
-        )
-        tmpl.addWidget(self.body_template_edit)
+        hint = QLabel("件名・本文の編集は『編集』から行ってください。（プレースホルダ一覧も表示されます）")
+        hint.setWordWrap(True)
+        tmpl.addWidget(hint)
         layout.addWidget(tmpl_group)
 
         list_group = QGroupBox("通知対象リスト")
         list_layout = QVBoxLayout(list_group)
 
-        self.table = QTableWidget(0, 11, self)
-        self.table.setHorizontalHeaderLabels(
-            [
-                "開始時刻(JST)",
-                "データ名",
-                "投入者（所属）",
-                "投入者メール",
-                "所有者（所属）",
-                "所有者メール",
-                "実送信先",
-                "エラーコード",
-                "エラーメッセージ",
-                "件名",
-                "entryId",
-            ]
-        )
+        # 列定義（要件: 開始時刻, エラーコード, 設備ID, 装置名_日, データセット, データ名, データセットテンプレ, ...）
+        self._table_headers = [
+            "開始時刻(JST)",
+            "エラーコード",
+            "設備ID",
+            "装置名_日",
+            "データセット",
+            "データ名",
+            "データセットテンプレ",
+            "本番通知済み(JST)",
+            "投入者（所属）",
+            "投入者メール",
+            "所有者（所属）",
+            "所有者メール",
+            "テスト送信先",
+            "本番送信先",
+            "実送信先",
+            "エラーメッセージ",
+            "件名",
+            "entryId",
+        ]
+        self._col_entry_id = len(self._table_headers) - 1
+
+        filter_area = QScrollArea(self)
+        filter_area.setWidgetResizable(True)
+        filter_widget = QWidget(filter_area)
+        filter_row = QHBoxLayout(filter_widget)
+        filter_row.setContentsMargins(0, 0, 0, 0)
+        self._table_filters: List[QLineEdit] = []
+        for h in self._table_headers:
+            e = QLineEdit()
+            e.setPlaceholderText(h)
+            e.setClearButtonEnabled(True)
+            e.textChanged.connect(self._apply_table_filters)
+            e.setMinimumWidth(120)
+            self._table_filters.append(e)
+            filter_row.addWidget(e)
+        filter_row.addStretch()
+        filter_area.setWidget(filter_widget)
+        list_layout.addWidget(filter_area)
+
+        self.table = QTableWidget(0, len(self._table_headers), self)
+        self.table.setHorizontalHeaderLabels(self._table_headers)
         self.table.setSortingEnabled(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setTextElideMode(Qt.ElideRight)
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.Interactive)
         header.setStretchLastSection(False)
+        try:
+            for i in range(len(self._table_headers)):
+                header.setSectionResizeMode(i, QHeaderView.Interactive)
+            header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(3, QHeaderView.Stretch)
+            header.setSectionResizeMode(4, QHeaderView.Stretch)
+            header.setSectionResizeMode(5, QHeaderView.Stretch)
+            header.setSectionResizeMode(6, QHeaderView.Stretch)
+            header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(8, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(9, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(10, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(11, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(12, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(13, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(14, QHeaderView.ResizeToContents)
+            header.setSectionResizeMode(15, QHeaderView.Stretch)
+            header.setSectionResizeMode(16, QHeaderView.Stretch)
+            header.setSectionResizeMode(17, QHeaderView.ResizeToContents)
+        except Exception:
+            header.setSectionResizeMode(QHeaderView.Interactive)
         list_layout.addWidget(self.table)
 
         send_row = QHBoxLayout()
@@ -370,8 +626,8 @@ class MailNotificationTab(QWidget):
 
         self._load_templates()
         self.template_combo.currentIndexChanged.connect(self._on_template_changed)
-        self.subject_template_edit.textChanged.connect(self._on_template_edited)
-        self.body_template_edit.textChanged.connect(self._on_template_edited)
+        self.production_send_creator_checkbox.toggled.connect(self._on_production_recipient_toggled)
+        self.production_send_owner_checkbox.toggled.connect(self._on_production_recipient_toggled)
 
         self._set_status("条件を設定して『通知対象抽出』を実行してください。", ThemeKey.TEXT_MUTED)
 
@@ -379,6 +635,32 @@ class MailNotificationTab(QWidget):
         self.test_mode_radio.toggled.connect(self._sync_mode_controls)
         self.production_mode_radio.toggled.connect(self._sync_mode_controls)
         self._sync_mode_controls()
+
+    def _current_template_subject(self) -> str:
+        idx = int(self._current_template_index)
+        if 0 <= idx < len(self._templates):
+            return str(self._templates[idx].get("subject") or "")
+        return ""
+
+    def _current_template_body(self) -> str:
+        idx = int(self._current_template_index)
+        if 0 <= idx < len(self._templates):
+            return str(self._templates[idx].get("body") or "")
+        return ""
+
+    def _on_production_recipient_toggled(self):
+        # 本番送信先は最低1つ必要（最後の1つは外せない）
+        if not self.production_send_creator_checkbox.isChecked() and not self.production_send_owner_checkbox.isChecked():
+            # 直前の操作で両方外れたケースは、投入者を復帰させる
+            self.production_send_creator_checkbox.blockSignals(True)
+            self.production_send_creator_checkbox.setChecked(True)
+            self.production_send_creator_checkbox.blockSignals(False)
+
+    def _include_creator_in_production(self) -> bool:
+        return bool(getattr(self, "production_send_creator_checkbox", None) and self.production_send_creator_checkbox.isChecked())
+
+    def _include_owner_in_production(self) -> bool:
+        return bool(getattr(self, "production_send_owner_checkbox", None) and self.production_send_owner_checkbox.isChecked())
 
     def _load_templates(self):
         mgr = get_config_manager()
@@ -398,10 +680,13 @@ class MailNotificationTab(QWidget):
                         "開始時刻(JST): {startTime}\n"
                         "データ名: {dataName}\n"
                         "データセット: {datasetName}\n"
+                        "データセットテンプレ: {datasetTemplateName}\n"
+                        "設備ID: {equipmentId}\n"
+                        "装置名_日: {deviceNameJa}\n"
                         "エラーコード: {errorCode}\n"
                         "エラーメッセージ: {errorMessage}\n"
-                        "投入者: {createdByName} ({createdByUserId})\n"
-                        "所有者: {dataOwnerName} ({dataOwnerUserId})\n"
+                        "投入者: {createdByName} <{createdByMail}>\n"
+                        "所有者: {dataOwnerName} <{dataOwnerMail}>\n"
                         "エントリID: {entryId}\n"
                     ),
                 }
@@ -427,11 +712,10 @@ class MailNotificationTab(QWidget):
 
         self._current_template_index = 0
         self.template_combo.setCurrentIndex(0)
-        self._apply_template_to_editors(0)
+        # 旧UI互換: エディタは廃止したため、ここではindexのみ合わせる
 
     def _save_templates(self):
         try:
-            self._sync_current_template_from_editors()
             mgr = get_config_manager()
             mgr.set("mail.notification.templates", list(self._templates))
             mgr.save()
@@ -451,16 +735,30 @@ class MailNotificationTab(QWidget):
             self._set_status("同名テンプレートが既に存在します。", ThemeKey.TEXT_WARNING)
             return
 
-        self._sync_current_template_from_editors()
         self._templates.append(
             {
                 "name": name,
-                "subject": self.subject_template_edit.text() or "",
-                "body": self.body_template_edit.toPlainText() or "",
+                "subject": self._current_template_subject() or "[RDE] 登録失敗: {dataName} ({entryId})",
+                "body": self._current_template_body()
+                or (
+                    "登録状況: FAILED\n"
+                    "開始時刻(JST): {startTime}\n"
+                    "データ名: {dataName}\n"
+                    "データセット: {datasetName}\n"
+                    "データセットテンプレ: {datasetTemplateName}\n"
+                    "設備ID: {equipmentId}\n"
+                    "装置名_日: {deviceNameJa}\n"
+                    "エラーコード: {errorCode}\n"
+                    "エラーメッセージ: {errorMessage}\n"
+                    "投入者: {createdByName} <{createdByMail}>\n"
+                    "所有者: {dataOwnerName} <{dataOwnerMail}>\n"
+                    "エントリID: {entryId}\n"
+                ),
             }
         )
         self.template_combo.addItem(name)
         self.template_combo.setCurrentIndex(len(self._templates) - 1)
+        self._edit_template_dialog()
 
     def _delete_template(self):
         if len(self._templates) <= 1:
@@ -486,30 +784,33 @@ class MailNotificationTab(QWidget):
         self.template_combo.setCurrentIndex(new_idx)
 
     def _on_template_changed(self, idx: int):
-        self._sync_current_template_from_editors()
         self._current_template_index = max(0, int(idx))
-        self._apply_template_to_editors(self._current_template_index)
+        # 既に抽出済みなら、テンプレ変更に合わせて表を更新
+        try:
+            if self._targets:
+                self._rebuild_and_render()
+        except Exception:
+            pass
 
-    def _apply_template_to_editors(self, idx: int):
-        if idx < 0 or idx >= len(self._templates):
-            return
-        t = self._templates[idx]
-        self.subject_template_edit.blockSignals(True)
-        self.body_template_edit.blockSignals(True)
-        self.subject_template_edit.setText(t.get("subject") or "")
-        self.body_template_edit.setPlainText(t.get("body") or "")
-        self.subject_template_edit.blockSignals(False)
-        self.body_template_edit.blockSignals(False)
-
-    def _sync_current_template_from_editors(self):
+    def _edit_template_dialog(self):
         idx = int(self._current_template_index)
         if idx < 0 or idx >= len(self._templates):
             return
-        self._templates[idx]["subject"] = self.subject_template_edit.text() or ""
-        self._templates[idx]["body"] = self.body_template_edit.toPlainText() or ""
-
-    def _on_template_edited(self):
-        self._sync_current_template_from_editors()
+        t = self._templates[idx]
+        dlg = _TemplateEditDialog(
+            self,
+            template_name=str(t.get("name") or ""),
+            subject=str(t.get("subject") or ""),
+            body=str(t.get("body") or ""),
+        )
+        if dlg.exec() != QDialog.Accepted:
+            return
+        subj, body = dlg.values()
+        self._templates[idx]["subject"] = subj
+        self._templates[idx]["body"] = body
+        # 表示中の候補もテンプレ適用結果が変わるため更新
+        if self._targets:
+            self._rebuild_and_render()
 
     def _sync_mode_controls(self):
         ref_on = self.mode_reference_radio.isChecked()
@@ -519,7 +820,8 @@ class MailNotificationTab(QWidget):
         self.end_dt.setEnabled(not ref_on)
 
         is_prod = self._is_production_mode()
-        self.production_recipient_combo.setEnabled(is_prod)
+        self.production_send_creator_checkbox.setEnabled(is_prod)
+        self.production_send_owner_checkbox.setEnabled(is_prod)
 
     def _is_production_mode(self) -> bool:
         return bool(getattr(self, "production_mode_radio", None) and self.production_mode_radio.isChecked())
@@ -528,6 +830,28 @@ class MailNotificationTab(QWidget):
         color = get_color(theme_key or ThemeKey.TEXT_MUTED)
         self.status_label.setStyleSheet(f"color: {color};")
         self.status_label.setText(message)
+
+    def _apply_table_filters(self):
+        filters = []
+        try:
+            filters = [(f.text() or "").strip().lower() for f in (getattr(self, "_table_filters", []) or [])]
+        except Exception:
+            filters = []
+
+        if not filters:
+            return
+
+        for r in range(self.table.rowCount()):
+            hide = False
+            for c, t in enumerate(filters):
+                if not t:
+                    continue
+                item = self.table.item(r, c)
+                cell = (item.text() if item else "").lower()
+                if t not in cell:
+                    hide = True
+                    break
+            self.table.setRowHidden(r, hide)
 
     def _show_send_log(self):
         try:
@@ -539,20 +863,18 @@ class MailNotificationTab(QWidget):
             QMessageBox.information(self, "送信ログ", "送信ログがありません。")
             return
 
-        lines = []
-        for h in items:
-            sent_at = str(h.get("sentAt") or "")
-            to_addr = str(h.get("to") or "")
-            subject = str(h.get("subject") or "")
-            lines.append(f"{sent_at} | {to_addr} | {subject}")
+        dlg = _SendLogDialog(self, items=items)
+        dlg.exec()
 
-        msg = QMessageBox(self)
-        msg.setIcon(QMessageBox.Information)
-        msg.setWindowTitle("送信ログ")
-        msg.setText(f"送信ログ（最新{len(lines)}件）")
-        msg.setDetailedText("\n".join(lines))
-        msg.setStandardButtons(QMessageBox.Ok)
-        msg.exec()
+    def _open_equipment_manager_dialog(self):
+        dlg = EquipmentManagerListDialog(self)
+        if dlg.exec() == QDialog.Accepted:
+            # 保存後、抽出済みの表示・テンプレ置換結果も変わるため更新
+            try:
+                if self._targets:
+                    self._rebuild_and_render()
+            except Exception:
+                pass
 
     def _test_to_address(self) -> str:
         try:
@@ -594,20 +916,133 @@ class MailNotificationTab(QWidget):
 
         self._email_map = self._build_email_map(selected)
 
+        self._augment_entries_for_display(selected)
+
         production = self._is_production_mode()
+        try:
+            production_sent_at_by_entry_id = load_last_sent_at_by_entry_id(mode="production")
+        except Exception:
+            production_sent_at_by_entry_id = {}
         planned = build_planned_notification_rows(
             entries=selected,
             email_map=self._email_map,
             production_mode=production,
+            include_creator=self._include_creator_in_production(),
+            include_owner=self._include_owner_in_production(),
             test_to_address=self._test_to_address(),
-            subject_template=self.subject_template_edit.text() or "",
-            body_template=self.body_template_edit.toPlainText() or "",
+            subject_template=self._current_template_subject(),
+            body_template=self._current_template_body(),
+            production_sent_at_by_entry_id=production_sent_at_by_entry_id,
         )
 
         self._targets = selected
         self._planned_rows = planned
         self._render_table(planned)
         self._set_status(f"抽出完了: {len(planned)} 件", ThemeKey.TEXT_SUCCESS)
+
+    def _augment_entries_for_display(self, entries: List[Dict[str, Any]]):
+        # dataset template name
+        try:
+            entry_ids = [str((e or {}).get("id") or "").strip() for e in entries or []]
+            tmpl_map = build_dataset_template_name_map_for_entry_ids([eid for eid in entry_ids if eid])
+        except Exception:
+            tmpl_map = {}
+
+        # equipment name lookup cache (merged_data2)
+        try:
+            name_map = load_equipment_name_map_from_merged_data2()
+        except Exception:
+            name_map = None
+
+        # instrument uuid -> localId (instruments.json)
+        try:
+            local_id_map = load_instrument_local_id_map_from_instruments_json()
+        except Exception:
+            local_id_map = None
+
+        # equipment manager store (input/equipment_managers.json)
+        try:
+            manager_map = equipment_manager_store.load_equipment_managers()
+        except Exception:
+            manager_map = {}
+
+        for e in entries or []:
+            if not isinstance(e, dict):
+                continue
+            eid = str(e.get("id") or "")
+            if eid and eid in tmpl_map:
+                e["datasetTemplateName"] = tmpl_map.get(eid) or ""
+
+            # 装置名_日: 登録状況サマリの instrumentNameJa を優先
+            dev_ja = str(e.get("instrumentNameJa") or "").strip()
+            dev_en = str(e.get("instrumentNameEn") or "").strip()
+
+            # equipmentId: merged_data2 の「設備ID」を優先（装置名から逆引き→文字列から抽出→既存値）
+            equip_id = ""
+            instrument_uuid = str(e.get("instrumentId") or "").strip()
+            try:
+                equip_id = (lookup_equipment_id_by_device_name(dev_ja, dev_en, name_map=name_map) or "").strip()
+            except Exception:
+                equip_id = ""
+            if not equip_id:
+                equip_id = (extract_equipment_id(dev_ja) or "").strip()
+            if not equip_id:
+                equip_id = (extract_equipment_id(dev_en) or "").strip()
+            if not equip_id:
+                # フォールバック: instruments.json の localId を採用
+                try:
+                    equip_id = (lookup_instrument_local_id(instrument_uuid, local_id_map=local_id_map) or "").strip()
+                except Exception:
+                    equip_id = ""
+            if not equip_id:
+                # 最後のフォールバック: instrumentId が既に設備ID形式なら採用
+                extracted = (extract_equipment_id(instrument_uuid) or "").strip()
+                equip_id = extracted or ""
+
+            if equip_id:
+                e["equipmentId"] = equip_id
+
+            # 設備管理者プレースホルダ
+            try:
+                managers = (manager_map or {}).get(str(e.get("equipmentId") or "").strip(), [])
+                names, emails, notes = equipment_manager_store.managers_to_placeholder_fields(managers)
+                e["equipmentManagerNames"] = names
+                e["equipmentManagerEmails"] = emails
+                e["equipmentManagerNotes"] = notes
+            except Exception:
+                # フォールバック: 空
+                e["equipmentManagerNames"] = e.get("equipmentManagerNames") or ""
+                e["equipmentManagerEmails"] = e.get("equipmentManagerEmails") or ""
+                e["equipmentManagerNotes"] = e.get("equipmentManagerNotes") or ""
+
+            # 装置名_日が空なら merged_data2 から補完
+            if not dev_ja and equip_id:
+                try:
+                    dev_ja = lookup_device_name_ja(equip_id, name_map=name_map) or ""
+                except Exception:
+                    dev_ja = ""
+            if dev_ja:
+                e["deviceNameJa"] = dev_ja
+
+    def _rebuild_and_render(self):
+        production = self._is_production_mode()
+        try:
+            production_sent_at_by_entry_id = load_last_sent_at_by_entry_id(mode="production")
+        except Exception:
+            production_sent_at_by_entry_id = {}
+        planned = build_planned_notification_rows(
+            entries=self._targets,
+            email_map=self._email_map,
+            production_mode=production,
+            include_creator=self._include_creator_in_production(),
+            include_owner=self._include_owner_in_production(),
+            test_to_address=self._test_to_address(),
+            subject_template=self._current_template_subject(),
+            body_template=self._current_template_body(),
+            production_sent_at_by_entry_id=production_sent_at_by_entry_id,
+        )
+        self._planned_rows = planned
+        self._render_table(planned)
 
     def _build_email_map(self, entries: List[Dict[str, Any]]) -> Dict[str, str]:
         # 1) エントリ→dataset→groupId から、複数グループを跨いでメールを合成（実データの解決率優先）
@@ -670,7 +1105,13 @@ class MailNotificationTab(QWidget):
             row = self.table.rowCount()
             self.table.insertRow(row)
             self.table.setItem(row, 0, QTableWidgetItem(r.start_time_jst))
-            self.table.setItem(row, 1, QTableWidgetItem(r.data_name))
+            self.table.setItem(row, 1, QTableWidgetItem(r.error_code))
+            self.table.setItem(row, 2, QTableWidgetItem(r.equipment_id))
+            self.table.setItem(row, 3, QTableWidgetItem(r.device_name_ja))
+            self.table.setItem(row, 4, QTableWidgetItem(r.dataset_name))
+            self.table.setItem(row, 5, QTableWidgetItem(r.data_name))
+            self.table.setItem(row, 6, QTableWidgetItem(r.dataset_template_name))
+            self.table.setItem(row, 7, QTableWidgetItem(_format_iso_to_jst(r.production_sent_at)))
             created_display = (r.created_name or "")
             if r.created_org:
                 created_display = f"{created_display} ({r.created_org})" if created_display else f"({r.created_org})"
@@ -678,35 +1119,27 @@ class MailNotificationTab(QWidget):
             if r.owner_org:
                 owner_display = f"{owner_display} ({r.owner_org})" if owner_display else f"({r.owner_org})"
 
-            self.table.setItem(row, 2, QTableWidgetItem(created_display))
-            self.table.setItem(row, 3, QTableWidgetItem(r.created_mail))
-            self.table.setItem(row, 4, QTableWidgetItem(owner_display))
-            self.table.setItem(row, 5, QTableWidgetItem(r.owner_mail))
-            self.table.setItem(row, 6, QTableWidgetItem(r.effective_to))
-            self.table.setItem(row, 7, QTableWidgetItem(r.error_code))
-            self.table.setItem(row, 8, QTableWidgetItem(r.error_message))
-            self.table.setItem(row, 9, QTableWidgetItem(r.subject))
-            self.table.setItem(row, 10, QTableWidgetItem(r.entry_id))
+            self.table.setItem(row, 8, QTableWidgetItem(created_display))
+            self.table.setItem(row, 9, QTableWidgetItem(r.created_mail))
+            self.table.setItem(row, 10, QTableWidgetItem(owner_display))
+            self.table.setItem(row, 11, QTableWidgetItem(r.owner_mail))
+            self.table.setItem(row, 12, QTableWidgetItem(r.test_to))
+            self.table.setItem(row, 13, QTableWidgetItem(r.production_to))
+            self.table.setItem(row, 14, QTableWidgetItem(r.effective_to))
+            self.table.setItem(row, 15, QTableWidgetItem(r.error_message))
+            self.table.setItem(row, 16, QTableWidgetItem(r.subject))
+            self.table.setItem(row, 17, QTableWidgetItem(r.entry_id))
 
             # 長文は省略表示＋ツールチップで全文
             try:
-                if self.table.item(row, 8):
-                    self.table.item(row, 8).setToolTip(r.error_message)
-                if self.table.item(row, 9):
-                    self.table.item(row, 9).setToolTip(r.subject)
+                if self.table.item(row, 15):
+                    self.table.item(row, 15).setToolTip(r.error_message)
+                if self.table.item(row, 16):
+                    self.table.item(row, 16).setToolTip(r.subject)
             except Exception:
                 pass
 
-        # 初期幅は内容に合わせつつ、長文列は過剰に広がり過ぎないように上限を設ける
-        try:
-            self.table.resizeColumnsToContents()
-            max_w = 420
-            for col in (8, 9):
-                w = self.table.columnWidth(col)
-                if w > max_w:
-                    self.table.setColumnWidth(col, max_w)
-        except Exception:
-            pass
+        # Stretch指定済みのため resizeColumnsToContents は基本不要
 
         try:
             if was_sorting:
@@ -714,16 +1147,16 @@ class MailNotificationTab(QWidget):
         except Exception:
             pass
 
-    def _effective_to_addr(self, real_to: str) -> str:
-        if self._is_production_mode():
+        # フィルタ再適用
+        try:
+            self._apply_table_filters()
+        except Exception:
+            pass
+
+    def _effective_to_addr(self, real_to: str, *, production_mode: bool) -> str:
+        if production_mode:
             return (real_to or "").strip()
         return self._test_to_address()
-
-    def _production_recipient_mode(self) -> str:
-        try:
-            return str(self.production_recipient_combo.currentData())
-        except Exception:
-            return _RECIPIENT_BOTH
 
     def _unique_in_order(self, values: List[str]) -> List[str]:
         seen = set()
@@ -744,30 +1177,49 @@ class MailNotificationTab(QWidget):
                 return e
         return None
 
-    def _send_for_entry(self, entry: Dict[str, Any], quiet: bool = False) -> Tuple[int, int]:
+    def _send_for_entry(
+        self,
+        entry: Dict[str, Any],
+        quiet: bool = False,
+        *,
+        force_production_mode: Optional[bool] = None,
+        include_creator: Optional[bool] = None,
+        include_owner: Optional[bool] = None,
+    ) -> Tuple[int, int]:
         row_map = None
         for r in self._planned_rows:
             if r.entry_id == str(entry.get("id") or ""):
                 row_map = r
                 break
 
-        subject = row_map.subject if row_map else (self.subject_template_edit.text() or "")
-        body = row_map.body if row_map else (self.body_template_edit.toPlainText() or "")
+        subject = row_map.subject if row_map else (self._current_template_subject() or "")
+        body = row_map.body if row_map else (self._current_template_body() or "")
 
         created_id = str(entry.get("createdByUserId") or "")
         owner_id = str(entry.get("dataOwnerUserId") or "")
         created_mail = (self._email_map.get(created_id) or "").strip()
         owner_mail = (self._email_map.get(owner_id) or "").strip()
 
-        production = self._is_production_mode()
+        production = bool(force_production_mode) if force_production_mode is not None else self._is_production_mode()
+        mode = "production" if production else "test"
+
+        tmpl_name = ""
+        try:
+            tmpl_name = str(self._templates[int(self._current_template_index)].get("name") or "")
+        except Exception:
+            tmpl_name = ""
         if production:
-            mode = self._production_recipient_mode()
-            if mode == _RECIPIENT_CREATOR:
-                real_targets = [created_mail]
-            elif mode == _RECIPIENT_OWNER:
-                real_targets = [owner_mail]
-            else:
-                real_targets = [created_mail, owner_mail]
+            use_creator = self._include_creator_in_production() if include_creator is None else bool(include_creator)
+            use_owner = self._include_owner_in_production() if include_owner is None else bool(include_owner)
+            if not use_creator and not use_owner:
+                if not quiet:
+                    self._set_status("本番送信先が未選択です（投入者/所有者のどちらかは必須）。", ThemeKey.TEXT_WARNING)
+                return (0, 1)
+            real_targets: List[str] = []
+            if use_creator:
+                real_targets.append(created_mail)
+            if use_owner:
+                real_targets.append(owner_mail)
             targets = self._unique_in_order(real_targets)
 
             if not targets:
@@ -786,7 +1238,7 @@ class MailNotificationTab(QWidget):
         sent = 0
         skipped = 0
         for real_to in targets:
-            effective_to = self._effective_to_addr(real_to)
+            effective_to = self._effective_to_addr(real_to, production_mode=production)
             if not effective_to:
                 skipped += 1
                 continue
@@ -796,7 +1248,13 @@ class MailNotificationTab(QWidget):
 
             try:
                 send_using_app_mail_settings(to_addr=effective_to, subject=subject, body=body)
-                record_sent(to_addr=effective_to, subject=subject)
+                record_sent_ex(
+                    to_addr=effective_to,
+                    subject=subject,
+                    mode=mode,
+                    entry_id=str(entry.get("id") or ""),
+                    template_name=tmpl_name,
+                )
                 sent += 1
             except Exception as exc:
                 logger.debug("send failed: %s", exc)
@@ -806,11 +1264,18 @@ class MailNotificationTab(QWidget):
 
         if not quiet:
             self._set_status(f"個別送信完了: sent={sent}, skipped={skipped}", ThemeKey.TEXT_SUCCESS)
+
+        # 本番送信のログ反映（本番通知済み列）
+        try:
+            if production and sent > 0:
+                self._rebuild_and_render()
+        except Exception:
+            pass
         return (sent, skipped)
 
     def _on_row_clicked(self, row: int, col: int):
         try:
-            entry_id = self.table.item(row, 10).text() if self.table.item(row, 10) else ""
+            entry_id = self.table.item(row, self._col_entry_id).text() if self.table.item(row, self._col_entry_id) else ""
         except Exception:
             entry_id = ""
         if not entry_id:
@@ -820,7 +1285,57 @@ class MailNotificationTab(QWidget):
         if not entry:
             return
 
-        self._send_for_entry(entry)
+        planned_row = None
+        for r in self._planned_rows:
+            if r.entry_id == str(entry_id):
+                planned_row = r
+                break
+        if not planned_row:
+            return
+
+        tmpl_name = ""
+        try:
+            tmpl_name = str(self._templates[int(self._current_template_index)].get("name") or "")
+        except Exception:
+            tmpl_name = ""
+
+        dlg = _NotificationConfirmDialog(self, template_name=tmpl_name, row=planned_row)
+
+        def _do_send_test():
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Question)
+            box.setWindowTitle("テスト送信の確認")
+            box.setText("テスト送信を実行します。\nキャンセルできます。")
+            box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            box.setDefaultButton(QMessageBox.No)
+            if box.exec() != QMessageBox.Yes:
+                return
+            s, k = self._send_for_entry(entry, quiet=True, force_production_mode=False)
+            self._set_status(f"テスト送信: sent={s}, skipped={k}", ThemeKey.TEXT_SUCCESS if s else ThemeKey.TEXT_WARNING)
+            dlg.accept()
+
+        def _do_send_prod():
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Question)
+            box.setWindowTitle("本番送信の確認")
+            box.setText("本番送信を実行します。\nキャンセルできます。")
+            box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            box.setDefaultButton(QMessageBox.No)
+            if box.exec() != QMessageBox.Yes:
+                return
+            s, k = self._send_for_entry(
+                entry,
+                quiet=True,
+                force_production_mode=True,
+                include_creator=self._include_creator_in_production(),
+                include_owner=self._include_owner_in_production(),
+            )
+            self._set_status(f"本番送信: sent={s}, skipped={k}", ThemeKey.TEXT_SUCCESS if s else ThemeKey.TEXT_WARNING)
+            dlg.accept()
+
+        dlg.send_test_btn.clicked.connect(_do_send_test)
+        dlg.send_prod_btn.clicked.connect(_do_send_prod)
+        dlg.exec()
 
     def send_all(self):
         if not self._targets:
@@ -865,7 +1380,7 @@ class MailNotificationTab(QWidget):
         for r in rows:
             try:
                 # entryId列（最終列）から取得
-                entry_ids.append(self.table.item(r, 10).text())
+                entry_ids.append(self.table.item(r, self._col_entry_id).text())
             except Exception:
                 continue
         entries: List[Dict[str, Any]] = []
@@ -882,7 +1397,11 @@ class MailNotificationTab(QWidget):
         recipients: List[str] = []
         unresolved = 0
 
-        prod_mode = self._production_recipient_mode()
+        include_creator = self._include_creator_in_production()
+        include_owner = self._include_owner_in_production()
+        if production and not (include_creator or include_owner):
+            self._set_status("本番送信先が未選択です（投入者/所有者のどちらかは必須）。", ThemeKey.TEXT_WARNING)
+            return False
 
         for e in entries or []:
             created_id = str(e.get("createdByUserId") or "")
@@ -890,12 +1409,11 @@ class MailNotificationTab(QWidget):
             created_mail = (self._email_map.get(created_id) or "").strip()
             owner_mail = (self._email_map.get(owner_id) or "").strip()
             if production:
-                if prod_mode == _RECIPIENT_CREATOR:
-                    real_targets = [created_mail]
-                elif prod_mode == _RECIPIENT_OWNER:
-                    real_targets = [owner_mail]
-                else:
-                    real_targets = [created_mail, owner_mail]
+                real_targets: List[str] = []
+                if include_creator:
+                    real_targets.append(created_mail)
+                if include_owner:
+                    real_targets.append(owner_mail)
                 real_targets = self._unique_in_order(real_targets)
                 if not real_targets:
                     unresolved += 1

@@ -195,8 +195,16 @@ def _create_session(config: Dict[str, Any]) -> _original_requests.Session:
     session.mount("https://", adapter)
     
     # 4. デフォルトヘッダー設定
+    user_agent_version = "unknown"
+    try:
+        from config.common import REVISION
+
+        user_agent_version = str(REVISION)
+    except Exception:
+        user_agent_version = "unknown"
+
     session.headers.update({
-        'User-Agent': 'ARIM-RDE-Tool/1.13.5 (Windows NT 10.0; Win64; x64) requests-wrapper'
+        'User-Agent': f'ARIM-RDE-Tool/{user_agent_version} (Windows NT 10.0; Win64; x64) requests-wrapper'
     })
     
     logger.info("HTTPセッションを構築しました")

@@ -8,6 +8,7 @@ import logging
 import re
 from typing import Dict, List, Optional
 from classes.equipment.conf.field_definitions import EXCEL_COLUMNS, DEFAULT_VALUES
+from classes.equipment.util.name_parser import split_device_name_from_facility_name
 
 
 logger = logging.getLogger(__name__)
@@ -37,11 +38,14 @@ class FacilityDataProcessor:
         # 装置名の設定（日本語・英語）
         # 優先順位: 設備名称 > 型番
         source_name = processed.get("設備名称") or processed.get("型番", "")
-        
-        if not processed.get("装置名_日"):
-            processed["装置名_日"] = source_name
-        if not processed.get("装置名_英"):
-            processed["装置名_英"] = source_name
+
+        # 既存互換: 装置名列が空なら設備名称から生成
+        if not processed.get("装置名_日") or not processed.get("装置名_英"):
+            ja, en = split_device_name_from_facility_name(source_name)
+            if not processed.get("装置名_日"):
+                processed["装置名_日"] = ja
+            if not processed.get("装置名_英"):
+                processed["装置名_英"] = en
         
         # PREFIXの設定
         if "設備ID" in processed and processed["設備ID"]:
