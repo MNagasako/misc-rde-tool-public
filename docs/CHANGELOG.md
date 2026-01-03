@@ -3,6 +3,33 @@
 > ⚠️ **注意**: このファイルは公開配布版向けドキュメントです。完全な開発履歴は開発リポジトリ（`C:/vscode/rde`）の `src/config/common.py` 内の履歴コメントを参照してください。
 
 
+## v2.4.2 (2026-01-03) - データ取得2: メール通知タブ拡張（運用モード/宛先選択/送信ログ閲覧/テンプレ/設備管理者）+ 設備管理者ダイアログ改善
+
+### ✉️ データ取得2: メール通知タブ（運用支援の拡張）
+
+- 宛先選択（テスト/本番、投入者/所有者/両方）を明確化し、誤送信防止の導線を強化。
+- テンプレート編集をダイアログ化し、本文/件名とプレースホルダ運用を分離。
+- 送信ログの閲覧/保存を継続し、運用監査と二重送信防止を支援。
+
+### 🏭 設備: 設備管理者（Equipment Managers）
+
+- 設備IDごとに管理者（name/mail/note）を編集・永続化（`input/equipment_managers.json`）。
+- メール通知テンプレートで設備管理者情報をプレースホルダとして利用可能に。
+- 装置名表示のフォールバック補完を強化し、表示不具合（ソート中の行追加でセルがズレる問題）を修正。
+
+### 🌐 ネットワーク
+
+- requests-wrapper の User-Agent 表記をアプリの `REVISION` と同期。
+
+### 📚 ドキュメント
+
+- VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.4.2 に統一。
+- `docs/RELEASE_NOTES_v2.4.2.md` を追加。
+- 旧最新版のリリースノートを `docs/archive/release_notes/` に退避。
+
+---
+
+
 ## v2.4.1 (2026-01-02) - データ取得2: メール通知タブ改善（運用モード/宛先選択/抽出範囲プリセット/送信ログ閲覧/From表示名）
 
 ### ✉️ データ取得2: メール通知タブ
@@ -19,7 +46,7 @@
 ### 📚 ドキュメント
 
 - VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.4.1 に統一。
-- `docs/RELEASE_NOTES_v2.4.1.md` を追加。
+- `docs/archive/release_notes/RELEASE_NOTES_v2.4.1.md` を追加。
 - 旧最新版のリリースノートを `docs/archive/release_notes/` に退避。
 
 ---
@@ -44,7 +71,7 @@
 ### 📚 ドキュメント
 
 - VERSION.txt / README / CHANGELOG / リリースノート等の表記を v2.4.0 に統一。
-- `docs/RELEASE_NOTES_v2.4.0.md` を追加。
+- `docs/archive/release_notes/RELEASE_NOTES_v2.4.0.md` を追加。
 - 旧最新版のリリースノートを `docs/archive/release_notes/` に退避。
 
 ---
