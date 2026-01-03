@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 try:
     from qt_compat.widgets import (
+        QApplication,
         QWidget,
         QVBoxLayout,
         QHBoxLayout,
@@ -30,9 +31,10 @@ try:
         QInputDialog,
         QDialog,
     )
-    from qt_compat.core import Qt, QThread, Signal
+    from qt_compat.core import Qt, QThread, Signal, QTimer
 except Exception:
     from PySide6.QtWidgets import (
+        QApplication,
         QWidget,
         QVBoxLayout,
         QHBoxLayout,
@@ -56,12 +58,19 @@ except Exception:
         QInputDialog,
         QDialog,
     )
-    from PySide6.QtCore import Qt, QThread, Signal
+    from PySide6.QtCore import Qt, QThread, Signal, QTimer
 
 from config.common import SUBGROUP_JSON_PATH
 from classes.core.mail_dispatcher import send_using_app_mail_settings
-from classes.core.mail_send_log import load_history, load_last_sent_at_by_entry_id, record_sent_ex, should_send
+from classes.core.mail_send_log import (
+    clear_history_by_mode,
+    load_history,
+    load_last_sent_at_by_entry_id,
+    record_sent_ex,
+    should_send,
+)
 from classes.data_entry.core import registration_status_service as regsvc
+from classes.data_entry.core.logic.mail_notification_auto_runner import build_batches, interval_options
 from classes.data_entry.core.logic.notification_selection import (
     PlannedNotificationRow,
     build_planned_notification_rows,
@@ -379,11 +388,265 @@ class _ExtractWorker(QThread):
             self.finished.emit([])
 
 
+class _AutoRunWorker(QThread):
+    finished = Signal(object)  # dict
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        run_token: int,
+        range_days: int,
+        production_mode: bool,
+        include_creator: bool,
+        include_owner: bool,
+        include_equipment_manager: bool,
+        test_to_address: str,
+        subject_template: str,
+        body_template: str,
+        template_name: str,
+        build_email_map: Callable[[List[Dict[str, Any]]], Dict[str, str]],
+        augment_entries_for_display: Callable[[List[Dict[str, Any]]], None],
+    ):
+        super().__init__(parent)
+        self._run_token = int(run_token)
+        self._range_days = int(range_days)
+        self._production_mode = bool(production_mode)
+        self._include_creator = bool(include_creator)
+        self._include_owner = bool(include_owner)
+        self._include_equipment_manager = bool(include_equipment_manager)
+        self._test_to_address = str(test_to_address or "").strip()
+        self._subject_template = subject_template or ""
+        self._body_template = body_template or ""
+        self._template_name = template_name or ""
+        self._build_email_map = build_email_map
+        self._augment_entries_for_display = augment_entries_for_display
+
+    def run(self):
+        mode = "production" if self._production_mode else "test"
+        checked_at_utc = datetime.now(_UTC)
+        try:
+            if self.isInterruptionRequested():
+                self.finished.emit(
+                    {
+                        "run_token": self._run_token,
+                        "mode": mode,
+                        "checked_at_utc": checked_at_utc,
+                        "entries": [],
+                        "email_map": {},
+                        "planned": [],
+                        "excluded_logged": 0,
+                        "unresolved": 0,
+                        "sent_batches": 0,
+                        "skipped_batches": 0,
+                        "sent_to_count": 0,
+                        "last_sent_at_utc": None,
+                        "errors": [],
+                    }
+                )
+                return
+
+            # 1) 登録状況更新（最新100件を取得→キャッシュ保存→全件キャッシュへマージ）
+            regsvc.fetch_latest(limit=100, use_cache=False)
+
+            if self.isInterruptionRequested():
+                self.finished.emit(
+                    {
+                        "run_token": self._run_token,
+                        "mode": mode,
+                        "checked_at_utc": checked_at_utc,
+                        "entries": [],
+                        "email_map": {},
+                        "planned": [],
+                        "excluded_logged": 0,
+                        "unresolved": 0,
+                        "sent_batches": 0,
+                        "skipped_batches": 0,
+                        "sent_to_count": 0,
+                        "last_sent_at_utc": None,
+                        "errors": [],
+                    }
+                )
+                return
+
+            # 2) 全件/最新から FAILED + 直近range_days日
+            if getattr(regsvc, "has_all_cache", None) and regsvc.has_all_cache(ignore_ttl=True):
+                entries = regsvc.load_all_cache(ignore_ttl=True)
+            else:
+                entries = regsvc.fetch_latest(limit=200, use_cache=True)
+
+            selected = select_failed_entries_by_reference(entries=entries, reference_utc=checked_at_utc, range_days=self._range_days)
+
+            if self.isInterruptionRequested():
+                self.finished.emit(
+                    {
+                        "run_token": self._run_token,
+                        "mode": mode,
+                        "checked_at_utc": checked_at_utc,
+                        "entries": [],
+                        "email_map": {},
+                        "planned": [],
+                        "excluded_logged": 0,
+                        "unresolved": 0,
+                        "sent_batches": 0,
+                        "skipped_batches": 0,
+                        "sent_to_count": 0,
+                        "last_sent_at_utc": None,
+                        "errors": [],
+                    }
+                )
+                return
+
+            # 3) ログがある entry は除外（mode別）
+            try:
+                logged = load_last_sent_at_by_entry_id(mode=mode)
+                logged_entry_ids = set(logged.keys())
+            except Exception:
+                logged_entry_ids = set()
+            filtered = [e for e in selected if str((e or {}).get("id") or "").strip() not in logged_entry_ids]
+            excluded_logged = max(0, len(selected) - len(filtered))
+
+            # 4) 表示用の拡張/テンプレ適用
+            email_map = self._build_email_map(filtered)
+            try:
+                self._augment_entries_for_display(filtered)
+            except Exception:
+                pass
+
+            production_sent_at_by_entry_id: Dict[str, str] = {}
+            try:
+                production_sent_at_by_entry_id = load_last_sent_at_by_entry_id(mode="production")
+            except Exception:
+                production_sent_at_by_entry_id = {}
+
+            planned = build_planned_notification_rows(
+                entries=filtered,
+                email_map=email_map,
+                production_mode=self._production_mode,
+                include_creator=self._include_creator,
+                include_owner=self._include_owner,
+                include_equipment_manager=self._include_equipment_manager,
+                test_to_address=self._test_to_address,
+                subject_template=self._subject_template,
+                body_template=self._body_template,
+                production_sent_at_by_entry_id=production_sent_at_by_entry_id,
+            )
+
+            if self.isInterruptionRequested():
+                self.finished.emit(
+                    {
+                        "run_token": self._run_token,
+                        "mode": mode,
+                        "checked_at_utc": checked_at_utc,
+                        "entries": [],
+                        "email_map": {},
+                        "planned": [],
+                        "excluded_logged": excluded_logged,
+                        "unresolved": 0,
+                        "sent_batches": 0,
+                        "skipped_batches": 0,
+                        "sent_to_count": 0,
+                        "last_sent_at_utc": None,
+                        "errors": [],
+                    }
+                )
+                return
+
+            # 5) 宛先ごとに1通へ集約（テストは全件1通）
+            summary = build_batches(
+                planned_rows=planned,
+                production_mode=self._production_mode,
+                include_creator=self._include_creator,
+                include_owner=self._include_owner,
+                include_equipment_manager=self._include_equipment_manager,
+                test_to_address=self._test_to_address,
+                template_name=self._template_name,
+                logged_entry_ids=logged_entry_ids,
+            )
+
+            sent_batches = 0
+            skipped_batches = 0
+            sent_to_count = 0
+            last_sent_at_utc: Optional[datetime] = None
+            errors: List[str] = []
+
+            for batch in summary.batches:
+                if self.isInterruptionRequested():
+                    break
+                to_addr = (batch.to_addr or "").strip()
+                subject = (batch.subject or "").strip()
+                if not to_addr or not subject:
+                    skipped_batches += 1
+                    continue
+                if not should_send(to_addr=to_addr, subject=subject):
+                    skipped_batches += 1
+                    continue
+                try:
+                    send_using_app_mail_settings(to_addr=to_addr, subject=subject, body=batch.body)
+                    sent_at = datetime.now(_UTC)
+                    for entry_id in batch.entry_ids:
+                        record_sent_ex(
+                            to_addr=to_addr,
+                            subject=subject,
+                            mode=mode,
+                            entry_id=str(entry_id or ""),
+                            template_name=self._template_name,
+                            sent_at=sent_at,
+                        )
+                    sent_batches += 1
+                    sent_to_count += 1
+                    last_sent_at_utc = sent_at
+                except Exception as exc:
+                    errors.append(str(exc))
+                    break
+
+            self.finished.emit(
+                {
+                    "run_token": self._run_token,
+                    "mode": mode,
+                    "checked_at_utc": checked_at_utc,
+                    "entries": filtered,
+                    "email_map": email_map,
+                    "planned": planned,
+                    "excluded_logged": excluded_logged,
+                    "unresolved": summary.unresolved_count,
+                    "sent_batches": sent_batches,
+                    "skipped_batches": skipped_batches,
+                    "sent_to_count": sent_to_count,
+                    "last_sent_at_utc": last_sent_at_utc,
+                    "errors": errors,
+                }
+            )
+        except Exception as exc:
+            self.finished.emit(
+                {
+                    "run_token": self._run_token,
+                    "mode": mode,
+                    "checked_at_utc": checked_at_utc,
+                    "entries": [],
+                    "email_map": {},
+                    "planned": [],
+                    "excluded_logged": 0,
+                    "unresolved": 0,
+                    "sent_batches": 0,
+                    "skipped_batches": 0,
+                    "sent_to_count": 0,
+                    "last_sent_at_utc": None,
+                    "errors": [str(exc)],
+                }
+            )
+
+
 class MailNotificationTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
 
         self._worker: _ExtractWorker | None = None
+        self._auto_worker: _AutoRunWorker | None = None
+        self._auto_timer = QTimer(self)
+        self._auto_timer.timeout.connect(self._on_auto_tick)
+        self._auto_run_token: int = 0
+        self._auto_mode: Optional[str] = None  # "test" / "production"
         self._targets: List[Dict[str, Any]] = []
         self._email_map: Dict[str, str] = {}
         self._planned_rows: List[PlannedNotificationRow] = []
@@ -397,8 +660,8 @@ class MailNotificationTab(QWidget):
 
         mode_group = QGroupBox("運用モード")
         mode_layout = QHBoxLayout(mode_group)
-        self.test_mode_radio = QRadioButton("テストモード（テストメールの宛先のみに送信）")
-        self.production_mode_radio = QRadioButton("本番モード（実際の宛先に送信）")
+        self.test_mode_radio = QRadioButton("テスト")
+        self.production_mode_radio = QRadioButton("本番")
         self.test_mode_radio.setChecked(True)
         mode_bg = QButtonGroup(self)
         mode_bg.addButton(self.test_mode_radio)
@@ -409,10 +672,13 @@ class MailNotificationTab(QWidget):
         mode_layout.addWidget(QLabel("本番送信先:"))
         self.production_send_creator_checkbox = QCheckBox("投入者")
         self.production_send_owner_checkbox = QCheckBox("所有者")
+        self.production_send_equipment_manager_checkbox = QCheckBox("設備管理者")
         self.production_send_creator_checkbox.setChecked(True)
         self.production_send_owner_checkbox.setChecked(True)
         mode_layout.addWidget(self.production_send_creator_checkbox)
         mode_layout.addWidget(self.production_send_owner_checkbox)
+        self.production_send_equipment_manager_checkbox.setChecked(False)
+        mode_layout.addWidget(self.production_send_equipment_manager_checkbox)
 
         self.view_log_btn = QPushButton("送信ログ表示")
         self.view_log_btn.clicked.connect(self._show_send_log)
@@ -491,12 +757,39 @@ class MailNotificationTab(QWidget):
         self.extract_once_btn = QPushButton("通知対象抽出")
         self.extract_once_btn.clicked.connect(self.extract_once)
         btn_row.addWidget(self.extract_once_btn)
+
+        btn_row.addWidget(QLabel("自動インターバル:"))
+        self.auto_interval_combo = QComboBox()
+        for label, sec in interval_options():
+            self.auto_interval_combo.addItem(label, int(sec))
+        # 初期値: 60秒
+        try:
+            idx = self.auto_interval_combo.findData(60)
+            if idx >= 0:
+                self.auto_interval_combo.setCurrentIndex(idx)
+        except Exception:
+            pass
+        btn_row.addWidget(self.auto_interval_combo)
+
+        self.auto_run_btn = QPushButton("自動実行")
+        self.auto_run_btn.setCheckable(True)
+        self.auto_run_btn.toggled.connect(self._on_auto_run_toggled)
+        btn_row.addWidget(self.auto_run_btn)
+
         btn_row.addStretch()
         cond_layout.addLayout(btn_row)
 
         self.status_label = QLabel("")
         self.status_label.setWordWrap(True)
         cond_layout.addWidget(self.status_label)
+
+        auto_info_row = QHBoxLayout()
+        self.last_check_label = QLabel("最終登録状況確認: -")
+        self.last_send_label = QLabel("最終送信: -")
+        auto_info_row.addWidget(self.last_check_label)
+        auto_info_row.addWidget(self.last_send_label)
+        auto_info_row.addStretch()
+        cond_layout.addLayout(auto_info_row)
 
         layout.addWidget(cond_group)
 
@@ -628,6 +921,7 @@ class MailNotificationTab(QWidget):
         self.template_combo.currentIndexChanged.connect(self._on_template_changed)
         self.production_send_creator_checkbox.toggled.connect(self._on_production_recipient_toggled)
         self.production_send_owner_checkbox.toggled.connect(self._on_production_recipient_toggled)
+        self.production_send_equipment_manager_checkbox.toggled.connect(self._on_production_recipient_toggled)
 
         self._set_status("条件を設定して『通知対象抽出』を実行してください。", ThemeKey.TEXT_MUTED)
 
@@ -635,6 +929,62 @@ class MailNotificationTab(QWidget):
         self.test_mode_radio.toggled.connect(self._sync_mode_controls)
         self.production_mode_radio.toggled.connect(self._sync_mode_controls)
         self._sync_mode_controls()
+
+        # 自動実行ボタンのラベルを運用モードに追従
+        self.test_mode_radio.toggled.connect(self._refresh_auto_run_button_text)
+        self.production_mode_radio.toggled.connect(self._refresh_auto_run_button_text)
+        self._refresh_auto_run_button_text()
+
+    def closeEvent(self, event):
+        # 破棄タイミングで QThread が生存していると
+        # "Destroyed while thread is still running" が出るため、明示的に停止要求する。
+        try:
+            self._stop_auto_run()
+        except Exception:
+            pass
+        try:
+            return super().closeEvent(event)
+        except Exception:
+            # qt_compat 経由で super の解決が崩れるケースに備える
+            event.accept()
+
+    def _auto_is_running(self) -> bool:
+        return self._auto_mode in ("test", "production")
+
+    def _auto_worker_is_running(self) -> bool:
+        w = self._auto_worker
+        if w is None:
+            return False
+        try:
+            return bool(w.isRunning())
+        except RuntimeError:
+            # Qt側で deleteLater 済みなど
+            self._auto_worker = None
+            return False
+
+    def _refresh_auto_run_button_text(self):
+        try:
+            if not getattr(self, "auto_run_btn", None):
+                return
+            mode = "本番" if self._is_production_mode() else "テスト"
+            if self._auto_is_running():
+                running_mode = "本番" if self._auto_mode == "production" else "テスト"
+                self.auto_run_btn.setText(f"停止（{running_mode}）")
+            else:
+                self.auto_run_btn.setText(f"自動実行（{mode}）")
+        except Exception:
+            pass
+
+    def _confirm_auto_run(self, *, action: str, mode: str) -> bool:
+        # action: "start" | "stop"
+        title = "自動実行" if action == "start" else "自動実行停止"
+        mode_label = "本番" if mode == "production" else "テスト"
+        if action == "start":
+            msg = f"自動実行（{mode_label}）を開始します。よろしいですか？"
+        else:
+            msg = f"自動実行（{mode_label}）を停止します。よろしいですか？"
+        ret = QMessageBox.question(self, title, msg, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        return ret == QMessageBox.Yes
 
     def _current_template_subject(self) -> str:
         idx = int(self._current_template_index)
@@ -650,8 +1000,12 @@ class MailNotificationTab(QWidget):
 
     def _on_production_recipient_toggled(self):
         # 本番送信先は最低1つ必要（最後の1つは外せない）
-        if not self.production_send_creator_checkbox.isChecked() and not self.production_send_owner_checkbox.isChecked():
-            # 直前の操作で両方外れたケースは、投入者を復帰させる
+        if (
+            not self.production_send_creator_checkbox.isChecked()
+            and not self.production_send_owner_checkbox.isChecked()
+            and not self.production_send_equipment_manager_checkbox.isChecked()
+        ):
+            # 直前の操作で全て外れたケースは、投入者を復帰させる
             self.production_send_creator_checkbox.blockSignals(True)
             self.production_send_creator_checkbox.setChecked(True)
             self.production_send_creator_checkbox.blockSignals(False)
@@ -661,6 +1015,12 @@ class MailNotificationTab(QWidget):
 
     def _include_owner_in_production(self) -> bool:
         return bool(getattr(self, "production_send_owner_checkbox", None) and self.production_send_owner_checkbox.isChecked())
+
+    def _include_equipment_manager_in_production(self) -> bool:
+        return bool(
+            getattr(self, "production_send_equipment_manager_checkbox", None)
+            and self.production_send_equipment_manager_checkbox.isChecked()
+        )
 
     def _load_templates(self):
         mgr = get_config_manager()
@@ -822,6 +1182,7 @@ class MailNotificationTab(QWidget):
         is_prod = self._is_production_mode()
         self.production_send_creator_checkbox.setEnabled(is_prod)
         self.production_send_owner_checkbox.setEnabled(is_prod)
+        self.production_send_equipment_manager_checkbox.setEnabled(is_prod)
 
     def _is_production_mode(self) -> bool:
         return bool(getattr(self, "production_mode_radio", None) and self.production_mode_radio.isChecked())
@@ -883,6 +1244,246 @@ class MailNotificationTab(QWidget):
         except Exception:
             return ""
 
+    def _selected_interval_seconds(self) -> int:
+        try:
+            sec = int(self.auto_interval_combo.currentData())
+            return sec if sec > 0 else 60
+        except Exception:
+            return 60
+
+    def _on_auto_run_toggled(self, checked: bool):
+        # 自動実行のモードは「運用モード」設定で決める
+        current_mode = "production" if self._is_production_mode() else "test"
+
+        if checked:
+            if not self._confirm_auto_run(action="start", mode=current_mode):
+                try:
+                    self.auto_run_btn.blockSignals(True)
+                    self.auto_run_btn.setChecked(False)
+                finally:
+                    self.auto_run_btn.blockSignals(False)
+                self._refresh_auto_run_button_text()
+                return
+            self._start_auto_run(mode=current_mode)
+        else:
+            # 未起動なら何もしない
+            if not self._auto_is_running():
+                self._refresh_auto_run_button_text()
+                return
+            if not self._confirm_auto_run(action="stop", mode=self._auto_mode or current_mode):
+                # 停止キャンセル → 走り続ける
+                try:
+                    self.auto_run_btn.blockSignals(True)
+                    self.auto_run_btn.setChecked(True)
+                finally:
+                    self.auto_run_btn.blockSignals(False)
+                self._refresh_auto_run_button_text()
+                return
+            self._stop_auto_run()
+
+    def _start_auto_run(self, *, mode: str):
+        # mode: "test" | "production"
+        if self._auto_worker_is_running():
+            self._set_status("自動実行が停止処理中です。少し待ってから再度開始してください。", ThemeKey.TEXT_WARNING)
+            try:
+                self.auto_run_btn.blockSignals(True)
+                self.auto_run_btn.setChecked(False)
+            finally:
+                self.auto_run_btn.blockSignals(False)
+            self._refresh_auto_run_button_text()
+            return
+
+        self._stop_auto_run(invalidate_only=True)
+
+        production_mode = mode == "production"
+        if production_mode:
+            if not (
+                self._include_creator_in_production()
+                or self._include_owner_in_production()
+                or self._include_equipment_manager_in_production()
+            ):
+                self._set_status("本番送信先が未選択です（投入者/所有者/設備管理者のいずれかは必須）。", ThemeKey.TEXT_WARNING)
+                try:
+                    self.auto_run_btn.blockSignals(True)
+                    self.auto_run_btn.setChecked(False)
+                finally:
+                    self.auto_run_btn.blockSignals(False)
+                self._refresh_auto_run_button_text()
+                return
+        else:
+            if not self._test_to_address():
+                self._set_status("テスト運用の送信先(To)が未設定です（設定→メール→テストメール）。", ThemeKey.TEXT_WARNING)
+                try:
+                    self.auto_run_btn.blockSignals(True)
+                    self.auto_run_btn.setChecked(False)
+                finally:
+                    self.auto_run_btn.blockSignals(False)
+                self._refresh_auto_run_button_text()
+                return
+
+            # 要件: テスト自動実行開始時、テストモード分だけログをクリア（本番は残す）
+            try:
+                removed = clear_history_by_mode(mode="test")
+                if removed:
+                    self._set_status(f"テスト送信ログをクリアしました: {removed}件", ThemeKey.TEXT_INFO)
+            except Exception:
+                pass
+
+        self._auto_run_token += 1
+        self._auto_mode = mode
+        self._refresh_auto_run_button_text()
+
+        self._run_auto_once(self._auto_run_token)
+        try:
+            self._auto_timer.start(int(self._selected_interval_seconds() * 1000))
+        except Exception:
+            self._auto_timer.start(int(60 * 1000))
+
+    def _stop_auto_run(self, *, invalidate_only: bool = False):
+        try:
+            if self._auto_timer.isActive():
+                self._auto_timer.stop()
+        except Exception:
+            pass
+
+        # 進行中の worker 結果を無効化
+        self._auto_run_token += 1
+
+        # 進行中スレッドには中断を要求（destroyed while running 対策）
+        try:
+            if self._auto_worker is not None and self._auto_worker.isRunning():
+                self._auto_worker.requestInterruption()
+        except Exception:
+            pass
+
+        self._auto_mode = None
+        if invalidate_only:
+            # start 前の初期化用途（ボタン状態は呼び出し元で調整）
+            return
+
+        try:
+            self.auto_run_btn.blockSignals(True)
+            self.auto_run_btn.setChecked(False)
+        except Exception:
+            pass
+        finally:
+            try:
+                self.auto_run_btn.blockSignals(False)
+            except Exception:
+                pass
+
+        self._refresh_auto_run_button_text()
+
+    def _on_auto_tick(self):
+        if self._auto_mode not in ("test", "production"):
+            return
+        if self._auto_worker_is_running():
+            return
+        self._run_auto_once(self._auto_run_token)
+
+    def _run_auto_once(self, run_token: int):
+        production = self._auto_mode == "production"
+        days = int(self.range_days_spin.value())
+
+        include_creator = self._include_creator_in_production()
+        include_owner = self._include_owner_in_production()
+        include_equipment_manager = self._include_equipment_manager_in_production()
+        test_to = self._test_to_address()
+
+        tmpl_name = ""
+        try:
+            tmpl_name = str(self._templates[int(self._current_template_index)].get("name") or "")
+        except Exception:
+            tmpl_name = ""
+
+        app_parent = QApplication.instance()
+        self._auto_worker = _AutoRunWorker(
+            app_parent,
+            run_token=run_token,
+            range_days=days,
+            production_mode=production,
+            include_creator=include_creator,
+            include_owner=include_owner,
+            include_equipment_manager=include_equipment_manager,
+            test_to_address=test_to,
+            subject_template=self._current_template_subject(),
+            body_template=self._current_template_body(),
+            template_name=tmpl_name,
+            build_email_map=self._build_email_map,
+            augment_entries_for_display=self._augment_entries_for_display,
+        )
+        self._auto_worker.finished.connect(self._on_auto_finished)
+        # 完了後に安全に破棄
+        try:
+            self._auto_worker.finished.connect(self._auto_worker.deleteLater)
+        except Exception:
+            pass
+        self._auto_worker.start()
+
+    def _on_auto_finished(self, result: Dict[str, Any]):
+        try:
+            if int(result.get("run_token") or 0) != int(self._auto_run_token):
+                return
+        except Exception:
+            return
+
+        # finished を受け取った時点で、次回起動に備えて参照を外す
+        # （Qt側は deleteLater で消える可能性がある）
+        self._auto_worker = None
+
+        checked_at_utc = result.get("checked_at_utc")
+        if isinstance(checked_at_utc, datetime):
+            try:
+                jst = checked_at_utc.astimezone(_JST)
+                self.last_check_label.setText(f"最終登録状況確認: {jst.strftime('%Y-%m-%d %H:%M')}")
+            except Exception:
+                pass
+
+        entries = result.get("entries") or []
+        planned = result.get("planned") or []
+        email_map = result.get("email_map") or {}
+
+        try:
+            self._targets = list(entries)
+            self._planned_rows = list(planned)
+            self._email_map = dict(email_map)
+            self._render_table(self._planned_rows)
+        except Exception:
+            pass
+
+        errors = result.get("errors") or []
+        if errors:
+            self._set_status(f"自動実行エラー: {errors[0]}", ThemeKey.TEXT_ERROR)
+            return
+
+        sent_batches = int(result.get("sent_batches") or 0)
+        sent_to_count = int(result.get("sent_to_count") or 0)
+        skipped_batches = int(result.get("skipped_batches") or 0)
+        excluded_logged = int(result.get("excluded_logged") or 0)
+        unresolved = int(result.get("unresolved") or 0)
+
+        last_sent_at_utc = result.get("last_sent_at_utc")
+        if isinstance(last_sent_at_utc, datetime) and sent_batches > 0:
+            try:
+                jst = last_sent_at_utc.astimezone(_JST)
+                self.last_send_label.setText(f"最終送信: {jst.strftime('%Y-%m-%d %H:%M')}（宛先{sent_to_count}件）")
+            except Exception:
+                pass
+
+        try:
+            if self._auto_mode == "production" and sent_batches > 0:
+                self._rebuild_and_render()
+        except Exception:
+            pass
+
+        self._set_status(
+            f"自動実行: 対象={len(planned)}件, 除外(ログ)={excluded_logged}件, 未解決={unresolved}件, 送信={sent_batches}通, skip={skipped_batches}通",
+            ThemeKey.TEXT_SUCCESS,
+        )
+
+        # 停止/モード変更によりUI側のチェックが外れている場合でも、表示は整合させる
+        self._refresh_auto_run_button_text()
+
     def extract_once(self):
         if self._worker is not None and self._worker.isRunning():
             return
@@ -929,6 +1530,7 @@ class MailNotificationTab(QWidget):
             production_mode=production,
             include_creator=self._include_creator_in_production(),
             include_owner=self._include_owner_in_production(),
+            include_equipment_manager=self._include_equipment_manager_in_production(),
             test_to_address=self._test_to_address(),
             subject_template=self._current_template_subject(),
             body_template=self._current_template_body(),
@@ -1036,6 +1638,7 @@ class MailNotificationTab(QWidget):
             production_mode=production,
             include_creator=self._include_creator_in_production(),
             include_owner=self._include_owner_in_production(),
+            include_equipment_manager=self._include_equipment_manager_in_production(),
             test_to_address=self._test_to_address(),
             subject_template=self._current_template_subject(),
             body_template=self._current_template_body(),
@@ -1185,6 +1788,7 @@ class MailNotificationTab(QWidget):
         force_production_mode: Optional[bool] = None,
         include_creator: Optional[bool] = None,
         include_owner: Optional[bool] = None,
+        include_equipment_manager: Optional[bool] = None,
     ) -> Tuple[int, int]:
         row_map = None
         for r in self._planned_rows:
@@ -1211,20 +1815,30 @@ class MailNotificationTab(QWidget):
         if production:
             use_creator = self._include_creator_in_production() if include_creator is None else bool(include_creator)
             use_owner = self._include_owner_in_production() if include_owner is None else bool(include_owner)
-            if not use_creator and not use_owner:
+            use_equipment_manager = (
+                self._include_equipment_manager_in_production()
+                if include_equipment_manager is None
+                else bool(include_equipment_manager)
+            )
+            if not use_creator and not use_owner and not use_equipment_manager:
                 if not quiet:
-                    self._set_status("本番送信先が未選択です（投入者/所有者のどちらかは必須）。", ThemeKey.TEXT_WARNING)
+                    self._set_status("本番送信先が未選択です（投入者/所有者/設備管理者のいずれかは必須）。", ThemeKey.TEXT_WARNING)
                 return (0, 1)
             real_targets: List[str] = []
             if use_creator:
                 real_targets.append(created_mail)
             if use_owner:
                 real_targets.append(owner_mail)
+            if use_equipment_manager:
+                try:
+                    real_targets.extend(list(getattr(row_map, "equipment_manager_emails", ()) or ()))
+                except Exception:
+                    pass
             targets = self._unique_in_order(real_targets)
 
             if not targets:
                 if not quiet:
-                    self._set_status("投入者/所有者のメールアドレスが解決できません。", ThemeKey.TEXT_WARNING)
+                    self._set_status("本番送信先のメールアドレスが解決できません。", ThemeKey.TEXT_WARNING)
                 return (0, 1)
         else:
             test_to = self._test_to_address()
@@ -1329,6 +1943,7 @@ class MailNotificationTab(QWidget):
                 force_production_mode=True,
                 include_creator=self._include_creator_in_production(),
                 include_owner=self._include_owner_in_production(),
+                include_equipment_manager=self._include_equipment_manager_in_production(),
             )
             self._set_status(f"本番送信: sent={s}, skipped={k}", ThemeKey.TEXT_SUCCESS if s else ThemeKey.TEXT_WARNING)
             dlg.accept()
@@ -1391,7 +2006,7 @@ class MailNotificationTab(QWidget):
         return entries
 
     def _confirm_send(self, entries: List[Dict[str, Any]]) -> bool:
-        # 宛先解決（投入者/所有者×件数）
+        # 宛先解決（投入者/所有者/設備管理者×件数）
         production = self._is_production_mode()
         test_to = self._test_to_address()
         recipients: List[str] = []
@@ -1399,11 +2014,22 @@ class MailNotificationTab(QWidget):
 
         include_creator = self._include_creator_in_production()
         include_owner = self._include_owner_in_production()
-        if production and not (include_creator or include_owner):
-            self._set_status("本番送信先が未選択です（投入者/所有者のどちらかは必須）。", ThemeKey.TEXT_WARNING)
+        include_equipment_manager = self._include_equipment_manager_in_production()
+        if production and not (include_creator or include_owner or include_equipment_manager):
+            self._set_status("本番送信先が未選択です（投入者/所有者/設備管理者のいずれかは必須）。", ThemeKey.TEXT_WARNING)
             return False
 
         for e in entries or []:
+            row_map = None
+            try:
+                eid = str(e.get("id") or "")
+                for r in self._planned_rows:
+                    if r.entry_id == eid:
+                        row_map = r
+                        break
+            except Exception:
+                row_map = None
+
             created_id = str(e.get("createdByUserId") or "")
             owner_id = str(e.get("dataOwnerUserId") or "")
             created_mail = (self._email_map.get(created_id) or "").strip()
@@ -1414,6 +2040,11 @@ class MailNotificationTab(QWidget):
                     real_targets.append(created_mail)
                 if include_owner:
                     real_targets.append(owner_mail)
+                if include_equipment_manager:
+                    try:
+                        real_targets.extend(list(getattr(row_map, "equipment_manager_emails", ()) or ()))
+                    except Exception:
+                        pass
                 real_targets = self._unique_in_order(real_targets)
                 if not real_targets:
                     unresolved += 1

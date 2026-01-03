@@ -185,3 +185,59 @@ def load_history(*, limit: int = 200) -> List[Dict[str, Any]]:
         return items
     except Exception:
         return []
+
+
+def clear_history_by_mode(*, mode: str) -> int:
+    """指定モードの送信履歴を削除する。
+
+    - history から mode が一致する要素のみ除去
+    - last_sent は残った history から再構築する（mode を保持していないため）
+
+    Returns:
+        削除した履歴件数
+    """
+
+    m = (mode or "").strip().lower()
+    if not m:
+        return 0
+
+    path = _log_path()
+    data = _load_json(path)
+    history = data.get("history")
+    if not isinstance(history, list):
+        history = []
+
+    kept: List[Dict[str, Any]] = []
+    removed = 0
+    for it in history:
+        if not isinstance(it, dict):
+            continue
+        if str(it.get("mode") or "").strip().lower() == m:
+            removed += 1
+            continue
+        kept.append(it)
+
+    # last_sent を再構築（新しい方が勝つ）
+    kept_sorted = [h for h in kept if isinstance(h, dict)]
+
+    def _key_time(item: Dict[str, Any]) -> str:
+        return str(item.get("sentAt") or "")
+
+    kept_sorted.sort(key=_key_time, reverse=True)
+
+    last: Dict[str, str] = {}
+    for it in kept_sorted:
+        to_addr = str(it.get("to") or "").strip()
+        subject = str(it.get("subject") or "").strip()
+        sent_at = str(it.get("sentAt") or "").strip()
+        if not to_addr or not subject or not sent_at:
+            continue
+        k = _key(to_addr, subject)
+        # sorted済みなので最初が最新
+        if k not in last:
+            last[k] = sent_at
+
+    data["history"] = kept
+    data["last_sent"] = last
+    _save_json(path, data)
+    return removed

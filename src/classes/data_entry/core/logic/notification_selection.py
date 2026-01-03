@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 _JST = timezone(timedelta(hours=9))
 _UTC = timezone.utc
@@ -97,6 +97,7 @@ class PlannedNotificationRow:
     owner_name: str
     owner_org: str
     owner_mail: str
+    equipment_manager_emails: Tuple[str, ...]
     test_to: str
     production_to: str
     production_sent_at: str
@@ -105,6 +106,18 @@ class PlannedNotificationRow:
     error_message: str
     subject: str
     body: str
+
+
+def _split_multi_emails(text: str) -> List[str]:
+    # ';' または改行区切りを許可
+    raw = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    parts: List[str] = []
+    for chunk in raw.split(";"):
+        for line in chunk.split("\n"):
+            v = (line or "").strip()
+            if v:
+                parts.append(v)
+    return parts
 
 
 class _SafeFormatDict(dict):
@@ -152,6 +165,7 @@ def build_planned_notification_rows(
     production_mode: bool,
     include_creator: bool,
     include_owner: bool,
+    include_equipment_manager: bool = False,
     test_to_address: str,
     subject_template: str,
     body_template: str,
@@ -181,11 +195,16 @@ def build_planned_notification_rows(
         created_mail = (email_map.get(created_id) or "").strip()
         owner_mail = (email_map.get(owner_id) or "").strip()
 
+        # UI側で埋めたプレースホルダ文字列（";"/改行区切り）を分解
+        equipment_manager_emails = _split_multi_emails(str(e.get("equipmentManagerEmails") or ""))
+
         production_targets: List[str] = []
         if include_creator:
             production_targets.append(created_mail)
         if include_owner:
             production_targets.append(owner_mail)
+        if include_equipment_manager:
+            production_targets.extend(equipment_manager_emails)
         # Preserve order / unique
         seen: set[str] = set()
         production_targets = [m for m in production_targets if m and not (m in seen or seen.add(m))]
@@ -231,6 +250,7 @@ def build_planned_notification_rows(
                 owner_name=owner_name,
                 owner_org=owner_org,
                 owner_mail=owner_mail or "(不明)",
+                equipment_manager_emails=tuple(equipment_manager_emails),
                 test_to=test_to,
                 production_to=production_to,
                 production_sent_at=prod_sent_at,

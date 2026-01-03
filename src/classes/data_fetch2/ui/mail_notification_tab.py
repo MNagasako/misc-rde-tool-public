@@ -211,8 +211,9 @@ class MailNotificationTab(QWidget):
             "データセット: {datasetName}\n"
             "エラーコード: {errorCode}\n"
             "エラーメッセージ: {errorMessage}\n"
-            "投入者: {createdByName} ({createdByUserId})\n"
-            "所有者: {dataOwnerName} ({dataOwnerUserId})\n"
+            "投入者: {createdByName} \n"
+            "所有者: {dataOwnerName} \n"
+            "装置管理者: {equipmentManagerName} \n"
             "エントリID: {entryId}\n"
         )
         tmpl.addWidget(self.body_template_edit)

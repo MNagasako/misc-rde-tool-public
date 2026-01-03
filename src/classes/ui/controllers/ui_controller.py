@@ -1644,9 +1644,6 @@ class UIController(UIControllerCore):
         
         widget = QWidget()
         layout = QVBoxLayout()
-        #label = QLabel(f"{title}機能")
-        #label.setStyleSheet("font-size: 16px; font-weight: bold; color: #1976d2; padding: 10px;")
-        #layout.addWidget(label)
 
         # タイトル→アクセント色マッピング（ThemeKey）
         accent_map = {
