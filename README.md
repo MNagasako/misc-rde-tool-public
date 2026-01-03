@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.4.2** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.4.3** のバイナリ配布およびドキュメント公開用リポジトリです。
 
 **本ページはAIによる自動生成文が含まれています。**
 
@@ -20,14 +20,12 @@
 
 ## 🚀 最新情報
 
-**2026-01-03 最新リリース**: バージョン2.4.2（データ取得2: メール通知タブ拡張 + 設備管理者）
+**2026-01-04 最新リリース**: バージョン2.4.3（メール通知タブ: 運用改善 + 設備管理者宛先）
 
-### v2.4.2 の主な改善
+### v2.4.3 の主な改善
 
-- 宛先選択（テスト/本番、投入者/所有者/両方）を明確化し、誤送信防止の導線を強化しました。
-- テンプレート編集をダイアログ化し、本文/件名とプレースホルダ運用を分離しました。
-- 送信ログの閲覧/保存を継続し、運用監査と二重送信防止を支援します。
-- 設備IDごとに設備管理者（name/mail/note）を編集・永続化し、テンプレートのプレースホルダとして利用可能にしました。
+- 運用モード表示を「テスト/本番」に簡略化し、画面上の判別を明確化しました。
+- 本番送信先に「設備管理者」を追加し、投入者/所有者に加えて宛先へ含められるよう改善しました。
 
 > ℹ️ リスティングタブは `output/arim-site/{equipment|reports}_latest.json` など最新エクスポートを前提とします。再読込前に各タブで「JSON再取得」を実行し、キャッシュディレクトリ（`output/arim-site/reports/cache/`）の残量にも留意してください。
 
@@ -129,13 +127,13 @@
 * **[ドキュメント一覧マップ](docs/DOCUMENT_MAP.md)**
 * **[第三者ライセンス通知](THIRD_PARTY_NOTICES/)**
 
-* **[リリースノート v2.4.2](docs/RELEASE_NOTES_v2.4.2.md)**
+* **[リリースノート v2.4.3](docs/RELEASE_NOTES_v2.4.3.md)**
 
 ---
 
 ## 🔢 バージョン情報
 
-現在配布バージョン: `v2.4.2` （`VERSION.txt` に基づく）
+現在配布バージョン: `v2.4.3` （`VERSION.txt` に基づく）
 
 更新履歴の詳細は `docs/CHANGELOG.md` を参照してください。
 
