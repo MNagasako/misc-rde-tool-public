@@ -27,28 +27,36 @@ class SpinnerButton(QPushButton):
         self._loading_text = ""
         self._is_loading = False
         self._spinner_index = 0
+        self._disable_button_on_loading = True
         
         # スピナーアニメーション用タイマー
         self._spinner_timer = QTimer(self)
         self._spinner_timer.timeout.connect(self._update_spinner)
         self._spinner_timer.setInterval(80)  # 80ms間隔でアニメーション
     
-    def start_loading(self, loading_text: str = "処理中"):
+    def start_loading(self, loading_text: str = "処理中", *, disable_button: bool = True):
         """
         ローディングアニメーションを開始
         
         Args:
             loading_text: ローディング中に表示するテキスト
+            disable_button: ローディング中にボタンを無効化するか（デフォルト True）
         """
         if self._is_loading:
+            # 既にローディング中の場合は表示文言だけ更新する
+            self._loading_text = loading_text
+            self._disable_button_on_loading = bool(disable_button)
+            self.setEnabled(not self._disable_button_on_loading)
+            self._update_spinner()
             return
-        
+
         self._is_loading = True
         self._loading_text = loading_text
         self._spinner_index = 0
+        self._disable_button_on_loading = bool(disable_button)
         
-        # ボタンを無効化
-        self.setEnabled(False)
+        # 必要ならボタンを無効化
+        self.setEnabled(not self._disable_button_on_loading)
         
         # スピナーアニメーション開始
         self._spinner_timer.start()

@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QFileDialog,
     QScrollArea,
     QSizePolicy,
     QTableWidget,
@@ -196,10 +197,14 @@ class EquipmentManagerListDialog(QDialog):
         btn_row = QHBoxLayout()
         self.open_file_btn = QPushButton("管理者リストJSONを開く")
         self.open_folder_btn = QPushButton("格納フォルダを開く")
+        self.export_xlsx_btn = QPushButton("XLSXエクスポート")
+        self.import_xlsx_btn = QPushButton("XLSXインポート")
         self.save_btn = QPushButton("保存")
         self.cancel_btn = QPushButton("キャンセル")
         btn_row.addWidget(self.open_file_btn)
         btn_row.addWidget(self.open_folder_btn)
+        btn_row.addWidget(self.export_xlsx_btn)
+        btn_row.addWidget(self.import_xlsx_btn)
         btn_row.addStretch()
         btn_row.addWidget(self.save_btn)
         btn_row.addWidget(self.cancel_btn)
@@ -209,6 +214,8 @@ class EquipmentManagerListDialog(QDialog):
         self.cancel_btn.clicked.connect(self.reject)
         self.open_file_btn.clicked.connect(self._open_store_file)
         self.open_folder_btn.clicked.connect(self._open_store_folder)
+        self.export_xlsx_btn.clicked.connect(self._export_xlsx)
+        self.import_xlsx_btn.clicked.connect(self._import_xlsx)
 
         self._load_rows(equipment_entries)
 
@@ -337,18 +344,7 @@ class EquipmentManagerListDialog(QDialog):
             self.table.setRowHidden(r, hide)
 
     def _on_save(self):
-        # Build mapping and persist
-        mapping: Dict[str, List[store.EquipmentManager]] = {}
-        for r in range(self.table.rowCount()):
-            eid = (self.table.item(r, 0).text() if self.table.item(r, 0) else "").strip()
-            if not eid:
-                continue
-            names = self.table.item(r, 2).text() if self.table.item(r, 2) else ""
-            emails = self.table.item(r, 3).text() if self.table.item(r, 3) else ""
-            notes = self.table.item(r, 4).text() if self.table.item(r, 4) else ""
-            managers = store.parse_managers_from_fields(names, emails, notes)
-            if managers:
-                mapping[eid] = managers
+        mapping, _name_map = self._build_mapping_from_table()
 
         try:
             store.save_equipment_managers(mapping)
@@ -358,3 +354,141 @@ class EquipmentManagerListDialog(QDialog):
 
         QMessageBox.information(self, "保存", "設備管理者リストを保存しました。")
         self.accept()
+
+    def _build_mapping_from_table(self) -> tuple[Dict[str, List[store.EquipmentManager]], Dict[str, str]]:
+        mapping: Dict[str, List[store.EquipmentManager]] = {}
+        name_map: Dict[str, str] = {}
+        for r in range(self.table.rowCount()):
+            eid = (self.table.item(r, 0).text() if self.table.item(r, 0) else "").strip()
+            if not eid:
+                continue
+            device_name = (self.table.item(r, 1).text() if self.table.item(r, 1) else "").strip()
+            if device_name:
+                name_map[eid] = device_name
+            names = self.table.item(r, 2).text() if self.table.item(r, 2) else ""
+            emails = self.table.item(r, 3).text() if self.table.item(r, 3) else ""
+            notes = self.table.item(r, 4).text() if self.table.item(r, 4) else ""
+            managers = store.parse_managers_from_fields(names, emails, notes)
+            if managers:
+                mapping[eid] = managers
+        return (mapping, name_map)
+
+    def _export_xlsx(self):
+        mapping, name_map = self._build_mapping_from_table()
+        try:
+            default_dir = str(Path(store.get_equipment_manager_store_path()).parent)
+        except Exception:
+            default_dir = ""
+        default_path = str(Path(default_dir) / "equipment_managers.xlsx") if default_dir else "equipment_managers.xlsx"
+
+        path, _filter = QFileDialog.getSaveFileName(
+            self,
+            "XLSXエクスポート",
+            default_path,
+            "Excel Files (*.xlsx)",
+        )
+        if not path:
+            return
+        if not str(path).lower().endswith(".xlsx"):
+            path = f"{path}.xlsx"
+
+        try:
+            store.export_equipment_managers_to_xlsx(path=path, mapping=mapping, equipment_name_by_id=name_map)
+        except Exception as exc:
+            QMessageBox.warning(self, "エクスポート失敗", f"XLSXのエクスポートに失敗しました: {exc}")
+            return
+
+        QMessageBox.information(self, "エクスポート", "XLSXをエクスポートしました。")
+
+    def _import_xlsx(self):
+        try:
+            default_dir = str(Path(store.get_equipment_manager_store_path()).parent)
+        except Exception:
+            default_dir = ""
+        default_path = str(Path(default_dir) / "equipment_managers.xlsx") if default_dir else ""
+
+        path, _filter = QFileDialog.getOpenFileName(
+            self,
+            "XLSXインポート",
+            default_path,
+            "Excel Files (*.xlsx)",
+        )
+        if not path:
+            return
+
+        try:
+            imported_mapping, imported_name_map = store.import_equipment_managers_from_xlsx(path=path)
+        except Exception as exc:
+            QMessageBox.warning(self, "インポート失敗", f"XLSXの読み込みに失敗しました: {exc}")
+            return
+
+        # 置換 or マージ
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle("XLSXインポート")
+        box.setText("インポート方法を選択してください。")
+        replace_btn = box.addButton("置き換え", QMessageBox.AcceptRole)
+        merge_btn = box.addButton("マージ", QMessageBox.ActionRole)
+        cancel_btn = box.addButton(QMessageBox.Cancel)
+        box.setDefaultButton(merge_btn)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked is None or clicked == cancel_btn:
+            return
+
+        current_mapping, _current_names = self._build_mapping_from_table()
+        if clicked == replace_btn:
+            new_mapping = imported_mapping
+        else:
+            new_mapping = store.merge_equipment_manager_mappings(current_mapping, imported_mapping)
+
+        self._apply_mapping_to_table(new_mapping, imported_name_map)
+        QMessageBox.information(self, "インポート", "XLSXをインポートしました。内容を確認して『保存』してください。")
+
+    def _apply_mapping_to_table(self, mapping: Dict[str, List[store.EquipmentManager]], name_map: Dict[str, str]):
+        # existing rows index
+        row_by_eid: Dict[str, int] = {}
+        for r in range(self.table.rowCount()):
+            eid = (self.table.item(r, 0).text() if self.table.item(r, 0) else "").strip()
+            if eid:
+                row_by_eid[eid] = r
+
+        # add missing rows (from imported)
+        for eid, managers in (mapping or {}).items():
+            ee = str(eid or "").strip()
+            if not ee:
+                continue
+            if ee in row_by_eid:
+                continue
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+
+            eid_item = QTableWidgetItem(ee)
+            eid_item.setFlags(eid_item.flags() & ~Qt.ItemIsEditable)
+            self.table.setItem(row, 0, eid_item)
+
+            dev = str((name_map or {}).get(ee, "") or "").strip()
+            name_item = QTableWidgetItem(dev)
+            name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+            self.table.setItem(row, 1, name_item)
+
+            self.table.setItem(row, 2, QTableWidgetItem(""))
+            self.table.setItem(row, 3, QTableWidgetItem(""))
+            self.table.setItem(row, 4, QTableWidgetItem(""))
+            row_by_eid[ee] = row
+
+        # apply values
+        for eid, r in row_by_eid.items():
+            managers = (mapping or {}).get(eid, [])
+            names, emails, notes = store.managers_to_placeholder_fields(list(managers or []))
+            self.table.setItem(r, 2, QTableWidgetItem(names))
+            self.table.setItem(r, 3, QTableWidgetItem(emails))
+            self.table.setItem(r, 4, QTableWidgetItem(notes))
+            # 装置名が空で、XLSX側にあれば補完
+            if (not (self.table.item(r, 1).text() if self.table.item(r, 1) else "").strip()) and (name_map or {}).get(eid):
+                name_item = QTableWidgetItem(str((name_map or {}).get(eid, "") or ""))
+                name_item.setFlags(name_item.flags() & ~Qt.ItemIsEditable)
+                self.table.setItem(r, 1, name_item)
+
+        self._apply_filters()

@@ -88,6 +88,8 @@ class PlannedNotificationRow:
     start_time_jst: str
     equipment_id: str
     device_name_ja: str
+    equipment_manager_names: str
+    equipment_manager_emails_display: str
     dataset_template_name: str
     dataset_name: str
     data_name: str
@@ -105,6 +107,7 @@ class PlannedNotificationRow:
     error_code: str
     error_message: str
     subject: str
+    entry_body: str
     body: str
 
 
@@ -168,7 +171,9 @@ def build_planned_notification_rows(
     include_equipment_manager: bool = False,
     test_to_address: str,
     subject_template: str,
+    header_template: str,
     body_template: str,
+    footer_template: str,
     production_sent_at_by_entry_id: Optional[Dict[str, str]] = None,
 ) -> List[PlannedNotificationRow]:
     """通知対象リスト（テーブル表示用）を生成する。
@@ -178,6 +183,9 @@ def build_planned_notification_rows(
       (ただし投入者/所有者の実アドレスは別カラムで表示する)
     """
     rows: List[PlannedNotificationRow] = []
+
+    # テスト運用時の注意表示（テンプレで利用可能）
+    test_notice = "本メールはテスト送信です" if not production_mode else ""
 
     for e in entries or []:
         entry_id = str(e.get("id") or "")
@@ -197,6 +205,8 @@ def build_planned_notification_rows(
 
         # UI側で埋めたプレースホルダ文字列（";"/改行区切り）を分解
         equipment_manager_emails = _split_multi_emails(str(e.get("equipmentManagerEmails") or ""))
+        equipment_manager_names = str(e.get("equipmentManagerNames") or "")
+        equipment_manager_emails_display = str(e.get("equipmentManagerEmails") or "")
 
         production_targets: List[str] = []
         if include_creator:
@@ -223,11 +233,17 @@ def build_planned_notification_rows(
             e["dataOwnerMail"] = owner_mail
             e["testToAddress"] = test_to
             e["productionToAddress"] = production_to
+            e["testNotice"] = test_notice
         except Exception:
             pass
 
         subject = _format_template(subject_template, e)
-        body = _format_template(body_template, e)
+        header = _format_template(header_template, e)
+        entry_body = _format_template(body_template, e)
+        footer = _format_template(footer_template, e)
+
+        parts = [p for p in [header.strip("\n"), entry_body.strip("\n"), footer.strip("\n")] if p]
+        body = "\n\n".join(parts).strip() + ("\n" if parts else "")
 
         # テーブルの「実送信先」表示は現運用モードの送信先を表示
         if production_mode:
@@ -241,6 +257,8 @@ def build_planned_notification_rows(
                 start_time_jst=start_time_jst,
                 equipment_id=str(e.get("equipmentId") or ""),
                 device_name_ja=str(e.get("deviceNameJa") or ""),
+                equipment_manager_names=equipment_manager_names,
+                equipment_manager_emails_display=equipment_manager_emails_display,
                 dataset_template_name=str(e.get("datasetTemplateName") or ""),
                 dataset_name=dataset_name,
                 data_name=data_name,
@@ -258,6 +276,7 @@ def build_planned_notification_rows(
                 error_code=str(e.get("errorCode") or ""),
                 error_message=str(e.get("errorMessage") or ""),
                 subject=subject,
+                entry_body=entry_body,
                 body=body,
             )
         )

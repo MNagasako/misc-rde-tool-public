@@ -129,3 +129,150 @@ def save_equipment_managers(mapping: Dict[str, List[EquipmentManager]]) -> None:
 
     with open(path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+def merge_equipment_manager_mappings(
+    base: Dict[str, List[EquipmentManager]],
+    incoming: Dict[str, List[EquipmentManager]],
+) -> Dict[str, List[EquipmentManager]]:
+    """Merge incoming mapping into base mapping (dedupe by name/email/note).
+
+    - Keeps existing order
+    - Appends new unique managers
+    """
+
+    result: Dict[str, List[EquipmentManager]] = {k: list(v or []) for k, v in (base or {}).items()}
+    for equip_id, managers in (incoming or {}).items():
+        eid = str(equip_id or "").strip()
+        if not eid:
+            continue
+        existing = result.get(eid) or []
+        seen = {(m.name, m.email, m.note) for m in existing if isinstance(m, EquipmentManager)}
+        merged = list(existing)
+        for m in managers or []:
+            if not isinstance(m, EquipmentManager):
+                continue
+            if not (m.name or m.email or m.note):
+                continue
+            key = (m.name, m.email, m.note)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(m)
+        if merged:
+            result[eid] = merged
+        else:
+            result.pop(eid, None)
+    return result
+
+
+def export_equipment_managers_to_xlsx(
+    *,
+    path: str,
+    mapping: Dict[str, List[EquipmentManager]],
+    equipment_name_by_id: Dict[str, str] | None = None,
+) -> None:
+    """Export equipment manager mapping to XLSX.
+
+    Sheet columns:
+      設備ID, 装置名, 管理者名, 管理者メール, 備考
+
+    Manager fields are stored as multi-value strings (newline-separated) compatible with UI.
+    """
+
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "equipment_managers"
+
+    headers = ["設備ID", "装置名", "管理者名", "管理者メール", "備考"]
+    ws.append(headers)
+
+    name_map = equipment_name_by_id or {}
+
+    equip_ids = sorted({str(k or "").strip() for k in (mapping or {}).keys()} | {str(k or "").strip() for k in name_map.keys()})
+    equip_ids = [eid for eid in equip_ids if eid]
+
+    for eid in equip_ids:
+        managers = (mapping or {}).get(eid, [])
+        names, emails, notes = managers_to_placeholder_fields(list(managers or []))
+        # XLSXでは編集しやすいよう改行区切りを優先
+        names = (names or "").replace("; ", "\n")
+        emails = (emails or "").replace("; ", "\n")
+        notes = (notes or "").replace("; ", "\n")
+        ws.append([eid, str(name_map.get(eid, "") or ""), names, emails, notes])
+
+    wb.save(str(path))
+
+
+def import_equipment_managers_from_xlsx(
+    *,
+    path: str,
+) -> tuple[Dict[str, List[EquipmentManager]], Dict[str, str]]:
+    """Import equipment manager mapping from XLSX.
+
+    Returns: (mapping, equipment_name_by_id)
+    """
+
+    import openpyxl
+
+    wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
+    ws = wb.active
+
+    rows = list(ws.iter_rows(values_only=True))
+    if not rows:
+        return ({}, {})
+
+    header_row = rows[0]
+    headers = [str(h or "").strip() for h in header_row]
+    col_index: Dict[str, int] = {h: i for i, h in enumerate(headers) if h}
+
+    def _idx(*candidates: str) -> int:
+        for c in candidates:
+            if c in col_index:
+                return int(col_index[c])
+        return -1
+
+    eid_i = _idx("設備ID", "equipment_id", "equipmentId")
+    name_i = _idx("装置名", "device_name_ja", "deviceNameJa")
+    names_i = _idx("管理者名", "manager_names", "managerNames")
+    emails_i = _idx("管理者メール", "manager_emails", "managerEmails")
+    notes_i = _idx("備考", "note", "notes")
+
+    if eid_i < 0:
+        raise ValueError("XLSXに '設備ID' 列が見つかりません")
+
+    mapping: Dict[str, List[EquipmentManager]] = {}
+    equipment_name_by_id: Dict[str, str] = {}
+
+    for r in rows[1:]:
+        if r is None:
+            continue
+        # all empty row
+        if not any((str(v).strip() if v is not None else "") for v in r):
+            continue
+
+        eid_val = r[eid_i] if eid_i < len(r) else ""
+        eid = str(eid_val or "").strip()
+        if not eid:
+            continue
+
+        device_name_val = r[name_i] if (0 <= name_i < len(r)) else ""
+        device_name = str(device_name_val or "").strip() if name_i >= 0 else ""
+        if device_name:
+            equipment_name_by_id[eid] = device_name
+
+        names_val = r[names_i] if (0 <= names_i < len(r)) else ""
+        emails_val = r[emails_i] if (0 <= emails_i < len(r)) else ""
+        notes_val = r[notes_i] if (0 <= notes_i < len(r)) else ""
+
+        names_text = str(names_val or "").strip() if names_i >= 0 else ""
+        emails_text = str(emails_val or "").strip() if emails_i >= 0 else ""
+        notes_text = str(notes_val or "").strip() if notes_i >= 0 else ""
+
+        managers = parse_managers_from_fields(names_text, emails_text, notes_text)
+        if managers:
+            mapping[eid] = managers
+
+    return (mapping, equipment_name_by_id)

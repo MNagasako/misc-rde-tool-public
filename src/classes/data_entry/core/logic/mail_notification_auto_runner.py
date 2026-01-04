@@ -52,6 +52,27 @@ def _aggregate_subject(*, subjects: Sequence[str], template_name: str, count: in
     return f"{base} ({count}件)"
 
 
+class _SafeFormatDict(dict):
+    def __missing__(self, key: str) -> str:  # pragma: no cover
+        return "{" + key + "}"
+
+
+def _format_batch_template(*, template: str, now_utc: datetime, count: int, production_mode: bool) -> str:
+    if not template:
+        return ""
+    values = _SafeFormatDict(
+        {
+            "nowJst": _now_jst_str(now_utc),
+            "count": str(int(count)),
+            "testNotice": "" if production_mode else "本メールはテスト送信です",
+        }
+    )
+    try:
+        return (template or "").format_map(values)
+    except Exception:
+        return template or ""
+
+
 def build_batches(
     *,
     planned_rows: Iterable[PlannedNotificationRow],
@@ -61,6 +82,9 @@ def build_batches(
     include_equipment_manager: bool = False,
     test_to_address: str,
     template_name: str,
+    batch_subject_template: str = "",
+    batch_header_template: str = "",
+    batch_footer_template: str = "",
     logged_entry_ids: Optional[Iterable[str]] = None,
 ) -> AutoRunSummary:
     """通知対象（planned_rows）から、送信先ごとのバッチメールを構築する。
@@ -81,6 +105,16 @@ def build_batches(
     all_rows = [r for r in (planned_rows or []) if r and getattr(r, "entry_id", "")]
     rows: List[PlannedNotificationRow] = [r for r in all_rows if r.entry_id not in logged]
     excluded = max(0, len(all_rows) - len(rows))
+
+    # 対象0件の場合は送信バッチを作らない（テスト運用でも空メールを送らない）
+    if not rows:
+        return AutoRunSummary(
+            checked_at_utc=now_utc,
+            selected_count=0,
+            excluded_logged_count=excluded,
+            unresolved_count=0,
+            batches=(),
+        )
 
     unresolved = 0
     buckets: Dict[str, List[PlannedNotificationRow]] = {}
@@ -138,30 +172,45 @@ def build_batches(
     batches: List[AutoRunMailBatch] = []
     for to, rs in buckets.items():
         # 本文は entry 単位にテンプレ適用済みの body を連結
-        subjects = [r.subject for r in rs]
-        subject = _aggregate_subject(subjects=subjects, template_name=template_name, count=len(rs))
+        subject = _format_batch_template(
+            template=(batch_subject_template or ""),
+            now_utc=now_utc,
+            count=len(rs),
+            production_mode=production_mode,
+        ).strip()
+        if not subject:
+            subjects = [r.subject for r in rs]
+            subject = _aggregate_subject(subjects=subjects, template_name=template_name, count=len(rs))
 
         parts: List[str] = []
-        header = f"自動通知（{_now_jst_str(now_utc)} JST）\n対象件数: {len(rs)}\n"
-        parts.append(header)
-        for idx, r in enumerate(rs, start=1):
-            parts.append(
-                "\n".join(
-                    [
-                        "------------------------------------------------------------",
-                        f"[{idx}/{len(rs)}] entryId: {r.entry_id}",
-                        f"開始: {r.start_time_jst}",
-                        f"設備ID: {r.equipment_id}",
-                        f"装置名_日: {r.device_name_ja}",
-                        f"エラーコード: {r.error_code}",
-                        f"件名: {r.subject}",
-                        "",
-                        (r.body or ""),
-                    ]
-                )
-            )
 
-        body = "\n".join(parts).strip() + "\n"
+        header = _format_batch_template(
+            template=batch_header_template,
+            now_utc=now_utc,
+            count=len(rs),
+            production_mode=production_mode,
+        ).strip("\n")
+        if header:
+            parts.append(header)
+
+        for idx, r in enumerate(rs, start=1):
+            entry_body = (getattr(r, "entry_body", "") or getattr(r, "body", "") or "").strip("\n")
+            if not entry_body:
+                continue
+            if idx > 1:
+                parts.append("------------------------------------------------------------")
+            parts.append(entry_body)
+
+        footer = _format_batch_template(
+            template=batch_footer_template,
+            now_utc=now_utc,
+            count=len(rs),
+            production_mode=production_mode,
+        ).strip("\n")
+        if footer:
+            parts.append(footer)
+
+        body = "\n\n".join([p for p in parts if p]).strip() + ("\n" if parts else "")
         batches.append(
             AutoRunMailBatch(
                 to_addr=to,
