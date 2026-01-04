@@ -46,7 +46,7 @@
 
 #### 最新版バイナリへの直接リンク
 
-常に最新の安定版: https://github.com/MNagasako/misc-rde-tool-public/releases/latest
+最新版: https://github.com/MNagasako/misc-rde-tool-public/releases/latest
 
 過去バージョンを含む全一覧: https://github.com/MNagasako/misc-rde-tool-public/releases
 
