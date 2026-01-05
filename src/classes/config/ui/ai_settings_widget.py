@@ -59,9 +59,10 @@ class AISettingsWidget(QWidget):
     # シグナル定義
     settings_changed = Signal()
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, use_internal_scroll: bool = True):
         super().__init__(parent)
         self.parent_widget = parent
+        self._use_internal_scroll = use_internal_scroll
         self.config_file_path = get_dynamic_file_path("input/ai_config.json")
         self.current_config = {}
         # モデル一覧の元データと価格キャッシュ
@@ -103,13 +104,7 @@ class AISettingsWidget(QWidget):
         title_font.setBold(True)
         title_label.setFont(title_font)
         layout.addWidget(title_label)
-        
-        # スクロールエリア
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        
+
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
         content_layout.setContentsMargins(10, 10, 10, 10)
@@ -126,9 +121,23 @@ class AISettingsWidget(QWidget):
         
         # テスト機能
         self.setup_test_section(content_layout)
-        
-        scroll_area.setWidget(content_widget)
-        layout.addWidget(scroll_area)
+
+        if self._use_internal_scroll:
+            # スクロールエリア（単体利用向け）
+            scroll_area = QScrollArea()
+            scroll_area.setWidgetResizable(True)
+            scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            scroll_area.setWidget(content_widget)
+            layout.addWidget(scroll_area, 1)
+        else:
+            # 親側（設定タブ側）でスクロール制御する場合は内部スクロールを作らない
+            try:
+                from qt_compat.widgets import QSizePolicy
+                content_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            except Exception:
+                pass
+            layout.addWidget(content_widget, 1)
         
         # ボタンエリア
         self.setup_buttons(layout)
@@ -2762,10 +2771,10 @@ class _ModelFetchWorker(QThread):
             self.failed.emit(str(e))
 
 
-def create_ai_settings_widget(parent=None):
+def create_ai_settings_widget(parent=None, use_internal_scroll: bool = True):
     """AI設定ウィジェットを作成"""
     try:
-        return AISettingsWidget(parent)
+        return AISettingsWidget(parent, use_internal_scroll=use_internal_scroll)
     except Exception as e:
         logger.error(f"AI設定ウィジェット作成エラー: {e}")
         return None

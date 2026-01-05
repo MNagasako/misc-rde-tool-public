@@ -6,6 +6,7 @@ AI拡張機能のボタン設定とプロンプトファイルの管理を行う
 import os
 import json
 import re
+import copy
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -465,21 +466,42 @@ def load_ai_extension_config():
         config_path = get_dynamic_file_path("input/ai/ai_ext_conf.json")
         
         if os.path.exists(config_path):
+            # メモ化（同一プロセス内での重複読み込みを避ける）
+            # - UI起動中に複数箇所から参照されるため、ここでI/Oを抑制する
+            # - 呼び出し側が辞書を変更しても良いように deepcopy で返す
+            global _AI_EXT_CONF_CACHE_PATH, _AI_EXT_CONF_CACHE_MTIME, _AI_EXT_CONF_CACHE_DATA
+
+            try:
+                mtime = os.path.getmtime(config_path)
+            except Exception:
+                mtime = None
+
+            if (
+                _AI_EXT_CONF_CACHE_DATA is not None
+                and _AI_EXT_CONF_CACHE_PATH == config_path
+                and _AI_EXT_CONF_CACHE_MTIME == mtime
+            ):
+                return copy.deepcopy(_AI_EXT_CONF_CACHE_DATA)
+
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = json.load(f)
-                logger.info("AI拡張設定ファイルを読み込みました: %s", config_path)
+            logger.info("AI拡張設定ファイルを読み込みました: %s", config_path)
 
-                # Backward compatible normalization: add target_kind in-memory
-                try:
-                    for btn in config.get('buttons', []) or []:
-                        if isinstance(btn, dict):
-                            btn.setdefault('target_kind', infer_ai_suggest_target_kind(btn))
-                    for btn in config.get('default_buttons', []) or []:
-                        if isinstance(btn, dict):
-                            btn.setdefault('target_kind', infer_ai_suggest_target_kind(btn))
-                except Exception:
-                    pass
-                return config
+            # Backward compatible normalization: add target_kind in-memory
+            try:
+                for btn in config.get('buttons', []) or []:
+                    if isinstance(btn, dict):
+                        btn.setdefault('target_kind', infer_ai_suggest_target_kind(btn))
+                for btn in config.get('default_buttons', []) or []:
+                    if isinstance(btn, dict):
+                        btn.setdefault('target_kind', infer_ai_suggest_target_kind(btn))
+            except Exception:
+                pass
+
+            _AI_EXT_CONF_CACHE_PATH = config_path
+            _AI_EXT_CONF_CACHE_MTIME = mtime
+            _AI_EXT_CONF_CACHE_DATA = config
+            return copy.deepcopy(config)
         else:
             logger.info("AI拡張設定ファイルが見つかりません。デフォルト設定を使用します: %s", config_path)
             return get_default_ai_extension_config()
@@ -488,6 +510,12 @@ def load_ai_extension_config():
         logger.error("AI拡張設定読み込みエラー: %s", e)
         logger.info("デフォルト設定を使用します")
         return get_default_ai_extension_config()
+
+
+# load_ai_extension_config() のキャッシュ（mtimeで無効化）
+_AI_EXT_CONF_CACHE_PATH: str | None = None
+_AI_EXT_CONF_CACHE_MTIME: float | None = None
+_AI_EXT_CONF_CACHE_DATA: dict | None = None
 
 
 def normalize_results_json_keys(keys) -> List[str]:

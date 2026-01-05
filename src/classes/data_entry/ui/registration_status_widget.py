@@ -47,7 +47,6 @@ class _SortableItem(QTableWidgetItem):
 
 
 class _EntryCacheWorker(QThread):
-    finished = Signal()
 
     def __init__(self, entry_ids: list[str]):
         super().__init__()
@@ -58,16 +57,13 @@ class _EntryCacheWorker(QThread):
         self._cancelled = True
 
     def run(self):
-        try:
-            for entry_id in self._entry_ids:
-                if self._cancelled:
-                    break
-                try:
-                    regsvc.ensure_entry_detail_cached(entry_id)
-                except Exception as exc:
-                    logger.debug("[登録状況] 個別JSONキャッシュに失敗: id=%s err=%s", entry_id, exc)
-        finally:
-            self.finished.emit()
+        for entry_id in self._entry_ids:
+            if self._cancelled:
+                break
+            try:
+                regsvc.ensure_entry_detail_cached(entry_id)
+            except Exception as exc:
+                logger.debug("[登録状況] 個別JSONキャッシュに失敗: id=%s err=%s", entry_id, exc)
 
 
 class _EntryPollWorker(QThread):
@@ -121,6 +117,9 @@ class RegistrationStatusWidget(QWidget):
         self._poll_timers: dict[str, QTimer] = {}
         self._poll_remaining: dict[str, int] = {}
         self._poll_workers: dict[str, _EntryPollWorker] = {}
+        # 実行中のQThread参照を保持してGC/破棄によるクラッシュを防ぐ。
+        # （"QThread: Destroyed while thread is still running" 対策）
+        self._retired_workers: set[QThread] = set()
         # 注意: テーブルはユーザーソートで行順が変わるため、entry_id→row の固定マップは使わない
         self._row_by_entry_id: dict[str, int] = {}
         if parent is None:
@@ -226,6 +225,69 @@ class RegistrationStatusWidget(QWidget):
         self.filter_creator.textChanged.connect(self._apply_filters)
         self.filter_inst.textChanged.connect(self._apply_filters)
 
+        # 破棄時にスレッドが残っているとクラッシュするため、念のため停止処理を仕込む。
+        try:
+            self.destroyed.connect(self._on_destroyed)
+        except Exception:
+            pass
+
+    def _retire_worker(self, worker: QThread | None) -> None:
+        if worker is None:
+            return
+        self._retired_workers.add(worker)
+
+        def _cleanup():
+            try:
+                self._retired_workers.discard(worker)
+            except Exception:
+                pass
+            try:
+                worker.deleteLater()
+            except Exception:
+                pass
+
+        # QThread.finished は built-in signal。_EntryCacheWorker は同名を上書きしているが
+        # いずれも .finished で接続できる想定。
+        try:
+            worker.finished.connect(_cleanup)
+        except Exception:
+            pass
+
+    def _on_destroyed(self, *_args):
+        # QWidget破棄直前に残スレッドを止めないと、Qtが異常終了する可能性がある。
+        try:
+            self._finalize_threads(wait_ms=5000)
+        except Exception:
+            pass
+
+    def _finalize_threads(self, wait_ms: int = 2000) -> None:
+        # タイマー/ポーリング停止
+        try:
+            self._stop_all_polling()
+        except Exception:
+            pass
+
+        # ワーカー停止要求
+        self._cancel_cache_worker(retire=True)
+        self._cancel_load_worker(retire=True)
+
+        # まだ走っているスレッドがあれば待機（最後の手段で terminate）
+        workers = set(self._retired_workers)
+        if self._cache_worker is not None:
+            workers.add(self._cache_worker)
+        if self._load_worker is not None:
+            workers.add(self._load_worker)
+        for w in list(workers):
+            try:
+                if w.isRunning():
+                    w.wait(wait_ms)
+                if w.isRunning():
+                    # キャンセル不能なブロッキングが残る場合の最終手段
+                    w.terminate()
+                    w.wait(1000)
+            except Exception:
+                pass
+
     def _is_terminal_status(self, status: str | None) -> bool:
         s = (status or '').strip().upper()
         return s in {"COMPLETED", "FAILED", "CANCELLED", "CANCELED"}
@@ -250,7 +312,7 @@ class RegistrationStatusWidget(QWidget):
             return
         # キャッシュ読み込みは別スレッドで実行し、タブ選択時にUIを固めない。
         try:
-            self._cancel_load_worker()
+            self._cancel_load_worker(retire=True)
             self.lbl_summary.setText("キャッシュ読込中…")
             self._load_worker = _EntriesLoadWorker()
             self._load_worker.loaded.connect(self._on_entries_loaded)
@@ -263,18 +325,25 @@ class RegistrationStatusWidget(QWidget):
         try:
             self._is_visible = False
             self._stop_all_polling()
-            self._cancel_cache_worker()
-            self._cancel_load_worker()
+            # 非表示化ではUI操作不能になるだけで破棄ではないため、
+            # 実行中スレッドは参照を保持したままキャンセル要求だけ行う。
+            self._cancel_cache_worker(retire=True)
+            self._cancel_load_worker(retire=True)
         finally:
             super().hideEvent(event)
 
-    def _cancel_load_worker(self):
+    def _cancel_load_worker(self, *, retire: bool = False):
+        worker = self._load_worker
+        self._load_worker = None
+        if worker is None:
+            return
         try:
-            if self._load_worker and self._load_worker.isRunning():
-                self._load_worker.cancel()
+            if worker.isRunning() and hasattr(worker, 'cancel'):
+                worker.cancel()
         except Exception:
             pass
-        self._load_worker = None
+        if retire and getattr(worker, 'isRunning', lambda: False)():
+            self._retire_worker(worker)
 
     @Slot(object)
     def _on_entries_loaded(self, entries):
@@ -399,20 +468,26 @@ class RegistrationStatusWidget(QWidget):
             entry_ids = [e.get('id') for e in entries if e.get('id')]
             if not entry_ids:
                 return
-            self._cancel_cache_worker()
+            self._cancel_cache_worker(retire=True)
             self._cache_worker = _EntryCacheWorker(entry_ids)
-            self._cache_worker.finished.connect(lambda: None)
+            # 完了後に参照を外す
+            self._cache_worker.finished.connect(lambda: setattr(self, '_cache_worker', None))
             self._cache_worker.start()
         except Exception as exc:
             logger.debug("[登録状況] 個別JSONキャッシュワーカー起動に失敗: %s", exc)
 
-    def _cancel_cache_worker(self):
+    def _cancel_cache_worker(self, *, retire: bool = False):
+        worker = self._cache_worker
+        self._cache_worker = None
+        if worker is None:
+            return
         try:
-            if self._cache_worker and self._cache_worker.isRunning():
-                self._cache_worker.cancel()
+            if worker.isRunning() and hasattr(worker, 'cancel'):
+                worker.cancel()
         except Exception:
             pass
-        self._cache_worker = None
+        if retire and getattr(worker, 'isRunning', lambda: False)():
+            self._retire_worker(worker)
 
     def update_cache_info_label(self):
         try:
@@ -737,8 +812,8 @@ class RegistrationStatusWidget(QWidget):
         self._poll_remaining.pop(entry_id, None)
         worker = self._poll_workers.pop(entry_id, None)
         if worker and worker.isRunning():
-            # 強制停止はしない（完了通知だけ捨てる）
-            pass
+            # 強制停止はしない（完了通知だけ捨てる）が、参照を維持しないとGCでクラッシュする。
+            self._retire_worker(worker)
 
         if reset_button:
             row = self._find_row_by_entry_id(entry_id)

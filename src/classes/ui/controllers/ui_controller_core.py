@@ -854,7 +854,11 @@ class UIControllerCore:
                 pass
             
             # タブ統合機能を追加
-            self._integrate_settings_tab()
+            # 既定ではタブ統合は無効（意図しない追加ウィンドウ/レイアウト崩れを避ける）
+            if self._should_enable_tab_integrator():
+                self._integrate_settings_tab()
+            else:
+                logger.debug("タブ統合機能は無効化されています (app.enable_tab_integrator=false)")
             
         except Exception as e:
             logger.error("メインレイアウト設定エラー: %s", e)
@@ -922,6 +926,20 @@ class UIControllerCore:
             logger.debug("タブ統合機能のインポートに失敗: %s", e)
         except Exception as e:
             logger.error("設定タブ統合エラー: %s", e)
+
+    def _should_enable_tab_integrator(self) -> bool:
+        """タブ統合機能を有効にするか判定する。
+
+        既定: False
+        有効化: config の app.enable_tab_integrator = true
+        """
+        try:
+            cfg = getattr(self.parent, 'config_manager', None)
+            if cfg is None:
+                return False
+            return bool(cfg.get('app.enable_tab_integrator', False))
+        except Exception:
+            return False
     
     def finalize_window_setup(self):
         """

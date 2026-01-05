@@ -4,7 +4,6 @@ Browserクラスから UI制御ロジックを分離
 統一メニュー表示・位置固定・フォント自動調整機能・レスポンシブデザイン対応・テキストエリア拡大機能
 【注意】バージョン更新時はconfig/common.py のREVISIONも要確認
 """
-import pandas as pd
 import logging
 
 from qt_compat.widgets import (
@@ -693,6 +692,36 @@ class UIController(UIControllerCore):
         # disconnect() on an unconnected signal emits RuntimeWarning on some PySide builds.
         self._request_analyzer_webview_monitoring_connected = False
         self._request_analyzer_overlay_prevention_connected = False
+
+        # Heavy UI preloads (improves "first click" latency)
+        self._ai_suggestion_dialog_cls = None
+
+        # テスト実行中はタイミングが不安定になりやすいため自動プリロードしない
+        try:
+            import os
+
+            if not os.environ.get("PYTEST_CURRENT_TEST"):
+                from qt_compat.core import QTimer
+
+                QTimer.singleShot(1500, self.preload_ai_suggestion_dialog)
+        except Exception:
+            pass
+
+    def preload_ai_suggestion_dialog(self) -> None:
+        """Preload heavy AI dialog module to reduce first-open latency."""
+        try:
+            self._get_ai_suggestion_dialog_class()
+        except Exception:
+            # 失敗しても実運用に影響させない
+            pass
+
+    def _get_ai_suggestion_dialog_class(self):
+        if self._ai_suggestion_dialog_cls is not None:
+            return self._ai_suggestion_dialog_cls
+        from classes.dataset.ui.ai_suggestion_dialog import AISuggestionDialog
+
+        self._ai_suggestion_dialog_cls = AISuggestionDialog
+        return AISuggestionDialog
     
     @property
     def bearer_token(self):
@@ -903,20 +932,39 @@ class UIController(UIControllerCore):
 
         is_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
-        # --- 機能切替時はアスペクト比固定・横幅固定を必ずデフォルト値に戻す ---
+        # --- 機能切替時のサイズ制約 ---
+        # 既定ではWebView用途の横幅固定を戻すが、設定モードは常時リサイズ可とする。
         top_level = self.parent if hasattr(self, 'parent') else None
         if top_level:
-            webview_width = getattr(top_level, '_webview_fixed_width', 900)
-            menu_width = 120
-            margin = 40
-            fixed_width = webview_width + menu_width + margin
-            if hasattr(top_level, 'setFixedWidth'):
-                top_level.setFixedWidth(fixed_width)
-            if hasattr(top_level, '_fixed_aspect_ratio'):
-                if hasattr(top_level, 'height') and top_level.height() != 0:
-                    top_level._fixed_aspect_ratio = fixed_width / top_level.height()
-                else:
-                    top_level._fixed_aspect_ratio = 1.0
+            if mode == "settings":
+                # 横幅固定・アスペクト比固定を解除
+                try:
+                    if hasattr(top_level, '_fixed_aspect_ratio'):
+                        top_level._fixed_aspect_ratio = None
+                    if hasattr(top_level, 'setMinimumSize'):
+                        top_level.setMinimumSize(200, 200)
+                    if hasattr(top_level, 'setMaximumSize'):
+                        top_level.setMaximumSize(16777215, 16777215)
+                    if hasattr(top_level, 'setMinimumWidth'):
+                        top_level.setMinimumWidth(200)
+                    if hasattr(top_level, 'setMaximumWidth'):
+                        top_level.setMaximumWidth(16777215)
+                    if hasattr(top_level, 'showNormal'):
+                        top_level.showNormal()
+                except Exception:
+                    pass
+            else:
+                webview_width = getattr(top_level, '_webview_fixed_width', 900)
+                menu_width = 120
+                margin = 40
+                fixed_width = webview_width + menu_width + margin
+                if hasattr(top_level, 'setFixedWidth'):
+                    top_level.setFixedWidth(fixed_width)
+                if hasattr(top_level, '_fixed_aspect_ratio'):
+                    if hasattr(top_level, 'height') and top_level.height() != 0:
+                        top_level._fixed_aspect_ratio = fixed_width / top_level.height()
+                    else:
+                        top_level._fixed_aspect_ratio = 1.0
 
 
 
@@ -956,6 +1004,20 @@ class UIController(UIControllerCore):
             webview_widget.setVisible(False)
             # NOTE: keep size constraints untouched; visibility is enough.
 
+        # 右側レイアウト（webview_widget / menu_area_widget）の伸長配分を調整
+        # WebViewを非表示にしたモードでは menu_area_widget が全高を使えるようにする
+        try:
+            right_widget = self.parent.findChild(QWidget, 'right_widget')
+            if right_widget and hasattr(right_widget, 'layout'):
+                right_layout = right_widget.layout()
+                if right_layout and hasattr(right_layout, 'setStretchFactor'):
+                    menu_area_widget = getattr(self.parent, 'menu_area_widget', None)
+                    if webview_widget and menu_area_widget:
+                        right_layout.setStretchFactor(webview_widget, 0)
+                        right_layout.setStretchFactor(menu_area_widget, 1)
+        except Exception:
+            pass
+
         # 前のモードがリクエスト解析だった場合はクリーンアップ
         if self.current_mode == "request_analyzer":
             self.cleanup_request_analyzer_mode()
@@ -991,7 +1053,17 @@ class UIController(UIControllerCore):
             # 対応するウィジェットを表示
             widget = self.get_mode_widget(mode)
             if widget:
-                self.parent.menu_area_layout.addWidget(widget)
+                try:
+                    from qt_compat.widgets import QSizePolicy
+                    widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+                except Exception:
+                    pass
+
+                # 縦方向に確実に伸長させる（内容が少ない場合でもタブ領域がウィンドウ高を使う）
+                try:
+                    self.parent.menu_area_layout.addWidget(widget, 1)
+                except Exception:
+                    self.parent.menu_area_layout.addWidget(widget)
 
                 # 描画の「初回Paint」と「収束」を計測（ロジック完了後も描画が続くケースの切り分け）
                 if (
@@ -1062,6 +1134,19 @@ class UIController(UIControllerCore):
                 webview_widget.setVisible(True)
                 webview_widget.setMinimumHeight(200)
                 webview_widget.setMaximumHeight(16777215)
+
+            # login はWebViewを主役に戻す
+            try:
+                right_widget = self.parent.findChild(QWidget, 'right_widget')
+                if right_widget and hasattr(right_widget, 'layout'):
+                    right_layout = right_widget.layout()
+                    if right_layout and hasattr(right_layout, 'setStretchFactor'):
+                        menu_area_widget = getattr(self.parent, 'menu_area_widget', None)
+                        if webview_widget and menu_area_widget:
+                            right_layout.setStretchFactor(webview_widget, 3)
+                            right_layout.setStretchFactor(menu_area_widget, 1)
+            except Exception:
+                pass
             if hasattr(self.parent, 'overlay_manager'):
                 self.parent.overlay_manager.hide_overlay()
             
@@ -1091,6 +1176,19 @@ class UIController(UIControllerCore):
             if webview_widget:
                 webview_widget.setVisible(False)
                 # NOTE: visibility is enough; avoid fixedHeight(0).
+
+            # 設定/各機能モードでは menu_area_widget を全高に
+            try:
+                right_widget = self.parent.findChild(QWidget, 'right_widget')
+                if right_widget and hasattr(right_widget, 'layout'):
+                    right_layout = right_widget.layout()
+                    if right_layout and hasattr(right_layout, 'setStretchFactor'):
+                        menu_area_widget = getattr(self.parent, 'menu_area_widget', None)
+                        if webview_widget and menu_area_widget:
+                            right_layout.setStretchFactor(webview_widget, 0)
+                            right_layout.setStretchFactor(menu_area_widget, 1)
+            except Exception:
+                pass
             if hasattr(self.parent, 'overlay_manager'):
                 self.parent.overlay_manager.hide_overlay()
 
@@ -1729,31 +1827,6 @@ class UIController(UIControllerCore):
             # bearer_tokenを個別に設定
             if hasattr(self._fetch2_tab_widget, 'set_bearer_token') and bearer_token:
                 self._fetch2_tab_widget.set_bearer_token(bearer_token)
-
-            # 重要: 表示後にスクロールバーが伸び縮みする原因になりやすい「重いフィルタUIの遅延構築」を、
-            # mode widget を画面に載せる前に完了させておく（表示開始前に時間がかかるのは許容）。
-            try:
-                ensure = getattr(self._fetch2_tab_widget, '_ensure_file_filter_widget', None)
-                if callable(ensure):
-                    if PerfMonitor is not None:
-                        with PerfMonitor.span("data_fetch2:prebuild_file_filter", logger=perf_logger):
-                            ensure()
-                    else:
-                        ensure()
-            except Exception:
-                pass
-
-            # フィルタの初期状態（デフォルト）をデータ取得タブへ反映（表示後の追従更新を減らす）
-            try:
-                init_sync = getattr(self._fetch2_tab_widget, 'init_filter_state', None)
-                if callable(init_sync):
-                    if PerfMonitor is not None:
-                        with PerfMonitor.span("data_fetch2:sync_initial_filter_state", logger=perf_logger):
-                            init_sync()
-                    else:
-                        init_sync()
-            except Exception:
-                pass
 
             # get_mode_widget() は末尾に addStretch() を入れるため、
             # ここで伸びるウィジェットにストレッチを与えないと下に大きな余白が残る。
@@ -3274,6 +3347,8 @@ class UIController(UIControllerCore):
     def _update_task_info_display(self, task_id):
         """課題情報表示を更新"""
         try:
+            import pandas as pd
+
             exp_data = self._load_experiment_data_for_task_list()
             logger.debug("exp_data loaded: %s records", len(exp_data) if exp_data else 0)
             
@@ -4612,7 +4687,7 @@ class UIController(UIControllerCore):
     def _launch_ai_extension_dialog_direct(self):
         """AI拡張ダイアログを直接起動（簡素化版）"""
         try:
-            from classes.dataset.ui.ai_suggestion_dialog import AISuggestionDialog
+            AISuggestionDialog = self._get_ai_suggestion_dialog_class()
             
             logger.debug("AI拡張ダイアログを直接起動")
             

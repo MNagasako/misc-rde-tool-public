@@ -35,9 +35,10 @@ def show_progress_dialog(parent, title, worker, show_completion_dialog=True):
     progress_dialog.setLabelText("処理を開始しています...")
     progress_dialog.setRange(0, 100)
     progress_dialog.setValue(0)
+    # 短時間処理で一瞬だけ表示されるのを避ける（必要ならQt側が自動で表示）
+    progress_dialog.setMinimumDuration(700)
     progress_dialog.setWindowModality(Qt.WindowModal)
     progress_dialog.setCancelButtonText("キャンセル")
-    progress_dialog.show()
     
     # プログレス更新の接続
     def update_progress(value, message):

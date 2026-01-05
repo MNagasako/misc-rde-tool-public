@@ -2892,7 +2892,12 @@ class BatchRegisterPreviewDialog(QDialog):
             summary_text += f"総サイズ: {self._format_size(total_size)}"
             
             if duplicate_count > 0:
-                summary_text += f" | <font color='red'>重複ファイル: {duplicate_count}個</font>"
+                summary_text += (
+                    " | "
+                    f"<span style='color: {get_color(ThemeKey.TEXT_ERROR)};'>"
+                    f"重複ファイル: {duplicate_count}個"
+                    "</span>"
+                )
             
             self.summary_label.setText(summary_text)
             
@@ -3898,7 +3903,12 @@ class BatchRegisterPreviewDialog(QDialog):
 • 総サイズ: {self._format_size(total_size)}"""
             
             if duplicate_count > 0:
-                summary_text += f"\n• <font color='red'>⚠ 重複ファイル: {duplicate_count}個</font>"
+                summary_text += (
+                    "\n• "
+                    f"<span style='color: {get_color(ThemeKey.TEXT_ERROR)};'>"
+                    f"⚠ 重複ファイル: {duplicate_count}個"
+                    "</span>"
+                )
             
             if datasets_count > 0:
                 summary_text += f"\n\n対象データセット: {', '.join(list(dataset_names)[:5])}"

@@ -76,12 +76,23 @@ class ListingTabBase(QWidget):
     empty_state_message: str = "データが見つかりません"
     columns: Sequence[ListingColumn] = ()
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent: Optional[QWidget] = None, *, defer_initial_refresh: bool = False):
         super().__init__(parent)
         self._current_source: Optional[Path] = None
         self._raw_records: List[dict] = []
         self._setup_ui()
-        self.refresh_from_disk()
+        if defer_initial_refresh:
+            # 初期表示を軽くするため、初回読み込みはイベントループに戻してから実行する。
+            # 直接refreshすると、タブ切替やウィジェット生成がブロックされやすい。
+            try:
+                from qt_compat.core import QTimer
+
+                self.status_label.setText("読み込み中...")
+                QTimer.singleShot(0, self.refresh_from_disk)
+            except Exception:
+                self.refresh_from_disk()
+        else:
+            self.refresh_from_disk()
 
     # ------------------------------------------------------------------
     # UI construction

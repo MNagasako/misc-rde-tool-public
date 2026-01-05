@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-ARIM RDE Tool v2.4.4 - PySide6によるRDE→ARIMデータポータル移行ツール
+ARIM RDE Tool v2.4.5 - PySide6によるRDE→ARIMデータポータル移行ツール
 
 主要機能:
 - RDEシステムへの自動ログイン・データセット一括取得・画像保存
@@ -90,7 +90,7 @@ log_manager = get_log_manager()
 logger = get_logger("RDE_WebView")
 # スプラッシュスクリーン
 try:
-    from classes.utils.splash_screen import show_splash_screen
+    from classes.utils.splash_screen import show_splash_screen, is_splash_enabled
     SPLASH_AVAILABLE = True
 except Exception as e:
     SPLASH_AVAILABLE = False
@@ -98,6 +98,9 @@ except Exception as e:
     def show_splash_screen():
         """スプラッシュスクリーン無効時のダミー関数"""
         return
+
+    def is_splash_enabled() -> bool:
+        return False
 
 class Browser(QWidget):
     @debug_log
@@ -1047,17 +1050,30 @@ def main():
                 logger.debug("src配下の__version__定義: なし")
             sys.exit(0)
         
-        if 'PerfMonitor' in locals() and PerfMonitor is not None:
-            with PerfMonitor.span("startup:show_splash", logger=logger):
+        # 余計なトップレベルウィンドウ（tkinterスプラッシュ）が出る問題を避けるため、
+        # 既定ではスプラッシュを表示しない（設定/環境変数で明示的に有効化した場合のみ表示）。
+        if SPLASH_AVAILABLE and is_splash_enabled():
+            if 'PerfMonitor' in locals() and PerfMonitor is not None:
+                with PerfMonitor.span("startup:show_splash", logger=logger):
+                    show_splash_screen()
+            else:
                 show_splash_screen()
-        else:
-            show_splash_screen()
 
         if 'PerfMonitor' in locals() and PerfMonitor is not None:
             with PerfMonitor.span("startup:create_qapplication", logger=logger):
                 app = QApplication(sys.argv)
         else:
             app = QApplication(sys.argv)
+
+        # DEBUG時: 一瞬だけ出る余計なトップレベルウィンドウの発生源を特定する
+        # （例: Windowsでタイトル"python"の空ウィンドウが表示されるケース）
+        try:
+            if args.log_level == 'DEBUG' and not os.environ.get("PYTEST_CURRENT_TEST"):
+                from classes.utils.window_show_probe import install_window_show_probe
+
+                install_window_show_probe(logger=logger)
+        except Exception:
+            logger.debug("window show probe install failed", exc_info=True)
 
         if 'PerfMonitor' in locals() and PerfMonitor is not None:
             with PerfMonitor.span("startup:create_browser", logger=logger, test_mode=args.test, auto_close=args.auto_close):

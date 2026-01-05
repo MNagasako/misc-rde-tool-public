@@ -7,13 +7,60 @@ import logging
 # ロガー設定
 logger = logging.getLogger(__name__)
 
-from PIL import Image, ImageTk
-import tkinter as tk
-import time
 import random
 
-def show_splash_screen():
+from classes.managers.app_config_manager import get_config_manager
+
+
+def _env_truthy(value: str | None) -> bool:
+    if value is None:
+        return False
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def is_splash_enabled() -> bool:
+    """スプラッシュ表示の有効/無効を判定。
+
+    既定は無効。
+    - `RDE_DISABLE_SPLASH_SCREEN` が truthy なら常に無効
+    - `RDE_ENABLE_SPLASH_SCREEN` が truthy なら常に有効
+    - それ以外は config `app.enable_splash_screen` を参照
+    """
     try:
+        if _env_truthy(os.environ.get("RDE_DISABLE_SPLASH_SCREEN")):
+            return False
+        if _env_truthy(os.environ.get("RDE_ENABLE_SPLASH_SCREEN")):
+            return True
+    except Exception:
+        # env 参照に失敗しても既定有効
+        return True
+
+    try:
+        cfg = get_config_manager()
+        return bool(cfg.get("app.enable_splash_screen", False))
+    except Exception:
+        return False
+
+def show_splash_screen():
+    # 判定側で無効の場合は何もしない
+    if not is_splash_enabled():
+        return
+
+    # tkinter/Pillow は必要時のみ import する（環境差異に強くする）
+    try:
+        import tkinter as tk
+        from PIL import Image, ImageTk
+    except Exception as e:
+        logger.warning("スプラッシュ画面の依存関係 import に失敗: %s", e)
+        return
+
+    try:
+        from classes.theme import ThemeKey, get_color
+
+        text_color = get_color(ThemeKey.TEXT_PRIMARY)
+        accent_color = get_color(ThemeKey.TEXT_LINK)
+        muted_color = get_color(ThemeKey.TEXT_MUTED)
+
         root = tk.Tk()
         root.title("スプラッシュ画面")
         screen_width = root.winfo_screenwidth()
@@ -58,10 +105,10 @@ def show_splash_screen():
         except Exception:
             pass
         # テキストは必ず表示
-        canvas.create_text(200, 280, text="ARIMデータカタログ", fill="black", font=("Arial", 12, "bold"))
-        canvas.create_text(200, 300, text="作成支援ツール（仮）", fill="black", font=("Arial", 12, "bold"))
-        canvas.create_text(200, 320, text=f"Version {REVISION}", fill="blue", font=("Arial", 10, "bold"))
-        canvas.create_text(200, 340, text="GitHub: MNagasako/misc-rde-tool-public", fill="black", font=("Arial", 10))
+        canvas.create_text(200, 280, text="ARIMデータカタログ", fill=text_color, font=("Arial", 12, "bold"))
+        canvas.create_text(200, 300, text="作成支援ツール（仮）", fill=text_color, font=("Arial", 12, "bold"))
+        canvas.create_text(200, 320, text=f"Version {REVISION}", fill=accent_color, font=("Arial", 10, "bold"))
+        canvas.create_text(200, 340, text="GitHub: MNagasako/misc-rde-tool-public", fill=muted_color, font=("Arial", 10))
         root.after(2000, root.destroy)
         root.mainloop()
     except Exception as e:

@@ -197,7 +197,7 @@ def read_latest_result(target_kind: str, target_key: str, button_id: str) -> Opt
         if not isinstance(rec, dict):
             continue
         ts = (rec.get('timestamp') or '').strip()
-        ts = re.sub(r'\.\d+(?=[+-]\\d\\d:\\d\\d$)', '', ts)
+        ts = re.sub(r'\.\d+(?=[+-][0-9]{2}:[0-9]{2}$)', '', ts)
         if ts and ts > best_ts:
             best_ts = ts
             best = rec
@@ -278,7 +278,7 @@ def list_latest_results(target_kind: str, button_id: Optional[str] = None) -> Li
     def _ts_key(r: Dict[str, Any]) -> str:
         s = (r.get('timestamp') or '').strip()
         # normalize to improve ordering if fractional seconds vary
-        s = re.sub(r'\.\d+(?=[+-]\\d\d:\\d\d$)', '', s)
+        s = re.sub(r'\.\d+(?=[+-][0-9]{2}:[0-9]{2}$)', '', s)
         return s
 
     results.sort(key=_ts_key, reverse=True)

@@ -1247,7 +1247,7 @@ class FileSetTableWidget(QTableWidget):
         status_label = QLabel("○" if mapping_file_exists else "×")
         status_label.setStyleSheet(f"""
             QLabel {{
-                color: {'green' if mapping_file_exists else 'red'};
+                color: {get_color(ThemeKey.TEXT_SUCCESS) if mapping_file_exists else get_color(ThemeKey.TEXT_ERROR)};
                 font-weight: bold;
                 font-size: 12px;
             }}

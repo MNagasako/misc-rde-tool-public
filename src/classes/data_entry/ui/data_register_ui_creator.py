@@ -26,16 +26,24 @@ from classes.theme.theme_manager import get_color
 from qt_compat.gui import QFont
 from qt_compat.core import QTimer, Qt
 from config.common import get_dynamic_file_path
-from classes.data_entry.util.template_format_validator import TemplateFormatValidator
-from classes.utils.dataset_launch_manager import DatasetLaunchManager, DatasetPayload
 from classes.managers.log_manager import get_logger
-from classes.dataset.util.dataset_dropdown_util import get_current_user_id
 
 # ロガー設定
 logger = get_logger(__name__)
-from classes.data_entry.util.data_entry_forms import create_schema_form_from_path
-from classes.data_entry.util.data_entry_forms_fixed import create_sample_form
-from classes.data_entry.util.group_member_loader import load_group_members
+ 
+
+def create_sample_form(*args, **kwargs):
+    """試料情報フォーム生成（後方互換ラッパー）。
+
+    以前は本モジュールに存在していたため、テストや他モジュールが
+    `classes.data_entry.ui.data_register_ui_creator.create_sample_form` を参照する。
+    実装は util 側にあるので遅延 import で委譲する。
+    """
+
+    from classes.data_entry.util.data_entry_forms_fixed import create_sample_form as _impl
+
+    return _impl(*args, **kwargs)
+
 
 
 def _set_required_label_state(label: QLabel, *, ok: bool) -> None:
@@ -85,11 +93,10 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
     Returns:
         QWidget: データ登録用ウィジェット
     """
+    # NOTE: ここで setVisible(True) すると、まだレイアウトに組み込まれていない QWidget が
+    # トップレベル化して一瞬だけ表示される（Windowsで "python" 空ウィンドウになる）ため禁止。
     widget = QWidget()
-    # pytest環境では強制表示がWindows側で不安定になることがあるため抑制
-    if not os.environ.get("PYTEST_CURRENT_TEST"):
-        widget.setVisible(True)  # 明示的に表示設定
-    layout = QVBoxLayout()
+    layout = QVBoxLayout(widget)
     layout.setContentsMargins(12, 12, 12, 12)
     layout.setSpacing(8)
     
@@ -115,7 +122,7 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
             dataset_combo_font = QFont("Yu Gothic UI", 11)
             dataset_dropdown.dataset_dropdown.setFont(dataset_combo_font)
             dataset_dropdown.dataset_dropdown.setStyleSheet("QComboBox { font-size: 12px; padding: 4px; }")
-        dataset_label = QLabel("📊 データセット選択")
+        dataset_label = QLabel("📊 データセット選択", widget)
         layout.insertWidget(0, dataset_label)
         layout.insertWidget(1, dataset_dropdown)
         parent_controller.dataset_dropdown = dataset_dropdown
@@ -126,18 +133,18 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
             from config.common import INFO_JSON_PATH, DATASET_JSON_PATH
             dataset_dropdown = create_dataset_dropdown_with_user(DATASET_JSON_PATH, INFO_JSON_PATH, widget)
             dataset_dropdown.setMinimumWidth(320)
-            dataset_label = QLabel("📊 データセット選択")
+            dataset_label = QLabel("📊 データセット選択", widget)
             layout.insertWidget(0, dataset_label)
             layout.insertWidget(1, dataset_dropdown)
             parent_controller.dataset_dropdown = dataset_dropdown
         except Exception as fallback_e:
             parent_controller.show_error(f"フォールバックドロップダウンも失敗: {fallback_e}")
-            dataset_dropdown = QLabel("データ登録機能が利用できません")
+            dataset_dropdown = QLabel("データ登録機能が利用できません", widget)
             layout.insertWidget(0, dataset_dropdown)
             parent_controller.dataset_dropdown = dataset_dropdown
     except Exception as e:
         parent_controller.show_error(f"データ登録画面の作成でエラーが発生しました: {e}")
-        dataset_dropdown = QLabel("データ登録機能が利用できません")
+        dataset_dropdown = QLabel("データ登録機能が利用できません", widget)
         layout.insertWidget(0, dataset_dropdown)
         parent_controller.dataset_dropdown = dataset_dropdown
 
@@ -158,10 +165,12 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
     schema_form_widget = None
     
     # --- ファイル検証用バリデータ ---
+    from classes.data_entry.util.template_format_validator import TemplateFormatValidator
+
     validator = TemplateFormatValidator()
     
     # --- テンプレート対応拡張子表示ラベル ---
-    template_format_label = QLabel("データセットを選択してください")
+    template_format_label = QLabel("データセットを選択してください", widget)
     template_format_label.setWordWrap(True)
     template_format_label.setStyleSheet(
         f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
@@ -172,7 +181,7 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
     parent_controller.template_format_label = template_format_label
     
     # --- ファイル検証結果表示ラベル ---
-    file_validation_label = QLabel("")
+    file_validation_label = QLabel("", widget)
     file_validation_label.setWordWrap(True)
     file_validation_label.setStyleSheet(
         f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
@@ -198,6 +207,12 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
         nonlocal schema_form_widget
         if combo is None:
             return
+
+        # 選択時にのみ必要な重い依存を import（初回表示を軽くする）
+        from classes.data_entry.util.data_entry_forms import create_schema_form_from_path
+        from classes.data_entry.util.group_member_loader import load_group_members
+        from classes.dataset.util.dataset_dropdown_util import get_current_user_id
+
         # --- 既存の試料フォーム・スキーマフォームを削除 ---
         if hasattr(parent_controller, 'sample_form_widget') and parent_controller.sample_form_widget:
             safe_remove_widget(layout, parent_controller.sample_form_widget)
@@ -318,27 +333,36 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
         if invoice_schema_exists == 'あり' and invoice_schema_path:
             form = create_schema_form_from_path(invoice_schema_path, widget)
             if form:
+                # 一瞬だけ別ウィンドウとして表示されるのを防ぐため、親とフラグを再強制してからレイアウトへ挿入する。
+                try:
+                    form.setVisible(False)
+                    form.setParent(widget)
+                    form.setWindowFlags(Qt.Widget)
+                    form.setWindowModality(Qt.NonModal)
+                except Exception:
+                    pass
+
+                try:
+                    widget.setUpdatesEnabled(False)
+                except Exception:
+                    pass
+
                 layout.insertWidget(5, form)
                 schema_form_widget = form
                 parent_controller.schema_form_widget = schema_form_widget
-                form.setVisible(True)
-                widget.setVisible(True)
-                widget.update()
-                layout.update()
-                widget.repaint()
-                def safe_show_schema_form():
-                    if hasattr(parent_controller, 'schema_form_widget') and parent_controller.schema_form_widget is not None:
-                        try:
-                            parent_controller.schema_form_widget.setVisible(True)
-                        except RuntimeError:
-                            pass
-                def safe_update_widget_schema():
-                    try:
-                        widget.update()
-                    except RuntimeError:
-                        pass
-                QTimer.singleShot(100, safe_show_schema_form)
-                QTimer.singleShot(100, safe_update_widget_schema)
+                try:
+                    form.setVisible(True)
+                except Exception:
+                    pass
+
+                try:
+                    widget.setUpdatesEnabled(True)
+                except Exception:
+                    pass
+                try:
+                    widget.update()
+                except Exception:
+                    pass
                 
                 # PySide6ではfindChildrenにタプルを渡せないため、個別に取得
                 line_edits = form.findChildren(QLineEdit)
@@ -403,6 +427,8 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
             if isinstance(data, dict) and data.get('id') == dataset_id:
                 return idx
         return -1
+
+    from classes.utils.dataset_launch_manager import DatasetLaunchManager, DatasetPayload
 
     def _ensure_dataset_entry(payload: DatasetPayload) -> int:
         if combo is None or not payload.raw:
@@ -637,7 +663,7 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
     btn_layout.addWidget(button_register_exec)
 
     # 必須未入力の表示（ボタン右側）
-    required_missing_label = QLabel("未入力必須項目有り")
+    required_missing_label = QLabel("未入力必須項目有り", widget)
     required_missing_label.setWordWrap(True)
     required_missing_label.setStyleSheet(_build_warning_badge_style())
     required_missing_label.setVisible(False)
@@ -904,16 +930,13 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
 
     # 最後にStretchを追加
     layout.addStretch()
-    widget.setLayout(layout)
     
     # レスポンシブデザイン対応
     widget.setMinimumWidth(600)  # 最小幅設定
     widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     
-    # ウィジェットを確実に表示（pytest環境では不安定化することがあるため抑制）
-    if not os.environ.get("PYTEST_CURRENT_TEST"):
-        widget.setVisible(True)
-    # widget.show()  # 削除 - これがメインウィンドウから分離する原因
+
+    # NOTE: 表示/非表示は呼び出し側（タブ/レイアウト）に委ねる。
     
     return widget
 

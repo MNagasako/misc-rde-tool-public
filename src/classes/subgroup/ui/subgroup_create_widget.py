@@ -37,62 +37,85 @@ def create_subgroup_create_widget(parent, title, color, create_auto_resize_butto
     create_tab = create_original_subgroup_create_widget(parent, title, color, create_auto_resize_button)
     tab_widget.addTab(create_tab, "新規作成")
     
-    # 修正タブ
-    try:
-        from .subgroup_edit_widget import create_subgroup_edit_widget
-        edit_tab = create_subgroup_edit_widget(parent, "サブグループ修正", color, create_auto_resize_button)
+    # 修正タブ（遅延ロード：初回表示を軽くする）
+    edit_tab = None
+    edit_scroll = None
+    edit_built = False
 
-        # 閲覧・修正タブ全体をスクロール可能にする（内容量に応じてスクロールを外側へ集約）
+    # タブ切り替え時にサブグループリストをリフレッシュする機能を追加
+    def _reset_window_height_to_screen(target_widget: QWidget) -> None:
+        try:
+            window = target_widget.window() if target_widget is not None else None
+            if window is None:
+                return
+            screen = getattr(window, 'screen', None)
+            if callable(screen):
+                screen = screen()
+            if screen is None:
+                # fallback
+                screen = QApplication.primaryScreen()
+            if screen is None:
+                return
+            available = screen.availableGeometry()
+            # 縦サイズのみディスプレイに合わせる（その後はユーザーが変更可能）
+            window.resize(window.width(), available.height())
+        except Exception:
+            logger.debug("subgroup_create: window height reset failed", exc_info=True)
+
+    try:
         edit_scroll = QScrollArea()
         edit_scroll.setWidgetResizable(True)
         edit_scroll.setFrameStyle(0)
         edit_scroll.setContentsMargins(0, 0, 0, 0)
-        edit_scroll.setWidget(edit_tab)
+        placeholder = QLabel("閲覧・修正タブを読み込み中...")
+        placeholder.setWordWrap(True)
+        edit_scroll.setWidget(placeholder)
         tab_widget.addTab(edit_scroll, "閲覧・修正")
-        
-        # タブ切り替え時にサブグループリストをリフレッシュする機能を追加
-        def _reset_window_height_to_screen(target_widget: QWidget) -> None:
-            try:
-                window = target_widget.window() if target_widget is not None else None
-                if window is None:
-                    return
-                screen = getattr(window, 'screen', None)
-                if callable(screen):
-                    screen = screen()
-                if screen is None:
-                    # fallback
-                    screen = QApplication.primaryScreen()
-                if screen is None:
-                    return
-                available = screen.availableGeometry()
-                # 縦サイズのみディスプレイに合わせる（その後はユーザーが変更可能）
-                window.resize(window.width(), available.height())
-            except Exception:
-                logger.debug("subgroup_create: window height reset failed", exc_info=True)
-
-        def on_tab_changed(index):
-            """タブ切り替え時の処理"""
-            try:
-                # 修正タブ（インデックス1）が選択された場合
-                if index == 1:  # 0: 新規作成, 1: 修正
-                    logger.info("修正タブが選択されました - サブグループリストをリフレッシュします")
-                    # edit_tab内のload_existing_subgroups関数を呼び出し
-                    if hasattr(edit_tab, '_refresh_subgroup_list'):
-                        edit_tab._refresh_subgroup_list()
-                        logger.info("サブグループリストのリフレッシュが完了しました")
-                    else:
-                        logger.warning("サブグループリフレッシュ機能が見つかりません")
-
-                    # 表示タイミングで縦サイズをディスプレイに合わせる（再表示のたびにリセット）
-                    _reset_window_height_to_screen(edit_scroll)
-            except Exception as e:
-                logger.error("タブ切り替え時のリフレッシュ処理でエラー: %s", e)
-        
-        tab_widget.currentChanged.connect(on_tab_changed)
-        
     except Exception as e:
-        logger.warning("サブグループ修正タブの作成に失敗: %s", e)
-        # エラー時は新規作成のみ
+        logger.warning("サブグループ修正タブのプレースホルダ作成に失敗: %s", e)
+        edit_scroll = None
+
+    def _ensure_edit_tab_built() -> None:
+        nonlocal edit_tab, edit_built
+        if edit_built:
+            return
+        if edit_scroll is None:
+            return
+        try:
+            from .subgroup_edit_widget import create_subgroup_edit_widget
+
+            edit_tab = create_subgroup_edit_widget(parent, "サブグループ修正", color, create_auto_resize_button)
+            edit_scroll.setWidget(edit_tab)
+            edit_built = True
+        except Exception as e:
+            logger.warning("サブグループ修正タブの作成に失敗: %s", e)
+            try:
+                fallback = QLabel(f"閲覧・修正タブの読み込みに失敗しました: {e}")
+                fallback.setWordWrap(True)
+                edit_scroll.setWidget(fallback)
+            except Exception:
+                pass
+            edit_built = True
+
+    def on_tab_changed(index):
+        """タブ切り替え時の処理"""
+        try:
+            # 修正タブ（インデックス1）が選択された場合
+            if index == 1:
+                _ensure_edit_tab_built()
+                logger.info("修正タブが選択されました - サブグループリストをリフレッシュします")
+                if edit_tab is not None and hasattr(edit_tab, '_refresh_subgroup_list'):
+                    edit_tab._refresh_subgroup_list()
+                    logger.info("サブグループリストのリフレッシュが完了しました")
+                else:
+                    logger.debug("サブグループリフレッシュ機能がスキップされました (edit_tab=%s)", edit_tab is not None)
+
+                if edit_scroll is not None:
+                    _reset_window_height_to_screen(edit_scroll)
+        except Exception as e:
+            logger.error("タブ切り替え時のリフレッシュ処理でエラー: %s", e)
+
+    tab_widget.currentChanged.connect(on_tab_changed)
     
     main_layout.addWidget(tab_widget)
     main_widget.setLayout(main_layout)

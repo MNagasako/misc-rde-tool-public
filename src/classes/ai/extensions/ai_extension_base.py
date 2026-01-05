@@ -6,7 +6,7 @@ AI拡張機能基盤
 import os
 import json
 import re
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Callable, Union
 from abc import ABC, abstractmethod
 
 import logging
@@ -108,6 +108,12 @@ class AIExtensionBase(ABC):
         
     def get_template(self, template_name: str) -> Optional[AIPromptTemplate]:
         """登録されたテンプレートを取得"""
+        ensure = getattr(self, "_ensure_templates_loaded", None)
+        if callable(ensure):
+            try:
+                ensure()
+            except Exception:
+                logger.debug("template ensure failed: %s", self.extension_name, exc_info=True)
         return self.prompt_templates.get(template_name)
         
     def reload_external_templates(self) -> bool:
@@ -155,9 +161,15 @@ class DatasetDescriptionExtension(AIExtensionBase):
     
     def __init__(self):
         super().__init__("dataset_description")
-        
-        # プロンプトテンプレートを登録
+
+        # テンプレート読み込みは初回利用時に遅延（import時/ダイアログ生成時の負荷を抑える）
+        self._templates_loaded = False
+
+    def _ensure_templates_loaded(self) -> None:
+        if getattr(self, "_templates_loaded", False):
+            return
         self._register_default_templates()
+        self._templates_loaded = True
         
     def _register_default_templates(self):
         """デフォルトのプロンプトテンプレートを登録"""
@@ -564,17 +576,40 @@ STRUCTUREDファイルのテキスト内容:
 class AIExtensionRegistry:
     """AI拡張機能レジストリ"""
     
-    _registry = {}
+    _registry: Dict[str, Union[AIExtensionBase, Callable[[], AIExtensionBase]]] = {}
     
     @classmethod
-    def register(cls, extension: AIExtensionBase):
-        """AI拡張機能を登録"""
-        cls._registry[extension.extension_name] = extension
+    def register(cls, extension: Union[AIExtensionBase, Callable[[], AIExtensionBase]]):
+        """AI拡張機能を登録（インスタンス or 遅延生成ファクトリ）。"""
+        # factoryの場合は一度生成して名前を確定する
+        if callable(extension) and not isinstance(extension, AIExtensionBase):
+            try:
+                instance = extension()
+                cls._registry[instance.extension_name] = extension
+                return
+            except Exception:
+                logger.debug("AIExtensionRegistry: factory probe failed", exc_info=True)
+                return
+
+        if isinstance(extension, AIExtensionBase):
+            cls._registry[extension.extension_name] = extension
         
     @classmethod
     def get(cls, extension_name: str) -> Optional[AIExtensionBase]:
         """登録されたAI拡張機能を取得"""
-        return cls._registry.get(extension_name)
+        entry = cls._registry.get(extension_name)
+        if entry is None:
+            return None
+        if isinstance(entry, AIExtensionBase):
+            return entry
+        # factoryから生成（初回のみ）
+        try:
+            instance = entry()
+            cls._registry[extension_name] = instance
+            return instance
+        except Exception:
+            logger.debug("AIExtensionRegistry: build failed name=%s", extension_name, exc_info=True)
+            return None
         
     @classmethod
     def list_extensions(cls) -> List[str]:
@@ -583,4 +618,4 @@ class AIExtensionRegistry:
 
 
 # デフォルト拡張機能を登録
-AIExtensionRegistry.register(DatasetDescriptionExtension())
+AIExtensionRegistry.register(DatasetDescriptionExtension)

@@ -797,29 +797,29 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
         error_widget.setLayout(error_layout)
         tab_widget.addTab(error_widget, "新規開設")
 
-    # 新規開設2タブ（新規開設 + メタデータ入力統合）
+    # 新規開設2タブ（遅延ロード：初回表示を軽くする）
+    create2_tab = None
+    create2_idx = -1
     try:
-        create2_tab = _create_dataset_create2_tab(parent)
-        main_widget._dataset_create2_tab = create2_tab  # type: ignore[attr-defined]
-        tab_widget.addTab(create2_tab, "新規開設2")
+        create2_placeholder = QWidget()
+        create2_layout = QVBoxLayout(create2_placeholder)
+        create2_layout.addWidget(QLabel("新規開設2を読み込み中..."))
+        create2_layout.addStretch(1)
+        create2_idx = tab_widget.addTab(create2_placeholder, "新規開設2")
+        main_widget._dataset_create2_tab = create2_placeholder  # type: ignore[attr-defined]
     except Exception as e:
-        logger.warning("データセット開設2タブの作成に失敗: %s", e)
-        from qt_compat.widgets import QLabel as ErrorLabel
-        error_widget = QWidget()
-        error_layout = QVBoxLayout()
-        error_layout.addWidget(ErrorLabel(f"データセット開設2機能の読み込みに失敗しました: {e}"))
-        error_widget.setLayout(error_layout)
-        tab_widget.addTab(error_widget, "新規開設2")
+        logger.warning("データセット開設2タブのプレースホルダ作成に失敗: %s", e)
+
+    create2_tab_ref = {"tab": getattr(main_widget, '_dataset_create2_tab', None)}
 
     # サブグループ更新通知は dataset_open 全体で1回だけ登録し、両タブを更新する
     try:
         from classes.dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
 
         create_tab = getattr(main_widget, '_dataset_create_tab', None)
-        create2_tab = getattr(main_widget, '_dataset_create2_tab', None)
 
         def _refresh_both_create_tabs():
-            for tab in (create_tab, create2_tab):
+            for tab in (create_tab, create2_tab_ref.get("tab")):
                 refresh_fn = getattr(tab, '_refresh_subgroup_data', None)
                 if callable(refresh_fn):
                     try:
@@ -841,51 +841,123 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     except Exception as e:
         logger.debug("dataset_open: subgroup notifier wiring failed: %s", e)
     
-    # 編集タブ
-    edit_tab = None  # 初期化（中身）
-    edit_scroll = None  # 初期化（タブとして追加されるラッパ）
+    # 編集タブ（遅延ロード：初回表示を軽くする）
+    edit_tab = None  # 実体（中身）
+    edit_scroll = None  # タブとして追加されるラッパ
+    edit_built = False
     try:
-        from classes.dataset.ui.dataset_edit_widget import create_dataset_edit_widget
-        edit_tab = create_dataset_edit_widget(parent, "データセット編集", create_auto_resize_button)
-        # 閲覧・修正タブ全体をスクロール可能にする
         edit_scroll = QScrollArea()
         edit_scroll.setWidgetResizable(True)
         edit_scroll.setFrameStyle(0)
         edit_scroll.setContentsMargins(0, 0, 0, 0)
-        edit_scroll.setWidget(edit_tab)
+        edit_scroll.setWidget(QLabel("閲覧・修正タブを読み込み中..."))
         tab_widget.addTab(edit_scroll, "閲覧・修正")
-        # 他機能連携（Launch）やタブ切替判定は、実際にタブへ追加したウィジェット
-        # （= QScrollArea）を参照する必要がある。
         main_widget._dataset_edit_tab = edit_scroll  # type: ignore[attr-defined]
-        main_widget._dataset_edit_inner_tab = edit_tab  # type: ignore[attr-defined]
-        
+        main_widget._dataset_edit_inner_tab = None  # type: ignore[attr-defined]
     except Exception as e:
-        logger.warning("データセット編集タブの作成に失敗: %s", e)
-        # エラー時は新規開設のみ
+        logger.warning("データセット編集タブのプレースホルダ作成に失敗: %s", e)
+        edit_scroll = None
     
-    # データエントリータブ（最小版）
+    # データエントリータブ（遅延ロード：初回表示を軽くする）
+    dataentry_tab = None
+    dataentry_built = False
     try:
-        from classes.dataset.ui.dataset_dataentry_widget_minimal import create_dataset_dataentry_widget
-        dataentry_tab = create_dataset_dataentry_widget(parent, "データエントリー", create_auto_resize_button)
-        tab_widget.addTab(dataentry_tab, "タイル（データエントリー）")
-        main_widget._dataset_dataentry_tab = dataentry_tab  # type: ignore[attr-defined]
-        
+        dataentry_placeholder = QWidget()
+        dataentry_layout = QVBoxLayout(dataentry_placeholder)
+        dataentry_layout.addWidget(QLabel("タイル（データエントリー）を読み込み中..."))
+        dataentry_layout.addStretch(1)
+        tab_widget.addTab(dataentry_placeholder, "タイル（データエントリー）")
+        main_widget._dataset_dataentry_tab = dataentry_placeholder  # type: ignore[attr-defined]
     except Exception as e:
-        logger.warning("データエントリータブの作成に失敗: %s", e)
-        # エラー時は空のタブを作成
-        from qt_compat.widgets import QLabel as ErrorLabel
-        error_widget = QWidget()
-        error_layout = QVBoxLayout()
-        error_layout.addWidget(ErrorLabel(f"データエントリー機能の読み込みに失敗しました: {e}"))
-        error_widget.setLayout(error_layout)
-        tab_widget.addTab(error_widget, "データエントリー")
+        logger.warning("データエントリータブのプレースホルダ作成に失敗: %s", e)
     
+    def _ensure_create2_built() -> None:
+        nonlocal create2_tab
+        if create2_tab is not None:
+            return
+        if create2_idx < 0:
+            return
+        try:
+            built = _create_dataset_create2_tab(parent)
+            create2_tab = built
+            # notifier refresh 対象も差し替える
+            try:
+                create2_tab_ref["tab"] = built
+            except Exception:
+                pass
+
+            tab_widget.blockSignals(True)
+            tab_widget.removeTab(create2_idx)
+            tab_widget.insertTab(create2_idx, built, "新規開設2")
+            tab_widget.setCurrentIndex(create2_idx)
+        except Exception as e:
+            logger.warning("データセット開設2タブの作成に失敗: %s", e)
+        finally:
+            try:
+                tab_widget.blockSignals(False)
+            except Exception:
+                pass
+
+    def _ensure_edit_built() -> None:
+        nonlocal edit_tab, edit_built
+        if edit_built:
+            return
+        if edit_scroll is None:
+            edit_built = True
+            return
+        try:
+            from classes.dataset.ui.dataset_edit_widget import create_dataset_edit_widget
+
+            edit_tab = create_dataset_edit_widget(parent, "データセット編集", create_auto_resize_button)
+            edit_scroll.setWidget(edit_tab)
+            main_widget._dataset_edit_inner_tab = edit_tab  # type: ignore[attr-defined]
+        except Exception as e:
+            logger.warning("データセット編集タブの作成に失敗: %s", e)
+            try:
+                edit_scroll.setWidget(QLabel(f"データセット編集タブの読み込みに失敗しました: {e}"))
+            except Exception:
+                pass
+        finally:
+            edit_built = True
+
+    def _ensure_dataentry_built() -> None:
+        nonlocal dataentry_tab, dataentry_built
+        if dataentry_built:
+            return
+        try:
+            from classes.dataset.ui.dataset_dataentry_widget_minimal import create_dataset_dataentry_widget
+
+            built = create_dataset_dataentry_widget(parent, "データエントリー", create_auto_resize_button)
+            dataentry_tab = built
+
+            # 末尾に追加したプレースホルダを差し替え（同名タブを探して置換）
+            idx = next((i for i in range(tab_widget.count()) if tab_widget.tabText(i) == "タイル（データエントリー）"), -1)
+            if idx >= 0:
+                tab_widget.blockSignals(True)
+                tab_widget.removeTab(idx)
+                tab_widget.insertTab(idx, built, "タイル（データエントリー）")
+                tab_widget.setCurrentIndex(idx)
+            main_widget._dataset_dataentry_tab = built  # type: ignore[attr-defined]
+        except Exception as e:
+            logger.warning("データエントリータブの作成に失敗: %s", e)
+        finally:
+            dataentry_built = True
+            try:
+                tab_widget.blockSignals(False)
+            except Exception:
+                pass
+
     # タブ切り替え時にデータセットリストをリフレッシュする機能を追加
     def on_tab_changed(index):
         """タブ切り替え時の処理"""
         try:
             current_tab = tab_widget.widget(index)
+            if create2_idx >= 0 and index == create2_idx:
+                _ensure_create2_built()
+                return
+
             if current_tab is main_widget._dataset_edit_tab:
+                _ensure_edit_built()
                 logger.info("修正タブが選択されました - データセットリストをリフレッシュします")
                 if edit_tab is not None and hasattr(edit_tab, '_refresh_dataset_list'):
                     edit_tab._refresh_dataset_list()
@@ -905,6 +977,7 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
                 except Exception:
                     logger.debug("dataset_open: window height reset failed", exc_info=True)
             elif current_tab is main_widget._dataset_dataentry_tab:
+                _ensure_dataentry_built()
                 logger.info("データエントリータブが選択されました")
         except Exception as e:
             logger.error("タブ切り替え時のリフレッシュ処理でエラー: %s", e)

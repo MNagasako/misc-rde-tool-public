@@ -91,7 +91,8 @@ class BasicInfoTabValidator:
                         output_dir=output_dir,
                         parent_widget=self.parent
                     )
-                    self._update_status_display("認証OK", "green")
+                    from classes.theme import ThemeKey
+                    self._update_status_display("認証OK", ThemeKey.TEXT_SUCCESS)
                 else:
                     logger.warning("[基本情報タブ] 認証検証失敗")
                     self._show_authentication_error()
@@ -139,7 +140,8 @@ class BasicInfoTabValidator:
                 self._switch_to_login_tab()
         
         QTimer.singleShot(0, show_dialog)
-        self._update_status_display("未ログイン", "red")
+        from classes.theme import ThemeKey
+        self._update_status_display("未ログイン", ThemeKey.TEXT_ERROR)
     
     def _show_authentication_error(self):
         """認証エラーメッセージを表示"""
@@ -150,7 +152,8 @@ class BasicInfoTabValidator:
                 self._switch_to_login_tab()
         
         QTimer.singleShot(0, show_dialog)
-        self._update_status_display("認証エラー", "red")
+        from classes.theme import ThemeKey
+        self._update_status_display("認証エラー", ThemeKey.TEXT_ERROR)
     
     def _show_permission_error(self):
         """権限エラーメッセージを表示"""
@@ -163,7 +166,8 @@ class BasicInfoTabValidator:
             )
         
         QTimer.singleShot(0, show_dialog)
-        self._update_status_display("権限なし", "orange")
+        from classes.theme import ThemeKey
+        self._update_status_display("権限なし", ThemeKey.TEXT_WARNING)
     
     def _show_network_error(self):
         """ネットワークエラーメッセージを表示"""
@@ -183,7 +187,8 @@ class BasicInfoTabValidator:
                 QTimer.singleShot(2000, self._perform_validation)
         
         QTimer.singleShot(0, show_dialog)
-        self._update_status_display("ネットワークエラー", "red")
+        from classes.theme import ThemeKey
+        self._update_status_display("ネットワークエラー", ThemeKey.TEXT_ERROR)
     
     def _show_general_error(self, error_msg):
         """一般的なエラーメッセージを表示"""
@@ -195,7 +200,8 @@ class BasicInfoTabValidator:
             )
         
         QTimer.singleShot(0, show_dialog)
-        self._update_status_display("エラー", "red")
+        from classes.theme import ThemeKey
+        self._update_status_display("エラー", ThemeKey.TEXT_ERROR)
     
     def _switch_to_login_tab(self):
         """ログインタブに切り替え"""
@@ -213,7 +219,7 @@ class BasicInfoTabValidator:
         except Exception as e:
             logger.error(f"ログインタブへの切り替えエラー: {e}")
     
-    def _update_status_display(self, status_text, color):
+    def _update_status_display(self, status_text, border_color_key=None):
         """ステータス表示を更新"""
         try:
             # JSON状況ウィジェットのステータスを更新
@@ -241,15 +247,9 @@ class BasicInfoTabValidator:
                 bg_color = get_color(ThemeKey.INPUT_BACKGROUND)
                 text_color = get_color(ThemeKey.INPUT_TEXT)
                 
-                # Build stylesheet using string concatenation to avoid f-string brace issues
-                if color == "green":
-                    border_style = "border: 1px solid green;"
-                elif color == "red":
-                    border_style = "border: 1px solid red;"
-                elif color == "orange":
-                    border_style = "border: 1px solid orange;"
-                else:
-                    border_style = ""
+                border_style = ""
+                if isinstance(border_color_key, ThemeKey):
+                    border_style = f"border: 1px solid {get_color(border_color_key)};"
                 
                 # Construct the stylesheet
                 style = (
@@ -263,7 +263,7 @@ class BasicInfoTabValidator:
                 )
                 
                 # Debug: Log the stylesheet
-                logger.debug(f"[TabValidator] Setting QTextEdit stylesheet (color={color})")
+                logger.debug(f"[TabValidator] Setting QTextEdit stylesheet (border_color_key={border_color_key})")
                 logger.debug(f"[TabValidator] Stylesheet: {style}")
                 logger.debug(f"[TabValidator] Stylesheet length: {len(style)}")
                 

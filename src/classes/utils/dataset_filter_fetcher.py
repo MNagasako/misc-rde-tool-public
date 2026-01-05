@@ -10,7 +10,7 @@ import logging
 import os
 from typing import Dict, List, Optional
 
-from qt_compat.core import Qt, QObject
+from qt_compat.core import Qt, QObject, QTimer
 from qt_compat.widgets import (
     QComboBox,
     QCompleter,
@@ -25,6 +25,12 @@ from qt_compat.widgets import (
 from classes.dataset.util.dataset_dropdown_util import get_dataset_type_display_map
 from classes.theme import ThemeKey
 from classes.theme.theme_manager import get_color
+
+try:
+    from shiboken6 import isValid as qt_is_valid  # type: ignore
+except Exception:  # pragma: no cover
+    def qt_is_valid(obj: object) -> bool:  # type: ignore
+        return obj is not None
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +57,19 @@ class DatasetFilterFetcher(QObject):
         self._datasets: List[Dict] = []
         self._filtered_datasets: List[Dict] = []
         self._suppress_filters = False
+        self._populate_generation = 0
+
+        if self.combo:
+            try:
+                self.combo.destroyed.connect(self._on_combo_destroyed)
+            except Exception:
+                pass
         self._load_dataset_items()
+
+    def _on_combo_destroyed(self, *_args: object) -> None:
+        # Invalidate any pending QTimer callbacks that may try to touch the combo.
+        self._populate_generation += 1
+        self.combo = None
 
     # ------------------------------------------------------------------
     # Public API
@@ -233,14 +251,80 @@ class DatasetFilterFetcher(QObject):
         self.apply_filters()
 
     def _update_combo(self) -> None:
-        if not self.combo:
+        if not self.combo or not qt_is_valid(self.combo):
             return
+
+        # たくさんのデータセットがあると、同期でaddItem+Completer構築がUIを長時間ブロックする。
+        # 初回の「操作可能」までを短縮するため、一定件数を超える場合は分割投入する。
+        async_threshold = 500
+        chunk_size = 200
 
         selected_id = self._current_selection_id()
         self._suppress_filters = True
+        async_started = False
         try:
+            if not self.combo or not qt_is_valid(self.combo):
+                return
             self.combo.blockSignals(True)
             self.combo.clear()
+
+            # 大量件数は非同期更新（イベントループに制御を返す）
+            if len(self._filtered_datasets) > async_threshold:
+                self._populate_generation += 1
+                generation = self._populate_generation
+                async_started = True
+
+                # まずプレースホルダを表示
+                placeholder = "-- 読み込み中... --"
+                self.combo.addItem(placeholder, None)
+                self.combo.setCurrentIndex(-1)
+
+                if self.combo.lineEdit():
+                    total = len(self._filtered_datasets)
+                    overall = len(self._datasets)
+                    self.combo.lineEdit().setPlaceholderText(f"データセットを検索・選択 ({total}/{overall}件)")
+
+                def _append_chunk(start: int) -> None:
+                    if generation != self._populate_generation:
+                        return
+                    if not self.combo or not qt_is_valid(self.combo):
+                        return
+
+                    # 初回chunkでプレースホルダを消す
+                    if start == 0:
+                        self.combo.clear()
+
+                    end = min(start + chunk_size, len(self._filtered_datasets))
+                    for dataset in self._filtered_datasets[start:end]:
+                        text = self._format_display_text(dataset)
+                        self.combo.addItem(text, dataset)
+
+                    if end < len(self._filtered_datasets):
+                        QTimer.singleShot(0, lambda: _append_chunk(end))
+                        return
+
+                    # 追加完了
+                    if not self._filtered_datasets:
+                        empty_placeholder = "-- 該当するデータセットがありません --"
+                        self.combo.addItem(empty_placeholder, None)
+
+                    # Completerは大量件数だと重いので付与しない（入力はフィルタ欄で十分）
+                    try:
+                        self.combo.setCompleter(None)
+                    except Exception:
+                        pass
+
+                    if selected_id:
+                        self._restore_selection(selected_id)
+                    else:
+                        self.combo.setCurrentIndex(-1)
+
+                    self.combo.blockSignals(False)
+                    self._suppress_filters = False
+
+                # 非同期開始
+                QTimer.singleShot(0, lambda: _append_chunk(0))
+                return
 
             display_list: List[str] = []
             for dataset in self._filtered_datasets:
@@ -272,8 +356,10 @@ class DatasetFilterFetcher(QObject):
                 placeholder = f"データセットを検索・選択 ({total}/{overall}件)"
                 self.combo.lineEdit().setPlaceholderText(placeholder)
         finally:
-            self.combo.blockSignals(False)
-            self._suppress_filters = False
+            if not async_started:
+                if self.combo and qt_is_valid(self.combo):
+                    self.combo.blockSignals(False)
+                self._suppress_filters = False
 
     def _current_selection_id(self) -> Optional[str]:
         if not self.combo:

@@ -18,7 +18,6 @@ from qt_compat.widgets import (
     QComboBox, QCheckBox, QSpinBox
 )
 from qt_compat.core import Qt, QThread, Signal, QTimer
-from classes.ai.core.ai_manager import AIManager
 from classes.theme import ThemeKey
 from classes.theme.theme_manager import get_color
 from classes.utils.dataset_filter_fetcher import DatasetFilterFetcher
@@ -26,11 +25,10 @@ from config.common import get_dynamic_file_path
 
 # ロガー設定
 logger = logging.getLogger(__name__)
-from classes.ai.extensions import AIExtensionRegistry, DatasetDescriptionExtension
-from classes.dataset.util.dataset_context_collector import get_dataset_context_collector
-from classes.dataset.util.dataset_context_collector import get_dataset_context_collector
-from classes.dataset.ui.spinner_overlay import SpinnerOverlay
-from classes.dataset.ui.ai_extension_config_dialog import AIExtensionConfigDialog
+
+# NOTE:
+# ai_suggestion_dialog は初回表示時のimportコストがボトルネックになりやすいため、
+# 重い依存（AIManager/拡張レジストリ/スピナー等）は使用箇所で遅延importする。
 
 # 一部のテスト環境でQDialogがMagicMock化され、インスタンス属性参照が困難な場合のフォールバック
 try:
@@ -65,7 +63,9 @@ class AIRequestThread(QThread):
         try:
             if self._stop_requested:
                 return
-                
+
+            from classes.ai.core.ai_manager import AIManager
+
             ai_manager = AIManager()
             
             if self._stop_requested:
@@ -163,6 +163,8 @@ class AISuggestionDialog(QDialog):
         self._did_initial_top_align = False
         
         # AI拡張機能を取得
+        from classes.ai.extensions import AIExtensionRegistry, DatasetDescriptionExtension
+
         self.ai_extension = AIExtensionRegistry.get(extension_name)
         if not self.ai_extension:
             self.ai_extension = DatasetDescriptionExtension()
@@ -226,21 +228,18 @@ class AISuggestionDialog(QDialog):
             except Exception as e:
                 logger.warning("AI拡張タブの初期化に失敗しました: %s", e)
 
-            # データセットタブ（一覧選択）
-            try:
-                dataset_tab = QWidget()
-                self.tab_widget.addTab(dataset_tab, "データセット")
-                self.setup_dataset_tab(dataset_tab)
-            except Exception as e:
-                logger.warning("データセットタブの初期化に失敗しました: %s", e)
+            # データセット/報告書/結果一覧は初期化が重いため、タブ選択時に遅延生成する
+            # （タブ自体は最初から表示してUXは維持）
+            self._lazy_tab_builders = {}
 
-            # 報告書タブ（converted.xlsx）
-            try:
-                report_tab = QWidget()
-                self.tab_widget.addTab(report_tab, "報告書")
-                self.setup_report_tab(report_tab)
-            except Exception as e:
-                logger.warning("報告書タブの初期化に失敗しました: %s", e)
+            def _register_lazy_tab(title: str, build_fn):
+                tab = QWidget()
+                self.tab_widget.addTab(tab, title)
+                idx = self.tab_widget.indexOf(tab)
+                self._lazy_tab_builders[idx] = (tab, build_fn)
+
+            _register_lazy_tab("データセット", self.setup_dataset_tab)
+            _register_lazy_tab("報告書", self.setup_report_tab)
             
             try:
                 extraction_settings_tab = QWidget()
@@ -249,13 +248,25 @@ class AISuggestionDialog(QDialog):
             except Exception as e:
                 logger.warning("ファイル抽出設定タブの初期化に失敗しました: %s", e)
 
-            # 結果一覧タブ（ログ表示）
+            _register_lazy_tab("結果一覧", self.setup_results_tab)
+
+            def _ensure_lazy_tab_initialized(index: int):
+                try:
+                    if not hasattr(self, "_lazy_tab_builders"):
+                        return
+                    entry = self._lazy_tab_builders.pop(index, None)
+                    if not entry:
+                        return
+                    tab, build_fn = entry
+                    build_fn(tab)
+                except Exception as e:
+                    logger.warning("遅延タブ初期化に失敗しました: index=%s error=%s", index, e)
+
             try:
-                results_tab = QWidget()
-                self.tab_widget.addTab(results_tab, "結果一覧")
-                self.setup_results_tab(results_tab)
-            except Exception as e:
-                logger.warning("結果一覧タブの初期化に失敗しました: %s", e)
+                # 初回選択時のみ初期化したいので、popで一度限りにする
+                self.tab_widget.currentChanged.connect(_ensure_lazy_tab_initialized)
+            except Exception:
+                pass
         
         # 注: データセット開設タブでの将来的な利用も想定
         # データセット開設タブから呼び出す場合は、mode="dataset_suggestion"を使用
@@ -405,6 +416,8 @@ class AISuggestionDialog(QDialog):
         preview_container_layout.addWidget(self.preview_text)
         
         # スピナーオーバーレイを追加
+        from classes.dataset.ui.spinner_overlay import SpinnerOverlay
+
         self.spinner_overlay = SpinnerOverlay(preview_container, "AI応答を待機中...")
         
         preview_layout.addWidget(preview_container)
@@ -699,6 +712,8 @@ class AISuggestionDialog(QDialog):
             logger.debug("プロンプト構築開始 - 入力コンテキスト: %s", self.context_data)
             
             # AIManagerからデフォルトプロバイダー・モデル情報を取得
+            from classes.ai.core.ai_manager import AIManager
+
             ai_manager = AIManager()
             provider = ai_manager.get_default_provider()
             model = ai_manager.get_default_model(provider)
@@ -706,6 +721,8 @@ class AISuggestionDialog(QDialog):
             logger.debug("使用予定AI: provider=%s, model=%s", provider, model)
             
             # データセットコンテキストコレクターを使用して完全なコンテキストを収集
+            from classes.dataset.util.dataset_context_collector import get_dataset_context_collector
+
             context_collector = get_dataset_context_collector()
             
             # データセットIDを取得（context_dataから）
@@ -1072,6 +1089,8 @@ class AISuggestionDialog(QDialog):
         header_layout.addStretch()
         
         # デフォルトAI設定表示
+        from classes.ai.core.ai_manager import AIManager
+
         ai_manager = AIManager()
         default_provider = ai_manager.get_default_provider()
         default_model = ai_manager.get_default_model(default_provider)
@@ -1334,6 +1353,8 @@ class AISuggestionDialog(QDialog):
 
         # AI応答待機用スピナー（キャンセル付き）
         try:
+            from classes.dataset.ui.spinner_overlay import SpinnerOverlay
+
             self.extension_spinner_overlay = SpinnerOverlay(
                 response_container,
                 "AI応答を待機中...",
@@ -1471,6 +1492,8 @@ class AISuggestionDialog(QDialog):
 
         # デフォルトAI設定表示（AI拡張と同様）
         try:
+            from classes.ai.core.ai_manager import AIManager
+
             ai_manager = AIManager()
             default_provider = ai_manager.get_default_provider()
             default_model = ai_manager.get_default_model(default_provider)
@@ -1654,6 +1677,8 @@ class AISuggestionDialog(QDialog):
 
         # スピナー（キャンセル付き）
         try:
+            from classes.dataset.ui.spinner_overlay import SpinnerOverlay
+
             self.report_spinner_overlay = SpinnerOverlay(
                 response_container,
                 "AI応答を待機中...",
@@ -1785,6 +1810,8 @@ class AISuggestionDialog(QDialog):
 
         # デフォルトAI設定表示（AI拡張/報告書と同様）
         try:
+            from classes.ai.core.ai_manager import AIManager
+
             ai_manager = AIManager()
             default_provider = ai_manager.get_default_provider()
             default_model = ai_manager.get_default_model(default_provider)
@@ -1969,6 +1996,8 @@ class AISuggestionDialog(QDialog):
 
         # スピナー（キャンセル付き）
         try:
+            from classes.dataset.ui.spinner_overlay import SpinnerOverlay
+
             self.dataset_spinner_overlay = SpinnerOverlay(
                 response_container,
                 "AI応答を待機中...",
@@ -5689,6 +5718,8 @@ ARIMNO: {{ARIMNO}}
             
                 # AI設定からプロバイダー/モデル情報を付与
                 try:
+                    from classes.ai.core.ai_manager import AIManager
+
                     ai_manager = AIManager()
                     provider = ai_manager.get_default_provider()
                     model = ai_manager.get_default_model(provider)
@@ -6242,6 +6273,8 @@ ARIMNO: {{ARIMNO}}
     def edit_extension_config(self):
         """AI拡張設定ファイルを編集"""
         try:
+            from classes.dataset.ui.ai_extension_config_dialog import AIExtensionConfigDialog
+
             dialog = AIExtensionConfigDialog(self)
             dialog.config_saved.connect(self._on_ai_suggest_config_saved)
             dialog.exec()

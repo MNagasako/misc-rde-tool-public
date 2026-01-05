@@ -401,7 +401,6 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     
     show_all_btn = QPushButton("全件表示")
     #show_all_btn.setMaximumWidth(80)
-    #show_all_btn.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold; border-radius: 4px; padding: 5px;")
     
     combo_layout.addWidget(combo)
     #combo_layout.addWidget(show_all_btn)

@@ -1442,8 +1442,6 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 f"データセット一覧を展開しています... (0/{total_items})",
                 total_items
             )
-            progress.show()
-            _process_events()
         else:
             progress = None
         
@@ -1712,9 +1710,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 logger.info("基本データを新規読み込み")
                 
                 # 統合プログレス表示
+                # ※明示 show() は minimumDuration を無効化して一瞬ポップアップの原因になり得るため呼ばない
                 loading_progress = create_progress_dialog("データ読み込み中", "データセット情報を読み込んでいます...", 0)
-                loading_progress.show()
-                _process_events()  # UIの更新を強制
                 
                 try:
                     loading_progress.setLabelText("dataset.jsonを読み込んでいます...")
@@ -4647,14 +4644,30 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     update_button.clicked.connect(on_update_dataset)
     
     # データ読み込み実行（デフォルトフィルタで）
-    load_existing_datasets("user_only", "")
+    # 初回表示をブロックしないよう、イベントループ復帰後に読み込みを開始。
+    # 連携ペイロードは初期ロード後に適用する（初期ロードが選択状態をリセットするため）。
+    _dataset_launch_receiver_registered = {"done": False}
+
+    def _register_dataset_launch_receiver_once() -> None:
+        if _dataset_launch_receiver_registered["done"]:
+            return
+        DatasetLaunchManager.instance().register_receiver("dataset_edit", _apply_dataset_launch_payload)
+        _dataset_launch_receiver_registered["done"] = True
+
+    def _initial_load_and_register_receiver() -> None:
+        try:
+            load_existing_datasets("user_only", "")
+        finally:
+            _register_dataset_launch_receiver_once()
+
+    QTimer.singleShot(0, _initial_load_and_register_receiver)
     
     # 初期状態でフォームをクリア
     clear_edit_form()
     logger.info("データセット編集ウィジェット初期化完了 - フォームをクリアしました")
 
     # 他機能からの連携（target dataset 指定）を受け取る
-    DatasetLaunchManager.instance().register_receiver("dataset_edit", _apply_dataset_launch_payload)
+    # ※ receiver 登録は初期ロード後に行う（上の _initial_load_and_register_receiver を参照）
     
     # 外部からリフレッシュできるように関数を属性として追加
     def refresh_with_current_filter(force_reload=False):
@@ -4692,6 +4705,11 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         try:
             notifier.unregister_callback(refresh_with_current_filter)
         except:
+            pass
+        try:
+            if _dataset_launch_receiver_registered["done"]:
+                DatasetLaunchManager.instance().unregister_receiver("dataset_edit")
+        except Exception:
             pass
     widget.destroyed.connect(cleanup)
     

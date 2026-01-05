@@ -14,8 +14,6 @@ from qt_compat.widgets import (
 from qt_compat.core import QTimer, Qt
 from qt_compat.gui import QFont
 
-from .data_register_ui_creator import create_data_register_widget
-
 # ロガー設定
 logger = logging.getLogger(__name__)
 from classes.data_entry.conf.ui_constants import (
@@ -24,6 +22,17 @@ from classes.data_entry.conf.ui_constants import (
     get_scroll_area_style,
     TAB_HEIGHT_RATIO,
 )
+
+
+def create_data_register_widget(*args, **kwargs):
+    """互換用ラッパー（重い依存のトップレベルimportを避ける）。
+
+    tests/widgets が本関数を monkeypatch するため、シンボルは維持する。
+    """
+
+    from .data_register_ui_creator import create_data_register_widget as _impl
+
+    return _impl(*args, **kwargs)
 
 
 class DataRegisterTabWidget(QWidget):
@@ -294,9 +303,8 @@ class DataRegisterTabWidget(QWidget):
                     # リサイズ直後のサイズを確認
                     actual_size = top_level.size()
                     logger.debug("リサイズ後の実際のサイズ: %sx%s", actual_size.width(), actual_size.height())
-                if hasattr(top_level, 'show'):
-                    top_level.show()
-                    logger.debug("show()実行")
+                # NOTE: top_level は既に可視のため、show() は呼ばない。
+                # Windows環境で一瞬のポップアップ/フォーカス変更を誘発することがある。
                     
                 # pytest中はWindowsで不安定になり得るため processEvents を避ける
                 if not os.environ.get("PYTEST_CURRENT_TEST"):
@@ -359,9 +367,8 @@ class DataRegisterTabWidget(QWidget):
                     # リサイズ直後のサイズを確認
                     actual_size = top_level.size()
                     logger.debug("リサイズ後の実際のサイズ: %sx%s", actual_size.width(), actual_size.height())
-                if hasattr(top_level, 'show'):
-                    top_level.show()
-                    logger.debug("show()実行")
+                # NOTE: top_level は既に可視のため、show() は呼ばない。
+                # Windows環境で一瞬のポップアップ/フォーカス変更を誘発することがある。
                     
                 # pytest中はWindowsで不安定になり得るため processEvents を避ける
                 if not os.environ.get("PYTEST_CURRENT_TEST"):

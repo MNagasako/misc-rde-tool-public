@@ -10,7 +10,7 @@
 
 import sys
 import logging
-from typing import Dict, Any, Optional
+from typing import Any, Callable, Dict, Optional
 
 # ログ設定（インポート前に初期化）
 logger = logging.getLogger(__name__)
@@ -24,6 +24,7 @@ try:
     )
     from qt_compat.core import Qt, QTimer, QSize
     from qt_compat.gui import QFont
+    from qt_compat.widgets import QSizePolicy
     from classes.theme import get_color, ThemeKey
     PYQT5_AVAILABLE = True
 except ImportError as e:
@@ -41,6 +42,12 @@ class SettingsTabWidget(QWidget):
         QWidget.__init__(self, parent)
         self.parent_widget = parent
         self.bearer_token = bearer_token
+
+        # 重いタブ（Report/DataPortal/Equipment等）の遅延ロード管理
+        # key はタブに実際に挿入されている widget（QScrollArea）
+        self._lazy_tab_builders: Dict[QWidget, Callable[[], QWidget]] = {}
+        self._lazy_tab_names: Dict[QWidget, str] = {}
+        self._lazy_building: bool = False
         
         self.setup_ui()
         
@@ -55,10 +62,29 @@ class SettingsTabWidget(QWidget):
         self.setLayout(layout)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(10)
+
+        try:
+            self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        except Exception:
+            pass
         
         # タブウィジェット
         self.tab_widget = QTabWidget()
+        try:
+            self.tab_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        except Exception:
+            pass
+        # 設定タブは常にリサイズ可能（固定幅/固定比率を解除）
+        try:
+            self.tab_widget.currentChanged.connect(self._on_tab_changed)
+        except Exception:
+            pass
         layout.addWidget(self.tab_widget)
+
+        try:
+            QTimer.singleShot(0, self._enable_window_resizing)
+        except Exception:
+            pass
         
         # プロキシ設定タブ（段組表示）
         self.setup_proxy_tab_responsive()
@@ -84,13 +110,14 @@ class SettingsTabWidget(QWidget):
         # - インポートタブ
         
         # 報告書タブ（即座にロード）
-        self.setup_report_tab()
+        # NOTE: ここは表示が重くなりやすいので、内容の構築を「タブ選択時」に遅延する。
+        self._add_lazy_tab("報告書", self._create_report_tab_widget)
 
         # データポータルタブ（公開・ログイン不要）
-        self.setup_data_portal_public_tab()
+        self._add_lazy_tab("データポータル", self._create_data_portal_public_tab_widget)
         
-        # 設備タブ（即座にロード）
-        self.setup_equipment_tab()
+        # 設備タブ
+        self._add_lazy_tab("設備", self._create_equipment_tab_widget)
             
         # ボタンエリア
         button_layout = QHBoxLayout()
@@ -106,6 +133,124 @@ class SettingsTabWidget(QWidget):
         button_layout.addWidget(self.reload_button)
         
     #layout.addLayout(button_layout)
+
+    def _on_tab_changed(self, _index: int) -> None:
+        self._maybe_build_current_lazy_tab(_index)
+        # 内部タブの切替でも固定サイズが残らないようにする
+        self._enable_window_resizing()
+
+    def _wrap_in_scroll(self, content_widget: QWidget) -> QScrollArea:
+        """各設定タブをスクロール可能に統一するためのラッパーを生成する。"""
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(10, 10, 10, 10)
+        container_layout.setSpacing(10)
+        container_layout.addWidget(content_widget)
+        container_layout.addStretch(1)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setWidget(container)
+        return scroll
+
+    def _enable_window_resizing(self) -> None:
+        """設定ウィジェットの親ウィンドウを常時リサイズ可能にする。"""
+        top_level = self.window()
+        if top_level is None:
+            return
+        try:
+            if hasattr(top_level, '_fixed_aspect_ratio'):
+                top_level._fixed_aspect_ratio = None
+            if hasattr(top_level, 'setMinimumSize'):
+                top_level.setMinimumSize(200, 200)
+            if hasattr(top_level, 'setMaximumSize'):
+                top_level.setMaximumSize(16777215, 16777215)
+            if hasattr(top_level, 'setMinimumWidth'):
+                top_level.setMinimumWidth(200)
+            if hasattr(top_level, 'setMaximumWidth'):
+                top_level.setMaximumWidth(16777215)
+            if hasattr(top_level, 'showNormal'):
+                top_level.showNormal()
+        except Exception:
+            pass
+
+    def _add_scroll_tab(self, content_widget: QWidget, tab_name: str) -> int:
+        """各設定タブをスクロール可能に統一し、内容が少ない場合は上に詰めて表示する。"""
+        scroll = self._wrap_in_scroll(content_widget)
+        return self.tab_widget.addTab(scroll, tab_name)
+
+    def _add_lazy_tab(self, tab_name: str, builder: Callable[[], QWidget]) -> int:
+        """タブ自体は即時に追加し、内容はタブ選択時に構築する。"""
+        placeholder = QWidget()
+        pl = QVBoxLayout(placeholder)
+        pl.setContentsMargins(20, 20, 20, 20)
+        title = QLabel(tab_name)
+        try:
+            title_font = QFont()
+            title_font.setPointSize(14)
+            title_font.setBold(True)
+            title.setFont(title_font)
+        except Exception:
+            pass
+        pl.addWidget(title)
+        pl.addWidget(QLabel("このタブは選択時に読み込みます。"))
+        pl.addStretch(1)
+
+        scroll = self._wrap_in_scroll(placeholder)
+        index = self.tab_widget.addTab(scroll, tab_name)
+        self._lazy_tab_builders[scroll] = builder
+        self._lazy_tab_names[scroll] = tab_name
+        return index
+
+    def _maybe_build_current_lazy_tab(self, index: int) -> None:
+        if self._lazy_building:
+            return
+        if index < 0:
+            return
+        try:
+            current = self.tab_widget.widget(index)
+        except Exception:
+            return
+        if current not in self._lazy_tab_builders:
+            return
+
+        self._lazy_building = True
+        try:
+            tab_name = self._lazy_tab_names.get(current) or self.tab_widget.tabText(index)
+            builder = self._lazy_tab_builders.get(current)
+            if builder is None:
+                return
+
+            try:
+                content = builder()
+            except Exception as e:
+                logger.warning("[settings_tab_widget] lazy tab build failed (%s): %s", tab_name, e)
+                content = QWidget()
+                l = QVBoxLayout(content)
+                l.setContentsMargins(20, 20, 20, 20)
+                l.addWidget(QLabel(f"{tab_name}の読み込みに失敗しました。"))
+                l.addWidget(QLabel(str(e)))
+                l.addStretch(1)
+
+            new_scroll = self._wrap_in_scroll(content)
+
+            # 置換（以降は遅延対象ではない）
+            self.tab_widget.removeTab(index)
+            self.tab_widget.insertTab(index, new_scroll, tab_name)
+            self.tab_widget.setCurrentIndex(index)
+
+            try:
+                del self._lazy_tab_builders[current]
+            except Exception:
+                pass
+            try:
+                del self._lazy_tab_names[current]
+            except Exception:
+                pass
+        finally:
+            self._lazy_building = False
     
     def refresh_theme(self):
         """テーマ変更時のスタイル更新"""
@@ -137,7 +282,7 @@ class SettingsTabWidget(QWidget):
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
         layout.addStretch()
-        self.tab_widget.addTab(widget, "インポート")
+        self._add_scroll_tab(widget, "インポート")
         
     def get_optimal_layout_columns(self):
         """画面サイズに基づいて最適な段組数を決定"""
@@ -176,19 +321,11 @@ class SettingsTabWidget(QWidget):
             # プロキシ設定ウィジェットを作成
             proxy_widget = ProxySettingsWidget(self)
             
-            # スクロールエリアでラップ
-            proxy_scroll = QScrollArea()
-            proxy_scroll.setWidgetResizable(True)
-            proxy_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            proxy_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            proxy_scroll.setMinimumHeight(800)  # 最小高さを600pxに設定（現在の2倍程度）
-            proxy_scroll.setWidget(proxy_widget)
-            
             # プロキシ設定ウィジェットへの参照を保存
             self.proxy_widget = proxy_widget
-            
-            # タブに追加
-            self.tab_widget.addTab(proxy_scroll, "プロキシ設定")
+
+            # タブに追加（常時スクロール/可変高さ）
+            self._add_scroll_tab(proxy_widget, "プロキシ設定")
             
             logger.info("完全なプロキシ設定ウィジェットを正常にロードしました")
             
@@ -282,7 +419,7 @@ class SettingsTabWidget(QWidget):
             scroll_area.setWidget(content_widget)
             main_layout.addWidget(scroll_area)
         
-        self.tab_widget.addTab(main_widget, "プロキシ設定")
+        self._add_scroll_tab(main_widget, "プロキシ設定")
         
     def setup_basic_proxy_settings(self, layout):
         """基本プロキシ設定セクション"""
@@ -432,7 +569,7 @@ class SettingsTabWidget(QWidget):
         layout.addWidget(ssl_group)
         
         layout.addStretch()
-        self.tab_widget.addTab(widget, "ネットワーク")
+        self._add_scroll_tab(widget, "ネットワーク")
         
     def setup_application_tab(self):
         """アプリケーション設定タブ"""
@@ -473,7 +610,7 @@ class SettingsTabWidget(QWidget):
         layout.addWidget(log_group)
         
         layout.addStretch()
-        self.tab_widget.addTab(widget, "アプリケーション")
+        self._add_scroll_tab(widget, "アプリケーション")
     
     
     def setup_data_structuring_tab(self):
@@ -516,7 +653,7 @@ class SettingsTabWidget(QWidget):
         layout.addWidget(result_group)
         layout.addStretch()
 
-        self.tab_widget.addTab(container, "データ構造化")
+        self._add_scroll_tab(container, "データ構造化")
     
     def _update_formats_with_source(self, entries):
         """解析完了時にentriesと元ファイルパスを一覧へ渡す"""
@@ -550,22 +687,14 @@ class SettingsTabWidget(QWidget):
             from classes.config.ui.ai_settings_widget import create_ai_settings_widget
             
             # AI設定ウィジェットを作成
-            ai_widget = create_ai_settings_widget(self)
+            ai_widget = create_ai_settings_widget(self, use_internal_scroll=False)
             
             if ai_widget:
-                # スクロールエリアでラップ
-                ai_scroll = QScrollArea()
-                ai_scroll.setWidgetResizable(True)
-                ai_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-                ai_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-                ai_scroll.setMinimumHeight(600)
-                ai_scroll.setWidget(ai_widget)
-                
                 # AI設定ウィジェットへの参照を保存
                 self.ai_widget = ai_widget
-                
-                # タブを追加
-                self.tab_widget.addTab(ai_scroll, "AI設定")
+
+                # タブを追加（常時スクロール/可変高さ）
+                self._add_scroll_tab(ai_widget, "AI設定")
                 logger.info("AI設定タブをロードしました")
                 return
             else:
@@ -611,7 +740,7 @@ class SettingsTabWidget(QWidget):
         layout.addWidget(path_label)
         
         layout.addStretch()
-        self.tab_widget.addTab(fallback_widget, "AI設定")
+        self._add_scroll_tab(fallback_widget, "AI設定")
         
     def test_enterprise_ca(self):
         """組織内CA確認テスト"""
@@ -720,7 +849,7 @@ class SettingsTabWidget(QWidget):
             from classes.config.ui.mail_settings_tab import MailSettingsTab
 
             self.mail_widget = MailSettingsTab(self)
-            self.tab_widget.addTab(self.mail_widget, "メール")
+            self._add_scroll_tab(self.mail_widget, "メール")
         except Exception as e:
             logger.warning("メールタブのロードに失敗: %s", e)
 
@@ -739,7 +868,7 @@ class SettingsTabWidget(QWidget):
                 logger.info("[settings_tab_widget] AutoLoginTabWidget作成成功")
                 
                 # タブに追加
-                tab_index = self.tab_widget.addTab(autologin_widget, "自動ログイン")
+                tab_index = self._add_scroll_tab(autologin_widget, "自動ログイン")
                 logger.info("[settings_tab_widget] 自動ログインタブ追加完了: インデックス=%s", tab_index)
                 
                 # ウィジェットへの参照を保存
@@ -769,7 +898,7 @@ class SettingsTabWidget(QWidget):
             logger.info("TokenStatusTab作成成功")
             
             # タブに追加
-            tab_index = self.tab_widget.addTab(token_status_widget, "トークン状態")
+            tab_index = self._add_scroll_tab(token_status_widget, "トークン状態")
             logger.info(f"トークン状態タブ追加完了: インデックス={tab_index}")
             
             # ウィジェットへの参照を保存
@@ -801,7 +930,7 @@ class SettingsTabWidget(QWidget):
         layout.addWidget(info_label)
         
         layout.addStretch()
-        self.tab_widget.addTab(widget, "トークン状態")
+        self._add_scroll_tab(widget, "トークン状態")
 
 
     def _create_fallback_autologin_tab(self):
@@ -831,131 +960,108 @@ class SettingsTabWidget(QWidget):
         layout.addStretch()
         
         # タブに追加
-        tab_index = self.tab_widget.addTab(fallback_widget, "自動ログイン")
+        tab_index = self._add_scroll_tab(fallback_widget, "自動ログイン")
         logger.info("[settings_tab_widget] フォールバック自動ログインタブ追加完了: インデックス=%s", tab_index)
     
-    def setup_report_tab(self):
-        """報告書タブ"""
+    def _create_report_tab_widget(self) -> QWidget:
+        """報告書タブ（内容ウィジェット）を作成して返す。"""
         logger.info("[settings_tab_widget] 報告書タブ作成開始")
         try:
             from classes.config.ui.report_tab import ReportTab
+
             report_widget = ReportTab(self)
-            
-            # スクロールエリアでラップ
-            report_scroll = QScrollArea()
-            report_scroll.setWidgetResizable(True)
-            report_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            report_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            report_scroll.setWidget(report_widget)
-            
             self.report_widget = report_widget
-            
-            # タブを追加
-            self.tab_widget.addTab(report_scroll, "報告書")
-            logger.info("[settings_tab_widget] 報告書タブ追加成功")
-            return
-            
+            logger.info("[settings_tab_widget] 報告書タブ作成成功")
+            return report_widget
         except Exception as e:
-            logger.warning(f"[settings_tab_widget] 報告書タブ作成失敗: {e}")
-            # フォールバック
+            logger.warning("[settings_tab_widget] 報告書タブ作成失敗: %s", e)
             widget = QWidget()
             layout = QVBoxLayout(widget)
             layout.setContentsMargins(20, 20, 20, 20)
-            
+
             title_label = QLabel("報告書データ取得")
-            title_font = QFont()
-            title_font.setPointSize(14)
-            title_font.setBold(True)
-            title_label.setFont(title_font)
+            try:
+                title_font = QFont()
+                title_font.setPointSize(14)
+                title_font.setBold(True)
+                title_label.setFont(title_font)
+            except Exception:
+                pass
             layout.addWidget(title_label)
-            
-            info_label = QLabel("報告書データ取得機能は現在開発中です。")
+
+            info_label = QLabel("報告書データ取得機能の読み込みに失敗しました。")
             info_label.setWordWrap(True)
             layout.addWidget(info_label)
-            
-            layout.addStretch()
-            self.tab_widget.addTab(widget, "報告書")
+            layout.addStretch(1)
+            return widget
 
-    def setup_data_portal_public_tab(self):
-        """データポータル（公開・ログイン不要）タブ"""
+    def _create_data_portal_public_tab_widget(self) -> QWidget:
+        """データポータル（公開・ログイン不要）タブの内容ウィジェットを作成して返す。"""
         logger.info("[settings_tab_widget] データポータルタブ作成開始")
         try:
             from classes.config.ui.data_portal_public_tab import DataPortalPublicTab
 
             portal_widget = DataPortalPublicTab(self)
-
-            portal_scroll = QScrollArea()
-            portal_scroll.setWidgetResizable(True)
-            portal_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            portal_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            portal_scroll.setWidget(portal_widget)
-
             self.data_portal_public_widget = portal_widget
-            self.tab_widget.addTab(portal_scroll, "データポータル")
-            logger.info("[settings_tab_widget] データポータルタブ追加成功")
-            return
+            logger.info("[settings_tab_widget] データポータルタブ作成成功")
+            return portal_widget
 
         except Exception as e:
-            logger.warning(f"[settings_tab_widget] データポータルタブ作成失敗: {e}")
+            logger.warning("[settings_tab_widget] データポータルタブ作成失敗: %s", e)
             widget = QWidget()
             layout = QVBoxLayout(widget)
             layout.setContentsMargins(20, 20, 20, 20)
 
             title_label = QLabel("データポータル（公開）")
-            title_font = QFont()
-            title_font.setPointSize(14)
-            title_font.setBold(True)
-            title_label.setFont(title_font)
+            try:
+                title_font = QFont()
+                title_font.setPointSize(14)
+                title_font.setBold(True)
+                title_label.setFont(title_font)
+            except Exception:
+                pass
             layout.addWidget(title_label)
 
             info_label = QLabel("公開データポータル機能の読み込みに失敗しました。")
             info_label.setWordWrap(True)
             layout.addWidget(info_label)
 
-            layout.addStretch()
-            self.tab_widget.addTab(widget, "データポータル")
+            layout.addStretch(1)
+            return widget
     
-    def setup_equipment_tab(self):
-        """設備タブ"""
+    def _create_equipment_tab_widget(self) -> QWidget:
+        """設備タブ（内容ウィジェット）を作成して返す。"""
         logger.info("[settings_tab_widget] 設備タブ作成開始")
         try:
             from classes.config.ui.equipment_tab import EquipmentTab
+
             equipment_widget = EquipmentTab(self)
-            
-            # スクロールエリアでラップ
-            equipment_scroll = QScrollArea()
-            equipment_scroll.setWidgetResizable(True)
-            equipment_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            equipment_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            equipment_scroll.setWidget(equipment_widget)
-            
             self.equipment_widget = equipment_widget
-            
-            # タブを追加
-            self.tab_widget.addTab(equipment_scroll, "設備")
-            logger.info("[settings_tab_widget] 設備タブ追加成功")
-            return
-            
+            logger.info("[settings_tab_widget] 設備タブ作成成功")
+            return equipment_widget
+
         except Exception as e:
-            logger.warning(f"[settings_tab_widget] 設備タブ作成失敗: {e}")
-            # フォールバック
+            logger.warning("[settings_tab_widget] 設備タブ作成失敗: %s", e)
             widget = QWidget()
             layout = QVBoxLayout(widget)
             layout.setContentsMargins(20, 20, 20, 20)
-            
+
             title_label = QLabel("設備データ取得")
-            title_font = QFont()
-            title_font.setPointSize(14)
-            title_font.setBold(True)
-            title_label.setFont(title_font)
+            try:
+                title_font = QFont()
+                title_font.setPointSize(14)
+                title_font.setBold(True)
+                title_label.setFont(title_font)
+            except Exception:
+                pass
             layout.addWidget(title_label)
-            
-            info_label = QLabel("設備データ取得機能は現在開発中です。")
+
+            info_label = QLabel("設備データ取得機能の読み込みに失敗しました。")
             info_label.setWordWrap(True)
             layout.addWidget(info_label)
-            
-            layout.addStretch()
-            self.tab_widget.addTab(widget, "設備")
+
+            layout.addStretch(1)
+            return widget
 
 
 def create_settings_tab_widget(parent=None, bearer_token=None):
