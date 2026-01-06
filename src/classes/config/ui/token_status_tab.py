@@ -11,6 +11,7 @@ Bearer Tokenの状態確認・手動リフレッシュ機能
 """
 
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -378,11 +379,15 @@ class TokenStatusTab(QWidget):
     def on_token_refresh_failed(self, host: str, error: str):
         """トークンリフレッシュ失敗"""
         logger.warning(f"トークンリフレッシュ失敗通知: {host} - {error}")
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return
         QMessageBox.warning(self, "リフレッシュ失敗", f"{host}のトークンリフレッシュに失敗しました: {error}")
     
     def on_token_expired(self, host: str):
         """トークン期限切れ"""
         logger.error(f"トークン期限切れ通知: {host}")
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return
         QMessageBox.critical(
             self, "トークン期限切れ",
             f"{host}のトークンが期限切れです。再ログインが必要です。"

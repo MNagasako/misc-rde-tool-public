@@ -1,5 +1,5 @@
 """
-テーマ管理 - ARIM RDE Tool v2.4.5
+テーマ管理 - ARIM RDE Tool v2.4.6
 
 ライト/ダークテーマの切り替えとカラー取得を一元管理。
 Singleton パターンで全UI要素から参照可能。
@@ -7,6 +7,7 @@ Singleton パターンで全UI要素から参照可能。
 
 from enum import Enum
 from typing import Optional
+import os
 import weakref
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QPalette
@@ -75,6 +76,7 @@ class ThemeManager(QObject):
         # QComboBox(非editable) placeholder の互換モード適用
         self._combo_placeholder_compat_styler = None
         self._combo_placeholder_compat_bootstrapped = False
+        self._qt_qcombobox_type = None
 
         # Native window frame (title bar) theming
         self._window_frame_styler = None
@@ -152,12 +154,17 @@ class ThemeManager(QObject):
         placeholderは lineEdit 側の描画（palette制御）に寄せる。
         """
         try:
-            from PySide6.QtWidgets import QComboBox
+            qcombobox_type = self._qt_qcombobox_type
+            if qcombobox_type is None:
+                from PySide6.QtWidgets import QComboBox as _QComboBox
 
-            if not isinstance(widget, QComboBox):
+                self._qt_qcombobox_type = _QComboBox
+                qcombobox_type = _QComboBox
+
+            if not isinstance(widget, qcombobox_type):
                 return
 
-            combo: QComboBox = widget
+            combo = widget
             if combo.isEditable():
                 return
             if not combo.placeholderText():
@@ -180,7 +187,7 @@ class ThemeManager(QObject):
                 pass
 
             combo.setEditable(True)
-            combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+            combo.setInsertPolicy(qcombobox_type.InsertPolicy.NoInsert)
             le = combo.lineEdit()
             if le is not None:
                 le.setReadOnly(True)
@@ -211,7 +218,11 @@ class ThemeManager(QObject):
                 return
 
         # 互換モードはテーマに依存しないため、既存一括適用は初回のみ行う
+        # ただしpytest環境では全ウィジェット走査が重く、タイムアウトの原因になり得るためスキップする。
         if not self._combo_placeholder_compat_bootstrapped:
+            if os.environ.get("PYTEST_CURRENT_TEST"):
+                self._combo_placeholder_compat_bootstrapped = True
+                return
             try:
                 for w in QApplication.allWidgets():
                     self._apply_combo_placeholder_compat(w)

@@ -878,9 +878,10 @@ class _AutoRunWorker(QThread):
                 if not to_addr or not subject:
                     skipped_batches += 1
                     continue
-                if not should_send(to_addr=to_addr, subject=subject):
-                    skipped_batches += 1
-                    continue
+                # NOTE:
+                # 自動通知では entryId ベースで二重送信を抑止している（logged_entry_ids / record_sent_ex）。
+                # ここで (to+subject) ベースの should_send を使うと、件名が固定の運用で
+                # 新規エントリがあっても送信が永続的にスキップされ得る。
                 try:
                     send_using_app_mail_settings(to_addr=to_addr, subject=subject, body=batch.body)
                     sent_at = datetime.now(_UTC)
@@ -898,7 +899,8 @@ class _AutoRunWorker(QThread):
                     last_sent_at_utc = sent_at
                 except Exception as exc:
                     errors.append(str(exc))
-                    break
+                    # 1件失敗しても、他宛先への通知は継続する
+                    continue
 
             self.finished.emit(
                 {
@@ -1196,33 +1198,14 @@ class MailNotificationTab(QWidget):
         header = self.table.horizontalHeader()
         header.setStretchLastSection(False)
         try:
-            for i in range(len(self._table_headers)):
-                header.setSectionResizeMode(i, QHeaderView.Interactive)
-            header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(4, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(5, QHeaderView.Stretch)
-            header.setSectionResizeMode(6, QHeaderView.Stretch)
-            header.setSectionResizeMode(7, QHeaderView.Stretch)
-            header.setSectionResizeMode(8, QHeaderView.Stretch)
-            header.setSectionResizeMode(9, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(10, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(11, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(12, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(13, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(14, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(15, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(16, QHeaderView.ResizeToContents)
-            header.setSectionResizeMode(17, QHeaderView.Stretch)
-            header.setSectionResizeMode(18, QHeaderView.Stretch)
-            header.setSectionResizeMode(19, QHeaderView.ResizeToContents)
+            # 要件: 通知対象リストの列幅は可変（ユーザーがドラッグで調整できる）
+            header.setSectionResizeMode(QHeaderView.Interactive)
         except Exception:
             header.setSectionResizeMode(QHeaderView.Interactive)
         list_layout.addWidget(self.table)
 
-        self.table.cellClicked.connect(self._on_row_clicked)
+        # 要件: シングルクリックは選択のみ。確認ダイアログはダブルクリックで表示。
+        self.table.cellDoubleClicked.connect(self._on_row_clicked)
 
         layout.addWidget(list_group)
 
@@ -1249,10 +1232,7 @@ class MailNotificationTab(QWidget):
 
         exec_layout.addSpacing(12)
 
-        self.combine_send_all_checkbox = QCheckBox("全件通知: 宛先ごとに結合して送信")
-        self.combine_send_all_checkbox.setChecked(False)
-        self.combine_send_all_checkbox.toggled.connect(self._on_send_mode_toggled)
-        exec_layout.addWidget(self.combine_send_all_checkbox)
+
 
         self.send_all_btn = QPushButton("全件通知")
         self.send_all_btn.clicked.connect(self.send_all)
@@ -1261,6 +1241,11 @@ class MailNotificationTab(QWidget):
         self.send_selected_btn = QPushButton("選択通知")
         self.send_selected_btn.clicked.connect(self.send_selected)
         exec_layout.addWidget(self.send_selected_btn)
+
+        self.combine_send_all_checkbox = QCheckBox("メール統合（宛先ごとに結合して送信）")
+        self.combine_send_all_checkbox.setChecked(False)
+        self.combine_send_all_checkbox.toggled.connect(self._on_send_mode_toggled)
+        exec_layout.addWidget(self.combine_send_all_checkbox)
 
         exec_layout.addStretch()
         layout.addWidget(exec_group)
@@ -1964,16 +1949,16 @@ class MailNotificationTab(QWidget):
         except Exception:
             pass
 
-        errors = result.get("errors") or []
-        if errors:
-            self._set_status(f"自動実行エラー: {errors[0]}", ThemeKey.TEXT_ERROR)
-            return
-
         sent_batches = int(result.get("sent_batches") or 0)
         sent_to_count = int(result.get("sent_to_count") or 0)
         skipped_batches = int(result.get("skipped_batches") or 0)
         excluded_logged = int(result.get("excluded_logged") or 0)
         unresolved = int(result.get("unresolved") or 0)
+
+        errors = result.get("errors") or []
+        if errors and sent_batches <= 0:
+            self._set_status(f"自動実行エラー: {errors[0]}", ThemeKey.TEXT_ERROR)
+            return
 
         last_sent_at_utc = result.get("last_sent_at_utc")
         if isinstance(last_sent_at_utc, datetime) and sent_batches > 0:
@@ -1990,8 +1975,12 @@ class MailNotificationTab(QWidget):
             pass
 
         self._set_status(
-            f"自動実行: 対象={len(planned)}件, 除外(ログ)={excluded_logged}件, 未解決={unresolved}件, 送信={sent_batches}通, skip={skipped_batches}通",
-            ThemeKey.TEXT_SUCCESS,
+            (
+                f"自動実行: 対象={len(planned)}件, 除外(ログ)={excluded_logged}件, 未解決={unresolved}件, "
+                f"送信={sent_batches}通, skip={skipped_batches}通"
+                + (f"（一部失敗: {errors[0]}）" if errors else "")
+            ),
+            ThemeKey.TEXT_WARNING if errors else ThemeKey.TEXT_SUCCESS,
         )
 
         # 停止/モード変更によりUI側のチェックが外れている場合でも、表示は整合させる
@@ -2124,7 +2113,65 @@ class MailNotificationTab(QWidget):
         except Exception:
             name_map = None
 
-        # instrument uuid -> localId (instruments.json)
+        # instrument uuid -> localId (instrument API / programs[].localId)
+        # ルール: instrumentId で結合し、programs[].localId を設備IDとして優先する。
+        try:
+            cache = getattr(self, "_instrument_info_cache", None)
+            if not isinstance(cache, dict):
+                cache = {}
+                setattr(self, "_instrument_info_cache", cache)
+        except Exception:
+            cache = {}
+
+        def _fetch_instrument_info(instrument_id: str) -> Dict[str, str]:
+            instrument_id = str(instrument_id or "").strip()
+            if not instrument_id:
+                return {}
+            if instrument_id in cache:
+                v = cache.get(instrument_id)
+                return v if isinstance(v, dict) else {}
+
+            url = f"https://rde-instrument-api.nims.go.jp/instruments/{instrument_id}"
+            headers = {
+                "Accept": "application/vnd.api+json",
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
+                "Origin": "https://rde-entry-arim.nims.go.jp",
+                "Referer": "https://rde-entry-arim.nims.go.jp/",
+            }
+            info: Dict[str, str] = {}
+            try:
+                from net.http_helpers import proxy_get
+
+                resp = proxy_get(url, headers=headers, timeout=10)
+                if not resp or int(getattr(resp, "status_code", 0) or 0) != 200:
+                    cache[instrument_id] = {}
+                    return {}
+                payload = resp.json() or {}
+                data = payload.get("data") or {}
+                attr = data.get("attributes") or {}
+                programs = attr.get("programs") or []
+
+                local_ids: List[str] = []
+                if isinstance(programs, list):
+                    for p in programs:
+                        if isinstance(p, dict) and p.get("localId"):
+                            local_ids.append(str(p.get("localId") or "").strip())
+
+                # 代表値として先頭のlocalIdを設備IDとして扱う
+                if local_ids:
+                    info["localId"] = local_ids[0]
+                if attr.get("nameJa"):
+                    info["nameJa"] = str(attr.get("nameJa") or "").strip()
+                if attr.get("nameEn"):
+                    info["nameEn"] = str(attr.get("nameEn") or "").strip()
+            except Exception:
+                info = {}
+
+            cache[instrument_id] = info
+            return info
+
+        # 旧フォールバック: instruments.json の localId
         try:
             local_id_map = load_instrument_local_id_map_from_instruments_json()
         except Exception:
@@ -2147,11 +2194,29 @@ class MailNotificationTab(QWidget):
             dev_ja = str(e.get("instrumentNameJa") or "").strip()
             dev_en = str(e.get("instrumentNameEn") or "").strip()
 
-            # equipmentId: merged_data2 の「設備ID」を優先（装置名から逆引き→文字列から抽出→既存値）
-            equip_id = ""
             instrument_uuid = str(e.get("instrumentId") or "").strip()
+
+            # equipmentId: instrument API の programs[].localId を最優先（instrumentIdで結合）
+            equip_id = ""
             try:
-                equip_id = (lookup_equipment_id_by_device_name(dev_ja, dev_en, name_map=name_map) or "").strip()
+                info = _fetch_instrument_info(instrument_uuid) if instrument_uuid else {}
+                equip_id = str((info or {}).get("localId") or "").strip()
+            except Exception:
+                equip_id = ""
+
+            # 装置名_日: entryの instrumentNameJa を優先、空なら instrument API の nameJa を補完
+            if (not dev_ja) and instrument_uuid:
+                try:
+                    info = _fetch_instrument_info(instrument_uuid)
+                    dev_ja = str((info or {}).get("nameJa") or "").strip() or dev_ja
+                    dev_en = str((info or {}).get("nameEn") or "").strip() or dev_en
+                except Exception:
+                    pass
+
+            # フォールバック: merged_data2 の「設備ID」（装置名から逆引き→文字列から抽出→既存値）
+            try:
+                if not equip_id:
+                    equip_id = (lookup_equipment_id_by_device_name(dev_ja, dev_en, name_map=name_map) or "").strip()
             except Exception:
                 equip_id = ""
             if not equip_id:
@@ -2159,7 +2224,7 @@ class MailNotificationTab(QWidget):
             if not equip_id:
                 equip_id = (extract_equipment_id(dev_en) or "").strip()
             if not equip_id:
-                # フォールバック: instruments.json の localId を採用
+                # フォールバック: instruments.json の localId を採用（ローカルキャッシュ）
                 try:
                     equip_id = (lookup_instrument_local_id(instrument_uuid, local_id_map=local_id_map) or "").strip()
                 except Exception:
@@ -2626,7 +2691,12 @@ class MailNotificationTab(QWidget):
             self._set_status("対象行が選択されていません。", ThemeKey.TEXT_WARNING)
             return
 
-        if not self._confirm_send(selected_entries, combine_by_to=False):
+        combine = bool(getattr(self, "combine_send_all_checkbox", None) and self.combine_send_all_checkbox.isChecked())
+        if not self._confirm_send(selected_entries, combine_by_to=combine):
+            return
+
+        if combine:
+            self._send_all_combined(selected_entries)
             return
 
         sent = 0
@@ -2725,9 +2795,10 @@ class MailNotificationTab(QWidget):
                 sent_to_count += 1
             except Exception as exc:
                 errors.append(str(exc))
-                break
+                # 1件失敗しても、他宛先への通知は継続する
+                continue
 
-        if errors:
+        if errors and sent_batches <= 0:
             self._set_status(f"結合送信に失敗: {errors[0]}", ThemeKey.TEXT_ERROR)
             return
 
@@ -2739,8 +2810,12 @@ class MailNotificationTab(QWidget):
             pass
 
         self._set_status(
-            f"全件通知（結合）完了: 対象={len(planned)}件, 宛先={sent_to_count}件, 送信={sent_batches}通, skip={skipped_batches}通, 未解決={summary.unresolved_count}件",
-            ThemeKey.TEXT_SUCCESS,
+            (
+                f"全件通知（結合）完了: 対象={len(planned)}件, 宛先={sent_to_count}件, 送信={sent_batches}通, "
+                f"skip={skipped_batches}通, 未解決={summary.unresolved_count}件"
+                + (f"（一部失敗: {errors[0]}）" if errors else "")
+            ),
+            ThemeKey.TEXT_WARNING if errors else ThemeKey.TEXT_SUCCESS,
         )
 
     def _get_visible_entries(self) -> List[Dict[str, Any]]:

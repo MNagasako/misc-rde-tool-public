@@ -104,6 +104,9 @@ class SettingsTabWidget(QWidget):
         # メールタブ（Gmail: アプリパスワードを先行実装）
         self.setup_mail_tab()
 
+        # MISCタブ
+        self.setup_misc_tab()
+
         # 除外されたタブ（ユーザー要望）:
         # - ネットワーク設定タブ
         # - アプリケーション設定タブ
@@ -852,6 +855,23 @@ class SettingsTabWidget(QWidget):
             self._add_scroll_tab(self.mail_widget, "メール")
         except Exception as e:
             logger.warning("メールタブのロードに失敗: %s", e)
+
+    def setup_misc_tab(self):
+        """MISC（その他）タブ"""
+        try:
+            from classes.config.ui.misc_tab import MiscTab
+
+            misc_widget = MiscTab(self)
+            self._add_scroll_tab(misc_widget, "MISC")
+        except Exception as e:
+            logger.warning("MISCタブのロードに失敗: %s", e)
+            fallback = QWidget()
+            l = QVBoxLayout(fallback)
+            l.setContentsMargins(20, 20, 20, 20)
+            l.addWidget(QLabel("MISCタブの読み込みに失敗しました。"))
+            l.addWidget(QLabel(str(e)))
+            l.addStretch(1)
+            self._add_scroll_tab(fallback, "MISC")
 
     def setup_autologin_tab(self):
         """自動ログインタブを設定"""

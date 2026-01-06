@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-ARIM RDE Tool v2.4.5 - PySide6によるRDE→ARIMデータポータル移行ツール
+ARIM RDE Tool v2.4.6 - PySide6によるRDE→ARIMデータポータル移行ツール
 
 主要機能:
 - RDEシステムへの自動ログイン・データセット一括取得・画像保存
@@ -1050,8 +1050,7 @@ def main():
                 logger.debug("src配下の__version__定義: なし")
             sys.exit(0)
         
-        # 余計なトップレベルウィンドウ（tkinterスプラッシュ）が出る問題を避けるため、
-        # 既定ではスプラッシュを表示しない（設定/環境変数で明示的に有効化した場合のみ表示）。
+        # スプラッシュは既定で表示（設定/MISC または環境変数で切り替え可能）。
         if SPLASH_AVAILABLE and is_splash_enabled():
             if 'PerfMonitor' in locals() and PerfMonitor is not None:
                 with PerfMonitor.span("startup:show_splash", logger=logger):
@@ -1080,6 +1079,90 @@ def main():
                 browser = Browser(auto_close=args.auto_close, test_mode=args.test)
         else:
             browser = Browser(auto_close=args.auto_close, test_mode=args.test)
+
+        # 起動時の自動更新チェック（1日1回、UI非ブロッキング）
+        # - 手動更新は 設定 → MISC からも実行可能
+        # - 更新実行時はインストーラ起動後にアプリ終了（自己書換え回避）
+        try:
+            if not args.test and not os.environ.get("PYTEST_CURRENT_TEST"):
+                from classes.core.app_updater import (
+                    check_update,
+                    download,
+                    get_default_download_path,
+                    run_installer_and_exit,
+                    should_check_once_per_day,
+                    verify_sha256,
+                    _now_utc,
+                )
+                from config.common import REVISION
+
+                def _auto_update_check_once_per_day() -> None:
+                    try:
+                        config_manager = get_config_manager()
+                        last_checked = config_manager.get("app.update.last_check_utc", "")
+                        if not should_check_once_per_day(last_checked):
+                            return
+
+                        config_manager.set("app.update.last_check_utc", _now_utc().isoformat())
+                        config_manager.save()
+
+                        import threading
+
+                        def _worker() -> None:
+                            try:
+                                has_update, latest_version, installer_url, expected_sha256, updated_at = check_update(REVISION)
+                                if not has_update:
+                                    return
+
+                                updated_at_text = updated_at or "不明"
+
+                                def _prompt_on_ui_thread() -> None:
+                                    from qt_compat.widgets import QMessageBox
+
+                                    msg = (
+                                        "新しいバージョンが利用可能です。\n\n"
+                                        f"現在: {REVISION}\n"
+                                        f"latest.json: {latest_version}\n"
+                                        f"更新日時: {updated_at_text}\n\n"
+                                        "設定 → MISC から更新できます。\n\n"
+                                        "今すぐ更新しますか？"
+                                    )
+                                    reply = QMessageBox.question(
+                                        browser,
+                                        "更新のお知らせ",
+                                        msg,
+                                        QMessageBox.Yes | QMessageBox.No,
+                                        QMessageBox.No,
+                                    )
+                                    if reply != QMessageBox.Yes:
+                                        return
+
+                                    try:
+                                        dst_path = get_default_download_path(latest_version)
+                                        download(installer_url, dst_path)
+                                        if not verify_sha256(dst_path, expected_sha256):
+                                            QMessageBox.warning(
+                                                browser,
+                                                "更新失敗",
+                                                "ダウンロードファイルの整合性確認（sha256）が一致しませんでした。",
+                                            )
+                                            return
+                                        run_installer_and_exit(dst_path)
+                                    except Exception as e:
+                                        logger.warning("Auto update failed: %s", e, exc_info=True)
+                                        QMessageBox.warning(browser, "更新失敗", str(e))
+
+                                QTimer.singleShot(0, _prompt_on_ui_thread)
+                            except Exception as e:
+                                logger.warning("Auto update check failed: %s", e, exc_info=True)
+
+                        threading.Thread(target=_worker, daemon=True).start()
+                    except Exception as e:
+                        logger.warning("Auto update scheduling failed: %s", e, exc_info=True)
+
+                QTimer.singleShot(1500, _auto_update_check_once_per_day)
+        except Exception as e:
+            logger.warning("Auto update init failed: %s", e, exc_info=True)
 
         if 'PerfMonitor' in locals() and PerfMonitor is not None:
             PerfMonitor.mark("startup:enter_event_loop", logger=logger)

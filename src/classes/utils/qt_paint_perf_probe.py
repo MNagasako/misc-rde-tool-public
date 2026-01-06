@@ -114,7 +114,27 @@ class QtPaintPerfProbe:
         try:
             if getattr(self._root, "isVisible", None) and self._root.isVisible():
                 _, _, QTimer, _ = self._qt
-                QTimer.singleShot(0, self._root.update)
+                # NOTE: QTimer.singleShot は後続のイベントループで実行されるため、
+                # root_widget が既に破棄されていると update() 呼び出しが
+                # Windows で access violation になり得る。安全にガードして呼び出す。
+                root = self._root
+
+                def _safe_update() -> None:
+                    try:
+                        from shiboken6 import isValid as _qt_is_valid  # type: ignore
+                    except Exception:
+                        _qt_is_valid = None
+                    try:
+                        if _qt_is_valid is not None and not _qt_is_valid(root):
+                            return
+                    except Exception:
+                        return
+                    try:
+                        root.update()
+                    except Exception:
+                        return
+
+                QTimer.singleShot(0, _safe_update)
         except Exception:
             pass
         return True

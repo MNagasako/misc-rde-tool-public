@@ -4452,7 +4452,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         update_entries_table_for_dataset(str(dataset_id), str(dataset_name) if dataset_name else None, force_refresh=False)
     
     # 動的フィルタリング用のタイマー
-    filter_timer = QTimer()
+    # 親無しの QTimer は widget 破棄後も生存し得て、timeout が遅れて発火すると
+    # 破棄済み QObject 参照で Windows/PySide6 がクラッシュすることがある。
+    filter_timer = QTimer(widget)
     filter_timer.setSingleShot(True)
     filter_timer.timeout.connect(apply_filter)
     
@@ -4660,7 +4662,41 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         finally:
             _register_dataset_launch_receiver_once()
 
-    QTimer.singleShot(0, _initial_load_and_register_receiver)
+    def _safe_initial_load_and_register_receiver() -> None:
+        try:
+            from shiboken6 import isValid
+
+            if not isValid(widget):
+                return
+        except Exception:
+            pass
+        _initial_load_and_register_receiver()
+
+    # 初回表示をブロックしないため、イベントループ復帰後に1度だけ実行する。
+    # widgetテストでは teardown 中の processEvents で走ると不安定になる場合があるため、
+    # タイマー参照を widget に保持し、テスト側が close 前に停止できるようにする。
+    _initial_load_scheduled = {"done": False}
+
+    def _initial_load_once() -> None:
+        if _initial_load_scheduled["done"]:
+            return
+        _initial_load_scheduled["done"] = True
+        _safe_initial_load_and_register_receiver()
+
+    try:
+        initial_timer = QTimer(widget)
+        initial_timer.setSingleShot(True)
+        initial_timer.timeout.connect(_initial_load_once)
+
+        timer_bucket = getattr(widget, "_rde_dataset_edit_timers", None)
+        if timer_bucket is None:
+            timer_bucket = []
+            setattr(widget, "_rde_dataset_edit_timers", timer_bucket)
+        timer_bucket.append(initial_timer)
+
+        initial_timer.start(0)
+    except Exception:
+        QTimer.singleShot(0, _initial_load_once)
     
     # 初期状態でフォームをクリア
     clear_edit_form()
@@ -4703,6 +4739,21 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     # ウィジェットが削除されるときに通知システムから登録解除
     def cleanup():
         try:
+            try:
+                filter_timer.stop()
+            except Exception:
+                pass
+            try:
+                timers = getattr(widget, "_rde_dataset_edit_timers", None)
+                if timers:
+                    for t in list(timers):
+                        try:
+                            t.stop()
+                        except Exception:
+                            pass
+                    timers.clear()
+            except Exception:
+                pass
             notifier.unregister_callback(refresh_with_current_filter)
         except:
             pass

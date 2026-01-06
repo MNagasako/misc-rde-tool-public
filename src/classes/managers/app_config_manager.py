@@ -60,6 +60,7 @@ class AppConfigManager:
                 "default_grant_number": "JPMXP1222TU0195",
                 "auto_login_enabled": False,
                 "auto_close_enabled": False,
+                "enable_splash_screen": True,
                 "test_mode": False
             },
             

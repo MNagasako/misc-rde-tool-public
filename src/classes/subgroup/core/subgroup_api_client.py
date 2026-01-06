@@ -201,7 +201,7 @@ class SubgroupApiClient:
                     # プログレス表示付きで自動更新（即座に実行）
                     worker = SimpleProgressWorker(
                         task_func=auto_refresh_subgroup_json,
-                        task_kwargs={'bearer_token': self.bearer_token},
+                        task_kwargs={'bearer_token': self.bearer_token, 'force_refresh_subgroup': True},
                         task_name="サブグループ情報更新"
                     )
                     

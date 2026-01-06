@@ -134,7 +134,7 @@ class SubgroupEditHandler(SubgroupCreateHandler):
                     # プログレス表示付きで自動更新（即座に実行）
                     worker = SimpleProgressWorker(
                         task_func=auto_refresh_subgroup_json,
-                        task_kwargs={'bearer_token': bearer_token},
+                        task_kwargs={'bearer_token': bearer_token, 'force_refresh_subgroup': True},
                         task_name="サブグループ情報更新"
                     )
                     
@@ -347,6 +347,7 @@ class SubgroupSelector:
         self.filtered_groups_data = []
         self.sample_count_cache = {}  # 試料数キャッシュ
         self._detail_user_cache: dict[str, dict] = {}
+        self._last_focus_group_id: Optional[str] = None
         
         # イベント接続
         self.filter_combo.currentTextChanged.connect(self.apply_filter)
@@ -355,6 +356,12 @@ class SubgroupSelector:
     def load_existing_subgroups(self):
         """既存サブグループの読み込み"""
         try:
+            # subGroup.json / subGroups詳細の内容が更新され得るため、読み込み前にキャッシュを破棄
+            try:
+                self._detail_user_cache.clear()
+            except Exception:
+                pass
+
             if not os.path.exists(SUBGROUP_JSON_PATH):
                 logger.info("サブグループファイルが見つかりません: %s", SUBGROUP_JSON_PATH)
                 self._set_empty_state("サブグループファイルが見つかりません")
@@ -387,6 +394,13 @@ class SubgroupSelector:
             logger.debug("関連試料数の事前読み込み完了")
             
             self.apply_filter()
+
+            # 直前にフォーカス指定されたサブグループがあれば再選択
+            try:
+                if self._last_focus_group_id:
+                    self.select_group_by_id(self._last_focus_group_id, prompt_clear_filter=True)
+            except Exception:
+                pass
             return True
             
         except Exception as e:
@@ -565,6 +579,85 @@ class SubgroupSelector:
                 display_text = f"{group['name']} (ID: {group['id']}, 試料: N/A)"
             
             self.combo_widget.addItem(display_text, group)
+
+    def _find_group_by_id(self, group_id: str) -> Optional[dict]:
+        if not group_id:
+            return None
+        for g in self.groups_data or []:
+            try:
+                if isinstance(g, dict) and str(g.get("id", "") or "") == str(group_id):
+                    return g
+            except Exception:
+                continue
+        return None
+
+    def _select_combo_item_by_group_id(self, group_id: str) -> bool:
+        if not group_id:
+            return False
+        for i in range(self.combo_widget.count()):
+            try:
+                data = self.combo_widget.itemData(i)
+                if isinstance(data, dict) and str(data.get("id", "") or "") == str(group_id):
+                    self.combo_widget.setCurrentIndex(i)
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _set_filter_none(self) -> bool:
+        """フィルタコンボを 'フィルタ無し' に切り替える。"""
+        try:
+            for i in range(self.filter_combo.count()):
+                if self.filter_combo.itemData(i) == "none":
+                    self.filter_combo.setCurrentIndex(i)
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def select_group_by_id(self, group_id: str, prompt_clear_filter: bool = True) -> bool:
+        """指定IDのサブグループを選択する。
+
+        フィルタが厳しく表示できない場合は、必要時のみフィルタ解除を確認して再表示する。
+        """
+        group_id = str(group_id or "")
+        if not group_id:
+            return False
+
+        # 現在の候補から選択を試行
+        if self._select_combo_item_by_group_id(group_id):
+            self._last_focus_group_id = group_id
+            return True
+
+        # そもそもデータに存在しない場合は諦める
+        if not self._find_group_by_id(group_id):
+            return False
+
+        # フィルタ条件で見えない場合のみ、解除確認
+        if prompt_clear_filter and self.filter_combo.currentData() != "none":
+            try:
+                reply = QMessageBox.question(
+                    self.combo_widget,
+                    "フィルタ解除の確認",
+                    "更新したサブグループが現在の表示フィルタ条件では表示できません。\n"
+                    "フィルタを解除して表示しますか？",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes,
+                )
+                if reply == QMessageBox.Yes:
+                    self._set_filter_none()
+                    # apply_filter は currentTextChanged 経由でも呼ばれるが、明示的に安全側で呼ぶ
+                    try:
+                        self.apply_filter()
+                    except Exception:
+                        pass
+                    if self._select_combo_item_by_group_id(group_id):
+                        self._last_focus_group_id = group_id
+                        return True
+            except Exception:
+                pass
+
+        return False
     
     def _get_sample_count(self, subgroup_id):
         """サブグループIDに対応する関連試料数を取得（キャッシュ付き）"""
@@ -1139,6 +1232,15 @@ def _initialize_managers(combo, filter_combo, scroll_area, form_builder, form_wi
         def refresh_callback():
             logger.info("サブグループ更新通知を受け取り、エントリーを更新します")
             selector.load_existing_subgroups()
+
+            # 直前に更新したサブグループがある場合は、それを優先して再表示
+            try:
+                group_id = getattr(widget, "_last_updated_subgroup_id", None)
+                if group_id:
+                    if selector.select_group_by_id(str(group_id), prompt_clear_filter=True):
+                        widget._last_updated_subgroup_id = None
+            except Exception:
+                pass
         
         notifier.register_callback(refresh_callback)
         logger.info("サブグループ更新通知コールバックを登録しました")
@@ -1236,7 +1338,7 @@ def _setup_event_handlers(widget, parent, managers, button_section, form_widgets
             return
         
         # 更新処理実行
-        _execute_update(edit_handler, form_values, roles)
+        _execute_update(edit_handler, form_values, roles, widget=widget, selector=selector)
     
     # イベント接続
     button_section['show'].clicked.connect(on_show_selected)
@@ -1246,7 +1348,7 @@ def _setup_event_handlers(widget, parent, managers, button_section, form_widgets
     refresh_btn.clicked.connect(selector.load_existing_subgroups)
 
 
-def _execute_update(edit_handler, form_values, roles):
+def _execute_update(edit_handler, form_values, roles, widget, selector):
     """更新処理の実行"""
     selected_group = edit_handler.selected_group_data
     group_id = selected_group['id']
@@ -1273,5 +1375,16 @@ def _execute_update(edit_handler, form_values, roles):
     
     if success:
         logger.info("サブグループ[%s]の更新が完了しました", group_name)
+
+        # 更新直後は当該サブグループを再選択して再表示する
+        try:
+            widget._last_updated_subgroup_id = str(group_id)
+        except Exception:
+            pass
+        try:
+            selector.load_existing_subgroups()
+            selector.select_group_by_id(str(group_id), prompt_clear_filter=True)
+        except Exception as e:
+            logger.debug("更新後の再選択に失敗: %s", e)
     else:
         logger.error("サブグループ[%s]の更新に失敗しました", group_name)

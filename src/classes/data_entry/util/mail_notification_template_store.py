@@ -169,7 +169,7 @@ def _default_template_set(*, kind: TemplateKind) -> MailNotificationTemplateSet:
 
     # combined
     return MailNotificationTemplateSet(
-        subject="[RDE] 登録失敗: {dataName} ({entryId})",
+        subject="[RDE] 登録失敗: 対象件数: {count}",
         header="{testNotice}\n自動通知（{nowJst} JST）\n対象件数: {count}\n",
         body=(
             "開始時刻(JST): {startTime}\n"

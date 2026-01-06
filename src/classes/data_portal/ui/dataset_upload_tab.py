@@ -84,6 +84,7 @@ class DatasetUploadTab(QWidget):
         # データセットドロップダウン（重い生成処理）の遅延初期化
         self._dataset_dropdown_initialized = False
         self._dataset_dropdown_init_scheduled = False
+        self._dataset_dropdown_init_timer = None
         
         self._init_ui()
         logger.info("データセットアップロードタブ初期化完了")
@@ -656,7 +657,17 @@ class DatasetUploadTab(QWidget):
         if self._dataset_dropdown_initialized or self._dataset_dropdown_init_scheduled:
             return
         self._dataset_dropdown_init_scheduled = True
-        QTimer.singleShot(0, self._ensure_dataset_dropdown_initialized)
+        # NOTE: QTimer.singleShot は親を持たない遅延呼び出しとなり、Widget破棄後に
+        # bound method が呼ばれてWindowsでaccess violationになることがある。
+        # 親付きの単発タイマーにして、破棄と同時に自動停止/破棄されるようにする。
+        try:
+            if self._dataset_dropdown_init_timer is None:
+                self._dataset_dropdown_init_timer = QTimer(self)
+                self._dataset_dropdown_init_timer.setSingleShot(True)
+                self._dataset_dropdown_init_timer.timeout.connect(self._ensure_dataset_dropdown_initialized)
+            self._dataset_dropdown_init_timer.start(0)
+        except Exception:
+            QTimer.singleShot(0, self._ensure_dataset_dropdown_initialized)
 
     def _ensure_dataset_dropdown_initialized(self) -> None:
         if self._dataset_dropdown_initialized:

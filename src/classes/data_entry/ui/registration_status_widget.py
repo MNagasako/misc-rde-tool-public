@@ -231,25 +231,55 @@ class RegistrationStatusWidget(QWidget):
         except Exception:
             pass
 
-    def _retire_worker(self, worker: QThread | None) -> None:
-        if worker is None:
-            return
-        self._retired_workers.add(worker)
+    @Slot()
+    def _on_retired_worker_finished(self) -> None:
+        """retire済みワーカーの後処理をGUIスレッドで行う。
 
-        def _cleanup():
-            try:
-                self._retired_workers.discard(worker)
-            except Exception:
-                pass
+        PySide6では、signalをPython callable(closure等)に接続すると
+        emitterスレッド側で実行され得るため、deleteLater等のQt操作は
+        QWidget側(QObject)のスレッド上で行う。
+        """
+        try:
+            worker = self.sender()
+        except Exception:
+            worker = None
+        if not isinstance(worker, QThread):
+            return
+        try:
+            self._retired_workers.discard(worker)
+        except Exception:
+            pass
+        try:
+            worker.deleteLater()
+        except Exception:
+            pass
+
+    @Slot()
+    def _on_cache_worker_finished(self) -> None:
+        try:
+            worker = self.sender()
+        except Exception:
+            worker = None
+        if self._cache_worker is worker:
+            self._cache_worker = None
+        # retire済みの場合は _on_retired_worker_finished 側でdeleteLaterする
+        if isinstance(worker, QThread) and worker not in getattr(self, "_retired_workers", set()):
             try:
                 worker.deleteLater()
             except Exception:
                 pass
 
-        # QThread.finished は built-in signal。_EntryCacheWorker は同名を上書きしているが
-        # いずれも .finished で接続できる想定。
+    def _retire_worker(self, worker: QThread | None) -> None:
+        if worker is None:
+            return
+        if worker in self._retired_workers:
+            return
+        self._retired_workers.add(worker)
+
+        # finishedシグナルはワーカースレッド側から発火するため、
+        # cleanupはWidget(QObject)側のスレッドで実行させる。
         try:
-            worker.finished.connect(_cleanup)
+            worker.finished.connect(self._on_retired_worker_finished)
         except Exception:
             pass
 
@@ -342,7 +372,8 @@ class RegistrationStatusWidget(QWidget):
                 worker.cancel()
         except Exception:
             pass
-        if retire and getattr(worker, 'isRunning', lambda: False)():
+        if retire:
+            # start直後のレースでisRunningがFalseでも参照を保持してGC破棄を防ぐ
             self._retire_worker(worker)
 
     @Slot(object)
@@ -470,8 +501,8 @@ class RegistrationStatusWidget(QWidget):
                 return
             self._cancel_cache_worker(retire=True)
             self._cache_worker = _EntryCacheWorker(entry_ids)
-            # 完了後に参照を外す
-            self._cache_worker.finished.connect(lambda: setattr(self, '_cache_worker', None))
+            # 完了後に参照を外し、deleteLaterはGUIスレッドで実行
+            self._cache_worker.finished.connect(self._on_cache_worker_finished)
             self._cache_worker.start()
         except Exception as exc:
             logger.debug("[登録状況] 個別JSONキャッシュワーカー起動に失敗: %s", exc)
@@ -486,7 +517,8 @@ class RegistrationStatusWidget(QWidget):
                 worker.cancel()
         except Exception:
             pass
-        if retire and getattr(worker, 'isRunning', lambda: False)():
+        if retire:
+            # start直後のレースでisRunningがFalseでも参照を保持してGC破棄を防ぐ
             self._retire_worker(worker)
 
     def update_cache_info_label(self):

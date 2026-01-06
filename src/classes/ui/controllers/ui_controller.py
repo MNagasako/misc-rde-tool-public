@@ -47,6 +47,70 @@ class UIController(UIControllerCore):
             if hasattr(self, 'logger'):
                 self.logger.error(f"エラーメッセージ表示失敗: {e}, 元のメッセージ: {message}")
             logger.error("エラー表示失敗: %s, 元のメッセージ: %s", e, message)
+
+    def _schedule_qt_single_shot(self, delay_ms, callback, *, parent=None, key=None):
+        """Schedule a Qt single-shot safely.
+
+        - Uses a parented QTimer so it is cancelled on parent destruction.
+        - Guards against callbacks running after QObject deletion.
+        - Keeps a reference to the QTimer to avoid premature GC.
+        """
+        if parent is None:
+            parent = getattr(self, "parent", None)
+
+        if parent is None:
+            try:
+                QTimer.singleShot(delay_ms, callback)
+            except Exception:
+                pass
+            return
+
+        try:
+            from shiboken6 import isValid
+
+            if not isValid(parent):
+                return
+        except Exception:
+            pass
+
+        timer = QTimer(parent)
+        timer.setSingleShot(True)
+
+        store_key = key or f"_rde_single_shot_{id(timer)}"
+        if not hasattr(self, "_rde_single_shot_timers"):
+            self._rde_single_shot_timers = {}
+
+        self._rde_single_shot_timers[store_key] = timer
+
+        def _on_timeout():
+            try:
+                try:
+                    from shiboken6 import isValid
+
+                    if not isValid(parent):
+                        return
+                except Exception:
+                    pass
+
+                callback()
+            except (RuntimeError, AttributeError):
+                # QObject deleted / callback no longer valid
+                pass
+            finally:
+                try:
+                    self._rde_single_shot_timers.pop(store_key, None)
+                except Exception:
+                    pass
+
+        try:
+            timer.timeout.connect(_on_timeout)
+            timer.start(int(delay_ms))
+        except Exception:
+            try:
+                self._rde_single_shot_timers.pop(store_key, None)
+            except Exception:
+                pass
+            return
     
     def show_text_area_expanded(self, text_widget, title):
         """
@@ -251,9 +315,8 @@ class UIController(UIControllerCore):
         
         # 待機メッセージを3秒後に非表示（成功メッセージを見せるため）
         if hasattr(self.parent, 'autologin_msg_label'):
-            from qt_compat.core import QTimer
             # 3秒後に非表示
-            QTimer.singleShot(3000, lambda: self._hide_login_message_safely())
+            self._schedule_qt_single_shot(3000, self._hide_login_message_safely, key="hide_login_message")
     
     def _hide_login_message_safely(self):
         """ログインメッセージを安全に非表示"""
@@ -701,9 +764,12 @@ class UIController(UIControllerCore):
             import os
 
             if not os.environ.get("PYTEST_CURRENT_TEST"):
-                from qt_compat.core import QTimer
-
-                QTimer.singleShot(1500, self.preload_ai_suggestion_dialog)
+                self._schedule_qt_single_shot(
+                    1500,
+                    self.preload_ai_suggestion_dialog,
+                    parent=self.parent,
+                    key="preload_ai_suggestion_dialog",
+                )
         except Exception:
             pass
 
@@ -1269,9 +1335,7 @@ class UIController(UIControllerCore):
             # 背景色の再適用と再描画を遅延実行して復旧を促す。
             if not is_pytest:
                 try:
-                    from qt_compat.core import QTimer
-
-                    QTimer.singleShot(0, self._refresh_webview_after_show)
+                    self._schedule_qt_single_shot(0, self._refresh_webview_after_show, key="refresh_webview_after_show")
                 except Exception:
                     pass
             
@@ -1326,9 +1390,7 @@ class UIController(UIControllerCore):
         # Async WebView events can fire during/after mode switches.
         if mode != "data_fetch" and hasattr(self.parent, 'overlay_manager'):
             try:
-                from qt_compat.core import QTimer
-
-                QTimer.singleShot(0, self.parent.overlay_manager.hide_overlay)
+                self._schedule_qt_single_shot(0, self.parent.overlay_manager.hide_overlay, key="hide_overlay_after_mode_switch")
             except Exception:
                 pass
 
@@ -1431,7 +1493,7 @@ class UIController(UIControllerCore):
                     except (RuntimeError, AttributeError):
                         # オブジェクトが削除済みまたは属性がない場合は無視
                         pass
-                QTimer.singleShot(50, safe_adjust_font)
+                self._schedule_qt_single_shot(50, safe_adjust_font, key=f"adjust_font_{mode}")
             except (RuntimeError, AttributeError):
                 # ボタンオブジェクトが削除済みの場合は無視
                 continue
@@ -2335,7 +2397,7 @@ class UIController(UIControllerCore):
                 webview.raise_()
                 
             # 少し遅延してもう一度実行（確実に無効化）
-            QTimer.singleShot(500, self.delayed_overlay_disable)
+            self._schedule_qt_single_shot(500, self.delayed_overlay_disable, key="delayed_overlay_disable")
             
             logger.debug("ナビゲーション後: オーバーレイを強制無効化しました")
             
@@ -3578,7 +3640,7 @@ class UIController(UIControllerCore):
             logger.debug("on_completer_activated called with text: '%s'", text)
             
             # 短い遅延の後に更新処理を実行（UIの更新を待つため）
-            QTimer.singleShot(100, lambda: self.on_task_id_changed(text))
+            self._schedule_qt_single_shot(100, lambda: self.on_task_id_changed(text), key="on_task_id_changed_delayed")
             
         except Exception as e:
             logger.debug("Error in on_completer_activated: %s", e)
@@ -4650,7 +4712,7 @@ class UIController(UIControllerCore):
                     # 位置調整は行わない（ユーザー要望により削除）
             
             # UIが完全に作成された後にサイズを適用
-            QTimer.singleShot(50, apply_sizing)
+            self._schedule_qt_single_shot(50, apply_sizing, key="apply_initial_data_register_sizing")
             
         except Exception as e:
             logger.error("初回データ登録サイズ適用エラー: %s", e)
@@ -4713,7 +4775,6 @@ class UIController(UIControllerCore):
             
             # AI拡張タブを選択
             if hasattr(dialog, 'tab_widget'):
-                from qt_compat.core import QTimer
                 def select_extension_tab():
                     try:
                         for i in range(dialog.tab_widget.count()):
@@ -4724,8 +4785,12 @@ class UIController(UIControllerCore):
                                 break
                     except Exception as e:
                         logger.error("AI拡張タブ選択エラー: %s", e)
-                
-                QTimer.singleShot(100, select_extension_tab)
+
+                # ダイアログが閉じた後に発火しないよう、dialog を親にする
+                try:
+                    self._schedule_qt_single_shot(100, select_extension_tab, parent=dialog, key="select_ai_extension_tab")
+                except Exception:
+                    pass
             
             # ダイアログを表示
             dialog.show()

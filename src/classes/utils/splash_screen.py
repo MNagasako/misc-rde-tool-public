@@ -21,7 +21,7 @@ def _env_truthy(value: str | None) -> bool:
 def is_splash_enabled() -> bool:
     """スプラッシュ表示の有効/無効を判定。
 
-    既定は無効。
+    既定は有効。
     - `RDE_DISABLE_SPLASH_SCREEN` が truthy なら常に無効
     - `RDE_ENABLE_SPLASH_SCREEN` が truthy なら常に有効
     - それ以外は config `app.enable_splash_screen` を参照
@@ -37,9 +37,9 @@ def is_splash_enabled() -> bool:
 
     try:
         cfg = get_config_manager()
-        return bool(cfg.get("app.enable_splash_screen", False))
+        return bool(cfg.get("app.enable_splash_screen", True))
     except Exception:
-        return False
+        return True
 
 def show_splash_screen():
     # 判定側で無効の場合は何もしない

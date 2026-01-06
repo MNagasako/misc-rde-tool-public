@@ -53,6 +53,32 @@ class DatasetLaunchManager:
         self._recent_applied: Dict[str, tuple[DatasetPayload, float]] = {}
 
     # ------------------------------------------------------------------
+    # Reset helpers (primarily for tests)
+    # ------------------------------------------------------------------
+    def reset_state(self) -> None:
+        """Clear all runtime state.
+
+        This is useful in long-running test sessions where widgets can be
+        destroyed after other tests replaced the singleton instance.
+        """
+
+        self._ui_controller = None
+        self._receivers.clear()
+        self._pending_request = None
+        self._recent_applied.clear()
+
+    @classmethod
+    def reset_instance(cls) -> None:
+        """Drop the singleton instance and clear its state if present."""
+
+        if cls._instance is not None:
+            try:
+                cls._instance.reset_state()
+            except Exception:
+                pass
+        cls._instance = None
+
+    # ------------------------------------------------------------------
     # Singleton helpers
     # ------------------------------------------------------------------
     @classmethod
