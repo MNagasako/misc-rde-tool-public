@@ -101,8 +101,15 @@ def _exec_dialog_on_ui_thread(groups, parent, context_name, force_dialog, defaul
             self.finished.emit(res)
 
     invoker = _DialogInvoker()
-    # Create in current (worker) thread, then move to UI thread from its own thread (safe).
+    # Create in current (worker) thread, then move to UI thread.
+    # IMPORTANT: After moving, ensure the object is Qt-owned (parented on UI thread),
+    # otherwise Python GC may delete the underlying QObject from the worker thread.
     invoker.moveToThread(app.thread())
+    try:
+        QTimer.singleShot(0, app, lambda inv=invoker: inv.setParent(app))
+    except Exception:
+        # If parenting fails, we still proceed; worst case is additional GC pressure.
+        pass
 
     worker_receiver = _WorkerReceiver()
     invoker.finished.connect(worker_receiver.on_finished, QtCore.Qt.ConnectionType.QueuedConnection)

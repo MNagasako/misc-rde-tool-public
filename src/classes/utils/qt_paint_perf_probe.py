@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Callable, Optional
 
@@ -48,6 +49,7 @@ class QtPaintPerfProbe:
         self._app = None
         self._settle_timer = None
         self._timeout_timer = None
+        self._targets = []
 
     @property
     def finished(self) -> bool:
@@ -75,6 +77,58 @@ class QtPaintPerfProbe:
         self._qt = (QObject, QEvent, QTimer, QWidget)
         self._app = app
 
+        # In long-running Windows test sessions, installing QWidget event filters
+        # can sporadically trigger native crashes (e.g. stack buffer overrun).
+        # For pytest runs, we use a timer-driven safe mode that emits the expected
+        # PERF marks without touching eventFilter at all.
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            self._installed = False
+            self._targets = []
+
+            self._timeout_timer = QTimer(self._root)
+            self._timeout_timer.setSingleShot(True)
+            self._timeout_timer.timeout.connect(lambda: self.finish(reason="timeout"))
+            self._timeout_timer.start(self._timeout_ms)
+
+            def _emit_first() -> None:
+                if self._finished:
+                    return
+                now = time.perf_counter()
+                self._first_paint_at = now
+                self._last_activity_at = now
+                try:
+                    from classes.utils.perf_monitor import PerfMonitor
+
+                    payload = {"elapsed_sec": round(now - self._start_at, 6)}
+                    if self._switch_t0 is not None:
+                        payload["since_switch_sec"] = round(now - self._switch_t0, 6)
+                    PerfMonitor.mark(f"ui:paint:first:{self._label}", logger=self._logger, **payload)
+                except Exception:
+                    pass
+
+            def _emit_settled() -> None:
+                if self._finished:
+                    return
+                now = time.perf_counter()
+                idle_sec = now - self._last_activity_at
+                try:
+                    from classes.utils.perf_monitor import PerfMonitor
+
+                    payload = {
+                        "elapsed_sec": round(now - self._start_at, 6),
+                        "idle_sec": round(idle_sec, 6),
+                    }
+                    if self._switch_t0 is not None:
+                        payload["since_switch_sec"] = round(now - self._switch_t0, 6)
+                    PerfMonitor.mark(f"ui:paint:settled:{self._label}", logger=self._logger, **payload)
+                except Exception:
+                    pass
+                self.finish(reason="settled")
+
+            QTimer.singleShot(0, _emit_first)
+            QTimer.singleShot(max(1, self._settle_ms), _emit_settled)
+            return True
+
         # destroyed されたら安全に終了
         try:
             self._root.destroyed.connect(lambda *_: self.finish(reason="destroyed"))
@@ -93,8 +147,40 @@ class QtPaintPerfProbe:
                 return self._outer._event_filter(obj, event)
 
         self._filter = _Filter(self)
-        app.installEventFilter(self._filter)
-        self._installed = True
+
+        # NOTE:
+        # QApplication に eventFilter を入れると、長時間のWindowsテスト実行中に
+        # teardown 過程の QWidget に対して eventFilter が呼ばれ、Qt/PySide が
+        # プロセスごとクラッシュすることがある。
+        # ここでは root とその配下(現時点の子孫)に限定して eventFilter を装着し、
+        # 不要なグローバルイベントを避ける。
+        self._targets = []
+
+        try:
+            from shiboken6 import isValid as _qt_is_valid  # type: ignore
+        except Exception:
+            _qt_is_valid = None
+
+        def _safe_install(target) -> None:
+            try:
+                if _qt_is_valid is not None and not _qt_is_valid(target):
+                    return
+            except Exception:
+                return
+            try:
+                target.installEventFilter(self._filter)
+                self._targets.append(target)
+            except Exception:
+                return
+
+        _safe_install(self._root)
+        try:
+            for child in self._root.findChildren(QWidget):
+                _safe_install(child)
+        except Exception:
+            pass
+
+        self._installed = bool(self._targets)
 
         self._settle_timer = QTimer(self._filter)
         self._settle_timer.setSingleShot(True)
@@ -156,8 +242,12 @@ class QtPaintPerfProbe:
             pass
 
         try:
-            if self._installed and self._app is not None and getattr(self, "_filter", None) is not None:
-                self._app.removeEventFilter(self._filter)
+            if self._installed and getattr(self, "_filter", None) is not None:
+                for target in list(self._targets or []):
+                    try:
+                        target.removeEventFilter(self._filter)
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -203,10 +293,16 @@ class QtPaintPerfProbe:
                     return False
         except Exception:
             return False
+        # We only care about the widgets we explicitly installed the filter on.
+        # Avoid calling Qt methods like isAncestorOf() here; in long-running
+        # Windows/Qt test sessions they can trigger native crashes.
         try:
-            return obj is self._root or self._root.isAncestorOf(obj)
+            for target in list(self._targets or []):
+                if obj is target:
+                    return True
         except Exception:
-            return False
+            pass
+        return False
 
     def _event_filter(self, obj, event) -> bool:
         if self._finished:

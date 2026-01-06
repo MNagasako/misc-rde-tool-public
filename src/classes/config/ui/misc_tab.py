@@ -135,7 +135,7 @@ class MiscTab(QWidget):
                 check_update,
                 download,
                 get_default_download_path,
-                run_installer_and_exit,
+                run_installer_and_restart,
                 verify_sha256,
             )
 
@@ -160,7 +160,7 @@ class MiscTab(QWidget):
                 f"latest.json: {latest_version}\n"
                 f"更新日時: {updated_at_text}\n\n"
                 "インストーラをダウンロードして更新しますか？\n\n"
-                "（実行後はアプリを終了します）",
+                "（更新完了後は自動で再起動します）",
                 QMessageBox.Yes | QMessageBox.No,
                 QMessageBox.Yes,
             )
@@ -179,8 +179,8 @@ class MiscTab(QWidget):
                 )
                 return
 
-            # 実行（この関数内でアプリ終了）
-            run_installer_and_exit(dst)
+            # 実行（この関数内でアプリ終了→更新完了後に再起動）
+            run_installer_and_restart(dst)
 
         except Exception as e:
             logger.error("更新確認/実行でエラー: %s", e, exc_info=True)

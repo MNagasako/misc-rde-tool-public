@@ -104,9 +104,6 @@ class SettingsTabWidget(QWidget):
         # メールタブ（Gmail: アプリパスワードを先行実装）
         self.setup_mail_tab()
 
-        # MISCタブ
-        self.setup_misc_tab()
-
         # 除外されたタブ（ユーザー要望）:
         # - ネットワーク設定タブ
         # - アプリケーション設定タブ
@@ -121,6 +118,9 @@ class SettingsTabWidget(QWidget):
         
         # 設備タブ
         self._add_lazy_tab("設備", self._create_equipment_tab_widget)
+
+        # MISCタブ（タブ一覧の最後尾に配置）
+        self.setup_misc_tab()
             
         # ボタンエリア
         button_layout = QHBoxLayout()

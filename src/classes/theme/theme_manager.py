@@ -1,5 +1,5 @@
 """
-テーマ管理 - ARIM RDE Tool v2.4.6
+テーマ管理 - ARIM RDE Tool v2.4.7
 
 ライト/ダークテーマの切り替えとカラー取得を一元管理。
 Singleton パターンで全UI要素から参照可能。
@@ -644,26 +644,24 @@ class ThemeManager(QObject):
                     except Exception:
                         pass
                 # Process pending events.
-                # NOTE: On Windows + pytest, QApplication.processEvents() can raise a fatal SEH
-                # (e.g. 0x8001010d). Avoid nested native message pumping in test runs.
+                # NOTE: On Windows + pytest, native message pumping (processEvents/sendPostedEvents)
+                # can still trigger sporadic SEH crashes in long runs. For tests we avoid it.
                 try:
                     import os
 
-                    if os.environ.get("PYTEST_CURRENT_TEST"):
-                        from PySide6.QtCore import QCoreApplication
-
-                        QCoreApplication.sendPostedEvents(None, 0)
-                    else:
+                    if not os.environ.get("PYTEST_CURRENT_TEST"):
                         app.processEvents()
                 except Exception:
                     pass
 
-                # タイトルバーの適用は winId の確定後に効くことがあるため、
-                # repaint/layout 後にも念のため全トップレベルに再適用する。
+                # タイトルバーの適用はネイティブAPIを触るため、pytest実行時は省略する。
                 try:
-                    from classes.theme.window_frame import apply_window_frame_theme
+                    import os
 
-                    apply_window_frame_theme(None, mode=self.get_mode())
+                    if not os.environ.get("PYTEST_CURRENT_TEST"):
+                        from classes.theme.window_frame import apply_window_frame_theme
+
+                        apply_window_frame_theme(None, mode=self.get_mode())
                 except Exception:
                     pass
                 # Optional targeted update

@@ -58,8 +58,8 @@ def _parse_version_to_tuple(version: str) -> Tuple[int, ...]:
 
     例:
     - "2.4.10" -> (2, 4, 10)
-    - "v2.4.6" -> (2, 4, 6)
-    - "2.4.6-beta1" -> (2, 4, 6, 1)
+    - "v2.4.7" -> (2, 4, 7)
+    - "2.4.7-beta1" -> (2, 4, 7, 1)
 
     文字列比較は禁止（2.4.10 > 2.4.4 を正しく扱う）。
     """
@@ -183,6 +183,88 @@ def run_installer_and_exit(installer_path: str, log_path: Optional[str] = None) 
 
     logger.info("インストーラ起動: %s", " ".join(args))
     subprocess.Popen(args, close_fds=True)
+
+    # できるだけ穏当な終了を試みる
+    try:
+        from qt_compat.widgets import QApplication
+
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+    except Exception:
+        pass
+
+    os._exit(0)
+
+
+def _ps_quote(s: str) -> str:
+    """PowerShell single-quote escape."""
+    return "'" + str(s).replace("'", "''") + "'"
+
+
+def run_installer_and_restart(
+    installer_path: str,
+    log_path: Optional[str] = None,
+    restart_exe: Optional[str] = None,
+) -> None:
+    """Inno Setup インストーラを実行し、完了後にアプリを再起動する。
+
+    実装方針:
+    - 本体は早期に終了してファイルロックを解除する
+    - 別プロセス(PowerShell)に「インストーラ待機→アプリ起動」を委譲する
+
+    NOTE: テストでは subprocess.Popen / os._exit を monkeypatch して使用すること。
+    """
+    if sys.platform != "win32":
+        raise RuntimeError("Windows以外ではインストーラ実行はサポートしていません")
+
+    if not installer_path or not os.path.exists(installer_path):
+        raise FileNotFoundError(f"インストーラが見つかりません: {installer_path}")
+
+    restart_exe = restart_exe or sys.executable
+    if not restart_exe:
+        raise RuntimeError("再起動対象の実行ファイルパスが取得できません")
+
+    log_path = log_path or _default_installer_log_path("latest")
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+
+    # インストーラ引数（run_installer_and_exit と同等）
+    installer_args = [
+        "/SP-",
+        "/VERYSILENT",
+        "/SUPPRESSMSGBOXES",
+        "/NORESTART",
+        f"/LOG={log_path}",
+    ]
+
+    # PowerShellで: インストーラ完了待ち → アプリ再起動
+    ps_script = (
+        "$ErrorActionPreference='SilentlyContinue';"
+        f"$installer={_ps_quote(installer_path)};"
+        f"$app={_ps_quote(restart_exe)};"
+        "$argList=@(" + ",".join(_ps_quote(a) for a in installer_args) + ");"
+        "$p=Start-Process -FilePath $installer -ArgumentList $argList -PassThru;"
+        "$null=$p.WaitForExit();"
+        "Start-Process -FilePath $app;"
+    )
+
+    popen_args = [
+        "pwsh" if os.name == "nt" else "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        ps_script,
+    ]
+
+    creationflags = 0
+    try:
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+    except Exception:
+        creationflags = 0
+
+    logger.info("インストーラ起動(再起動付き): %s", installer_path)
+    subprocess.Popen(popen_args, close_fds=True, creationflags=creationflags)
 
     # できるだけ穏当な終了を試みる
     try:

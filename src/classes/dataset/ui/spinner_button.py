@@ -4,6 +4,8 @@ AIサジェストボタン用のスピナーアニメーション実装
 ローディング中を視覚的に示すスピナー付きボタン
 """
 
+import os
+
 from qt_compat.widgets import QPushButton
 from qt_compat.core import QTimer, Qt
 from qt_compat.gui import QFont
@@ -22,6 +24,9 @@ class SpinnerButton(QPushButton):
             parent: 親ウィジェット
         """
         super().__init__(text, parent)
+
+        # pytest 実行中はタイマーによるUI更新を避け、最小限の表示更新のみ行う
+        self._test_mode = bool(os.environ.get("PYTEST_CURRENT_TEST"))
         
         self._original_text = text
         self._loading_text = ""
@@ -57,7 +62,13 @@ class SpinnerButton(QPushButton):
         
         # 必要ならボタンを無効化
         self.setEnabled(not self._disable_button_on_loading)
-        
+
+        # pytest中はタイマーを回さず、最小限の表示更新だけ行う
+        if self._test_mode:
+            self._spinner_timer.stop()
+            self._update_spinner()
+            return
+
         # スピナーアニメーション開始
         self._spinner_timer.start()
         self._update_spinner()

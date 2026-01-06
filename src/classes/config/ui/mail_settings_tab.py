@@ -34,6 +34,7 @@ from classes.core.email_sender import get_gmail_smtp_settings, send_email_via_sm
 from classes.core.email_sender import SmtpSettings
 from classes.core import m365_mail_sender
 from classes.core import secret_store
+from classes.core import mail_settings_store
 from classes.managers.app_config_manager import get_config_manager
 from classes.theme import ThemeKey, get_color
 
@@ -302,6 +303,10 @@ class MailSettingsTab(QWidget):
 
     def load_current_settings(self):
         cfg = get_config_manager()
+
+        # 上書きインストール等でconfigが初期化されても、OSキーチェーンに退避した
+        # 非機微メール設定を復元できるようにする。
+        mail_settings_store.restore_into_config_if_needed(cfg)
         provider = cfg.get("mail.provider", _PROVIDER_GMAIL)
 
         idx = self.provider_combo.findData(provider)
@@ -363,6 +368,14 @@ class MailSettingsTab(QWidget):
         cfg.set("mail.test.body", self.test_body_edit.toPlainText())
 
         cfg.save()
+
+        # 非機微情報（From/SMTP host等）もOSキーチェーンへ退避し、
+        # 設定ファイルが消えても復元できるようにする。
+        try:
+            snapshot = mail_settings_store.snapshot_from_config(cfg)
+            mail_settings_store.save_snapshot_to_keyring(snapshot)
+        except Exception:
+            pass
 
         if provider == _PROVIDER_GMAIL:
             self._persist_gmail_secret_if_needed()
