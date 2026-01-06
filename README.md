@@ -3,19 +3,18 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.4.5** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.4.5** のバイナリ配布およびドキュメント公開用リポジトリです。  
+本ツールは、文部科学省ARIM事業の研究データ共有サイト「RDE」の操作補助とデータポータルへの登録支援を目的とした Windows デスクトップアプリケーションです。Web操作の煩雑さを軽減し、データの一括取得・登録・AI支援機能を提供します。
 
-(↓↓↓↓↓↓こちらのほうが人力なので間違いが少ないです。更新頻度も高いです↓↓↓↓)
+> [!NOTE]
+>  **[ARIM-RDE-TOOL　置き場](https://cuddly-stinger-40d.notion.site/QuickStart-2befc2cb5fc380f09d0dd4595b767f4d?source=copy_link)**   (こちらのほうが人力なので間違いが少ないです。更新頻度も高いです) 
 
-**[ARIM-RDE-TOOL　置き場](https://cuddly-stinger-40d.notion.site/QuickStart-2befc2cb5fc380f09d0dd4595b767f4d?source=copy_link)**　
-
-(↑↑↑↑↑こちらのほうが人力なので間違いが少ないです。更新頻度も高いです↑↑↑↑↑)
-
-**本ページはAIによる自動生成文が含まれています。**
+> [!IMPORTANT]
+> **本ページはAIによる自動生成文が含まれています。**  
 > ⚠ 本ツールは単独の個人開発による非公式ツールです。ARIM事業 / RDE / ARIMデータポータルの公式サポート対象ではありません。開発チーム・ロードマップ・将来計画の事前告知は一切行いません。ここに記載しているのは現行バージョンで提供中の機能のみです。
 > RDEサイトおよびデータポータルの画面・通信挙動を独自解析し再現しているため、サイト側の仕様変更で予告なく動作しなくなる・誤作動する可能性があります。利用は自己責任で行ってください。
 
-本ツールは、文部科学省ARIM事業の研究データ共有サイト「RDE」の操作補助とデータポータルへの登録支援を目的とした Windows デスクトップアプリケーションです。Web操作の煩雑さを軽減し、データの一括取得・登録・AI支援機能を提供します。
+
 
 ---
 
