@@ -857,6 +857,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     grant_number_filter_label.setStyleSheet("font-weight: bold;")
     
     grant_number_filter_edit = QLineEdit()
+    grant_number_filter_edit.setObjectName("dataset_grant_number_filter_edit")
     grant_number_filter_edit.setPlaceholderText("課題番号の一部を入力（部分一致検索・リアルタイム絞り込み）")
     grant_number_filter_edit.setMinimumWidth(400)
     

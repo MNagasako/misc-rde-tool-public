@@ -6,6 +6,7 @@ from qt_compat.widgets import QWidget, QTabWidget, QVBoxLayout, QLabel, QScrollA
 from classes.dataset.ui.dataset_open_widget import create_dataset_open_widget
 from classes.dataset.ui.dataset_edit_widget import create_dataset_edit_widget
 from classes.dataset.ui.dataset_dataentry_widget_minimal import create_dataset_dataentry_widget
+from classes.dataset.ui.dataset_listing_widget import create_dataset_listing_widget
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
 
@@ -75,6 +76,22 @@ class DatasetTabWidget(QTabWidget):
         
         self.dataentry_tab.setLayout(dataentry_layout)
         self.addTab(self.dataentry_tab, "データエントリー")
+
+        # 一覧タブ
+        self.listing_tab = QWidget()
+        listing_layout = QVBoxLayout(self.listing_tab)
+        try:
+            self.listing_widget = create_dataset_listing_widget(
+                parent=self.listing_tab,
+                title="一覧",
+            )
+            listing_layout.addWidget(self.listing_widget)
+        except Exception as e:
+            error_label = QLabel(f"データセット一覧機能読み込みエラー: {e}")
+            error_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;")
+            listing_layout.addWidget(error_label)
+        self.listing_tab.setLayout(listing_layout)
+        self.addTab(self.listing_tab, "一覧")
 
 # ファクトリ関数
 def create_dataset_tab_widget(parent=None, bearer_token=None, ui_controller=None):

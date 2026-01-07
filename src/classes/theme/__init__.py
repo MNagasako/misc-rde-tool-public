@@ -1,5 +1,5 @@
 """
-テーマ管理モジュール - ARIM RDE Tool v2.4.8
+テーマ管理モジュール - ARIM RDE Tool v2.4.9
 
 ライト/ダークモード対応のテーマ管理システム。
 Material Design準拠の配色を提供。

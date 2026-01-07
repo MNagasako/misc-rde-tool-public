@@ -761,6 +761,7 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     main_widget._dataset_create2_tab = None  # type: ignore[attr-defined]
     main_widget._dataset_edit_tab = None  # type: ignore[attr-defined]
     main_widget._dataset_dataentry_tab = None  # type: ignore[attr-defined]
+    main_widget._dataset_listing_tab = None  # type: ignore[attr-defined]
     
     # タイトル
     label = QLabel(f"{title}機能")
@@ -870,6 +871,19 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
         main_widget._dataset_dataentry_tab = dataentry_placeholder  # type: ignore[attr-defined]
     except Exception as e:
         logger.warning("データエントリータブのプレースホルダ作成に失敗: %s", e)
+
+    # 一覧タブ（遅延ロード：初回表示を軽くする）
+    listing_tab = None
+    listing_built = False
+    try:
+        listing_placeholder = QWidget()
+        listing_layout = QVBoxLayout(listing_placeholder)
+        listing_layout.addWidget(QLabel("一覧を読み込み中..."))
+        listing_layout.addStretch(1)
+        tab_widget.addTab(listing_placeholder, "一覧")
+        main_widget._dataset_listing_tab = listing_placeholder  # type: ignore[attr-defined]
+    except Exception as e:
+        logger.warning("一覧タブのプレースホルダ作成に失敗: %s", e)
     
     def _ensure_create2_built() -> None:
         nonlocal create2_tab
@@ -947,6 +961,79 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
             except Exception:
                 pass
 
+    def _ensure_listing_built() -> None:
+        nonlocal listing_tab, listing_built
+        if listing_built:
+            return
+        try:
+            from classes.dataset.ui.dataset_listing_widget import create_dataset_listing_widget
+
+            built = create_dataset_listing_widget(parent, "一覧")
+
+            # 「ツール内」リンク: 閲覧・修正タブで該当データセットを開く
+            try:
+                if hasattr(built, "set_tool_open_callback"):
+                    def _open_in_tool(dataset_id: str) -> None:
+                        try:
+                            if not dataset_id:
+                                return
+                            # 先に閲覧・修正タブへ移動
+                            edit_idx = next((i for i in range(tab_widget.count()) if tab_widget.tabText(i) == "閲覧・修正"), -1)
+                            if edit_idx >= 0:
+                                tab_widget.setCurrentIndex(edit_idx)
+                            # 生成を保証
+                            _ensure_edit_built()
+                            target = edit_tab
+                            if target is None and edit_scroll is not None:
+                                try:
+                                    target = edit_scroll.widget()
+                                except Exception:
+                                    target = None
+                            # 表示スコープを「すべて」に緩和（ユーザー所属のみだと表示されないケースがある）
+                            try:
+                                from PySide6.QtWidgets import QRadioButton, QLineEdit
+                                from classes.dataset.ui.dataset_edit_widget import relax_dataset_edit_filters_for_launch
+
+                                if target is not None:
+                                    all_radio = target.findChild(QRadioButton, "dataset_filter_all_radio")
+                                    user_radio = target.findChild(QRadioButton, "dataset_filter_user_only_radio")
+                                    others_radio = target.findChild(QRadioButton, "dataset_filter_others_radio")
+                                    grant_edit = target.findChild(QLineEdit, "dataset_grant_number_filter_edit")
+                                    relax_dataset_edit_filters_for_launch(
+                                        all_radio,
+                                        other_radios=[r for r in [user_radio, others_radio] if r is not None],
+                                        grant_filter_edit=grant_edit,
+                                        apply_filter_callback=getattr(target, "_refresh_dataset_list", None),
+                                    )
+                            except Exception:
+                                logger.debug("dataset_open: relax filters failed", exc_info=True)
+                            if target is not None and hasattr(target, "_restore_dataset_selection"):
+                                target._restore_dataset_selection(dataset_id)
+                        except Exception:
+                            logger.debug("dataset_open: tool-open failed", exc_info=True)
+
+                    built.set_tool_open_callback(_open_in_tool)
+            except Exception:
+                pass
+
+            listing_tab = built
+
+            idx = next((i for i in range(tab_widget.count()) if tab_widget.tabText(i) == "一覧"), -1)
+            if idx >= 0:
+                tab_widget.blockSignals(True)
+                tab_widget.removeTab(idx)
+                tab_widget.insertTab(idx, built, "一覧")
+                tab_widget.setCurrentIndex(idx)
+            main_widget._dataset_listing_tab = built  # type: ignore[attr-defined]
+        except Exception as e:
+            logger.warning("一覧タブの作成に失敗: %s", e)
+        finally:
+            listing_built = True
+            try:
+                tab_widget.blockSignals(False)
+            except Exception:
+                pass
+
     # タブ切り替え時にデータセットリストをリフレッシュする機能を追加
     def on_tab_changed(index):
         """タブ切り替え時の処理"""
@@ -979,6 +1066,41 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
             elif current_tab is main_widget._dataset_dataentry_tab:
                 _ensure_dataentry_built()
                 logger.info("データエントリータブが選択されました")
+            elif current_tab is main_widget._dataset_listing_tab:
+                _ensure_listing_built()
+                logger.info("一覧タブが選択されました")
+
+                # 一覧タブは横幅を十分確保して表示（ユーザーが自由にリサイズ可能）
+                try:
+                    window = main_widget.window()
+
+                    # UIController/EventHandler による横幅固定を解除
+                    try:
+                        if hasattr(window, '_fixed_aspect_ratio'):
+                            window._fixed_aspect_ratio = None
+                        if hasattr(window, 'setMinimumSize'):
+                            window.setMinimumSize(200, 200)
+                        if hasattr(window, 'setMaximumSize'):
+                            window.setMaximumSize(16777215, 16777215)
+                        if hasattr(window, 'setMinimumWidth'):
+                            window.setMinimumWidth(200)
+                        if hasattr(window, 'setMaximumWidth'):
+                            window.setMaximumWidth(16777215)
+                        if hasattr(window, 'showNormal'):
+                            window.showNormal()
+                    except Exception:
+                        pass
+
+                    screen = window.screen() if hasattr(window, 'screen') else None
+                    if screen is None:
+                        screen = QApplication.primaryScreen()
+                    if screen is not None:
+                        available = screen.availableGeometry()
+                        target_w = int(available.width() * 0.90)
+                        target_h = int(available.height() * 0.90)
+                        window.resize(target_w, target_h)
+                except Exception:
+                    logger.debug("dataset_open: listing window resize failed", exc_info=True)
         except Exception as e:
             logger.error("タブ切り替え時のリフレッシュ処理でエラー: %s", e)
     
