@@ -1552,7 +1552,8 @@ class AISuggestionDialog(QDialog):
         row2.addWidget(QLabel("機関コード:"))
         self.report_inst_code_filter_input = QLineEdit()
         self.report_inst_code_filter_input.setPlaceholderText("機関コードで絞り込み")
-        self.report_inst_code_filter_input.setMinimumWidth(140)
+        # 機関コードはアルファベット2文字のため、入力欄をコンパクトにする
+        self.report_inst_code_filter_input.setFixedWidth(80)
         row2.addWidget(self.report_inst_code_filter_input)
 
         row2.addSpacing(10)
@@ -1571,8 +1572,25 @@ class AISuggestionDialog(QDialog):
 
         row2.addStretch()
 
+        # 横断技術領域（主/副）フィルタ（重要技術領域と同様に事前フィルタ）
+        row3 = QHBoxLayout()
+        row3.addWidget(QLabel("横断技術領域(主):"))
+        self.report_cross_main_filter_combo = QComboBox()
+        self.report_cross_main_filter_combo.setMinimumWidth(200)
+        self.report_cross_main_filter_combo.addItem("全て")
+        row3.addWidget(self.report_cross_main_filter_combo)
+
+        row3.addSpacing(10)
+        row3.addWidget(QLabel("横断技術領域(副):"))
+        self.report_cross_sub_filter_combo = QComboBox()
+        self.report_cross_sub_filter_combo.setMinimumWidth(200)
+        self.report_cross_sub_filter_combo.addItem("全て")
+        row3.addWidget(self.report_cross_sub_filter_combo)
+        row3.addStretch()
+
         filter_container_layout.addLayout(row1)
         filter_container_layout.addLayout(row2)
+        filter_container_layout.addLayout(row3)
 
         self.report_refresh_button = QPushButton("更新")
         self.report_refresh_button.setMaximumWidth(70)
@@ -1581,13 +1599,15 @@ class AISuggestionDialog(QDialog):
         layout.addWidget(filter_widget)
 
         self.report_entries_table = QTableWidget()
-        self.report_entries_table.setColumnCount(7)
+        self.report_entries_table.setColumnCount(9)
         self.report_entries_table.setHorizontalHeaderLabels([
             "ARIM課題番号",
             "年度",
             "機関コード",
             "所属名",
             "利用課題名",
+            "横断技術領域（主）",
+            "横断技術領域（副）",
             "重要技術領域（主）",
             "重要技術領域（副）",
         ])
@@ -1780,6 +1800,8 @@ class AISuggestionDialog(QDialog):
         self.report_affiliation_filter_input.textChanged.connect(self.refresh_report_entries)
         self.report_title_filter_input.textChanged.connect(self.refresh_report_entries)
         self.report_year_filter_combo.currentIndexChanged.connect(self.refresh_report_entries)
+        self.report_cross_main_filter_combo.currentIndexChanged.connect(self.refresh_report_entries)
+        self.report_cross_sub_filter_combo.currentIndexChanged.connect(self.refresh_report_entries)
         self.report_important_main_filter_combo.currentIndexChanged.connect(self.refresh_report_entries)
         self.report_important_sub_filter_combo.currentIndexChanged.connect(self.refresh_report_entries)
         self.report_entries_table.itemSelectionChanged.connect(self.on_report_entry_selected)
@@ -3048,12 +3070,37 @@ class AISuggestionDialog(QDialog):
 
             # 年度候補を更新（全件から抽出）
             years = []
+            cross_mains = []
+            cross_subs = []
             important_mains = []
             important_subs = []
             for rec in self._report_entries:
                 y = self._get_report_record_value(rec, ["年度", "利用年度"])
                 if y and y not in years:
                     years.append(y)
+
+                cm = self._get_report_record_value(
+                    rec,
+                    [
+                        "横断技術領域・主",
+                        "横断技術領域（主）",
+                        "キーワード【横断技術領域】（主）",
+                        "横断技術領域 主",
+                    ],
+                )
+                if cm and cm not in cross_mains:
+                    cross_mains.append(cm)
+                cs = self._get_report_record_value(
+                    rec,
+                    [
+                        "横断技術領域・副",
+                        "横断技術領域（副）",
+                        "キーワード【横断技術領域】（副）",
+                        "横断技術領域 副",
+                    ],
+                )
+                if cs and cs not in cross_subs:
+                    cross_subs.append(cs)
 
                 im = self._get_report_record_value(rec, ["重要技術領域・主", "重要技術領域（主）", "important_tech_main", "重要技術領域 主"])
                 if im and im not in important_mains:
@@ -3062,6 +3109,8 @@ class AISuggestionDialog(QDialog):
                 if isub and isub not in important_subs:
                     important_subs.append(isub)
             years_sorted = sorted(years)
+            cross_mains_sorted = sorted(cross_mains)
+            cross_subs_sorted = sorted(cross_subs)
             important_mains_sorted = sorted(important_mains)
             important_subs_sorted = sorted(important_subs)
 
@@ -3100,11 +3149,36 @@ class AISuggestionDialog(QDialog):
                 self.report_important_sub_filter_combo.setCurrentIndex(idx)
             self.report_important_sub_filter_combo.blockSignals(False)
 
+            # 横断技術領域（主/副）候補を更新
+            current_cross_main = self.report_cross_main_filter_combo.currentText() if hasattr(self, 'report_cross_main_filter_combo') else "全て"
+            self.report_cross_main_filter_combo.blockSignals(True)
+            self.report_cross_main_filter_combo.clear()
+            self.report_cross_main_filter_combo.addItem("全て")
+            for v in cross_mains_sorted:
+                self.report_cross_main_filter_combo.addItem(v)
+            idx = self.report_cross_main_filter_combo.findText(current_cross_main)
+            if idx >= 0:
+                self.report_cross_main_filter_combo.setCurrentIndex(idx)
+            self.report_cross_main_filter_combo.blockSignals(False)
+
+            current_cross_sub = self.report_cross_sub_filter_combo.currentText() if hasattr(self, 'report_cross_sub_filter_combo') else "全て"
+            self.report_cross_sub_filter_combo.blockSignals(True)
+            self.report_cross_sub_filter_combo.clear()
+            self.report_cross_sub_filter_combo.addItem("全て")
+            for v in cross_subs_sorted:
+                self.report_cross_sub_filter_combo.addItem(v)
+            idx = self.report_cross_sub_filter_combo.findText(current_cross_sub)
+            if idx >= 0:
+                self.report_cross_sub_filter_combo.setCurrentIndex(idx)
+            self.report_cross_sub_filter_combo.blockSignals(False)
+
             arimno_filter = self.report_arimno_filter_input.text().strip() if hasattr(self, 'report_arimno_filter_input') else ""
             year_filter = self.report_year_filter_combo.currentText().strip() if hasattr(self, 'report_year_filter_combo') else "全て"
             inst_code_filter = self.report_inst_code_filter_input.text().strip() if hasattr(self, 'report_inst_code_filter_input') else ""
             affiliation_filter = self.report_affiliation_filter_input.text().strip() if hasattr(self, 'report_affiliation_filter_input') else ""
             title_filter = self.report_title_filter_input.text().strip() if hasattr(self, 'report_title_filter_input') else ""
+            cross_main_filter = self.report_cross_main_filter_combo.currentText().strip() if hasattr(self, 'report_cross_main_filter_combo') else "全て"
+            cross_sub_filter = self.report_cross_sub_filter_combo.currentText().strip() if hasattr(self, 'report_cross_sub_filter_combo') else "全て"
             important_main_filter = self.report_important_main_filter_combo.currentText().strip() if hasattr(self, 'report_important_main_filter_combo') else "全て"
             important_sub_filter = self.report_important_sub_filter_combo.currentText().strip() if hasattr(self, 'report_important_sub_filter_combo') else "全て"
 
@@ -3115,6 +3189,8 @@ class AISuggestionDialog(QDialog):
                 inst_code = self._get_report_record_value(rec, ["機関コード", "実施機関コード"])
                 affiliation = self._get_report_record_value(rec, ["所属名", "所属"])
                 title = self._get_report_record_value(rec, ["利用課題名", "Title"])
+                cross_main = self._get_report_record_value(rec, ["横断技術領域・主", "横断技術領域（主）"])
+                cross_sub = self._get_report_record_value(rec, ["横断技術領域・副", "横断技術領域（副）"])
                 important_main = self._get_report_record_value(rec, ["重要技術領域・主", "重要技術領域（主）"])
                 important_sub = self._get_report_record_value(rec, ["重要技術領域・副", "重要技術領域（副）"])
 
@@ -3127,6 +3203,10 @@ class AISuggestionDialog(QDialog):
                 if affiliation_filter and affiliation_filter not in affiliation:
                     continue
                 if title_filter and title_filter not in title:
+                    continue
+                if cross_main_filter and cross_main_filter != "全て" and cross_main_filter not in cross_main:
+                    continue
+                if cross_sub_filter and cross_sub_filter != "全て" and cross_sub_filter not in cross_sub:
                     continue
                 if important_main_filter and important_main_filter != "全て" and important_main_filter not in important_main:
                     continue
@@ -3146,16 +3226,30 @@ class AISuggestionDialog(QDialog):
                 inst_code = self._get_report_record_value(rec, ["機関コード", "実施機関コード"])
                 affiliation = self._get_report_record_value(rec, ["所属名", "所属"])
                 title = self._get_report_record_value(rec, ["利用課題名", "Title"])
+                cross_main = self._get_report_record_value(rec, ["横断技術領域・主", "横断技術領域（主）"])
+                cross_sub = self._get_report_record_value(rec, ["横断技術領域・副", "横断技術領域（副）"])
                 important_main = self._get_report_record_value(rec, ["重要技術領域・主", "重要技術領域（主）"])
                 important_sub = self._get_report_record_value(rec, ["重要技術領域・副", "重要技術領域（副）"])
 
                 affiliation_disp = self._truncate_table_text(affiliation, 22)
                 title_disp = self._truncate_table_text(title, 28)
+                cross_main_disp = self._truncate_table_text(cross_main, 22)
+                cross_sub_disp = self._truncate_table_text(cross_sub, 22)
                 important_main_disp = self._truncate_table_text(important_main, 22)
                 important_sub_disp = self._truncate_table_text(important_sub, 22)
 
-                # 表示順: ARIM課題番号, 年度, 機関コード, 所属名, 利用課題名, 重要技術領域(主), 重要技術領域(副)
-                for col_idx, value in enumerate([arimno, year, inst_code, affiliation_disp, title_disp, important_main_disp, important_sub_disp]):
+                # 表示順: ARIM課題番号, 年度, 機関コード, 所属名, 利用課題名, 横断技術領域(主), 横断技術領域(副), 重要技術領域(主), 重要技術領域(副)
+                for col_idx, value in enumerate([
+                    arimno,
+                    year,
+                    inst_code,
+                    affiliation_disp,
+                    title_disp,
+                    cross_main_disp,
+                    cross_sub_disp,
+                    important_main_disp,
+                    important_sub_disp,
+                ]):
                     item = QTableWidgetItem(value)
                     item.setData(Qt.UserRole, rec)
                     self.report_entries_table.setItem(row_idx, col_idx, item)
@@ -3727,6 +3821,55 @@ class AISuggestionDialog(QDialog):
         filters.addStretch()
         layout.addLayout(filters)
 
+        # 対象=報告書 のときのみ表示する追加フィルタ
+        self.results_report_filters_widget = QWidget()
+        report_filters = QHBoxLayout(self.results_report_filters_widget)
+        report_filters.setContentsMargins(0, 0, 0, 0)
+
+        report_filters.addWidget(QLabel("年度:"))
+        self.results_report_year_combo = QComboBox()
+        self.results_report_year_combo.setMinimumWidth(110)
+        self.results_report_year_combo.addItem("全て")
+        report_filters.addWidget(self.results_report_year_combo)
+
+        report_filters.addSpacing(10)
+        report_filters.addWidget(QLabel("機関コード:"))
+        self.results_report_inst_code_edit = QLineEdit()
+        self.results_report_inst_code_edit.setPlaceholderText("AA")
+        self.results_report_inst_code_edit.setFixedWidth(80)
+        report_filters.addWidget(self.results_report_inst_code_edit)
+
+        report_filters.addSpacing(10)
+        report_filters.addWidget(QLabel("横断(主):"))
+        self.results_report_cross_main_combo = QComboBox()
+        self.results_report_cross_main_combo.setMinimumWidth(180)
+        self.results_report_cross_main_combo.addItem("全て")
+        report_filters.addWidget(self.results_report_cross_main_combo)
+
+        report_filters.addSpacing(10)
+        report_filters.addWidget(QLabel("横断(副):"))
+        self.results_report_cross_sub_combo = QComboBox()
+        self.results_report_cross_sub_combo.setMinimumWidth(180)
+        self.results_report_cross_sub_combo.addItem("全て")
+        report_filters.addWidget(self.results_report_cross_sub_combo)
+
+        report_filters.addSpacing(10)
+        report_filters.addWidget(QLabel("重要(主):"))
+        self.results_report_important_main_combo = QComboBox()
+        self.results_report_important_main_combo.setMinimumWidth(180)
+        self.results_report_important_main_combo.addItem("全て")
+        report_filters.addWidget(self.results_report_important_main_combo)
+
+        report_filters.addSpacing(10)
+        report_filters.addWidget(QLabel("重要(副):"))
+        self.results_report_important_sub_combo = QComboBox()
+        self.results_report_important_sub_combo.setMinimumWidth(180)
+        self.results_report_important_sub_combo.addItem("全て")
+        report_filters.addWidget(self.results_report_important_sub_combo)
+
+        report_filters.addStretch()
+        layout.addWidget(self.results_report_filters_widget)
+
         self.results_table = QTableWidget()
         self.results_table.setColumnCount(6)
         self.results_table.setHorizontalHeaderLabels([
@@ -3748,11 +3891,20 @@ class AISuggestionDialog(QDialog):
 
         # 接続
         self.results_target_kind_combo.currentIndexChanged.connect(self._populate_results_button_combo)
+        self.results_target_kind_combo.currentIndexChanged.connect(self._on_results_target_kind_changed)
         self.results_button_combo.currentIndexChanged.connect(self.refresh_results_list)
         self.results_view_mode_combo.currentIndexChanged.connect(self.refresh_results_list)
         self.results_filter_edit.textChanged.connect(self._apply_results_filter)
         self.results_refresh_button.clicked.connect(self.refresh_results_list)
         self.results_export_button.clicked.connect(self.export_results_table)
+
+        # 報告書向け追加フィルタ
+        self.results_report_year_combo.currentIndexChanged.connect(self.refresh_results_list)
+        self.results_report_inst_code_edit.textChanged.connect(self.refresh_results_list)
+        self.results_report_cross_main_combo.currentIndexChanged.connect(self.refresh_results_list)
+        self.results_report_cross_sub_combo.currentIndexChanged.connect(self.refresh_results_list)
+        self.results_report_important_main_combo.currentIndexChanged.connect(self.refresh_results_list)
+        self.results_report_important_sub_combo.currentIndexChanged.connect(self.refresh_results_list)
         # 行クリックでログファイル表示
         try:
             self.results_table.cellClicked.connect(self._on_results_table_cell_clicked)
@@ -3760,7 +3912,18 @@ class AISuggestionDialog(QDialog):
             pass
 
         self._populate_results_button_combo()
+        self._on_results_target_kind_changed()
         self.refresh_results_list()
+
+    def _on_results_target_kind_changed(self) -> None:
+        """対象切替に応じて、報告書向けフィルタUIの表示を切り替える。"""
+        try:
+            kind = self.results_target_kind_combo.currentData() if hasattr(self, 'results_target_kind_combo') else 'report'
+            show_report_filters = (kind == 'report')
+            if hasattr(self, 'results_report_filters_widget'):
+                self.results_report_filters_widget.setVisible(show_report_filters)
+        except Exception:
+            pass
 
     def _on_results_table_cell_clicked(self, row: int, _col: int) -> None:
         """結果一覧の行クリックで、対応するログファイルを表示する。"""
@@ -4203,13 +4366,16 @@ class AISuggestionDialog(QDialog):
                 pass
 
     def refresh_results_list(self):
+        # コンボ更新等で再帰的に呼ばれる場合があるため、再入を防止する
+        if getattr(self, '_refresh_results_list_running', False):
+            return
+        self._refresh_results_list_running = True
         try:
             from qt_compat.widgets import QTableWidgetItem
             from classes.dataset.util.ai_suggest_result_log import list_latest_results
             from classes.dataset.util.ai_extension_helper import load_ai_extension_config
             from classes.dataset.util.ai_extension_helper import normalize_results_json_keys
             from classes.dataset.util.report_listing_helper import (
-                build_task_number_to_key_technology_areas_index,
                 extract_task_number_from_report_target_key,
                 load_latest_report_records,
             )
@@ -4226,21 +4392,245 @@ class AISuggestionDialog(QDialog):
 
             recs = list_latest_results(kind, bid)
 
-            tech_index = {}
+            # 対象=報告書のとき、converted.xlsx 由来のレコード（またはフォールバック）と結合して
+            # 年度/機関コード/技術領域を表示・フィルタする。
+            report_rows_by_task = {}
             if kind == 'report':
                 try:
                     report_records = self._get_displayed_report_records()
                 except Exception:
                     report_records = []
+
+                # report tabが未生成でも、converted.xlsx から読み込んで結合に使う
+                if not report_records:
+                    try:
+                        from classes.dataset.util.ai_extension_helper import load_converted_xlsx_report_entries
+
+                        report_records = load_converted_xlsx_report_entries()
+                    except Exception:
+                        report_records = []
+
                 if not report_records:
                     try:
                         report_records = load_latest_report_records()
                     except Exception:
                         report_records = []
+
+                def _as_int_year(value: str) -> int:
+                    s = (value or '').strip()
+                    if not s:
+                        return -1
+                    try:
+                        # '2024年度' なども許容
+                        m = re.search(r"(\d{4})", s)
+                        if m:
+                            return int(m.group(1))
+                        return int(s)
+                    except Exception:
+                        return -1
+
+                # task_number -> [{year, inst_code, cross_main, cross_sub, important_main, important_sub}]
+                report_rows_by_task = {}
+                for rec in report_records or []:
+                    if not isinstance(rec, dict):
+                        continue
+                    task_number = self._get_report_record_value(rec, [
+                        "課題番号",
+                        "ARIMNO",
+                        "課題番号 / Project Issue Number",
+                        "課題番号 / Project Issue Number",
+                    ])
+                    task_number = (task_number or '').strip()
+                    if not task_number:
+                        continue
+
+                    year = self._get_report_record_value(rec, ["年度", "利用年度", "Fiscal Year", "利用年度 / Fiscal Year"]).strip()
+                    inst_code = self._get_report_record_value(rec, ["機関コード", "実施機関コード", "Support Institute", "利用した実施機関"]).strip()
+                    cross_main = self._get_report_record_value(rec, [
+                        "横断技術領域・主",
+                        "横断技術領域（主）",
+                        "キーワード【横断技術領域】（主）",
+                        "キーワード【横断技術領域】(主)",
+                    ])
+                    cross_sub = self._get_report_record_value(rec, [
+                        "横断技術領域・副",
+                        "横断技術領域（副）",
+                        "キーワード【横断技術領域】（副）",
+                        "キーワード【横断技術領域】(副)",
+                    ])
+                    important_main = self._get_report_record_value(rec, [
+                        "重要技術領域・主",
+                        "重要技術領域（主）",
+                        "キーワード【重要技術領域】（主）",
+                        "キーワード【重要技術領域】(主)",
+                    ])
+                    important_sub = self._get_report_record_value(rec, [
+                        "重要技術領域・副",
+                        "重要技術領域（副）",
+                        "キーワード【重要技術領域】（副）",
+                        "キーワード【重要技術領域】(副)",
+                    ])
+
+                    row = {
+                        'year': year,
+                        'inst_code': inst_code,
+                        'cross_main': cross_main,
+                        'cross_sub': cross_sub,
+                        'important_main': important_main,
+                        'important_sub': important_sub,
+                    }
+                    report_rows_by_task.setdefault(task_number, []).append(row)
+
+                def _parse_report_target_key_parts(target_key: str) -> tuple[str, str, str]:
+                    """<課題番号>|<年度>|<機関コード> を安全に分解して返す。
+
+                    reportタブのログキーはARIMNOのみの場合もあるため、その場合は(課題番号,'','')。
+                    """
+                    t = (target_key or '').strip()
+                    if not t:
+                        return ('', '', '')
+                    parts = t.split('|')
+                    task = (parts[0].strip() if len(parts) >= 1 else '')
+                    year0 = (parts[1].strip() if len(parts) >= 2 else '')
+                    inst0 = (parts[2].strip() if len(parts) >= 3 else '')
+                    return (task, year0, inst0)
+
+                def _pick_best_report_row(task_number: str, year_hint: str, inst_hint: str) -> dict:
+                    rows = list(report_rows_by_task.get(task_number, []) or [])
+                    if not rows:
+                        return {}
+
+                    # year/inst がヒントとしてある場合はできるだけ一致させる
+                    if year_hint:
+                        rows_y = [r for r in rows if (r.get('year') or '').strip() == year_hint]
+                        if rows_y:
+                            rows = rows_y
+                    if inst_hint:
+                        rows_i = [r for r in rows if inst_hint in ((r.get('inst_code') or '').strip())]
+                        if rows_i:
+                            rows = rows_i
+
+                    if not rows:
+                        return {}
+
+                    # 複数候補が残る場合は、年度が最大のものを優先（converted.xlsxの典型運用に合わせる）
+                    rows_sorted = sorted(rows, key=lambda r: _as_int_year(str(r.get('year') or '')), reverse=True)
+                    return rows_sorted[0] if rows_sorted else (rows[0] if rows else {})
+
+                def _joined_report_fields_for_target_key(target_key: str) -> dict:
+                    task, y_hint, inst_hint = _parse_report_target_key_parts(str(target_key or ''))
+                    task = task or extract_task_number_from_report_target_key(str(target_key or ''))
+                    if not task:
+                        return {}
+                    picked = _pick_best_report_row(task, y_hint, inst_hint)
+                    # キー側情報もフォールバックとして残す
+                    return {
+                        'task_number': task,
+                        'year': str(picked.get('year') or y_hint or '').strip(),
+                        'inst_code': str(picked.get('inst_code') or inst_hint or '').strip(),
+                        'cross_main': '' if self._is_empty_or_nan(picked.get('cross_main')) else str(picked.get('cross_main') or '').strip(),
+                        'cross_sub': '' if self._is_empty_or_nan(picked.get('cross_sub')) else str(picked.get('cross_sub') or '').strip(),
+                        'important_main': '' if self._is_empty_or_nan(picked.get('important_main')) else str(picked.get('important_main') or '').strip(),
+                        'important_sub': '' if self._is_empty_or_nan(picked.get('important_sub')) else str(picked.get('important_sub') or '').strip(),
+                    }
+
+            else:
+                def _joined_report_fields_for_target_key(_target_key: str) -> dict:  # type: ignore[misc]
+                    return {}
+
+            # 報告書向けフィルタ候補を更新（結合後の値ベース）
+            if kind == 'report' and hasattr(self, 'results_report_year_combo'):
+                years = []
+                cross_mains = []
+                cross_subs = []
+                imp_mains = []
+                imp_subs = []
+
+                for rec in recs:
+                    jf = _joined_report_fields_for_target_key(str(rec.get('target_key') or ''))
+                    y = str(jf.get('year') or '').strip()
+                    if y and y not in years:
+                        years.append(y)
+                    for key, acc in [
+                        ('cross_main', cross_mains),
+                        ('cross_sub', cross_subs),
+                        ('important_main', imp_mains),
+                        ('important_sub', imp_subs),
+                    ]:
+                        v = str(jf.get(key) or '').strip()
+                        if v and v not in acc:
+                            acc.append(v)
+
+                def _update_combo(combo, values) -> None:
+                    try:
+                        current = combo.currentText() or '全て'
+                    except Exception:
+                        current = '全て'
+                    combo.blockSignals(True)
+                    combo.clear()
+                    combo.addItem('全て')
+                    for v in sorted(values):
+                        combo.addItem(v)
+                    idx = combo.findText(current)
+                    if idx >= 0:
+                        combo.setCurrentIndex(idx)
+                    combo.blockSignals(False)
+
                 try:
-                    tech_index = build_task_number_to_key_technology_areas_index(report_records)
+                    years_sorted = sorted(years)
+                    current_year = self.results_report_year_combo.currentText() if hasattr(self, 'results_report_year_combo') else '全て'
+                    self.results_report_year_combo.blockSignals(True)
+                    self.results_report_year_combo.clear()
+                    self.results_report_year_combo.addItem('全て')
+                    for y in years_sorted:
+                        self.results_report_year_combo.addItem(y)
+                    idx = self.results_report_year_combo.findText(current_year)
+                    if idx >= 0:
+                        self.results_report_year_combo.setCurrentIndex(idx)
+                    self.results_report_year_combo.blockSignals(False)
+
+                    _update_combo(self.results_report_cross_main_combo, cross_mains)
+                    _update_combo(self.results_report_cross_sub_combo, cross_subs)
+                    _update_combo(self.results_report_important_main_combo, imp_mains)
+                    _update_combo(self.results_report_important_sub_combo, imp_subs)
                 except Exception:
-                    tech_index = {}
+                    pass
+
+            # 報告書向けフィルタをログ一覧へ適用（結合後の値ベース）
+            if kind == 'report' and hasattr(self, 'results_report_year_combo'):
+                year_filter = (self.results_report_year_combo.currentText() or '').strip()
+                inst_code_filter = (self.results_report_inst_code_edit.text() if hasattr(self, 'results_report_inst_code_edit') else '')
+                inst_code_filter = (inst_code_filter or '').strip()
+                cross_main_filter = (self.results_report_cross_main_combo.currentText() or '').strip()
+                cross_sub_filter = (self.results_report_cross_sub_combo.currentText() or '').strip()
+                imp_main_filter = (self.results_report_important_main_combo.currentText() or '').strip()
+                imp_sub_filter = (self.results_report_important_sub_combo.currentText() or '').strip()
+
+                filtered_recs = []
+                for rec in recs:
+                    tkey = str(rec.get('target_key') or '')
+                    jf = _joined_report_fields_for_target_key(tkey)
+                    y = str(jf.get('year') or '').strip()
+                    inst = str(jf.get('inst_code') or '').strip()
+                    cm = str(jf.get('cross_main') or '').strip()
+                    cs = str(jf.get('cross_sub') or '').strip()
+                    im = str(jf.get('important_main') or '').strip()
+                    isub = str(jf.get('important_sub') or '').strip()
+
+                    if year_filter and year_filter != '全て' and year_filter != y:
+                        continue
+                    if inst_code_filter and inst_code_filter not in inst:
+                        continue
+                    if cross_main_filter and cross_main_filter != '全て' and cross_main_filter not in cm:
+                        continue
+                    if cross_sub_filter and cross_sub_filter != '全て' and cross_sub_filter not in cs:
+                        continue
+                    if imp_main_filter and imp_main_filter != '全て' and imp_main_filter not in im:
+                        continue
+                    if imp_sub_filter and imp_sub_filter != '全て' and imp_sub_filter not in isub:
+                        continue
+                    filtered_recs.append(rec)
+                recs = filtered_recs
 
             # Helper: parse JSON-path like "a.b[0].c"
             def _get_json_value(obj, key_path: str):
@@ -4348,10 +4738,14 @@ class AISuggestionDialog(QDialog):
 
             if view_mode == 'snippet':
                 if kind == 'report':
-                    self.results_table.setColumnCount(8)
+                    self.results_table.setColumnCount(12)
                     self.results_table.setHorizontalHeaderLabels([
                         "日時",
                         "対象キー",
+                        "年度",
+                        "機関コード",
+                        "横断技術領域（主）",
+                        "横断技術領域（副）",
                         "重要技術領域（主）",
                         "重要技術領域（副）",
                         "ボタン",
@@ -4379,11 +4773,21 @@ class AISuggestionDialog(QDialog):
                     snip = _snippet(rec)
 
                     if kind == 'report':
-                        task_number = extract_task_number_from_report_target_key(tkey)
-                        main_area, sub_area = tech_index.get(task_number, ('', ''))
-                        main_txt = '' if self._is_empty_or_nan(main_area) else str(main_area)
-                        sub_txt = '' if self._is_empty_or_nan(sub_area) else str(sub_area)
-                        values = [ts, tkey, main_txt, sub_txt, blabel, model, elapsed, snip]
+                        jf = _joined_report_fields_for_target_key(tkey)
+                        values = [
+                            ts,
+                            tkey,
+                            str(jf.get('year') or ''),
+                            str(jf.get('inst_code') or ''),
+                            str(jf.get('cross_main') or ''),
+                            str(jf.get('cross_sub') or ''),
+                            str(jf.get('important_main') or ''),
+                            str(jf.get('important_sub') or ''),
+                            blabel,
+                            model,
+                            elapsed,
+                            snip,
+                        ]
                     else:
                         values = [ts, tkey, blabel, model, elapsed, snip]
 
@@ -4434,7 +4838,16 @@ class AISuggestionDialog(QDialog):
 
                 include_elem = any((r.get('elem') or '') != '' for r in rows)
                 if kind == 'report':
-                    base_headers = ["日時", "対象キー", "重要技術領域（主）", "重要技術領域（副）"] + (["要素"] if include_elem else []) + ["ボタン", "モデル", "所要時間(秒)"]
+                    base_headers = [
+                        "日時",
+                        "対象キー",
+                        "年度",
+                        "機関コード",
+                        "横断技術領域（主）",
+                        "横断技術領域（副）",
+                        "重要技術領域（主）",
+                        "重要技術領域（副）",
+                    ] + (["要素"] if include_elem else []) + ["ボタン", "モデル", "所要時間(秒)"]
                 else:
                     base_headers = ["日時", "対象キー"] + (["要素"] if include_elem else []) + ["ボタン", "モデル", "所要時間(秒)"]
                 headers = base_headers + keys
@@ -4448,12 +4861,33 @@ class AISuggestionDialog(QDialog):
                     elapsed = _format_elapsed_seconds(rec)
 
                     if kind == 'report':
-                        task_number = extract_task_number_from_report_target_key(row['tkey'])
-                        main_area, sub_area = tech_index.get(task_number, ('', ''))
-                        main_txt = '' if self._is_empty_or_nan(main_area) else str(main_area)
-                        sub_txt = '' if self._is_empty_or_nan(sub_area) else str(sub_area)
-                        base_values = [row['ts'], row['tkey'], main_txt, sub_txt] + ([row['elem']] if include_elem else []) + [row['blabel'], row['model'], elapsed]
-                        json_base_headers = ["日時", "対象キー", "重要技術領域（主）", "重要技術領域（副）"] + (["要素"] if include_elem else []) + ["ボタン", "モデル", "所要時間(秒)"]
+                        jf = _joined_report_fields_for_target_key(row['tkey'])
+                        year = str(jf.get('year') or '')
+                        inst_code = str(jf.get('inst_code') or '')
+                        cross_main = str(jf.get('cross_main') or '')
+                        cross_sub = str(jf.get('cross_sub') or '')
+                        imp_main = str(jf.get('important_main') or '')
+                        imp_sub = str(jf.get('important_sub') or '')
+                        base_values = [
+                            row['ts'],
+                            row['tkey'],
+                            year,
+                            inst_code,
+                            cross_main,
+                            cross_sub,
+                            imp_main,
+                            imp_sub,
+                        ] + ([row['elem']] if include_elem else []) + [row['blabel'], row['model'], elapsed]
+                        json_base_headers = [
+                            "日時",
+                            "対象キー",
+                            "年度",
+                            "機関コード",
+                            "横断技術領域（主）",
+                            "横断技術領域（副）",
+                            "重要技術領域（主）",
+                            "重要技術領域（副）",
+                        ] + (["要素"] if include_elem else []) + ["ボタン", "モデル", "所要時間(秒)"]
                     else:
                         base_values = [row['ts'], row['tkey']] + ([row['elem']] if include_elem else []) + [row['blabel'], row['model'], elapsed]
                         json_base_headers = ["日時", "対象キー"] + (["要素"] if include_elem else []) + ["ボタン", "モデル", "所要時間(秒)"]
@@ -4486,6 +4920,8 @@ class AISuggestionDialog(QDialog):
                 self.results_table.setRowCount(0)
             except Exception:
                 pass
+        finally:
+            self._refresh_results_list_running = False
 
     def _apply_results_filter(self):
         try:
