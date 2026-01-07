@@ -134,8 +134,8 @@ class _WindowShowProbe(QObject):
             )
 
             # Trim stack to repo frames only.
-                src_root = get_dynamic_file_path("src")
-                root = _normalize_path(os.path.join(src_root, ""))
+            src_root = get_dynamic_file_path("src")
+            root = _normalize_path(os.path.join(src_root, ""))
             stack = traceback.extract_stack(limit=80)
             repo_frames: list[str] = []
             for frame in stack:

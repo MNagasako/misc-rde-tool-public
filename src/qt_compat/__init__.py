@@ -59,23 +59,25 @@ def initialize_webengine():
         bool: 初期化が成功した場合True
     """
     import os
-    import sys
+    from config.common import get_static_resource_path
     
     # PyInstallerバイナリ実行時のQt設定
     if getattr(sys, 'frozen', False):
         # _MEIPASSからQtプラグインディレクトリを設定
         if hasattr(sys, '_MEIPASS'):
-            qt_plugin_path = os.path.join(sys._MEIPASS, 'PySide6', 'plugins')
+            qt_plugin_path = get_static_resource_path('PySide6/plugins')
+            qt_platform_path = get_static_resource_path('PySide6/plugins/platforms')
             if os.path.exists(qt_plugin_path):
                 os.environ['QT_PLUGIN_PATH'] = qt_plugin_path
-                os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = os.path.join(qt_plugin_path, 'platforms')
+                os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = qt_platform_path
                 logger.info(f"[PyInstaller] Qt Plugin Path設定: {qt_plugin_path}")
             else:
                 # fallback: _MEIPASS直下のpluginsを試す
-                fallback_path = os.path.join(sys._MEIPASS, 'plugins')
+                fallback_path = get_static_resource_path('plugins')
+                fallback_platform_path = get_static_resource_path('plugins/platforms')
                 if os.path.exists(fallback_path):
                     os.environ['QT_PLUGIN_PATH'] = fallback_path
-                    os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = os.path.join(fallback_path, 'platforms')
+                    os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = fallback_platform_path
                     logger.info(f"[PyInstaller] Qt Plugin Path設定（fallback）: {fallback_path}")
                 else:
                     logger.warning(f"[PyInstaller] Qtプラグインが見つかりません: {qt_plugin_path}")

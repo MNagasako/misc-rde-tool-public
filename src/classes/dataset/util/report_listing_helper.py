@@ -46,7 +46,32 @@ def build_task_number_to_key_technology_areas_index(
 ) -> Dict[str, Tuple[str, str]]:
     """報告書レコード群から、課題番号→(重要技術領域 主, 副) の索引を作る。"""
 
+    rich = build_task_number_to_tech_areas_index(report_records)
     index: Dict[str, Tuple[str, str]] = {}
+    for task_number, areas in (rich or {}).items():
+        if task_number in index:
+            continue
+        main_area = _stringify((areas or {}).get("important_main"))
+        sub_area = _stringify((areas or {}).get("important_sub"))
+        index[task_number] = (main_area, sub_area)
+    return index
+
+
+def build_task_number_to_tech_areas_index(report_records: Iterable[dict]) -> Dict[str, Dict[str, str]]:
+    """報告書レコード群から、課題番号→技術領域（重要/横断）の索引を作る。
+
+    Returns:
+        {
+            <task_number>: {
+                'important_main': ...,
+                'important_sub': ...,
+                'cross_main': ...,
+                'cross_sub': ...,
+            }
+        }
+    """
+
+    index: Dict[str, Dict[str, str]] = {}
     for rec in report_records or []:
         if not isinstance(rec, dict):
             continue
@@ -55,7 +80,26 @@ def build_task_number_to_key_technology_areas_index(
         if not task_number:
             continue
 
-        main_area = _first_non_empty(
+        cross_main = _first_non_empty(
+            rec,
+            (
+                "横断技術領域（主）",
+                "横断技術領域・主",
+                "キーワード【横断技術領域】（主）",
+                "キーワード【横断技術領域】(主)",
+            ),
+        )
+        cross_sub = _first_non_empty(
+            rec,
+            (
+                "横断技術領域（副）",
+                "横断技術領域・副",
+                "キーワード【横断技術領域】（副）",
+                "キーワード【横断技術領域】(副)",
+            ),
+        )
+
+        important_main = _first_non_empty(
             rec,
             (
                 "重要技術領域（主）",
@@ -64,7 +108,7 @@ def build_task_number_to_key_technology_areas_index(
                 "キーワード【重要技術領域】(主)",
             ),
         )
-        sub_area = _first_non_empty(
+        important_sub = _first_non_empty(
             rec,
             (
                 "重要技術領域（副）",
@@ -75,7 +119,12 @@ def build_task_number_to_key_technology_areas_index(
         )
 
         if task_number not in index:
-            index[task_number] = (main_area, sub_area)
+            index[task_number] = {
+                "important_main": important_main,
+                "important_sub": important_sub,
+                "cross_main": cross_main,
+                "cross_sub": cross_sub,
+            }
 
     return index
 

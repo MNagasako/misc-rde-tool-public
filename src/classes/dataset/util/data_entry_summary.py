@@ -110,8 +110,16 @@ def format_size_with_bytes(num_bytes: int) -> str:
     return f"{size:.2f} {units[unit_index]} ({num_bytes:,} B)"
 
 
-def compute_summary_from_payload(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Compute aggregated summary from a RDE dataEntry payload."""
+def compute_summary_from_payload(payload: Dict[str, Any], *, prefer_cached_files: bool = True) -> Optional[Dict[str, Any]]:
+    """Compute aggregated summary from a RDE dataEntry payload.
+
+    Args:
+        prefer_cached_files: When True, prefer cached per-entry dataFiles payloads
+            (output/rde/data/dataFiles/<entry_id>.json) to compute file stats.
+            This is more accurate in environments where /data?include=files omits
+            some file types, but it is expensive for large datasets.
+            When False, compute stats only from the dataEntry payload itself.
+    """
 
     if not isinstance(payload, dict):
         return None
@@ -125,7 +133,7 @@ def compute_summary_from_payload(payload: Dict[str, Any]) -> Optional[Dict[str, 
         return _finalize_summary(summary)
 
     for entry in entries:
-        entry_summary = _analyze_entry(entry, file_lookup)
+        entry_summary = _analyze_entry(entry, file_lookup, prefer_cached_files=prefer_cached_files)
         _merge_entry_summary(summary, entry, entry_summary)
 
     return _finalize_summary(summary)
@@ -187,7 +195,7 @@ def _classify_file_type(raw_type: str) -> str:
     return "OTHER"
 
 
-def compute_entry_file_stats(entry: Dict[str, Any], file_lookup: Dict[str, Any]) -> Dict[str, Any]:
+def compute_entry_file_stats(entry: Dict[str, Any], file_lookup: Dict[str, Any], *, prefer_cached_files: bool = True) -> Dict[str, Any]:
     """Compute fileType counts/sizes for a single entry.
 
     Prefer cached /data/{id}/files payload when available because the
@@ -198,30 +206,31 @@ def compute_entry_file_stats(entry: Dict[str, Any], file_lookup: Dict[str, Any])
     sizes = {ft: 0 for ft in DISPLAY_FILE_TYPES}
     image_bytes = 0
 
-    cached_files_payload = _load_cached_files_payload(str(entry.get("id", "")))
-    if cached_files_payload:
-        for item in cached_files_payload.get("data", []):
-            if not _is_file_like_resource(item):
-                continue
-            attributes = item.get("attributes", {})
-            if not isinstance(attributes, dict):
-                continue
-            raw_type = attributes.get("fileType", "OTHER")
-            classified = _classify_file_type(raw_type)
-            size = _safe_int(attributes.get("fileSize", 0))
-            counts[classified] += 1
-            sizes[classified] += size
-            is_image = attributes.get("isImageFile")
-            if is_image is None:
-                is_image = raw_type in IMAGE_FILE_TYPES
-            if is_image:
-                image_bytes += size
+    if prefer_cached_files:
+        cached_files_payload = _load_cached_files_payload(str(entry.get("id", "")))
+        if cached_files_payload:
+            for item in cached_files_payload.get("data", []):
+                if not _is_file_like_resource(item):
+                    continue
+                attributes = item.get("attributes", {})
+                if not isinstance(attributes, dict):
+                    continue
+                raw_type = attributes.get("fileType", "OTHER")
+                classified = _classify_file_type(raw_type)
+                size = _safe_int(attributes.get("fileSize", 0))
+                counts[classified] += 1
+                sizes[classified] += size
+                is_image = attributes.get("isImageFile")
+                if is_image is None:
+                    is_image = raw_type in IMAGE_FILE_TYPES
+                if is_image:
+                    image_bytes += size
 
-        return {
-            "counts": counts,
-            "sizes": sizes,
-            "image_bytes": image_bytes,
-        }
+            return {
+                "counts": counts,
+                "sizes": sizes,
+                "image_bytes": image_bytes,
+            }
 
     rel_files = entry.get("relationships", {}).get("files", {}).get("data", [])
     if isinstance(rel_files, list):
@@ -253,8 +262,8 @@ def compute_entry_file_stats(entry: Dict[str, Any], file_lookup: Dict[str, Any])
     }
 
 
-def _analyze_entry(entry: Dict[str, Any], file_lookup: Dict[str, Any]) -> Dict[str, Any]:
-    return compute_entry_file_stats(entry, file_lookup)
+def _analyze_entry(entry: Dict[str, Any], file_lookup: Dict[str, Any], *, prefer_cached_files: bool = True) -> Dict[str, Any]:
+    return compute_entry_file_stats(entry, file_lookup, prefer_cached_files=prefer_cached_files)
 
 
 def _merge_entry_summary(summary: Dict[str, Any], entry: Dict[str, Any], entry_summary: Dict[str, Dict[str, int]]):
