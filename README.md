@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.4.7** のバイナリ配布およびドキュメント公開用リポジトリです。  
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.4.8** のバイナリ配布およびドキュメント公開用リポジトリです。  
 本ツールは、文部科学省ARIM事業の研究データ共有サイト「RDE」の操作補助とデータポータルへの登録支援を目的とした Windows デスクトップアプリケーションです。Web操作の煩雑さを軽減し、データの一括取得・登録・AI支援機能を提供します。
 
 > [!NOTE]
@@ -22,15 +22,15 @@
 
 ## 🚀 最新情報
 
-**2026-01-06 最新リリース**: バージョン2.4.7（設定/更新フロー改善 + UI調整 + テスト安定化 + 表記更新）
+**2026-01-07 最新リリース**: バージョン2.4.8（AI説明文提案: 報告書/結果一覧の運用性改善 + テスト/表記更新）
 
-### v2.4.7 の主な改善
+### v2.4.8 の主な改善
 
-- メール設定の「上書きインストール耐性」を強化（非機微設定を OS キーチェーンへ退避し、自動復元）。
-- アプリ更新後に自動で再起動するフローを追加（インストーラ完了待ち→再起動を別プロセスへ委譲）。
-- 設定画面の MISC タブをタブ一覧の最後尾へ移動。
-- Windows + PySide6 + pytest-qt の長時間実行で発生し得る不安定要因を抑止（描画監視のイベントフックを限定）。
-- 配布版ドキュメントの表記（VERSION/README/CHANGELOG/リリースノート）を v2.4.7 に統一。
+- AI説明文提案（報告書）: 横断技術領域（主/副）列の追加と事前フィルタ対応。
+- AI説明文提案（結果一覧・対象=報告書）: 年度/機関コード/横断/重要（主/副）の列表示と絞り込みUIを追加。
+- converted.xlsx と結合して値を補完し、空欄を抑制（`target_key` が課題番号のみの場合など）。
+- 変更に追従してウィジェットテストを更新。
+- 配布版ドキュメントの表記（VERSION/README/CHANGELOG/リリースノート）を v2.4.8 に統一。
 
 > ℹ️ リスティングタブは `output/arim-site/{equipment|reports}_latest.json` など最新エクスポートを前提とします。再読込前に各タブで「JSON再取得」を実行し、キャッシュディレクトリ（`output/arim-site/reports/cache/`）の残量にも留意してください。
 
@@ -132,13 +132,13 @@
 * **[ドキュメント一覧マップ](docs/DOCUMENT_MAP.md)**
 * **[第三者ライセンス通知](THIRD_PARTY_NOTICES/)**
 
-* **[リリースノート v2.4.7](docs/RELEASE_NOTES_v2.4.7.md)**
+* **[リリースノート v2.4.8](docs/RELEASE_NOTES_v2.4.8.md)**
 
 ---
 
 ## 🔢 バージョン情報
 
-現在配布バージョン: `v2.4.7` （`VERSION.txt` に基づく）
+現在配布バージョン: `v2.4.8` （`VERSION.txt` に基づく）
 
 更新履歴の詳細は `docs/CHANGELOG.md` を参照してください。
 
