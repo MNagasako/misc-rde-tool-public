@@ -6,7 +6,7 @@ HTTP ヘルパー関数
 プロキシ対応HTTPリクエストを提供します。
 """
 
-from .session_manager import get_proxy_session, _session_manager
+from .session_manager import get_proxy_session, create_new_proxy_session, _session_manager
 from typing import Dict, Optional, Any, Union
 import requests  # 型ヒント用のみ
 import time
@@ -118,13 +118,17 @@ def proxy_get(url: str, **kwargs) -> requests.Response:
     Returns:
         requests.Response: レスポンスオブジェクト
     """
-    session = get_proxy_session()
+    # 内部制御用オプション（requestsへは渡さない）
+    use_new_session = bool(kwargs.pop("use_new_session", False))
+    skip_bearer_token = bool(kwargs.pop("skip_bearer_token", False))
+
+    session = create_new_proxy_session() if use_new_session else get_proxy_session()
     
     # Bearer Token自動付与（ヘッダーに含まれていない場合）
     if 'headers' not in kwargs or kwargs['headers'] is None:
         kwargs['headers'] = {}
     
-    if 'Authorization' not in kwargs['headers']:
+    if (not skip_bearer_token) and ('Authorization' not in kwargs['headers']):
         try:
             from config.common import get_bearer_token_for_url
             bearer_token = get_bearer_token_for_url(url)

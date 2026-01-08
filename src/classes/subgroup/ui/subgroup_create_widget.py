@@ -10,6 +10,7 @@ from ..util.subgroup_ui_helpers import (
     SubgroupFormBuilder, SubgroupCreateHandler, MemberDataProcessor,
     show_selected_user_ids, load_user_entries, prepare_subgroup_create_request
 )
+from .subgroup_listing_widget import create_subgroup_listing_widget
 from classes.theme import get_color, ThemeKey
 from classes.utils.label_style import apply_label_style
 
@@ -75,6 +76,14 @@ def create_subgroup_create_widget(parent, title, color, create_auto_resize_butto
         logger.warning("サブグループ修正タブのプレースホルダ作成に失敗: %s", e)
         edit_scroll = None
 
+    # 一覧タブ（軽量・即時ロード）
+    try:
+        # parent は UIController 等(QWIdgetでない)が渡るケースがあるため、QTabWidget を親にする
+        listing_tab = create_subgroup_listing_widget(tab_widget)
+        tab_widget.addTab(listing_tab, "一覧")
+    except Exception as e:
+        logger.warning("サブグループ一覧タブの作成に失敗: %s", e)
+
     def _ensure_edit_tab_built() -> None:
         nonlocal edit_tab, edit_built
         if edit_built:
@@ -100,8 +109,14 @@ def create_subgroup_create_widget(parent, title, color, create_auto_resize_butto
     def on_tab_changed(index):
         """タブ切り替え時の処理"""
         try:
-            # 修正タブ（インデックス1）が選択された場合
-            if index == 1:
+            current_text = ""
+            try:
+                current_text = tab_widget.tabText(index)
+            except Exception:
+                current_text = ""
+
+            # 閲覧・修正タブが選択された場合
+            if current_text == "閲覧・修正":
                 _ensure_edit_tab_built()
                 logger.info("修正タブが選択されました - サブグループリストをリフレッシュします")
                 if edit_tab is not None and hasattr(edit_tab, '_refresh_subgroup_list'):

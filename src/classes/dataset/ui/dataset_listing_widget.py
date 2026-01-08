@@ -35,7 +35,7 @@ from qt_compat.widgets import (
     QListWidgetItem,
 )
 
-from PySide6.QtCore import QObject, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QTimer
+from PySide6.QtCore import QObject, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QTimer, QAbstractProxyModel
 from PySide6.QtGui import QKeySequence, QBrush, QFont, QDesktopServices
 from qt_compat.core import QUrl
 from PySide6.QtWidgets import QTableView
@@ -176,6 +176,10 @@ class DatasetFilterProxyModel(QSortFilterProxyModel):
         self._description_len_max: Optional[int] = None
         self._related_count_min: Optional[int] = None
         self._related_count_max: Optional[int] = None
+        self._tile_count_min: Optional[int] = None
+        self._tile_count_max: Optional[int] = None
+        self._file_count_min: Optional[int] = None
+        self._file_count_max: Optional[int] = None
         self.setFilterCaseSensitivity(Qt.CaseInsensitive)
 
     @staticmethod
@@ -240,6 +244,16 @@ class DatasetFilterProxyModel(QSortFilterProxyModel):
     def set_related_count_range(self, min_value: Optional[int], max_value: Optional[int]) -> None:
         self._related_count_min = min_value
         self._related_count_max = max_value
+        self.invalidateFilter()
+
+    def set_tile_count_range(self, min_value: Optional[int], max_value: Optional[int]) -> None:
+        self._tile_count_min = min_value
+        self._tile_count_max = max_value
+        self.invalidateFilter()
+
+    def set_file_count_range(self, min_value: Optional[int], max_value: Optional[int]) -> None:
+        self._file_count_min = min_value
+        self._file_count_max = max_value
         self.invalidateFilter()
 
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:  # noqa: N802
@@ -309,6 +323,40 @@ class DatasetFilterProxyModel(QSortFilterProxyModel):
                 if self._related_count_max is not None and n > self._related_count_max:
                     return False
 
+        # tile count range
+        if self._tile_count_min is not None or self._tile_count_max is not None:
+            tile_col = self._find_column_by_label("タイル数")
+            if tile_col >= 0:
+                idx = model.index(source_row, tile_col, source_parent)
+                val = model.data(idx, Qt.UserRole)
+                try:
+                    n = int(val)
+                except Exception:
+                    n = None
+                if n is None:
+                    return False
+                if self._tile_count_min is not None and n < self._tile_count_min:
+                    return False
+                if self._tile_count_max is not None and n > self._tile_count_max:
+                    return False
+
+        # file count range
+        if self._file_count_min is not None or self._file_count_max is not None:
+            file_col = self._find_column_by_label("ファイル数")
+            if file_col >= 0:
+                idx = model.index(source_row, file_col, source_parent)
+                val = model.data(idx, Qt.UserRole)
+                try:
+                    n = int(val)
+                except Exception:
+                    n = None
+                if n is None:
+                    return False
+                if self._file_count_min is not None and n < self._file_count_min:
+                    return False
+                if self._file_count_max is not None and n > self._file_count_max:
+                    return False
+
         return True
 
     def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:  # noqa: N802
@@ -344,20 +392,172 @@ class DatasetFilterProxyModel(QSortFilterProxyModel):
         return -1
 
 
-class RowLimitProxyModel(QSortFilterProxyModel):
+class PaginationProxyModel(QAbstractProxyModel):
+    """Proxy model that slices the source rows into pages.
+
+    - Source model should already apply filtering/sorting.
+    - This model only selects the current page range.
+    """
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._row_limit = 100  # 0 = all
+        self._page_size = 100  # 0 = all
+        self._page = 1  # 1-based
 
-    def set_row_limit(self, limit: int) -> None:
-        self._row_limit = max(0, int(limit))
-        self.invalidate()
+    def set_page_size(self, page_size: int) -> None:
+        size = max(0, int(page_size))
+        if self._page_size == size:
+            return
+        self.beginResetModel()
+        self._page_size = size
+        self._page = 1
+        self.endResetModel()
+
+    def set_page(self, page: int) -> None:
+        p = max(1, int(page))
+        if self._page == p:
+            return
+        self.beginResetModel()
+        self._page = p
+        self.endResetModel()
+
+    def page_size(self) -> int:
+        return self._page_size
+
+    def page(self) -> int:
+        return self._page
+
+    def total_rows(self) -> int:
+        src = self.sourceModel()
+        return int(src.rowCount()) if src is not None else 0
+
+    def total_pages(self) -> int:
+        total = self.total_rows()
+        if self._page_size <= 0:
+            return 1 if total >= 0 else 1
+        if total <= 0:
+            return 1
+        return max(1, (total + self._page_size - 1) // self._page_size)
+
+    def _page_start(self) -> int:
+        if self._page_size <= 0:
+            return 0
+        return (max(1, self._page) - 1) * self._page_size
+
+    def _page_end(self) -> int:
+        if self._page_size <= 0:
+            return self.total_rows()
+        return min(self.total_rows(), self._page_start() + self._page_size)
+
+    def setSourceModel(self, source_model) -> None:  # noqa: N802
+        old = self.sourceModel()
+        if old is source_model:
+            return
+
+        if old is not None:
+            try:
+                old.modelReset.disconnect(self._on_source_changed)
+                old.layoutChanged.disconnect(self._on_source_changed)
+                old.rowsInserted.disconnect(self._on_source_changed)
+                old.rowsRemoved.disconnect(self._on_source_changed)
+            except Exception:
+                pass
+
+        self.beginResetModel()
+        super().setSourceModel(source_model)
+        self._page = 1
+        self.endResetModel()
+
+        if source_model is not None:
+            try:
+                source_model.modelReset.connect(self._on_source_changed)
+                source_model.layoutChanged.connect(self._on_source_changed)
+                source_model.rowsInserted.connect(self._on_source_changed)
+                source_model.rowsRemoved.connect(self._on_source_changed)
+            except Exception:
+                pass
+
+    def _on_source_changed(self, *_args: object) -> None:
+        # Clamp page to new total pages.
+        max_page = self.total_pages()
+        if self._page > max_page:
+            self._page = max_page
+        self.beginResetModel()
+        self.endResetModel()
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802
-        total = super().rowCount(parent)
-        if self._row_limit <= 0:
-            return total
-        return min(total, self._row_limit)
+        if parent.isValid():
+            return 0
+        src = self.sourceModel()
+        if src is None:
+            return 0
+        start = self._page_start()
+        end = self._page_end()
+        return max(0, end - start)
+
+    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:  # noqa: N802
+        if parent.isValid():
+            return 0
+        src = self.sourceModel()
+        return int(src.columnCount()) if src is not None else 0
+
+    def index(self, row: int, column: int, parent: QModelIndex = QModelIndex()) -> QModelIndex:  # noqa: N802
+        if parent.isValid():
+            return QModelIndex()
+        if row < 0 or column < 0:
+            return QModelIndex()
+        if row >= self.rowCount() or column >= self.columnCount():
+            return QModelIndex()
+        return self.createIndex(row, column)
+
+    def parent(self, _child: QModelIndex = QModelIndex()) -> QModelIndex:  # noqa: N802
+        return QModelIndex()
+
+    def mapToSource(self, proxy_index: QModelIndex) -> QModelIndex:  # noqa: N802
+        if not proxy_index.isValid():
+            return QModelIndex()
+        src = self.sourceModel()
+        if src is None:
+            return QModelIndex()
+        src_row = self._page_start() + proxy_index.row()
+        return src.index(src_row, proxy_index.column())
+
+    def mapFromSource(self, source_index: QModelIndex) -> QModelIndex:  # noqa: N802
+        if not source_index.isValid():
+            return QModelIndex()
+        start = self._page_start()
+        end = self._page_end()
+        if source_index.row() < start or source_index.row() >= end:
+            return QModelIndex()
+        return self.index(source_index.row() - start, source_index.column())
+
+    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):  # noqa: N802
+        src = self.sourceModel()
+        if src is None:
+            return None
+        src_index = self.mapToSource(index)
+        return src.data(src_index, role)
+
+    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.DisplayRole):  # noqa: N802
+        src = self.sourceModel()
+        if src is None:
+            return None
+        return src.headerData(section, orientation, role)
+
+    def flags(self, index: QModelIndex):  # noqa: N802
+        src = self.sourceModel()
+        if src is None:
+            return Qt.NoItemFlags
+        return src.flags(self.mapToSource(index))
+
+    def sort(self, column: int, order: Qt.SortOrder = Qt.AscendingOrder) -> None:  # noqa: N802
+        src = self.sourceModel()
+        if src is None:
+            return
+        try:
+            src.sort(column, order)
+        except Exception:
+            pass
 
 
 class ColumnSelectorDialog(QDialog):
@@ -458,7 +658,7 @@ class DatasetListingWidget(QWidget):
         self._columns: List[DatasetListColumn] = []
         self._model: Optional[DatasetListTableModel] = None
         self._filter_proxy = DatasetFilterProxyModel(self)
-        self._limit_proxy = RowLimitProxyModel(self)
+        self._limit_proxy = PaginationProxyModel(self)
 
         self._filter_edits_by_key: Dict[str, QLineEdit] = {}
         self._filters_container: Optional[QWidget] = None
@@ -475,6 +675,10 @@ class DatasetListingWidget(QWidget):
         self._desc_len_max = QSpinBox(self)
         self._related_cnt_min = QSpinBox(self)
         self._related_cnt_max = QSpinBox(self)
+        self._tile_cnt_min = QSpinBox(self)
+        self._tile_cnt_max = QSpinBox(self)
+        self._file_cnt_min = QSpinBox(self)
+        self._file_cnt_max = QSpinBox(self)
         self._tool_open_callback = None
 
         # Debounce filter application to keep the table responsive while typing/clicking.
@@ -490,6 +694,13 @@ class DatasetListingWidget(QWidget):
         self._range_desc_widget: Optional[QWidget] = None
         self._range_related_widget: Optional[QWidget] = None
         self._range_embargo_widget: Optional[QWidget] = None
+
+        # Range filter relayout on resize (wrap when narrow)
+        self._range_wrap_mode: Optional[bool] = None
+        self._range_relayout_timer = QTimer(self)
+        self._range_relayout_timer.setSingleShot(True)
+        self._range_relayout_timer.setInterval(200)
+        self._range_relayout_timer.timeout.connect(self._maybe_relayout_range_filters)
 
         root = QVBoxLayout(self)
 
@@ -511,6 +722,25 @@ class DatasetListingWidget(QWidget):
         except Exception:
             pass
         buttons_row.addWidget(self._row_limit)
+
+        buttons_row.addWidget(QLabel("ページ:"))
+        self._page = QSpinBox(self)
+        self._page.setObjectName("dataset_listing_page")
+        self._page.setMinimum(1)
+        self._page.setMaximum(1)
+        self._page.setValue(1)
+        try:
+            from PySide6.QtWidgets import QAbstractSpinBox
+
+            self._page.setButtonSymbols(QAbstractSpinBox.PlusMinus)
+        except Exception:
+            pass
+        buttons_row.addWidget(self._page)
+
+        buttons_row.addWidget(QLabel("/"))
+        self._total_pages = QLabel("1")
+        self._total_pages.setObjectName("dataset_listing_total_pages")
+        buttons_row.addWidget(self._total_pages)
 
         self._select_columns = QPushButton("列選択", self)
         buttons_row.addWidget(self._select_columns)
@@ -535,6 +765,7 @@ class DatasetListingWidget(QWidget):
         # Row 2: filters (must be directly above the table)
         # 要件: 縦スクロールバーは表示しない（必要ならテーブル領域を狭くする）
         self._filters_container = QWidget(self)
+        self._filters_container.setObjectName("dataset_listing_filters_container")
         self._filters_layout = QVBoxLayout(self._filters_container)
         self._filters_layout.setContentsMargins(0, 0, 0, 0)
         self._filters_layout.setSpacing(6)
@@ -610,6 +841,56 @@ class DatasetListingWidget(QWidget):
             self._related_cnt_max.setSpecialValueText("未設定")
             self._related_cnt_max.setButtonSymbols(QAbstractSpinBox.PlusMinus)
             self._related_cnt_max.setValue(0)
+
+            self._tile_cnt_min.setObjectName("dataset_listing_tile_cnt_min")
+            self._tile_cnt_min.setMinimum(0)
+            self._tile_cnt_min.setMaximum(999999)
+            self._tile_cnt_min.setSpecialValueText("未設定")
+            self._tile_cnt_min.setButtonSymbols(QAbstractSpinBox.PlusMinus)
+            self._tile_cnt_min.setValue(0)
+            self._tile_cnt_max.setObjectName("dataset_listing_tile_cnt_max")
+            self._tile_cnt_max.setMinimum(0)
+            self._tile_cnt_max.setMaximum(999999)
+            self._tile_cnt_max.setSpecialValueText("未設定")
+            self._tile_cnt_max.setButtonSymbols(QAbstractSpinBox.PlusMinus)
+            self._tile_cnt_max.setValue(0)
+
+            self._file_cnt_min.setObjectName("dataset_listing_file_cnt_min")
+            self._file_cnt_min.setMinimum(0)
+            self._file_cnt_min.setMaximum(999999)
+            self._file_cnt_min.setSpecialValueText("未設定")
+            self._file_cnt_min.setButtonSymbols(QAbstractSpinBox.PlusMinus)
+            self._file_cnt_min.setValue(0)
+            self._file_cnt_max.setObjectName("dataset_listing_file_cnt_max")
+            self._file_cnt_max.setMinimum(0)
+            self._file_cnt_max.setMaximum(999999)
+            self._file_cnt_max.setSpecialValueText("未設定")
+            self._file_cnt_max.setButtonSymbols(QAbstractSpinBox.PlusMinus)
+            self._file_cnt_max.setValue(0)
+
+            # Keep range inputs from becoming too large, but avoid truncation.
+            for sb in (
+                self._desc_len_min,
+                self._desc_len_max,
+                self._related_cnt_min,
+                self._related_cnt_max,
+                self._tile_cnt_min,
+                self._tile_cnt_max,
+                self._file_cnt_min,
+                self._file_cnt_max,
+            ):
+                try:
+                    sb.setMinimumWidth(90)
+                    sb.setMaximumWidth(140)
+                except Exception:
+                    pass
+
+            for de in (self._embargo_from, self._embargo_to):
+                try:
+                    de.setMinimumWidth(110)
+                    de.setMaximumWidth(160)
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -635,7 +916,21 @@ class DatasetListingWidget(QWidget):
         emb_layout.addWidget(QLabel("～"))
         emb_layout.addWidget(self._embargo_to)
 
-        self._clear_filters = QPushButton("クリア", self)
+        self._clear_filters = QPushButton("フィルタクリア", self)
+
+        self._range_tile_widget = QWidget(self)
+        tile_layout = QHBoxLayout(self._range_tile_widget)
+        tile_layout.setContentsMargins(0, 0, 0, 0)
+        tile_layout.addWidget(self._tile_cnt_min)
+        tile_layout.addWidget(QLabel("～"))
+        tile_layout.addWidget(self._tile_cnt_max)
+
+        self._range_file_widget = QWidget(self)
+        file_layout = QHBoxLayout(self._range_file_widget)
+        file_layout.setContentsMargins(0, 0, 0, 0)
+        file_layout.addWidget(self._file_cnt_min)
+        file_layout.addWidget(QLabel("～"))
+        file_layout.addWidget(self._file_cnt_max)
 
         try:
             self._filters_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -676,12 +971,17 @@ class DatasetListingWidget(QWidget):
 
         # Wiring
         self._row_limit.valueChanged.connect(self._apply_row_limit)
+        self._page.valueChanged.connect(self._apply_page)
         self._embargo_from.dateChanged.connect(self._schedule_apply_filters)
         self._embargo_to.dateChanged.connect(self._schedule_apply_filters)
         self._desc_len_min.valueChanged.connect(self._schedule_apply_filters)
         self._desc_len_max.valueChanged.connect(self._schedule_apply_filters)
         self._related_cnt_min.valueChanged.connect(self._schedule_apply_filters)
         self._related_cnt_max.valueChanged.connect(self._schedule_apply_filters)
+        self._tile_cnt_min.valueChanged.connect(self._schedule_apply_filters)
+        self._tile_cnt_max.valueChanged.connect(self._schedule_apply_filters)
+        self._file_cnt_min.valueChanged.connect(self._schedule_apply_filters)
+        self._file_cnt_max.valueChanged.connect(self._schedule_apply_filters)
         self._clear_filters.clicked.connect(self._clear_all_filters)
         self._select_columns.clicked.connect(self._open_column_selector)
         self._reset_columns.clicked.connect(self._reset_column_visibility)
@@ -695,10 +995,92 @@ class DatasetListingWidget(QWidget):
         self._table.clicked.connect(self._on_table_clicked)
 
         # Initialize
-        self.reload_data()
+        # 初回表示の体感を改善するため、ウィジェット描画後に読み込みを開始する。
+        self._status.setText("読み込み中...")
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            # テストは決定性を優先して同期で読み込む
+            self.reload_data()
+        else:
+            try:
+                QTimer.singleShot(0, self.reload_data)
+            except Exception:
+                self.reload_data()
 
         # Ensure initial state
         self._set_filters_collapsed(False)
+
+    def resizeEvent(self, event) -> None:  # noqa: N802
+        try:
+            super().resizeEvent(event)
+        except Exception:
+            pass
+        try:
+            self._range_relayout_timer.start()
+        except Exception:
+            self._maybe_relayout_range_filters()
+
+    def _compute_should_wrap_range_filters(self) -> bool:
+        try:
+            w = int(self.width())
+        except Exception:
+            w = 0
+        return w > 0 and w < 980
+
+    def _maybe_relayout_range_filters(self) -> None:
+        wrap = self._compute_should_wrap_range_filters()
+        if self._range_wrap_mode is None or self._range_wrap_mode != wrap:
+            self._range_wrap_mode = wrap
+            self._relayout_range_filters(wrap)
+
+    def _relayout_range_filters(self, wrap: bool) -> None:
+        if self._range_filters_layout is None:
+            return
+
+        def clear_layout(layout: QGridLayout) -> None:
+            while layout.count():
+                item = layout.takeAt(0)
+                w = item.widget() if item is not None else None
+                if w is not None:
+                    w.setParent(None)
+
+        def bold_label(text: str) -> QLabel:
+            lbl = QLabel(text)
+            try:
+                f = lbl.font()
+                f.setBold(True)
+                lbl.setFont(f)
+            except Exception:
+                pass
+            return lbl
+
+        clear_layout(self._range_filters_layout)
+
+        entries: List[tuple[str, Optional[QWidget]]] = [
+            ("説明文字数", self._range_desc_widget),
+            ("関連データセット", self._range_related_widget),
+            ("タイル数", self._range_tile_widget),
+            ("ファイル数", self._range_file_widget),
+            ("エンバーゴ期間終了日", self._range_embargo_widget),
+        ]
+        entries = [(lbl, w) for (lbl, w) in entries if w is not None]
+
+        r = 0
+        c = 0
+        per_row = 3 if wrap else len(entries)
+        for i, (lbl, w) in enumerate(entries):
+            if wrap and i > 0 and (i % per_row) == 0:
+                r += 1
+                c = 0
+            self._range_filters_layout.addWidget(bold_label(lbl), r, c)
+            c += 1
+            self._range_filters_layout.addWidget(w, r, c)
+            c += 1
+
+        if self._clear_filters is not None:
+            if wrap:
+                r += 1
+                c = 0
+            self._range_filters_layout.addWidget(self._clear_filters, r, c)
 
     def _schedule_apply_filters(self) -> None:
         # Avoid repeated heavy filtering while user is typing/clicking.
@@ -735,6 +1117,21 @@ class DatasetListingWidget(QWidget):
             f"QCheckBox {{ color: {get_color(ThemeKey.TEXT_PRIMARY)}; }}"
         )
         self.setStyleSheet(base_qss)
+
+        # Filters container background
+        try:
+            # Add padding via QSS for better visibility.
+            filters_qss = (
+                f"QWidget#dataset_listing_filters_container {{"
+                f"  background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};"
+                f"  border: 1px solid {get_color(ThemeKey.PANEL_BORDER)};"
+                f"  border-radius: 4px;"
+                f"  padding: 6px;"
+                f"}}"
+            )
+            self.setStyleSheet(self.styleSheet() + filters_qss)
+        except Exception:
+            pass
 
         # Table
         table_qss = (
@@ -839,7 +1236,14 @@ class DatasetListingWidget(QWidget):
             pass
 
     def _apply_row_limit(self) -> None:
-        self._limit_proxy.set_row_limit(int(self._row_limit.value()))
+        self._limit_proxy.set_page_size(int(self._row_limit.value()))
+        self._update_pagination_controls()
+
+    def _apply_page(self) -> None:
+        try:
+            self._limit_proxy.set_page(int(self._page.value()))
+        except Exception:
+            return
 
     def _clear_all_filters(self) -> None:
         for edit in self._filter_edits_by_key.values():
@@ -852,6 +1256,10 @@ class DatasetListingWidget(QWidget):
             self._desc_len_max.setValue(0)
             self._related_cnt_min.setValue(0)
             self._related_cnt_max.setValue(0)
+            self._tile_cnt_min.setValue(0)
+            self._tile_cnt_max.setValue(0)
+            self._file_cnt_min.setValue(0)
+            self._file_cnt_max.setValue(0)
         except Exception:
             pass
         self._filter_proxy.set_embargo_range(None, None)
@@ -899,6 +1307,24 @@ class DatasetListingWidget(QWidget):
             None if rel_min <= 0 else rel_min,
             None if rel_max <= 0 else rel_max,
         )
+
+        # Tile count range
+        tile_min = int(self._tile_cnt_min.value())
+        tile_max = int(self._tile_cnt_max.value())
+        self._filter_proxy.set_tile_count_range(
+            None if tile_min <= 0 else tile_min,
+            None if tile_max <= 0 else tile_max,
+        )
+
+        # File count range
+        file_min = int(self._file_cnt_min.value())
+        file_max = int(self._file_cnt_max.value())
+        self._filter_proxy.set_file_count_range(
+            None if file_min <= 0 else file_min,
+            None if file_max <= 0 else file_max,
+        )
+
+        self._update_pagination_controls()
 
         self._update_filters_summary()
 
@@ -979,6 +1405,30 @@ class DatasetListingWidget(QWidget):
         except Exception:
             pass
 
+        # タイル数
+        try:
+            min_v = int(self._tile_cnt_min.value())
+            max_v = int(self._tile_cnt_max.value())
+            min_txt = "" if min_v <= 0 else str(min_v)
+            max_txt = "" if max_v <= 0 else str(max_v)
+            rng = _format_range(min_txt, max_txt)
+            if rng:
+                parts.append(f"タイル数:{rng}")
+        except Exception:
+            pass
+
+        # ファイル数
+        try:
+            min_v = int(self._file_cnt_min.value())
+            max_v = int(self._file_cnt_max.value())
+            min_txt = "" if min_v <= 0 else str(min_v)
+            max_txt = "" if max_v <= 0 else str(max_v)
+            rng = _format_range(min_txt, max_txt)
+            if rng:
+                parts.append(f"ファイル数:{rng}")
+        except Exception:
+            pass
+
         # テキストフィルタ
         try:
             key_to_label = {c.key: c.label for c in self._columns}
@@ -992,6 +1442,53 @@ class DatasetListingWidget(QWidget):
             pass
 
         self._filters_summary_label.setText(" / ".join(parts))
+
+    def _update_pagination_controls(self) -> None:
+        try:
+            total_pages = int(self._limit_proxy.total_pages())
+        except Exception:
+            total_pages = 1
+        if total_pages <= 0:
+            total_pages = 1
+
+        try:
+            self._total_pages.setText(str(total_pages))
+        except Exception:
+            pass
+
+        # Disable paging controls for "全件"
+        try:
+            page_size = int(self._row_limit.value())
+        except Exception:
+            page_size = 0
+
+        try:
+            if page_size <= 0:
+                self._page.blockSignals(True)
+                self._page.setMaximum(1)
+                self._page.setValue(1)
+                self._page.setEnabled(False)
+                self._limit_proxy.set_page(1)
+                self._page.blockSignals(False)
+                return
+        except Exception:
+            pass
+
+        try:
+            self._page.setEnabled(True)
+            self._page.blockSignals(True)
+            self._page.setMaximum(total_pages)
+            if self._page.value() > total_pages:
+                self._page.setValue(total_pages)
+            if self._page.value() < 1:
+                self._page.setValue(1)
+            self._limit_proxy.set_page(int(self._page.value()))
+            self._page.blockSignals(False)
+        except Exception:
+            try:
+                self._page.blockSignals(False)
+            except Exception:
+                pass
 
     def _open_column_selector(self) -> None:
         visible_by_key = self._get_current_visible_by_key()
@@ -1156,49 +1653,8 @@ class DatasetListingWidget(QWidget):
         clear_layout(self._text_filters_layout)
         self._filter_edits_by_key = {}
 
-        # --- Range filters (non-text) on their own rows ---
-        r = 0
-        # 3項目(説明文字数/関連データセット/エンバーゴ期間終了日)を1行にまとめる
-        c = 0
-        if self._range_desc_widget is not None:
-            self._range_filters_layout.addWidget(bold_label("説明文字数"), r, c)
-            c += 1
-            self._range_filters_layout.addWidget(self._range_desc_widget, r, c)
-            c += 1
-
-        if self._range_related_widget is not None:
-            self._range_filters_layout.addWidget(bold_label("関連データセット"), r, c)
-            c += 1
-            self._range_filters_layout.addWidget(self._range_related_widget, r, c)
-            c += 1
-
-        if self._range_embargo_widget is not None:
-            self._range_filters_layout.addWidget(bold_label("エンバーゴ期間終了日"), r, c)
-            c += 1
-            self._range_filters_layout.addWidget(self._range_embargo_widget, r, c)
-            c += 1
-
-        # stretch + clear button
-        spacer = QWidget(self)
-        try:
-            spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        except Exception:
-            pass
-        self._range_filters_layout.addWidget(spacer, r, c)
-        c += 1
-        self._range_filters_layout.addWidget(self._clear_filters, r, c)
-
-        # Make range layout behave
-        try:
-            # labels: 0 stretch, widgets: 0, spacer: 1
-            # (we don't know exact column count, so set best-effort)
-            for col in range(max(0, c)):
-                self._range_filters_layout.setColumnStretch(col, 0)
-            # spacer column is (c-2) because last is clear button
-            if c >= 2:
-                self._range_filters_layout.setColumnStretch(c - 2, 1)
-        except Exception:
-            pass
+        # --- Range filters (non-text): wrap when narrow ---
+        self._relayout_range_filters(self._compute_should_wrap_range_filters())
 
         # --- Text filters only: 5 columns with equal widths ---
         max_cols = 5
@@ -1211,7 +1667,7 @@ class DatasetListingWidget(QWidget):
         row = 0
         col = 0
         for cdef in self._columns:
-            if cdef.key in {"description_len", "related_datasets_count", "embargo_date"}:
+            if cdef.key in {"description_len", "related_datasets_count", "embargo_date", "tile_count", "file_count"}:
                 continue
 
             pair = QWidget(self)

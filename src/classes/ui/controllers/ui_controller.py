@@ -973,6 +973,26 @@ class UIController(UIControllerCore):
         self.menu_buttons['help'].clicked.connect(
             lambda: self.open_help_dialog()
         )
+
+        # メインメニュー表示切替（既定: データ取得/AIテストは非表示）
+        try:
+            from classes.managers.app_config_manager import get_config_manager
+
+            cfg = get_config_manager()
+            show_data_fetch = bool(cfg.get("app.menu.show_data_fetch", False))
+            show_ai_test = bool(cfg.get("app.menu.show_ai_test", False))
+        except Exception:
+            show_data_fetch = False
+            show_ai_test = False
+
+        try:
+            self.menu_buttons['data_fetch'].setVisible(show_data_fetch)
+        except Exception:
+            pass
+        try:
+            self.menu_buttons['ai_test'].setVisible(show_ai_test)
+        except Exception:
+            pass
         
         return list(self.menu_buttons.values())
     
@@ -999,12 +1019,25 @@ class UIController(UIControllerCore):
         is_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
         # --- 機能切替時のサイズ制約 ---
-        # 既定ではWebView用途の横幅固定を戻すが、設定モードは常時リサイズ可とする。
+        # WebView(ログイン/データ取得)用途のみ横幅固定・アスペクト比固定。
+        # それ以外の通常機能は常にリサイズ可能にする。
         top_level = self.parent if hasattr(self, 'parent') else None
         if top_level:
-            if mode == "settings":
-                # 横幅固定・アスペクト比固定を解除
-                try:
+            try:
+                if mode in {"login", "data_fetch"}:
+                    webview_width = getattr(top_level, '_webview_fixed_width', 900)
+                    menu_width = 120
+                    margin = 40
+                    fixed_width = webview_width + menu_width + margin
+                    if hasattr(top_level, 'setFixedWidth'):
+                        top_level.setFixedWidth(fixed_width)
+                    if hasattr(top_level, '_fixed_aspect_ratio'):
+                        if hasattr(top_level, 'height') and top_level.height() != 0:
+                            top_level._fixed_aspect_ratio = fixed_width / top_level.height()
+                        else:
+                            top_level._fixed_aspect_ratio = 1.0
+                else:
+                    # 横幅固定・アスペクト比固定を解除（幅が「元に戻る」症状の根本対策）
                     if hasattr(top_level, '_fixed_aspect_ratio'):
                         top_level._fixed_aspect_ratio = None
                     if hasattr(top_level, 'setMinimumSize'):
@@ -1017,20 +1050,8 @@ class UIController(UIControllerCore):
                         top_level.setMaximumWidth(16777215)
                     if hasattr(top_level, 'showNormal'):
                         top_level.showNormal()
-                except Exception:
-                    pass
-            else:
-                webview_width = getattr(top_level, '_webview_fixed_width', 900)
-                menu_width = 120
-                margin = 40
-                fixed_width = webview_width + menu_width + margin
-                if hasattr(top_level, 'setFixedWidth'):
-                    top_level.setFixedWidth(fixed_width)
-                if hasattr(top_level, '_fixed_aspect_ratio'):
-                    if hasattr(top_level, 'height') and top_level.height() != 0:
-                        top_level._fixed_aspect_ratio = fixed_width / top_level.height()
-                    else:
-                        top_level._fixed_aspect_ratio = 1.0
+            except Exception:
+                pass
 
 
 
@@ -1257,6 +1278,22 @@ class UIController(UIControllerCore):
                 pass
             if hasattr(self.parent, 'overlay_manager'):
                 self.parent.overlay_manager.hide_overlay()
+
+            # Ensure window is resizable (login/data_fetch may have fixed width).
+            if top_level:
+                try:
+                    top_level.setMinimumSize(200, 200)
+                except Exception:
+                    pass
+                try:
+                    top_level.setMaximumSize(16777215, 16777215)
+                except Exception:
+                    pass
+                try:
+                    top_level.setMinimumWidth(200)
+                    top_level.setMaximumWidth(16777215)
+                except Exception:
+                    pass
 
             # サブグループ・データセット・基本情報・設定モードは初期高さをディスプレイの90%に設定（後から変更可）
             if mode in ["subgroup_create", "basic_info", "dataset_open", "data_register", "settings", "ai_test", "data_fetch2", "data_portal", "help"]:

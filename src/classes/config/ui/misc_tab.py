@@ -8,16 +8,18 @@ Phase2-2: 設定メニューMISCタブ追加
 import sys
 import os
 import logging
+import threading
 from pathlib import Path
 
 from config.common import REVISION
+from classes.managers.app_config_manager import get_config_manager
 
 try:
     from qt_compat.widgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
-        QLabel, QPushButton, QMessageBox, QCheckBox
+        QLabel, QPushButton, QMessageBox, QCheckBox, QProgressDialog
     )
-    from qt_compat.core import Qt
+    from qt_compat.core import Qt, QTimer, QObject, Signal, Slot
     from classes.theme import get_color, ThemeKey
     PYQT5_AVAILABLE = True
 except ImportError:
@@ -32,6 +34,7 @@ class MiscTab(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._update_in_progress = False
         self.setup_ui()
         
     def setup_ui(self):
@@ -52,6 +55,10 @@ class MiscTab(QWidget):
         # アプリ更新
         update_group = self.create_update_group()
         layout.addWidget(update_group)
+
+        # メインメニュー表示
+        menu_group = self.create_menu_group()
+        layout.addWidget(menu_group)
         
         # ディレクトリ操作グループ
         dir_group = self.create_directory_group()
@@ -102,9 +109,9 @@ class MiscTab(QWidget):
 
         btn_layout = QHBoxLayout()
 
-        check_btn = QPushButton("更新を確認")
-        check_btn.clicked.connect(self.check_for_update)
-        check_btn.setStyleSheet(
+        self._update_check_btn = QPushButton("更新を確認")
+        self._update_check_btn.clicked.connect(self.check_for_update)
+        self._update_check_btn.setStyleSheet(
             f"""
             QPushButton {{
                 padding: 6px 14px;
@@ -122,69 +129,419 @@ class MiscTab(QWidget):
             }}
             """
         )
-        btn_layout.addWidget(check_btn)
+        btn_layout.addWidget(self._update_check_btn)
 
         layout.addLayout(btn_layout)
         layout.addStretch(1)
         return group
 
-    def check_for_update(self):
-        """手動の更新確認→希望があればDL+検証+インストーラ実行"""
+    def create_menu_group(self):
+        """メインメニュー表示設定"""
+        group = QGroupBox("メインメニュー")
+        group.setStyleSheet(
+            f"""
+            QGroupBox {{
+                font-weight: bold;
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }}
+            """
+        )
+
+        layout = QVBoxLayout(group)
+        layout.setSpacing(10)
+
+        info_label = QLabel(
+            "メインメニューの一部ボタンを表示/非表示にできます。\n"
+            "※『データ取得2』『AIテスト2』は常時表示です。"
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 9pt; font-weight: normal;"
+        )
+        layout.addWidget(info_label)
+
+        self.menu_show_data_fetch_checkbox = QCheckBox("メインメニューに『データ取得』を表示する（既定: 非表示）")
+        self.menu_show_data_fetch_checkbox.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-weight: normal;"
+        )
+        layout.addWidget(self.menu_show_data_fetch_checkbox)
+
+        self.menu_show_ai_test_checkbox = QCheckBox("メインメニューに『AIテスト』を表示する（既定: 非表示）")
+        self.menu_show_ai_test_checkbox.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-weight: normal;"
+        )
+        layout.addWidget(self.menu_show_ai_test_checkbox)
+
+        btn_layout = QHBoxLayout()
+        apply_btn = QPushButton("保存")
+        apply_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                padding: 6px 14px;
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_PRESSED)};
+            }}
+            """
+        )
+        apply_btn.clicked.connect(self.save_menu_settings)
+        btn_layout.addWidget(apply_btn)
+        btn_layout.addStretch(1)
+        layout.addLayout(btn_layout)
+
+        self.load_menu_settings()
+        return group
+
+    def load_menu_settings(self):
+        """メインメニュー表示設定の読み込み"""
         try:
-            from classes.core.app_updater import (
-                check_update,
-                download,
-                get_default_download_path,
-                run_installer_and_restart,
-                verify_sha256,
-            )
+            cfg = get_config_manager()
+            show_data_fetch = bool(cfg.get("app.menu.show_data_fetch", False))
+            show_ai_test = bool(cfg.get("app.menu.show_ai_test", False))
+            self.menu_show_data_fetch_checkbox.setChecked(show_data_fetch)
+            self.menu_show_ai_test_checkbox.setChecked(show_ai_test)
+        except Exception as e:
+            logger.debug("メインメニュー設定の読み込みに失敗: %s", e)
+            try:
+                self.menu_show_data_fetch_checkbox.setChecked(False)
+                self.menu_show_ai_test_checkbox.setChecked(False)
+            except Exception:
+                pass
 
-            has_update, latest_version, url, sha256, updated_at = check_update(REVISION)
-            updated_at_text = updated_at or "不明"
-            if not has_update:
-                QMessageBox.information(
-                    self,
-                    "更新確認",
-                    "現在のバージョンは最新です。\n\n"
-                    f"現在: {REVISION}\n"
-                    f"latest.json: {latest_version or REVISION}\n"
-                    f"更新日時: {updated_at_text}",
-                )
-                return
+    def save_menu_settings(self):
+        """メインメニュー表示設定の保存"""
+        try:
+            cfg = get_config_manager()
+            cfg.set("app.menu.show_data_fetch", bool(self.menu_show_data_fetch_checkbox.isChecked()))
+            cfg.set("app.menu.show_ai_test", bool(self.menu_show_ai_test_checkbox.isChecked()))
+            if not cfg.save():
+                raise RuntimeError("設定ファイルの保存に失敗しました")
 
-            reply = QMessageBox.question(
+            QMessageBox.information(
                 self,
-                "更新があります",
-                "新しいバージョンが利用可能です。\n\n"
-                f"現在: {REVISION}\n"
-                f"latest.json: {latest_version}\n"
-                f"更新日時: {updated_at_text}\n\n"
-                "インストーラをダウンロードして更新しますか？\n\n"
-                "（更新完了後は自動で再起動します）",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.Yes,
+                "保存完了",
+                "メインメニュー設定を保存しました。\n次回起動時から反映されます。",
             )
-            if reply != QMessageBox.Yes:
+        except Exception as e:
+            QMessageBox.warning(self, "保存失敗", f"メインメニュー設定の保存に失敗しました: {e}")
+
+    def check_for_update(self):
+        """手動の更新確認→希望があればDL+検証+インストーラ実行（進捗表示/非同期）"""
+        try:
+            from classes.core.app_updater import check_update
+
+            if self._update_in_progress:
                 return
+            self._update_in_progress = True
 
-            dst = get_default_download_path(latest_version)
-            QMessageBox.information(self, "更新", "ダウンロードを開始します。完了までお待ちください。")
-            download(url, dst)
+            if hasattr(self, "_update_check_btn"):
+                self._update_check_btn.setEnabled(False)
 
-            if not verify_sha256(dst, sha256):
+            cancelled = {"v": False}
+            progress = QProgressDialog(self)
+            progress.setWindowTitle("更新確認")
+            progress.setLabelText("更新情報（latest.json）を取得中...")
+            progress.setRange(0, 0)  # indeterminate
+            progress.setMinimumDuration(300)
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setCancelButtonText("キャンセル")
+
+            def _on_cancel():
+                cancelled["v"] = True
+                _finish_ui(enable_button=True)
+
+            progress.canceled.connect(_on_cancel)
+            progress.show()
+
+            def _finish_ui(enable_button: bool = True) -> None:
+                try:
+                    progress.close()
+                except Exception:
+                    pass
+                if enable_button and hasattr(self, "_update_check_btn"):
+                    self._update_check_btn.setEnabled(True)
+                self._update_in_progress = False
+                # watchdogの誤発火（正常完了後のタイムアウト通知）を防ぐ
+                cancelled["v"] = True
+
+                # 進行中のUI呼び出し用Emitterを破棄（終了後にUI側へ戻す必要がないため）
+                try:
+                    emitter = getattr(self, "_update_check_result_emitter", None)
+                    if emitter is not None:
+                        emitter.deleteLater()
+                except Exception:
+                    pass
+                try:
+                    self._update_check_result_emitter = None
+                except Exception:
+                    pass
+
+            def _timeout_watchdog() -> None:
+                if cancelled["v"]:
+                    return
+                # まだ進行中ならタイムアウト扱い
+                cancelled["v"] = True
+                _finish_ui(enable_button=True)
                 QMessageBox.warning(
                     self,
-                    "更新失敗",
-                    "sha256検証に失敗しました。\n安全のためインストーラは実行しません。",
+                    "更新確認",
+                    "更新情報の取得がタイムアウトしました。\n"
+                    "ネットワーク/プロキシ設定をご確認のうえ、再試行してください。",
                 )
-                return
 
-            # 実行（この関数内でアプリ終了→更新完了後に再起動）
-            run_installer_and_restart(dst)
+            # 30秒で強制的に終わらせる（HTTPが戻らない環境向け）
+            QTimer.singleShot(30_000, self, _timeout_watchdog)
+
+            def _handle_result(payload: object) -> None:
+                try:
+                    if cancelled["v"]:
+                        return
+
+                    if isinstance(payload, Exception):
+                        _finish_ui(enable_button=True)
+                        QMessageBox.warning(self, "更新エラー", f"更新確認に失敗しました: {payload}")
+                        return
+
+                    has_update, latest_version, url, sha256, updated_at = payload
+                    _finish_ui(enable_button=True)
+
+                    # latest.json取得失敗（check_updateは例外を握りつぶして空文字を返す）
+                    if not latest_version or not url or not sha256:
+                        QMessageBox.warning(
+                            self,
+                            "更新確認",
+                            "更新情報の取得に失敗しました。\n"
+                            "ネットワーク/プロキシ設定をご確認のうえ、時間をおいて再試行してください。",
+                        )
+                        return
+
+                    updated_at_text = updated_at or "不明"
+                    if not has_update:
+                        QMessageBox.information(
+                            self,
+                            "更新確認",
+                            "現在のバージョンは最新です。\n\n"
+                            f"現在: {REVISION}\n"
+                            f"latest.json: {latest_version}\n"
+                            f"更新日時: {updated_at_text}",
+                        )
+                        return
+
+                    reply = QMessageBox.question(
+                        self,
+                        "更新があります",
+                        "新しいバージョンが利用可能です。\n\n"
+                        f"現在: {REVISION}\n"
+                        f"latest.json: {latest_version}\n"
+                        f"更新日時: {updated_at_text}\n\n"
+                        "インストーラをダウンロードして更新しますか？\n\n"
+                        "（更新完了後は自動で再起動します）",
+                        QMessageBox.Yes | QMessageBox.No,
+                        QMessageBox.Yes,
+                    )
+                    if reply != QMessageBox.Yes:
+                        return
+
+                    self._download_and_install(url=url, version=latest_version, sha256=sha256)
+                except Exception as e:
+                    logger.error("更新確認UI処理でエラー: %s", e, exc_info=True)
+                    _finish_ui(enable_button=True)
+                    QMessageBox.warning(self, "更新エラー", f"更新確認に失敗しました: {e}")
+
+            def _worker_check() -> None:
+                try:
+                    result = check_update(REVISION)
+                    # (has_update, latest_version, url, sha256, updated_at)
+                    try:
+                        # worker thread -> UI thread は Signal/Slot で安全に橋渡しする
+                        emitter = getattr(self, "_update_check_result_emitter", None)
+                        if emitter is not None:
+                            emitter.result_ready.emit(result)
+                    except Exception:
+                        # フォールバック（Qtが不安定な環境向け）
+                        try:
+                            QTimer.singleShot(0, self, lambda p=result: _handle_result(p))
+                        except Exception:
+                            QTimer.singleShot(0, lambda p=result: _handle_result(p))
+                except Exception as e:
+                    logger.error("更新確認でエラー: %s", e, exc_info=True)
+                    try:
+                        emitter = getattr(self, "_update_check_result_emitter", None)
+                        if emitter is not None:
+                            emitter.result_ready.emit(e)
+                    except Exception:
+                        try:
+                            QTimer.singleShot(0, self, lambda p=e: _handle_result(p))
+                        except Exception:
+                            QTimer.singleShot(0, lambda p=e: _handle_result(p))
+
+            class _UpdateCheckResultEmitter(QObject):
+                result_ready = Signal(object)
+
+                def __init__(self, parent=None):
+                    super().__init__(parent)
+                    self.result_ready.connect(self._dispatch, Qt.ConnectionType.QueuedConnection)
+
+                @Slot(object)
+                def _dispatch(self, payload: object) -> None:
+                    _handle_result(payload)
+
+            # この呼び出し中だけ使うEmitter（selfの子にして寿命を安定化）
+            self._update_check_result_emitter = _UpdateCheckResultEmitter(self)
+
+            threading.Thread(target=_worker_check, daemon=True).start()
 
         except Exception as e:
             logger.error("更新確認/実行でエラー: %s", e, exc_info=True)
+            if hasattr(self, "_update_check_btn"):
+                self._update_check_btn.setEnabled(True)
+            self._update_in_progress = False
             QMessageBox.warning(self, "更新エラー", f"更新処理に失敗しました: {e}")
+
+    def _download_and_install(self, *, url: str, version: str, sha256: str) -> None:
+        """更新インストーラをDL→sha256検証→実行（進捗/キャンセル対応）。"""
+        from classes.core.app_updater import (
+            download,
+            get_default_download_path,
+            run_installer_and_restart,
+            verify_sha256,
+        )
+
+        dst = get_default_download_path(version)
+
+        if self._update_in_progress:
+            return
+        self._update_in_progress = True
+
+        if hasattr(self, "_update_check_btn"):
+            self._update_check_btn.setEnabled(False)
+
+        cancelled = {"v": False}
+        progress = QProgressDialog(self)
+        progress.setWindowTitle("更新")
+        progress.setLabelText("ダウンロードを開始します...")
+        progress.setRange(0, 100)
+        progress.setValue(0)
+        progress.setMinimumDuration(300)
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setCancelButtonText("キャンセル")
+
+        def _on_cancel():
+            cancelled["v"] = True
+            _finish_ui()
+
+        progress.canceled.connect(_on_cancel)
+        progress.show()
+
+        def _set_progress(value: int, message: str) -> None:
+            try:
+                progress.setValue(int(value))
+                progress.setLabelText(message)
+            except Exception:
+                pass
+
+        def _set_busy() -> None:
+            try:
+                if progress.maximum() != 0 or progress.minimum() != 0:
+                    progress.setRange(0, 0)
+            except Exception:
+                pass
+
+        def _set_determinate() -> None:
+            try:
+                if progress.maximum() != 100 or progress.minimum() != 0:
+                    progress.setRange(0, 100)
+            except Exception:
+                pass
+
+        def progress_callback(current, total, message="処理中"):
+            if cancelled["v"]:
+                return False
+            # total=0 はサイズ不明（busy表示）
+            if not total:
+                QTimer.singleShot(0, _set_busy)
+                QTimer.singleShot(0, lambda: _set_progress(0, str(message)))
+                return True
+
+            # ProgressWorker互換: total=100の場合は percent
+            if total == 100 and int(current) <= 100:
+                QTimer.singleShot(0, _set_determinate)
+                v = int(current)
+                QTimer.singleShot(0, lambda: _set_progress(v, str(message)))
+                return True
+
+            # カウント値の場合は0%固定（ただしメッセージ更新）
+            QTimer.singleShot(0, _set_busy)
+            QTimer.singleShot(0, lambda: _set_progress(0, str(message)))
+            return True
+
+        def _finish_ui() -> None:
+            try:
+                progress.close()
+            except Exception:
+                pass
+            if hasattr(self, "_update_check_btn"):
+                self._update_check_btn.setEnabled(True)
+            self._update_in_progress = False
+
+        def _run_installer_on_ui_thread() -> None:
+            # ここで例外が出るとプログレスが閉じず「止まった」ように見えるので捕捉する
+            try:
+                _finish_ui()
+                run_installer_and_restart(dst)
+            except Exception as e:
+                logger.error("インストーラ起動に失敗: %s", e, exc_info=True)
+                QMessageBox.warning(self, "更新エラー", f"インストーラ起動に失敗しました: {e}")
+
+        def _worker_download() -> None:
+            try:
+                progress_callback(0, 100, "ダウンロード中...")
+                download(url, dst, progress_callback=progress_callback)
+                if cancelled["v"]:
+                    QTimer.singleShot(0, _finish_ui)
+                    return
+
+                progress_callback(90, 100, "sha256検証中...")
+                if not verify_sha256(dst, sha256):
+                    def _bad_sha():
+                        _finish_ui()
+                        QMessageBox.warning(
+                            self,
+                            "更新失敗",
+                            "sha256検証に失敗しました。\n安全のためインストーラは実行しません。",
+                        )
+                    QTimer.singleShot(0, _bad_sha)
+                    return
+
+                progress_callback(100, 100, "インストーラを起動します...")
+
+                # アプリ終了を伴うためUIスレッドで実行（例外もUI側で処理）
+                QTimer.singleShot(0, _run_installer_on_ui_thread)
+            except Exception as e:
+                logger.error("更新ダウンロード/実行でエラー: %s", e, exc_info=True)
+                def _on_err():
+                    _finish_ui()
+                    if not cancelled["v"]:
+                        QMessageBox.warning(self, "更新エラー", f"更新処理に失敗しました: {e}")
+                QTimer.singleShot(0, _on_err)
+
+        threading.Thread(target=_worker_download, daemon=True).start()
 
     def create_startup_group(self):
         """起動関連オプション"""
@@ -217,6 +574,18 @@ class MiscTab(QWidget):
             "環境変数 RDE_DISABLE_SPLASH_SCREEN / RDE_ENABLE_SPLASH_SCREEN が指定されている場合は、そちらが優先されます。"
         )
         layout.addWidget(self.splash_checkbox)
+
+        self.update_check_checkbox = QCheckBox("起動時に更新を確認する（既定: 確認する）")
+        self.update_check_checkbox.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-weight: normal;"
+        )
+        layout.addWidget(self.update_check_checkbox)
+
+        self.update_prompt_checkbox = QCheckBox("起動時の更新確認ダイアログを表示する（既定: 表示）")
+        self.update_prompt_checkbox.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-weight: normal;"
+        )
+        layout.addWidget(self.update_prompt_checkbox)
 
         info_label = QLabel(
             "この設定は次回起動時から有効になります。\n"
@@ -261,25 +630,31 @@ class MiscTab(QWidget):
     def load_startup_settings(self):
         """起動関連設定の読み込み"""
         try:
-            from classes.managers.app_config_manager import get_config_manager
-
             cfg = get_config_manager()
             enabled = bool(cfg.get("app.enable_splash_screen", True))
             self.splash_checkbox.setChecked(enabled)
+
+            update_enabled = bool(cfg.get("app.update.auto_check_enabled", True))
+            self.update_check_checkbox.setChecked(update_enabled)
+
+            prompt_enabled = bool(cfg.get("app.update.startup_prompt_enabled", True))
+            self.update_prompt_checkbox.setChecked(prompt_enabled)
         except Exception as e:
             logger.debug("スプラッシュ設定の読み込みに失敗: %s", e)
             try:
                 self.splash_checkbox.setChecked(True)
+                self.update_check_checkbox.setChecked(True)
+                self.update_prompt_checkbox.setChecked(True)
             except Exception:
                 pass
 
     def save_startup_settings(self):
         """起動関連設定の保存"""
         try:
-            from classes.managers.app_config_manager import get_config_manager
-
             cfg = get_config_manager()
             cfg.set("app.enable_splash_screen", bool(self.splash_checkbox.isChecked()))
+            cfg.set("app.update.auto_check_enabled", bool(self.update_check_checkbox.isChecked()))
+            cfg.set("app.update.startup_prompt_enabled", bool(self.update_prompt_checkbox.isChecked()))
             if not cfg.save():
                 raise RuntimeError("設定ファイルの保存に失敗しました")
 

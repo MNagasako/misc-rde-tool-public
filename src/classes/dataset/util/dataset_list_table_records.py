@@ -18,6 +18,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import os
 import time
+from pathlib import Path
 
 from classes.dataset.util.data_entry_summary import compute_summary_from_payload, format_size_with_bytes
 
@@ -30,6 +31,266 @@ _DATASET_LIST_CACHE: Dict[str, Any] = {
     "rows": None,
     "created_at": 0.0,
 }
+
+
+def _persisted_cache_path() -> str:
+    # NOTE: Must be CWD-independent. Use get_dynamic_file_path.
+    return get_dynamic_file_path("output/rde/cache/dataset_listing_cache.json")
+
+
+def _normalize_signature(value: Any) -> Any:
+    """Return JSON-stable representation for signature values.
+
+    Signature currently contains tuples; JSON round-trips them as lists.
+    Normalize both sides so persisted cache can be matched reliably.
+    """
+
+    if isinstance(value, tuple):
+        return [_normalize_signature(v) for v in value]
+    if isinstance(value, list):
+        return [_normalize_signature(v) for v in value]
+    if isinstance(value, dict):
+        # Not expected, but keep deterministic ordering.
+        return {str(k): _normalize_signature(v) for k, v in sorted(value.items(), key=lambda kv: str(kv[0]))}
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    # Fallback for unexpected objects
+    try:
+        return str(value)
+    except Exception:
+        return None
+
+
+def _serialize_columns(columns: List["DatasetListColumn"]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for col in columns or []:
+        try:
+            out.append({"key": col.key, "label": col.label, "default_visible": bool(col.default_visible)})
+        except Exception:
+            continue
+    return out
+
+
+def _deserialize_columns(payload: Any) -> Optional[List["DatasetListColumn"]]:
+    if not isinstance(payload, list):
+        return None
+    cols: List[DatasetListColumn] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or "").strip()
+        label = str(item.get("label") or "").strip()
+        if not key or not label:
+            continue
+        cols.append(DatasetListColumn(key=key, label=label, default_visible=bool(item.get("default_visible", True))))
+    return cols
+
+
+def _serialize_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Serialize rows for persisted cache.
+
+    - Drops heavy/raw fields to keep cache small.
+    - Stores embargo date object as ISO string.
+    """
+
+    serialized: List[Dict[str, Any]] = []
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        out: Dict[str, Any] = {}
+        for k, v in row.items():
+            # Exclude original raw payload to reduce cache size.
+            if k == "_raw":
+                continue
+            if k == "_embargo_date_obj":
+                if isinstance(v, datetime.date):
+                    out[k] = v.isoformat()
+                else:
+                    out[k] = None
+                continue
+            # JSON-safe primitives only.
+            if v is None or isinstance(v, (str, int, float, bool)):
+                out[k] = v
+                continue
+            if isinstance(v, list):
+                # Best-effort: keep simple lists (str/int/bool).
+                simple = True
+                for it in v:
+                    if it is None or isinstance(it, (str, int, float, bool)):
+                        continue
+                    simple = False
+                    break
+                if simple:
+                    out[k] = v
+                continue
+            # Drop non-serializable fields.
+        serialized.append(out)
+    return serialized
+
+
+def _deserialize_rows(payload: Any) -> Optional[List[Dict[str, Any]]]:
+    if not isinstance(payload, list):
+        return None
+    rows: List[Dict[str, Any]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        row: Dict[str, Any] = dict(item)
+        emb = row.get("_embargo_date_obj")
+        if isinstance(emb, str) and emb:
+            try:
+                y, m, d = map(int, emb.split("-"))
+                row["_embargo_date_obj"] = datetime.date(y, m, d)
+            except Exception:
+                row["_embargo_date_obj"] = None
+        elif emb is None:
+            row["_embargo_date_obj"] = None
+        else:
+            # Unknown type -> reset
+            row["_embargo_date_obj"] = None
+        rows.append(row)
+    return rows
+
+
+def _load_persisted_cache(signature: Any) -> Optional[Tuple[List["DatasetListColumn"], List[Dict[str, Any]]]]:
+    path = _persisted_cache_path()
+    if not path:
+        return None
+    try:
+        if not os.path.exists(path):
+            return None
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if not isinstance(payload, dict):
+            return None
+        if _normalize_signature(payload.get("signature")) != _normalize_signature(signature):
+            return None
+        cols = _deserialize_columns(payload.get("columns"))
+        rows = _deserialize_rows(payload.get("rows"))
+        if cols is None or rows is None:
+            return None
+        return cols, rows
+    except Exception:
+        return None
+
+
+def _save_persisted_cache(signature: Any, columns: List["DatasetListColumn"], rows: List[Dict[str, Any]]) -> None:
+    path = _persisted_cache_path()
+    if not path:
+        return
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        payload = {
+            "signature": _normalize_signature(signature),
+            "created_at": time.time(),
+            "columns": _serialize_columns(columns),
+            "rows": _serialize_rows(rows),
+        }
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False)
+    except Exception:
+        return
+
+
+def _cache_file_path() -> str:
+    # Persisted cache to speed up first listing tab render across app restarts.
+    # NOTE: Must use config.common.get_dynamic_file_path (CWD independent).
+    return get_dynamic_file_path("output/rde/cache/dataset_listing_rows_cache.json")
+
+
+def _serialize_rows_for_cache(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    serialized: List[Dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        out = dict(row)
+
+        # datetime.date is not JSON serializable.
+        d = out.get("_embargo_date_obj")
+        if isinstance(d, datetime.date):
+            out["_embargo_date_obj"] = d.isoformat()
+        elif d is None:
+            out["_embargo_date_obj"] = ""
+
+        # Avoid bloating the cache with large raw payloads.
+        if "_raw" in out:
+            out.pop("_raw", None)
+
+        serialized.append(out)
+    return serialized
+
+
+def _deserialize_rows_from_cache(rows: Any) -> List[Dict[str, Any]]:
+    if not isinstance(rows, list):
+        return []
+    result: List[Dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        out = dict(row)
+
+        d = out.get("_embargo_date_obj")
+        if isinstance(d, str) and d.strip():
+            out["_embargo_date_obj"] = _parse_iso_date(d.strip())
+        else:
+            out["_embargo_date_obj"] = None
+
+        result.append(out)
+    return result
+
+
+def _try_load_persisted_cache(signature: Any) -> Optional[Tuple[List[DatasetListColumn], List[Dict[str, Any]]]]:
+    try:
+        path = _cache_file_path()
+        if not path or not os.path.exists(path):
+            return None
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("signature") != signature:
+            return None
+        cols_raw = payload.get("columns")
+        rows_raw = payload.get("rows")
+        if not isinstance(cols_raw, list) or not isinstance(rows_raw, list):
+            return None
+
+        columns: List[DatasetListColumn] = []
+        for c in cols_raw:
+            if not isinstance(c, dict):
+                continue
+            key = str(c.get("key") or "").strip()
+            label = str(c.get("label") or "").strip()
+            if not key or not label:
+                continue
+            columns.append(DatasetListColumn(key=key, label=label, default_visible=bool(c.get("default_visible", True))))
+
+        rows = _deserialize_rows_from_cache(rows_raw)
+        return columns, rows
+    except Exception:
+        return None
+
+
+def _try_write_persisted_cache(signature: Any, columns: List[DatasetListColumn], rows: List[Dict[str, Any]]) -> None:
+    try:
+        path = _cache_file_path()
+        if not path:
+            return
+        Path(os.path.dirname(path)).mkdir(parents=True, exist_ok=True)
+
+        payload = {
+            "signature": signature,
+            "columns": [
+                {"key": c.key, "label": c.label, "default_visible": bool(c.default_visible)}
+                for c in (columns or [])
+                if isinstance(c, DatasetListColumn)
+            ],
+            "rows": _serialize_rows_for_cache(rows or []),
+        }
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
+    except Exception:
+        return
 
 
 def clear_dataset_list_cache() -> None:
@@ -418,6 +679,25 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
     ):
         return _DATASET_LIST_CACHE["columns"], _DATASET_LIST_CACHE["rows"]
 
+    # Persisted cache fallback: enables fast initial listing even if module-level cache was cleared.
+    persisted = _load_persisted_cache(signature)
+    if persisted is not None:
+        columns, rows = persisted
+        _DATASET_LIST_CACHE["signature"] = signature
+        _DATASET_LIST_CACHE["columns"] = columns
+        _DATASET_LIST_CACHE["rows"] = rows
+        _DATASET_LIST_CACHE["created_at"] = time.time()
+        return columns, rows
+
+    persisted = _try_load_persisted_cache(signature)
+    if persisted is not None:
+        columns, rows = persisted
+        _DATASET_LIST_CACHE["signature"] = signature
+        _DATASET_LIST_CACHE["columns"] = columns
+        _DATASET_LIST_CACHE["rows"] = rows
+        _DATASET_LIST_CACHE["created_at"] = time.time()
+        return columns, rows
+
     dataset_payload = _load_json_file(dataset_json_path)
     subgroup_payload = _load_json_file(subgroup_json_path)
     info_payload = _load_json_file(info_json_path)
@@ -628,5 +908,9 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
     _DATASET_LIST_CACHE["columns"] = columns
     _DATASET_LIST_CACHE["rows"] = rows
     _DATASET_LIST_CACHE["created_at"] = time.time()
+
+    _save_persisted_cache(signature, columns, rows)
+
+    _try_write_persisted_cache(signature, columns, rows)
 
     return columns, rows

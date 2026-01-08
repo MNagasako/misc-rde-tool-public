@@ -13,11 +13,12 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Union
 
 from config.common import get_dynamic_file_path
 
@@ -76,10 +77,10 @@ def _is_newer(current_version: str, latest_version: str) -> bool:
     return _parse_version_to_tuple(latest_version) > _parse_version_to_tuple(current_version)
 
 
-def _load_latest_json(url: str, timeout: int = 15) -> dict:
+def _load_latest_json(url: str, timeout: Union[int, Tuple[float, float]] = 15, use_new_session: bool = False) -> dict:
     from net.http_helpers import proxy_get
 
-    resp = proxy_get(url, timeout=timeout)
+    resp = proxy_get(url, timeout=timeout, skip_bearer_token=True, use_new_session=use_new_session)
     resp.raise_for_status()
     try:
         return resp.json()
@@ -90,7 +91,8 @@ def _load_latest_json(url: str, timeout: int = 15) -> dict:
 def check_update(
     current_version: str,
     latest_json_url: str = DEFAULT_LATEST_JSON_URL,
-    timeout: int = 15,
+    timeout: Union[int, Tuple[float, float]] = 15,
+    use_new_session: bool = False,
 ) -> Tuple[bool, str, str, str, str]:
     """更新有無を確認する。
 
@@ -98,7 +100,7 @@ def check_update(
         (has_update, latest_version, url, sha256, updated_at)
     """
     try:
-        data = _load_latest_json(latest_json_url, timeout=timeout)
+        data = _load_latest_json(latest_json_url, timeout=timeout, use_new_session=use_new_session)
         if not isinstance(data, dict):
             raise ValueError("latest.json が辞書形式ではありません")
 
@@ -119,8 +121,18 @@ def check_update(
         return False, "", "", "", ""
 
 
-def download(url: str, dst_path: str, timeout: int = 60) -> str:
-    """インストーラをダウンロードして dst_path に保存する。"""
+def download(
+    url: str,
+    dst_path: str,
+    timeout: int = 60,
+    progress_callback: Optional[callable] = None,
+) -> str:
+    """インストーラをダウンロードして dst_path に保存する。
+
+    progress_callback は (current, total, message) -> bool を想定。
+    - total=100 の場合 current はパーセントとして扱える（ProgressWorker互換）
+    - False が返った場合はキャンセルとして中断する
+    """
     from net.http_helpers import proxy_get
 
     os.makedirs(os.path.dirname(dst_path), exist_ok=True)
@@ -128,12 +140,48 @@ def download(url: str, dst_path: str, timeout: int = 60) -> str:
     resp = proxy_get(url, timeout=timeout, stream=True)
     resp.raise_for_status()
 
+    total_bytes = 0
+    try:
+        total_bytes = int(resp.headers.get("Content-Length", "0") or 0)
+    except Exception:
+        total_bytes = 0
+
     tmp_path = dst_path + ".download"
-    with open(tmp_path, "wb") as f:
-        for chunk in resp.iter_content(chunk_size=1024 * 256):
-            if not chunk:
-                continue
-            f.write(chunk)
+
+    written = 0
+    last_percent: Optional[int] = None
+    try:
+        with open(tmp_path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=1024 * 256):
+                if not chunk:
+                    continue
+                f.write(chunk)
+                written += len(chunk)
+
+                if progress_callback:
+                    if total_bytes > 0:
+                        percent = min(int((written / total_bytes) * 100), 100)
+                        if last_percent is None or percent != last_percent:
+                            last_percent = percent
+                            message = f"ダウンロード中... ({written}/{total_bytes} bytes)"
+                            if not progress_callback(percent, 100, message):
+                                raise RuntimeError("更新ダウンロードがキャンセルされました")
+                    else:
+                        # total不明: 進捗率は出せないがキャンセル判定だけは行う
+                        message = f"ダウンロード中... ({written} bytes)"
+                        if not progress_callback(0, 0, message):
+                            raise RuntimeError("更新ダウンロードがキャンセルされました")
+
+        # 最後に100%を通知
+        if progress_callback:
+            progress_callback(100, 100, "ダウンロード完了")
+    except Exception:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+        raise
 
     os.replace(tmp_path, dst_path)
     return dst_path
@@ -248,8 +296,9 @@ def run_installer_and_restart(
         "Start-Process -FilePath $app;"
     )
 
+    ps_exe = "pwsh" if shutil.which("pwsh") else "powershell"
     popen_args = [
-        "pwsh" if os.name == "nt" else "powershell",
+        ps_exe,
         "-NoProfile",
         "-ExecutionPolicy",
         "Bypass",
@@ -296,6 +345,72 @@ def should_check_once_per_day(last_checked_iso: Optional[str], now: Optional[dat
         return True
 
     return now - last >= timedelta(days=1)
+
+
+@dataclass(frozen=True)
+class StartupUpdatePrecheck:
+    """起動時更新チェックの事前判定結果（Qt非依存）。"""
+
+    show_prompt: bool
+    run_check_without_prompt: bool
+    reason: str
+    last_checked_iso: str
+    auto_check_enabled: bool
+    startup_prompt_enabled: bool
+
+
+def startup_update_precheck(config_manager, now: Optional[datetime] = None) -> StartupUpdatePrecheck:
+    """起動時の更新確認について、ダイアログ表示/自動チェック実行を事前判定する。
+
+    ルール:
+    - startup_prompt_enabled=True の場合は、毎回「確認するか」ダイアログを出す（1日1回判定の前）。
+    - ダイアログを出さない場合のみ、auto_check_enabled=True かつ 1日1回条件で自動チェックする。
+    """
+    now = now or _now_utc()
+
+    # config_manager は AppConfigManager 互換（get を持つ）を想定
+    auto_check_enabled = bool(config_manager.get("app.update.auto_check_enabled", True))
+    startup_prompt_enabled = bool(config_manager.get("app.update.startup_prompt_enabled", True))
+    last_checked = str(config_manager.get("app.update.last_check_utc", "") or "")
+
+    if startup_prompt_enabled:
+        return StartupUpdatePrecheck(
+            show_prompt=True,
+            run_check_without_prompt=False,
+            reason="prompt_enabled",
+            last_checked_iso=last_checked,
+            auto_check_enabled=auto_check_enabled,
+            startup_prompt_enabled=startup_prompt_enabled,
+        )
+
+    if not auto_check_enabled:
+        return StartupUpdatePrecheck(
+            show_prompt=False,
+            run_check_without_prompt=False,
+            reason="auto_check_disabled",
+            last_checked_iso=last_checked,
+            auto_check_enabled=auto_check_enabled,
+            startup_prompt_enabled=startup_prompt_enabled,
+        )
+
+    if not should_check_once_per_day(last_checked, now=now):
+        return StartupUpdatePrecheck(
+            show_prompt=False,
+            run_check_without_prompt=False,
+            reason="checked_recently",
+            last_checked_iso=last_checked,
+            auto_check_enabled=auto_check_enabled,
+            startup_prompt_enabled=startup_prompt_enabled,
+        )
+
+    return StartupUpdatePrecheck(
+        show_prompt=False,
+        run_check_without_prompt=True,
+        reason="auto_check_due",
+        last_checked_iso=last_checked,
+        auto_check_enabled=auto_check_enabled,
+        startup_prompt_enabled=startup_prompt_enabled,
+    )
 
 
 def get_default_download_path(version: str) -> str:

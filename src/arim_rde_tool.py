@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-ARIM RDE Tool v2.4.10 - PySide6によるRDE→ARIMデータポータル移行ツール
+ARIM RDE Tool v2.4.11 - PySide6によるRDE→ARIMデータポータル移行ツール
 
 主要機能:
 - RDEシステムへの自動ログイン・データセット一括取得・画像保存
@@ -1087,11 +1087,7 @@ def main():
             if not args.test and not os.environ.get("PYTEST_CURRENT_TEST"):
                 from classes.core.app_updater import (
                     check_update,
-                    download,
-                    get_default_download_path,
-                    run_installer_and_exit,
-                    should_check_once_per_day,
-                    verify_sha256,
+                    startup_update_precheck,
                     _now_utc,
                 )
                 from config.common import REVISION
@@ -1099,64 +1095,194 @@ def main():
                 def _auto_update_check_once_per_day() -> None:
                     try:
                         config_manager = get_config_manager()
-                        last_checked = config_manager.get("app.update.last_check_utc", "")
-                        if not should_check_once_per_day(last_checked):
-                            return
 
-                        config_manager.set("app.update.last_check_utc", _now_utc().isoformat())
-                        config_manager.save()
+                        # 起動時更新チェックの事前判定（Qt非依存）
+                        pre = startup_update_precheck(config_manager)
+                        logger.debug(
+                            "[AutoUpdate] precheck: show_prompt=%s run_without_prompt=%s reason=%s auto_check_enabled=%s startup_prompt_enabled=%s last_checked=%r",
+                            pre.show_prompt,
+                            pre.run_check_without_prompt,
+                            pre.reason,
+                            pre.auto_check_enabled,
+                            pre.startup_prompt_enabled,
+                            pre.last_checked_iso,
+                        )
+
+                        # 起動時に「更新確認するか」ダイアログ（次回以降非表示にできる）
+                        if pre.show_prompt:
+                            from qt_compat.widgets import QMessageBox, QCheckBox
+
+                            dont_ask = QCheckBox("次回からこの確認を表示しない")
+                            msg_box = QMessageBox(browser)
+                            msg_box.setIcon(QMessageBox.Question)
+                            msg_box.setWindowTitle("更新確認")
+                            msg_box.setText("起動時に更新を確認しますか？")
+                            msg_box.setInformativeText("\n（設定 → MISC から変更できます）")
+                            msg_box.setCheckBox(dont_ask)
+                            yes_btn = msg_box.addButton("確認する", QMessageBox.YesRole)
+                            no_btn = msg_box.addButton("今回はしない", QMessageBox.NoRole)
+                            msg_box.setDefaultButton(yes_btn)
+                            msg_box.exec()
+
+                            chosen = msg_box.clickedButton()
+                            do_check_now = chosen == yes_btn
+
+                            logger.debug(
+                                "[AutoUpdate] startup prompt choice: do_check_now=%s dont_ask=%s",
+                                do_check_now,
+                                dont_ask.isChecked(),
+                            )
+
+                            if dont_ask.isChecked():
+                                # 次回以降はこの確認を出さず、選択を既定値として保存
+                                config_manager.set("app.update.startup_prompt_enabled", False)
+                                config_manager.set("app.update.auto_check_enabled", bool(do_check_now))
+                                try:
+                                    config_manager.save()
+                                except Exception:
+                                    logger.debug("Failed to persist app.update startup settings", exc_info=True)
+
+                            if not do_check_now:
+                                logger.debug("[AutoUpdate] skipped: user chose not to check")
+                                return
+
+                        else:
+                            # ダイアログ無しパス（自動）
+                            if not pre.run_check_without_prompt:
+                                logger.debug("[AutoUpdate] skipped (no prompt): %s", pre.reason)
+                                return
 
                         import threading
 
-                        def _worker() -> None:
+                        def _start_check_with_progress() -> None:
+                            """UIスレッドでプログレス表示→ワーカーで更新確認→完了時にUIへ戻す。"""
+                            from qt_compat.widgets import QMessageBox, QProgressDialog
+                            from qt_compat.core import Qt
+
+                            progress = QProgressDialog(browser)
+                            progress.setWindowTitle("更新確認")
+                            progress.setLabelText("更新情報（latest.json）を確認中...")
+                            progress.setRange(0, 0)  # indeterminate
+                            progress.setMinimumDuration(200)
+                            progress.setWindowModality(Qt.WindowModal)
                             try:
-                                has_update, latest_version, installer_url, expected_sha256, updated_at = check_update(REVISION)
-                                if not has_update:
+                                progress.setCancelButton(None)
+                            except Exception:
+                                pass
+                            progress.show()
+
+                            finished = {"v": False}
+
+                            def _finish_ui(has_update: bool, latest_version: str, updated_at: str) -> None:
+                                if finished["v"]:
                                     return
+                                finished["v"] = True
+                                try:
+                                    progress.close()
+                                except Exception:
+                                    pass
 
+                            def _show_result_dialog(has_update: bool, latest_version: str, updated_at: str) -> None:
                                 updated_at_text = updated_at or "不明"
-
-                                def _prompt_on_ui_thread() -> None:
-                                    from qt_compat.widgets import QMessageBox
-
+                                if has_update:
                                     msg = (
                                         "新しいバージョンが利用可能です。\n\n"
                                         f"現在: {REVISION}\n"
                                         f"latest.json: {latest_version}\n"
                                         f"更新日時: {updated_at_text}\n\n"
-                                        "設定 → MISC から更新できます。\n\n"
-                                        "今すぐ更新しますか？"
+                                        "更新は『設定 → MISC』の『更新を確認』から実行してください。"
                                     )
-                                    reply = QMessageBox.question(
-                                        browser,
-                                        "更新のお知らせ",
-                                        msg,
-                                        QMessageBox.Yes | QMessageBox.No,
-                                        QMessageBox.No,
+                                    QMessageBox.information(browser, "更新のお知らせ", msg)
+                                else:
+                                    msg = (
+                                        "現在のバージョンは最新です。\n\n"
+                                        f"現在: {REVISION}\n"
+                                        f"latest.json: {latest_version}\n"
+                                        f"更新日時: {updated_at_text}"
                                     )
-                                    if reply != QMessageBox.Yes:
-                                        return
+                                    QMessageBox.information(browser, "更新確認", msg)
+
+                            def _timeout_ui() -> None:
+                                if finished["v"]:
+                                    return
+                                finished["v"] = True
+                                try:
+                                    progress.close()
+                                except Exception:
+                                    pass
+                                logger.warning("[AutoUpdate] startup update check timed out")
+                                QMessageBox.warning(
+                                    browser,
+                                    "更新確認タイムアウト",
+                                    "更新確認がタイムアウトしました。\n"
+                                    "ネットワーク/プロキシ設定を確認し、\n"
+                                    "『設定 → MISC』の『更新を確認』から再試行してください。",
+                                )
+
+                            # ネットワークが固まってもUIが戻るようにハードタイムアウト
+                            QTimer.singleShot(30_000, _timeout_ui)
+
+                            def _worker() -> None:
+                                try:
+                                    result = check_update(
+                                        REVISION,
+                                        # MISCタブ実装に合わせる（既定timeout、共有セッション）
+                                        timeout=15,
+                                        use_new_session=False,
+                                    )
+
+                                    has_update, latest_version, installer_url, expected_sha256, updated_at = result
+
+                                    # latest.json を正しく取得できた場合のみ「チェック済み」として記録する
+                                    if latest_version and installer_url and expected_sha256:
+                                        try:
+                                            config_manager.set("app.update.last_check_utc", _now_utc().isoformat())
+                                            config_manager.save()
+                                        except Exception:
+                                            logger.debug("Failed to persist app.update.last_check_utc", exc_info=True)
+
+                                    def _handle_result(payload: object) -> None:
+                                        if finished["v"]:
+                                            return
+                                        try:
+                                            if isinstance(payload, Exception):
+                                                _timeout_ui()
+                                                return
+
+                                            has_u, latest_v, url, sha256, upd_at = payload
+                                            # 完了（まず閉じる）
+                                            _finish_ui(False, "", "")
+
+                                            # latest.json取得失敗（check_updateは例外を握りつぶして空文字を返す）
+                                            if not latest_v or not url or not sha256:
+                                                QMessageBox.warning(
+                                                    browser,
+                                                    "更新確認",
+                                                    "更新情報の取得に失敗しました。\n"
+                                                    "ネットワーク/プロキシ設定をご確認のうえ、\n"
+                                                    "『設定 → MISC』の『更新を確認』から再試行してください。",
+                                                )
+                                                return
+
+                                            _show_result_dialog(bool(has_u), str(latest_v or ""), str(upd_at or ""))
+                                        except Exception as e:
+                                            logger.warning("[AutoUpdate] startup update UI handler failed: %s", e, exc_info=True)
+                                            _timeout_ui()
 
                                     try:
-                                        dst_path = get_default_download_path(latest_version)
-                                        download(installer_url, dst_path)
-                                        if not verify_sha256(dst_path, expected_sha256):
-                                            QMessageBox.warning(
-                                                browser,
-                                                "更新失敗",
-                                                "ダウンロードファイルの整合性確認（sha256）が一致しませんでした。",
-                                            )
-                                            return
-                                        run_installer_and_exit(dst_path)
-                                    except Exception as e:
-                                        logger.warning("Auto update failed: %s", e, exc_info=True)
-                                        QMessageBox.warning(browser, "更新失敗", str(e))
+                                        QTimer.singleShot(0, browser, lambda p=result: _handle_result(p))
+                                    except Exception:
+                                        QTimer.singleShot(0, lambda p=result: _handle_result(p))
+                                except Exception as e:
+                                    logger.warning("Auto update check failed: %s", e, exc_info=True)
+                                    try:
+                                        QTimer.singleShot(0, browser, _timeout_ui)
+                                    except Exception:
+                                        QTimer.singleShot(0, _timeout_ui)
 
-                                QTimer.singleShot(0, _prompt_on_ui_thread)
-                            except Exception as e:
-                                logger.warning("Auto update check failed: %s", e, exc_info=True)
+                            threading.Thread(target=_worker, daemon=True).start()
 
-                        threading.Thread(target=_worker, daemon=True).start()
+                        QTimer.singleShot(0, _start_check_with_progress)
                     except Exception as e:
                         logger.warning("Auto update scheduling failed: %s", e, exc_info=True)
 
