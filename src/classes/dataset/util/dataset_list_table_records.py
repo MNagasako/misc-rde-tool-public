@@ -317,27 +317,22 @@ def _safe_mtime(path: str) -> float:
 
 
 def _dir_signature(dir_path: str) -> Tuple[int, float]:
-    """Return (json_file_count, max_mtime) best-effort for a directory."""
+    """Return (json_file_count, max_mtime) best-effort for a directory.
+
+    NOTE:
+    - 巨大な output ディレクトリでは os.listdir() 走査が非常に重く、
+      一覧タブの初回表示が「無限に待っている」ように見える原因になり得る。
+    - 一覧タブのキャッシュ判定は厳密性より体感速度を優先し、
+      ここではディレクトリ自体の mtime のみで代表させる（高速化）。
+    """
 
     if not dir_path:
         return 0, 0.0
     try:
         if not os.path.isdir(dir_path):
             return 0, 0.0
-        count = 0
-        max_m = 0.0
-        for name in os.listdir(dir_path):
-            if not str(name).lower().endswith(".json"):
-                continue
-            count += 1
-            try:
-                p = os.path.join(dir_path, name)
-                m = _safe_mtime(p)
-                if m > max_m:
-                    max_m = m
-            except Exception:
-                continue
-        return count, max_m
+        # jsonファイル個数は数えない（重い）。max_mtimeとしてdirのmtimeを使う。
+        return 0, float(os.path.getmtime(dir_path))
     except Exception:
         return 0, 0.0
 
@@ -662,6 +657,7 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
     dataset_details_dir = get_dynamic_file_path("output/rde/data/datasets")
 
     signature = (
+        2,  # signature schema
         _safe_mtime(dataset_json_path),
         _safe_mtime(subgroup_json_path),
         _safe_mtime(info_json_path),
@@ -727,6 +723,15 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
     # Cache dataEntry computations to avoid repeated disk IO.
     data_entry_payload_cache: Dict[str, Any] = {}
     data_entry_stats_cache: Dict[str, Tuple[Optional[int], Optional[int], Optional[int]]] = {}
+
+    # Listing tab should stay responsive: computing tile/file stats requires reading
+    # output/rde/data/dataEntry/<dataset>.json for each dataset, which can be extremely slow
+    # on large workspaces. For large lists, skip these stats and show the listing first.
+    try:
+        _DATAENTRY_STATS_MAX_DATASETS = 200
+        compute_data_entry_stats = len(dataset_items) <= _DATAENTRY_STATS_MAX_DATASETS
+    except Exception:
+        compute_data_entry_stats = True
 
     def _load_data_entry_payload(dsid: str) -> Any:
         dsid = _safe_str(dsid).strip()
@@ -799,12 +804,18 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
         embargo_display = embargo_date_obj.isoformat() if embargo_date_obj else (embargo_text.split("T")[0] if embargo_text else "")
 
         contact = _safe_str(attrs.get("contact"))
-        taxonomy_keys = attrs.get("taxonomyKeys") if isinstance(attrs.get("taxonomyKeys"), list) else []
-        taxonomy_keys_text = " ".join([_safe_str(x).strip() for x in taxonomy_keys if _safe_str(x).strip()])
+        taxonomy_keys_list: List[Any] = []
+        taxonomy_keys_raw = attrs.get("taxonomyKeys")
+        if isinstance(taxonomy_keys_raw, list):
+            taxonomy_keys_list = taxonomy_keys_raw
+        taxonomy_keys_text = " ".join([_safe_str(x).strip() for x in taxonomy_keys_list if _safe_str(x).strip()])
 
         related_links = _format_related_links(attrs.get("relatedLinks"))
-        tags = attrs.get("tags") if isinstance(attrs.get("tags"), list) else []
-        tag_items = [_safe_str(t).strip() for t in tags if _safe_str(t).strip()]
+        tags_list: List[Any] = []
+        tags_raw = attrs.get("tags")
+        if isinstance(tags_raw, list):
+            tags_list = tags_raw
+        tag_items = [_safe_str(t).strip() for t in tags_list if _safe_str(t).strip()]
         tags_text = ", ".join(tag_items)
         tag_count = len(tag_items)
 
@@ -850,7 +861,10 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
         related_dataset_ids = _extract_rel_ids(item, "relatedDatasets")
         related_dataset_names = [dataset_name_by_id.get(i, i) for i in related_dataset_ids]
 
-        tile_count, shared2_file_count, shared2_bytes = _compute_tile_file_stats(dataset_id)
+        if compute_data_entry_stats:
+            tile_count, shared2_file_count, shared2_bytes = _compute_tile_file_stats(dataset_id)
+        else:
+            tile_count, shared2_file_count, shared2_bytes = None, None, None
         file_size_display = ""
         if shared2_bytes is not None:
             try:

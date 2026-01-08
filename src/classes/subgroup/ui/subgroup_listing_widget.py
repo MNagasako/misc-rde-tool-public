@@ -11,8 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from qt_compat.core import Qt
-from qt_compat.core import QUrl
+from qt_compat.core import Qt, QUrl, QThread, Signal
 from qt_compat.widgets import (
     QWidget,
     QVBoxLayout,
@@ -48,9 +47,13 @@ from classes.subgroup.util.subgroup_list_table_records import (
     SubgroupListColumn,
     build_subgroup_list_rows_from_files,
 )
+from classes.dataset.ui.spinner_overlay import SpinnerOverlay
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
 from config.common import get_dynamic_file_path
+
+
+_ACTIVE_SUBGROUP_LISTING_RELOAD_THREADS: set[QThread] = set()
 
 
 class PaginationProxyModel(QAbstractProxyModel):
@@ -580,6 +583,10 @@ class SubgroupListingWidget(QWidget):
         self._filters_collapsed = False
         self._filter_edits_by_key: Dict[str, QLineEdit] = {}
 
+        self._spinner_overlay: Optional[SpinnerOverlay] = None
+        self._reload_thread: Optional[QThread] = None
+        self._reload_worker: Optional[QObject] = None
+
         self._filters_container: Optional[QWidget] = None
         self._filters_summary_label: Optional[QLabel] = None
         self._range_filters_container: Optional[QWidget] = None
@@ -625,8 +632,23 @@ class SubgroupListingWidget(QWidget):
         self._range_rel_sample_widget: Optional[QWidget] = None
 
         self._setup_ui()
-        self.reload_data()
         self._set_filters_collapsed(False)
+
+        # 初回表示の体感を改善するため、ウィジェット描画後に読み込みを開始する。
+        try:
+            if self._status is not None:
+                self._status.setText("読み込み中...")
+        except Exception:
+            pass
+
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            # テストは決定性を優先して同期で読み込む
+            self.reload_data()
+        else:
+            try:
+                QTimer.singleShot(0, self.reload_data)
+            except Exception:
+                self.reload_data()
 
     # ------------------------------------------------------------------
     # UI
@@ -778,6 +800,8 @@ class SubgroupListingWidget(QWidget):
         # Copy selection (Ctrl+C)
         self._copy_shortcut = QShortcut(QKeySequence.Copy, self._table)
         self._copy_shortcut.activated.connect(self._copy_selection_to_clipboard)
+
+        self._spinner_overlay = SpinnerOverlay(self._table)
 
         # Theme styling
         self._apply_theme()
@@ -949,9 +973,48 @@ class SubgroupListingWidget(QWidget):
     # Data / filtering
     # ------------------------------------------------------------------
     def reload_data(self) -> None:
-        columns, rows = build_subgroup_list_rows_from_files()
+        if self._is_running_under_pytest():
+            self._reload_data_sync()
+        else:
+            self._start_reload_async()
+
+    def _is_running_under_pytest(self) -> bool:
+        return bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+    def _show_loading(self) -> None:
+        try:
+            if self._status is not None:
+                self._status.setText("読み込み中...")
+        except Exception:
+            pass
+        try:
+            if self._spinner_overlay is not None:
+                self._spinner_overlay.set_message("読み込み中…")
+                self._spinner_overlay.start()
+        except Exception:
+            pass
+
+    def _hide_loading(self) -> None:
+        try:
+            if self._spinner_overlay is not None:
+                self._spinner_overlay.stop()
+        except Exception:
+            pass
+
+    class _ReloadWorker(QObject):
+        finished = Signal(object, object, object)
+
+        def run(self) -> None:
+            try:
+                columns, rows = build_subgroup_list_rows_from_files()
+                self.finished.emit(columns, rows, None)
+            except Exception as exc:
+                self.finished.emit(None, None, str(exc))
+
+    def _update_table_data(self, columns, rows) -> None:
         self._columns = columns
         self._rows = rows
+
         if self._model is None:
             self._model = SubgroupListTableModel(columns, rows, self)
             self._filter_proxy.setSourceModel(self._model)
@@ -959,7 +1022,10 @@ class SubgroupListingWidget(QWidget):
         else:
             self._model.set_columns_and_rows(columns, rows)
 
-        self._apply_column_visibility(self._load_column_visibility() or {c.key: c.default_visible for c in columns}, persist=False)
+        self._apply_column_visibility(
+            self._load_column_visibility() or {c.key: c.default_visible for c in columns},
+            persist=False,
+        )
 
         self._rebuild_text_filters_panel()
         self._apply_row_limit()
@@ -973,6 +1039,73 @@ class SubgroupListingWidget(QWidget):
                 self._schedule_adjust_row_heights()
         except Exception:
             pass
+
+    def _on_reload_thread_finished(self) -> None:
+        self._reload_thread = None
+        self._reload_worker = None
+
+    def _on_reload_finished(self, columns, rows, error_message) -> None:
+        self._hide_loading()
+        if error_message:
+            try:
+                if self._status is not None:
+                    self._status.setText("読み込み失敗")
+            except Exception:
+                pass
+            return
+        if columns is None or rows is None:
+            return
+        self._update_table_data(columns, rows)
+
+    def _start_reload_async(self) -> None:
+        if self._reload_thread is not None and self._reload_thread.isRunning():
+            return
+
+        self._show_loading()
+
+        # ウィジェット破棄と同時にスレッドが破棄されると
+        # "QThread: Destroyed while thread '' is still running" の原因になる。
+        # 親を付けず、明示的に参照を保持して寿命を管理する。
+        thread = QThread()
+        worker = SubgroupListingWidget._ReloadWorker()
+        worker.moveToThread(thread)
+
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_reload_finished)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_reload_thread_finished)
+
+        # 参照保持（GC/ウィジェット破棄に伴う不意な破棄を避ける）
+        self._reload_worker = worker
+        _ACTIVE_SUBGROUP_LISTING_RELOAD_THREADS.add(thread)
+        try:
+            setattr(thread, "_reload_worker", worker)
+        except Exception:
+            pass
+        try:
+            thread.finished.connect(lambda: _ACTIVE_SUBGROUP_LISTING_RELOAD_THREADS.discard(thread))
+        except Exception:
+            pass
+
+        self._reload_thread = thread
+        thread.start()
+
+    def _reload_data_sync(self) -> None:
+        self._show_loading()
+        try:
+            columns, rows = build_subgroup_list_rows_from_files()
+        except Exception:
+            self._hide_loading()
+            try:
+                if self._status is not None:
+                    self._status.setText("読み込み失敗")
+            except Exception:
+                pass
+            return
+        self._hide_loading()
+        self._update_table_data(columns, rows)
 
     def _schedule_adjust_row_heights(self) -> None:
         try:

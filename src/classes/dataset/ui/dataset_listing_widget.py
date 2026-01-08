@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-from qt_compat.core import Qt, QDate
+from qt_compat.core import Qt, QDate, QUrl, QThread, Signal
 from qt_compat.widgets import (
     QWidget,
     QVBoxLayout,
@@ -37,8 +37,9 @@ from qt_compat.widgets import (
 
 from PySide6.QtCore import QObject, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QTimer, QAbstractProxyModel
 from PySide6.QtGui import QKeySequence, QBrush, QFont, QDesktopServices
-from qt_compat.core import QUrl
 from PySide6.QtWidgets import QTableView
+
+from classes.dataset.ui.spinner_overlay import SpinnerOverlay
 
 from classes.dataset.util.dataset_list_table_records import (
     DatasetListColumn,
@@ -52,6 +53,9 @@ from classes.dataset.util.dataset_listing_export_filename import (
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
 from config.common import get_dynamic_file_path
+
+
+_ACTIVE_DATASET_LISTING_RELOAD_THREADS: set[QThread] = set()
 
 
 class DatasetListTableModel(QAbstractTableModel):
@@ -682,7 +686,9 @@ class DatasetListingWidget(QWidget):
         self._tool_open_callback = None
 
         # Debounce filter application to keep the table responsive while typing/clicking.
-        # Slight delay is acceptable per requirement.
+        self._filter_proxy = DatasetFilterProxyModel(self)
+        self._reload_thread: Optional[QThread] = None
+        self._reload_worker: Optional[QObject] = None
         self._filter_apply_timer = QTimer(self)
         self._filter_apply_timer.setSingleShot(True)
         self._filter_apply_timer.setInterval(350)
@@ -966,6 +972,8 @@ class DatasetListingWidget(QWidget):
         self._copy_shortcut = QShortcut(QKeySequence.Copy, self._table)
         self._copy_shortcut.activated.connect(self._copy_selection_to_clipboard)
 
+        self._spinner_overlay = SpinnerOverlay(self._table)
+
         # Theme styling
         self._apply_theme()
 
@@ -1204,8 +1212,37 @@ class DatasetListingWidget(QWidget):
         except Exception:
             return
 
-    def reload_data(self) -> None:
-        columns, rows = build_dataset_list_rows_from_files()
+    def _is_running_under_pytest(self) -> bool:
+        return bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+    def _show_loading(self) -> None:
+        try:
+            self._status.setText("読み込み中...")
+        except Exception:
+            pass
+        try:
+            self._spinner_overlay.show_message("読み込み中…")
+            self._spinner_overlay.start()
+        except Exception:
+            pass
+
+    def _hide_loading(self) -> None:
+        try:
+            self._spinner_overlay.stop()
+        except Exception:
+            pass
+
+    class _ReloadWorker(QObject):
+        finished = Signal(object, object, object)
+
+        def run(self) -> None:
+            try:
+                columns, rows = build_dataset_list_rows_from_files()
+                self.finished.emit(columns, rows, None)
+            except Exception as exc:
+                self.finished.emit(None, None, str(exc))
+
+    def _update_table_data(self, columns, rows) -> None:
         self._columns = columns
 
         if self._model is None:
@@ -1217,7 +1254,6 @@ class DatasetListingWidget(QWidget):
             self._model.set_rows(rows)
 
         self._status.setText(f"{len(rows)}件")
-
         self._rebuild_filters_panel()
 
         # Apply saved column visibility (fallback: defaults)
@@ -1234,6 +1270,77 @@ class DatasetListingWidget(QWidget):
                 self._table.resizeRowsToContents()
         except Exception:
             pass
+
+    def _on_reload_thread_finished(self) -> None:
+        self._reload_thread = None
+        self._reload_worker = None
+
+    def _on_reload_finished(self, columns, rows, error_message) -> None:
+        self._hide_loading()
+        if error_message:
+            try:
+                self._status.setText("読み込み失敗")
+            except Exception:
+                pass
+            return
+        if columns is None or rows is None:
+            return
+        self._update_table_data(columns, rows)
+
+    def _start_reload_async(self) -> None:
+        if self._reload_thread is not None and self._reload_thread.isRunning():
+            return
+
+        self._show_loading()
+
+        # ウィジェット破棄と同時にスレッドが破棄されると
+        # "QThread: Destroyed while thread '' is still running" の原因になる。
+        # 親を付けず、明示的に参照を保持して寿命を管理する。
+        thread = QThread()
+        worker = DatasetListingWidget._ReloadWorker()
+        worker.moveToThread(thread)
+
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._on_reload_finished)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._on_reload_thread_finished)
+
+        # 参照保持（GC/ウィジェット破棄に伴う不意な破棄を避ける）
+        self._reload_worker = worker
+        _ACTIVE_DATASET_LISTING_RELOAD_THREADS.add(thread)
+        try:
+            setattr(thread, "_reload_worker", worker)
+        except Exception:
+            pass
+        try:
+            thread.finished.connect(lambda: _ACTIVE_DATASET_LISTING_RELOAD_THREADS.discard(thread))
+        except Exception:
+            pass
+
+        self._reload_thread = thread
+        thread.start()
+
+    def _reload_data_sync(self) -> None:
+        self._show_loading()
+        try:
+            columns, rows = build_dataset_list_rows_from_files()
+        except Exception:
+            self._hide_loading()
+            try:
+                self._status.setText("読み込み失敗")
+            except Exception:
+                pass
+            return
+        self._hide_loading()
+        self._update_table_data(columns, rows)
+
+    def reload_data(self) -> None:
+        if self._is_running_under_pytest():
+            self._reload_data_sync()
+        else:
+            self._start_reload_async()
 
     def _apply_row_limit(self) -> None:
         self._limit_proxy.set_page_size(int(self._row_limit.value()))

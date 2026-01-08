@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
@@ -16,6 +17,14 @@ from config.common import get_dynamic_file_path, get_samples_dir_path
 from classes.subgroup.util.related_dataset_fetcher import RelatedDatasetFetcher
 
 LOGGER = logging.getLogger(__name__)
+
+
+_SUBGROUP_LIST_CACHE: Dict[str, Any] = {
+    "signature": None,
+    "columns": None,
+    "rows": None,
+    "created_at": 0.0,
+}
 
 
 @dataclass(frozen=True)
@@ -58,6 +67,117 @@ def _load_json_file(path: str) -> Any:
     except Exception:
         LOGGER.debug("Failed to load json: %s", path, exc_info=True)
         return None
+
+
+def _persisted_cache_path() -> str:
+    # NOTE: Must be CWD-independent. Use get_dynamic_file_path.
+    return get_dynamic_file_path("output/rde/cache/subgroup_listing_cache.json")
+
+
+def _safe_stat_signature(path: str) -> Tuple[float, int]:
+    try:
+        if not path or not os.path.exists(path):
+            return 0.0, 0
+        return float(os.path.getmtime(path)), int(os.path.getsize(path))
+    except Exception:
+        return 0.0, 0
+
+
+def _safe_dir_mtime(path: str) -> float:
+    try:
+        if not path or not os.path.exists(path):
+            return 0.0
+        return float(os.path.getmtime(path))
+    except Exception:
+        return 0.0
+
+
+def _compute_signature(*, subgroup_json_path: str, dataset_json_path: str, samples_dir: str) -> Dict[str, Any]:
+    # Keep JSON-stable primitives only.
+    subgroup_sig = _safe_stat_signature(subgroup_json_path)
+    dataset_sig = _safe_stat_signature(dataset_json_path)
+    samples_mtime = _safe_dir_mtime(samples_dir)
+    return {
+        "subGroup.json": [subgroup_sig[0], subgroup_sig[1]],
+        "dataset.json": [dataset_sig[0], dataset_sig[1]],
+        "samples_dir_mtime": samples_mtime,
+        "schema": 1,
+    }
+
+
+def _serialize_columns(columns: List["SubgroupListColumn"]) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for col in columns or []:
+        try:
+            out.append({"key": col.key, "label": col.label, "default_visible": bool(col.default_visible)})
+        except Exception:
+            continue
+    return out
+
+
+def _deserialize_columns(payload: Any) -> List["SubgroupListColumn"]:
+    if not isinstance(payload, list):
+        return []
+    cols: List[SubgroupListColumn] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        key = _safe_str(item.get("key")).strip()
+        label = _safe_str(item.get("label")).strip()
+        if not key or not label:
+            continue
+        cols.append(SubgroupListColumn(key=key, label=label, default_visible=bool(item.get("default_visible", True))))
+    return cols
+
+
+def _load_persisted_cache(signature: Dict[str, Any]) -> Tuple[List["SubgroupListColumn"], List[Dict[str, Any]]] | None:
+    path = _persisted_cache_path()
+    if not path:
+        return None
+    try:
+        if not os.path.exists(path):
+            return None
+        with open(path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("signature") != signature:
+            return None
+        cols = _deserialize_columns(payload.get("columns"))
+        rows = payload.get("rows")
+        if not cols or not isinstance(rows, list):
+            return None
+        cleaned_rows: List[Dict[str, Any]] = [r for r in rows if isinstance(r, dict)]
+        return cols, cleaned_rows
+    except Exception:
+        return None
+
+
+def _save_persisted_cache(signature: Dict[str, Any], columns: List["SubgroupListColumn"], rows: List[Dict[str, Any]]) -> None:
+    path = _persisted_cache_path()
+    if not path:
+        return
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        payload = {
+            "signature": signature,
+            "created_at": time.time(),
+            "columns": _serialize_columns(columns),
+            "rows": rows,
+        }
+        with open(path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False)
+    except Exception:
+        return
+
+
+def clear_subgroup_list_cache() -> None:
+    """Clear the in-memory cache used by build_subgroup_list_rows_from_files()."""
+
+    _SUBGROUP_LIST_CACHE["signature"] = None
+    _SUBGROUP_LIST_CACHE["columns"] = None
+    _SUBGROUP_LIST_CACHE["rows"] = None
+    _SUBGROUP_LIST_CACHE["created_at"] = 0.0
 
 
 def _coerce_items(payload: Any) -> List[dict]:
@@ -120,6 +240,34 @@ def build_subgroup_list_rows_from_files() -> Tuple[List[SubgroupListColumn], Lis
     """Load output/rde/data/subGroup.json and return (columns, rows)."""
 
     subgroup_json_path = get_dynamic_file_path("output/rde/data/subGroup.json")
+    dataset_json_path = get_dynamic_file_path("output/rde/data/dataset.json")
+    try:
+        samples_dir = get_samples_dir_path()
+    except Exception:
+        samples_dir = ""
+
+    signature = _compute_signature(
+        subgroup_json_path=subgroup_json_path,
+        dataset_json_path=dataset_json_path,
+        samples_dir=samples_dir,
+    )
+
+    if (
+        _SUBGROUP_LIST_CACHE.get("signature") == signature
+        and _SUBGROUP_LIST_CACHE.get("columns") is not None
+        and _SUBGROUP_LIST_CACHE.get("rows") is not None
+    ):
+        return _SUBGROUP_LIST_CACHE["columns"], _SUBGROUP_LIST_CACHE["rows"]
+
+    persisted = _load_persisted_cache(signature)
+    if persisted is not None:
+        cols, rows = persisted
+        _SUBGROUP_LIST_CACHE["signature"] = signature
+        _SUBGROUP_LIST_CACHE["columns"] = cols
+        _SUBGROUP_LIST_CACHE["rows"] = rows
+        _SUBGROUP_LIST_CACHE["created_at"] = time.time()
+        return cols, rows
+
     payload = _load_json_file(subgroup_json_path)
 
     # Resolve user ids -> names (same source as edit tab: subGroup.json included users)
@@ -159,18 +307,12 @@ def build_subgroup_list_rows_from_files() -> Tuple[List[SubgroupListColumn], Lis
     except Exception:
         get_cached_user = None  # type: ignore
 
-    # Edit/repair tab helper (unified member resolution). We avoid API by not passing bearer_token.
-    try:
-        from classes.subgroup.core.subgroup_api_helper import load_unified_member_list  # type: ignore
-    except Exception:
-        load_unified_member_list = None  # type: ignore
-
-    unified_member_info_cache: Dict[str, Dict[str, Any]] = {}
+    # NOTE: 一覧タブでは修正タブ向けの重い統合メンバー解決（load_unified_member_list）を使わない。
+    # subGroup.jsonのincludedユーザー＋ユーザーキャッシュでの軽量解決に留め、
+    # 初回表示の体感（スピナーが消えない）を防ぐ。
 
     # Related datasets via dataset.json (same logic as edit tab)
-    related_dataset_fetcher = RelatedDatasetFetcher(
-        dataset_json_path=get_dynamic_file_path("output/rde/data/dataset.json")
-    )
+    related_dataset_fetcher = RelatedDatasetFetcher(dataset_json_path=dataset_json_path)
 
     # subGroup.json often uses JSON:API: groups in `data`, related resources in `included`.
     # We need both: list groups from `data` while using `included` for enrichment.
@@ -247,17 +389,7 @@ def build_subgroup_list_rows_from_files() -> Tuple[List[SubgroupListColumn], Lis
                     if s:
                         member_ids.append(s)
 
-        # Resolve member names as reliably as possible (view/edit tab approach).
-        member_info_for_group: Dict[str, Any] = {}
-        if subgroup_id and subgroup_id not in unified_member_info_cache and load_unified_member_list is not None:
-            try:
-                _users, info = load_unified_member_list(subgroup_id=subgroup_id, bearer_token=None)
-                unified_member_info_cache[subgroup_id] = info if isinstance(info, dict) else {}
-            except Exception:
-                unified_member_info_cache[subgroup_id] = {}
-        if subgroup_id:
-            member_info_for_group = unified_member_info_cache.get(subgroup_id, {})
-
+        # Resolve member names (lightweight): subGroup.json included users -> cache fallback.
         member_names: List[str] = []
         for mid in member_ids:
             if not mid:
@@ -268,13 +400,6 @@ def build_subgroup_list_rows_from_files() -> Tuple[List[SubgroupListColumn], Lis
                 resolved = _safe_str(info.get("userName") if isinstance(info, dict) else "").strip()
             except Exception:
                 resolved = ""
-            if not resolved:
-                try:
-                    info2 = member_info_for_group.get(mid) if isinstance(member_info_for_group, dict) else None
-                    if isinstance(info2, dict):
-                        resolved = _safe_str(info2.get("userName") or "").strip()
-                except Exception:
-                    resolved = ""
             if (not resolved or resolved in {"Unknown", "Unknown User"}) and get_cached_user is not None:
                 try:
                     cached = get_cached_user(mid)
@@ -375,5 +500,14 @@ def build_subgroup_list_rows_from_files() -> Tuple[List[SubgroupListColumn], Lis
 
     # Stable ordering by name then id
     rows.sort(key=lambda r: ((r.get("subgroup_name") or ""), (r.get("subgroup_id") or "")))
+
+    try:
+        _save_persisted_cache(signature, columns, rows)
+    except Exception:
+        pass
+    _SUBGROUP_LIST_CACHE["signature"] = signature
+    _SUBGROUP_LIST_CACHE["columns"] = columns
+    _SUBGROUP_LIST_CACHE["rows"] = rows
+    _SUBGROUP_LIST_CACHE["created_at"] = time.time()
 
     return columns, rows

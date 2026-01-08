@@ -3,9 +3,21 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import hashlib
 import json
+import re
 from typing import Any, Dict
 
 from config.common import get_dynamic_file_path
+
+
+_SHA256_HEX64_RE = re.compile(r"(?i)(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])")
+
+
+def _normalize_sha256_hex(value: str) -> str:
+    s = str(value or "")
+    m = _SHA256_HEX64_RE.search(s)
+    if not m:
+        return ""
+    return m.group(0).lower()
 
 
 def read_version_from_version_txt(version_txt_path: str | None = None) -> str:
@@ -60,12 +72,12 @@ def _normalize_iso_datetime(value: str) -> str:
 def build_latest_json(*, version: str, url: str, sha256: str, updated_at: str | None = None) -> Dict[str, str]:
     v = (version or "").strip().lstrip("v")
     u = (url or "").strip()
-    s = (sha256 or "").strip().lower()
+    s = _normalize_sha256_hex(sha256)
     if not v:
         raise ValueError("version が空です")
     if not u:
         raise ValueError("url が空です")
-    if len(s) != 64:
+    if not s:
         raise ValueError("sha256 の形式が不正です（64桁hex）")
     ua = _normalize_iso_datetime(updated_at) if updated_at is not None else _now_utc_iso()
     return {"version": v, "url": u, "sha256": s, "updatedAt": ua}

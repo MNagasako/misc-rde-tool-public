@@ -25,6 +25,21 @@ from config.common import get_dynamic_file_path
 logger = logging.getLogger(__name__)
 
 
+_SHA256_HEX64_RE = re.compile(r"(?i)(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])")
+
+
+def _normalize_sha256_hex(value: str) -> str:
+    """sha256文字列から64桁hexを抽出して正規化する。
+
+    例: "sha256: <hex>", "SHA256=<hex>", "<hex>  filename" などを許容する。
+    """
+    s = str(value or "")
+    m = _SHA256_HEX64_RE.search(s)
+    if not m:
+        return ""
+    return m.group(0).lower()
+
+
 DEFAULT_LATEST_JSON_URL = (
     "https://raw.githubusercontent.com/MNagasako/misc-rde-tool-public/main/latest.json"
 )
@@ -106,12 +121,13 @@ def check_update(
 
         version = str(data.get("version", "") or "").strip()
         url = str(data.get("url", "") or "").strip()
-        sha256 = str(data.get("sha256", "") or "").strip().lower()
+        sha256_raw = str(data.get("sha256", "") or "")
+        sha256 = _normalize_sha256_hex(sha256_raw)
         updated_at = _normalize_updated_at(str(data.get("updatedAt", "") or ""))
 
         if not version or not url or not sha256:
             raise ValueError("latest.json に version/url/sha256 が不足しています")
-        if not re.fullmatch(r"[0-9a-f]{64}", sha256):
+        if not sha256:
             raise ValueError("sha256 の形式が不正です（64桁hex）")
 
         has_update = _is_newer(current_version, version)
@@ -189,8 +205,8 @@ def download(
 
 def verify_sha256(path: str, expected: str) -> bool:
     """sha256を検証する（不一致なら False）。"""
-    expected = str(expected or "").strip().lower()
-    if not re.fullmatch(r"[0-9a-f]{64}", expected):
+    normalized = _normalize_sha256_hex(str(expected or ""))
+    if not normalized:
         raise ValueError("expected sha256 の形式が不正です（64桁hex）")
 
     h = hashlib.sha256()
@@ -198,7 +214,7 @@ def verify_sha256(path: str, expected: str) -> bool:
         for chunk in iter(lambda: f.read(1024 * 1024), b""):
             h.update(chunk)
     actual = h.hexdigest().lower()
-    return actual == expected
+    return actual == normalized
 
 
 def _default_installer_log_path(version: str) -> str:

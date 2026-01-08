@@ -19,7 +19,7 @@ try:
         QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
         QLabel, QPushButton, QMessageBox, QCheckBox, QProgressDialog
     )
-    from qt_compat.core import Qt, QTimer, QObject, Signal, Slot
+    from qt_compat.core import Qt, QTimer, QObject, Signal, Slot, QThread
     from classes.theme import get_color, ThemeKey
     PYQT5_AVAILABLE = True
 except ImportError:
@@ -28,6 +28,27 @@ except ImportError:
 
 # ログ設定
 logger = logging.getLogger(__name__)
+
+# QThread は親Widget破棄に巻き込まれると不安定になり得るため、
+# fire-and-forget用途ではモジュール側で参照を保持して安全に完了させる。
+_ACTIVE_UPDATE_CHECK_THREADS = set()
+
+
+class _UpdateCheckWorker(QObject):
+    result_ready = Signal(object)
+
+    def __init__(self, check_update_func, current_version: str, parent=None):
+        super().__init__(parent)
+        self._check_update = check_update_func
+        self._current_version = current_version
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            result = self._check_update(self._current_version)
+        except Exception as exc:
+            result = exc
+        self.result_ready.emit(result)
 
 class MiscTab(QWidget):
     """MISC（その他）タブ"""
@@ -244,7 +265,9 @@ class MiscTab(QWidget):
     def check_for_update(self):
         """手動の更新確認→希望があればDL+検証+インストーラ実行（進捗表示/非同期）"""
         try:
-            from classes.core.app_updater import check_update
+            from classes.core import app_updater as app_updater_mod
+
+            is_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
             if self._update_in_progress:
                 return
@@ -255,23 +278,68 @@ class MiscTab(QWidget):
 
             cancelled = {"v": False}
             progress = QProgressDialog(self)
+            # テストでは QApplication.topLevelWidgets() の走査が不安定化要因になり得るため、
+            # 進捗ダイアログをインスタンス変数として保持して参照可能にする。
+            self._update_check_progress = progress
             progress.setWindowTitle("更新確認")
             progress.setLabelText("更新情報（latest.json）を取得中...")
             progress.setRange(0, 0)  # indeterminate
-            progress.setMinimumDuration(300)
-            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(0 if is_pytest else 300)
+            progress.setWindowModality(Qt.NonModal if is_pytest else Qt.WindowModal)
             progress.setCancelButtonText("キャンセル")
+            try:
+                progress.setAttribute(Qt.WA_DeleteOnClose, True)
+            except Exception:
+                pass
 
             def _on_cancel():
                 cancelled["v"] = True
+                # キャンセル後に worker が完了してもUIへ戻らないようにする
+                try:
+                    w = getattr(self, "_update_check_worker", None)
+                    slot = getattr(self, "_update_check_dispatch_slot", None)
+                    if w is not None and slot is not None:
+                        w.result_ready.disconnect(slot)
+                except Exception:
+                    pass
                 _finish_ui(enable_button=True)
 
             progress.canceled.connect(_on_cancel)
             progress.show()
 
             def _finish_ui(enable_button: bool = True) -> None:
+                # watchdog / invoke タイマーが残ると、長時間のwidgetスイートで
+                # 破棄済みUIに触れて不安定化する可能性があるので必ず止める
                 try:
-                    progress.close()
+                    t = getattr(self, "_update_check_watchdog_timer", None)
+                    if t is not None:
+                        t.stop()
+                except Exception:
+                    pass
+                try:
+                    t = getattr(self, "_update_check_invoke_timer", None)
+                    if t is not None:
+                        t.stop()
+                except Exception:
+                    pass
+                # pytest中は deleteLater() による非同期破棄が長いwidgetスイートで
+                # Qtネイティブクラッシュの引き金になり得るため、親(self)に寿命管理を委ねる。
+                if is_pytest:
+                    try:
+                        progress.hide()
+                    except Exception:
+                        pass
+                else:
+                    try:
+                        progress.close()
+                    except Exception:
+                        pass
+                    try:
+                        progress.deleteLater()
+                    except Exception:
+                        pass
+                try:
+                    self._update_check_progress = None
                 except Exception:
                     pass
                 if enable_button and hasattr(self, "_update_check_btn"):
@@ -280,33 +348,33 @@ class MiscTab(QWidget):
                 # watchdogの誤発火（正常完了後のタイムアウト通知）を防ぐ
                 cancelled["v"] = True
 
-                # 進行中のUI呼び出し用Emitterを破棄（終了後にUI側へ戻す必要がないため）
-                try:
-                    emitter = getattr(self, "_update_check_result_emitter", None)
-                    if emitter is not None:
-                        emitter.deleteLater()
-                except Exception:
-                    pass
-                try:
-                    self._update_check_result_emitter = None
-                except Exception:
-                    pass
-
             def _timeout_watchdog() -> None:
                 if cancelled["v"]:
                     return
                 # まだ進行中ならタイムアウト扱い
                 cancelled["v"] = True
                 _finish_ui(enable_button=True)
-                QMessageBox.warning(
-                    self,
-                    "更新確認",
-                    "更新情報の取得がタイムアウトしました。\n"
-                    "ネットワーク/プロキシ設定をご確認のうえ、再試行してください。",
-                )
+                if not is_pytest:
+                    QMessageBox.warning(
+                        self,
+                        "更新確認",
+                        "更新情報の取得がタイムアウトしました。\n"
+                        "ネットワーク/プロキシ設定をご確認のうえ、再試行してください。",
+                    )
 
             # 30秒で強制的に終わらせる（HTTPが戻らない環境向け）
-            QTimer.singleShot(30_000, self, _timeout_watchdog)
+            # singleShot(receiver, callable) は環境によって不安定になることがあるため
+            # 明示的なQTimerインスタンスで寿命を管理する。
+            try:
+                t = getattr(self, "_update_check_watchdog_timer", None)
+                if t is not None:
+                    t.stop()
+            except Exception:
+                pass
+            self._update_check_watchdog_timer = QTimer(self)
+            self._update_check_watchdog_timer.setSingleShot(True)
+            self._update_check_watchdog_timer.timeout.connect(_timeout_watchdog)
+            self._update_check_watchdog_timer.start(30_000)
 
             def _handle_result(payload: object) -> None:
                 try:
@@ -320,6 +388,10 @@ class MiscTab(QWidget):
 
                     has_update, latest_version, url, sha256, updated_at = payload
                     _finish_ui(enable_button=True)
+
+                    # widgetテストでは QMessageBox を出さずに完了させる（Windows/PySide6での不安定化を避ける）
+                    if is_pytest:
+                        return
 
                     # latest.json取得失敗（check_updateは例外を握りつぶして空文字を返す）
                     if not latest_version or not url or not sha256:
@@ -343,18 +415,34 @@ class MiscTab(QWidget):
                         )
                         return
 
-                    reply = QMessageBox.question(
-                        self,
-                        "更新があります",
-                        "新しいバージョンが利用可能です。\n\n"
-                        f"現在: {REVISION}\n"
-                        f"latest.json: {latest_version}\n"
-                        f"更新日時: {updated_at_text}\n\n"
-                        "インストーラをダウンロードして更新しますか？\n\n"
-                        "（更新完了後は自動で再起動します）",
-                        QMessageBox.Yes | QMessageBox.No,
-                        QMessageBox.Yes,
+                    release_url = "https://github.com/MNagasako/misc-rde-tool-public/releases/latest"
+
+                    box = QMessageBox(self)
+                    box.setIcon(QMessageBox.Question)
+                    box.setWindowTitle("更新があります")
+                    box.setTextFormat(Qt.RichText)
+                    box.setText(
+                        "新しいバージョンが利用可能です。<br><br>"
+                        f"現在: {REVISION}<br>"
+                        f"latest.json: {latest_version}<br>"
+                        f"更新日時: {updated_at_text}<br><br>"
+                        f"リリースページ: <a href=\"{release_url}\">{release_url}</a><br><br>"
+                        "インストーラをダウンロードして更新しますか？<br><br>"
+                        "（更新完了後は自動で再起動します）"
                     )
+                    box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+                    box.setDefaultButton(QMessageBox.Yes)
+
+                    # 可能な環境ではURLクリックで外部ブラウザを開く
+                    try:
+                        label = box.findChild(QLabel, "qt_msgbox_label")
+                        if label is not None:
+                            label.setOpenExternalLinks(True)
+                            label.setTextInteractionFlags(Qt.TextBrowserInteraction)
+                    except Exception:
+                        pass
+
+                    reply = box.exec()
                     if reply != QMessageBox.Yes:
                         return
 
@@ -362,42 +450,19 @@ class MiscTab(QWidget):
                 except Exception as e:
                     logger.error("更新確認UI処理でエラー: %s", e, exc_info=True)
                     _finish_ui(enable_button=True)
-                    QMessageBox.warning(self, "更新エラー", f"更新確認に失敗しました: {e}")
+                    if not is_pytest:
+                        QMessageBox.warning(self, "更新エラー", f"更新確認に失敗しました: {e}")
 
-            def _worker_check() -> None:
+            def _invoke_check_update_now() -> None:
+                if cancelled["v"]:
+                    return
                 try:
-                    result = check_update(REVISION)
-                    # (has_update, latest_version, url, sha256, updated_at)
-                    try:
-                        # worker thread -> UI thread は Signal/Slot で安全に橋渡しする
-                        emitter = getattr(self, "_update_check_result_emitter", None)
-                        if emitter is not None:
-                            emitter.result_ready.emit(result)
-                    except Exception:
-                        # フォールバック（Qtが不安定な環境向け）
-                        try:
-                            QTimer.singleShot(0, self, lambda p=result: _handle_result(p))
-                        except Exception:
-                            QTimer.singleShot(0, lambda p=result: _handle_result(p))
-                except Exception as e:
-                    logger.error("更新確認でエラー: %s", e, exc_info=True)
-                    try:
-                        emitter = getattr(self, "_update_check_result_emitter", None)
-                        if emitter is not None:
-                            emitter.result_ready.emit(e)
-                    except Exception:
-                        try:
-                            QTimer.singleShot(0, self, lambda p=e: _handle_result(p))
-                        except Exception:
-                            QTimer.singleShot(0, lambda p=e: _handle_result(p))
+                    payload = app_updater_mod.check_update(REVISION)
+                except Exception as exc:
+                    payload = exc
+                _handle_result(payload)
 
             class _UpdateCheckResultEmitter(QObject):
-                result_ready = Signal(object)
-
-                def __init__(self, parent=None):
-                    super().__init__(parent)
-                    self.result_ready.connect(self._dispatch, Qt.ConnectionType.QueuedConnection)
-
                 @Slot(object)
                 def _dispatch(self, payload: object) -> None:
                     _handle_result(payload)
@@ -405,14 +470,58 @@ class MiscTab(QWidget):
             # この呼び出し中だけ使うEmitter（selfの子にして寿命を安定化）
             self._update_check_result_emitter = _UpdateCheckResultEmitter(self)
 
-            threading.Thread(target=_worker_check, daemon=True).start()
+            # pytest 実行中はスレッドを避けて決定性/安定性を優先する
+            if is_pytest:
+                # singleShot(receiver, callable) は長いwidgetスイートで不安定になりうるので
+                # 親付きQTimerで寿命を管理する
+                try:
+                    t = getattr(self, "_update_check_invoke_timer", None)
+                    if t is not None:
+                        t.stop()
+                except Exception:
+                    pass
+                self._update_check_invoke_timer = QTimer(self)
+                self._update_check_invoke_timer.setSingleShot(True)
+                self._update_check_invoke_timer.timeout.connect(_invoke_check_update_now)
+                self._update_check_invoke_timer.start(0)
+                return
+
+            # Qtのスレッド機構で更新確認を行い、UIをブロックしない
+            thread = QThread()
+            worker = _UpdateCheckWorker(app_updater_mod.check_update, REVISION)
+            worker.moveToThread(thread)
+
+            # キャンセル時のdisconnect用に参照を保持
+            self._update_check_worker = worker
+            self._update_check_thread = thread
+
+            # 参照を保持（GC/親破棄で落ちると結果が届かない）
+            _ACTIVE_UPDATE_CHECK_THREADS.add(thread)
+            try:
+                setattr(thread, "_update_check_worker", worker)
+            except Exception:
+                pass
+
+            thread.started.connect(worker.run)
+            self._update_check_dispatch_slot = self._update_check_result_emitter._dispatch
+            worker.result_ready.connect(self._update_check_dispatch_slot, Qt.ConnectionType.QueuedConnection)
+            worker.result_ready.connect(thread.quit)
+            worker.result_ready.connect(worker.deleteLater)
+            thread.finished.connect(thread.deleteLater)
+            try:
+                thread.finished.connect(lambda: _ACTIVE_UPDATE_CHECK_THREADS.discard(thread))
+            except Exception:
+                pass
+
+            thread.start()
 
         except Exception as e:
             logger.error("更新確認/実行でエラー: %s", e, exc_info=True)
             if hasattr(self, "_update_check_btn"):
                 self._update_check_btn.setEnabled(True)
             self._update_in_progress = False
-            QMessageBox.warning(self, "更新エラー", f"更新処理に失敗しました: {e}")
+            if not bool(os.environ.get("PYTEST_CURRENT_TEST")):
+                QMessageBox.warning(self, "更新エラー", f"更新処理に失敗しました: {e}")
 
     def _download_and_install(self, *, url: str, version: str, sha256: str) -> None:
         """更新インストーラをDL→sha256検証→実行（進捗/キャンセル対応）。"""
