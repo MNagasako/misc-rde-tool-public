@@ -56,6 +56,7 @@ from config.common import get_dynamic_file_path
 
 
 _ACTIVE_DATASET_LISTING_RELOAD_THREADS: set[QThread] = set()
+_ACTIVE_DATASET_LISTING_STATS_THREADS: set[QThread] = set()
 
 
 class DatasetListTableModel(QAbstractTableModel):
@@ -68,6 +69,33 @@ class DatasetListTableModel(QAbstractTableModel):
         self.beginResetModel()
         self._rows = rows
         self.endResetModel()
+
+    def update_row_fields(self, row_index: int, updates: Dict[str, Any]) -> None:
+        if row_index < 0 or row_index >= len(self._rows):
+            return
+        if not isinstance(updates, dict) or not updates:
+            return
+
+        row = self._rows[row_index]
+        changed_cols: List[int] = []
+        for col_index, col in enumerate(self._columns):
+            if col.key not in updates:
+                continue
+            new_val = updates.get(col.key)
+            if row.get(col.key) == new_val:
+                continue
+            row[col.key] = new_val
+            changed_cols.append(col_index)
+
+        if not changed_cols:
+            return
+
+        for col_index in changed_cols:
+            try:
+                top_left = self.index(row_index, col_index)
+                self.dataChanged.emit(top_left, top_left)
+            except Exception:
+                continue
 
     def get_columns(self) -> List[DatasetListColumn]:
         return self._columns
@@ -689,6 +717,9 @@ class DatasetListingWidget(QWidget):
         self._filter_proxy = DatasetFilterProxyModel(self)
         self._reload_thread: Optional[QThread] = None
         self._reload_worker: Optional[QObject] = None
+
+        self._stats_thread: Optional[QThread] = None
+        self._stats_worker: Optional[QObject] = None
         self._filter_apply_timer = QTimer(self)
         self._filter_apply_timer.setSingleShot(True)
         self._filter_apply_timer.setInterval(350)
@@ -1232,6 +1263,177 @@ class DatasetListingWidget(QWidget):
         except Exception:
             pass
 
+    def _cancel_stats_fill(self) -> None:
+        worker = self._stats_worker
+        thread = self._stats_thread
+
+        if worker is not None:
+            try:
+                getattr(worker, "cancel")()
+            except Exception:
+                pass
+
+        if thread is not None and thread.isRunning():
+            try:
+                thread.quit()
+            except Exception:
+                pass
+
+        self._stats_thread = None
+        self._stats_worker = None
+
+    class _StatsFillWorker(QObject):
+        row_ready = Signal(int, object, object, object)
+        finished = Signal()
+
+        def __init__(self, tasks: List[tuple[int, str]]):
+            super().__init__()
+            self._tasks = tasks
+            self._cancelled = False
+
+        def cancel(self) -> None:
+            self._cancelled = True
+
+        def run(self) -> None:
+            from config.common import get_dynamic_file_path
+            from classes.dataset.util.data_entry_summary import compute_summary_from_payload, format_size_with_bytes
+
+            import json
+            import os
+
+            for row_index, dataset_id in self._tasks:
+                if self._cancelled:
+                    break
+
+                dsid = str(dataset_id or "").strip()
+                if not dsid:
+                    continue
+
+                try:
+                    path = get_dynamic_file_path(f"output/rde/data/dataEntry/{dsid}.json")
+                    if not path or not os.path.exists(path):
+                        continue
+                    with open(path, "r", encoding="utf-8") as fh:
+                        payload = json.load(fh)
+                except Exception:
+                    continue
+
+                if not isinstance(payload, dict):
+                    continue
+
+                tiles = payload.get("data")
+                tile_count = len(tiles) if isinstance(tiles, list) else 0
+
+                shared2_file_count = None
+                file_size_display = ""
+                try:
+                    summary = compute_summary_from_payload(payload, prefer_cached_files=False)
+                except Exception:
+                    summary = None
+
+                shared2 = summary.get("shared2") if isinstance(summary, dict) else None
+                if isinstance(shared2, dict):
+                    try:
+                        shared2_file_count = int(shared2.get("count", 0) or 0)
+                    except Exception:
+                        shared2_file_count = None
+
+                    try:
+                        shared2_bytes = int(shared2.get("bytes", 0) or 0)
+                    except Exception:
+                        shared2_bytes = None
+
+                    if shared2_bytes is not None:
+                        try:
+                            file_size_display = format_size_with_bytes(shared2_bytes)
+                        except Exception:
+                            file_size_display = str(shared2_bytes)
+
+                if self._cancelled:
+                    break
+
+                try:
+                    self.row_ready.emit(row_index, tile_count, shared2_file_count, file_size_display)
+                except Exception:
+                    continue
+
+            try:
+                self.finished.emit()
+            except Exception:
+                pass
+
+    def _on_stats_row_ready(self, row_index: int, tile_count: object, file_count: object, file_size_display: object) -> None:
+        if self._model is None:
+            return
+        try:
+            updates = {
+                "tile_count": tile_count,
+                "file_count": file_count,
+                "file_size": "" if file_size_display is None else str(file_size_display),
+            }
+            self._model.update_row_fields(int(row_index), updates)
+        except Exception:
+            return
+
+    def _on_stats_fill_finished(self) -> None:
+        # Re-evaluate filters once after bulk stats fill.
+        try:
+            self._filter_proxy.invalidateFilter()
+        except Exception:
+            pass
+
+        self._stats_thread = None
+        self._stats_worker = None
+
+    def _start_stats_fill_async(self, rows: List[Dict[str, Any]]) -> None:
+        if self._is_running_under_pytest():
+            return
+        if self._model is None:
+            return
+        if self._stats_thread is not None and self._stats_thread.isRunning():
+            return
+
+        tasks: List[tuple[int, str]] = []
+        for i, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+            dsid = str(row.get("dataset_id") or "").strip()
+            if not dsid:
+                continue
+            # Already computed
+            if row.get("tile_count") is not None and row.get("file_count") is not None and (row.get("file_size") or ""):
+                continue
+            tasks.append((i, dsid))
+
+        if not tasks:
+            return
+
+        thread = QThread()
+        worker = DatasetListingWidget._StatsFillWorker(tasks)
+        worker.moveToThread(thread)
+
+        thread.started.connect(worker.run)
+        worker.row_ready.connect(self._on_stats_row_ready)
+        worker.finished.connect(self._on_stats_fill_finished)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(thread.deleteLater)
+
+        self._stats_worker = worker
+        self._stats_thread = thread
+
+        _ACTIVE_DATASET_LISTING_STATS_THREADS.add(thread)
+        try:
+            setattr(thread, "_stats_worker", worker)
+        except Exception:
+            pass
+        try:
+            thread.finished.connect(lambda: _ACTIVE_DATASET_LISTING_STATS_THREADS.discard(thread))
+        except Exception:
+            pass
+
+        thread.start()
+
     class _ReloadWorker(QObject):
         finished = Signal(object, object, object)
 
@@ -1263,6 +1465,13 @@ class DatasetListingWidget(QWidget):
         self._apply_row_limit()
         self._apply_filters_now()
 
+        # Large workspaces may skip expensive stats during initial load.
+        # Fill tile/file stats in background to restore legacy behavior without blocking UI.
+        try:
+            self._start_stats_fill_async(rows)
+        except Exception:
+            pass
+
         # 改行表示がある列のため、表示行数が少ない場合のみ行高を内容に合わせる
         try:
             limit = int(self._row_limit.value())
@@ -1290,6 +1499,8 @@ class DatasetListingWidget(QWidget):
     def _start_reload_async(self) -> None:
         if self._reload_thread is not None and self._reload_thread.isRunning():
             return
+
+        self._cancel_stats_fill()
 
         self._show_loading()
 
@@ -1323,6 +1534,7 @@ class DatasetListingWidget(QWidget):
         thread.start()
 
     def _reload_data_sync(self) -> None:
+        self._cancel_stats_fill()
         self._show_loading()
         try:
             columns, rows = build_dataset_list_rows_from_files()
