@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.4.12** のバイナリ配布およびドキュメント公開用リポジトリです。  
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.4.13** のバイナリ配布およびドキュメント公開用リポジトリです。  
 本ツールは、文部科学省ARIM事業の研究データ共有サイト「RDE」の操作補助とデータポータルへの登録支援を目的とした Windows デスクトップアプリケーションです。Web操作の煩雑さを軽減し、データの一括取得・登録・AI支援機能を提供します。
 
 > [!NOTE]
@@ -22,12 +22,13 @@
 
 ## 🚀 最新情報
 
-**2026-01-09 最新リリース**: バージョン2.4.12（一覧タブ: 大規模データ環境の初回表示改善 + 非同期リロード安定化）
+**2026-01-09 最新リリース**: バージョン2.4.13（データセット一覧: 範囲フィルタ2行化 + TAG数範囲フィルタ修正 + file_size bytes統一）
 
-### v2.4.12 の主な改善
+### v2.4.13 の主な改善
 
-- 一覧タブ（サブグループ一覧/データセット一覧）: 大規模データで重くなりがちな処理を抑制し、初回表示が終わらないように見えるケースを低減。
-- 非同期リロードのスレッド寿命管理を改善し、タブ切替等での QThread エラーを抑止。
+- データセット一覧タブ: 範囲フィルタ群を2行表示に変更（フィルタ領域の視認性改善）。
+- データセット一覧タブ: TAG数の範囲フィルタが実際に絞り込みに反映されない不具合を修正。
+- データセット一覧タブ: `file_size` は bytes(int) を保持し、エクスポートでも bytes を出力するよう統一。
 - テストスイートを実行し、回帰を防止。
 
 > ℹ️ リスティングタブは `output/arim-site/{equipment|reports}_latest.json` など最新エクスポートを前提とします。再読込前に各タブで「JSON再取得」を実行し、キャッシュディレクトリ（`output/arim-site/reports/cache/`）の残量にも留意してください。
@@ -130,13 +131,13 @@
 * **[ドキュメント一覧マップ](docs/DOCUMENT_MAP.md)**
 * **[第三者ライセンス通知](THIRD_PARTY_NOTICES/)**
 
-* **[リリースノート v2.4.10](docs/RELEASE_NOTES_v2.4.10.md)**
+* **[リリースノート v2.4.13](docs/RELEASE_NOTES_v2.4.13.md)**
 
 ---
 
 ## 🔢 バージョン情報
 
-現在配布バージョン: `v2.4.10` （`VERSION.txt` に基づく）
+現在配布バージョン: `v2.4.13` （`VERSION.txt` に基づく）
 
 更新履歴の詳細は `docs/CHANGELOG.md` を参照してください。
 
