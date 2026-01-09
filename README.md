@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.4.13** のバイナリ配布およびドキュメント公開用リポジトリです。  
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.4.14** のバイナリ配布およびドキュメント公開用リポジトリです。  
 本ツールは、文部科学省ARIM事業の研究データ共有サイト「RDE」の操作補助とデータポータルへの登録支援を目的とした Windows デスクトップアプリケーションです。Web操作の煩雑さを軽減し、データの一括取得・登録・AI支援機能を提供します。
 
 > [!NOTE]
@@ -22,13 +22,12 @@
 
 ## 🚀 最新情報
 
-**2026-01-09 最新リリース**: バージョン2.4.13（データセット一覧: 範囲フィルタ2行化 + TAG数範囲フィルタ修正 + file_size bytes統一）
+**2026-01-09 最新リリース**: バージョン2.4.14（データセット一覧: ポータル列の公開状態表示改善 + キャッシュ最適化）
 
-### v2.4.13 の主な改善
+### v2.4.14 の主な改善
 
-- データセット一覧タブ: 範囲フィルタ群を2行表示に変更（フィルタ領域の視認性改善）。
-- データセット一覧タブ: TAG数の範囲フィルタが実際に絞り込みに反映されない不具合を修正。
-- データセット一覧タブ: `file_size` は bytes(int) を保持し、エクスポートでも bytes を出力するよう統一。
+- データセット一覧タブ: ポータル列の公開状態表示を改善（公開JSON補完/ログインCSV一括判定/セルクリック再確認+セル内スピナー）。
+- データセット一覧タブ: 個別アクセス回数を抑制（キャッシュの1日維持・上書き保存、クリック時のみ再確認）。
 - テストスイートを実行し、回帰を防止。
 
 > ℹ️ リスティングタブは `output/arim-site/{equipment|reports}_latest.json` など最新エクスポートを前提とします。再読込前に各タブで「JSON再取得」を実行し、キャッシュディレクトリ（`output/arim-site/reports/cache/`）の残量にも留意してください。
@@ -131,13 +130,13 @@
 * **[ドキュメント一覧マップ](docs/DOCUMENT_MAP.md)**
 * **[第三者ライセンス通知](THIRD_PARTY_NOTICES/)**
 
-* **[リリースノート v2.4.13](docs/RELEASE_NOTES_v2.4.13.md)**
+* **[リリースノート v2.4.14](docs/RELEASE_NOTES_v2.4.14.md)**
 
 ---
 
 ## 🔢 バージョン情報
 
-現在配布バージョン: `v2.4.13` （`VERSION.txt` に基づく）
+現在配布バージョン: `v2.4.14` （`VERSION.txt` に基づく）
 
 更新履歴の詳細は `docs/CHANGELOG.md` を参照してください。
 
