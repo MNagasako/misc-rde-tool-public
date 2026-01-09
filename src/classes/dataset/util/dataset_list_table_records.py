@@ -20,7 +20,7 @@ import os
 import time
 from pathlib import Path
 
-from classes.dataset.util.data_entry_summary import compute_summary_from_payload, format_size_with_bytes
+from classes.dataset.util.data_entry_summary import compute_summary_from_payload
 
 from config.common import get_dynamic_file_path
 
@@ -657,7 +657,7 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
     dataset_details_dir = get_dynamic_file_path("output/rde/data/datasets")
 
     signature = (
-        2,  # signature schema
+        3,  # signature schema
         _safe_mtime(dataset_json_path),
         _safe_mtime(subgroup_json_path),
         _safe_mtime(info_json_path),
@@ -865,12 +865,12 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
             tile_count, shared2_file_count, shared2_bytes = _compute_tile_file_stats(dataset_id)
         else:
             tile_count, shared2_file_count, shared2_bytes = None, None, None
-        file_size_display = ""
+        file_size_bytes: Optional[int] = None
         if shared2_bytes is not None:
             try:
-                file_size_display = format_size_with_bytes(shared2_bytes)
+                file_size_bytes = int(shared2_bytes)
             except Exception:
-                file_size_display = _safe_str(shared2_bytes)
+                file_size_bytes = None
 
         row: Dict[str, Any] = {
             "dataset_id": dataset_id,
@@ -881,7 +881,10 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
             "tool_open": "ツール内" if dataset_id else "",
             "tile_count": tile_count,
             "file_count": shared2_file_count,
-            "file_size": file_size_display,
+            # NOTE: 値は「バイト数の数値」で保持する（表示用文字列はUI側で生成）。
+            # 過去のように "10.2 MB (10695475 bytes)" 等の複合文字列を格納すると、
+            # ソート/集計/エクスポートで不都合が生じやすく、修正のたびに仕様が揺れる。
+            "file_size": file_size_bytes,
             "description": description,
             "description_len": len(description) if isinstance(description, str) else 0,
             "embargo_date": embargo_display,

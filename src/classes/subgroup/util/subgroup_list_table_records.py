@@ -27,6 +27,9 @@ _SUBGROUP_LIST_CACHE: Dict[str, Any] = {
 }
 
 
+_DETAIL_USER_ATTR_CACHE: Dict[str, Dict[str, Dict[str, Any]]] = {}
+
+
 @dataclass(frozen=True)
 class SubgroupListColumn:
     key: str
@@ -92,17 +95,78 @@ def _safe_dir_mtime(path: str) -> float:
         return 0.0
 
 
-def _compute_signature(*, subgroup_json_path: str, dataset_json_path: str, samples_dir: str) -> Dict[str, Any]:
+def _compute_signature(
+    *,
+    subgroup_json_path: str,
+    dataset_json_path: str,
+    samples_dir: str,
+    subgroup_details_dir: str,
+    subgroup_rel_details_dir: str,
+) -> Dict[str, Any]:
     # Keep JSON-stable primitives only.
     subgroup_sig = _safe_stat_signature(subgroup_json_path)
     dataset_sig = _safe_stat_signature(dataset_json_path)
     samples_mtime = _safe_dir_mtime(samples_dir)
+    details_mtime = _safe_dir_mtime(subgroup_details_dir)
+    rel_details_mtime = _safe_dir_mtime(subgroup_rel_details_dir)
     return {
         "subGroup.json": [subgroup_sig[0], subgroup_sig[1]],
         "dataset.json": [dataset_sig[0], dataset_sig[1]],
         "samples_dir_mtime": samples_mtime,
-        "schema": 1,
+        "subgroup_details_dir_mtime": details_mtime,
+        "subgroup_rel_details_dir_mtime": rel_details_mtime,
+        "schema": 2,
     }
+
+
+def _load_detail_user_attributes_for_subgroup(subgroup_id: str) -> Dict[str, Dict[str, Any]]:
+    """サブグループ詳細ファイルから user_id -> attributes を読む（キャッシュ付き）。
+
+    一覧タブのメンバー表示は、修正タブ同様「ユーザー名」を最優先で表示する。
+    subGroup.json だけでは userName が欠落するケースがあり、ここを参照しないと
+    メンバーIDが直接表示される不具合が再発しやすい。
+    """
+
+    sgid = _safe_str(subgroup_id).strip()
+    if not sgid:
+        return {}
+
+    cached = _DETAIL_USER_ATTR_CACHE.get(sgid)
+    if isinstance(cached, dict):
+        return cached
+
+    attr_map: Dict[str, Dict[str, Any]] = {}
+    try:
+        # NOTE: Must be CWD-independent. Use get_dynamic_file_path.
+        candidate_paths = [
+            get_dynamic_file_path(f"output/rde/data/subGroups/{sgid}.json"),
+            get_dynamic_file_path(f"output/rde/data/subGroupsAncestors/{sgid}.json"),
+            # legacy dir (互換)
+            get_dynamic_file_path(f"output/rde/data/subgroups/{sgid}.json"),
+        ]
+        for path in candidate_paths:
+            if not path or not os.path.exists(path):
+                continue
+            data = _load_json_file(path)
+            included = data.get("included", []) if isinstance(data, dict) else []
+            if not isinstance(included, list):
+                continue
+            for item in included:
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") != "user":
+                    continue
+                uid = _safe_str(item.get("id")).strip()
+                attrs = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
+                if uid:
+                    attr_map[uid] = attrs or {}
+            if attr_map:
+                break
+    except Exception:
+        attr_map = {}
+
+    _DETAIL_USER_ATTR_CACHE[sgid] = attr_map
+    return attr_map
 
 
 def _serialize_columns(columns: List["SubgroupListColumn"]) -> List[Dict[str, Any]]:
@@ -246,10 +310,15 @@ def build_subgroup_list_rows_from_files() -> Tuple[List[SubgroupListColumn], Lis
     except Exception:
         samples_dir = ""
 
+    subgroup_details_dir = get_dynamic_file_path("output/rde/data/subGroups")
+    subgroup_rel_details_dir = get_dynamic_file_path("output/rde/data/subGroupsAncestors")
+
     signature = _compute_signature(
         subgroup_json_path=subgroup_json_path,
         dataset_json_path=dataset_json_path,
         samples_dir=samples_dir,
+        subgroup_details_dir=subgroup_details_dir,
+        subgroup_rel_details_dir=subgroup_rel_details_dir,
     )
 
     if (
@@ -389,15 +458,28 @@ def build_subgroup_list_rows_from_files() -> Tuple[List[SubgroupListColumn], Lis
                     if s:
                         member_ids.append(s)
 
-        # Resolve member names (lightweight): subGroup.json included users -> cache fallback.
+        # Resolve member names:
+        # - 修正タブのメンバーテーブルは「詳細ファイル included.user.userName」を優先する。
+        # - 一覧タブも同様にしないと、subGroup.json 側に userName が無いケースで
+        #   メンバーIDが直接表示される不具合が再発する。
+        # - そのため、ここでは「詳細ファイル -> subGroup.json included -> ユーザーキャッシュ」の順で解決する。
+        #   （※ resolved できない場合でも、IDをUIに表示しない）
         member_names: List[str] = []
+        detail_attr_map = _load_detail_user_attributes_for_subgroup(subgroup_id)
         for mid in member_ids:
             if not mid:
                 continue
             resolved = ""
             try:
+                detail = detail_attr_map.get(mid) if isinstance(detail_attr_map, dict) else {}
+                if isinstance(detail, dict):
+                    resolved = _safe_str(detail.get("userName") or "").strip()
+            except Exception:
+                resolved = ""
+            try:
                 info = user_map.get(mid) or {}
-                resolved = _safe_str(info.get("userName") if isinstance(info, dict) else "").strip()
+                if not resolved:
+                    resolved = _safe_str(info.get("userName") if isinstance(info, dict) else "").strip()
             except Exception:
                 resolved = ""
             if (not resolved or resolved in {"Unknown", "Unknown User"}) and get_cached_user is not None:
@@ -407,7 +489,10 @@ def build_subgroup_list_rows_from_files() -> Tuple[List[SubgroupListColumn], Lis
                         resolved = _safe_str(cached.get("userName") or "").strip() or resolved
                 except Exception:
                     pass
-            member_names.append(resolved or mid)
+
+            # 再発防止: UIに member_id を直接出さない。
+            # どうしても解決できない場合は "Unknown" とする（IDの露出は不可）。
+            member_names.append(resolved or "Unknown")
 
         # De-dup while preserving order
         member_names = list(dict.fromkeys([n for n in member_names if n]))

@@ -305,7 +305,17 @@ class MiscTab(QWidget):
                 _finish_ui(enable_button=True)
 
             progress.canceled.connect(_on_cancel)
-            progress.show()
+            # pytest（widgetスイート）ではOSネイティブウィンドウ生成が大量に積み上がると
+            # PySide6/Windows環境で不安定化（クラッシュ/突然のプロセス終了）し得る。
+            # テストは進捗表示自体ではなく完了/キャンセルの配線を検証したいので、
+            # 進捗ダイアログは生成するが表示は行わない。
+            if not is_pytest:
+                progress.show()
+            else:
+                try:
+                    progress.hide()
+                except Exception:
+                    pass
 
             def _finish_ui(enable_button: bool = True) -> None:
                 # watchdog / invoke タイマーが残ると、長時間のwidgetスイートで

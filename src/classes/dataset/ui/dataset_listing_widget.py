@@ -132,6 +132,15 @@ class DatasetListTableModel(QAbstractTableModel):
             value = row.get(col.key)
             if isinstance(value, bool):
                 return "True" if value else "False"
+            if col.key == "file_size":
+                # 値は bytes(int) で保持し、表示用文字列はここで整形する。
+                try:
+                    from classes.dataset.util.data_entry_summary import format_size_with_bytes
+
+                    if isinstance(value, int):
+                        return format_size_with_bytes(value)
+                except Exception:
+                    pass
             return "" if value is None else str(value)
 
         if role == Qt.UserRole:
@@ -212,6 +221,8 @@ class DatasetFilterProxyModel(QSortFilterProxyModel):
         self._tile_count_max: Optional[int] = None
         self._file_count_min: Optional[int] = None
         self._file_count_max: Optional[int] = None
+        self._tag_count_min: Optional[int] = None
+        self._tag_count_max: Optional[int] = None
         self.setFilterCaseSensitivity(Qt.CaseInsensitive)
 
     @staticmethod
@@ -286,6 +297,11 @@ class DatasetFilterProxyModel(QSortFilterProxyModel):
     def set_file_count_range(self, min_value: Optional[int], max_value: Optional[int]) -> None:
         self._file_count_min = min_value
         self._file_count_max = max_value
+        self.invalidateFilter()
+
+    def set_tag_count_range(self, min_value: Optional[int], max_value: Optional[int]) -> None:
+        self._tag_count_min = min_value
+        self._tag_count_max = max_value
         self.invalidateFilter()
 
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:  # noqa: N802
@@ -389,6 +405,23 @@ class DatasetFilterProxyModel(QSortFilterProxyModel):
                 if self._file_count_max is not None and n > self._file_count_max:
                     return False
 
+        # tag count range
+        if self._tag_count_min is not None or self._tag_count_max is not None:
+            tag_col = self._find_column_by_label("TAG数")
+            if tag_col >= 0:
+                idx = model.index(source_row, tag_col, source_parent)
+                val = model.data(idx, Qt.UserRole)
+                try:
+                    n = int(val)
+                except Exception:
+                    n = None
+                if n is None:
+                    return False
+                if self._tag_count_min is not None and n < self._tag_count_min:
+                    return False
+                if self._tag_count_max is not None and n > self._tag_count_max:
+                    return False
+
         return True
 
     def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:  # noqa: N802
@@ -411,6 +444,15 @@ class DatasetFilterProxyModel(QSortFilterProxyModel):
                 return False
             if l is None and isinstance(r, datetime.date):
                 return True
+
+        # 数値列はUserRoleが数値なら数値として比較（DisplayRole文字列比較の誤ソートを避ける）
+        try:
+            l_num = model.data(left, Qt.UserRole)
+            r_num = model.data(right, Qt.UserRole)
+            if isinstance(l_num, (int, float)) and isinstance(r_num, (int, float)):
+                return l_num < r_num
+        except Exception:
+            pass
 
         return super().lessThan(left, right)
 
@@ -711,6 +753,8 @@ class DatasetListingWidget(QWidget):
         self._tile_cnt_max = QSpinBox(self)
         self._file_cnt_min = QSpinBox(self)
         self._file_cnt_max = QSpinBox(self)
+        self._tag_cnt_min = QSpinBox(self)
+        self._tag_cnt_max = QSpinBox(self)
         self._tool_open_callback = None
 
         # Debounce filter application to keep the table responsive while typing/clicking.
@@ -729,6 +773,7 @@ class DatasetListingWidget(QWidget):
         # If we create these widgets inside `_rebuild_filters_panel()`, they can be GC'ed after
         # removal from the layout, which deletes their children (QSpinBox/QDateEdit) on Qt side.
         self._range_desc_widget: Optional[QWidget] = None
+        self._range_tag_widget: Optional[QWidget] = None
         self._range_related_widget: Optional[QWidget] = None
         self._range_embargo_widget: Optional[QWidget] = None
 
@@ -905,10 +950,25 @@ class DatasetListingWidget(QWidget):
             self._file_cnt_max.setButtonSymbols(QAbstractSpinBox.PlusMinus)
             self._file_cnt_max.setValue(0)
 
+            self._tag_cnt_min.setObjectName("dataset_listing_tag_cnt_min")
+            self._tag_cnt_min.setMinimum(0)
+            self._tag_cnt_min.setMaximum(999999)
+            self._tag_cnt_min.setSpecialValueText("未設定")
+            self._tag_cnt_min.setButtonSymbols(QAbstractSpinBox.PlusMinus)
+            self._tag_cnt_min.setValue(0)
+            self._tag_cnt_max.setObjectName("dataset_listing_tag_cnt_max")
+            self._tag_cnt_max.setMinimum(0)
+            self._tag_cnt_max.setMaximum(999999)
+            self._tag_cnt_max.setSpecialValueText("未設定")
+            self._tag_cnt_max.setButtonSymbols(QAbstractSpinBox.PlusMinus)
+            self._tag_cnt_max.setValue(0)
+
             # Keep range inputs from becoming too large, but avoid truncation.
             for sb in (
                 self._desc_len_min,
                 self._desc_len_max,
+                self._tag_cnt_min,
+                self._tag_cnt_max,
                 self._related_cnt_min,
                 self._related_cnt_max,
                 self._tile_cnt_min,
@@ -938,6 +998,13 @@ class DatasetListingWidget(QWidget):
         desc_layout.addWidget(self._desc_len_min)
         desc_layout.addWidget(QLabel("～"))
         desc_layout.addWidget(self._desc_len_max)
+
+        self._range_tag_widget = QWidget(self)
+        tag_layout = QHBoxLayout(self._range_tag_widget)
+        tag_layout.setContentsMargins(0, 0, 0, 0)
+        tag_layout.addWidget(self._tag_cnt_min)
+        tag_layout.addWidget(QLabel("～"))
+        tag_layout.addWidget(self._tag_cnt_max)
 
         self._range_related_widget = QWidget(self)
         rel_layout = QHBoxLayout(self._range_related_widget)
@@ -1015,6 +1082,8 @@ class DatasetListingWidget(QWidget):
         self._embargo_to.dateChanged.connect(self._schedule_apply_filters)
         self._desc_len_min.valueChanged.connect(self._schedule_apply_filters)
         self._desc_len_max.valueChanged.connect(self._schedule_apply_filters)
+        self._tag_cnt_min.valueChanged.connect(self._schedule_apply_filters)
+        self._tag_cnt_max.valueChanged.connect(self._schedule_apply_filters)
         self._related_cnt_min.valueChanged.connect(self._schedule_apply_filters)
         self._related_cnt_max.valueChanged.connect(self._schedule_apply_filters)
         self._tile_cnt_min.valueChanged.connect(self._schedule_apply_filters)
@@ -1036,6 +1105,9 @@ class DatasetListingWidget(QWidget):
         # Initialize
         # 初回表示の体感を改善するため、ウィジェット描画後に読み込みを開始する。
         self._status.setText("読み込み中...")
+        # NOTE: reload_data() 呼び出し前でも、初回表示待ちが目立つためスピナーを即表示する。
+        # reload_data() 内でも _show_loading() するが、二重呼び出しは許容する。
+        self._show_loading()
         if os.environ.get("PYTEST_CURRENT_TEST"):
             # テストは決定性を優先して同期で読み込む
             self.reload_data()
@@ -1059,11 +1131,8 @@ class DatasetListingWidget(QWidget):
             self._maybe_relayout_range_filters()
 
     def _compute_should_wrap_range_filters(self) -> bool:
-        try:
-            w = int(self.width())
-        except Exception:
-            w = 0
-        return w > 0 and w < 980
+        # 要件: 範囲フィルタ群は常に2行で表示する。
+        return True
 
     def _maybe_relayout_range_filters(self) -> None:
         wrap = self._compute_should_wrap_range_filters()
@@ -1096,6 +1165,7 @@ class DatasetListingWidget(QWidget):
 
         entries: List[tuple[str, Optional[QWidget]]] = [
             ("説明文字数", self._range_desc_widget),
+            ("TAG数", self._range_tag_widget),
             ("関連データセット", self._range_related_widget),
             ("タイル数", self._range_tile_widget),
             ("ファイル数", self._range_file_widget),
@@ -1116,9 +1186,8 @@ class DatasetListingWidget(QWidget):
             c += 1
 
         if self._clear_filters is not None:
-            if wrap:
-                r += 1
-                c = 0
+            # 範囲フィルタが2行になる場合でも、クリアボタンは3行目に落とさず
+            # 最終行の末尾に配置する。
             self._range_filters_layout.addWidget(self._clear_filters, r, c)
 
     def _schedule_apply_filters(self) -> None:
@@ -1296,7 +1365,7 @@ class DatasetListingWidget(QWidget):
 
         def run(self) -> None:
             from config.common import get_dynamic_file_path
-            from classes.dataset.util.data_entry_summary import compute_summary_from_payload, format_size_with_bytes
+            from classes.dataset.util.data_entry_summary import compute_summary_from_payload
 
             import json
             import os
@@ -1325,7 +1394,7 @@ class DatasetListingWidget(QWidget):
                 tile_count = len(tiles) if isinstance(tiles, list) else 0
 
                 shared2_file_count = None
-                file_size_display = ""
+                file_size_bytes = None
                 try:
                     summary = compute_summary_from_payload(payload, prefer_cached_files=False)
                 except Exception:
@@ -1344,16 +1413,13 @@ class DatasetListingWidget(QWidget):
                         shared2_bytes = None
 
                     if shared2_bytes is not None:
-                        try:
-                            file_size_display = format_size_with_bytes(shared2_bytes)
-                        except Exception:
-                            file_size_display = str(shared2_bytes)
+                        file_size_bytes = shared2_bytes
 
                 if self._cancelled:
                     break
 
                 try:
-                    self.row_ready.emit(row_index, tile_count, shared2_file_count, file_size_display)
+                    self.row_ready.emit(row_index, tile_count, shared2_file_count, file_size_bytes)
                 except Exception:
                     continue
 
@@ -1362,14 +1428,15 @@ class DatasetListingWidget(QWidget):
             except Exception:
                 pass
 
-    def _on_stats_row_ready(self, row_index: int, tile_count: object, file_count: object, file_size_display: object) -> None:
+    def _on_stats_row_ready(self, row_index: int, tile_count: object, file_count: object, file_size_bytes: object) -> None:
         if self._model is None:
             return
         try:
             updates = {
                 "tile_count": tile_count,
                 "file_count": file_count,
-                "file_size": "" if file_size_display is None else str(file_size_display),
+                # NOTE: file_size は表示文字列ではなく bytes(int) を保持する。
+                "file_size": file_size_bytes,
             }
             self._model.update_row_fields(int(row_index), updates)
         except Exception:
@@ -1401,7 +1468,9 @@ class DatasetListingWidget(QWidget):
             if not dsid:
                 continue
             # Already computed
-            if row.get("tile_count") is not None and row.get("file_count") is not None and (row.get("file_size") or ""):
+            file_size_val = row.get("file_size")
+            file_size_is_filled = file_size_val is not None and str(file_size_val).strip() != ""
+            if row.get("tile_count") is not None and row.get("file_count") is not None and file_size_is_filled:
                 continue
             tasks.append((i, dsid))
 
@@ -1573,6 +1642,8 @@ class DatasetListingWidget(QWidget):
         try:
             self._desc_len_min.setValue(0)
             self._desc_len_max.setValue(0)
+            self._tag_cnt_min.setValue(0)
+            self._tag_cnt_max.setValue(0)
             self._related_cnt_min.setValue(0)
             self._related_cnt_max.setValue(0)
             self._tile_cnt_min.setValue(0)
@@ -1643,6 +1714,14 @@ class DatasetListingWidget(QWidget):
             None if file_max <= 0 else file_max,
         )
 
+        # Tag count range
+        tag_min = int(self._tag_cnt_min.value())
+        tag_max = int(self._tag_cnt_max.value())
+        self._filter_proxy.set_tag_count_range(
+            None if tag_min <= 0 else tag_min,
+            None if tag_max <= 0 else tag_max,
+        )
+
         self._update_pagination_controls()
 
         self._update_filters_summary()
@@ -1693,6 +1772,18 @@ class DatasetListingWidget(QWidget):
             rng = _format_range(min_txt, max_txt)
             if rng:
                 parts.append(f"説明文字数:{rng}")
+        except Exception:
+            pass
+
+        # TAG数
+        try:
+            min_v = int(self._tag_cnt_min.value())
+            max_v = int(self._tag_cnt_max.value())
+            min_txt = "" if min_v <= 0 else str(min_v)
+            max_txt = "" if max_v <= 0 else str(max_v)
+            rng = _format_range(min_txt, max_txt)
+            if rng:
+                parts.append(f"TAG数:{rng}")
         except Exception:
             pass
 
@@ -1928,11 +2019,24 @@ class DatasetListingWidget(QWidget):
         visible_cols.sort(key=lambda logical: header.visualIndex(logical))
         col_labels = [str(model.headerData(c, Qt.Horizontal, Qt.DisplayRole) or "") for c in visible_cols]
 
-        data_rows: List[List[str]] = []
+        data_rows: List[List[Any]] = []
         for r in range(model.rowCount()):
-            row_values: List[str] = []
+            row_values: List[Any] = []
             for c in visible_cols:
                 idx = model.index(r, c)
+                col_key = ""
+                try:
+                    col_key = self._columns[c].key
+                except Exception:
+                    col_key = ""
+
+                if col_key == "file_size":
+                    # エクスポートでは表示用の複合文字列ではなく bytes(int) を出力する。
+                    raw = model.data(idx, Qt.UserRole)
+                    if isinstance(raw, int):
+                        row_values.append(raw)
+                        continue
+
                 row_values.append(str(model.data(idx, Qt.DisplayRole) or ""))
             data_rows.append(row_values)
 
@@ -1986,7 +2090,20 @@ class DatasetListingWidget(QWidget):
         row = 0
         col = 0
         for cdef in self._columns:
-            if cdef.key in {"description_len", "related_datasets_count", "embargo_date", "tile_count", "file_count"}:
+            # NOTE: range-filter columns and non-meaningful text-filter columns are excluded.
+            # - tool_open: 列は維持するが、列フィルタ(テキスト)は不要。
+            # - file_size: bytes(int) を保持するため、列フィルタ(テキスト)は不要。
+            # - tag_count: 数値範囲フィルタで扱う。
+            if cdef.key in {
+                "description_len",
+                "related_datasets_count",
+                "embargo_date",
+                "tile_count",
+                "file_count",
+                "tag_count",
+                "tool_open",
+                "file_size",
+            }:
                 continue
 
             pair = QWidget(self)
