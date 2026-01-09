@@ -21,13 +21,15 @@
 """
 import os
 import json
+import math
 from qt_compat.widgets import QWidget, QVBoxLayout, QLabel, QTabWidget, QScrollArea, QApplication
 from qt_compat.widgets import QHBoxLayout, QFormLayout, QLineEdit, QTextEdit, QPushButton
-from qt_compat.widgets import QSizePolicy
-from qt_compat.core import Qt
+from qt_compat.widgets import QButtonGroup, QComboBox, QRadioButton, QSizePolicy
+from qt_compat.core import QDate, Qt
 from classes.dataset.core.dataset_open_logic import create_group_select_widget
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
+from config.common import DATASET_JSON_PATH, SUBGROUP_DETAILS_DIR, SUBGROUP_REL_DETAILS_DIR, get_dynamic_file_path
 
 import logging
 
@@ -67,6 +69,170 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     else:
         container, team_groups, group_combo, grant_combo, open_btn, name_edit, embargo_edit, template_combo, template_list, _filter_combo = create_tab_result
         manager_combo = getattr(container, "manager_combo", None)
+
+    filter_combo = _filter_combo
+
+    CORE_SHARE_SCOPE_ID = "22aec474-bbf2-4826-bf63-60c82d75df41"
+
+    def _is_nan_value(value) -> bool:
+        try:
+            return isinstance(value, float) and math.isnan(value)
+        except Exception:
+            return False
+
+    def _normalize_text_value(value) -> str:
+        if value is None or _is_nan_value(value):
+            return ""
+        text = str(value)
+        if text.strip().lower() == "nan":
+            return ""
+        return text
+
+    def _get_user_grant_numbers() -> set[str]:
+        grants: set[str] = set()
+        try:
+            self_path = get_dynamic_file_path("output/rde/data/self.json")
+            sub_group_path = get_dynamic_file_path("output/rde/data/subGroup.json")
+            with open(self_path, encoding="utf-8") as f:
+                self_data = json.load(f)
+            user_id = (self_data.get("data", {}) or {}).get("id")
+            if not user_id:
+                return grants
+
+            with open(sub_group_path, encoding="utf-8") as f:
+                sub_group_data = json.load(f)
+
+            for item in (sub_group_data.get("included", []) or []):
+                if not isinstance(item, dict):
+                    continue
+                if item.get("type") != "group":
+                    continue
+                attrs = item.get("attributes", {}) or {}
+                if (attrs.get("groupType") or "") != "TEAM":
+                    continue
+                roles = attrs.get("roles", []) or []
+                user_in_group = any((r or {}).get("userId") == user_id for r in roles if isinstance(r, dict))
+                if not user_in_group:
+                    continue
+                subjects = attrs.get("subjects", []) or []
+                for subject in subjects:
+                    if not isinstance(subject, dict):
+                        continue
+                    grant_number = _normalize_text_value(subject.get("grantNumber")).strip()
+                    if grant_number:
+                        grants.add(grant_number)
+        except Exception:
+            logger.debug("新規開設2: user grantNumbers の取得に失敗", exc_info=True)
+        return grants
+
+    def _safe_set_combo_by_data(combo: QComboBox | None, target_data: str) -> bool:
+        if combo is None:
+            return False
+        try:
+            idx = combo.findData(target_data)
+        except Exception:
+            idx = -1
+        if idx is None or idx < 0:
+            return False
+        try:
+            combo.setCurrentIndex(int(idx))
+            return True
+        except Exception:
+            return False
+
+    def _safe_set_combo_by_text(combo: QComboBox | None, target_text: str) -> bool:
+        if combo is None:
+            return False
+        try:
+            idx = combo.findText(target_text)
+        except Exception:
+            idx = -1
+        if idx is None or idx < 0:
+            return False
+        try:
+            combo.setCurrentIndex(int(idx))
+            return True
+        except Exception:
+            return False
+
+    def _read_json(path: str) -> dict:
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    _all_dataset_ids_ref: dict[str, set[str]] = {"ids": set()}
+
+    def _resolve_group_label(group_id: str) -> str | None:
+        if not group_id:
+            return None
+        candidate_paths = [
+            os.path.join(SUBGROUP_DETAILS_DIR, f"{group_id}.json"),
+            os.path.join(SUBGROUP_REL_DETAILS_DIR, f"{group_id}.json"),
+        ]
+        for path in candidate_paths:
+            data = _read_json(path)
+            group = (data or {}).get("data", {}) or {}
+            attr = (group or {}).get("attributes", {}) or {}
+            name = str(attr.get("name") or "").strip()
+            subjects = attr.get("subjects", []) or []
+            try:
+                grant_count = len(subjects)
+            except Exception:
+                grant_count = 0
+            if name:
+                return f"{name} ({grant_count}件の課題)"
+        return None
+
+    def _extract_dataset_prefill_fields(dataset_id: str) -> dict:
+        if not dataset_id:
+            return {}
+        detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dataset_id}.json")
+        detail = _read_json(detail_path)
+        data = (detail or {}).get("data", {}) or {}
+        attr = (data or {}).get("attributes", {}) or {}
+        rel = (data or {}).get("relationships", {}) or {}
+        group_id = ((rel.get("group", {}) or {}).get("data", {}) or {}).get("id")
+        grant_number = attr.get("grantNumber")
+
+        template_id = ((rel.get("template", {}) or {}).get("data", {}) or {}).get("id")
+        related_links = attr.get("relatedLinks")
+        tags = attr.get("tags")
+        embargo_date = attr.get("embargoDate")
+        description = attr.get("description")
+        name = attr.get("name")
+        is_anonymized = attr.get("isAnonymized")
+
+        related_dataset_ids: list[str] = []
+        for item in ((rel.get("relatedDatasets", {}) or {}).get("data", []) or []):
+            if isinstance(item, dict) and item.get("id"):
+                related_dataset_ids.append(str(item["id"]))
+
+        share_core_scope = None
+        try:
+            for pol in (attr.get("sharingPolicies", []) or []):
+                if not isinstance(pol, dict):
+                    continue
+                if str(pol.get("scopeId") or "") == CORE_SHARE_SCOPE_ID:
+                    share_core_scope = bool(pol.get("permissionToView"))
+                    break
+        except Exception:
+            share_core_scope = None
+
+        return {
+            "group_id": (str(group_id) if group_id else None),
+            "grant_number": (str(grant_number) if grant_number else None),
+            "template_id": (str(template_id) if template_id else None),
+            "name": (str(name) if name is not None else None),
+            "embargo_date": (str(embargo_date) if embargo_date is not None else None),
+            "description": (str(description) if description is not None else None),
+            "related_links": (related_links if related_links is not None else None),
+            "tags": (tags if tags is not None else None),
+            "related_dataset_ids": related_dataset_ids,
+            "share_core_scope": share_core_scope,
+            "is_anonymized": (bool(is_anonymized) if is_anonymized is not None else None),
+        }
 
     # AI CHECK thread reference (avoid accessing container from destroyed handler)
     _ai_check_thread_ref: dict[str, object | None] = {"thread": None}
@@ -124,6 +290,327 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     insert_row = _find_row_for_widget(open_btn)
     if insert_row < 0:
         insert_row = form_layout.rowCount()
+
+    # --- Existing dataset load panel (top) ---
+    existing_panel = QWidget(container)
+    existing_panel.setObjectName("dataset_create2_existing_dataset_panel")
+    try:
+        existing_panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+    except Exception:
+        pass
+
+    existing_panel_layout = QVBoxLayout(existing_panel)
+    existing_panel_layout.setContentsMargins(10, 8, 10, 8)
+    existing_panel_layout.setSpacing(6)
+
+    existing_title = QLabel("既存データセット読み込み", existing_panel)
+    try:
+        existing_title.setStyleSheet(
+            f"font-weight: bold; color: {get_color(ThemeKey.TEXT_PRIMARY)};"
+        )
+    except Exception:
+        pass
+    existing_panel_layout.addWidget(existing_title)
+
+    # Filters (similar to データエントリー タブ)
+    display_filter_widget = QWidget(existing_panel)
+    display_filter_layout = QHBoxLayout(display_filter_widget)
+    display_filter_layout.setContentsMargins(0, 0, 0, 0)
+    display_filter_layout.setSpacing(8)
+
+    display_label = QLabel("表示対象:", display_filter_widget)
+    display_user_only_radio = QRadioButton("所属のみ", display_filter_widget)
+    display_others_only_radio = QRadioButton("その他のみ", display_filter_widget)
+    display_all_radio = QRadioButton("すべて", display_filter_widget)
+    display_all_radio.setChecked(True)
+
+    display_group = QButtonGroup(display_filter_widget)
+    display_group.addButton(display_user_only_radio)
+    display_group.addButton(display_others_only_radio)
+    display_group.addButton(display_all_radio)
+
+    display_filter_layout.addWidget(display_label)
+    display_filter_layout.addWidget(display_user_only_radio)
+    display_filter_layout.addWidget(display_others_only_radio)
+    display_filter_layout.addWidget(display_all_radio)
+    display_filter_layout.addStretch(1)
+    existing_panel_layout.addWidget(display_filter_widget)
+
+    grant_filter_widget = QWidget(existing_panel)
+    grant_filter_layout = QHBoxLayout(grant_filter_widget)
+    grant_filter_layout.setContentsMargins(0, 0, 0, 0)
+    grant_filter_layout.setSpacing(8)
+    grant_filter_label = QLabel("課題番号フィルタ:", grant_filter_widget)
+    grant_filter_input = QLineEdit(grant_filter_widget)
+    grant_filter_input.setObjectName("dataset_create2_existing_dataset_grant_filter")
+    grant_filter_input.setPlaceholderText("課題番号 (例: 22XXXXXX)")
+    grant_filter_input.setMinimumWidth(200)
+    grant_filter_layout.addWidget(grant_filter_label)
+    grant_filter_layout.addWidget(grant_filter_input)
+    grant_filter_layout.addStretch(1)
+    existing_panel_layout.addWidget(grant_filter_widget)
+
+    existing_row = QWidget(existing_panel)
+    existing_row_layout = QHBoxLayout(existing_row)
+    existing_row_layout.setContentsMargins(0, 0, 0, 0)
+    existing_row_layout.setSpacing(8)
+
+    existing_combo = QComboBox(existing_row)
+    existing_combo.setObjectName("dataset_create2_existing_dataset_combo")
+    existing_combo.setEditable(True)
+    existing_combo.setInsertPolicy(QComboBox.NoInsert)
+    existing_combo.setMaxVisibleItems(12)
+    try:
+        existing_combo.view().setMinimumHeight(240)
+    except Exception:
+        pass
+    existing_combo.lineEdit().setPlaceholderText("既存データセットを選択")
+
+    reload_btn = QPushButton("一覧再読込", existing_row)
+    reload_btn.setProperty("variant", "secondary")
+
+    existing_row_layout.addWidget(existing_combo, 1)
+    existing_row_layout.addWidget(reload_btn, 0)
+    existing_panel_layout.addWidget(existing_row)
+
+    try:
+        existing_panel.setStyleSheet(
+            f"background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)};"
+            f"border: 1px solid {get_color(ThemeKey.PANEL_BORDER)};"
+            f"border-radius: 6px;"
+        )
+    except Exception:
+        pass
+
+    def _populate_existing_dataset_combo() -> None:
+        preserve_id = ""
+        try:
+            preserve_id = str(existing_combo.currentData() or "")
+        except Exception:
+            preserve_id = ""
+
+        if display_user_only_radio.isChecked():
+            filter_mode = "user_only"
+        elif display_others_only_radio.isChecked():
+            filter_mode = "others_only"
+        else:
+            filter_mode = "all"
+
+        grant_filter_text = (grant_filter_input.text() or "").strip().lower()
+        user_grants = _get_user_grant_numbers()
+
+        existing_combo.blockSignals(True)
+        existing_combo.clear()
+        existing_combo.addItem("(選択してください)", "")
+        try:
+            data = _read_json(DATASET_JSON_PATH)
+            datasets = (data or {}).get("data", []) or []
+
+            # Keep a set of all dataset IDs for validating relatedDatasets.
+            try:
+                _all_dataset_ids_ref["ids"] = {
+                    str(it.get("id"))
+                    for it in datasets
+                    if isinstance(it, dict) and it.get("id")
+                }
+            except Exception:
+                _all_dataset_ids_ref["ids"] = set()
+
+            user_items: list[tuple[str, str]] = []
+            other_items: list[tuple[str, str]] = []
+
+            for item in datasets:
+                if not isinstance(item, dict):
+                    continue
+                ds_id = item.get("id")
+                if not ds_id:
+                    continue
+                attr = item.get("attributes", {}) or {}
+                name = _normalize_text_value(attr.get("name")).strip() or "名前なし"
+                grant = _normalize_text_value(attr.get("grantNumber")).strip()
+
+                if grant_filter_text and grant_filter_text not in (grant or "").lower():
+                    continue
+
+                label_parts = [name]
+                if grant:
+                    label_parts.append(f"[{grant}]")
+                label = " ".join(label_parts) if label_parts else str(ds_id)
+
+                if user_grants and grant and grant in user_grants:
+                    user_items.append((label, str(ds_id)))
+                else:
+                    other_items.append((label, str(ds_id)))
+
+            # safety: user_grants が空の時は user_only でも全件扱い
+            if filter_mode == "user_only" and not user_grants:
+                filter_mode = "all"
+
+            if filter_mode == "user_only":
+                items = user_items
+            elif filter_mode == "others_only":
+                items = other_items
+            else:
+                items = user_items + other_items
+
+            for label, dsid in items:
+                existing_combo.addItem(label, dsid)
+        except Exception:
+            logger.debug("新規開設2: dataset.json 読み込みに失敗", exc_info=True)
+        finally:
+            try:
+                if preserve_id:
+                    idx = existing_combo.findData(preserve_id)
+                    if idx >= 0:
+                        existing_combo.setCurrentIndex(idx)
+                    else:
+                        existing_combo.setCurrentIndex(0)
+                else:
+                    existing_combo.setCurrentIndex(0)
+            except Exception:
+                existing_combo.setCurrentIndex(0)
+            existing_combo.blockSignals(False)
+
+    def _apply_autofill_from_existing_dataset(dataset_id: str) -> None:
+        dataset_id = (dataset_id or "").strip()
+        if not dataset_id:
+            return
+
+        prefill = _extract_dataset_prefill_fields(dataset_id)
+        if not prefill:
+            return
+
+        group_id = prefill.get("group_id")
+        grant_number = prefill.get("grant_number")
+        template_id = prefill.get("template_id")
+
+        # 仕様: ロールフィルタ=none / テンプレフィルタ形式=all
+        # ※シグナルを止めない: グループ/課題の再ロードが必要
+        _safe_set_combo_by_data(filter_combo, "none")
+
+        template_filter_combo = getattr(container, "template_filter_combo", None)
+        _safe_set_combo_by_data(template_filter_combo, "all")
+
+        try:
+            # サブグループ/課題番号
+            if group_id:
+                label = _resolve_group_label(str(group_id))
+                if label:
+                    if not _safe_set_combo_by_text(group_combo, label):
+                        if group_combo and group_combo.lineEdit():
+                            group_combo.lineEdit().setText(label)
+
+            if grant_number:
+                try:
+                    idx = grant_combo.findData(grant_number) if grant_combo is not None else -1
+                except Exception:
+                    idx = -1
+                if idx is not None and idx >= 0:
+                    if grant_combo is not None:
+                        grant_combo.setCurrentIndex(int(idx))
+                else:
+                    if grant_combo and grant_combo.lineEdit():
+                        grant_combo.lineEdit().setText(str(grant_number))
+
+            # テンプレート
+            if template_id:
+                try:
+                    idx = template_combo.findData(template_id) if template_combo is not None else -1
+                except Exception:
+                    idx = -1
+                if idx is not None and idx >= 0:
+                    if template_combo is not None:
+                        template_combo.setCurrentIndex(int(idx))
+                # 見つからない場合は安全側: 何もしない
+
+            # データセット名
+            if prefill.get("name") is not None and hasattr(name_edit, "setText"):
+                name_edit.setText(str(prefill.get("name") or ""))
+
+            # エンバーゴ期間終了日
+            embargo_val = prefill.get("embargo_date")
+            if embargo_val and hasattr(embargo_edit, "setDate"):
+                date_part = str(embargo_val).split("T", 1)[0]
+                parts = date_part.split("-")
+                if len(parts) == 3:
+                    y, m, d = (int(parts[0]), int(parts[1]), int(parts[2]))
+                    embargo_edit.setDate(QDate(y, m, d))
+
+            # 説明
+            desc_edit = getattr(container, "_create2_description_edit", None)
+            if prefill.get("description") is not None and desc_edit is not None and hasattr(desc_edit, "setPlainText"):
+                desc_edit.setPlainText(str(prefill.get("description") or ""))
+
+            # 関連情報（TITLE:URL をカンマ区切り）
+            related_info_edit = getattr(container, "_create2_related_info_edit", None)
+            links_val = prefill.get("related_links")
+            if related_info_edit is not None and hasattr(related_info_edit, "setText"):
+                link_parts: list[str] = []
+                if isinstance(links_val, list):
+                    for it in links_val:
+                        if not isinstance(it, dict):
+                            continue
+                        title = _normalize_text_value(it.get("title")).strip()
+                        url = _normalize_text_value(it.get("url")).strip()
+                        if title and url:
+                            link_parts.append(f"{title}:{url}")
+                    related_info_edit.setText(", ".join(link_parts))
+                elif links_val is None or _is_nan_value(links_val) or str(links_val).strip().lower() == "nan":
+                    related_info_edit.setText("")
+
+            # TAG
+            tags_edit = getattr(container, "_create2_tags_edit", None)
+            tags_val = prefill.get("tags")
+            if tags_edit is not None and hasattr(tags_edit, "setText"):
+                if isinstance(tags_val, list):
+                    tag_text = ", ".join([_normalize_text_value(t).strip() for t in tags_val if _normalize_text_value(t).strip()])
+                    tags_edit.setText(tag_text)
+                elif tags_val is None or _is_nan_value(tags_val) or str(tags_val).strip().lower() == "nan":
+                    tags_edit.setText("")
+                else:
+                    tags_edit.setText(_normalize_text_value(tags_val).strip())
+
+            # 関連データセット
+            selected_ids = getattr(container, "_selected_related_dataset_ids", None)
+            display = getattr(container, "_create2_related_datasets_display", None)
+            ids_val = prefill.get("related_dataset_ids") or []
+            if isinstance(selected_ids, list):
+                valid_ids = _all_dataset_ids_ref.get("ids") or set()
+                filtered = [str(x) for x in ids_val if str(x) and (not valid_ids or str(x) in valid_ids)]
+                selected_ids.clear()
+                selected_ids.extend(filtered)
+                if display is not None and hasattr(display, "setText"):
+                    display.setText(f"{len(selected_ids)}件" if selected_ids else "")
+
+            # データ中核拠点広域シェア / 匿名
+            share_val = prefill.get("share_core_scope")
+            if share_val is not None and share_core_scope_checkbox is not None and hasattr(share_core_scope_checkbox, "setChecked"):
+                share_core_scope_checkbox.setChecked(bool(share_val))
+            anon_val = prefill.get("is_anonymized")
+            if anon_val is not None and anonymize_checkbox is not None and hasattr(anonymize_checkbox, "setChecked"):
+                anonymize_checkbox.setChecked(bool(anon_val))
+        except Exception:
+            logger.debug("新規開設2: 既存データセットからの自動反映に失敗", exc_info=True)
+
+    _populate_existing_dataset_combo()
+    reload_btn.clicked.connect(_populate_existing_dataset_combo)
+    display_user_only_radio.toggled.connect(lambda *_: _populate_existing_dataset_combo())
+    display_others_only_radio.toggled.connect(lambda *_: _populate_existing_dataset_combo())
+    display_all_radio.toggled.connect(lambda *_: _populate_existing_dataset_combo())
+    grant_filter_input.textChanged.connect(lambda *_: _populate_existing_dataset_combo())
+    existing_combo.currentIndexChanged.connect(lambda *_: _apply_autofill_from_existing_dataset(str(existing_combo.currentData() or "")))
+    try:
+        existing_combo.activated.connect(lambda *_: _apply_autofill_from_existing_dataset(str(existing_combo.currentData() or "")))
+    except Exception:
+        pass
+
+    # form の先頭に差し込み（背景/枠線で区別）
+    form_layout.insertRow(0, existing_panel)
+    insert_row += 1
+
+    # 仕様: デフォルトでもロールフィルタ=none、テンプレフィルタ形式=all に寄せる
+    _safe_set_combo_by_data(filter_combo, "none")
+    _safe_set_combo_by_data(getattr(container, "template_filter_combo", None), "all")
 
     # Move checkboxes (share/anonymize) to the bottom (after related datasets)
     share_core_scope_checkbox = getattr(container, "share_core_scope_checkbox", None)
@@ -551,6 +1038,9 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     form_layout.insertRow(insert_row, QLabel("関連データセット:"), related_datasets_widget)
     insert_row += 1
 
+    # expose display for existing dataset autofill
+    container._create2_related_datasets_display = related_datasets_display  # type: ignore[attr-defined]
+
     # Place checkboxes AFTER related datasets
     if share_core_scope_checkbox is not None:
         form_layout.insertRow(insert_row, share_core_scope_checkbox)
@@ -611,10 +1101,30 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     def open_tag_builder():
         try:
             from classes.dataset.ui.tag_builder_dialog import TagBuilderDialog
+            selected_template_id = None
+            selected_template_type = ""
+            try:
+                selected_template_id = template_combo.currentData() if template_combo else None
+            except Exception:
+                selected_template_id = None
+            if selected_template_id:
+                for t in (template_list or []):
+                    if isinstance(t, dict) and str(t.get("id") or "") == str(selected_template_id):
+                        selected_template_type = str(t.get("datasetType") or "")
+                        break
+            if not selected_template_type:
+                try:
+                    idx = template_combo.currentIndex() if template_combo else -1
+                    selected_template_type = (
+                        template_list[idx].get("datasetType")
+                        if 0 <= idx < len(template_list)
+                        else ""
+                    )
+                except Exception:
+                    selected_template_type = ""
             dataset_context = {
                 "name": name_edit.text().strip() if hasattr(name_edit, "text") else "",
-                "type": (template_list[template_combo.currentIndex()].get("datasetType")
-                         if 0 <= template_combo.currentIndex() < len(template_list) else ""),
+                "type": selected_template_type,
                 "grant_number": _get_current_grant_number() or "",
                 "description": description_edit.toPlainText().strip() if hasattr(description_edit, "toPlainText") else "",
             }
@@ -680,8 +1190,52 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
         dataset_name = name_edit.text().strip() if hasattr(name_edit, "text") else ""
         embargo_str = embargo_edit.date().toString("yyyy-MM-dd") if embargo_edit else ""
         template_idx = template_combo.currentIndex() if template_combo else -1
-        template_id = template_list[template_idx]["id"] if 0 <= template_idx < len(template_list) else ""
-        dataset_type = template_list[template_idx]["datasetType"] if 0 <= template_idx < len(template_list) else "ANALYSIS"
+
+        template_id = ""
+        try:
+            current_data = template_combo.currentData() if template_combo else None
+            if current_data:
+                template_id = str(current_data)
+        except Exception:
+            template_id = ""
+
+        # If user typed a template name (editable combo), resolve it to a real item.
+        if not template_id and template_combo is not None and template_combo.isEditable():
+            typed_text = ""
+            try:
+                typed_text = (template_combo.lineEdit().text() or "").strip()
+            except Exception:
+                typed_text = ""
+            if typed_text:
+                try:
+                    match_idx = template_combo.findText(typed_text)
+                except Exception:
+                    match_idx = -1
+                if match_idx is not None and match_idx >= 0:
+                    try:
+                        template_combo.setCurrentIndex(int(match_idx))
+                        template_idx = template_combo.currentIndex()
+                        current_data = template_combo.currentData()
+                        if current_data:
+                            template_id = str(current_data)
+                    except Exception:
+                        pass
+
+        dataset_type = "ANALYSIS"
+        if template_id:
+            try:
+                for t in (template_list or []):
+                    if isinstance(t, dict) and str(t.get("id") or "") == str(template_id):
+                        dataset_type = str(t.get("datasetType") or "ANALYSIS")
+                        break
+            except Exception:
+                dataset_type = "ANALYSIS"
+        elif 0 <= template_idx < len(template_list):
+            try:
+                dataset_type = str(template_list[template_idx].get("datasetType") or "ANALYSIS")
+                template_id = str(template_list[template_idx].get("id") or "")
+            except Exception:
+                dataset_type = "ANALYSIS"
 
         if not dataset_name:
             from qt_compat.widgets import QMessageBox
@@ -691,7 +1245,7 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
             from qt_compat.widgets import QMessageBox
             QMessageBox.warning(parent, "入力エラー", "エンバーゴ期間終了日は必須です。")
             return
-        if template_idx < 0 or not template_id:
+        if not template_id:
             from qt_compat.widgets import QMessageBox
             QMessageBox.warning(parent, "入力エラー", "テンプレートは必須です。")
             return

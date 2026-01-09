@@ -40,6 +40,7 @@ from PySide6.QtGui import QKeySequence, QBrush, QFont, QDesktopServices
 from PySide6.QtWidgets import QTableView
 
 from classes.dataset.ui.spinner_overlay import SpinnerOverlay
+from classes.dataset.ui.portal_status_spinner_delegate import PortalStatusSpinnerDelegate
 
 from classes.dataset.util.dataset_list_table_records import (
     DatasetListColumn,
@@ -57,6 +58,10 @@ from config.common import get_dynamic_file_path
 
 _ACTIVE_DATASET_LISTING_RELOAD_THREADS: set[QThread] = set()
 _ACTIVE_DATASET_LISTING_STATS_THREADS: set[QThread] = set()
+_ACTIVE_DATASET_LISTING_PORTAL_THREADS: set[QThread] = set()
+
+
+_ACTIVE_DATASET_LISTING_PORTAL_CSV_THREADS: set[QThread] = set()
 
 
 class DatasetListTableModel(QAbstractTableModel):
@@ -764,6 +769,18 @@ class DatasetListingWidget(QWidget):
 
         self._stats_thread: Optional[QThread] = None
         self._stats_worker: Optional[QObject] = None
+
+        self._portal_thread: Optional[QThread] = None
+        self._portal_worker: Optional[QObject] = None
+
+        self._portal_csv_thread: Optional[QThread] = None
+        self._portal_csv_worker: Optional[QObject] = None
+
+        # Per-row portal status refresh (click on portal cell)
+        self._portal_status_loading_model_rows: set[int] = set()
+        self._portal_status_refresh_inflight_dataset_ids: set[str] = set()
+        self._portal_status_refresh_threads: set[QThread] = set()
+        self._portal_status_delegate: Optional[PortalStatusSpinnerDelegate] = None
         self._filter_apply_timer = QTimer(self)
         self._filter_apply_timer.setSingleShot(True)
         self._filter_apply_timer.setInterval(350)
@@ -1351,6 +1368,895 @@ class DatasetListingWidget(QWidget):
         self._stats_thread = None
         self._stats_worker = None
 
+    def _cancel_portal_fill(self) -> None:
+        worker = self._portal_worker
+        thread = self._portal_thread
+
+        if worker is not None:
+            try:
+                getattr(worker, "cancel")()
+            except Exception:
+                pass
+
+        if thread is not None and thread.isRunning():
+            try:
+                thread.quit()
+            except Exception:
+                pass
+
+        self._portal_thread = None
+        self._portal_worker = None
+
+    def _collect_visible_portal_tasks(self) -> List[tuple[int, str]]:
+        """Collect (model_row_index, dataset_id) for currently visible page."""
+        if self._model is None:
+            return []
+
+        try:
+            proxy_rows = int(self._limit_proxy.rowCount())
+        except Exception:
+            proxy_rows = 0
+        if proxy_rows <= 0:
+            return []
+
+        tasks: List[tuple[int, str]] = []
+        seen: set[str] = set()
+
+        for pr in range(proxy_rows):
+            try:
+                proxy_index = self._limit_proxy.index(pr, 0)
+                if not proxy_index.isValid():
+                    continue
+                filter_index = self._limit_proxy.mapToSource(proxy_index)
+                model_index = self._filter_proxy.mapToSource(filter_index)
+                model_row = int(model_index.row())
+            except Exception:
+                continue
+
+            try:
+                row = self._model.get_rows()[model_row]
+            except Exception:
+                continue
+
+            dsid = str(row.get("dataset_id") or "").strip()
+            if not dsid or dsid in seen:
+                continue
+            seen.add(dsid)
+            tasks.append((model_row, dsid))
+
+        return tasks
+
+    class _PortalFillWorker(QObject):
+        row_ready = Signal(int, object)
+        finished = Signal()
+
+        def __init__(self, tasks: List[tuple[int, str]], environment: str):
+            super().__init__()
+            self._tasks = tasks
+            self._environment = environment
+            self._cancelled = False
+
+        def cancel(self) -> None:
+            self._cancelled = True
+
+        def run(self) -> None:
+            from classes.data_portal.core.auth_manager import get_auth_manager
+            from classes.data_portal.core.portal_client import PortalClient
+            from classes.data_portal.core.portal_entry_status import (
+                get_portal_entry_status_cache,
+                parse_portal_entry_search_html,
+            )
+
+            env = str(self._environment or "production").strip() or "production"
+
+            auth_manager = get_auth_manager()
+            try:
+                credentials = auth_manager.get_credentials(env)
+            except Exception:
+                credentials = None
+
+            if credentials is None:
+                try:
+                    self.finished.emit()
+                except Exception:
+                    pass
+                return
+
+            try:
+                client = PortalClient(env)
+                client.set_credentials(credentials)
+            except Exception:
+                try:
+                    self.finished.emit()
+                except Exception:
+                    pass
+                return
+
+            try:
+                login_ok, _msg = client.login()
+            except Exception:
+                login_ok = False
+            if not login_ok:
+                try:
+                    self.finished.emit()
+                except Exception:
+                    pass
+                return
+
+            cache = get_portal_entry_status_cache()
+
+            for row_index, dataset_id in self._tasks:
+                if self._cancelled:
+                    break
+
+                dsid = str(dataset_id or "").strip()
+                if not dsid:
+                    continue
+
+                # Cache re-check
+                try:
+                    cached = cache.get_label(dsid, env)
+                except Exception:
+                    cached = None
+                if cached:
+                    try:
+                        self.row_ready.emit(int(row_index), cached)
+                    except Exception:
+                        pass
+                    continue
+
+                data = {
+                    "mode": "theme",
+                    "keyword": dsid,
+                    "search_inst": "",
+                    "search_license_level": "",
+                    "search_status": "",
+                    "page": "1",
+                }
+
+                try:
+                    ok, resp = client.post("main.php", data=data)
+                except Exception:
+                    continue
+                if not ok or not hasattr(resp, "text"):
+                    continue
+
+                html = resp.text or ""
+                if "ログイン" in html or "Login" in html or "loginArea" in html:
+                    try:
+                        relogin_ok, _msg = client.login()
+                    except Exception:
+                        relogin_ok = False
+                    if not relogin_ok:
+                        continue
+                    try:
+                        ok, resp = client.post("main.php", data=data)
+                    except Exception:
+                        continue
+                    if not ok or not hasattr(resp, "text"):
+                        continue
+                    html = resp.text or ""
+
+                parsed = parse_portal_entry_search_html(html, dsid, environment=env)
+                label = parsed.listing_label()
+                try:
+                    from classes.dataset.util.portal_status_resolver import normalize_logged_in_portal_label
+
+                    label = normalize_logged_in_portal_label(label)
+                except Exception:
+                    pass
+                try:
+                    cache.set_label(dsid, label, env)
+                except Exception:
+                    pass
+
+                if self._cancelled:
+                    break
+                try:
+                    self.row_ready.emit(int(row_index), label)
+                except Exception:
+                    continue
+
+            try:
+                self.finished.emit()
+            except Exception:
+                pass
+
+    class _PortalStatusRefreshWorker(QObject):
+        """Refresh portal status for one dataset_id using both logged-in and public checks."""
+
+        result_ready = Signal(int, object, object, object)
+        finished = Signal()
+
+        def __init__(self, model_row: int, dataset_id: str, *, env_candidates: List[str], worker_env: str):
+            super().__init__()
+            self._model_row = int(model_row)
+            self._dataset_id = str(dataset_id or "").strip()
+            self._env_candidates = [str(e or "").strip() for e in (env_candidates or []) if str(e or "").strip()]
+            self._worker_env = str(worker_env or "production").strip() or "production"
+
+        def run(self) -> None:
+            dsid = self._dataset_id
+            if not dsid:
+                try:
+                    self.finished.emit()
+                except Exception:
+                    pass
+                return
+
+            logged_in_label = None
+            logged_in_checked = False
+
+            # Logged-in check (if credentials available)
+            try:
+                from classes.data_portal.core.auth_manager import get_auth_manager
+                from classes.data_portal.core.portal_client import PortalClient
+                from classes.data_portal.core.portal_entry_status import (
+                    get_portal_entry_status_cache,
+                    parse_portal_entry_search_html,
+                )
+
+                auth_manager = get_auth_manager()
+                try:
+                    credentials = auth_manager.get_credentials(self._worker_env)
+                except Exception:
+                    credentials = None
+
+                if credentials is not None:
+                    logged_in_checked = True
+                    client = PortalClient(self._worker_env)
+                    client.set_credentials(credentials)
+                    login_ok, _msg = client.login()
+                    if login_ok:
+                        data = {
+                            "mode": "theme",
+                            "keyword": dsid,
+                            "search_inst": "",
+                            "search_license_level": "",
+                            "search_status": "",
+                            "page": "1",
+                        }
+
+                        ok, resp = client.post("main.php", data=data)
+                        if ok and hasattr(resp, "text"):
+                            html = resp.text or ""
+                            if "ログイン" in html or "Login" in html or "loginArea" in html:
+                                relogin_ok, _msg = client.login()
+                                if relogin_ok:
+                                    ok, resp = client.post("main.php", data=data)
+                                    if ok and hasattr(resp, "text"):
+                                        html = resp.text or ""
+
+                            parsed = parse_portal_entry_search_html(html, dsid, environment=self._worker_env)
+                            raw_label = parsed.listing_label()
+                            try:
+                                from classes.dataset.util.portal_status_resolver import normalize_logged_in_portal_label
+
+                                logged_in_label = normalize_logged_in_portal_label(raw_label)
+                            except Exception:
+                                logged_in_label = str(raw_label).strip() if raw_label is not None else ""
+
+                            # Save to cache for future listing fill.
+                            try:
+                                cache = get_portal_entry_status_cache()
+                                cache.set_label(dsid, logged_in_label, self._worker_env)
+                            except Exception:
+                                pass
+            except Exception:
+                logged_in_label = None
+
+            # Public (no-login) check
+            public_published = False
+            try:
+                from classes.utils.data_portal_public import get_public_published_dataset_ids
+
+                public_published = dsid in get_public_published_dataset_ids()
+            except Exception:
+                public_published = False
+
+            # If not found in output.json, best-effort live probe (production -> test)
+            if not public_published:
+                try:
+                    from classes.utils.data_portal_public import search_public_arim_data, fetch_public_arim_data_details
+
+                    for env in ("production", "test"):
+                        links = search_public_arim_data(
+                            keyword=dsid,
+                            environment=env,
+                            timeout=15,
+                            max_pages=1,
+                            start_page=1,
+                            end_page=1,
+                        )
+                        if not links:
+                            continue
+
+                        details = fetch_public_arim_data_details(
+                            links,
+                            environment=env,
+                            timeout=15,
+                            max_items=3,
+                            max_workers=1,
+                            cache_enabled=True,
+                        )
+                        for detail in details:
+                            try:
+                                fields = detail.fields if hasattr(detail, "fields") else {}
+                                if isinstance(fields, dict) and str(fields.get("dataset_id") or "").strip() == dsid:
+                                    public_published = True
+                                    break
+                            except Exception:
+                                continue
+                        if public_published:
+                            break
+                except Exception:
+                    public_published = False
+
+            try:
+                self.result_ready.emit(self._model_row, logged_in_label, public_published, logged_in_checked)
+            except Exception:
+                pass
+
+            try:
+                self.finished.emit()
+            except Exception:
+                pass
+
+    def _portal_status_column_index(self) -> Optional[int]:
+        try:
+            for i, c in enumerate(self._columns or []):
+                if getattr(c, "key", None) == "portal_status":
+                    return int(i)
+        except Exception:
+            return None
+        return None
+
+    def _install_portal_status_delegate(self) -> None:
+        col_idx = self._portal_status_column_index()
+        if col_idx is None or self._table is None:
+            return
+
+        # Reuse one delegate instance.
+        if self._portal_status_delegate is None:
+            self._portal_status_delegate = PortalStatusSpinnerDelegate(
+                self,
+                is_loading_callback=self._is_portal_status_loading_for_proxy_index,
+                view=self._table,
+            )
+        try:
+            self._table.setItemDelegateForColumn(int(col_idx), self._portal_status_delegate)
+        except Exception:
+            return
+
+    def _is_portal_status_loading_for_proxy_index(self, proxy_index: QModelIndex) -> bool:
+        try:
+            if not proxy_index.isValid() or self._model is None:
+                return False
+            idx1 = self._limit_proxy.mapToSource(proxy_index)
+            idx2 = self._filter_proxy.mapToSource(idx1)
+            if not idx2.isValid():
+                return False
+            model_row = int(idx2.row())
+            return model_row in self._portal_status_loading_model_rows
+        except Exception:
+            return False
+
+    def _collect_env_candidates_for_portal(self) -> List[str]:
+        env_candidates: List[str] = ["production", "test"]
+        try:
+            from classes.data_portal.conf.config import get_data_portal_config
+
+            cfg_envs = get_data_portal_config().get_available_environments()
+            if isinstance(cfg_envs, list) and cfg_envs:
+                ordered: List[str] = []
+                for known in ("production", "test"):
+                    if known in cfg_envs and known not in ordered:
+                        ordered.append(known)
+                for e in cfg_envs:
+                    if e not in ordered:
+                        ordered.append(str(e))
+                if ordered:
+                    env_candidates = ordered
+        except Exception:
+            pass
+        return env_candidates
+
+    def _pick_worker_env_with_credentials(self, env_candidates: List[str]) -> str:
+        worker_env = env_candidates[0] if env_candidates else "production"
+        try:
+            from classes.data_portal.core.auth_manager import get_auth_manager
+
+            auth_manager = get_auth_manager()
+            for candidate in env_candidates:
+                try:
+                    cred = auth_manager.get_credentials(str(candidate))
+                except Exception:
+                    cred = None
+                if cred is not None:
+                    worker_env = str(candidate)
+                    break
+        except Exception:
+            pass
+        return str(worker_env or "production").strip() or "production"
+
+    def _start_portal_status_refresh_for_model_row(self, model_row: int, dataset_id: str) -> None:
+        if self._model is None:
+            return
+
+        dsid = str(dataset_id or "").strip()
+        if not dsid:
+            return
+
+        # Avoid duplicate in-flight refresh.
+        if dsid in self._portal_status_refresh_inflight_dataset_ids:
+            return
+
+        self._portal_status_refresh_inflight_dataset_ids.add(dsid)
+        self._portal_status_loading_model_rows.add(int(model_row))
+        try:
+            if self._table is not None:
+                self._table.viewport().update()
+        except Exception:
+            pass
+
+        # Under pytest, avoid network/threading; simulate a short wait to exercise spinner.
+        if self._is_running_under_pytest():
+            def _finish_pytest() -> None:
+                try:
+                    self._on_portal_status_refresh_result(int(model_row), None, False, True)
+                finally:
+                    self._on_portal_status_refresh_finished(int(model_row), dsid)
+
+            try:
+                QTimer.singleShot(150, _finish_pytest)
+            except Exception:
+                _finish_pytest()
+            return
+
+        env_candidates = self._collect_env_candidates_for_portal()
+        worker_env = self._pick_worker_env_with_credentials(env_candidates)
+
+        thread = QThread()
+        worker = DatasetListingWidget._PortalStatusRefreshWorker(
+            int(model_row),
+            dsid,
+            env_candidates=env_candidates,
+            worker_env=worker_env,
+        )
+        worker.moveToThread(thread)
+
+        thread.started.connect(worker.run)
+        worker.result_ready.connect(self._on_portal_status_refresh_result)
+
+        # Cleanup
+        worker.finished.connect(lambda: self._on_portal_status_refresh_finished(int(model_row), dsid))
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(thread.deleteLater)
+
+        self._portal_status_refresh_threads.add(thread)
+        _ACTIVE_DATASET_LISTING_PORTAL_THREADS.add(thread)
+        try:
+            setattr(thread, "_portal_status_refresh_worker", worker)
+        except Exception:
+            pass
+        try:
+            thread.finished.connect(lambda: self._portal_status_refresh_threads.discard(thread))
+            thread.finished.connect(lambda: _ACTIVE_DATASET_LISTING_PORTAL_THREADS.discard(thread))
+        except Exception:
+            pass
+
+        thread.start()
+
+    def _on_portal_status_refresh_result(
+        self,
+        model_row: int,
+        logged_in_label: object,
+        public_published: object,
+        logged_in_checked: object,
+    ) -> None:
+        if self._model is None:
+            return
+
+        try:
+            row = self._model.get_rows()[int(model_row)]
+        except Exception:
+            row = None
+
+        existing = None
+        if isinstance(row, dict):
+            existing = row.get("portal_status")
+        existing_text = str(existing).strip() if existing is not None else ""
+
+        logged_text = str(logged_in_label).strip() if logged_in_label is not None else ""
+        public_ok = bool(public_published)
+        checked = bool(logged_in_checked)
+
+        # Click refresh should prefer newly confirmed values over existing.
+        new_label = None
+        if logged_text:
+            new_label = logged_text
+        elif public_ok:
+            try:
+                from classes.dataset.util.portal_status_resolver import PUBLIC_LABEL
+
+                new_label = PUBLIC_LABEL
+            except Exception:
+                new_label = "公開"
+        else:
+            # If we actually checked (logged-in path), treat as confirmed-not-public.
+            # Do not leave blank; use "未UP".
+            if checked:
+                new_label = "未UP"
+            else:
+                # If we couldn't check (no credentials, etc.), keep existing value.
+                new_label = existing_text
+
+        try:
+            self._model.update_row_fields(int(model_row), {"portal_status": new_label})
+        except Exception:
+            return
+
+    def _on_portal_status_refresh_finished(self, model_row: int, dataset_id: str) -> None:
+        try:
+            self._portal_status_loading_model_rows.discard(int(model_row))
+            self._portal_status_refresh_inflight_dataset_ids.discard(str(dataset_id or "").strip())
+        except Exception:
+            pass
+        try:
+            if self._table is not None:
+                self._table.viewport().update()
+        except Exception:
+            pass
+
+    def _on_portal_row_ready(self, row_index: int, label: object) -> None:
+        if self._model is None:
+            return
+        try:
+            self._model.update_row_fields(int(row_index), {"portal_status": label})
+        except Exception:
+            return
+
+    def _on_portal_fill_finished(self) -> None:
+        self._portal_thread = None
+        self._portal_worker = None
+
+    def _start_portal_fill_async(self) -> None:
+        if self._is_running_under_pytest():
+            return
+        if self._model is None:
+            return
+        if self._portal_thread is not None and self._portal_thread.isRunning():
+            return
+
+        # Prefer production, but allow test env cache/credentials.
+        env_candidates: List[str] = ["production", "test"]
+        try:
+            from classes.data_portal.conf.config import get_data_portal_config
+
+            cfg_envs = get_data_portal_config().get_available_environments()
+            if isinstance(cfg_envs, list) and cfg_envs:
+                ordered: List[str] = []
+                for known in ("production", "test"):
+                    if known in cfg_envs and known not in ordered:
+                        ordered.append(known)
+                for e in cfg_envs:
+                    if e not in ordered:
+                        ordered.append(str(e))
+                if ordered:
+                    env_candidates = ordered
+        except Exception:
+            pass
+
+        worker_env = env_candidates[0] if env_candidates else "production"
+        try:
+            from classes.data_portal.core.auth_manager import get_auth_manager
+
+            auth_manager = get_auth_manager()
+            for candidate in env_candidates:
+                try:
+                    cred = auth_manager.get_credentials(str(candidate))
+                except Exception:
+                    cred = None
+                if cred is not None:
+                    worker_env = str(candidate)
+                    break
+        except Exception:
+            pass
+
+        public_published_dataset_ids: set[str] = set()
+        try:
+            from classes.utils.data_portal_public import get_public_published_dataset_ids
+
+            public_published_dataset_ids = get_public_published_dataset_ids()
+        except Exception:
+            public_published_dataset_ids = set()
+
+        try:
+            from classes.dataset.util.portal_status_resolver import resolve_portal_status_label
+            from classes.dataset.util.portal_status_resolver import PUBLIC_LABEL as _PUBLIC_FALLBACK_LABEL
+            from classes.dataset.util.portal_status_resolver import pick_best_cached_label
+        except Exception:
+            resolve_portal_status_label = None
+            _PUBLIC_FALLBACK_LABEL = "公開"
+            pick_best_cached_label = None
+
+        try:
+            from classes.data_portal.core.portal_entry_status import get_portal_entry_status_cache
+
+            cache = get_portal_entry_status_cache()
+        except Exception:
+            cache = None
+
+        tasks: List[tuple[int, str]] = []
+        for model_row, dsid in self._collect_visible_portal_tasks():
+            try:
+                row = self._model.get_rows()[model_row]
+            except Exception:
+                continue
+
+            # Already filled
+            existing = row.get("portal_status")
+            existing_text = str(existing).strip() if existing is not None else ""
+            if existing_text and existing_text != _PUBLIC_FALLBACK_LABEL:
+                continue
+
+            cached_label = None
+            if cache is not None:
+                if pick_best_cached_label is not None:
+                    try:
+                        cached_label = pick_best_cached_label(
+                            dsid,
+                            get_label=lambda d, e: cache.get_label_any_age(d, e) if hasattr(cache, "get_label_any_age") else cache.get_label(d, e),
+                            environments=env_candidates,
+                        )
+                    except Exception:
+                        cached_label = None
+                else:
+                    try:
+                        cached_label = cache.get_label_any_age(dsid, worker_env) if hasattr(cache, "get_label_any_age") else cache.get_label(dsid, worker_env)
+                    except Exception:
+                        cached_label = None
+
+            resolved = None
+            if resolve_portal_status_label is not None:
+                try:
+                    resolved = resolve_portal_status_label(
+                        existing=row.get("portal_status"),
+                        cached=cached_label,
+                        dataset_id=dsid,
+                        public_published_dataset_ids=public_published_dataset_ids,
+                    )
+                except Exception:
+                    resolved = None
+
+            if resolved is None and cached_label:
+                resolved = cached_label
+
+            if resolved:
+                try:
+                    self._model.update_row_fields(int(model_row), {"portal_status": resolved})
+                except Exception:
+                    pass
+                # Keep using resolved/cached values; avoid automatic per-row portal access.
+                continue
+
+            tasks.append((model_row, dsid))
+
+        if not tasks:
+            return
+
+        thread = QThread()
+        worker = DatasetListingWidget._PortalFillWorker(tasks, worker_env)
+        worker.moveToThread(thread)
+
+        thread.started.connect(worker.run)
+        worker.row_ready.connect(self._on_portal_row_ready)
+        worker.finished.connect(self._on_portal_fill_finished)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(thread.deleteLater)
+
+        self._portal_worker = worker
+        self._portal_thread = thread
+
+        _ACTIVE_DATASET_LISTING_PORTAL_THREADS.add(thread)
+        try:
+            setattr(thread, "_portal_worker", worker)
+        except Exception:
+            pass
+        try:
+            thread.finished.connect(lambda: _ACTIVE_DATASET_LISTING_PORTAL_THREADS.discard(thread))
+        except Exception:
+            pass
+
+        thread.start()
+
+    class _PortalCsvFillWorker(QObject):
+        mapping_ready = Signal(object, object)  # (environment, mapping)
+        finished = Signal()
+
+        def __init__(self, *, environment: str):
+            super().__init__()
+            self._environment = str(environment or "production").strip() or "production"
+
+        def run(self) -> None:
+            from classes.data_portal.core.auth_manager import get_auth_manager
+            from classes.data_portal.core.portal_client import PortalClient
+
+            env = self._environment
+            auth_manager = get_auth_manager()
+            try:
+                credentials = auth_manager.get_credentials(env)
+            except Exception:
+                credentials = None
+
+            if credentials is None:
+                try:
+                    self.finished.emit()
+                except Exception:
+                    pass
+                return
+
+            try:
+                client = PortalClient(env)
+                client.set_credentials(credentials)
+            except Exception:
+                try:
+                    self.finished.emit()
+                except Exception:
+                    pass
+                return
+
+            try:
+                ok, _msg = client.login()
+            except Exception:
+                ok = False
+            if not ok:
+                try:
+                    self.finished.emit()
+                except Exception:
+                    pass
+                return
+
+            try:
+                ok, resp = client.download_theme_csv()
+            except Exception:
+                ok = False
+                resp = None
+            if not ok or resp is None:
+                try:
+                    self.finished.emit()
+                except Exception:
+                    pass
+                return
+
+            payload = getattr(resp, "content", b"")
+            try:
+                from classes.data_portal.core.portal_csv_status import parse_portal_theme_csv_to_label_map
+
+                mapping = parse_portal_theme_csv_to_label_map(payload)
+            except Exception:
+                mapping = {}
+
+            try:
+                self.mapping_ready.emit(env, mapping)
+            except Exception:
+                pass
+
+            try:
+                self.finished.emit()
+            except Exception:
+                pass
+
+    def _start_portal_csv_fill_async(self) -> None:
+        if self._is_running_under_pytest():
+            return
+        if self._model is None:
+            return
+        if self._portal_csv_thread is not None and self._portal_csv_thread.isRunning():
+            return
+
+        env_candidates = self._collect_env_candidates_for_portal()
+        worker_env = self._pick_worker_env_with_credentials(env_candidates)
+
+        # If no credentials found for any env, skip.
+        try:
+            from classes.data_portal.core.auth_manager import get_auth_manager
+
+            auth_manager = get_auth_manager()
+            cred = auth_manager.get_credentials(worker_env)
+            if cred is None:
+                return
+        except Exception:
+            return
+
+        thread = QThread()
+        worker = DatasetListingWidget._PortalCsvFillWorker(environment=worker_env)
+        worker.moveToThread(thread)
+
+        thread.started.connect(worker.run)
+        worker.mapping_ready.connect(self._on_portal_csv_mapping_ready)
+        worker.finished.connect(self._on_portal_csv_fill_finished)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(thread.deleteLater)
+
+        self._portal_csv_worker = worker
+        self._portal_csv_thread = thread
+
+        _ACTIVE_DATASET_LISTING_PORTAL_CSV_THREADS.add(thread)
+        try:
+            setattr(thread, "_portal_csv_worker", worker)
+        except Exception:
+            pass
+        try:
+            thread.finished.connect(lambda: _ACTIVE_DATASET_LISTING_PORTAL_CSV_THREADS.discard(thread))
+        except Exception:
+            pass
+
+        thread.start()
+
+    def _on_portal_csv_mapping_ready(self, environment: object, mapping: object) -> None:
+        if self._model is None:
+            return
+
+        env = str(environment or "production").strip() or "production"
+        mp = mapping if isinstance(mapping, dict) else {}
+        if not mp:
+            return
+
+        # Persist to portal status cache (once).
+        try:
+            from classes.data_portal.core.portal_entry_status import get_portal_entry_status_cache
+
+            cache = get_portal_entry_status_cache()
+            if hasattr(cache, "set_labels_bulk"):
+                cache.set_labels_bulk(mp, env)
+            else:
+                for dsid, label in mp.items():
+                    cache.set_label(dsid, str(label), env)
+        except Exception:
+            pass
+
+        # Update current rows (do not force repaint of everything; update only changed rows).
+        try:
+            from classes.dataset.util.portal_status_resolver import PUBLIC_LABEL as _PUBLIC_FALLBACK_LABEL
+            from classes.dataset.util.portal_status_resolver import is_managed_public_label
+        except Exception:
+            _PUBLIC_FALLBACK_LABEL = "公開"
+            is_managed_public_label = lambda _x: False
+
+        rows = self._model.get_rows()
+        for i, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+            dsid = str(row.get("dataset_id") or "").strip()
+            if not dsid:
+                continue
+            new_label = mp.get(dsid)
+            if not new_label:
+                continue
+            existing = row.get("portal_status")
+            existing_text = str(existing).strip() if existing is not None else ""
+
+            # Always accept managed public upgrade.
+            if is_managed_public_label(new_label):
+                if existing_text != str(new_label):
+                    self._model.update_row_fields(i, {"portal_status": str(new_label)})
+                continue
+
+            # For non-public labels, avoid overwriting already managed/public.
+            if existing_text and existing_text != _PUBLIC_FALLBACK_LABEL:
+                continue
+
+            if existing_text != str(new_label):
+                self._model.update_row_fields(i, {"portal_status": str(new_label)})
+
+    def _on_portal_csv_fill_finished(self) -> None:
+        self._portal_csv_thread = None
+        self._portal_csv_worker = None
+
     class _StatsFillWorker(QObject):
         row_ready = Signal(int, object, object, object)
         finished = Signal()
@@ -1527,6 +2433,12 @@ class DatasetListingWidget(QWidget):
         self._status.setText(f"{len(rows)}件")
         self._rebuild_filters_panel()
 
+        # Portal column: show in-cell spinner during per-row refresh.
+        try:
+            self._install_portal_status_delegate()
+        except Exception:
+            pass
+
         # Apply saved column visibility (fallback: defaults)
         visible_by_key = self._load_column_visibility() or {c.key: c.default_visible for c in columns}
         self._apply_column_visibility(visible_by_key, persist=False)
@@ -1538,6 +2450,18 @@ class DatasetListingWidget(QWidget):
         # Fill tile/file stats in background to restore legacy behavior without blocking UI.
         try:
             self._start_stats_fill_async(rows)
+        except Exception:
+            pass
+
+        # Fill portal status in background (visible page only).
+        try:
+            self._start_portal_fill_async()
+        except Exception:
+            pass
+
+        # Bulk portal status via CSV (logged-in export)
+        try:
+            self._start_portal_csv_fill_async()
         except Exception:
             pass
 
@@ -1570,6 +2494,7 @@ class DatasetListingWidget(QWidget):
             return
 
         self._cancel_stats_fill()
+        self._cancel_portal_fill()
 
         self._show_loading()
 
@@ -1604,6 +2529,7 @@ class DatasetListingWidget(QWidget):
 
     def _reload_data_sync(self) -> None:
         self._cancel_stats_fill()
+        self._cancel_portal_fill()
         self._show_loading()
         try:
             columns, rows = build_dataset_list_rows_from_files()
@@ -1626,12 +2552,20 @@ class DatasetListingWidget(QWidget):
     def _apply_row_limit(self) -> None:
         self._limit_proxy.set_page_size(int(self._row_limit.value()))
         self._update_pagination_controls()
+        try:
+            self._start_portal_fill_async()
+        except Exception:
+            pass
 
     def _apply_page(self) -> None:
         try:
             self._limit_proxy.set_page(int(self._page.value()))
         except Exception:
             return
+        try:
+            self._start_portal_fill_async()
+        except Exception:
+            pass
 
     def _clear_all_filters(self) -> None:
         for edit in self._filter_edits_by_key.values():
@@ -1725,6 +2659,11 @@ class DatasetListingWidget(QWidget):
         self._update_pagination_controls()
 
         self._update_filters_summary()
+
+        try:
+            self._start_portal_fill_async()
+        except Exception:
+            pass
 
     def _toggle_filters_collapsed(self) -> None:
         self._set_filters_collapsed(not self._filters_collapsed)
@@ -2146,7 +3085,21 @@ class DatasetListingWidget(QWidget):
                 return
 
             col = self._columns[idx2.column()] if 0 <= idx2.column() < len(self._columns) else None
-            if col is None or col.key not in {"dataset_name", "instrument_names", "subgroup_name", "tool_open"}:
+            if col is None:
+                return
+
+            if col.key == "portal_status":
+                try:
+                    rows = self._model.get_rows()
+                    row = rows[idx2.row()] if 0 <= idx2.row() < len(rows) else {}
+                    dsid = str(row.get("dataset_id") or "").strip()
+                    if dsid:
+                        self._start_portal_status_refresh_for_model_row(int(idx2.row()), dsid)
+                except Exception:
+                    return
+                return
+
+            if col.key not in {"dataset_name", "instrument_names", "subgroup_name", "tool_open"}:
                 return
 
             if col.key in {"dataset_name", "subgroup_name"}:

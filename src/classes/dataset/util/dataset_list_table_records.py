@@ -565,7 +565,7 @@ def _build_name_map_by_id(payload: Any, preferred_attr_keys: Tuple[str, ...]) ->
 
 def _build_grant_number_to_subgroup_info(subgroup_payload: Any) -> Dict[str, Dict[str, str]]:
     # subGroup.json often contains included groups of type TEAM.
-    # We extract grantNumber -> {"name": team_name, "id": group_id}
+    # We extract grantNumber -> {"name": team_name, "id": group_id, "description": desc}
     if not isinstance(subgroup_payload, dict):
         return {}
 
@@ -583,6 +583,7 @@ def _build_grant_number_to_subgroup_info(subgroup_payload: Any) -> Dict[str, Dic
         if _safe_str(attrs.get("groupType")).strip().upper() != "TEAM":
             continue
         team_name = _safe_str(attrs.get("name")).strip()
+        team_desc = _safe_str(attrs.get("description")).strip()
         group_id = _safe_str(inc.get("id")).strip()
         subjects = attrs.get("subjects")
         if not isinstance(subjects, list):
@@ -592,8 +593,55 @@ def _build_grant_number_to_subgroup_info(subgroup_payload: Any) -> Dict[str, Dic
                 continue
             grant = _safe_str(subj.get("grantNumber")).strip()
             if grant and (team_name or group_id):
-                mapping.setdefault(grant, {"name": team_name, "id": group_id})
+                mapping.setdefault(grant, {"name": team_name, "id": group_id, "description": team_desc})
     return mapping
+
+
+def _extract_group_id_from_dataset_detail_payload(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    rels = data.get("relationships") if isinstance(data.get("relationships"), dict) else {}
+    group = rels.get("group") if isinstance(rels.get("group"), dict) else {}
+    group_data = group.get("data") if isinstance(group.get("data"), dict) else {}
+    return _safe_str(group_data.get("id")).strip()
+
+
+def _extract_group_id_best_effort(dataset_item: Dict[str, Any], dataset_id: str) -> str:
+    # 1) dataset.json item may already include relationships.group
+    try:
+        rels = dataset_item.get("relationships") if isinstance(dataset_item.get("relationships"), dict) else {}
+        group = rels.get("group") if isinstance(rels.get("group"), dict) else {}
+        data = group.get("data") if isinstance(group.get("data"), dict) else {}
+        gid = _safe_str(data.get("id")).strip()
+        if gid:
+            return gid
+    except Exception:
+        pass
+
+    # 2) per-dataset detail JSON is more reliable
+    dsid = _safe_str(dataset_id).strip()
+    if not dsid:
+        return ""
+    detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dsid}.json")
+    payload = _load_json_file(detail_path)
+    return _extract_group_id_from_dataset_detail_payload(payload)
+
+
+def _extract_subgroup_description_from_payload(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    attrs = data.get("attributes") if isinstance(data.get("attributes"), dict) else {}
+    return _safe_str(attrs.get("description")).strip() if isinstance(attrs, dict) else ""
+
+
+def _extract_subgroup_name_from_payload(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    attrs = data.get("attributes") if isinstance(data.get("attributes"), dict) else {}
+    return _safe_str(attrs.get("name")).strip() if isinstance(attrs, dict) else ""
 
 
 def _build_grant_number_to_subgroup_name(subgroup_payload: Any) -> Dict[str, str]:
@@ -605,7 +653,9 @@ def _build_grant_number_to_subgroup_name(subgroup_payload: Any) -> Dict[str, str
 def get_default_columns() -> List[DatasetListColumn]:
     # Labels are aligned to dataset_edit_widget.py where possible (without trailing colon).
     return [
+        DatasetListColumn("portal_status", "ポータル", True),
         DatasetListColumn("subgroup_name", "サブグループ名", True),
+        DatasetListColumn("subgroup_description", "サブグループ説明", True),
         DatasetListColumn("grant_number", "課題番号", True),
         DatasetListColumn("dataset_name", "データセット名", True),
         DatasetListColumn("tool_open", "ツール内リンク", True),
@@ -657,7 +707,7 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
     dataset_details_dir = get_dynamic_file_path("output/rde/data/datasets")
 
     signature = (
-        3,  # signature schema
+        5,  # signature schema (bump when columns/row schema changes)
         _safe_mtime(dataset_json_path),
         _safe_mtime(subgroup_json_path),
         _safe_mtime(info_json_path),
@@ -719,6 +769,9 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
             dataset_name_by_id[did] = name
 
     columns = get_default_columns()
+
+    # Cache subgroup detail payloads to avoid repeated disk IO.
+    subgroup_detail_payload_cache: Dict[str, Any] = {}
 
     # Cache dataEntry computations to avoid repeated disk IO.
     data_entry_payload_cache: Dict[str, Any] = {}
@@ -796,6 +849,32 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
         subgroup_info = grant_to_subgroup_info.get(grant_number, {}) if grant_number else {}
         subgroup_name = _safe_str(subgroup_info.get("name")).strip() if isinstance(subgroup_info, dict) else ""
         subgroup_id = _safe_str(subgroup_info.get("id")).strip() if isinstance(subgroup_info, dict) else ""
+        subgroup_description = _safe_str(subgroup_info.get("description")).strip() if isinstance(subgroup_info, dict) else ""
+
+        # Prefer dataset detail JSON relationships.group -> subGroups/<id>.json
+        group_id_from_dataset = _extract_group_id_best_effort(item, dataset_id)
+        if group_id_from_dataset:
+            subgroup_id = group_id_from_dataset
+            if subgroups_dir:
+                subgroup_detail_path = os.path.join(subgroups_dir, f"{group_id_from_dataset}.json")
+            else:
+                subgroup_detail_path = get_dynamic_file_path(f"output/rde/data/subGroups/{group_id_from_dataset}.json")
+
+            if group_id_from_dataset in subgroup_detail_payload_cache:
+                subgroup_payload = subgroup_detail_payload_cache[group_id_from_dataset]
+            else:
+                subgroup_payload = _load_json_file(subgroup_detail_path)
+                subgroup_detail_payload_cache[group_id_from_dataset] = subgroup_payload
+
+            desc_from_detail = _extract_subgroup_description_from_payload(subgroup_payload)
+            if desc_from_detail:
+                subgroup_description = desc_from_detail
+
+            # If subgroup name is not known from subGroup.json, try to fill it from detail.
+            if not subgroup_name:
+                name_from_detail = _extract_subgroup_name_from_payload(subgroup_payload)
+                if name_from_detail:
+                    subgroup_name = name_from_detail
 
         dataset_name = _safe_str(attrs.get("name")).strip()
         description = _safe_str(attrs.get("description"))
@@ -875,6 +954,7 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
         row: Dict[str, Any] = {
             "dataset_id": dataset_id,
             "subgroup_name": subgroup_name,
+            "subgroup_description": subgroup_description,
             "subgroup_id": subgroup_id,
             "grant_number": grant_number,
             "dataset_name": dataset_name,

@@ -3240,97 +3240,56 @@ class DatasetUploadTab(QWidget):
             # データセットIDがレスポンスに含まれるかチェック
             dataset_id_found = dataset_id in response.text
             logger.info(f"[CHECK_ENTRY] データセットID存在チェック: {dataset_id_found}")
-            
-            if dataset_id_found:
-                # 修正リンクが有効かチェック
-                import re
-                from bs4 import BeautifulSoup
-                
-                # 修正リンクのパターン: <a href="#" onClick="document.form_change0.submit()
-                pattern = r'form_change\d+'
-                match = re.search(pattern, response.text)
-                logger.info(f"[CHECK_ENTRY] form_change パターン検索: match={match}, pattern={pattern if match else 'N/A'}")
-                
-                # ステータス情報を抽出
-                soup = BeautifulSoup(response.text, 'html.parser')
-                status_cell = None
-                for td in soup.find_all('td', {'rowspan': '2'}):
-                    if '公開' in td.get_text() or '非公開' in td.get_text():
-                        status_cell = td
-                        break
-                
-                if status_cell:
-                    status_text = status_cell.get_text(strip=True)
-                    if '公開済' in status_text:
-                        self.current_status = '公開済'
-                        logger.info(f"[CHECK_ENTRY] ステータス: 公開済")
-                    elif '非公開' in status_text:
-                        self.current_status = '非公開'
-                        logger.info(f"[CHECK_ENTRY] ステータス: 非公開")
+
+            from classes.data_portal.core.portal_entry_status import parse_portal_entry_search_html
+
+            env = self.current_environment or self.env_combo.currentData() or 'production'
+            parsed = parse_portal_entry_search_html(response.text, dataset_id, environment=str(env))
+
+            # Persist best-effort portal label for dataset listing.
+            # "公開（管理）" is determined by the same condition as enabling "非公開にする".
+            try:
+                if parsed.can_edit:
+                    from classes.data_portal.core.portal_entry_status import get_portal_entry_status_cache
+                    from classes.dataset.util.portal_status_resolver import normalize_logged_in_portal_label
+
+                    label = normalize_logged_in_portal_label(parsed.listing_label())
+                    get_portal_entry_status_cache().set_label(str(dataset_id), label, str(env))
+            except Exception:
+                pass
+
+            # パース結果をウィジェット状態へ反映
+            self.current_status = parsed.current_status
+            self.current_public_code = parsed.public_code
+            self.current_public_key = parsed.public_key
+            self.current_public_url = parsed.public_url
+
+            if parsed.dataset_id_found and parsed.can_edit:
+                logger.info(f"[CHECK_ENTRY] ✅ エントリ存在 - 修正可能")
+                self.edit_portal_btn.setEnabled(True)
+                self.edit_portal_btn.setToolTip(f"データポータルのエントリを修正します (ID: {dataset_id[:8]}...)")
+
+                # ステータス変更ボタン
+                if parsed.can_toggle_status and self.current_status:
+                    self.toggle_status_btn.setEnabled(True)
+                    if self.current_status == '公開済':
+                        self.toggle_status_btn.setText("🔄 非公開にする")
+                        self.toggle_status_btn.setToolTip("データポータルのエントリを非公開にします")
                     else:
-                        self.current_status = None
-                        logger.warning(f"[CHECK_ENTRY] ステータス不明: {status_text}")
+                        self.toggle_status_btn.setText("🔄 公開する")
+                        self.toggle_status_btn.setToolTip("データポータルのエントリを公開します")
                 else:
-                    self.current_status = None
-                    logger.warning(f"[CHECK_ENTRY] ステータス情報が見つかりません")
-
-                # 公開ページURLの code/key を抽出（存在すれば公開ページボタンを有効化）
-                self.current_public_code = None
-                self.current_public_key = None
-                self.current_public_url = None
-                try:
-                    for a in soup.find_all('a', href=True):
-                        href = a.get('href') or ''
-                        if 'arim_data.php' in href and 'mode=detail' in href and 'code=' in href and 'key=' in href:
-                            try:
-                                from urllib.parse import urlparse, parse_qs
-                                parsed = urlparse(href)
-                                params = parse_qs(parsed.query)
-                                code = (params.get('code', [''])[0] or '').strip()
-                                key = (params.get('key', [''])[0] or '').strip()
-
-                                if code and key:
-                                    env = self.current_environment or self.env_combo.currentData() or 'production'
-                                    from classes.utils.data_portal_public import build_public_detail_url
-                                    full_url = build_public_detail_url(env, code, key)
-                                    self.current_public_code = code
-                                    self.current_public_key = key
-                                    self.current_public_url = full_url
-                                    logger.info(
-                                        f"[CHECK_ENTRY] 公開URLパラメータ抽出: code={self.current_public_code}, key={self.current_public_key}"
-                                    )
-                                    break
-                            except Exception:
-                                continue
-                except Exception as ex:
-                    logger.debug(f"[CHECK_ENTRY] 公開URL抽出スキップ: {ex}")
-                
-                if match:
-                    logger.info(f"[CHECK_ENTRY] ✅ エントリ存在 - 修正可能 (form: {match.group()})")
-                    self.edit_portal_btn.setEnabled(True)
-                    self.edit_portal_btn.setToolTip(f"データポータルのエントリを修正します (ID: {dataset_id[:8]}...)")
-                    
-                    # ステータス変更ボタンを有効化
-                    if self.current_status:
-                        self.toggle_status_btn.setEnabled(True)
-                        if self.current_status == '公開済':
-                            self.toggle_status_btn.setText("🔄 非公開にする")
-                            self.toggle_status_btn.setToolTip("データポータルのエントリを非公開にします")
-                        else:
-                            self.toggle_status_btn.setText("🔄 公開する")
-                            self.toggle_status_btn.setToolTip("データポータルのエントリを公開します")
-                    else:
-                        self.toggle_status_btn.setEnabled(False)
-                        self.toggle_status_btn.setToolTip("ステータス情報が取得できません")
-
-                    # 公開ページボタン（code/keyが取れている場合のみ有効化）
-                    self.public_view_btn.setEnabled(bool(self.current_public_code and self.current_public_key))
-                else:
-                    logger.warning(f"[CHECK_ENTRY] ⚠️ エントリ存在 - 修正リンクが見つかりません")
-                    self.edit_portal_btn.setEnabled(False)
-                    self.edit_portal_btn.setToolTip("修正リンクが無効です")
                     self.toggle_status_btn.setEnabled(False)
-                    self.public_view_btn.setEnabled(False)
+                    self.toggle_status_btn.setToolTip("ステータス情報が取得できません")
+
+                # 公開ページボタン（code/keyが取れている場合のみ有効化）
+                self.public_view_btn.setEnabled(bool(parsed.can_public_view))
+            elif parsed.dataset_id_found:
+                logger.warning(f"[CHECK_ENTRY] ⚠️ エントリ存在 - 修正リンクが見つかりません")
+                self.edit_portal_btn.setEnabled(False)
+                self.edit_portal_btn.setToolTip("修正リンクが無効です")
+                self.toggle_status_btn.setEnabled(False)
+                self.public_view_btn.setEnabled(False)
             else:
                 logger.info(f"[CHECK_ENTRY] ⚠️ エントリ未登録")
                 self.edit_portal_btn.setEnabled(False)

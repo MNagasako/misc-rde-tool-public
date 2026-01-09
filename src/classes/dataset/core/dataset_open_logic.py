@@ -5,13 +5,134 @@ import json
 from qt_compat.widgets import QComboBox, QLabel, QVBoxLayout, QHBoxLayout, QWidget
 from classes.utils.api_request_helper import api_request  # refactored to use api_request_helper
 from core.bearer_token_manager import BearerTokenManager
-from config.common import OUTPUT_RDE_DATA_DIR
+from config.common import DATASET_JSON_PATH, OUTPUT_RDE_DATA_DIR
 from classes.dataset.util.show_event_refresh import RefreshOnShowWidget
 
 import logging
 
 # ロガー設定
 logger = logging.getLogger(__name__)
+
+
+def _format_any_as_pretty_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False, indent=2)
+        except Exception:
+            return str(value)
+    return str(value)
+
+
+def _build_dataset_open_error_detail_text(payload_str: str, result) -> str:
+    request_text = payload_str or ""
+    response_text = _format_any_as_pretty_text(result)
+    return (
+        "=== Request (Payload) ===\n"
+        f"{request_text}\n"
+        "\n=== Response / Error ===\n"
+        f"{response_text}\n"
+    )
+
+
+def _extract_related_datasets_resource_not_found_hint(result) -> str | None:
+    """Build a user-facing hint when 422 likely comes from relatedDatasets.
+
+    RDE API returns 422 for invalid relationships; one known case is
+    providing non-existing or non-accessible dataset ids in relatedDatasets.
+    """
+
+    if not isinstance(result, dict):
+        return None
+
+    status_code = result.get("status_code")
+    if status_code is not None and status_code != 422:
+        return None
+
+    response_json = result.get("response_json")
+    if not isinstance(response_json, dict):
+        return None
+
+    errors = response_json.get("errors")
+    if not isinstance(errors, list):
+        return None
+
+    for err in errors:
+        if not isinstance(err, dict):
+            continue
+        detail = str(err.get("detail") or "")
+        pointer = str(((err.get("source") or {}) if isinstance(err.get("source"), dict) else {}).get("pointer") or "")
+
+        looks_like_not_found = ("resource not found" in detail.lower()) and ("type=dataset" in detail)
+        points_to_related = "relatedDatasets" in pointer
+
+        if looks_like_not_found and points_to_related:
+            return (
+                "（確認のお願い）関連データセット（relatedDatasets）に、存在しないデータセット、または参照権限のないデータセットIDが含まれている可能性があります。\n"
+                "既存データセット読み込みから自動反映した場合も含め、関連データセットの指定内容を確認してください。"
+            )
+
+    return None
+
+
+def _format_dataset_open_error_summary(result) -> str:
+    if isinstance(result, dict):
+        status = result.get("status_code")
+        err = result.get("error")
+        if status is not None and err:
+            return f"HTTP {status}: {err}"
+        if err:
+            return str(err)
+    return str(result)
+
+
+def _show_dataset_open_error_dialog(parent, payload_str: str, result) -> None:
+    from qt_compat.widgets import QMessageBox, QPushButton, QDialog, QVBoxLayout, QTextEdit
+
+    msg_box = QMessageBox(parent)
+    msg_box.setWindowTitle("データセット開設エラー")
+    msg_box.setIcon(QMessageBox.Critical)
+    hint = _extract_related_datasets_resource_not_found_hint(result)
+    summary = _format_dataset_open_error_summary(result)
+    if hint:
+        msg_box.setText(f"データセットの開設に失敗しました。\n{summary}\n\n{hint}")
+    else:
+        msg_box.setText(f"データセットの開設に失敗しました。\n{summary}")
+    ok_btn = msg_box.addButton(QMessageBox.Ok)
+    detail_btn = QPushButton("リクエスト/レスポンス全文表示")
+    msg_box.addButton(detail_btn, QMessageBox.ActionRole)
+    msg_box.setDefaultButton(ok_btn)
+
+    detail_text = _build_dataset_open_error_detail_text(payload_str, result)
+
+    def show_detail():
+        dlg = QDialog(parent)
+        dlg.setWindowTitle("リクエスト/レスポンス 全文表示")
+        layout = QVBoxLayout(dlg)
+        text_edit = QTextEdit(dlg)
+        text_edit.setReadOnly(True)
+        text_edit.setPlainText(detail_text)
+        text_edit.setMinimumSize(650, 450)
+        layout.addWidget(text_edit)
+        dlg.setLayout(layout)
+        dlg.exec_()
+
+    detail_btn.clicked.connect(show_detail)
+    msg_box.exec_()
+
+
+def _load_dataset_id_set_from_dataset_json() -> set[str]:
+    try:
+        with open(DATASET_JSON_PATH, encoding="utf-8") as f:
+            data = json.load(f)
+        return {
+            str(it.get("id"))
+            for it in (data or {}).get("data", []) or []
+            if isinstance(it, dict) and it.get("id")
+        }
+    except Exception:
+        return set()
 
 
 def _build_template_entries(
@@ -236,9 +357,18 @@ def run_dataset_open_logic(
     if related_dataset_ids:
         rel_ids = [rid for rid in related_dataset_ids if isinstance(rid, str) and rid.strip()]
         if rel_ids:
-            payload["data"]["relationships"]["relatedDatasets"] = {
-                "data": [{"type": "dataset", "id": rid} for rid in rel_ids]
-            }
+            # Prevent 422 by excluding stale/nonexistent dataset IDs.
+            valid_ids = _load_dataset_id_set_from_dataset_json()
+            if valid_ids:
+                filtered_rel_ids = [rid for rid in rel_ids if rid in valid_ids]
+                dropped = [rid for rid in rel_ids if rid not in valid_ids]
+                if dropped:
+                    logger.warning("relatedDatasets: dataset.json に存在しないIDを除外しました: %s", dropped)
+                rel_ids = filtered_rel_ids
+            if rel_ids:
+                payload["data"]["relationships"]["relatedDatasets"] = {
+                    "data": [{"type": "dataset", "id": rid} for rid in rel_ids]
+                }
     payload_str = json.dumps(payload, ensure_ascii=False, indent=2)
     logger.debug("payload sharingPolicies: %s", payload['data']['attributes']['sharingPolicies'])
     logger.debug("payload isAnonymized: %s", payload['data']['attributes']['isAnonymized'])
@@ -353,7 +483,7 @@ def run_dataset_open_logic(
                 # エラー時は開設成功のみを通知
                 QMessageBox.information(parent, "データセット開設", f"データセットの開設に成功しました。\nID: {dataset_id}\n\n（注意: 一覧の自動更新に失敗しました）")
         else:
-            QMessageBox.critical(parent, "データセット開設エラー", f"データセットの開設に失敗しました。\n{result}")
+            _show_dataset_open_error_dialog(parent, payload_str, result)
         update_dataset(bearer_token)
     else:
         logger.info("データセット開設処理はユーザーによりキャンセルされました。")
@@ -1382,6 +1512,7 @@ def create_dataset(bearer_token, payload, output_dir=None):
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": '"Windows"',
     }
+    resp = None
     try:
         resp = api_request("POST", url, bearer_token=bearer_token, headers=headers, json_data=payload, timeout=15)  # refactored to use api_request_helper
         if resp is None:
@@ -1411,7 +1542,30 @@ def create_dataset(bearer_token, payload, output_dir=None):
         return True, data
     except Exception as e:
         logger.error("設備情報の取得・保存に失敗しました: %s", e)
-        return False, str(e)
+
+        # Try to include response payload for debugging (422 etc.)
+        try:
+            info: dict = {"error": str(e), "url": url}
+            if resp is not None:
+                try:
+                    info["status_code"] = getattr(resp, "status_code", None)
+                except Exception:
+                    info["status_code"] = None
+                try:
+                    info["response_text"] = getattr(resp, "text", None)
+                except Exception:
+                    info["response_text"] = None
+                try:
+                    info["response_headers"] = dict(getattr(resp, "headers", {}) or {})
+                except Exception:
+                    info["response_headers"] = None
+                try:
+                    info["response_json"] = resp.json()
+                except Exception:
+                    info["response_json"] = None
+            return False, info
+        except Exception:
+            return False, str(e)
 
 
     

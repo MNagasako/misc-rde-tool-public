@@ -6,6 +6,8 @@ net.http_helpersを使用してプロキシ・SSL設定に対応
 """
 
 import logging
+import re
+import os
 from typing import Optional, Dict, Any, Tuple
 from urllib.parse import urljoin, urlparse
 
@@ -420,6 +422,121 @@ class PortalClient:
             logger.error(f"ログインエラー: {e}")
             self.authenticated = False
             return False, f"ログインエラー: {e}"
+
+    def _origin_for_headers(self) -> str:
+        try:
+            parsed = urlparse(self.base_url)
+            if parsed.scheme and parsed.netloc:
+                return f"{parsed.scheme}://{parsed.netloc}"
+        except Exception:
+            pass
+        return "https://nanonet.go.jp"
+
+    @staticmethod
+    def _extract_csv_tokens_from_html(html: str) -> Tuple[Optional[str], Optional[str]]:
+        """Extract (code, key) for csv_download from portal HTML (best-effort)."""
+
+        text = html or ""
+        code = None
+        key = None
+
+        # Look for query fragments like code=165&key=... or hidden inputs.
+        try:
+            m = re.search(r"\bcode=(\d+)\b", text)
+            if m:
+                code = m.group(1)
+        except Exception:
+            code = None
+        try:
+            m = re.search(r"\bkey=([A-Za-z0-9_-]{8,})\b", text)
+            if m:
+                key = m.group(1)
+        except Exception:
+            key = None
+
+        return code, key
+
+    def download_theme_csv(
+        self,
+        *,
+        keyword: str = "",
+        search_inst: str = "",
+        search_license_level: str = "",
+        search_status: str = "",
+        page: int = 1,
+    ) -> Tuple[bool, Any]:
+        """Download logged-in theme list as CSV.
+
+        The portal provides a CSV export via main.php:
+        - mode=theme
+        - mode2=csv_download
+        - auth=1
+        - code/key tokens (extracted from HTML)
+        """
+
+        if not self.credentials:
+            return False, "認証情報が設定されていません"
+
+        if not self.is_authenticated():
+            ok, msg = self.login()
+            if not ok:
+                return False, msg
+
+        # Fetch main page to obtain code/key tokens.
+        ok, resp = self.get("main.php", params={"mode": "theme"})
+        if not ok or not hasattr(resp, "text"):
+            return False, "CSV用トークン取得失敗"
+
+        html = resp.text or ""
+        code, key = self._extract_csv_tokens_from_html(html)
+        if not code or not key:
+            # Persist for inspection
+            try:
+                self._save_login_debug_response("theme_main_for_csv", html)
+            except Exception:
+                pass
+            return False, "CSV用トークン(code/key)を抽出できません"
+
+        headers = {
+            "Origin": self._origin_for_headers(),
+            "Referer": "https://nanonet.go.jp/",
+        }
+
+        data = {
+            "mode": "theme",
+            "mode2": "csv_download",
+            "keyword": keyword or "",
+            "search_inst": search_inst or "",
+            "search_license_level": search_license_level or "",
+            "search_status": search_status or "",
+            "page": str(int(page) if int(page) > 0 else 1),
+            "auth": "1",
+            "code": str(code),
+            "key": str(key),
+        }
+
+        ok, resp = self.post("main.php", data=data, headers=headers)
+        if not ok:
+            return False, resp
+
+        # Save CSV for real-world inspection (opt-in via env).
+        if os.environ.get("ARIM_PORTAL_SAVE_CSV", "").strip():
+            try:
+                from datetime import datetime
+                from config.common import get_dynamic_file_path
+
+                out_dir = get_dynamic_file_path("output/data_portal_debug")
+                os.makedirs(out_dir, exist_ok=True)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                path = os.path.join(out_dir, f"theme_list_{self.environment}_{ts}.csv")
+                payload = getattr(resp, "content", b"")
+                with open(path, "wb") as fh:
+                    fh.write(payload)
+                logger.info(f"CSV保存: {path}")
+            except Exception:
+                pass
+
+        return True, resp
     
     def logout(self) -> Tuple[bool, str]:
         """
