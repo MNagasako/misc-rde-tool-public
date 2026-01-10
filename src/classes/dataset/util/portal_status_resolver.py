@@ -3,20 +3,37 @@ from __future__ import annotations
 from typing import AbstractSet, Any, Callable, Iterable, Optional
 
 
-PUBLIC_MANAGED_LABEL = "公開（管理）"
-PUBLIC_LABEL = "公開"
+# Requirement-driven portal status labels (dataset listing)
+UNCHECKED_LABEL = "未確認"
+
+# Display labels (as shown in the dataset listing UI)
+# - managed: determined by logged-in portal (management) features
+# - public: determined by public portal (output.json)
+PUBLIC_MANAGED_LABEL = "公開"
+PRIVATE_MANAGED_LABEL = "非公開"
+
+PUBLIC_PUBLISHED_LABEL = "公開2"
+NONPUBLIC_OR_UNREGISTERED_LABEL = "管理外"
 
 
 def normalize_logged_in_portal_label(label: Any) -> str:
     text = str(label).strip() if label is not None else ""
-    # Logged-in portal status uses "公開済"; keep "公開" reserved for public-json fallback.
+    # Logged-in portal search results / CSV use "公開済" and "UP済".
     if text in {"公開済"}:
         return PUBLIC_MANAGED_LABEL
+    if text in {"UP済"}:
+        return PRIVATE_MANAGED_LABEL
+    if text in {"未UP"}:
+        return NONPUBLIC_OR_UNREGISTERED_LABEL
     return text
 
 
 def is_managed_public_label(label: Any) -> bool:
     return (str(label).strip() if label is not None else "") == PUBLIC_MANAGED_LABEL
+
+
+def is_managed_private_label(label: Any) -> bool:
+    return (str(label).strip() if label is not None else "") == PRIVATE_MANAGED_LABEL
 
 
 def pick_best_cached_label(
@@ -50,8 +67,12 @@ def pick_best_cached_label(
     return None
 
 
-def is_public_fallback_label(label: Any) -> bool:
-    return (str(label).strip() if label is not None else "") == PUBLIC_LABEL
+def is_unchecked_label(label: Any) -> bool:
+    return (str(label).strip() if label is not None else "") == UNCHECKED_LABEL
+
+
+def is_public_published_label(label: Any) -> bool:
+    return (str(label).strip() if label is not None else "") == PUBLIC_PUBLISHED_LABEL
 
 
 def resolve_portal_status_label(
@@ -72,20 +93,34 @@ def resolve_portal_status_label(
         label string, or None when unresolved.
     """
 
-    existing_text = str(existing).strip() if existing is not None else ""
-    existing_text = normalize_logged_in_portal_label(existing_text)
-    if existing_text and not is_public_fallback_label(existing_text):
+    existing_text = normalize_logged_in_portal_label(existing)
+    cached_text = normalize_logged_in_portal_label(cached)
+    dsid = str(dataset_id or "").strip()
+
+    # 1) Managed determination takes precedence (public/private).
+    if is_managed_public_label(existing_text) or is_managed_private_label(existing_text):
+        return existing_text
+    if is_managed_public_label(cached_text) or is_managed_private_label(cached_text):
+        return cached_text
+
+    # 2) If the dataset_id is present in public output.json, classify as 公開2.
+    #    This should override negative/unregistered results.
+    if dsid and dsid in public_published_dataset_ids:
+        return PUBLIC_PUBLISHED_LABEL
+
+    # 3) Cached negative determination
+    if cached_text == NONPUBLIC_OR_UNREGISTERED_LABEL:
+        return cached_text
+
+    # 4) Existing confirmed values (but don't let 管理外 block future public check)
+    if existing_text and not is_unchecked_label(existing_text):
         return existing_text
 
-    cached_text = normalize_logged_in_portal_label(cached)
+    # If we already know something (e.g., cached negative), keep it; otherwise unresolved.
     if cached_text:
         return cached_text
 
-    dsid = str(dataset_id or "").strip()
-    if dsid and dsid in public_published_dataset_ids:
-        return PUBLIC_LABEL
-
-    if is_public_fallback_label(existing_text):
+    if existing_text:
         return existing_text
 
     return None

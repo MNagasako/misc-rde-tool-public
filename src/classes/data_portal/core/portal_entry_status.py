@@ -251,6 +251,34 @@ class PortalEntryStatusCache:
             label = item.get("label")
             return str(label) if isinstance(label, str) and label.strip() else None
 
+    def get_checked_at_any_age(self, dataset_id: str, environment: str = DEFAULT_ENVIRONMENT) -> Optional[float]:
+        """Return cached checked_at (epoch seconds) regardless of TTL."""
+
+        self._ensure_loaded()
+        k = self._key(environment, dataset_id)
+        with self._lock:
+            item = self._items.get(k)
+            if not isinstance(item, dict):
+                return None
+            try:
+                checked_at_f = float(item.get("checked_at") or 0.0)
+            except Exception:
+                checked_at_f = 0.0
+            return checked_at_f if checked_at_f > 0.0 else None
+
+    def clear(self, environment: Optional[str] = None) -> None:
+        """Clear cached items (optionally only for one environment) and persist."""
+
+        self._ensure_loaded()
+        env = str(environment or "").strip()
+        with self._lock:
+            if not env:
+                self._items = {}
+            else:
+                prefix = f"{env}:"
+                self._items = {k: v for k, v in self._items.items() if not str(k).startswith(prefix)}
+        self._save_best_effort()
+
     def set_label(self, dataset_id: str, label: str, environment: str = DEFAULT_ENVIRONMENT) -> None:
         self._ensure_loaded()
         k = self._key(environment, dataset_id)

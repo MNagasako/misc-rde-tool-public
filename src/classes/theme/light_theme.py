@@ -1,5 +1,5 @@
 """
-ライトテーマ定義 - ARIM RDE Tool v2.4.14
+ライトテーマ定義 - ARIM RDE Tool v2.4.15
 
 Material Design準拠のライトモード配色。
 現行アプリの配色を忠実に再現。

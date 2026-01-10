@@ -30,6 +30,7 @@ QLabel = QtWidgets.QLabel
 QPushButton = QtWidgets.QPushButton
 QLineEdit = QtWidgets.QLineEdit
 QTextEdit = QtWidgets.QTextEdit
+QPlainTextEdit = QtWidgets.QPlainTextEdit
 QTextBrowser = QtWidgets.QTextBrowser
 QComboBox = QtWidgets.QComboBox
 QCheckBox = QtWidgets.QCheckBox
@@ -93,6 +94,7 @@ __all__ = [
     'QPushButton',
     'QLineEdit',
     'QTextEdit',
+    'QPlainTextEdit',
     'QTextBrowser',
     'QComboBox',
     'QCheckBox',

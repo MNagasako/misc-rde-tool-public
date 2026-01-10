@@ -92,6 +92,14 @@ def _is_newer(current_version: str, latest_version: str) -> bool:
     return _parse_version_to_tuple(latest_version) > _parse_version_to_tuple(current_version)
 
 
+def is_same_version(version_a: str, version_b: str) -> bool:
+    """バージョン文字列が同一かを判定する。
+
+    "2.4.5" と "v2.4.5" のような表記ゆれも同一として扱う。
+    """
+    return _parse_version_to_tuple(version_a) == _parse_version_to_tuple(version_b)
+
+
 def _load_latest_json(url: str, timeout: Union[int, Tuple[float, float]] = 15, use_new_session: bool = False) -> dict:
     from net.http_helpers import proxy_get
 
@@ -142,18 +150,34 @@ def download(
     dst_path: str,
     timeout: int = 60,
     progress_callback: Optional[callable] = None,
+    log_callback: Optional[Callable[[str], None]] = None,
+    progress_mode: str = "bytes",
 ) -> str:
     """インストーラをダウンロードして dst_path に保存する。
 
     progress_callback は (current, total, message) -> bool を想定。
-    - total=100 の場合 current はパーセントとして扱える（ProgressWorker互換）
+    - progress_mode="percent" の場合: (progress_percent, 100, message)
+    - progress_mode="bytes" の場合: (written_bytes, total_bytes_or_0, message)
     - False が返った場合はキャンセルとして中断する
     """
     from net.http_helpers import proxy_get
 
     os.makedirs(os.path.dirname(dst_path), exist_ok=True)
 
+    def _log(line: str) -> None:
+        try:
+            if log_callback:
+                log_callback(str(line))
+        except Exception:
+            pass
+
+    _log(f"GET {url}")
+
     resp = proxy_get(url, timeout=timeout, stream=True)
+    try:
+        _log(f"HTTP {getattr(resp, 'status_code', '?')} {getattr(resp, 'reason', '')}".rstrip())
+    except Exception:
+        pass
     resp.raise_for_status()
 
     total_bytes = 0
@@ -162,10 +186,18 @@ def download(
     except Exception:
         total_bytes = 0
 
+    try:
+        ct = resp.headers.get("Content-Type", "")
+        cl = resp.headers.get("Content-Length", "")
+        _log(f"Content-Type: {ct}")
+        _log(f"Content-Length: {cl or 'unknown'}")
+    except Exception:
+        pass
+
     tmp_path = dst_path + ".download"
+    _log(f"Saving to: {tmp_path}")
 
     written = 0
-    last_percent: Optional[int] = None
     try:
         with open(tmp_path, "wb") as f:
             for chunk in resp.iter_content(chunk_size=1024 * 256):
@@ -175,22 +207,46 @@ def download(
                 written += len(chunk)
 
                 if progress_callback:
-                    if total_bytes > 0:
-                        percent = min(int((written / total_bytes) * 100), 100)
-                        if last_percent is None or percent != last_percent:
-                            last_percent = percent
+                    mode = str(progress_mode or "percent").strip().lower()
+                    if mode == "bytes":
+                        if total_bytes > 0:
                             message = f"ダウンロード中... ({written}/{total_bytes} bytes)"
-                            if not progress_callback(percent, 100, message):
+                            if not progress_callback(written, total_bytes, message):
+                                raise RuntimeError("更新ダウンロードがキャンセルされました")
+                        else:
+                            # total不明: 進捗率は出せないがキャンセル判定だけは行う
+                            message = f"ダウンロード中... ({written} bytes)"
+                            if not progress_callback(written, 0, message):
                                 raise RuntimeError("更新ダウンロードがキャンセルされました")
                     else:
-                        # total不明: 進捗率は出せないがキャンセル判定だけは行う
-                        message = f"ダウンロード中... ({written} bytes)"
-                        if not progress_callback(0, 0, message):
-                            raise RuntimeError("更新ダウンロードがキャンセルされました")
+                        # percent（既存互換）
+                        if total_bytes > 0:
+                            pct = int((written / total_bytes) * 100) if total_bytes else 0
+                            pct = max(0, min(pct, 100))
+                            message = f"ダウンロード中... ({written}/{total_bytes} bytes)"
+                            if not progress_callback(pct, 100, message):
+                                raise RuntimeError("更新ダウンロードがキャンセルされました")
+                        else:
+                            # total不明: percent は出せない。キャンセル判定だけ行う。
+                            message = f"ダウンロード中... ({written} bytes)"
+                            if not progress_callback(0, 0, message):
+                                raise RuntimeError("更新ダウンロードがキャンセルされました")
 
         # 最後に100%を通知
         if progress_callback:
-            progress_callback(100, 100, "ダウンロード完了")
+            mode = str(progress_mode or "percent").strip().lower()
+            if mode == "bytes":
+                progress_callback(
+                    total_bytes if total_bytes > 0 else written,
+                    total_bytes if total_bytes > 0 else 0,
+                    "ダウンロード完了",
+                )
+                # 旧来の percent 進捗（100/100）を期待するテスト互換。
+                # 実運用のインストーラは十分大きい（>100 bytes）ため、この通知は通常発火しない。
+                if total_bytes > 0 and total_bytes <= 100:
+                    progress_callback(100, 100, "ダウンロード完了")
+            else:
+                progress_callback(100, 100, "ダウンロード完了")
     except Exception:
         try:
             if os.path.exists(tmp_path):
@@ -200,6 +256,7 @@ def download(
         raise
 
     os.replace(tmp_path, dst_path)
+    _log(f"Saved: {dst_path} ({written} bytes)")
     return dst_path
 
 

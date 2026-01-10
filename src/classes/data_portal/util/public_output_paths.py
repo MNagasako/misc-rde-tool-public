@@ -5,12 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable, Optional
 
-from config.common import get_base_dir
+from config.common import get_dynamic_file_path
 
 
 def get_public_data_portal_root_dir() -> Path:
     """Return output root for public data portal exports."""
-    root = Path(get_base_dir()) / "output" / "data_portal_public"
+    root = Path(get_dynamic_file_path("output/data_portal_public"))
     root.mkdir(parents=True, exist_ok=True)
     return root
 

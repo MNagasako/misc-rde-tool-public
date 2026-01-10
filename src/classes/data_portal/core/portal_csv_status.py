@@ -5,8 +5,8 @@ This module is UI-agnostic.
 - Extracts dataset_id + status and maps them to listing labels.
 
 Rules:
-- "公開済" -> "公開（管理）"
-- "非公開" -> "UP済" (entry exists but not publicly published)
+- "公開済" -> "登録済-公開（管理判定）"
+- "非公開" -> "登録済-非公開（管理判定）" (entry exists but not publicly published)
 
 All HTTP access is handled elsewhere (PortalClient).
 """
@@ -18,7 +18,7 @@ import io
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional
 
-from classes.dataset.util.portal_status_resolver import PUBLIC_MANAGED_LABEL
+from classes.dataset.util.portal_status_resolver import PRIVATE_MANAGED_LABEL, PUBLIC_MANAGED_LABEL
 
 
 @dataclass(frozen=True)
@@ -135,7 +135,7 @@ def map_csv_rows_to_listing_labels(rows: Iterable[PortalCsvRow]) -> Dict[str, st
         if any(m in status for m in _STATUS_PUBLIC_MARKERS):
             label = PUBLIC_MANAGED_LABEL
         elif any(m in status for m in _STATUS_PRIVATE_MARKERS):
-            label = "UP済"
+            label = PRIVATE_MANAGED_LABEL
 
         if label:
             mapping[dsid] = label

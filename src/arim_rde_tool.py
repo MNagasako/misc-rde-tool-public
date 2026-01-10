@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-ARIM RDE Tool v2.4.14 - PySide6によるRDE→ARIMデータポータル移行ツール
+ARIM RDE Tool v2.4.15 - PySide6によるRDE→ARIMデータポータル移行ツール
 
 主要機能:
 - RDEシステムへの自動ログイン・データセット一括取得・画像保存
@@ -1202,6 +1202,114 @@ def main():
                                     )
                                     QMessageBox.information(browser, "更新確認", msg)
 
+                            def _download_and_install_same_version(url: str, version: str, sha256: str) -> None:
+                                from classes.core.app_updater import (
+                                    download,
+                                    get_default_download_path,
+                                    run_installer_and_restart,
+                                    verify_sha256,
+                                )
+
+                                from classes.core.app_update_ui import UpdateDownloadDialog
+
+                                import threading
+
+                                dst = get_default_download_path(version)
+
+                                release_url = "https://github.com/MNagasako/misc-rde-tool-public/releases/latest"
+                                dl = UpdateDownloadDialog(title="更新", release_url=release_url, parent=browser)
+                                dl.setModal(True)
+                                dl.set_status("ダウンロード準備中...")
+                                dl.append_log(f"version={version}")
+                                dl.append_log(f"dst={dst}")
+                                dl.show()
+
+                                def progress_callback(current, total, message="処理中"):
+                                    if dl.is_cancelled():
+                                        return False
+                                    try:
+                                        dl.progress_bytes_changed.emit(int(current or 0), int(total or 0), str(message))
+                                    except Exception:
+                                        pass
+                                    return True
+
+                                def _run_installer_on_ui_thread() -> None:
+                                    try:
+                                        try:
+                                            dl.append_log("Installer: launching (silent) ...")
+                                            dl.append_log("Note: アプリは更新のため終了します（クラッシュではありません）")
+                                            dl.set_status("インストーラを起動しました。更新のためアプリを終了します...")
+                                        except Exception:
+                                            pass
+
+                                        def _do_launch() -> None:
+                                            try:
+                                                run_installer_and_restart(dst)
+                                            except Exception as e:
+                                                logger.error("Installer launch failed: %s", e, exc_info=True)
+                                                try:
+                                                    dl.close()
+                                                except Exception:
+                                                    pass
+                                                QMessageBox.warning(browser, "更新エラー", f"インストーラ起動に失敗しました: {e}")
+
+                                        QTimer.singleShot(250, browser, _do_launch)
+                                    except Exception as e:
+                                        logger.error("Installer launch prepare failed: %s", e, exc_info=True)
+                                        try:
+                                            dl.close()
+                                        except Exception:
+                                            pass
+                                        QMessageBox.warning(browser, "更新エラー", f"インストーラ起動に失敗しました: {e}")
+
+                                def _worker_download() -> None:
+                                    try:
+                                        dl.status_changed.emit("ダウンロード中...")
+
+                                        def _log(line: str) -> None:
+                                            try:
+                                                dl.log_line.emit(str(line))
+                                            except Exception:
+                                                pass
+
+                                        download(url, dst, progress_callback=progress_callback, log_callback=_log, progress_mode="bytes")
+                                        if dl.is_cancelled():
+                                            QTimer.singleShot(0, browser, dl.close)
+                                            return
+
+                                        dl.status_changed.emit("sha256検証中...")
+                                        if not verify_sha256(dst, sha256):
+                                            def _bad_sha() -> None:
+                                                try:
+                                                    dl.close()
+                                                except Exception:
+                                                    pass
+                                                QMessageBox.warning(
+                                                    browser,
+                                                    "更新失敗",
+                                                    "sha256検証に失敗しました。\n安全のためインストーラは実行しません。",
+                                                )
+
+                                            QTimer.singleShot(0, browser, _bad_sha)
+                                            return
+
+                                        dl.finish_success("インストーラを起動します...")
+                                        QTimer.singleShot(0, browser, _run_installer_on_ui_thread)
+                                    except Exception as e:
+                                        logger.error("Update download/verify failed: %s", e, exc_info=True)
+
+                                        def _on_err() -> None:
+                                            try:
+                                                dl.close()
+                                            except Exception:
+                                                pass
+                                            if not dl.is_cancelled():
+                                                QMessageBox.warning(browser, "更新エラー", f"更新処理に失敗しました: {e}")
+
+                                        QTimer.singleShot(0, browser, _on_err)
+
+                                threading.Thread(target=_worker_download, daemon=True).start()
+
                             def _timeout_ui() -> None:
                                 if finished["v"]:
                                     return
@@ -1262,6 +1370,34 @@ def main():
                                                     "ネットワーク/プロキシ設定をご確認のうえ、\n"
                                                     "『設定 → MISC』の『更新を確認』から再試行してください。",
                                                 )
+                                                return
+
+                                            # 同一版でも再インストール導線を出す
+                                            try:
+                                                from classes.core.app_updater import is_same_version
+                                            except Exception:
+                                                is_same_version = None
+
+                                            if not bool(has_u) and callable(is_same_version) and is_same_version(REVISION, str(latest_v or "")):
+                                                updated_at_text = str(upd_at or "") or "不明"
+
+                                                box = QMessageBox(browser)
+                                                box.setIcon(QMessageBox.Information)
+                                                box.setWindowTitle("更新確認")
+                                                box.setText("現在のバージョンは最新です。")
+                                                box.setInformativeText(
+                                                    f"現在: {REVISION}\n"
+                                                    f"latest.json: {latest_v}\n"
+                                                    f"更新日時: {updated_at_text}\n\n"
+                                                    "同一バージョンを再ダウンロードして、再インストールすることもできます。"
+                                                )
+                                                reinstall_btn = box.addButton("同一版を再インストール", QMessageBox.AcceptRole)
+                                                close_btn = box.addButton("閉じる", QMessageBox.RejectRole)
+                                                box.setDefaultButton(close_btn)
+                                                box.exec()
+
+                                                if box.clickedButton() == reinstall_btn:
+                                                    _download_and_install_same_version(str(url or ""), str(latest_v or ""), str(sha256 or ""))
                                                 return
 
                                             _show_result_dialog(bool(has_u), str(latest_v or ""), str(upd_at or ""))

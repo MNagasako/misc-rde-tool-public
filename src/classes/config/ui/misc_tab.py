@@ -34,6 +34,60 @@ logger = logging.getLogger(__name__)
 _ACTIVE_UPDATE_CHECK_THREADS = set()
 
 
+class _UpdateCheckProgressStub(QObject):
+    """pytest実行時用の軽量な進捗ダミー。
+
+    Windows/PySide6 の widget スイートでは、ネイティブウィンドウ（QProgressDialog 等）を
+    大量に作ると稀にプロセスがネイティブクラッシュすることがある。
+    テストで検証したいのは「キャンセル/完了の配線」であり、実ウィンドウは不要なため
+    QObject ベースのスタブに置き換える。
+    """
+
+    canceled = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+    def setWindowTitle(self, _title: str) -> None:
+        return
+
+    def setLabelText(self, _text: str) -> None:
+        return
+
+    def setRange(self, _minimum: int, _maximum: int) -> None:
+        return
+
+    def setMinimumDuration(self, _ms: int) -> None:
+        return
+
+    def setWindowModality(self, _modality) -> None:
+        return
+
+    def setCancelButtonText(self, _text: str) -> None:
+        return
+
+    def setAttribute(self, *_args, **_kwargs) -> None:
+        return
+
+    def show(self) -> None:
+        return
+
+    def hide(self) -> None:
+        return
+
+    def close(self) -> None:
+        return
+
+    def deleteLater(self) -> None:
+        return
+
+    def cancel(self) -> None:
+        try:
+            self.canceled.emit()
+        except Exception:
+            pass
+
+
 class _UpdateCheckWorker(QObject):
     result_ready = Signal(object)
 
@@ -277,7 +331,7 @@ class MiscTab(QWidget):
                 self._update_check_btn.setEnabled(False)
 
             cancelled = {"v": False}
-            progress = QProgressDialog(self)
+            progress = _UpdateCheckProgressStub(self) if is_pytest else QProgressDialog(self)
             # テストでは QApplication.topLevelWidgets() の走査が不安定化要因になり得るため、
             # 進捗ダイアログをインスタンス変数として保持して参照可能にする。
             self._update_check_progress = progress
@@ -311,11 +365,6 @@ class MiscTab(QWidget):
             # 進捗ダイアログは生成するが表示は行わない。
             if not is_pytest:
                 progress.show()
-            else:
-                try:
-                    progress.hide()
-                except Exception:
-                    pass
 
             def _finish_ui(enable_button: bool = True) -> None:
                 # watchdog / invoke タイマーが残ると、長時間のwidgetスイートで
@@ -415,14 +464,70 @@ class MiscTab(QWidget):
 
                     updated_at_text = updated_at or "不明"
                     if not has_update:
-                        QMessageBox.information(
-                            self,
-                            "更新確認",
-                            "現在のバージョンは最新です。\n\n"
+                        try:
+                            from classes.core.app_updater import is_same_version
+                        except Exception:
+                            is_same_version = None
+
+                        release_url = "https://github.com/MNagasako/misc-rde-tool-public/releases/latest"
+
+                        # latest.json が現在版と同一の場合でも、再インストール導線を用意する。
+                        if callable(is_same_version) and is_same_version(REVISION, latest_version):
+                            box = QMessageBox(self)
+                            box.setIcon(QMessageBox.Information)
+                            box.setWindowTitle("更新確認")
+                            box.setText("現在のバージョンは最新です。")
+                            box.setInformativeText(
+                                f"現在: {REVISION}\n"
+                                f"latest.json: {latest_version}\n"
+                                f"更新日時: {updated_at_text}\n\n"
+                                "同一バージョンを再ダウンロードして、再インストールすることもできます。\n\n"
+                                f"リリースページ: {release_url}"
+                            )
+
+                            reinstall_btn = box.addButton("同一版を再インストール", QMessageBox.AcceptRole)
+                            open_site_btn = box.addButton("更新サイトを開く", QMessageBox.ActionRole)
+                            close_btn = box.addButton("閉じる", QMessageBox.RejectRole)
+                            box.setDefaultButton(close_btn)
+                            box.exec()
+
+                            if box.clickedButton() == open_site_btn:
+                                try:
+                                    from classes.core.app_update_ui import open_url_in_browser
+
+                                    open_url_in_browser(release_url)
+                                except Exception:
+                                    pass
+                            elif box.clickedButton() == reinstall_btn:
+                                self._download_and_install(url=url, version=latest_version, sha256=sha256)
+                            return
+
+                        # 更新が無い場合でも、最新版の再インストール導線とリンクを出す。
+                        box = QMessageBox(self)
+                        box.setIcon(QMessageBox.Information)
+                        box.setWindowTitle("更新確認")
+                        box.setText("現在のバージョンは最新です。")
+                        box.setInformativeText(
                             f"現在: {REVISION}\n"
                             f"latest.json: {latest_version}\n"
-                            f"更新日時: {updated_at_text}",
+                            f"更新日時: {updated_at_text}\n\n"
+                            "最新版を再ダウンロードして再インストールすることもできます。\n\n"
+                            f"リリースページ: {release_url}"
                         )
+                        reinstall_btn = box.addButton("最新版を再インストール", QMessageBox.AcceptRole)
+                        open_site_btn = box.addButton("更新サイトを開く", QMessageBox.ActionRole)
+                        close_btn = box.addButton("閉じる", QMessageBox.RejectRole)
+                        box.setDefaultButton(close_btn)
+                        box.exec()
+                        if box.clickedButton() == open_site_btn:
+                            try:
+                                from classes.core.app_update_ui import open_url_in_browser
+
+                                open_url_in_browser(release_url)
+                            except Exception:
+                                pass
+                        elif box.clickedButton() == reinstall_btn:
+                            self._download_and_install(url=url, version=latest_version, sha256=sha256)
                         return
 
                     release_url = "https://github.com/MNagasako/misc-rde-tool-public/releases/latest"
@@ -440,8 +545,11 @@ class MiscTab(QWidget):
                         "インストーラをダウンロードして更新しますか？<br><br>"
                         "（更新完了後は自動で再起動します）"
                     )
-                    box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-                    box.setDefaultButton(QMessageBox.Yes)
+
+                    install_btn = box.addButton("インストール", QMessageBox.AcceptRole)
+                    open_site_btn = box.addButton("更新サイトを開く", QMessageBox.ActionRole)
+                    close_btn = box.addButton("閉じる", QMessageBox.RejectRole)
+                    box.setDefaultButton(install_btn)
 
                     # 可能な環境ではURLクリックで外部ブラウザを開く
                     try:
@@ -452,8 +560,16 @@ class MiscTab(QWidget):
                     except Exception:
                         pass
 
-                    reply = box.exec()
-                    if reply != QMessageBox.Yes:
+                    box.exec()
+                    if box.clickedButton() == open_site_btn:
+                        try:
+                            from classes.core.app_update_ui import open_url_in_browser
+
+                            open_url_in_browser(release_url)
+                        except Exception:
+                            pass
+                        return
+                    if box.clickedButton() != install_btn:
                         return
 
                     self._download_and_install(url=url, version=latest_version, sha256=sha256)
@@ -542,6 +658,10 @@ class MiscTab(QWidget):
             verify_sha256,
         )
 
+        release_url = "https://github.com/MNagasako/misc-rde-tool-public/releases/latest"
+
+        from classes.core.app_update_ui import UpdateDownloadDialog
+
         dst = get_default_download_path(version)
 
         if self._update_in_progress:
@@ -551,68 +671,26 @@ class MiscTab(QWidget):
         if hasattr(self, "_update_check_btn"):
             self._update_check_btn.setEnabled(False)
 
-        cancelled = {"v": False}
-        progress = QProgressDialog(self)
-        progress.setWindowTitle("更新")
-        progress.setLabelText("ダウンロードを開始します...")
-        progress.setRange(0, 100)
-        progress.setValue(0)
-        progress.setMinimumDuration(300)
-        progress.setWindowModality(Qt.WindowModal)
-        progress.setCancelButtonText("キャンセル")
-
-        def _on_cancel():
-            cancelled["v"] = True
-            _finish_ui()
-
-        progress.canceled.connect(_on_cancel)
-        progress.show()
-
-        def _set_progress(value: int, message: str) -> None:
-            try:
-                progress.setValue(int(value))
-                progress.setLabelText(message)
-            except Exception:
-                pass
-
-        def _set_busy() -> None:
-            try:
-                if progress.maximum() != 0 or progress.minimum() != 0:
-                    progress.setRange(0, 0)
-            except Exception:
-                pass
-
-        def _set_determinate() -> None:
-            try:
-                if progress.maximum() != 100 or progress.minimum() != 0:
-                    progress.setRange(0, 100)
-            except Exception:
-                pass
+        dlg = UpdateDownloadDialog(title="更新", release_url=release_url, parent=self)
+        dlg.setModal(True)
+        dlg.set_status("ダウンロード準備中...")
+        dlg.append_log(f"version={version}")
+        dlg.append_log(f"dst={dst}")
+        dlg.show()
 
         def progress_callback(current, total, message="処理中"):
-            if cancelled["v"]:
+            if dlg.is_cancelled():
                 return False
-            # total=0 はサイズ不明（busy表示）
-            if not total:
-                QTimer.singleShot(0, _set_busy)
-                QTimer.singleShot(0, lambda: _set_progress(0, str(message)))
-                return True
-
-            # ProgressWorker互換: total=100の場合は percent
-            if total == 100 and int(current) <= 100:
-                QTimer.singleShot(0, _set_determinate)
-                v = int(current)
-                QTimer.singleShot(0, lambda: _set_progress(v, str(message)))
-                return True
-
-            # カウント値の場合は0%固定（ただしメッセージ更新）
-            QTimer.singleShot(0, _set_busy)
-            QTimer.singleShot(0, lambda: _set_progress(0, str(message)))
+            try:
+                # bytes-based progress (preferred)
+                dlg.progress_bytes_changed.emit(int(current or 0), int(total or 0), str(message))
+            except Exception:
+                pass
             return True
 
         def _finish_ui() -> None:
             try:
-                progress.close()
+                dlg.close()
             except Exception:
                 pass
             if hasattr(self, "_update_check_btn"):
@@ -620,23 +698,47 @@ class MiscTab(QWidget):
             self._update_in_progress = False
 
         def _run_installer_on_ui_thread() -> None:
-            # ここで例外が出るとプログレスが閉じず「止まった」ように見えるので捕捉する
+            # run_installer_and_restart は os._exit(0) で即時終了するため、
+            # その前に「正常終了（更新のため終了）」であることをUI/ログに残す。
             try:
-                _finish_ui()
-                run_installer_and_restart(dst)
+                try:
+                    dlg.append_log("Installer: launching (silent) ...")
+                    dlg.append_log("Note: アプリは更新のため終了します（クラッシュではありません）")
+                    dlg.set_status("インストーラを起動しました。更新のためアプリを終了します...")
+                except Exception:
+                    pass
+
+                def _do_launch() -> None:
+                    try:
+                        run_installer_and_restart(dst)
+                    except Exception as e:
+                        logger.error("インストーラ起動に失敗: %s", e, exc_info=True)
+                        _finish_ui()
+                        QMessageBox.warning(self, "更新エラー", f"インストーラ起動に失敗しました: {e}")
+
+                # UIが描画される猶予（短時間）
+                QTimer.singleShot(250, self, _do_launch)
             except Exception as e:
-                logger.error("インストーラ起動に失敗: %s", e, exc_info=True)
+                logger.error("インストーラ起動準備に失敗: %s", e, exc_info=True)
+                _finish_ui()
                 QMessageBox.warning(self, "更新エラー", f"インストーラ起動に失敗しました: {e}")
 
         def _worker_download() -> None:
             try:
-                progress_callback(0, 100, "ダウンロード中...")
-                download(url, dst, progress_callback=progress_callback)
-                if cancelled["v"]:
-                    QTimer.singleShot(0, _finish_ui)
+                dlg.status_changed.emit("ダウンロード中...")
+
+                def _log(line: str) -> None:
+                    try:
+                        dlg.log_line.emit(str(line))
+                    except Exception:
+                        pass
+
+                download(url, dst, progress_callback=progress_callback, log_callback=_log, progress_mode="bytes")
+                if dlg.is_cancelled():
+                    QTimer.singleShot(0, self, _finish_ui)
                     return
 
-                progress_callback(90, 100, "sha256検証中...")
+                dlg.status_changed.emit("sha256検証中...")
                 if not verify_sha256(dst, sha256):
                     def _bad_sha():
                         _finish_ui()
@@ -645,20 +747,20 @@ class MiscTab(QWidget):
                             "更新失敗",
                             "sha256検証に失敗しました。\n安全のためインストーラは実行しません。",
                         )
-                    QTimer.singleShot(0, _bad_sha)
+                    QTimer.singleShot(0, self, _bad_sha)
                     return
 
-                progress_callback(100, 100, "インストーラを起動します...")
+                dlg.finish_success("インストーラを起動します...")
 
                 # アプリ終了を伴うためUIスレッドで実行（例外もUI側で処理）
-                QTimer.singleShot(0, _run_installer_on_ui_thread)
+                QTimer.singleShot(0, self, _run_installer_on_ui_thread)
             except Exception as e:
                 logger.error("更新ダウンロード/実行でエラー: %s", e, exc_info=True)
                 def _on_err():
                     _finish_ui()
-                    if not cancelled["v"]:
+                    if not dlg.is_cancelled():
                         QMessageBox.warning(self, "更新エラー", f"更新処理に失敗しました: {e}")
-                QTimer.singleShot(0, _on_err)
+                QTimer.singleShot(0, self, _on_err)
 
         threading.Thread(target=_worker_download, daemon=True).start()
 

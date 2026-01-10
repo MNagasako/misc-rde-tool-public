@@ -25,6 +25,7 @@ DetailItemCallback = Callable[["PublicArimDataDetail", int, int], None]
 
 
 _PUBLIC_OUTPUT_DATASET_ID_CACHE: dict[str, object] = {
+    "path": None,
     "mtime": None,
     "dataset_ids": set(),
 }
@@ -38,12 +39,13 @@ def get_public_published_dataset_ids(*, use_cache: bool = True) -> set[str]:
     """
 
     path = get_public_data_portal_root_dir() / "output.json"
+    cache_path = _PUBLIC_OUTPUT_DATASET_ID_CACHE.get("path")
     try:
         mtime = path.stat().st_mtime
     except OSError:
         return set()
 
-    if use_cache and _PUBLIC_OUTPUT_DATASET_ID_CACHE.get("mtime") == mtime:
+    if use_cache and cache_path == str(path) and _PUBLIC_OUTPUT_DATASET_ID_CACHE.get("mtime") == mtime:
         cached = _PUBLIC_OUTPUT_DATASET_ID_CACHE.get("dataset_ids")
         return set(cached) if isinstance(cached, set) else set()
 
@@ -61,11 +63,15 @@ def get_public_published_dataset_ids(*, use_cache: bool = True) -> set[str]:
             fields = item.get("fields") if isinstance(item.get("fields"), dict) else {}
             dsid = str(fields.get("dataset_id") or "").strip()
             if not dsid:
+                fields_raw = item.get("fields_raw") if isinstance(item.get("fields_raw"), dict) else {}
+                dsid = str(fields_raw.get("dataset_id") or "").strip()
+            if not dsid:
                 # safety net for older payload shapes
                 dsid = str(item.get("dataset_id") or "").strip()
             if dsid:
                 dataset_ids.add(dsid)
 
+    _PUBLIC_OUTPUT_DATASET_ID_CACHE["path"] = str(path)
     _PUBLIC_OUTPUT_DATASET_ID_CACHE["mtime"] = mtime
     _PUBLIC_OUTPUT_DATASET_ID_CACHE["dataset_ids"] = dataset_ids
     return set(dataset_ids)

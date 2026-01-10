@@ -654,6 +654,7 @@ def get_default_columns() -> List[DatasetListColumn]:
     # Labels are aligned to dataset_edit_widget.py where possible (without trailing colon).
     return [
         DatasetListColumn("portal_status", "ポータル", True),
+        DatasetListColumn("portal_checked_at", "ポータル確認時刻", True),
         DatasetListColumn("subgroup_name", "サブグループ名", True),
         DatasetListColumn("subgroup_description", "サブグループ説明", True),
         DatasetListColumn("grant_number", "課題番号", True),
@@ -707,7 +708,7 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
     dataset_details_dir = get_dynamic_file_path("output/rde/data/datasets")
 
     signature = (
-        5,  # signature schema (bump when columns/row schema changes)
+        6,  # signature schema (bump when columns/row schema changes)
         _safe_mtime(dataset_json_path),
         _safe_mtime(subgroup_json_path),
         _safe_mtime(info_json_path),
