@@ -10,7 +10,7 @@
 - API_ENDPOINTS_COMPLETE_MAP.md
 - API_INVESTIGATION_FINAL_REPORT.md
 - README.txt
-- RELEASE_NOTES_v2.4.14.md (最新)
+- RELEASE_NOTES_v2.4.15.md (最新)
 
 ## 機能別ドキュメント（docs/features/）
 - README.md
