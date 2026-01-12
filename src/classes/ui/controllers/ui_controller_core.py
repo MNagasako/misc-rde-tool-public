@@ -206,7 +206,10 @@ class UIControllerCore:
             """ボタンスタイルを更新"""
             current_mode = theme_manager.get_mode()
             self.theme_toggle_btn.setText(theme_labels[current_mode])
-            self.theme_toggle_btn.setStyleSheet(self._build_button_style('secondary'))
+            from classes.utils.button_styles import get_button_style
+
+            # hover/pressed を含む共通スタイルを使用（テーマ追従は get_button_style 側で担保）
+            self.theme_toggle_btn.setStyleSheet(get_button_style('secondary'))
         
         def on_theme_toggle():
             """テーマ切替ハンドラ
@@ -327,14 +330,14 @@ class UIControllerCore:
             
             # テーマ切替ボタンのスタイル更新
             if hasattr(self, 'theme_toggle_btn'):
-                self.theme_toggle_btn.setStyleSheet(
-                    f'background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)}; '
-                    f'color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)}; '
-                    f'font-weight: bold; border-radius: 6px; margin: 2px;'
-                )
+                from classes.utils.button_styles import get_button_style
+
+                self.theme_toggle_btn.setStyleSheet(get_button_style('secondary'))
             # 閉じるボタンのスタイル更新
             if hasattr(self.parent, 'close_btn'):
-                self.parent.close_btn.setStyleSheet(self._build_button_style('danger'))
+                from classes.utils.button_styles import get_button_style
+
+                self.parent.close_btn.setStyleSheet(get_button_style('danger'))
             
             # メインウィンドウ背景色の更新
             if hasattr(self.parent, 'setStyleSheet'):
@@ -397,20 +400,25 @@ class UIControllerCore:
             return
         
         logger.debug(f"[ThemeToggle] メニューボタンスタイル更新: current_mode={current_mode}")
-        
-        # 全ボタンのスタイルを現在のモードに応じて更新
+
+        # UIController 側でメニュー配色（グループ別など）を管理している場合は、
+        # それを優先して呼び出す。これによりテーマ切替直後に
+        # Core の汎用inactiveスタイルで上書きされる問題を防ぐ。
+        try:
+            updater = getattr(self, "update_menu_button_styles", None)
+            if callable(updater):
+                updater(current_mode)
+                return
+        except Exception:
+            # fallback に進む
+            pass
+
+        # Fallback: 旧ロジック（汎用スタイル）
         for mode, button in self.menu_buttons.items():
             try:
                 if button is None or not hasattr(button, 'setStyleSheet'):
                     continue
-                
-                if mode == current_mode:
-                    # アクティブボタン
-                    button.setStyleSheet(self._build_button_style('active'))
-                    logger.debug(f"[ThemeToggle] アクティブボタン設定: {mode}")
-                else:
-                    # 非アクティブボタン
-                    button.setStyleSheet(self._build_button_style('inactive'))
+                button.setStyleSheet(self._build_button_style('active' if mode == current_mode else 'inactive'))
             except (RuntimeError, AttributeError):
                 continue
     

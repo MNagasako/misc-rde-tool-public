@@ -14,7 +14,7 @@ from qt_compat.core import QTimer
 from config.common import INPUT_DIR, OUTPUT_DIR, SUMMARY_XLSX_PATH, ensure_directory_exists, get_dynamic_file_path
 from classes.basic.util.summary_file_utils import list_summary_workbooks
 from classes.theme import get_color, ThemeKey
-from classes.utils.button_styles import get_menu_button_style
+from classes.utils.button_styles import get_grouped_menu_button_style, get_menu_button_style
 from classes.utils.dataset_launch_manager import DatasetLaunchManager
 
 # UIControllerCore をインポート
@@ -897,18 +897,7 @@ class UIController(UIControllerCore):
         self.menu_buttons['login'].clicked.connect(
             lambda: self.switch_mode("login")
         )
-        self.menu_buttons['data_fetch'] = self.create_auto_resize_button(
-            'データ取得', button_width, button_height, base_inactive_style
-        )
-        self.menu_buttons['data_fetch'].clicked.connect(
-            lambda: self.switch_mode("data_fetch")
-        )
-        self.menu_buttons['data_fetch2'] = self.create_auto_resize_button(
-            'データ取得2', button_width, button_height, base_inactive_style
-        )
-        self.menu_buttons['data_fetch2'].clicked.connect(
-            lambda: self.switch_mode("data_fetch2")
-        )
+
         self.menu_buttons['subgroup_create'] = self.create_auto_resize_button(
             'サブグループ', button_width, button_height, base_inactive_style
         )
@@ -922,30 +911,55 @@ class UIController(UIControllerCore):
         self.menu_buttons['dataset_open'].clicked.connect(
             lambda: self.switch_mode("dataset_open")
         )
+
         self.menu_buttons['data_register'] = self.create_auto_resize_button(
-            'データ登録', button_width, button_height, base_inactive_style
+            'データ登録/タイル', button_width, button_height, base_inactive_style
         )
+        self.menu_buttons['data_register'].clicked.connect(
+            lambda: self.switch_mode("data_register")
+        )
+
+        self.menu_buttons['data_fetch2'] = self.create_auto_resize_button(
+            'データ取得２', button_width, button_height, base_inactive_style
+        )
+        self.menu_buttons['data_fetch2'].clicked.connect(
+            lambda: self.switch_mode("data_fetch2")
+        )
+
         self.menu_buttons['basic_info'] = self.create_auto_resize_button(
-            '基本情報', button_width, button_height, base_inactive_style
+            'RDE基本情報', button_width, button_height, base_inactive_style
         )
         self.menu_buttons['basic_info'].clicked.connect(
             lambda: self.switch_mode("basic_info")
         )
 
-        self.menu_buttons['data_register'].clicked.connect(
-            lambda: self.switch_mode("data_register")
+        self.menu_buttons['data_portal'] = self.create_auto_resize_button(
+            'データポータル', button_width, button_height, base_inactive_style
         )
+        self.menu_buttons['data_portal'].clicked.connect(
+            lambda: self.switch_mode("data_portal")
+        )
+
+        self.menu_buttons['ai_test2'] = self.create_auto_resize_button(
+            'AIテスト2', button_width, button_height, base_inactive_style
+        )
+        self.menu_buttons['ai_test2'].clicked.connect(
+            lambda: self.open_ai_extension_dialog_from_menu()
+        )
+
         self.menu_buttons['settings'] = self.create_auto_resize_button(
             '設定', button_width, button_height, base_inactive_style
         )
         self.menu_buttons['settings'].clicked.connect(
             lambda: self.switch_mode("settings")
         )
-        self.menu_buttons['request_analyzer'] = self.create_auto_resize_button(
-            'リクエスト解析', button_width, button_height, base_inactive_style
+
+        # Optional/hidden-by-default menus (keep available via config)
+        self.menu_buttons['data_fetch'] = self.create_auto_resize_button(
+            'データ取得', button_width, button_height, base_inactive_style
         )
-        self.menu_buttons['request_analyzer'].clicked.connect(
-            lambda: self.switch_mode("request_analyzer")
+        self.menu_buttons['data_fetch'].clicked.connect(
+            lambda: self.switch_mode("data_fetch")
         )
         self.menu_buttons['ai_test'] = self.create_auto_resize_button(
             'AIテスト', button_width, button_height, base_inactive_style
@@ -953,17 +967,11 @@ class UIController(UIControllerCore):
         self.menu_buttons['ai_test'].clicked.connect(
             lambda: self.switch_mode("ai_test")
         )
-        self.menu_buttons['ai_test2'] = self.create_auto_resize_button(
-            '🤖 AIテスト2', button_width, button_height, base_inactive_style
+        self.menu_buttons['request_analyzer'] = self.create_auto_resize_button(
+            'リクエスト解析', button_width, button_height, base_inactive_style
         )
-        self.menu_buttons['ai_test2'].clicked.connect(
-            lambda: self.open_ai_extension_dialog_from_menu()
-        )
-        self.menu_buttons['data_portal'] = self.create_auto_resize_button(
-            '📤 データポータル', button_width, button_height, base_inactive_style
-        )
-        self.menu_buttons['data_portal'].clicked.connect(
-            lambda: self.switch_mode("data_portal")
+        self.menu_buttons['request_analyzer'].clicked.connect(
+            lambda: self.switch_mode("request_analyzer")
         )
         
         # ヘルプボタン（閉じるボタンの上に表示）
@@ -1525,10 +1533,13 @@ class UIController(UIControllerCore):
                 if button is None or not hasattr(button, 'setStyleSheet'):
                     continue
                     
-                if mode == active_mode:
-                    button.setStyleSheet(get_menu_button_style(True))
+                is_active = (mode == active_mode)
+
+                # 例外（現状維持）: ライト/ダーク切替、ヘルプ、閉じる
+                if mode in {"theme", "help", "close"}:
+                    button.setStyleSheet(get_menu_button_style(is_active))
                 else:
-                    button.setStyleSheet(get_menu_button_style(False))
+                    button.setStyleSheet(get_grouped_menu_button_style(mode, is_active))
                 
                 # スタイル変更後にフォントサイズを再調整（安全性チェック付き）
                 def safe_adjust_font(b=button):

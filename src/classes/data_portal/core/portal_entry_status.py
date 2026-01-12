@@ -279,6 +279,36 @@ class PortalEntryStatusCache:
                 self._items = {k: v for k, v in self._items.items() if not str(k).startswith(prefix)}
         self._save_best_effort()
 
+    def clear_dataset_ids(self, dataset_ids: set[str] | list[str] | tuple[str, ...], environment: Optional[str] = None) -> None:
+        """Remove cached items for specific dataset IDs and persist.
+
+        This is used for partial force refresh scenarios (e.g. "非公開のみ更新").
+
+        Args:
+            dataset_ids: dataset IDs to remove.
+            environment: when provided, remove only from that environment; otherwise remove across all environments.
+        """
+
+        self._ensure_loaded()
+        ids = {str(d or "").strip() for d in (dataset_ids or [])}
+        ids.discard("")
+        if not ids:
+            return
+
+        env = str(environment or "").strip()
+
+        with self._lock:
+            if env:
+                prefix = f"{env}:"
+                for dsid in ids:
+                    self._items.pop(f"{env}:{dsid}", None)
+            else:
+                # Remove from any env.
+                suffixes = {f":{dsid}" for dsid in ids}
+                self._items = {k: v for k, v in self._items.items() if not any(str(k).endswith(sfx) for sfx in suffixes)}
+
+        self._save_best_effort()
+
     def set_label(self, dataset_id: str, label: str, environment: str = DEFAULT_ENVIRONMENT) -> None:
         self._ensure_loaded()
         k = self._key(environment, dataset_id)
@@ -318,14 +348,33 @@ class PortalEntryStatusCache:
             return
         try:
             os.makedirs(os.path.dirname(path), exist_ok=True)
+
+            # Snapshot under lock so concurrent writers do not corrupt the persisted file.
+            with self._lock:
+                items_snapshot = dict(self._items)
+
             payload = {
                 "version": _CACHE_VERSION,
                 "ttl_seconds": CACHE_TTL_SECONDS,
                 "saved_at": time.time(),
-                "items": self._items,
+                "items": items_snapshot,
             }
-            with open(path, "w", encoding="utf-8") as fh:
+
+            # Atomic write (best-effort) to avoid truncation/corruption on crash.
+            tmp_path = f"{path}.tmp"
+            with open(tmp_path, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh, ensure_ascii=False)
+            try:
+                os.replace(tmp_path, path)
+            except Exception:
+                # Fallback to direct write if atomic replace fails.
+                with open(path, "w", encoding="utf-8") as fh:
+                    json.dump(payload, fh, ensure_ascii=False)
+                try:
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+                except Exception:
+                    pass
         except Exception as exc:
             logger.debug(f"portal entry status cache save skipped: {exc}")
 

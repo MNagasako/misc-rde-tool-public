@@ -333,6 +333,16 @@ class ThemeManager(QObject):
                 return
 
         if not self._scroll_area_viewport_bootstrapped:
+            # pytest 実行では allWidgets() 走査が重く、長時間ランで不安定化し得るため、
+            # 初回の一括拾い上げは行わず、Show/Polish のイベントフィルタで追従させる。
+            try:
+                import os
+
+                if os.environ.get("PYTEST_CURRENT_TEST"):
+                    self._scroll_area_viewport_bootstrapped = True
+                    return
+            except Exception:
+                pass
             try:
                 for w in QApplication.allWidgets():
                     self._apply_scroll_area_viewport_style(w, only_when_visible=True)
@@ -408,6 +418,16 @@ class ThemeManager(QObject):
 
         # 既存の拾い上げは初回のみ allWidgets で行い、以降は追跡集合のみを再適用
         if not self._text_area_viewport_bootstrapped:
+            # pytest 実行では allWidgets() 走査が重く、長時間ランで不安定化し得るため、
+            # 初回の一括拾い上げは行わず、Show/Polish のイベントフィルタで追従させる。
+            try:
+                import os
+
+                if os.environ.get("PYTEST_CURRENT_TEST"):
+                    self._text_area_viewport_bootstrapped = True
+                    return
+            except Exception:
+                pass
             try:
                 for w in QApplication.allWidgets():
                     self._apply_text_area_viewport_style(w)
@@ -611,26 +631,23 @@ class ThemeManager(QObject):
                 except Exception:
                     pass
 
-                # viewport styler/eventFilter 類は pytest 実行では不要なうえ、
-                # 長時間ランで不安定化し得るためスキップする。
-                if not is_pytest_run:
-                    # QTextEdit/QTextBrowser の viewport へ直接スタイル適用（環境差対策）
-                    try:
-                        self._ensure_text_area_viewport_styler(app)
-                    except Exception:
-                        pass
+                # viewport styler/eventFilter 類は pytest でも必要（widget tests で検証される）。
+                # ただし allWidgets() の全走査は pytest では不安定/高コストになり得るため、
+                # 各 styler 側で PYTEST_CURRENT_TEST を見て bootstrap を軽量化する。
+                try:
+                    self._ensure_text_area_viewport_styler(app)
+                except Exception:
+                    pass
 
-                    # QScrollArea の viewport へ直接スタイル適用（未塗り領域の黒化対策）
-                    try:
-                        self._ensure_scroll_area_viewport_styler(app)
-                    except Exception:
-                        pass
+                try:
+                    self._ensure_scroll_area_viewport_styler(app)
+                except Exception:
+                    pass
 
-                    # QComboBox(非editable) placeholder の環境差対策（互換モード）
-                    try:
-                        self._ensure_combo_placeholder_compat_styler(app)
-                    except Exception:
-                        pass
+                try:
+                    self._ensure_combo_placeholder_compat_styler(app)
+                except Exception:
+                    pass
 
                 # theme_changed は updatesEnabled を戻した後に通知する（finally 側で1回だけemit）。
                 signal_elapsed = 0.0

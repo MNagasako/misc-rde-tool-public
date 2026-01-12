@@ -73,7 +73,9 @@ def _get_button_style_cached(kind_lower: str, theme_key: str) -> str:
     )
 
     if hover_key:
-        style += f" QPushButton:hover {{ background-color: {get_color(hover_key)}; }}"
+        hover_bg = get_color(hover_key)
+        style += f" QPushButton:hover {{ background-color: {hover_bg}; }}"
+        style += f" QPushButton:pressed {{ background-color: {hover_bg}; }}"
 
     style += (
         " QPushButton:disabled { "
@@ -112,6 +114,7 @@ def _get_menu_button_style_cached(is_active: bool, theme_key: str) -> str:
         f"color: {get_color(fg_key)}; "
         "font-weight: bold; border-radius: 6px; margin: 2px; padding: 4px 8px; }"
         f"QPushButton:hover {{ background-color: {hover_bg}; color: {hover_fg}; }}"
+        f"QPushButton:pressed {{ background-color: {hover_bg}; color: {hover_fg}; }}"
     )
 
 
@@ -122,4 +125,137 @@ def get_menu_button_style(is_active: bool) -> str:
     """
     return _get_menu_button_style_cached(is_active, _theme_cache_key())
 
-__all__ = ["get_button_style", "get_menu_button_style"]
+
+# === Main menu grouped styles ===
+
+_MENU_GROUP_BY_MODE: dict[str, int] = {
+    # Group 1
+    "login": 1,
+    # Group 2 (RDE)
+    "subgroup_create": 2,
+    "dataset_open": 2,
+    "data_register": 2,
+    "data_fetch2": 2,
+    "data_fetch": 2,  # optional/hidden by default
+    # Group 3 (RDE prep)
+    "basic_info": 3,
+    # Group 4 (Data portal)
+    "data_portal": 4,
+    # Group 5 (AI)
+    "ai_test2": 5,
+    "ai_test": 5,  # optional/hidden by default
+    # Group 6 (Settings)
+    "settings": 6,
+}
+
+
+def _group_keys(group: int, is_active: bool) -> tuple[ThemeKey, ThemeKey, ThemeKey]:
+    """Return (bg_key, fg_key, hover_bg_key) for the group + state."""
+
+    if group == 1:
+        if is_active:
+            return (
+                ThemeKey.MENU_GROUP1_ACTIVE_BACKGROUND,
+                ThemeKey.MENU_GROUP1_ACTIVE_TEXT,
+                ThemeKey.MENU_GROUP1_ACTIVE_HOVER_BACKGROUND,
+            )
+        return (
+            ThemeKey.MENU_GROUP1_INACTIVE_BACKGROUND,
+            ThemeKey.MENU_GROUP1_INACTIVE_TEXT,
+            ThemeKey.MENU_GROUP1_HOVER_BACKGROUND,
+        )
+    if group == 2:
+        if is_active:
+            return (
+                ThemeKey.MENU_GROUP2_ACTIVE_BACKGROUND,
+                ThemeKey.MENU_GROUP2_ACTIVE_TEXT,
+                ThemeKey.MENU_GROUP2_ACTIVE_HOVER_BACKGROUND,
+            )
+        return (
+            ThemeKey.MENU_GROUP2_INACTIVE_BACKGROUND,
+            ThemeKey.MENU_GROUP2_INACTIVE_TEXT,
+            ThemeKey.MENU_GROUP2_HOVER_BACKGROUND,
+        )
+    if group == 3:
+        if is_active:
+            return (
+                ThemeKey.MENU_GROUP3_ACTIVE_BACKGROUND,
+                ThemeKey.MENU_GROUP3_ACTIVE_TEXT,
+                ThemeKey.MENU_GROUP3_ACTIVE_HOVER_BACKGROUND,
+            )
+        return (
+            ThemeKey.MENU_GROUP3_INACTIVE_BACKGROUND,
+            ThemeKey.MENU_GROUP3_INACTIVE_TEXT,
+            ThemeKey.MENU_GROUP3_HOVER_BACKGROUND,
+        )
+    if group == 4:
+        if is_active:
+            return (
+                ThemeKey.MENU_GROUP4_ACTIVE_BACKGROUND,
+                ThemeKey.MENU_GROUP4_ACTIVE_TEXT,
+                ThemeKey.MENU_GROUP4_ACTIVE_HOVER_BACKGROUND,
+            )
+        return (
+            ThemeKey.MENU_GROUP4_INACTIVE_BACKGROUND,
+            ThemeKey.MENU_GROUP4_INACTIVE_TEXT,
+            ThemeKey.MENU_GROUP4_HOVER_BACKGROUND,
+        )
+    if group == 5:
+        if is_active:
+            return (
+                ThemeKey.MENU_GROUP5_ACTIVE_BACKGROUND,
+                ThemeKey.MENU_GROUP5_ACTIVE_TEXT,
+                ThemeKey.MENU_GROUP5_ACTIVE_HOVER_BACKGROUND,
+            )
+        return (
+            ThemeKey.MENU_GROUP5_INACTIVE_BACKGROUND,
+            ThemeKey.MENU_GROUP5_INACTIVE_TEXT,
+            ThemeKey.MENU_GROUP5_HOVER_BACKGROUND,
+        )
+    # group 6 (default)
+    if is_active:
+        return (
+            ThemeKey.MENU_GROUP6_ACTIVE_BACKGROUND,
+            ThemeKey.MENU_GROUP6_ACTIVE_TEXT,
+            ThemeKey.MENU_GROUP6_ACTIVE_HOVER_BACKGROUND,
+        )
+    return (
+        ThemeKey.MENU_GROUP6_INACTIVE_BACKGROUND,
+        ThemeKey.MENU_GROUP6_INACTIVE_TEXT,
+        ThemeKey.MENU_GROUP6_HOVER_BACKGROUND,
+    )
+
+
+@lru_cache(maxsize=256)
+def _get_grouped_menu_button_style_cached(mode: str, is_active: bool, theme_key: str) -> str:
+    # Keep some buttons unchanged (as requested).
+    if mode in {"help"}:
+        return get_menu_button_style(is_active)
+
+    group = _MENU_GROUP_BY_MODE.get(mode)
+    if group is None:
+        return get_menu_button_style(is_active)
+
+    bg_key, fg_key, hover_bg_key = _group_keys(group, is_active)
+    hover_bg = get_color(hover_bg_key)
+    return (
+        "QPushButton { "
+        f"background-color: {get_color(bg_key)}; "
+        f"color: {get_color(fg_key)}; "
+        "font-weight: bold; border-radius: 6px; margin: 2px; padding: 4px 8px; }"
+        f"QPushButton:hover {{ background-color: {hover_bg}; color: {get_color(fg_key)}; }}"
+        f"QPushButton:pressed {{ background-color: {hover_bg}; color: {get_color(fg_key)}; }}"
+    )
+
+
+def get_grouped_menu_button_style(mode: str, is_active: bool) -> str:
+    """メインメニュー（左ペイン）用: グループ別のスタイルを返す。
+
+    - テーマ切替に完全追従（キャッシュキーにテーマモードを含める）
+    - hover/選択中(=active) を個別配色
+    - help / theme / close などは既存のまま（呼び出し側で使い分ける想定）
+    """
+
+    return _get_grouped_menu_button_style_cached(mode, is_active, _theme_cache_key())
+
+__all__ = ["get_button_style", "get_menu_button_style", "get_grouped_menu_button_style"]

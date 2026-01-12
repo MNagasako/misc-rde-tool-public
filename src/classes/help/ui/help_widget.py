@@ -38,9 +38,25 @@ class HelpWidget(QWidget):
         
         # Aboutタブ
         self.setup_about_tab()
+
+        # 更新履歴タブ（Aboutの更新点を分離）
+        self.setup_release_notes_tab()
         
         # 使用方法タブ
         self.setup_usage_tab()
+
+    def setup_release_notes_tab(self):
+        """更新履歴タブ設定"""
+        try:
+            from classes.help.ui.release_notes_tab import create_release_notes_tab
+            tab = create_release_notes_tab(self)
+            if tab:
+                self.tab_widget.addTab(tab, "更新履歴")
+            else:
+                self._create_fallback_tab("更新履歴", "更新履歴タブの読み込みに失敗しました。")
+        except Exception as e:
+            logger.error(f"更新履歴タブ作成エラー: {e}")
+            self._create_fallback_tab("更新履歴", f"エラー: {e}")
     
     def setup_about_tab(self):
         """Aboutタブ設定"""

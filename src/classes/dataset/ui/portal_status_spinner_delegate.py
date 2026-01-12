@@ -14,7 +14,7 @@ import weakref
 from typing import Optional
 
 from qt_compat.core import Qt, QTimer
-from qt_compat.gui import QFont
+from qt_compat.gui import QBrush, QFont
 from PySide6.QtWidgets import QStyledItemDelegate
 
 from classes.theme import ThemeKey
@@ -122,6 +122,12 @@ class PortalStatusSpinnerDelegate(QStyledItemDelegate):
             # Prefer theme text color.
             try:
                 opt.palette.setColor(opt.palette.Text, get_color(ThemeKey.TABLE_ROW_TEXT))
+            except Exception:
+                pass
+
+            # Visible "in-progress" highlight (theme-based).
+            try:
+                opt.backgroundBrush = QBrush(get_color(ThemeKey.TABLE_ROW_BACKGROUND_HOVER))
             except Exception:
                 pass
 

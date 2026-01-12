@@ -60,6 +60,55 @@ class DarkTheme:
         ThemeKey.MENU_BUTTON_ACTIVE_TEXT: "#000000",
         ThemeKey.MENU_BUTTON_HOVER_BACKGROUND: "#2a3a4a",  # Slightly lighter dark blue
         ThemeKey.MENU_BUTTON_HOVER_TEXT: "#64b5f6",
+
+        # メインメニュー（左ペイン）: グループ別配色
+        # Group1: ログイン
+        ThemeKey.MENU_GROUP1_INACTIVE_BACKGROUND: "#1b5e20",  # Green 900
+        ThemeKey.MENU_GROUP1_INACTIVE_TEXT: "#e0e0e0",
+        ThemeKey.MENU_GROUP1_HOVER_BACKGROUND: "#2e7d32",  # Green 800
+        ThemeKey.MENU_GROUP1_ACTIVE_BACKGROUND: "#388e3c",  # Green 700
+        ThemeKey.MENU_GROUP1_ACTIVE_TEXT: "#e0e0e0",
+        ThemeKey.MENU_GROUP1_ACTIVE_HOVER_BACKGROUND: "#43a047",  # Green 600
+
+        # Group2: RDE関係
+        ThemeKey.MENU_GROUP2_INACTIVE_BACKGROUND: "#0d47a1",  # Blue 900
+        ThemeKey.MENU_GROUP2_INACTIVE_TEXT: "#e0e0e0",
+        ThemeKey.MENU_GROUP2_HOVER_BACKGROUND: "#1565c0",  # Blue 800
+        ThemeKey.MENU_GROUP2_ACTIVE_BACKGROUND: "#1976d2",  # Blue 700
+        ThemeKey.MENU_GROUP2_ACTIVE_TEXT: "#e0e0e0",
+        ThemeKey.MENU_GROUP2_ACTIVE_HOVER_BACKGROUND: "#1e88e5",  # Blue 600
+
+        # Group3: RDE準備（Group2に近い）
+        ThemeKey.MENU_GROUP3_INACTIVE_BACKGROUND: "#1a237e",  # Indigo 900
+        ThemeKey.MENU_GROUP3_INACTIVE_TEXT: "#e0e0e0",
+        ThemeKey.MENU_GROUP3_HOVER_BACKGROUND: "#283593",  # Indigo 800
+        ThemeKey.MENU_GROUP3_ACTIVE_BACKGROUND: "#303f9f",  # Indigo 700
+        ThemeKey.MENU_GROUP3_ACTIVE_TEXT: "#e0e0e0",
+        ThemeKey.MENU_GROUP3_ACTIVE_HOVER_BACKGROUND: "#3949ab",  # Indigo 600
+
+        # Group4: データポータル関係
+        ThemeKey.MENU_GROUP4_INACTIVE_BACKGROUND: "#004d40",  # Teal 900
+        ThemeKey.MENU_GROUP4_INACTIVE_TEXT: "#e0e0e0",
+        ThemeKey.MENU_GROUP4_HOVER_BACKGROUND: "#00695c",  # Teal 800
+        ThemeKey.MENU_GROUP4_ACTIVE_BACKGROUND: "#00796b",  # Teal 700
+        ThemeKey.MENU_GROUP4_ACTIVE_TEXT: "#e0e0e0",
+        ThemeKey.MENU_GROUP4_ACTIVE_HOVER_BACKGROUND: "#00897b",  # Teal 600
+
+        # Group5: AI関係
+        ThemeKey.MENU_GROUP5_INACTIVE_BACKGROUND: "#4a148c",  # Purple 900
+        ThemeKey.MENU_GROUP5_INACTIVE_TEXT: "#e0e0e0",
+        ThemeKey.MENU_GROUP5_HOVER_BACKGROUND: "#6a1b9a",  # Purple 800
+        ThemeKey.MENU_GROUP5_ACTIVE_BACKGROUND: "#7b1fa2",  # Purple 700
+        ThemeKey.MENU_GROUP5_ACTIVE_TEXT: "#e0e0e0",
+        ThemeKey.MENU_GROUP5_ACTIVE_HOVER_BACKGROUND: "#8e24aa",  # Purple 600
+
+        # Group6: 設定関係
+        ThemeKey.MENU_GROUP6_INACTIVE_BACKGROUND: "#263238",  # Blue Grey 900
+        ThemeKey.MENU_GROUP6_INACTIVE_TEXT: "#e0e0e0",
+        ThemeKey.MENU_GROUP6_HOVER_BACKGROUND: "#37474f",  # Blue Grey 800
+        ThemeKey.MENU_GROUP6_ACTIVE_BACKGROUND: "#455a64",  # Blue Grey 700
+        ThemeKey.MENU_GROUP6_ACTIVE_TEXT: "#e0e0e0",
+        ThemeKey.MENU_GROUP6_ACTIVE_HOVER_BACKGROUND: "#546e7a",  # Blue Grey 600
         
         # ========================================
         # Button - ボタン全般（明度を上げる）

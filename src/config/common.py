@@ -98,7 +98,13 @@ def _get_src_dir_for_source_execution() -> str:
 # 2025-12-22: v2.3.3 - データセット修正UI改善（関連データ）+ テスト更新/安定化
 # 2025-12-21: v2.3.2 - テキストエリア可視性改善（枠線/背景）+ テスト強化
 # 2025-12-20: v2.3.1 - データセット機能改善（API再取得・キーボード操作対応）
-REVISION = "2.4.16"  # リビジョン番号（バージョン管理用）- 【注意】変更時は上記場所も要更新
+# NOTE:
+# バージョンは VERSION.txt を単一のソース・オブ・トゥルースとし、
+# ここでは VERSION.txt から読み取った値を REVISION として公開する。
+# - ソース実行時: project_root/VERSION.txt
+# - バイナリ実行時: PyInstaller datas に含まれる _MEIPASS/VERSION.txt
+# これにより、コード内にバージョン文字列の重複定義を残さない。
+REVISION = "(uninitialized)"
 # 2025-12-18: v2.2.8 - データセット開設フィルタUI改善 + 基本情報キャッシュ判定修正 + ドキュメント更新
 #   - データセット開設（新規開設/新規開設2）: ロール/サブグループ/テンプレート/組織フィルタのラベル整理と「フィルタなし」の追加
 #   - 基本情報: サブグループ0件ケースで subGroups/ 欠損扱いにせず、不要な再取得を抑制
@@ -306,10 +312,46 @@ def get_dynamic_file_path(relative_path):
         logger.debug(f"[PATH_DEBUG] get_dynamic_file_path: {relative_path} -> {result}")
     return result
 
+
+def read_version_from_version_txt() -> str:
+    """VERSION.txt からバージョン文字列を取得する。
+
+    - ソース実行時: project_root/VERSION.txt
+    - バイナリ実行時: _MEIPASS/VERSION.txt
+    """
+
+    candidates: list[str] = []
+    try:
+        if is_binary_execution():
+            candidates.append(get_static_resource_path("VERSION.txt"))
+        else:
+            candidates.append(get_dynamic_file_path("VERSION.txt"))
+    except Exception:
+        # 最終フォールバック: ソース実行想定（project_root/VERSION.txt）
+        try:
+            candidates.append(os.path.join(get_base_dir(), "VERSION.txt"))
+        except Exception:
+            pass
+
+    for path in candidates:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                for line in f:
+                    v = (line or "").strip()
+                    if v:
+                        return v.lstrip("v")
+        except Exception:
+            continue
+
+    return "unknown"
+
 # ディレクトリ自動作成とパス定義
 
 # 基準ディレクトリの取得
 BASE_DIR = get_base_dir()
+
+# VERSION.txt を読み取り、公開するバージョン値を確定
+REVISION = read_version_from_version_txt()
 
 # 入力・出力・設定ディレクトリの定義
 INPUT_DIR = get_dynamic_file_path('input')

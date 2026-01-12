@@ -1877,13 +1877,29 @@ class DatasetUploadTab(QWidget):
     
     def _log_status(self, message: str, error: bool = False):
         """ステータスログ"""
+        # NOTE:
+        # 以前はメッセージごとにHTMLで色を埋め込んでいたため、
+        # テーマ切替後も既存文字列の色が残り、背景色だけが変わって視認性が悪化していた。
+        # ここでは「テキストエリア全体のforeground/background」をstyleSheetで管理し、
+        # メッセージ単位での色指定は行わない。
+        try:
+            from qt_compat.gui import QTextCursor
+
+            cursor = self.status_text.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            cursor.insertText(f"{message}\n")
+            self.status_text.setTextCursor(cursor)
+        except Exception:
+            # Fallback
+            try:
+                self.status_text.append(message)
+            except Exception:
+                pass
+
         if error:
-            style = f"color: {get_color(ThemeKey.TEXT_ERROR)};"
+            logger.error(message)
         else:
-            style = f"color: {get_color(ThemeKey.INPUT_TEXT)};"
-        
-        self.status_text.append(f'<span style="{style}">{message}</span>')
-        logger.info(message)
+            logger.info(message)
     
     def _show_info(self, message: str):
         """情報メッセージ"""

@@ -56,6 +56,51 @@ class ThemeKey(str, Enum):
     MENU_BUTTON_ACTIVE_TEXT = "menu.button.active.text"
     MENU_BUTTON_HOVER_BACKGROUND = "menu.button.hover.background"
     MENU_BUTTON_HOVER_TEXT = "menu.button.hover.text"
+
+    # メインメニュー（左ペイン）: グループ別配色
+    # 各グループごとに inactive/active と hover の背景色・文字色を分離し、
+    # テーマ(Light/Dark)に完全対応させる。
+    MENU_GROUP1_INACTIVE_BACKGROUND = "menu.group1.inactive.background"
+    MENU_GROUP1_INACTIVE_TEXT = "menu.group1.inactive.text"
+    MENU_GROUP1_HOVER_BACKGROUND = "menu.group1.hover.background"
+    MENU_GROUP1_ACTIVE_BACKGROUND = "menu.group1.active.background"
+    MENU_GROUP1_ACTIVE_TEXT = "menu.group1.active.text"
+    MENU_GROUP1_ACTIVE_HOVER_BACKGROUND = "menu.group1.active.hover.background"
+
+    MENU_GROUP2_INACTIVE_BACKGROUND = "menu.group2.inactive.background"
+    MENU_GROUP2_INACTIVE_TEXT = "menu.group2.inactive.text"
+    MENU_GROUP2_HOVER_BACKGROUND = "menu.group2.hover.background"
+    MENU_GROUP2_ACTIVE_BACKGROUND = "menu.group2.active.background"
+    MENU_GROUP2_ACTIVE_TEXT = "menu.group2.active.text"
+    MENU_GROUP2_ACTIVE_HOVER_BACKGROUND = "menu.group2.active.hover.background"
+
+    MENU_GROUP3_INACTIVE_BACKGROUND = "menu.group3.inactive.background"
+    MENU_GROUP3_INACTIVE_TEXT = "menu.group3.inactive.text"
+    MENU_GROUP3_HOVER_BACKGROUND = "menu.group3.hover.background"
+    MENU_GROUP3_ACTIVE_BACKGROUND = "menu.group3.active.background"
+    MENU_GROUP3_ACTIVE_TEXT = "menu.group3.active.text"
+    MENU_GROUP3_ACTIVE_HOVER_BACKGROUND = "menu.group3.active.hover.background"
+
+    MENU_GROUP4_INACTIVE_BACKGROUND = "menu.group4.inactive.background"
+    MENU_GROUP4_INACTIVE_TEXT = "menu.group4.inactive.text"
+    MENU_GROUP4_HOVER_BACKGROUND = "menu.group4.hover.background"
+    MENU_GROUP4_ACTIVE_BACKGROUND = "menu.group4.active.background"
+    MENU_GROUP4_ACTIVE_TEXT = "menu.group4.active.text"
+    MENU_GROUP4_ACTIVE_HOVER_BACKGROUND = "menu.group4.active.hover.background"
+
+    MENU_GROUP5_INACTIVE_BACKGROUND = "menu.group5.inactive.background"
+    MENU_GROUP5_INACTIVE_TEXT = "menu.group5.inactive.text"
+    MENU_GROUP5_HOVER_BACKGROUND = "menu.group5.hover.background"
+    MENU_GROUP5_ACTIVE_BACKGROUND = "menu.group5.active.background"
+    MENU_GROUP5_ACTIVE_TEXT = "menu.group5.active.text"
+    MENU_GROUP5_ACTIVE_HOVER_BACKGROUND = "menu.group5.active.hover.background"
+
+    MENU_GROUP6_INACTIVE_BACKGROUND = "menu.group6.inactive.background"
+    MENU_GROUP6_INACTIVE_TEXT = "menu.group6.inactive.text"
+    MENU_GROUP6_HOVER_BACKGROUND = "menu.group6.hover.background"
+    MENU_GROUP6_ACTIVE_BACKGROUND = "menu.group6.active.background"
+    MENU_GROUP6_ACTIVE_TEXT = "menu.group6.active.text"
+    MENU_GROUP6_ACTIVE_HOVER_BACKGROUND = "menu.group6.active.hover.background"
     
     # ========================================
     # Button - ボタン全般
