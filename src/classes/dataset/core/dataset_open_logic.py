@@ -1284,10 +1284,23 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         except Exception as _e:
             logger.debug("dataset_open_widget theme refresh failed: %s", _e)
 
-    # ThemeManagerへ接続
+    # ThemeManagerへ接続（container破棄で自動解除されるよう QObject ブリッジ経由）
     try:
+        from PySide6.QtCore import QObject, Slot
         from classes.theme.theme_manager import ThemeManager as _TM2
-        _TM2.get_instance().theme_changed.connect(_refresh_theme)
+
+        _tm2 = _TM2.get_instance()
+
+        class _ThemeChangedBridge(QObject):
+            @Slot(object)
+            def on_theme_changed(self, *_args):
+                try:
+                    _refresh_theme()
+                except Exception:
+                    pass
+
+        container._rde_theme_changed_bridge = _ThemeChangedBridge(container)  # type: ignore[attr-defined]
+        _tm2.theme_changed.connect(container._rde_theme_changed_bridge.on_theme_changed)  # type: ignore[attr-defined]
     except Exception as _e:
         logger.debug("Theme signal connect failed (dataset open): %s", _e)
     _refresh_theme()

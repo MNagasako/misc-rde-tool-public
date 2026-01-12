@@ -280,28 +280,27 @@ class EventHandler:
             loadStartedのタイミングでも背景色を明示しておく。
             """
             try:
-                from classes.theme import get_color, get_qcolor, ThemeKey
-
-                bg = get_color(ThemeKey.WINDOW_BACKGROUND)
+                from classes.theme import get_qcolor, ThemeKey
 
                 # WebView周辺の下地（未描画領域が黒にならないように）
                 try:
                     right_widget = self.parent.findChild(QWidget, 'right_widget')
                     if right_widget is not None:
-                        right_widget.setStyleSheet(f"background-color: {bg};")
+                        # 固定色を当てるとテーマ切替後に残留するため、palette参照にする
+                        right_widget.setStyleSheet("background-color: palette(window);")
                 except Exception:
                     pass
                 try:
                     webview_widget = self.parent.findChild(QWidget, 'webview_widget')
                     if webview_widget is not None:
-                        webview_widget.setStyleSheet(f"background-color: {bg};")
+                        webview_widget.setStyleSheet("background-color: palette(window);")
                 except Exception:
                     pass
 
                 # WebView自身
                 try:
                     if hasattr(self.parent, 'webview'):
-                        self.parent.webview.setStyleSheet(f"background-color: {bg};")
+                        self.parent.webview.setStyleSheet("background-color: palette(window);")
                         page = self.parent.webview.page() if hasattr(self.parent.webview, 'page') else None
                         if page is not None and hasattr(page, 'setBackgroundColor'):
                             page.setBackgroundColor(get_qcolor(ThemeKey.WINDOW_BACKGROUND))

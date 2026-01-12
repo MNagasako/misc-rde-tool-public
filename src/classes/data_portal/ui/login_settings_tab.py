@@ -12,6 +12,7 @@ from qt_compat.widgets import (
 from qt_compat.core import Qt, Signal
 
 from classes.theme import get_color, ThemeKey
+from classes.theme.theme_manager import ThemeManager
 
 from classes.managers.log_manager import get_logger
 from ..core.auth_manager import get_auth_manager, PortalCredentials, AuthManager
@@ -81,6 +82,25 @@ class LoginSettingsTab(QWidget):
         layout.addWidget(self.status_text)
         
         layout.addStretch()
+
+        # テーマ変更イベントに追従（個別 styleSheet の色埋め込み更新）
+        try:
+            self._theme_manager = ThemeManager.instance()
+            self._theme_slot = self.refresh_theme
+            self._theme_manager.theme_changed.connect(self._theme_slot)
+
+            def _disconnect_theme_slot(*_args):
+                try:
+                    self._theme_manager.theme_changed.disconnect(self._theme_slot)
+                except Exception:
+                    pass
+
+            try:
+                self.destroyed.connect(_disconnect_theme_slot)
+            except Exception:
+                pass
+        except Exception:
+            pass
     
     def _apply_status_style(self):
         """ステータステキストスタイルを適用"""
@@ -411,12 +431,9 @@ class LoginSettingsTab(QWidget):
     
     def _log_status(self, message: str, error: bool = False):
         """ステータスログ出力"""
-        if error:
-            style = f"color: {get_color(ThemeKey.TEXT_ERROR)};"
-        else:
-            style = f"color: {get_color(ThemeKey.INPUT_TEXT)};"
-        
-        self.status_text.append(f'<span style="{style}">{message}</span>')
+        # 仕様: 文字列ごとに配色は指定しない（テーマ側の QTextEdit QSS に委ねる）
+        # error は文頭アイコン(❌/⚠️ 等)で区別し、色は固定しない。
+        self.status_text.append(message)
         logger.info(message)
     
     def _show_info(self, message: str):

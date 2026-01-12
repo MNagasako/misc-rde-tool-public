@@ -1,5 +1,5 @@
 """
-テーマ管理 - ARIM RDE Tool v2.4.15
+テーマ管理 - ARIM RDE Tool v2.4.16
 
 ライト/ダークテーマの切り替えとカラー取得を一元管理。
 Singleton パターンで全UI要素から参照可能。
@@ -9,6 +9,7 @@ from enum import Enum
 from typing import Optional
 import os
 import weakref
+from shiboken6 import isValid as _shiboken_is_valid
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QPalette
 from PySide6.QtWidgets import QApplication
@@ -429,6 +430,23 @@ class ThemeManager(QObject):
         """
         if cls._instance is None:
             cls._instance = ThemeManager()
+            return cls._instance
+
+        # PySide6 では QObject が先に破棄されても Python 側参照が残り得る。
+        # その状態で signal connect すると `RuntimeError: Signal source has been deleted` になるため、
+        # ここで生存確認し、無効なら再生成する。
+        try:
+            if not _shiboken_is_valid(cls._instance):
+                # __new__ が _instance を返すため、先にクリアしてから再生成する
+                cls._instance = None
+                cls._instance = ThemeManager()
+        except Exception:
+            # shiboken6 が想定外に失敗した場合は、Qt側例外の発生を避けるため再生成を試みる
+            try:
+                cls._instance = None
+                cls._instance = ThemeManager()
+            except Exception:
+                pass
         return cls._instance
     
     def get_color(self, key: ThemeKey) -> str:
@@ -490,10 +508,13 @@ class ThemeManager(QObject):
         is_pytest_run = bool(os.environ.get("PYTEST_CURRENT_TEST"))
         
         mode_changed = mode != self._current_mode
+        old_mode = self._current_mode
         if mode_changed:
-            old_mode = self._current_mode
+            # NOTE: theme_changed は重い refresh_theme を多数発火し得るため、
+            # グローバルQSS/Palette適用より前に emit すると
+            # 「個別Widget再スタイル」→「全体再スタイル」が重なり、切替が遅くなる。
+            # ここでは mode を先に切り替え、emit は後段（QSS/Palette適用後）で行う。
             self._current_mode = mode
-            self.theme_changed.emit(mode)
             print(f"[ThemeManager] Theme changed: {old_mode.value} → {mode.value}")
         else:
             print(f"[ThemeManager] Theme reapply (same mode: {mode.value})")
@@ -515,8 +536,15 @@ class ThemeManager(QObject):
             print(f"[ThemeManager] style patch init skipped: {patch_err}")
 
         app = QApplication.instance()
-        if app is not None:
-            try:
+        if app is None:
+            # QApplication が未初期化でも、モード変更通知だけは行う
+            if mode_changed:
+                try:
+                    self.theme_changed.emit(mode)
+                except Exception:
+                    pass
+            return
+        try:
                 # === updatesEnabled バッチ無効化開始 ===
                 top_levels = []
                 if not is_pytest_run:
@@ -577,42 +605,38 @@ class ThemeManager(QObject):
                 palette_elapsed = (time.perf_counter_ns() - palette_start) / 1_000_000
 
                 # ネイティブタイトルバー配色もテーマに追従（ダイアログ/別ウィンドウ含む）
+                # NOTE: pytestでも、呼び出し自体は行う（テストでspyされる/実装がNo-opのケースがある）。
                 try:
                     self._ensure_window_frame_styler(app)
                 except Exception:
                     pass
 
-                # QTextEdit/QTextBrowser の viewport へ直接スタイル適用（環境差対策）
-                try:
-                    self._ensure_text_area_viewport_styler(app)
-                except Exception:
-                    pass
-
-                # QScrollArea の viewport へ直接スタイル適用（未塗り領域の黒化対策）
-                try:
-                    self._ensure_scroll_area_viewport_styler(app)
-                except Exception:
-                    pass
-
-                # QComboBox(非editable) placeholder の環境差対策（互換モード）
-                try:
-                    self._ensure_combo_placeholder_compat_styler(app)
-                except Exception:
-                    pass
-                
-                # 大量ComboBox最適化
-                combo_elapsed = 0.0
+                # viewport styler/eventFilter 類は pytest 実行では不要なうえ、
+                # 長時間ランで不安定化し得るためスキップする。
                 if not is_pytest_run:
+                    # QTextEdit/QTextBrowser の viewport へ直接スタイル適用（環境差対策）
                     try:
-                        combo_start = time.perf_counter_ns()
-                        from classes.utils.theme_perf_util import optimize_global_large_combos
+                        self._ensure_text_area_viewport_styler(app)
+                    except Exception:
+                        pass
 
-                        processed = optimize_global_large_combos(threshold=500, deferred=True)
-                        combo_elapsed = (time.perf_counter_ns() - combo_start) / 1_000_000
-                        if processed:
-                            print(f"[ThemeManager] optimized {processed} large combo boxes ({combo_elapsed:.2f}ms)")
-                    except Exception as opt_e:  # pragma: no cover
-                        print(f"[ThemeManager] combo optimization skipped: {opt_e}")
+                    # QScrollArea の viewport へ直接スタイル適用（未塗り領域の黒化対策）
+                    try:
+                        self._ensure_scroll_area_viewport_styler(app)
+                    except Exception:
+                        pass
+
+                    # QComboBox(非editable) placeholder の環境差対策（互換モード）
+                    try:
+                        self._ensure_combo_placeholder_compat_styler(app)
+                    except Exception:
+                        pass
+
+                # theme_changed は updatesEnabled を戻した後に通知する（finally 側で1回だけemit）。
+                signal_elapsed = 0.0
+                
+                # 大量ComboBox最適化は toggle のクリティカルパスから外す（後で singleShot）
+                combo_elapsed = 0.0
                 
                 # 処理時間サマリー
                 total_elapsed = (time.perf_counter_ns() - total_start) / 1_000_000
@@ -630,12 +654,12 @@ class ThemeManager(QObject):
                 print(
                     f"[ThemeManager] Timing: styleGen={gen_elapsed:.2f}ms styleApply={apply_elapsed:.2f}ms "
                     f"styleTotal={style_total_elapsed:.2f}ms repaint={repaint_elapsed:.2f}ms palette={palette_elapsed:.2f}ms "
-                    f"combo={combo_elapsed:.2f}ms total={total_elapsed:.2f}ms{meta_str}"
+                    f"signal={signal_elapsed:.2f}ms combo={combo_elapsed:.2f}ms total={total_elapsed:.2f}ms{meta_str}"
                 )
                 
-            except Exception as e:
-                print(f"[ThemeManager] apply palette failed: {e}")
-            finally:
+        except Exception as e:
+            print(f"[ThemeManager] apply palette failed: {e}")
+        finally:
                 # === updatesEnabled バッチ再有効化 ===
                 repaint_start = time.perf_counter_ns()
                 for w in top_levels:
@@ -675,6 +699,42 @@ class ThemeManager(QObject):
                 repaint_elapsed = (time.perf_counter_ns() - repaint_start) / 1_000_000
                 # Emit refined timing summary (micro-profile + repaint)
                 print(f"[ThemeManager] Timing(refined): repaint={repaint_elapsed:.2f}ms (topLevels={len(top_levels)})")
+
+                # theme_changed は updatesEnabled を戻した後に通知する。
+                # updates無効中に個別Widgetが setStyleSheet すると、
+                # 画面の一部だけ反映が遅れて「タブ切替で直る」症状になり得る。
+                signal_elapsed = 0.0
+                if mode_changed:
+                    sig_start = time.perf_counter_ns()
+                    try:
+                        self.theme_changed.emit(mode)
+                    except Exception:
+                        pass
+                    signal_elapsed = (time.perf_counter_ns() - sig_start) / 1_000_000
+                    print(f"[ThemeManager] Timing(signal): signal={signal_elapsed:.2f}ms")
+
+
+                # クリティカルパス外で ComboBox 最適化（UIスレッドで後続実行）
+                if not is_pytest_run:
+                    try:
+                        from PySide6.QtCore import QTimer
+
+                        def _run_combo_opt():
+                            try:
+                                import time as _t
+                                from classes.utils.theme_perf_util import optimize_global_large_combos
+
+                                c_start = _t.perf_counter_ns()
+                                processed = optimize_global_large_combos(threshold=500, deferred=True)
+                                c_elapsed = (_t.perf_counter_ns() - c_start) / 1_000_000
+                                if processed:
+                                    print(f"[ThemeManager] optimized {processed} large combo boxes ({c_elapsed:.2f}ms)")
+                            except Exception as opt_e:  # pragma: no cover
+                                print(f"[ThemeManager] combo optimization skipped: {opt_e}")
+
+                        QTimer.singleShot(0, _run_combo_opt)
+                    except Exception:
+                        pass
                 # カウンタ取得とログ
                 try:
                     from classes.utils.style_patch import get_style_counters, get_style_class_stats

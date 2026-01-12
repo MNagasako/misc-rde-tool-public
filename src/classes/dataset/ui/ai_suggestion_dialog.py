@@ -1141,6 +1141,16 @@ class AISuggestionDialog(QDialog):
         dataset_combo_layout.addWidget(show_all_btn)
         
         dataset_select_layout.addWidget(dataset_combo_container)
+
+        # 選択中データセットの日時（JST）を表示
+        try:
+            from classes.utils.dataset_datetime_display import create_dataset_dates_label, attach_dataset_dates_label
+
+            self._extension_dataset_dates_label = create_dataset_dates_label(dataset_select_widget)
+            attach_dataset_dates_label(combo=self.extension_dataset_combo, label=self._extension_dataset_dates_label)
+            dataset_select_layout.addWidget(self._extension_dataset_dates_label)
+        except Exception:
+            self._extension_dataset_dates_label = None
         layout.addWidget(dataset_select_widget)
         
         # データセット情報エリア（既存）

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-ARIM RDE Tool v2.4.15 - PySide6によるRDE→ARIMデータポータル移行ツール
+ARIM RDE Tool v2.4.16 - PySide6によるRDE→ARIMデータポータル移行ツール
 
 主要機能:
 - RDEシステムへの自動ログイン・データセット一括取得・画像保存
@@ -973,12 +973,35 @@ def main():
             print("="*80)
 
         if args.version:
-            try:
-                version_path = get_static_resource_path('../VERSION.txt')
-                with open(version_path, encoding='utf-8') as f:
-                    version = f.readline().strip()
+            version: str | None = None
+
+            # ソース実行時: project_root/VERSION.txt を狙って ../VERSION.txt
+            # バイナリ実行時: sys._MEIPASS (=_internal) 直下に VERSION.txt を同梱して読む
+            candidate_paths = [
+                get_static_resource_path('../VERSION.txt'),
+                get_static_resource_path('VERSION.txt'),
+            ]
+            for version_path in candidate_paths:
+                try:
+                    with open(version_path, encoding='utf-8') as f:
+                        v = (f.readline() or '').strip()
+                    if v:
+                        version = v
+                        break
+                except Exception:
+                    continue
+
+            if not version:
+                try:
+                    from config.common import REVISION as _REVISION
+
+                    version = str(_REVISION)
+                except Exception:
+                    version = None
+
+            if version:
                 print(version)
-            except Exception:
+            else:
                 logger.debug("バージョン情報の取得に失敗しました")
             sys.exit(0)
 

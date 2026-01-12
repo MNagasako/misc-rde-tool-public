@@ -339,19 +339,8 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     search_widget.setLayout(search_layout)
     layout.addWidget(search_widget)
     
-    # コンボボックス作成
-    combo = QComboBox()
-    combo.setMinimumWidth(650)
-    combo.setEditable(True)
-    combo.setInsertPolicy(QComboBox.NoInsert)
-    combo.setMaxVisibleItems(15)
-    # プレースホルダは項目ではなく、入力欄のヒントとして表示
-    combo.lineEdit().setPlaceholderText("— データセットを選択してください —")
-    
-    # コンボボックス個別スタイル（フォント表示問題対策）
-    # テキストが隠れないよう十分な高さとパディングを確保
-    # フォーカス可視化強化（枠色+薄い背景）
-    combo.setStyleSheet(f"""
+    def _build_combo_style() -> str:
+        return f"""
         QComboBox {{
             background-color: {get_color(ThemeKey.COMBO_BACKGROUND)};
             color: {get_color(ThemeKey.TEXT_PRIMARY)};
@@ -392,7 +381,21 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
             background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)};
             border: 1px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)};
         }}
-    """)
+    """
+
+    # コンボボックス作成
+    combo = QComboBox()
+    combo.setMinimumWidth(650)
+    combo.setEditable(True)
+    combo.setInsertPolicy(QComboBox.NoInsert)
+    combo.setMaxVisibleItems(15)
+    # プレースホルダは項目ではなく、入力欄のヒントとして表示
+    combo.lineEdit().setPlaceholderText("— データセットを選択してください —")
+    
+    # コンボボックス個別スタイル（フォント表示問題対策）
+    # テキストが隠れないよう十分な高さとパディングを確保
+    # フォーカス可視化強化（枠色+薄い背景）
+    combo.setStyleSheet(_build_combo_style())
     
     # 全件表示ボタン（コンボボックスの隣に配置）
     combo_container = QWidget()
@@ -407,6 +410,17 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     combo_container.setLayout(combo_layout)
     
     layout.addWidget(combo_container)
+
+    # 選択中データセットの日時（JST）を表示
+    try:
+        from classes.utils.dataset_datetime_display import create_dataset_dates_label, attach_dataset_dates_label
+
+        dataset_dates_label = create_dataset_dates_label(container)
+        attach_dataset_dates_label(combo=combo, label=dataset_dates_label)
+        layout.addWidget(dataset_dates_label)
+        container.dataset_dates_label = dataset_dates_label
+    except Exception:
+        container.dataset_dates_label = None
     
     def load_and_filter_datasets():
         """フィルタリング設定を適用してコンボボックスを更新"""
@@ -782,6 +796,12 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
             
             # 表示件数ラベルの色更新
             apply_label_style(count_label, get_color(ThemeKey.TEXT_MUTED), bold=True, point_size=10)
+
+            # データセット選択コンボのQSS更新（色埋め込みのため再適用が必要）
+            try:
+                combo.setStyleSheet(_build_combo_style())
+            except Exception:
+                pass
             
             container.update()
         except Exception as e:
@@ -844,20 +864,27 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     container.reset_filters = reset_filters_to_all
     container.reload_datasets = load_and_filter_datasets
     
-    # ThemeManager接続
-    from classes.theme.theme_manager import ThemeManager
-    theme_manager = ThemeManager.instance()
-    theme_manager.theme_changed.connect(refresh_theme)
-
-    # Widget破棄後に theme_changed が飛ぶと、削除済みWidget参照で不安定になるため切断する
-    def _disconnect_theme_changed(*_args):
-        try:
-            theme_manager.theme_changed.disconnect(refresh_theme)
-        except Exception:
-            pass
-
+    # ThemeManager 接続
+    # NOTE:
+    # - テーマ変更シグナルにローカル関数(クロージャ)を直接 connect すると、
+    #   破棄済みWidget参照が残ったり、disconnect が漏れた場合にシグナル受信が蓄積しやすい。
+    # - QObject 子のブリッジを介して connect し、container 破棄と同時に自動的に解除されるようにする。
     try:
-        container.destroyed.connect(_disconnect_theme_changed)
+        from PySide6.QtCore import QObject, Slot
+        from classes.theme.theme_manager import ThemeManager
+
+        theme_manager = ThemeManager.instance()
+
+        class _ThemeChangedBridge(QObject):
+            @Slot(object)
+            def on_theme_changed(self, *_args):
+                try:
+                    refresh_theme()
+                except Exception:
+                    pass
+
+        container._rde_theme_changed_bridge = _ThemeChangedBridge(container)  # type: ignore[attr-defined]
+        theme_manager.theme_changed.connect(container._rde_theme_changed_bridge.on_theme_changed)  # type: ignore[attr-defined]
     except Exception:
         pass
     
@@ -1159,9 +1186,28 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
         except Exception:
             pass
 
+        try:
+            summary_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-size: 11px;")
+        except Exception:
+            pass
+
+    # ThemeManager 接続（widget 破棄時に自動解除されるよう QObject ブリッジ経由）
     try:
+        from PySide6.QtCore import QObject, Slot
         from classes.theme.theme_manager import ThemeManager
-        ThemeManager.instance().theme_changed.connect(_refresh_theme_local)
+
+        tm = ThemeManager.instance()
+
+        class _ThemeChangedBridge(QObject):
+            @Slot(object)
+            def on_theme_changed(self, *_args):
+                try:
+                    _refresh_theme_local()
+                except Exception:
+                    pass
+
+        widget._rde_theme_changed_bridge = _ThemeChangedBridge(widget)  # type: ignore[attr-defined]
+        tm.theme_changed.connect(widget._rde_theme_changed_bridge.on_theme_changed)  # type: ignore[attr-defined]
     except Exception:
         pass
 

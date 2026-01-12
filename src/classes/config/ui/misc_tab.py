@@ -255,6 +255,12 @@ class MiscTab(QWidget):
         )
         layout.addWidget(self.menu_show_ai_test_checkbox)
 
+        self.menu_show_request_analyzer_checkbox = QCheckBox("メインメニューに『リクエスト解析』を表示する（既定: 非表示）")
+        self.menu_show_request_analyzer_checkbox.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-weight: normal;"
+        )
+        layout.addWidget(self.menu_show_request_analyzer_checkbox)
+
         btn_layout = QHBoxLayout()
         apply_btn = QPushButton("保存")
         apply_btn.setStyleSheet(
@@ -289,13 +295,16 @@ class MiscTab(QWidget):
             cfg = get_config_manager()
             show_data_fetch = bool(cfg.get("app.menu.show_data_fetch", False))
             show_ai_test = bool(cfg.get("app.menu.show_ai_test", False))
+            show_request_analyzer = bool(cfg.get("app.menu.show_request_analyzer", False))
             self.menu_show_data_fetch_checkbox.setChecked(show_data_fetch)
             self.menu_show_ai_test_checkbox.setChecked(show_ai_test)
+            self.menu_show_request_analyzer_checkbox.setChecked(show_request_analyzer)
         except Exception as e:
             logger.debug("メインメニュー設定の読み込みに失敗: %s", e)
             try:
                 self.menu_show_data_fetch_checkbox.setChecked(False)
                 self.menu_show_ai_test_checkbox.setChecked(False)
+                self.menu_show_request_analyzer_checkbox.setChecked(False)
             except Exception:
                 pass
 
@@ -305,6 +314,7 @@ class MiscTab(QWidget):
             cfg = get_config_manager()
             cfg.set("app.menu.show_data_fetch", bool(self.menu_show_data_fetch_checkbox.isChecked()))
             cfg.set("app.menu.show_ai_test", bool(self.menu_show_ai_test_checkbox.isChecked()))
+            cfg.set("app.menu.show_request_analyzer", bool(self.menu_show_request_analyzer_checkbox.isChecked()))
             if not cfg.save():
                 raise RuntimeError("設定ファイルの保存に失敗しました")
 

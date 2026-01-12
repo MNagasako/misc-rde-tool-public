@@ -49,7 +49,7 @@ from classes.subgroup.util.subgroup_list_table_records import (
 )
 from classes.dataset.ui.spinner_overlay import SpinnerOverlay
 from classes.theme.theme_keys import ThemeKey
-from classes.theme.theme_manager import get_color
+from classes.theme.theme_manager import ThemeManager, get_color
 from config.common import get_dynamic_file_path
 
 
@@ -805,6 +805,7 @@ class SubgroupListingWidget(QWidget):
 
         # Theme styling
         self._apply_theme()
+        self._bind_theme_refresh()
 
         # Wiring
         if self._row_limit is not None:
@@ -846,6 +847,45 @@ class SubgroupListingWidget(QWidget):
             self._rel_sample_max,
         ):
             sb.valueChanged.connect(self._schedule_apply_filters)
+
+    def _bind_theme_refresh(self) -> None:
+        """テーマ切替時に、このウィジェット固有のQSSを再適用する。
+
+        NOTE: この一覧タブは self.setStyleSheet(...) でサブツリーに配色を固定しているため、
+        QApplication全体のQSS/palette変更だけでは配色が更新されない。
+        """
+        try:
+            tm = ThemeManager.instance()
+        except Exception:
+            return
+
+        def _on_theme_changed(*_args) -> None:
+            try:
+                self._apply_theme()
+            except Exception:
+                pass
+
+        try:
+            tm.theme_changed.connect(_on_theme_changed)
+        except Exception:
+            return
+
+        # Keep a reference so the slot isn't GC'd.
+        try:
+            self._rde_theme_refresh_slot = _on_theme_changed  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        def _disconnect(*_args) -> None:
+            try:
+                tm.theme_changed.disconnect(_on_theme_changed)
+            except Exception:
+                pass
+
+        try:
+            self.destroyed.connect(_disconnect)
+        except Exception:
+            pass
 
     def _init_range_spinboxes(self) -> None:
         try:

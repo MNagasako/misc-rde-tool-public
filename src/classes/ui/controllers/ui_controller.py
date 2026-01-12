@@ -981,9 +981,11 @@ class UIController(UIControllerCore):
             cfg = get_config_manager()
             show_data_fetch = bool(cfg.get("app.menu.show_data_fetch", False))
             show_ai_test = bool(cfg.get("app.menu.show_ai_test", False))
+            show_request_analyzer = bool(cfg.get("app.menu.show_request_analyzer", False))
         except Exception:
             show_data_fetch = False
             show_ai_test = False
+            show_request_analyzer = False
 
         try:
             self.menu_buttons['data_fetch'].setVisible(show_data_fetch)
@@ -991,6 +993,12 @@ class UIController(UIControllerCore):
             pass
         try:
             self.menu_buttons['ai_test'].setVisible(show_ai_test)
+        except Exception:
+            pass
+
+        # 既定: リクエスト解析は非表示（必要な場合のみ設定で表示）
+        try:
+            self.menu_buttons['request_analyzer'].setVisible(show_request_analyzer)
         except Exception:
             pass
         
@@ -1774,7 +1782,36 @@ class UIController(UIControllerCore):
         # 入力がある場合はポップアップ表示
 
         # テーマ再適用関数（ライト/ダーク切替時）
-        def _refresh_basic_info_theme():
+        # NOTE: ThemeManager.theme_changed へのクロージャ接続はテストスイート中に残留しやすい。
+        # weakref を使って controller を保持しないようにし、controller がGCされたら自己disconnectする。
+        try:
+            import weakref
+
+            _rde_self_ref = weakref.ref(self)
+        except Exception:
+            _rde_self_ref = None
+
+        try:
+            _rde_theme_manager = ThemeManager.instance()
+        except Exception as e:
+            logger.debug("BasicInfo theme manager init failed: %s", e)
+            _rde_theme_manager = None
+
+        def _refresh_basic_info_theme(*_args):
+            self_obj = None
+            try:
+                self_obj = _rde_self_ref() if _rde_self_ref is not None else self
+            except Exception:
+                self_obj = None
+
+            if self_obj is None:
+                try:
+                    if _rde_theme_manager is not None:
+                        _rde_theme_manager.theme_changed.disconnect(_refresh_basic_info_theme)
+                except Exception:
+                    pass
+                return
+
             try:
                 # ボタンスタイル再生成
                 info_button_style_new = f"""
@@ -1786,15 +1823,15 @@ class UIController(UIControllerCore):
                     padding: 3px;
                 """
                 xlsx_button_style_new = f"background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)}; font-weight: bold; border-radius: 4px; border: 1px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)}; padding: 3px;"
-                for btn in [getattr(self, 'basic_btn', None), getattr(self, 'basic_self_btn', None), getattr(self, 'common_only_btn', None), getattr(self, 'invoice_schema_btn', None), getattr(self, 'sample_info_btn', None)]:
+                for btn in [getattr(self_obj, 'basic_btn', None), getattr(self_obj, 'basic_self_btn', None), getattr(self_obj, 'common_only_btn', None), getattr(self_obj, 'invoice_schema_btn', None), getattr(self_obj, 'sample_info_btn', None)]:
                     if btn:
                         btn.setStyleSheet(info_button_style_new)
-                for btn in [getattr(self, 'summary_basic_info_btn', None), getattr(self, 'open_summary_xlsx_btn', None)]:
+                for btn in [getattr(self_obj, 'summary_basic_info_btn', None), getattr(self_obj, 'open_summary_xlsx_btn', None)]:
                     if btn:
                         btn.setStyleSheet(xlsx_button_style_new)
                 # 入力欄
-                if hasattr(self, 'basic_info_input'):
-                    self.basic_info_input.setStyleSheet(f"""
+                if hasattr(self_obj, 'basic_info_input'):
+                    self_obj.basic_info_input.setStyleSheet(f"""
                         QLineEdit {{
        
                             border: 1px solid {get_color(ThemeKey.BORDER_INFO)};
@@ -1808,14 +1845,16 @@ class UIController(UIControllerCore):
                         }}
                     """)
                 # ラベル色再適用
-                if hasattr(self, 'basic_search_label'):
-                    self.basic_search_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)}; margin-top: 10px;")
-                if hasattr(self, 'json_status_widget') and hasattr(self.json_status_widget, 'refresh_theme'):
-                    self.json_status_widget.refresh_theme()
+                if hasattr(self_obj, 'basic_search_label'):
+                    self_obj.basic_search_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)}; margin-top: 10px;")
+                if hasattr(self_obj, 'json_status_widget') and hasattr(self_obj.json_status_widget, 'refresh_theme'):
+                    self_obj.json_status_widget.refresh_theme()
             except Exception as e:
                 logger.debug("BasicInfo theme refresh failed: %s", e)
+
         try:
-            ThemeManager.instance().theme_changed.connect(_refresh_basic_info_theme)
+            if _rde_theme_manager is not None:
+                _rde_theme_manager.theme_changed.connect(_refresh_basic_info_theme)
         except Exception as e:
             logger.debug("BasicInfo theme signal connect failed: %s", e)
         _refresh_basic_info_theme()

@@ -931,7 +931,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     existing_dataset_label.setMinimumWidth(150)
     existing_dataset_combo = QComboBox()
     existing_dataset_combo.setObjectName("datasetEditCombo")
-    existing_dataset_combo.setMinimumWidth(650)  # 幅を広げてID表示対応
+    # タブ幅に追従して横幅を伸縮（固定幅は避ける）
+    existing_dataset_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     existing_dataset_combo.setEditable(True)  # 検索補完のために編集可能にする
     existing_dataset_combo.setInsertPolicy(QComboBox.NoInsert)  # 新しいアイテムの挿入を禁止
     existing_dataset_combo.setMaxVisibleItems(12)  # ドロップダウンの表示行数を12行に
@@ -988,9 +989,19 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     existing_dataset_combo.focusInEvent = combo_focus_in
     
     dataset_selection_layout.addWidget(existing_dataset_label)
-    dataset_selection_layout.addWidget(existing_dataset_combo)
+    dataset_selection_layout.addWidget(existing_dataset_combo, 1)
     dataset_selection_widget.setLayout(dataset_selection_layout)
     layout.addWidget(dataset_selection_widget)
+
+    # 選択中データセットの日時（JST）を表示
+    try:
+        from classes.utils.dataset_datetime_display import create_dataset_dates_label, attach_dataset_dates_label
+
+        dataset_dates_label = create_dataset_dates_label(widget)
+        attach_dataset_dates_label(combo=existing_dataset_combo, label=dataset_dates_label)
+        layout.addWidget(dataset_dates_label)
+    except Exception:
+        pass
 
     launch_controls_widget = QWidget()
     launch_controls_layout = QHBoxLayout()
@@ -1013,8 +1024,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     launch_buttons = []
 
     def _has_dataset_selection() -> bool:
+        # index==0 でも実データセットの場合があるため、indexの真偽では判定しない
         idx = existing_dataset_combo.currentIndex()
-        if idx <= 0:
+        if idx < 0:
             return False
         dataset_data = existing_dataset_combo.itemData(idx)
         return isinstance(dataset_data, dict) and bool(dataset_data.get("id"))
@@ -1041,7 +1053,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
 
     def _get_selected_dataset_payload():
         idx = existing_dataset_combo.currentIndex()
-        if idx <= 0:
+        if idx < 0:
             QMessageBox.warning(widget, "データセット未選択", "連携するデータセットを選択してください。")
             return None
         dataset_data = existing_dataset_combo.itemData(idx)
@@ -3309,6 +3321,53 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         edit_manager_combo,
         edit_applicant_display,
     ) = create_edit_form()
+
+    # テーマ切替時に、個別に styleSheet を埋め込んでいる read-only 表示欄の色を再適用する。
+    # (ThemeKey を使うが、setStyleSheet は自動更新されないため)
+    try:
+        edit_applicant_display.setObjectName("dataset_edit_applicant_display")
+    except Exception:
+        pass
+    try:
+        edit_related_datasets_display.setObjectName("dataset_edit_related_datasets_display")
+    except Exception:
+        pass
+
+    def _apply_readonly_display_theme(*_args):
+        try:
+            edit_applicant_display.setStyleSheet(
+                f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)}; color: {get_color(ThemeKey.TEXT_MUTED)};"
+            )
+        except Exception:
+            pass
+        try:
+            edit_related_datasets_display.setStyleSheet(
+                f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)}; color: {get_color(ThemeKey.TEXT_MUTED)};"
+            )
+        except Exception:
+            pass
+
+    _apply_readonly_display_theme()
+
+    try:
+        from classes.theme.theme_manager import ThemeManager
+
+        _tm = ThemeManager.instance()
+        widget._dataset_edit_readonly_theme_slot = _apply_readonly_display_theme  # type: ignore[attr-defined]
+        _tm.theme_changed.connect(widget._dataset_edit_readonly_theme_slot)
+
+        def _disconnect_readonly_theme_slot(*_a):
+            try:
+                _tm.theme_changed.disconnect(widget._dataset_edit_readonly_theme_slot)
+            except Exception:
+                pass
+
+        try:
+            widget.destroyed.connect(_disconnect_readonly_theme_slot)
+        except Exception:
+            pass
+    except Exception:
+        pass
     
     # 上: 既存フォーム / 下: データエントリー一覧 の縦スプリッターを追加
     manager_entries = []

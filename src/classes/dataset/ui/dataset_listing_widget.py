@@ -52,7 +52,7 @@ from classes.dataset.util.dataset_listing_export_filename import (
 )
 
 from classes.theme.theme_keys import ThemeKey
-from classes.theme.theme_manager import get_color
+from classes.theme.theme_manager import ThemeManager, get_color
 from config.common import get_dynamic_file_path
 
 
@@ -1270,6 +1270,7 @@ class DatasetListingWidget(QWidget):
 
         # Theme styling
         self._apply_theme()
+        self._bind_theme_refresh()
 
         # Wiring
         self._row_limit.valueChanged.connect(self._apply_row_limit)
@@ -1318,6 +1319,41 @@ class DatasetListingWidget(QWidget):
 
         # Ensure initial state
         self._set_filters_collapsed(False)
+
+    def _bind_theme_refresh(self) -> None:
+        """テーマ切替時に、このウィジェット固有のQSSを再適用する。"""
+        try:
+            tm = ThemeManager.instance()
+        except Exception:
+            return
+
+        def _on_theme_changed(*_args) -> None:
+            try:
+                self._apply_theme()
+            except Exception:
+                pass
+
+        try:
+            tm.theme_changed.connect(_on_theme_changed)
+        except Exception:
+            return
+
+        # Keep a reference so the slot isn't GC'd.
+        try:
+            self._rde_theme_refresh_slot = _on_theme_changed  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        def _disconnect(*_args) -> None:
+            try:
+                tm.theme_changed.disconnect(_on_theme_changed)
+            except Exception:
+                pass
+
+        try:
+            self.destroyed.connect(_disconnect)
+        except Exception:
+            pass
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         try:

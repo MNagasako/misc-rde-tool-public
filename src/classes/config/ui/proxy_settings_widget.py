@@ -523,8 +523,9 @@ class ProxySettingsWidget(QWidget):
         self._theme_connected = False
 
         # テーマ切替で styleSheet に埋め込んだ色が更新漏れしないようにする
+        # NOTE: lambda を直接 connect すると接続が残留しやすいため、QObjectメソッドへ接続する。
         try:
-            ThemeManager.instance().theme_changed.connect(lambda *_: self.refresh_theme())
+            ThemeManager.instance().theme_changed.connect(self._on_theme_changed)
             self._theme_connected = True
         except Exception:
             self._theme_connected = False
@@ -532,6 +533,12 @@ class ProxySettingsWidget(QWidget):
         self.init_ui()
         self.refresh_theme()
         self.load_current_settings()
+
+    def _on_theme_changed(self, *_args) -> None:
+        try:
+            self.refresh_theme()
+        except Exception:
+            pass
         
     def init_ui(self):
         """UI初期化"""

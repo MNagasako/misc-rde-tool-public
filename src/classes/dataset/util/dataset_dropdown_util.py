@@ -797,6 +797,17 @@ def create_dataset_dropdown_with_user(dataset_json_path, info_json_path, parent=
     layout.addWidget(info_label)
     layout.addWidget(path_label)
     layout.addWidget(combo)
+
+    # 選択中データセットの日時（JST）を表示
+    try:
+        from classes.utils.dataset_datetime_display import create_dataset_dates_label, attach_dataset_dates_label
+
+        dataset_dates_label = create_dataset_dates_label(container)
+        # dataset dict を Qt.UserRole に保持しているため、それを優先して参照
+        attach_dataset_dates_label(combo=combo, label=dataset_dates_label, data_role=Qt.UserRole)
+        layout.addWidget(dataset_dates_label)
+    except Exception:
+        pass
     container.setLayout(layout)
     # combo自体にも参照を持たせておく（テストや外部取得用）
     container.dataset_dropdown = combo

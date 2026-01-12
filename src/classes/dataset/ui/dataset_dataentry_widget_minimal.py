@@ -20,7 +20,7 @@ from qt_compat.widgets import (
     QPushButton, QMessageBox, QComboBox, 
     QTableWidget, QTableWidgetItem, QHeaderView, QGroupBox,
     QCheckBox, QRadioButton, QProgressDialog, QApplication,
-    QLineEdit, QButtonGroup, QGridLayout, QCompleter, QDialog
+    QLineEdit, QButtonGroup, QGridLayout, QCompleter, QDialog, QSizePolicy
 )
 from qt_compat.core import Qt, QTimer, QUrl, QStringListModel
 from qt_compat.gui import QDesktopServices
@@ -146,7 +146,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
 
     dataset_combo = QComboBox()
     dataset_combo.setObjectName("datasetDataEntryCombo")
-    dataset_combo.setMinimumWidth(650)
+    dataset_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
     dataset_combo.setEditable(True)
     dataset_combo.setInsertPolicy(QComboBox.NoInsert)
     dataset_combo.setMaxVisibleItems(12)
@@ -197,11 +197,21 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     show_all_btn.clicked.connect(dataset_combo.showPopup)
 
     dataset_selection_layout.addWidget(dataset_label)
-    dataset_selection_layout.addWidget(dataset_combo)
+    dataset_selection_layout.addWidget(dataset_combo, 1)
     dataset_selection_layout.addWidget(show_all_btn)
     dataset_selection_widget.setLayout(dataset_selection_layout)
     layout.addWidget(dataset_selection_widget)
     widget.dataset_combo = dataset_combo  # type: ignore[attr-defined]
+
+    # 選択中データセットの日時（JST）を表示
+    try:
+        from classes.utils.dataset_datetime_display import create_dataset_dates_label, attach_dataset_dates_label
+
+        dataset_dates_label = create_dataset_dates_label(widget)
+        attach_dataset_dates_label(combo=dataset_combo, label=dataset_dates_label)
+        layout.addWidget(dataset_dates_label)
+    except Exception:
+        pass
 
     launch_controls_widget = QWidget()
     launch_controls_layout = QHBoxLayout()
@@ -225,7 +235,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
 
     def _has_dataset_selection() -> bool:
         idx = dataset_combo.currentIndex()
-        if idx <= 0:
+        if idx < 0:
             return False
         data = dataset_combo.itemData(idx)
         return bool(data)
@@ -252,7 +262,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
 
     def _get_current_dataset_payload():
         idx = dataset_combo.currentIndex()
-        if idx <= 0:
+        if idx < 0:
             QMessageBox.warning(widget, "データセット未選択", "連携するデータセットを選択してください。")
             return None
         dataset_id = dataset_combo.itemData(idx)

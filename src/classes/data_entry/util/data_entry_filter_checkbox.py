@@ -575,6 +575,17 @@ def create_checkbox_filter_dropdown(parent=None):
     layout.addWidget(status_label)
     layout.addWidget(combo)
 
+    # 選択中データセットの日時（JST）を表示
+    try:
+        from classes.utils.dataset_datetime_display import create_dataset_dates_label, attach_dataset_dates_label
+
+        dataset_dates_label = create_dataset_dates_label(container)
+        attach_dataset_dates_label(combo=combo, label=dataset_dates_label, data_role=Qt.UserRole)
+        layout.addWidget(dataset_dates_label)
+        container.dataset_dates_label = dataset_dates_label
+    except Exception:
+        pass
+
     # フィルタなし専用キャッシュ（表示名生成のコストを削減）
     no_filter_cache: dict = {
         "items": None,  # list[tuple[str, dict]]

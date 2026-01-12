@@ -1022,6 +1022,10 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     related_datasets_display.setReadOnly(True)
     related_datasets_display.setPlaceholderText("関連データセット（設定ボタンで編集）")
     try:
+        related_datasets_display.setObjectName("dataset_create2_related_datasets_display")
+    except Exception:
+        pass
+    try:
         from classes.theme.theme_keys import ThemeKey as _TK
         from classes.theme.theme_manager import get_color as _gc
         related_datasets_display.setStyleSheet(
@@ -1040,6 +1044,51 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
 
     # expose display for existing dataset autofill
     container._create2_related_datasets_display = related_datasets_display  # type: ignore[attr-defined]
+
+    # テーマ切替時に、新規開設2で個別に色埋め込みしているパネル/表示欄を再適用する。
+    def _refresh_create2_theme(*_args):
+        try:
+            existing_panel.setStyleSheet(
+                f"background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)};"
+                f"border: 1px solid {get_color(ThemeKey.PANEL_BORDER)};"
+                f"border-radius: 6px;"
+            )
+        except Exception:
+            pass
+        try:
+            existing_title.setStyleSheet(
+                f"font-weight: bold; color: {get_color(ThemeKey.TEXT_PRIMARY)};"
+            )
+        except Exception:
+            pass
+        try:
+            related_datasets_display.setStyleSheet(
+                f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)}; color: {get_color(ThemeKey.TEXT_MUTED)};"
+            )
+        except Exception:
+            pass
+
+    _refresh_create2_theme()
+
+    try:
+        from classes.theme.theme_manager import ThemeManager
+
+        _tm = ThemeManager.instance()
+        container._create2_theme_slot = _refresh_create2_theme  # type: ignore[attr-defined]
+        _tm.theme_changed.connect(container._create2_theme_slot)
+
+        def _disconnect_create2_theme_slot(*_a):
+            try:
+                _tm.theme_changed.disconnect(container._create2_theme_slot)
+            except Exception:
+                pass
+
+        try:
+            container.destroyed.connect(_disconnect_create2_theme_slot)
+        except Exception:
+            pass
+    except Exception:
+        pass
 
     # Place checkboxes AFTER related datasets
     if share_core_scope_checkbox is not None:
