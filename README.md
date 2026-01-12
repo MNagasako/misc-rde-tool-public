@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.4.16** のバイナリ配布およびドキュメント公開用リポジトリです。  
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.4.17** のバイナリ配布およびドキュメント公開用リポジトリです。  
 本ツールは、文部科学省ARIM事業の研究データ共有サイト「RDE」の操作補助とデータポータルへの登録支援を目的とした Windows デスクトップアプリケーションです。Web操作の煩雑さを軽減し、データの一括取得・登録・AI支援機能を提供します。
 
 > [!NOTE]
@@ -22,9 +22,9 @@
 
 ## 🚀 最新情報
 
-**2026-01-11 最新リリース**: バージョン2.4.16（テーマ切替: 破棄順序クラッシュ修正 + 一覧/各種UIの配色追従）
+**2026-01-12 最新リリース**: バージョン2.4.17（テーマ切替: 破棄順序クラッシュ修正 + 一覧/各種UIの配色追従）
 
-### v2.4.16 の主な改善
+### v2.4.17 の主な改善
 
 - テーマ切替時に、特定の破棄順序でクラッシュする問題を修正。
 - 一覧タブ/各種ウィジェットで、ローカルQSSがテーマ切替に追従しない問題を修正。
@@ -46,7 +46,7 @@
 3. デスクトップに作成されたショートカットからアプリを起動します。
 4. 初回起動時、必要なフォルダ（`input/`, `output/`）が自動的に作成されます。
 
-> ✅ v2.4.16 のファイル名は `arim_rde_tool_setup.2.4.16.exe` です（改変チェックは `latest.json` の `sha256` または `checksums.sha256` を参照）。
+> ✅ v2.4.17 のファイル名は `arim_rde_tool_setup.2.4.17.exe` です（改変チェックは `latest.json` の `sha256` または `checksums.sha256` を参照）。
 
 #### 最新版バイナリへの直接リンク
 
@@ -133,13 +133,13 @@
 * **[ドキュメント一覧マップ](docs/DOCUMENT_MAP.md)**
 * **[第三者ライセンス通知](THIRD_PARTY_NOTICES/)**
 
-* **[リリースノート v2.4.16](docs/RELEASE_NOTES_v2.4.16.md)**
+* **[リリースノート v2.4.17](docs/RELEASE_NOTES_v2.4.17.md)**
 
 ---
 
 ## 🔢 バージョン情報
 
-現在配布バージョン: `v2.4.16` （`VERSION.txt` に基づく）
+現在配布バージョン: `v2.4.17` （`VERSION.txt` に基づく）
 
 更新履歴の詳細は `docs/CHANGELOG.md` を参照してください。
 
