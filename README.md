@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.4.17** のバイナリ配布およびドキュメント公開用リポジトリです。  
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.4.18** のバイナリ配布およびドキュメント公開用リポジトリです。  
 本ツールは、文部科学省ARIM事業の研究データ共有サイト「RDE」の操作補助とデータポータルへの登録支援を目的とした Windows デスクトップアプリケーションです。Web操作の煩雑さを軽減し、データの一括取得・登録・AI支援機能を提供します。
 
 > [!NOTE]
@@ -22,14 +22,14 @@
 
 ## 🚀 最新情報
 
-**2026-01-12 最新リリース**: バージョン2.4.17（テーマ切替: 破棄順序クラッシュ修正 + 一覧/各種UIの配色追従）
+**2026-01-13 最新リリース**: バージョン2.4.18（データセット一覧: 日時列の整合性修正 + 範囲フィルタ安定化）
 
-### v2.4.17 の主な改善
+### v2.4.18 の主な改善
 
-- テーマ切替時に、特定の破棄順序でクラッシュする問題を修正。
-- 一覧タブ/各種ウィジェットで、ローカルQSSがテーマ切替に追従しない問題を修正。
-- データポータル設定のステータス表示を、文字列ごとの固定色指定からテーマ追従の見た目へ統一。
-- ユニット/ウィジェット/統合テストを実行し、回帰を防止。
+- データセット一覧: 開設日(created) / 更新日(modified) / 公開日(openAt) の割当を仕様に合わせて統一。
+- 旧キャッシュが残っても逆転表示が続かないよう、互換性を保ったままキャッシュ署名を更新。
+- created 欠損時のみ、個別JSONを参照するベストエフォート補完を追加。
+- ユニット/ウィジェットテストを実行し、回帰を抑止。
 
 > ℹ️ リスティングタブは `output/arim-site/{equipment|reports}_latest.json` など最新エクスポートを前提とします。再読込前に各タブで「JSON再取得」を実行し、キャッシュディレクトリ（`output/arim-site/reports/cache/`）の残量にも留意してください。
 
@@ -46,7 +46,7 @@
 3. デスクトップに作成されたショートカットからアプリを起動します。
 4. 初回起動時、必要なフォルダ（`input/`, `output/`）が自動的に作成されます。
 
-> ✅ v2.4.17 のファイル名は `arim_rde_tool_setup.2.4.17.exe` です（改変チェックは `latest.json` の `sha256` または `checksums.sha256` を参照）。
+> ✅ v2.4.18 のファイル名は `arim_rde_tool_setup.2.4.18.exe` です（改変チェックは `latest.json` の `sha256` または `checksums.sha256` を参照）。
 
 #### 最新版バイナリへの直接リンク
 
@@ -133,13 +133,13 @@
 * **[ドキュメント一覧マップ](docs/DOCUMENT_MAP.md)**
 * **[第三者ライセンス通知](THIRD_PARTY_NOTICES/)**
 
-* **[リリースノート v2.4.17](docs/RELEASE_NOTES_v2.4.17.md)**
+* **[リリースノート v2.4.18](docs/RELEASE_NOTES_v2.4.18.md)**
 
 ---
 
 ## 🔢 バージョン情報
 
-現在配布バージョン: `v2.4.17` （`VERSION.txt` に基づく）
+現在配布バージョン: `v2.4.18` （`VERSION.txt` に基づく）
 
 更新履歴の詳細は `docs/CHANGELOG.md` を参照してください。
 
