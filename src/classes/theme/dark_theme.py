@@ -1,5 +1,5 @@
 """
-ダークテーマ定義 - ARIM RDE Tool v2.4.16
+ダークテーマ定義 - ARIM RDE Tool v2.4.18
 
 Material Design Dark準拠のダークモード配色。
 高コントラスト・視認性重視の配色設計。
@@ -60,6 +60,10 @@ class DarkTheme:
         ThemeKey.MENU_BUTTON_ACTIVE_TEXT: "#000000",
         ThemeKey.MENU_BUTTON_HOVER_BACKGROUND: "#2a3a4a",  # Slightly lighter dark blue
         ThemeKey.MENU_BUTTON_HOVER_TEXT: "#64b5f6",
+
+        # メインメニュー（左ペイン）: 選択中の暖色背景（全グループ共通）
+        ThemeKey.MENU_ACTIVE_WARM_BACKGROUND: "#ccb90f",
+        ThemeKey.MENU_ACTIVE_WARM_HOVER_BACKGROUND: "#dbc70e",
 
         # メインメニュー（左ペイン）: グループ別配色
         # Group1: ログイン

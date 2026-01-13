@@ -155,9 +155,9 @@ def _group_keys(group: int, is_active: bool) -> tuple[ThemeKey, ThemeKey, ThemeK
     if group == 1:
         if is_active:
             return (
-                ThemeKey.MENU_GROUP1_ACTIVE_BACKGROUND,
+                ThemeKey.MENU_ACTIVE_WARM_BACKGROUND,
                 ThemeKey.MENU_GROUP1_ACTIVE_TEXT,
-                ThemeKey.MENU_GROUP1_ACTIVE_HOVER_BACKGROUND,
+                ThemeKey.MENU_ACTIVE_WARM_HOVER_BACKGROUND,
             )
         return (
             ThemeKey.MENU_GROUP1_INACTIVE_BACKGROUND,
@@ -167,9 +167,9 @@ def _group_keys(group: int, is_active: bool) -> tuple[ThemeKey, ThemeKey, ThemeK
     if group == 2:
         if is_active:
             return (
-                ThemeKey.MENU_GROUP2_ACTIVE_BACKGROUND,
+                ThemeKey.MENU_ACTIVE_WARM_BACKGROUND,
                 ThemeKey.MENU_GROUP2_ACTIVE_TEXT,
-                ThemeKey.MENU_GROUP2_ACTIVE_HOVER_BACKGROUND,
+                ThemeKey.MENU_ACTIVE_WARM_HOVER_BACKGROUND,
             )
         return (
             ThemeKey.MENU_GROUP2_INACTIVE_BACKGROUND,
@@ -179,9 +179,9 @@ def _group_keys(group: int, is_active: bool) -> tuple[ThemeKey, ThemeKey, ThemeK
     if group == 3:
         if is_active:
             return (
-                ThemeKey.MENU_GROUP3_ACTIVE_BACKGROUND,
+                ThemeKey.MENU_ACTIVE_WARM_BACKGROUND,
                 ThemeKey.MENU_GROUP3_ACTIVE_TEXT,
-                ThemeKey.MENU_GROUP3_ACTIVE_HOVER_BACKGROUND,
+                ThemeKey.MENU_ACTIVE_WARM_HOVER_BACKGROUND,
             )
         return (
             ThemeKey.MENU_GROUP3_INACTIVE_BACKGROUND,
@@ -191,9 +191,9 @@ def _group_keys(group: int, is_active: bool) -> tuple[ThemeKey, ThemeKey, ThemeK
     if group == 4:
         if is_active:
             return (
-                ThemeKey.MENU_GROUP4_ACTIVE_BACKGROUND,
+                ThemeKey.MENU_ACTIVE_WARM_BACKGROUND,
                 ThemeKey.MENU_GROUP4_ACTIVE_TEXT,
-                ThemeKey.MENU_GROUP4_ACTIVE_HOVER_BACKGROUND,
+                ThemeKey.MENU_ACTIVE_WARM_HOVER_BACKGROUND,
             )
         return (
             ThemeKey.MENU_GROUP4_INACTIVE_BACKGROUND,
@@ -203,9 +203,9 @@ def _group_keys(group: int, is_active: bool) -> tuple[ThemeKey, ThemeKey, ThemeK
     if group == 5:
         if is_active:
             return (
-                ThemeKey.MENU_GROUP5_ACTIVE_BACKGROUND,
+                ThemeKey.MENU_ACTIVE_WARM_BACKGROUND,
                 ThemeKey.MENU_GROUP5_ACTIVE_TEXT,
-                ThemeKey.MENU_GROUP5_ACTIVE_HOVER_BACKGROUND,
+                ThemeKey.MENU_ACTIVE_WARM_HOVER_BACKGROUND,
             )
         return (
             ThemeKey.MENU_GROUP5_INACTIVE_BACKGROUND,
@@ -215,9 +215,9 @@ def _group_keys(group: int, is_active: bool) -> tuple[ThemeKey, ThemeKey, ThemeK
     # group 6 (default)
     if is_active:
         return (
-            ThemeKey.MENU_GROUP6_ACTIVE_BACKGROUND,
+            ThemeKey.MENU_ACTIVE_WARM_BACKGROUND,
             ThemeKey.MENU_GROUP6_ACTIVE_TEXT,
-            ThemeKey.MENU_GROUP6_ACTIVE_HOVER_BACKGROUND,
+            ThemeKey.MENU_ACTIVE_WARM_HOVER_BACKGROUND,
         )
     return (
         ThemeKey.MENU_GROUP6_INACTIVE_BACKGROUND,

@@ -1,4 +1,4 @@
-"""Markdownレンダリングユーティリティ - ARIM RDE Tool v2.4.16"""
+"""Markdownレンダリングユーティリティ - ARIM RDE Tool v2.4.18"""
 
 import logging
 import os

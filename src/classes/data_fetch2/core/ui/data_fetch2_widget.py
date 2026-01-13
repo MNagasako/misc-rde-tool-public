@@ -1350,12 +1350,17 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
                             if success:
                                 logger.info(f"ファイル取得処理完了: dataset_id={dataset_obj}, message_len={len(message) if isinstance(message, str) else 'N/A'}")
                                 logger.info(f"完了メッセージ詳細\n---\n{message}\n---")
+                                # 表示メッセージ
                                 if message and message != "no_data":
-                                    safe_show_message_widget(widget, "完了", message, "information")
+                                    dialog_text = message
+                                    dialog_title = "完了"
                                 elif message == "no_data":
-                                    safe_show_message_widget(widget, "情報", "選択されたデータセットにはデータエントリがありませんでした", "information")
+                                    dialog_text = "選択されたデータセットにはデータエントリがありませんでした"
+                                    dialog_title = "情報"
                                 else:
                                     # フォールバックでも最低限の件数を表示する
+                                    dialog_title = "完了"
+                                    dialog_text = "ファイル一括取得が完了しました"
                                     try:
                                         from classes.data_fetch2.core.logic.fetch2_filelist_logic import get_dataset_filetype_counts
                                         # 可能なら直前選択のdataset_idで再集計
@@ -1367,10 +1372,60 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
                                         total_fb = sum(counts_fb.values())
                                         parts_fb = [f"{k}: {v}" for k, v in sorted(counts_fb.items())]
                                         inner_fb = "、".join(parts_fb) if parts_fb else "対象ファイルなし"
-                                        fb_msg = f"ファイル一括取得が完了しました\n合計ダウンロード予定ファイル: {total_fb}件\n内訳（fileType別）: {inner_fb}"
-                                        safe_show_message_widget(widget, "完了", fb_msg, "information")
+                                        dialog_text = f"ファイル一括取得が完了しました\n合計ダウンロード予定ファイル: {total_fb}件\n内訳（fileType別）: {inner_fb}"
                                     except Exception:
-                                        safe_show_message_widget(widget, "完了", "ファイル一括取得が完了しました", "information")
+                                        pass
+
+                                # 保存先フォルダ（fetch_files_json_for_dataset と同じ規約）
+                                save_folder = None
+                                try:
+                                    from config.common import get_dynamic_file_path
+                                    from classes.data_fetch2.core.logic.fetch2_filelist_logic import replace_invalid_path_chars
+                                    import os
+
+                                    attrs = (dataset_obj or {}).get('attributes', {}) or {}
+                                    grant_number = str(attrs.get('grantNumber') or '').strip() or "不明"
+                                    dataset_name = str(attrs.get('name') or '').strip() or "データセット名未設定"
+                                    safe_dataset_name = replace_invalid_path_chars(dataset_name)
+                                    candidate = get_dynamic_file_path(f"output/rde/data/dataFiles/{grant_number}/{safe_dataset_name}")
+                                    if os.path.isdir(candidate):
+                                        save_folder = candidate
+                                    else:
+                                        base = get_dynamic_file_path("output/rde/data/dataFiles")
+                                        if os.path.isdir(base):
+                                            save_folder = base
+                                except Exception:
+                                    save_folder = None
+
+                                # ボタン付き完了ダイアログ（保存フォルダを開く）
+                                try:
+                                    from qt_compat.widgets import QMessageBox
+                                    msg_box = QMessageBox(widget)
+                                    msg_box.setWindowTitle(dialog_title)
+                                    msg_box.setText(dialog_text)
+                                    msg_box.setIcon(QMessageBox.Information)
+                                    open_btn = msg_box.addButton("📂 保存フォルダを開く", QMessageBox.ActionRole)
+                                    ok_btn = msg_box.addButton(QMessageBox.Ok)
+                                    if not save_folder:
+                                        try:
+                                            open_btn.setEnabled(False)
+                                        except Exception:
+                                            pass
+                                    msg_box.exec()
+                                    if save_folder and msg_box.clickedButton() == open_btn:
+                                        try:
+                                            from qt_compat.gui import QDesktopServices
+                                            from qt_compat.core import QUrl
+                                            QDesktopServices.openUrl(QUrl.fromLocalFile(save_folder))
+                                        except Exception:
+                                            try:
+                                                import os
+                                                os.startfile(str(save_folder))
+                                            except Exception:
+                                                pass
+                                except Exception:
+                                    # フォールバック
+                                    safe_show_message_widget(widget, dialog_title, dialog_text, "information")
                             else:
                                 logger.error(f"ファイル取得処理失敗: dataset_id={dataset_obj}, error={message}")
                                 logger.error(f"失敗メッセージ詳細\n---\n{message}\n---")

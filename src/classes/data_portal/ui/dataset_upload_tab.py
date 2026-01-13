@@ -742,6 +742,93 @@ class DatasetUploadTab(QWidget):
                 self._dataset_dates_label = None
 
         self._dataset_dropdown_initialized = True
+
+    def select_dataset_id(self, dataset_id: str) -> bool:
+        """指定dataset_idをデータセット選択UIへ反映する。
+
+        - 高度ドロップダウン(data_fetch2統合)があればそれを優先
+        - フォールバックのQComboBoxでも選択できる
+        """
+
+        dsid = str(dataset_id or "").strip()
+        if not dsid:
+            return False
+
+        try:
+            if not self._dataset_dropdown_initialized:
+                self._ensure_dataset_dropdown_initialized()
+        except Exception:
+            pass
+
+        # 1) 高度ドロップダウン（data_fetch2統合）
+        try:
+            dropdown_widget = getattr(self, "dataset_dropdown_widget", None)
+            combo = getattr(dropdown_widget, "dataset_dropdown", None) if dropdown_widget is not None else None
+            if combo is not None and hasattr(combo, "count"):
+                try:
+                    from classes.data_fetch2.core.ui.data_fetch2_widget import relax_fetch2_filters_for_launch
+
+                    relax_fetch2_filters_for_launch(dropdown_widget)
+                except Exception:
+                    pass
+
+                def _find_index() -> int:
+                    for i in range(int(combo.count())):
+                        try:
+                            if str(combo.itemData(i) or "").strip() == dsid:
+                                return int(i)
+                        except Exception:
+                            continue
+                    return -1
+
+                idx = _find_index()
+                if idx < 0:
+                    try:
+                        reload_fn = getattr(dropdown_widget, "reload_datasets", None)
+                        if callable(reload_fn):
+                            reload_fn()
+                    except Exception:
+                        pass
+                    idx = _find_index()
+
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+                    try:
+                        combo.setFocus()
+                    except Exception:
+                        pass
+                    return True
+        except Exception:
+            pass
+
+        # 2) フォールバックのQComboBox
+        try:
+            combo = getattr(self, "dataset_combo", None)
+            if combo is None:
+                return False
+
+            try:
+                if int(combo.count()) <= 1:
+                    self._on_load_datasets()
+            except Exception:
+                pass
+
+            for i in range(int(combo.count())):
+                try:
+                    info = combo.itemData(i)
+                    if isinstance(info, dict) and str(info.get("id") or "").strip() == dsid:
+                        combo.setCurrentIndex(i)
+                        try:
+                            combo.setFocus()
+                        except Exception:
+                            pass
+                        return True
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+        return False
     
     def _create_anonymization_options(self) -> QGroupBox:
         """匿名化オプションセクション"""

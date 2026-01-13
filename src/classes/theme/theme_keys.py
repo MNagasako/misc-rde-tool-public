@@ -1,4 +1,4 @@
-"""テーマキー定義 - ARIM RDE Tool v2.4.16
+"""テーマキー定義 - ARIM RDE Tool v2.4.18
 
 UI要素の色を参照するためのキー定義。
 セマンティックな命名規則に基づく階層構造。
@@ -102,6 +102,10 @@ class ThemeKey(str, Enum):
     MENU_GROUP6_ACTIVE_TEXT = "menu.group6.active.text"
     MENU_GROUP6_ACTIVE_HOVER_BACKGROUND = "menu.group6.active.hover.background"
     
+    # Main menu (left pane): warm selection background (shared across groups)
+    MENU_ACTIVE_WARM_BACKGROUND = "menu.active.warm.background"
+    MENU_ACTIVE_WARM_HOVER_BACKGROUND = "menu.active.warm.hover.background"
+
     # ========================================
     # Button - ボタン全般
     # ========================================

@@ -1,5 +1,5 @@
 """
-ライトテーマ定義 - ARIM RDE Tool v2.4.16
+ライトテーマ定義 - ARIM RDE Tool v2.4.18
 
 Material Design準拠のライトモード配色。
 現行アプリの配色を忠実に再現。
@@ -60,6 +60,10 @@ class LightTheme:
         ThemeKey.MENU_BUTTON_ACTIVE_TEXT: "#ffffff",
         ThemeKey.MENU_BUTTON_HOVER_BACKGROUND: "#bbdefb",  # Lighter Blue
         ThemeKey.MENU_BUTTON_HOVER_TEXT: "#1976d2",
+
+        # メインメニュー（左ペイン）: 選択中の暖色背景（全グループ共通）
+        ThemeKey.MENU_ACTIVE_WARM_BACKGROUND: "#ccb90f",  # warm pastel
+        ThemeKey.MENU_ACTIVE_WARM_HOVER_BACKGROUND: "#dbc70e",
 
         # メインメニュー（左ペイン）: グループ別配色
         # Group1: ログイン

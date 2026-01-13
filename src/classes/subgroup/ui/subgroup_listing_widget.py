@@ -229,6 +229,10 @@ class ColumnSelectorDialog(QDialog):
         self.setWindowTitle("列選択")
         self._columns = columns
 
+        self._default_visible_by_key: Dict[str, bool] = {
+            c.key: bool(getattr(c, "default_visible", True)) for c in columns
+        }
+
         self._checkbox_by_key: Dict[str, QCheckBox] = {}
 
         layout = QVBoxLayout(self)
@@ -249,10 +253,51 @@ class ColumnSelectorDialog(QDialog):
         scroll.setWidget(body)
         layout.addWidget(scroll, 1)
 
+        quick_buttons = QHBoxLayout()
+
+        self._btn_select_all = QPushButton("全選択", self)
+        self._btn_select_all.setObjectName("column_selector_select_all")
+        self._btn_select_all.clicked.connect(self._select_all)
+        quick_buttons.addWidget(self._btn_select_all)
+
+        self._btn_select_none = QPushButton("全非選択", self)
+        self._btn_select_none.setObjectName("column_selector_select_none")
+        self._btn_select_none.clicked.connect(self._select_none)
+        quick_buttons.addWidget(self._btn_select_none)
+
+        self._btn_reset = QPushButton("列リセット", self)
+        self._btn_reset.setObjectName("column_selector_reset")
+        self._btn_reset.clicked.connect(self._reset_to_default)
+        quick_buttons.addWidget(self._btn_reset)
+
+        quick_buttons.addStretch(1)
+        layout.addLayout(quick_buttons)
+
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _select_all(self) -> None:
+        for cb in self._checkbox_by_key.values():
+            try:
+                cb.setChecked(True)
+            except Exception:
+                pass
+
+    def _select_none(self) -> None:
+        for cb in self._checkbox_by_key.values():
+            try:
+                cb.setChecked(False)
+            except Exception:
+                pass
+
+    def _reset_to_default(self) -> None:
+        for key, cb in self._checkbox_by_key.items():
+            try:
+                cb.setChecked(bool(self._default_visible_by_key.get(key, True)))
+            except Exception:
+                pass
 
     def get_visible_by_key(self) -> Dict[str, bool]:
         return {k: cb.isChecked() for k, cb in self._checkbox_by_key.items()}
@@ -1191,9 +1236,18 @@ class SubgroupListingWidget(QWidget):
         max_h = int(self._row_max_height_px())
         padding = 8
 
+        visible_cols = []
+        for c in range(col_count):
+            try:
+                if self._table.isColumnHidden(c):
+                    continue
+            except Exception:
+                pass
+            visible_cols.append(c)
+
         for r in range(row_count):
             max_lines = 1
-            for c in range(col_count):
+            for c in visible_cols:
                 try:
                     idx = model.index(r, c)
                     txt = str(model.data(idx, Qt.DisplayRole) or "")
@@ -1513,6 +1567,9 @@ class SubgroupListingWidget(QWidget):
 
     def _load_column_visibility(self) -> Optional[Dict[str, bool]]:
         try:
+            # テストは決定性を優先して、ユーザー設定（永続ファイル）に依存しない。
+            if self._is_running_under_pytest():
+                return None
             path = self._column_visibility_path()
             if not path or not os.path.exists(path):
                 return None
@@ -1530,6 +1587,9 @@ class SubgroupListingWidget(QWidget):
 
     def _save_column_visibility(self, visible_by_key: Dict[str, bool]) -> None:
         try:
+            # テストは副作用（ファイル書き込み）を避ける。
+            if self._is_running_under_pytest():
+                return
             path = self._column_visibility_path()
             if not path:
                 return

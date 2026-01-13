@@ -1619,6 +1619,38 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
             except Exception:
                 pass
 
+            # 「アプリ内リンク」: データポータルへ遷移し、dataset_idを事前選択
+            try:
+                if hasattr(built, "set_portal_open_callback"):
+                    def _open_in_portal(dataset_id: str) -> None:
+                        try:
+                            if not dataset_id:
+                                return
+                            ui_controller = getattr(parent, "ui_controller", None)
+                            if ui_controller is None or not hasattr(ui_controller, "switch_mode"):
+                                return
+
+                            ui_controller.switch_mode("data_portal")
+                            portal_widget = None
+                            try:
+                                if hasattr(ui_controller, "get_mode_widget"):
+                                    portal_widget = ui_controller.get_mode_widget("data_portal")
+                            except Exception:
+                                portal_widget = getattr(ui_controller, "data_portal_widget", None)
+
+                            if portal_widget is None:
+                                portal_widget = getattr(ui_controller, "data_portal_widget", None)
+
+                            open_fn = getattr(portal_widget, "open_upload_and_select_dataset", None)
+                            if callable(open_fn):
+                                open_fn(dataset_id)
+                        except Exception:
+                            logger.debug("dataset_open: portal-open failed", exc_info=True)
+
+                    built.set_portal_open_callback(_open_in_portal)
+            except Exception:
+                pass
+
             listing_tab = built
 
             idx = next((i for i in range(tab_widget.count()) if tab_widget.tabText(i) == "一覧"), -1)

@@ -4852,13 +4852,24 @@ class UIController(UIControllerCore):
             }
             
             # ダイアログを作成（AI拡張モード）
+            # NOTE: 親なしTop-levelにすると、pytest-qt等の長時間セッションで
+            # close後の破棄タイミングが不安定になり、Qtネイティブクラッシュの
+            # 要因になり得る。可能な限りメインウィンドウへ親付けする。
+            dialog_parent = getattr(self, "parent", None)
             dialog = AISuggestionDialog(
-                parent=None,  # 親を指定しない
+                parent=dialog_parent,
                 context_data=context_data,
                 extension_name="dataset_description",
                 auto_generate=False,
                 mode="ai_extension"  # AI拡張モード: AI拡張、ファイル抽出設定タブのみ表示
             )
+
+            try:
+                from qt_compat.core import Qt
+
+                dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+            except Exception:
+                pass
             
             # AI拡張タブを選択
             if hasattr(dialog, 'tab_widget'):

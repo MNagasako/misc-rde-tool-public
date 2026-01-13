@@ -208,3 +208,27 @@ class DataPortalWidget(QWidget):
     def switch_to_upload_tab(self):
         """データセットタブに切り替え"""
         self.tab_widget.setCurrentIndex(2)
+
+    def open_upload_and_select_dataset(self, dataset_id: str) -> bool:
+        """データカタログ(アップロード)タブを開き、dataset_idを選択する。
+
+        DataPortalWidget は upload タブを遅延生成するため、本メソッドで
+        生成→タブ移動→選択までを一括で行う。
+        """
+
+        self.switch_to_upload_tab()
+        try:
+            self._ensure_upload_tab()
+        except Exception as e:
+            logger.error("DataPortalWidget: failed to ensure upload tab: %s", e)
+            return False
+
+        try:
+            if self.dataset_upload_tab is None:
+                return False
+            select_fn = getattr(self.dataset_upload_tab, "select_dataset_id", None)
+            if callable(select_fn):
+                return bool(select_fn(dataset_id))
+        except Exception as e:
+            logger.error("DataPortalWidget: dataset selection failed: %s", e)
+        return False

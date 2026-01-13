@@ -135,6 +135,15 @@ class DatasetListTableModel(QAbstractTableModel):
 
         if role == Qt.DisplayRole:
             value = row.get(col.key)
+            if col.key == "portal_open":
+                dataset_id = str(row.get("dataset_id") or "").strip()
+                return "カタログ" if dataset_id else ""
+            if col.key == "portal_status":
+                status = "" if value is None else str(value)
+                checked_at = str(row.get("portal_checked_at") or "").strip()
+                if status and checked_at:
+                    return f"{status}（{checked_at}）"
+                return status
             if isinstance(value, bool):
                 return "True" if value else "False"
             if col.key == "file_size":
@@ -152,6 +161,12 @@ class DatasetListTableModel(QAbstractTableModel):
             if col.key == "embargo_date":
                 embargo_obj = row.get("_embargo_date_obj")
                 return embargo_obj
+            if col.key == "open_at_date":
+                return row.get("_open_at_date_obj")
+            if col.key == "modified_date":
+                return row.get("_modified_date_obj")
+            if col.key == "created_date":
+                return row.get("_created_date_obj")
             if col.key == "dataset_name":
                 dataset_id = row.get("dataset_id")
                 dataset_id = str(dataset_id).strip() if dataset_id is not None else ""
@@ -168,10 +183,14 @@ class DatasetListTableModel(QAbstractTableModel):
                 dataset_id = row.get("dataset_id")
                 dataset_id = str(dataset_id).strip() if dataset_id is not None else ""
                 return dataset_id
+            if col.key == "portal_open":
+                dataset_id = row.get("dataset_id")
+                dataset_id = str(dataset_id).strip() if dataset_id is not None else ""
+                return dataset_id
             return row.get(col.key)
 
         if role == Qt.ForegroundRole:
-            if col.key in {"dataset_name", "instrument_names", "tool_open"}:
+            if col.key in {"dataset_name", "instrument_names", "tool_open", "portal_open"}:
                 return QBrush(get_color(ThemeKey.TEXT_LINK))
             if col.key == "subgroup_name":
                 subgroup_id = row.get("subgroup_id")
@@ -186,7 +205,7 @@ class DatasetListTableModel(QAbstractTableModel):
                     return QBrush(get_color(ThemeKey.TEXT_DISABLED))
 
         if role == Qt.FontRole:
-            if col.key in {"dataset_name", "instrument_names", "tool_open"}:
+            if col.key in {"dataset_name", "instrument_names", "tool_open", "portal_open"}:
                 f = QFont()
                 f.setUnderline(True)
                 return f
@@ -219,6 +238,12 @@ class DatasetFilterProxyModel(QSortFilterProxyModel):
         self._exact_match_column_indices: set[int] = set()
         self._embargo_from: Optional[datetime.date] = None
         self._embargo_to: Optional[datetime.date] = None
+        self._open_at_from: Optional[datetime.date] = None
+        self._open_at_to: Optional[datetime.date] = None
+        self._modified_from: Optional[datetime.date] = None
+        self._modified_to: Optional[datetime.date] = None
+        self._created_from: Optional[datetime.date] = None
+        self._created_to: Optional[datetime.date] = None
         self._description_len_min: Optional[int] = None
         self._description_len_max: Optional[int] = None
         self._related_count_min: Optional[int] = None
@@ -247,19 +272,35 @@ class DatasetFilterProxyModel(QSortFilterProxyModel):
             return any(p.search(text) for p in (patterns or []))
 
         # exact-match semantics: compare against the whole cell text.
+        # NOTE: portal_status はセル側に「ステータス（日時）」、フィルタ側に「ステータス（件数）」
+        # のような装飾が入るため、括弧以降は無視してステータス部分のみで一致判定する。
         cell = text.strip()
+        cell_key = self._strip_parenthetical_suffix(cell)
         for term in self._split_filter_terms(raw_filter or ""):
             t = (term or "").strip()
             if not t:
                 continue
+            t_key = self._strip_parenthetical_suffix(t)
             if "*" in t:
-                pat = self._compile_wildcard_pattern(t)
-                if pat is not None and pat.fullmatch(cell):
+                pat = self._compile_wildcard_pattern(t_key)
+                if pat is not None and pat.fullmatch(cell_key):
                     return True
             else:
-                if cell.lower() == t.lower():
+                if cell_key.lower() == t_key.lower():
                     return True
         return False
+
+    @staticmethod
+    def _strip_parenthetical_suffix(text: str) -> str:
+        """括弧で始まるサフィックス（例: （日時）, （件数））を除去してステータス部分だけ返す。"""
+        raw = (text or "").strip()
+        if not raw:
+            return ""
+        for sep in ("（", "("):
+            pos = raw.find(sep)
+            if pos > 0:
+                return raw[:pos].strip()
+        return raw
 
     @staticmethod
     def _split_filter_terms(text: str) -> List[str]:
@@ -315,6 +356,21 @@ class DatasetFilterProxyModel(QSortFilterProxyModel):
         self._embargo_to = date_to
         self.invalidateFilter()
 
+    def set_open_at_range(self, date_from: Optional[datetime.date], date_to: Optional[datetime.date]) -> None:
+        self._open_at_from = date_from
+        self._open_at_to = date_to
+        self.invalidateFilter()
+
+    def set_modified_range(self, date_from: Optional[datetime.date], date_to: Optional[datetime.date]) -> None:
+        self._modified_from = date_from
+        self._modified_to = date_to
+        self.invalidateFilter()
+
+    def set_created_range(self, date_from: Optional[datetime.date], date_to: Optional[datetime.date]) -> None:
+        self._created_from = date_from
+        self._created_to = date_to
+        self.invalidateFilter()
+
     def set_description_len_range(self, min_value: Optional[int], max_value: Optional[int]) -> None:
         self._description_len_min = min_value
         self._description_len_max = max_value
@@ -364,6 +420,45 @@ class DatasetFilterProxyModel(QSortFilterProxyModel):
                 if self._embargo_to and embargo_obj > self._embargo_to:
                     return False
 
+        # created range filter
+        if self._created_from or self._created_to:
+            col = self._find_column_by_label("開設日")
+            if col >= 0:
+                idx = model.index(source_row, col, source_parent)
+                d = model.data(idx, Qt.UserRole)
+                if not isinstance(d, datetime.date):
+                    return False
+                if self._created_from and d < self._created_from:
+                    return False
+                if self._created_to and d > self._created_to:
+                    return False
+                
+        # modified range filter
+        if self._modified_from or self._modified_to:
+            col = self._find_column_by_label("更新日")
+            if col >= 0:
+                idx = model.index(source_row, col, source_parent)
+                d = model.data(idx, Qt.UserRole)
+                if not isinstance(d, datetime.date):
+                    return False
+                if self._modified_from and d < self._modified_from:
+                    return False
+                if self._modified_to and d > self._modified_to:
+                    return False
+
+        # openAt range filter
+        if self._open_at_from or self._open_at_to:
+            col = self._find_column_by_label("公開日")
+            if col >= 0:
+                idx = model.index(source_row, col, source_parent)
+                d = model.data(idx, Qt.UserRole)
+                if not isinstance(d, datetime.date):
+                    return False
+                if self._open_at_from and d < self._open_at_from:
+                    return False
+                if self._open_at_to and d > self._open_at_to:
+                    return False
+                                
         if self._column_filter_patterns:
             for col_idx, patterns in self._column_filter_patterns.items():
                 if col_idx in (ignore_columns or set()):
@@ -481,6 +576,45 @@ class DatasetFilterProxyModel(QSortFilterProxyModel):
                 if self._embargo_to and embargo_obj > self._embargo_to:
                     return False
 
+        # openAt range filter
+        if self._open_at_from or self._open_at_to:
+            col = self._find_column_by_label("公開日")
+            if col >= 0:
+                idx = model.index(source_row, col, source_parent)
+                d = model.data(idx, Qt.UserRole)
+                if not isinstance(d, datetime.date):
+                    return False
+                if self._open_at_from and d < self._open_at_from:
+                    return False
+                if self._open_at_to and d > self._open_at_to:
+                    return False
+
+        # modified range filter
+        if self._modified_from or self._modified_to:
+            col = self._find_column_by_label("更新日")
+            if col >= 0:
+                idx = model.index(source_row, col, source_parent)
+                d = model.data(idx, Qt.UserRole)
+                if not isinstance(d, datetime.date):
+                    return False
+                if self._modified_from and d < self._modified_from:
+                    return False
+                if self._modified_to and d > self._modified_to:
+                    return False
+
+        # created range filter
+        if self._created_from or self._created_to:
+            col = self._find_column_by_label("開設日")
+            if col >= 0:
+                idx = model.index(source_row, col, source_parent)
+                d = model.data(idx, Qt.UserRole)
+                if not isinstance(d, datetime.date):
+                    return False
+                if self._created_from and d < self._created_from:
+                    return False
+                if self._created_to and d > self._created_to:
+                    return False
+
         # per-column text filters
         # - delimiters: ',', ';', ' '
         # - wildcard: '*' matches any chars
@@ -595,7 +729,7 @@ class DatasetFilterProxyModel(QSortFilterProxyModel):
         except Exception:
             label = None
 
-        if label == "エンバーゴ期間終了日":
+        if label in {"エンバーゴ期間終了日", "開設日", "更新日", "公開日"}:
             l = model.data(left, Qt.UserRole)
             r = model.data(right, Qt.UserRole)
             if isinstance(l, datetime.date) and isinstance(r, datetime.date):
@@ -962,6 +1096,7 @@ class DatasetListingWidget(QWidget):
         self._tag_cnt_min = QSpinBox(self)
         self._tag_cnt_max = QSpinBox(self)
         self._tool_open_callback = None
+        self._portal_open_callback = None
 
         # Debounce filter application to keep the table responsive while typing/clicking.
         self._filter_proxy = DatasetFilterProxyModel(self)
@@ -1088,8 +1223,8 @@ class DatasetListingWidget(QWidget):
             menu = QMenu(self._portal_force_refresh_btn)
             act_all = menu.addAction("全件強制更新")
             act_all.triggered.connect(self._confirm_and_force_refresh_portal_statuses)
-            act_nonpublic = menu.addAction("未公開のみ更新")
-            act_nonpublic.triggered.connect(self._confirm_and_force_refresh_portal_statuses_nonpublic_only)
+            act_unconfirmed = menu.addAction("未確認のみ更新")
+            act_unconfirmed.triggered.connect(self._confirm_and_force_refresh_portal_statuses_nonpublic_only)
             self._portal_force_refresh_btn.setMenu(menu)
         except Exception:
             pass
@@ -1152,6 +1287,58 @@ class DatasetListingWidget(QWidget):
         self._embargo_to.setDate(QDate(2000, 1, 1))
         self._embargo_to.setMinimumDate(QDate(2000, 1, 1))
         self._embargo_to.setMaximumDate(QDate(2999, 12, 31))
+
+        # OpenAt/Modified/Created range widgets
+        self._open_at_from = QDateEdit(self)
+        self._open_at_from.setObjectName("dataset_listing_open_at_from")
+        self._open_at_from.setDisplayFormat("yyyy-MM-dd")
+        self._open_at_from.setCalendarPopup(True)
+        self._open_at_from.setSpecialValueText("未設定")
+        self._open_at_from.setDate(QDate(2000, 1, 1))
+        self._open_at_from.setMinimumDate(QDate(2000, 1, 1))
+        self._open_at_from.setMaximumDate(QDate(2999, 12, 31))
+        self._open_at_to = QDateEdit(self)
+        self._open_at_to.setObjectName("dataset_listing_open_at_to")
+        self._open_at_to.setDisplayFormat("yyyy-MM-dd")
+        self._open_at_to.setCalendarPopup(True)
+        self._open_at_to.setSpecialValueText("未設定")
+        self._open_at_to.setDate(QDate(2000, 1, 1))
+        self._open_at_to.setMinimumDate(QDate(2000, 1, 1))
+        self._open_at_to.setMaximumDate(QDate(2999, 12, 31))
+
+        self._modified_from = QDateEdit(self)
+        self._modified_from.setObjectName("dataset_listing_modified_from")
+        self._modified_from.setDisplayFormat("yyyy-MM-dd")
+        self._modified_from.setCalendarPopup(True)
+        self._modified_from.setSpecialValueText("未設定")
+        self._modified_from.setDate(QDate(2000, 1, 1))
+        self._modified_from.setMinimumDate(QDate(2000, 1, 1))
+        self._modified_from.setMaximumDate(QDate(2999, 12, 31))
+        self._modified_to = QDateEdit(self)
+        self._modified_to.setObjectName("dataset_listing_modified_to")
+        self._modified_to.setDisplayFormat("yyyy-MM-dd")
+        self._modified_to.setCalendarPopup(True)
+        self._modified_to.setSpecialValueText("未設定")
+        self._modified_to.setDate(QDate(2000, 1, 1))
+        self._modified_to.setMinimumDate(QDate(2000, 1, 1))
+        self._modified_to.setMaximumDate(QDate(2999, 12, 31))
+
+        self._created_from = QDateEdit(self)
+        self._created_from.setObjectName("dataset_listing_created_from")
+        self._created_from.setDisplayFormat("yyyy-MM-dd")
+        self._created_from.setCalendarPopup(True)
+        self._created_from.setSpecialValueText("未設定")
+        self._created_from.setDate(QDate(2000, 1, 1))
+        self._created_from.setMinimumDate(QDate(2000, 1, 1))
+        self._created_from.setMaximumDate(QDate(2999, 12, 31))
+        self._created_to = QDateEdit(self)
+        self._created_to.setObjectName("dataset_listing_created_to")
+        self._created_to.setDisplayFormat("yyyy-MM-dd")
+        self._created_to.setCalendarPopup(True)
+        self._created_to.setSpecialValueText("未設定")
+        self._created_to.setDate(QDate(2000, 1, 1))
+        self._created_to.setMinimumDate(QDate(2000, 1, 1))
+        self._created_to.setMaximumDate(QDate(2999, 12, 31))
 
         # Range filter inputs default settings
         try:
@@ -1242,7 +1429,16 @@ class DatasetListingWidget(QWidget):
                 except Exception:
                     pass
 
-            for de in (self._embargo_from, self._embargo_to):
+            for de in (
+                self._embargo_from,
+                self._embargo_to,
+                self._open_at_from,
+                self._open_at_to,
+                self._modified_from,
+                self._modified_to,
+                self._created_from,
+                self._created_to,
+            ):
                 try:
                     de.setMinimumWidth(110)
                     de.setMaximumWidth(160)
@@ -1279,6 +1475,27 @@ class DatasetListingWidget(QWidget):
         emb_layout.addWidget(self._embargo_from)
         emb_layout.addWidget(QLabel("～"))
         emb_layout.addWidget(self._embargo_to)
+
+        self._range_open_at_widget = QWidget(self)
+        open_at_layout = QHBoxLayout(self._range_open_at_widget)
+        open_at_layout.setContentsMargins(0, 0, 0, 0)
+        open_at_layout.addWidget(self._open_at_from)
+        open_at_layout.addWidget(QLabel("～"))
+        open_at_layout.addWidget(self._open_at_to)
+
+        self._range_modified_widget = QWidget(self)
+        modified_layout = QHBoxLayout(self._range_modified_widget)
+        modified_layout.setContentsMargins(0, 0, 0, 0)
+        modified_layout.addWidget(self._modified_from)
+        modified_layout.addWidget(QLabel("～"))
+        modified_layout.addWidget(self._modified_to)
+
+        self._range_created_widget = QWidget(self)
+        created_layout = QHBoxLayout(self._range_created_widget)
+        created_layout.setContentsMargins(0, 0, 0, 0)
+        created_layout.addWidget(self._created_from)
+        created_layout.addWidget(QLabel("～"))
+        created_layout.addWidget(self._created_to)
 
         self._clear_filters = QPushButton("フィルタクリア", self)
 
@@ -1341,6 +1558,12 @@ class DatasetListingWidget(QWidget):
         self._page.valueChanged.connect(self._apply_page)
         self._embargo_from.dateChanged.connect(self._schedule_apply_filters)
         self._embargo_to.dateChanged.connect(self._schedule_apply_filters)
+        self._open_at_from.dateChanged.connect(self._schedule_apply_filters)
+        self._open_at_to.dateChanged.connect(self._schedule_apply_filters)
+        self._modified_from.dateChanged.connect(self._schedule_apply_filters)
+        self._modified_to.dateChanged.connect(self._schedule_apply_filters)
+        self._created_from.dateChanged.connect(self._schedule_apply_filters)
+        self._created_to.dateChanged.connect(self._schedule_apply_filters)
         self._desc_len_min.valueChanged.connect(self._schedule_apply_filters)
         self._desc_len_max.valueChanged.connect(self._schedule_apply_filters)
         self._tag_cnt_min.valueChanged.connect(self._schedule_apply_filters)
@@ -1472,12 +1695,16 @@ class DatasetListingWidget(QWidget):
             ("タイル数", self._range_tile_widget),
             ("ファイル数", self._range_file_widget),
             ("エンバーゴ期間終了日", self._range_embargo_widget),
+            ("公開日", self._range_open_at_widget),
+            ("更新日", self._range_modified_widget),
+            ("開設日", self._range_created_widget),
         ]
         entries = [(lbl, w) for (lbl, w) in entries if w is not None]
 
         r = 0
         c = 0
-        per_row = 3 if wrap else len(entries)
+        # 要件: 範囲フィルタ群は常に2行で表示する。
+        per_row = (max(1, (len(entries) + 1) // 2)) if wrap else len(entries)
         for i, (lbl, w) in enumerate(entries):
             if wrap and i > 0 and (i % per_row) == 0:
                 r += 1
@@ -3352,9 +3579,69 @@ class DatasetListingWidget(QWidget):
         try:
             limit = int(self._row_limit.value())
             if limit <= 0 or limit <= 200:
-                self._table.resizeRowsToContents()
+                self._adjust_row_heights_to_max_lines_visible_columns()
         except Exception:
             pass
+
+    def _row_max_height_px(self) -> int:
+        try:
+            from qt_compat.widgets import QApplication
+
+            screen = QApplication.primaryScreen()
+            if screen:
+                h = int(screen.geometry().height())
+                if h > 0:
+                    return max(80, int(h * 0.50))
+        except Exception:
+            pass
+        return 600
+
+    def _adjust_row_heights_to_max_lines_visible_columns(self) -> None:
+        if not hasattr(self, "_table") or self._table is None:
+            return
+        model = self._table.model()
+        if model is None:
+            return
+
+        try:
+            row_count = int(model.rowCount())
+            col_count = int(model.columnCount())
+        except Exception:
+            return
+
+        # Avoid heavy recalculation on extremely large views.
+        if row_count > 2000:
+            return
+
+        visible_cols = []
+        for c in range(col_count):
+            try:
+                if self._table.isColumnHidden(c):
+                    continue
+            except Exception:
+                pass
+            visible_cols.append(c)
+
+        fm = self._table.fontMetrics()
+        line_h = max(1, int(fm.height()))
+        max_h = int(self._row_max_height_px())
+        padding = 8
+
+        for r in range(row_count):
+            max_lines = 1
+            for c in visible_cols:
+                try:
+                    idx = model.index(r, c)
+                    txt = str(model.data(idx, Qt.DisplayRole) or "")
+                    lines = max(1, len(txt.splitlines()))
+                    if lines > max_lines:
+                        max_lines = lines
+                except Exception:
+                    continue
+            desired = max_lines * line_h + padding
+            if desired > max_h:
+                desired = max_h
+            self._table.setRowHeight(r, int(desired))
 
     def _on_reload_thread_finished(self) -> None:
         self._reload_thread = None
@@ -3462,6 +3749,12 @@ class DatasetListingWidget(QWidget):
         # Use 0/invalid as "no filter" by setting both to minimum and then disabling via internal state.
         self._embargo_from.setDate(QDate(2000, 1, 1))
         self._embargo_to.setDate(QDate(2000, 1, 1))
+        self._open_at_from.setDate(QDate(2000, 1, 1))
+        self._open_at_to.setDate(QDate(2000, 1, 1))
+        self._modified_from.setDate(QDate(2000, 1, 1))
+        self._modified_to.setDate(QDate(2000, 1, 1))
+        self._created_from.setDate(QDate(2000, 1, 1))
+        self._created_to.setDate(QDate(2000, 1, 1))
         try:
             self._desc_len_min.setValue(0)
             self._desc_len_max.setValue(0)
@@ -3476,13 +3769,23 @@ class DatasetListingWidget(QWidget):
         except Exception:
             pass
         self._filter_proxy.set_embargo_range(None, None)
+        self._filter_proxy.set_open_at_range(None, None)
+        self._filter_proxy.set_modified_range(None, None)
+        self._filter_proxy.set_created_range(None, None)
         self._apply_filters_now()
 
     def _apply_filters_now(self) -> None:
         filters_by_index: Dict[int, str] = {}
         key_to_index = {c.key: i for i, c in enumerate(self._columns)}
         for key, w in self._filter_edits_by_key.items():
-            if key in {"description_len", "related_datasets_count", "embargo_date"}:
+            if key in {
+                "description_len",
+                "related_datasets_count",
+                "embargo_date",
+                "open_at_date",
+                "modified_date",
+                "created_date",
+            }:
                 # 範囲フィルタは専用UIで扱う
                 continue
             idx = key_to_index.get(key)
@@ -3497,17 +3800,27 @@ class DatasetListingWidget(QWidget):
                 filters_by_index[idx] = text
         self._filter_proxy.set_column_filters(filters_by_index)
 
-        # Only enable embargo filter when user selected meaningful values.
-        date_from = self._qdate_to_date(self._embargo_from.date())
-        date_to = self._qdate_to_date(self._embargo_to.date())
+        def _normalize_date_range(de_from: QDateEdit, de_to: QDateEdit) -> tuple[Optional[datetime.date], Optional[datetime.date]]:
+            d_from = self._qdate_to_date(de_from.date())
+            d_to = self._qdate_to_date(de_to.date())
+            if d_from == datetime.date(2000, 1, 1):
+                d_from = None
+            if d_to == datetime.date(2000, 1, 1):
+                d_to = None
+            return d_from, d_to
 
-        # Treat the default 2000-01-01 as "unset".
-        if date_from == datetime.date(2000, 1, 1):
-            date_from = None
-        if date_to == datetime.date(2000, 1, 1):
-            date_to = None
+        # Date ranges
+        embargo_from, embargo_to = _normalize_date_range(self._embargo_from, self._embargo_to)
+        self._filter_proxy.set_embargo_range(embargo_from, embargo_to)
 
-        self._filter_proxy.set_embargo_range(date_from, date_to)
+        open_at_from, open_at_to = _normalize_date_range(self._open_at_from, self._open_at_to)
+        self._filter_proxy.set_open_at_range(open_at_from, open_at_to)
+
+        modified_from, modified_to = _normalize_date_range(self._modified_from, self._modified_to)
+        self._filter_proxy.set_modified_range(modified_from, modified_to)
+
+        created_from, created_to = _normalize_date_range(self._created_from, self._created_to)
+        self._filter_proxy.set_created_range(created_from, created_to)
 
         # Description length range
         min_v = int(self._desc_len_min.value())
@@ -3779,7 +4092,10 @@ class DatasetListingWidget(QWidget):
             idx = self._model.index(r, int(portal_col_idx))
             label = str(self._model.data(idx, Qt.DisplayRole) or "").strip()
             if label:
-                counts[label] = counts.get(label, 0) + 1
+                # テーブル側の portal_status は「ステータス（日時）」形式なので、括弧以降は無視して集計する。
+                key = DatasetFilterProxyModel._strip_parenthetical_suffix(label)
+                if key:
+                    counts[key] = counts.get(key, 0) + 1
 
         # Update item texts but keep itemData as the raw filter token.
         for i in range(combo.count()):
@@ -3788,7 +4104,8 @@ class DatasetListingWidget(QWidget):
             if not token:
                 combo.setItemText(i, f"すべて ({total})")
                 continue
-            combo.setItemText(i, f"{token} ({counts.get(token, 0)})")
+            token_key = DatasetFilterProxyModel._strip_parenthetical_suffix(token)
+            combo.setItemText(i, f"{token} ({counts.get(token_key, 0)})")
 
     def _auto_fetch_portal_statuses_if_needed(self) -> None:
         if os.environ.get("PYTEST_CURRENT_TEST"):
@@ -4214,10 +4531,14 @@ class DatasetListingWidget(QWidget):
                 "description_len",
                 "related_datasets_count",
                 "embargo_date",
+                "open_at_date",
+                "modified_date",
+                "created_date",
                 "tile_count",
                 "file_count",
                 "tag_count",
                 "portal_checked_at",
+                "portal_open",
                 "tool_open",
                 "file_size",
             }:
@@ -4253,6 +4574,27 @@ class DatasetListingWidget(QWidget):
                 edit.addItem(PRIVATE_MANAGED_LABEL, PRIVATE_MANAGED_LABEL)
                 edit.addItem(PUBLIC_PUBLISHED_LABEL, PUBLIC_PUBLISHED_LABEL)
                 edit.addItem(NONPUBLIC_OR_UNREGISTERED_LABEL, NONPUBLIC_OR_UNREGISTERED_LABEL)
+                edit.currentIndexChanged.connect(self._schedule_apply_filters)
+                self._filter_edits_by_key[cdef.key] = edit
+            elif cdef.key in {"is_anonymized", "is_data_entry_prohibited"}:
+                edit = QComboBox(self)
+                edit.addItem("すべて", "")
+                edit.addItem("はい", "True")
+                edit.addItem("いいえ", "False")
+                edit.currentIndexChanged.connect(self._schedule_apply_filters)
+                self._filter_edits_by_key[cdef.key] = edit
+            elif cdef.key == "data_listing_type":
+                edit = QComboBox(self)
+                edit.addItem("すべて", "")
+                values: List[str] = []
+                try:
+                    rows = self._model.get_rows() if self._model is not None else []
+                    values = sorted({str(r.get("data_listing_type") or "").strip() for r in rows if isinstance(r, dict)})
+                    values = [v for v in values if v]
+                except Exception:
+                    values = []
+                for v in values:
+                    edit.addItem(v, v)
                 edit.currentIndexChanged.connect(self._schedule_apply_filters)
                 self._filter_edits_by_key[cdef.key] = edit
             else:
@@ -4312,7 +4654,7 @@ class DatasetListingWidget(QWidget):
                     return
                 return
 
-            if col.key not in {"dataset_name", "instrument_names", "subgroup_name", "tool_open"}:
+            if col.key not in {"dataset_name", "instrument_names", "subgroup_name", "tool_open", "portal_open"}:
                 return
 
             if col.key in {"dataset_name", "subgroup_name"}:
@@ -4329,6 +4671,17 @@ class DatasetListingWidget(QWidget):
                 if dataset_id and callable(self._tool_open_callback):
                     try:
                         self._tool_open_callback(dataset_id)
+                    except Exception:
+                        return
+                return
+
+            if col.key == "portal_open":
+                dataset_id = self._model.data(idx2, Qt.UserRole)
+                dataset_id = dataset_id if isinstance(dataset_id, str) else ""
+                dataset_id = dataset_id.strip()
+                if dataset_id and callable(self._portal_open_callback):
+                    try:
+                        self._portal_open_callback(dataset_id)
                     except Exception:
                         return
                 return
@@ -4410,7 +4763,7 @@ class DatasetListingWidget(QWidget):
         reply = QMessageBox.question(
             self,
             "確認",
-            "データカタログ（データポータル）ステータスを『未公開のみ』強制更新します。\n\n"
+            "データカタログ（データポータル）ステータスを『未確認のみ』強制更新します。\n\n"
             "- 対象: 未確認 / 非公開 / 管理外 / 空\n"
             "- 公開（公開/公開2）は原則スキップします\n"
             "- 対象のキャッシュのみクリアして再取得します\n\n"
@@ -4584,6 +4937,9 @@ class DatasetListingWidget(QWidget):
 
     def set_tool_open_callback(self, callback) -> None:
         self._tool_open_callback = callback
+
+    def set_portal_open_callback(self, callback) -> None:
+        self._portal_open_callback = callback
 
 
 def create_dataset_listing_widget(parent=None, title: str = "一覧") -> QWidget:

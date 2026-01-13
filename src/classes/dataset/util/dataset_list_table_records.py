@@ -33,6 +33,14 @@ _DATASET_LIST_CACHE: Dict[str, Any] = {
 }
 
 
+_DATE_OBJ_KEYS = {
+    "_embargo_date_obj",
+    "_open_at_date_obj",
+    "_modified_date_obj",
+    "_created_date_obj",
+}
+
+
 def _persisted_cache_path() -> str:
     # NOTE: Must be CWD-independent. Use get_dynamic_file_path.
     return get_dynamic_file_path("output/rde/cache/dataset_listing_cache.json")
@@ -102,11 +110,8 @@ def _serialize_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             # Exclude original raw payload to reduce cache size.
             if k == "_raw":
                 continue
-            if k == "_embargo_date_obj":
-                if isinstance(v, datetime.date):
-                    out[k] = v.isoformat()
-                else:
-                    out[k] = None
+            if k in _DATE_OBJ_KEYS:
+                out[k] = v.isoformat() if isinstance(v, datetime.date) else None
                 continue
             # JSON-safe primitives only.
             if v is None or isinstance(v, (str, int, float, bool)):
@@ -136,18 +141,12 @@ def _deserialize_rows(payload: Any) -> Optional[List[Dict[str, Any]]]:
         if not isinstance(item, dict):
             continue
         row: Dict[str, Any] = dict(item)
-        emb = row.get("_embargo_date_obj")
-        if isinstance(emb, str) and emb:
-            try:
-                y, m, d = map(int, emb.split("-"))
-                row["_embargo_date_obj"] = datetime.date(y, m, d)
-            except Exception:
-                row["_embargo_date_obj"] = None
-        elif emb is None:
-            row["_embargo_date_obj"] = None
-        else:
-            # Unknown type -> reset
-            row["_embargo_date_obj"] = None
+        for k in _DATE_OBJ_KEYS:
+            v = row.get(k)
+            if isinstance(v, str) and v:
+                row[k] = _parse_iso_date(v)
+            else:
+                row[k] = None
         rows.append(row)
     return rows
 
@@ -206,11 +205,12 @@ def _serialize_rows_for_cache(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]
         out = dict(row)
 
         # datetime.date is not JSON serializable.
-        d = out.get("_embargo_date_obj")
-        if isinstance(d, datetime.date):
-            out["_embargo_date_obj"] = d.isoformat()
-        elif d is None:
-            out["_embargo_date_obj"] = ""
+        for k in _DATE_OBJ_KEYS:
+            d = out.get(k)
+            if isinstance(d, datetime.date):
+                out[k] = d.isoformat()
+            else:
+                out[k] = ""
 
         # Avoid bloating the cache with large raw payloads.
         if "_raw" in out:
@@ -229,11 +229,12 @@ def _deserialize_rows_from_cache(rows: Any) -> List[Dict[str, Any]]:
             continue
         out = dict(row)
 
-        d = out.get("_embargo_date_obj")
-        if isinstance(d, str) and d.strip():
-            out["_embargo_date_obj"] = _parse_iso_date(d.strip())
-        else:
-            out["_embargo_date_obj"] = None
+        for k in _DATE_OBJ_KEYS:
+            d = out.get(k)
+            if isinstance(d, str) and d.strip():
+                out[k] = _parse_iso_date(d.strip())
+            else:
+                out[k] = None
 
         result.append(out)
     return result
@@ -414,6 +415,28 @@ def _parse_iso_date(date_text: str) -> Optional[datetime.date]:
         return datetime.date(y, m, d)
     except Exception:
         return None
+
+
+def _parse_iso_datetime_to_jst_date(dt_text: str) -> Optional[datetime.date]:
+    """ISO 8601日時文字列をJST日付に変換する。
+
+    - 入力がUTC('Z')やタイムゾーン付きの場合: JST(UTC+9)へ変換して日付を返す
+    - 入力が日付のみ/変換不能の場合: YYYY-MM-DD 部分を best-effort で解釈する
+    """
+
+    text = (dt_text or "").strip()
+    if not text:
+        return None
+
+    try:
+        # Pythonのfromisoformatは'Z'を直接扱えないため置換する。
+        parsed = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return _parse_iso_date(text)
+        jst = datetime.timezone(datetime.timedelta(hours=9))
+        return parsed.astimezone(jst).date()
+    except Exception:
+        return _parse_iso_date(text)
 
 
 def _format_related_links(links: Any) -> str:
@@ -654,7 +677,9 @@ def get_default_columns() -> List[DatasetListColumn]:
     # Labels are aligned to dataset_edit_widget.py where possible (without trailing colon).
     return [
         DatasetListColumn("portal_status", "ポータル", True),
-        DatasetListColumn("portal_checked_at", "ポータル確認時刻", True),
+        DatasetListColumn("portal_open", "アプリ内リンク", True),
+        # NOTE: ポータル確認時刻はポータル列へ統合表示するため、デフォルトでは非表示。
+        DatasetListColumn("portal_checked_at", "ポータル確認時刻", False),
         DatasetListColumn("subgroup_name", "サブグループ名", True),
         DatasetListColumn("subgroup_description", "サブグループ説明", True),
         DatasetListColumn("grant_number", "課題番号", True),
@@ -664,6 +689,10 @@ def get_default_columns() -> List[DatasetListColumn]:
         DatasetListColumn("file_count", "ファイル数", True),
         DatasetListColumn("file_size", "ファイルサイズ", True),
         DatasetListColumn("embargo_date", "エンバーゴ期間終了日", True),
+        # NOTE: 日付3列はデフォルト非表示（必要に応じて列選択で表示）
+        DatasetListColumn("created_date", "開設日", False),
+        DatasetListColumn("modified_date", "更新日", False),
+        DatasetListColumn("open_at_date", "公開日", False),
         DatasetListColumn("template_name", "データセットテンプレート", True),
         DatasetListColumn("instrument_names", "設備", True),
         DatasetListColumn("manager_name", "管理者", True),
@@ -695,6 +724,7 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
     Each row also contains:
       - _raw: original dataset item
       - _embargo_date_obj: datetime.date | None (for UI filtering/sorting)
+            - _open_at_date_obj/_modified_date_obj/_created_date_obj: datetime.date | None (for UI filtering/sorting)
     """
 
     dataset_json_path = get_dynamic_file_path("output/rde/data/dataset.json")
@@ -708,7 +738,7 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
     dataset_details_dir = get_dynamic_file_path("output/rde/data/datasets")
 
     signature = (
-        6,  # signature schema (bump when columns/row schema changes)
+        9,  # signature schema (bump when columns/row schema changes)
         _safe_mtime(dataset_json_path),
         _safe_mtime(subgroup_json_path),
         _safe_mtime(info_json_path),
@@ -773,6 +803,35 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
 
     # Cache subgroup detail payloads to avoid repeated disk IO.
     subgroup_detail_payload_cache: Dict[str, Any] = {}
+
+    def _extract_detail_attributes_best_effort(dsid: str) -> Dict[str, Any]:
+        dsid = _safe_str(dsid).strip()
+        if not dsid:
+            return {}
+        detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dsid}.json")
+        payload = _load_json_file(detail_path)
+        if not isinstance(payload, dict):
+            return {}
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        attrs = data.get("attributes") if isinstance(data.get("attributes"), dict) else {}
+        return attrs if isinstance(attrs, dict) else {}
+
+    def _extract_date_texts_best_effort(attrs: Dict[str, Any], dsid: str) -> tuple[str, str, str]:
+        """dataset.json の attributes から日付文字列を取得し、created欠損時のみ個別JSONで補完する。"""
+
+        created_text = _safe_str((attrs or {}).get("created")).strip()
+        modified_text = _safe_str((attrs or {}).get("modified")).strip()
+        open_at_text = _safe_str((attrs or {}).get("openAt")).strip()
+
+        # 要件: openAt は未定義の場合があるが created は必ずある想定。
+        # 万が一 created が無い場合は個別JSONを確認して補完する。
+        if not created_text and dsid:
+            detail_attrs = _extract_detail_attributes_best_effort(dsid)
+            created_text = _safe_str(detail_attrs.get("created")).strip() or created_text
+            modified_text = _safe_str(detail_attrs.get("modified")).strip() or modified_text
+            open_at_text = _safe_str(detail_attrs.get("openAt")).strip() or open_at_text
+
+        return created_text, modified_text, open_at_text
 
     # Cache dataEntry computations to avoid repeated disk IO.
     data_entry_payload_cache: Dict[str, Any] = {}
@@ -882,6 +941,26 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
         embargo_text = _safe_str(attrs.get("embargoDate")).strip()
         embargo_date_obj = _parse_iso_date(embargo_text)
         embargo_display = embargo_date_obj.isoformat() if embargo_date_obj else (embargo_text.split("T")[0] if embargo_text else "")
+        created_text, modified_text, open_at_text = _extract_date_texts_best_effort(attrs, dataset_id)
+
+        created_date_obj = _parse_iso_datetime_to_jst_date(created_text)
+        created_display = (
+            created_date_obj.isoformat()
+            if created_date_obj
+            else (created_text.split("T")[0] if created_text else "")
+        )
+        modified_date_obj = _parse_iso_datetime_to_jst_date(modified_text)
+        modified_display = (
+            modified_date_obj.isoformat()
+            if modified_date_obj
+            else (modified_text.split("T")[0] if modified_text else "")
+        )
+        open_at_date_obj = _parse_iso_datetime_to_jst_date(open_at_text)
+        open_at_display = (
+            open_at_date_obj.isoformat()
+            if open_at_date_obj
+            else (open_at_text.split("T")[0] if open_at_text else "")
+        )
 
         contact = _safe_str(attrs.get("contact"))
         taxonomy_keys_list: List[Any] = []
@@ -969,6 +1048,9 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
             "description": description,
             "description_len": len(description) if isinstance(description, str) else 0,
             "embargo_date": embargo_display,
+            "open_at_date": open_at_display,
+            "modified_date": modified_display,
+            "created_date": created_display,
             "template_name": template_name,
             "instrument_names": ", ".join([n for n in instrument_names if n]),
             "manager_name": manager_name,
@@ -989,6 +1071,9 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
             # extras
             "_raw": item,
             "_embargo_date_obj": embargo_date_obj,
+            "_open_at_date_obj": open_at_date_obj,
+            "_modified_date_obj": modified_date_obj,
+            "_created_date_obj": created_date_obj,
             "_template_id": template_id,
             "_license_id": license_id,
             "_instrument_ids": instrument_ids,
