@@ -123,7 +123,13 @@ class DataPortalWidget(QWidget):
         """タブ切替時の遅延初期化"""
         try:
             # 0: login, 1: master, 2: upload
-            if index == 1:
+            if index == 0:
+                try:
+                    if hasattr(self, "login_settings_tab") and hasattr(self.login_settings_tab, "auto_test_connections"):
+                        self.login_settings_tab.auto_test_connections()
+                except Exception:
+                    pass
+            elif index == 1:
                 self._ensure_master_tab()
             elif index == 2:
                 self._ensure_upload_tab()

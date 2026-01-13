@@ -1199,10 +1199,20 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
             grant_count = len(subjects) if subjects else 0
             return f"{name} ({grant_count}件の課題)"
 
+        # create_group_select_widget 内ではフィルタ変更で team_groups が再代入されるため、
+        # 返却されたリスト参照を固定で持つと外側が古くなる。container のアクセサがあればそれを優先する。
+        current_team_groups = team_groups
+        try:
+            getter = getattr(container, "_get_current_team_groups", None)
+            if callable(getter):
+                current_team_groups = getter() or []
+        except Exception:
+            current_team_groups = team_groups
+
         selected_group = None
         idx = group_combo.currentIndex() if group_combo else -1
-        if idx is not None and 0 <= idx < len(team_groups):
-            selected_group = team_groups[idx]
+        if idx is not None and 0 <= idx < len(current_team_groups):
+            selected_group = current_team_groups[idx]
         else:
             current_group_text = ""
             try:
@@ -1210,7 +1220,7 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
             except Exception:
                 current_group_text = ""
             if current_group_text:
-                for g in team_groups:
+                for g in current_team_groups:
                     if _format_group_display_text(g) == current_group_text:
                         selected_group = g
                         break

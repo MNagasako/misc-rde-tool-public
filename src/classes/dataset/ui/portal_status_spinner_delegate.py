@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import os
 import weakref
-from typing import Optional
+from typing import Callable, Optional
 
 from qt_compat.core import Qt, QTimer
+from PySide6.QtCore import QEvent
 from qt_compat.gui import QBrush, QFont
 from PySide6.QtWidgets import QStyledItemDelegate
 
@@ -26,9 +27,10 @@ class PortalStatusSpinnerDelegate(QStyledItemDelegate):
 
     SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
-    def __init__(self, parent=None, *, is_loading_callback=None, view=None):
+    def __init__(self, parent=None, *, is_loading_callback=None, view=None, activate_callback: Callable | None = None):
         super().__init__(parent)
         self._is_loading_callback = is_loading_callback
+        self._activate_callback = activate_callback
         self._spinner_index = 0
         self._test_mode = bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
@@ -59,6 +61,37 @@ class PortalStatusSpinnerDelegate(QStyledItemDelegate):
         self._timer.timeout.connect(self._tick)
         if not self._test_mode:
             self._timer.start()
+
+    def editorEvent(self, event, model, option, index):  # noqa: N802
+        """Handle mouse clicks reliably for the portal_status column.
+
+        QTableView.clicked/pressed can be flaky depending on focus/selection timing.
+        Delegates receive item mouse events consistently, so we use this to trigger
+        portal status refresh.
+        """
+
+        try:
+            if self._activate_callback is None:
+                return super().editorEvent(event, model, option, index)
+
+            # Prefer release to avoid double-triggering on press+release.
+            if event is None or event.type() != QEvent.Type.MouseButtonRelease:
+                return super().editorEvent(event, model, option, index)
+
+            btn = getattr(event, "button", None)
+            if callable(btn):
+                btn = btn()
+            if btn != Qt.LeftButton:
+                return super().editorEvent(event, model, option, index)
+
+            try:
+                self._activate_callback(index)
+            except Exception:
+                pass
+
+            return super().editorEvent(event, model, option, index)
+        except Exception:
+            return super().editorEvent(event, model, option, index)
 
     def _on_theme_changed(self) -> None:
         # Paint uses get_color() each time; just request repaint.

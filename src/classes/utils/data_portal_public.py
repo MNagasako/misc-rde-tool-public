@@ -50,11 +50,19 @@ def get_public_published_dataset_ids(*, use_cache: bool = True) -> set[str]:
         return set(cached) if isinstance(cached, set) else set()
 
     dataset_ids: set[str] = set()
+    payload = None
+    loaded_ok = False
     try:
         with path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
+        loaded_ok = True
     except Exception:
-        payload = None
+        # Do not poison the cache with an empty result when parsing fails.
+        # This can happen if output.json is being written while the app starts.
+        cached = _PUBLIC_OUTPUT_DATASET_ID_CACHE.get("dataset_ids")
+        if use_cache and cache_path == str(path) and isinstance(cached, set) and cached:
+            return set(cached)
+        return set()
 
     if isinstance(payload, list):
         for item in payload:
@@ -70,6 +78,16 @@ def get_public_published_dataset_ids(*, use_cache: bool = True) -> set[str]:
                 dsid = str(item.get("dataset_id") or "").strip()
             if dsid:
                 dataset_ids.add(dsid)
+
+    # If payload shape is unexpected, keep prior cache when available.
+    if not isinstance(payload, list):
+        cached = _PUBLIC_OUTPUT_DATASET_ID_CACHE.get("dataset_ids")
+        if use_cache and cache_path == str(path) and isinstance(cached, set) and cached:
+            return set(cached)
+        return set()
+
+    if not loaded_ok:
+        return set()
 
     _PUBLIC_OUTPUT_DATASET_ID_CACHE["path"] = str(path)
     _PUBLIC_OUTPUT_DATASET_ID_CACHE["mtime"] = mtime

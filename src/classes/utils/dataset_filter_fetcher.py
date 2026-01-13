@@ -10,7 +10,8 @@ import logging
 import os
 from typing import Dict, List, Optional
 
-from qt_compat.core import Qt, QObject, QTimer
+from qt_compat.core import Qt, QObject, QTimer, QEvent
+from qt_compat.gui import QKeyEvent, QFontMetrics
 from qt_compat.widgets import (
     QComboBox,
     QCompleter,
@@ -20,6 +21,7 @@ from qt_compat.widgets import (
     QSizePolicy,
     QVBoxLayout,
     QWidget,
+    QtWidgets,
 )
 
 from classes.dataset.util.dataset_dropdown_util import get_dataset_type_display_map
@@ -43,12 +45,17 @@ class DatasetFilterFetcher(QObject):
         dataset_json_path: str,
         info_json_path: Optional[str] = None,
         combo: Optional[QComboBox] = None,
+        *,
+        show_text_search_field: bool = True,
+        clear_on_blank_click: bool = False,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
         self.dataset_json_path = dataset_json_path
         self.info_json_path = info_json_path
         self.combo = combo
+        self._show_text_search_field = show_text_search_field
+        self._clear_on_blank_click = clear_on_blank_click
         self._filter_widget: Optional[QWidget] = None
         self._program_combo: Optional[QComboBox] = None
         self._grant_edit: Optional[QLineEdit] = None
@@ -58,6 +65,34 @@ class DatasetFilterFetcher(QObject):
         self._filtered_datasets: List[Dict] = []
         self._suppress_filters = False
         self._populate_generation = 0
+        self._combo_signal_connected = False
+        self._combo_event_filter_installed = False
+        self._combo_line_edit_event_filter_installed = False
+        self._combo_popup_event_filter_installed = False
+        self._combo_line_edit: Optional[QLineEdit] = None
+        self._combo_popup_view: Optional[QWidget] = None
+        self._combo_popup_viewport: Optional[QWidget] = None
+        self._popup_focus_suppressed = False
+        self._popup_view_old_focus_policy: Optional[Qt.FocusPolicy] = None
+        self._popup_viewport_old_focus_policy: Optional[Qt.FocusPolicy] = None
+        self._typing_popup_active = False
+        self._pending_popup = False
+        self._logged_combo_connected = False
+        self._logged_first_combo_input = False
+        self._app_about_to_quit = False
+        self._search_edit_authoritative = False
+
+        # When running under pytest-qt (or any GUI app), Qt teardown order can be fragile.
+        # Guard all deferred callbacks so they don't touch Qt objects during shutdown.
+        try:
+            app = QtWidgets.QApplication.instance()
+        except Exception:
+            app = None
+        if app is not None:
+            try:
+                app.aboutToQuit.connect(self._on_app_about_to_quit)
+            except Exception:
+                pass
 
         if self.combo:
             try:
@@ -70,6 +105,11 @@ class DatasetFilterFetcher(QObject):
         # Invalidate any pending QTimer callbacks that may try to touch the combo.
         self._populate_generation += 1
         self.combo = None
+
+    def _on_app_about_to_quit(self, *_args: object) -> None:
+        # Invalidate any pending callbacks that might try to touch Qt objects.
+        self._app_about_to_quit = True
+        self._populate_generation += 1
 
     # ------------------------------------------------------------------
     # Public API
@@ -104,8 +144,6 @@ class DatasetFilterFetcher(QObject):
         grant_edit.setMinimumWidth(200)
         self._grant_edit = grant_edit
 
-        search_label = QLabel("テキスト検索:")
-        search_label.setStyleSheet("font-weight: bold;")
         search_edit = QLineEdit()
         search_edit.setPlaceholderText("名前・タイトル・説明で検索")
         search_edit.setMinimumWidth(220)
@@ -115,8 +153,11 @@ class DatasetFilterFetcher(QObject):
         filters_layout.addWidget(program_combo)
         filters_layout.addWidget(grant_label)
         filters_layout.addWidget(grant_edit)
-        filters_layout.addWidget(search_label)
-        filters_layout.addWidget(search_edit)
+        if self._show_text_search_field:
+            search_label = QLabel("テキスト検索:")
+            search_label.setStyleSheet("font-weight: bold;")
+            filters_layout.addWidget(search_label)
+            filters_layout.addWidget(search_edit)
         filters_layout.addStretch()
 
         layout.addLayout(filters_layout)
@@ -130,12 +171,249 @@ class DatasetFilterFetcher(QObject):
         layout.addWidget(count_label)
 
         self._connect_filter_signals()
+        self._connect_combo_signals()
         self._filter_widget = container
         self.apply_filters()
         return container
 
+    def eventFilter(self, obj: object, event: object) -> bool:  # type: ignore[override]
+        """Intercept combo arrow clicks to behave like 'show all'."""
+
+        if not self.combo:
+            return super().eventFilter(obj, event)
+
+        # Popup view lifecycle: when we suppress focus stealing for typing popups,
+        # restore the original focus policies once the popup is hidden.
+        if obj is self._combo_popup_view or obj is self._combo_popup_viewport:
+            try:
+                if self._typing_popup_active and event.type() == QEvent.KeyPress:
+                    # Even if Qt moves focus to the popup list, keep text entry stable by
+                    # forwarding typing keys into the editable lineEdit.
+                    line_edit = self.combo.lineEdit() if self.combo and self.combo.isEditable() else None
+                    if line_edit and qt_is_valid(line_edit):
+                        key = event.key() if hasattr(event, "key") else None
+                        if key is not None:
+                            navigation_keys = {
+                                Qt.Key_Up,
+                                Qt.Key_Down,
+                                Qt.Key_PageUp,
+                                Qt.Key_PageDown,
+                                Qt.Key_Home,
+                                Qt.Key_End,
+                                Qt.Key_Enter,
+                                Qt.Key_Return,
+                                Qt.Key_Escape,
+                                Qt.Key_Tab,
+                            }
+                            if key not in navigation_keys:
+                                try:
+                                    forwarded = QKeyEvent(
+                                        event.type(),
+                                        key,
+                                        event.modifiers(),
+                                        event.text(),
+                                        event.isAutoRepeat(),
+                                        event.count(),
+                                    )
+                                except Exception:
+                                    forwarded = None
+                                if forwarded is not None:
+                                    QtWidgets.QApplication.sendEvent(line_edit, forwarded)
+                                    return True
+
+                if event.type() == QEvent.Show and self._typing_popup_active:
+                    QTimer.singleShot(0, self._restore_combo_line_edit_focus)
+                if event.type() == QEvent.FocusIn and self._typing_popup_active:
+                    # Some styles force focus to the popup; immediately return it to the input.
+                    QTimer.singleShot(0, self._restore_combo_line_edit_focus)
+                if event.type() == QEvent.Hide:
+                    self._typing_popup_active = False
+                    self._restore_popup_focus_policy_if_needed()
+            except Exception:
+                pass
+            return super().eventFilter(obj, event)
+
+        # Optional UX: clicking the blank area (right side) inside the combo's lineEdit clears input.
+        # This is intentionally opt-in because it may surprise in other screens.
+        if self._clear_on_blank_click and self._combo_line_edit and obj is self._combo_line_edit:
+            try:
+                if event.type() == QEvent.MouseButtonPress:
+                    text = self._combo_line_edit.text()
+                    if not text:
+                        return super().eventFilter(obj, event)
+
+                    # Determine click position (Qt6 has position(); Qt5 has pos()).
+                    pos = None
+                    if hasattr(event, "position"):
+                        try:
+                            pos = event.position().toPoint()
+                        except Exception:
+                            pos = None
+                    if pos is None and hasattr(event, "pos"):
+                        try:
+                            pos = event.pos()
+                        except Exception:
+                            pos = None
+                    if pos is None:
+                        return super().eventFilter(obj, event)
+
+                    margins = self._combo_line_edit.textMargins()
+                    metrics = QFontMetrics(self._combo_line_edit.font())
+                    text_width = metrics.horizontalAdvance(text)
+
+                    # If clicked beyond the rendered text area, clear.
+                    # Add a small padding to account for caret/spacing.
+                    threshold_x = margins.left() + text_width + 6
+                    if pos.x() > threshold_x:
+                        # Clear selection + typed text without triggering the typing-popup behaviour.
+                        self._pending_popup = False
+                        self._typing_popup_active = False
+                        self._restore_popup_focus_policy_if_needed()
+
+                        self._suppress_filters = True
+                        try:
+                            if self.combo and qt_is_valid(self.combo):
+                                try:
+                                    self.combo.blockSignals(True)
+                                except Exception:
+                                    pass
+                                try:
+                                    self.combo.setCurrentIndex(-1)
+                                finally:
+                                    try:
+                                        self.combo.blockSignals(False)
+                                    except Exception:
+                                        pass
+                            self._combo_line_edit.clear()
+                            if self._search_edit:
+                                self._search_edit.clear()
+                        finally:
+                            self._suppress_filters = False
+
+                        self.apply_filters()
+                        QTimer.singleShot(0, self._restore_combo_line_edit_focus)
+                        return True
+            except Exception:
+                pass
+            return super().eventFilter(obj, event)
+
+        if obj is not self.combo:
+            return super().eventFilter(obj, event)
+
+        try:
+            if event.type() == QEvent.MouseButtonPress:
+                # Only treat clicks on the arrow sub-control as 'show all'.
+                option = QtWidgets.QStyleOptionComboBox()
+                option.initFrom(self.combo)
+                option.editable = self.combo.isEditable()
+                option.currentText = self.combo.currentText()
+
+                arrow_rect = self.combo.style().subControlRect(
+                    QtWidgets.QStyle.CC_ComboBox,
+                    option,
+                    QtWidgets.QStyle.SC_ComboBoxArrow,
+                    self.combo,
+                )
+
+                pos = event.pos() if hasattr(event, "pos") else None
+                if pos is not None and arrow_rect.contains(pos):
+                    # Defer so the current mouse event finishes cleanly.
+                    QTimer.singleShot(0, self.show_all)
+                    return True
+        except Exception:
+            # Fall back to default behaviour if anything goes wrong.
+            pass
+
+        return super().eventFilter(obj, event)
+
+    def _suppress_popup_focus_steal_for_typing(self) -> None:
+        """Prevent the combo popup from taking focus away from the lineEdit.
+
+        When QComboBox.showPopup() is called, Qt may transfer focus to the popup QListView.
+        That breaks multi-character typing (2nd keypress goes to the list). For typing-driven
+        popups we keep the popup non-focusable and keep focus in the lineEdit.
+        """
+
+        if self._popup_focus_suppressed:
+            return
+        if not self.combo or not qt_is_valid(self.combo):
+            return
+
+        try:
+            view = self.combo.view()
+            viewport = view.viewport() if view else None
+        except Exception:
+            return
+
+        if not view:
+            return
+
+        self._combo_popup_view = view
+        self._combo_popup_viewport = viewport
+
+        try:
+            self._popup_view_old_focus_policy = view.focusPolicy()
+            view.setFocusPolicy(Qt.NoFocus)
+        except Exception:
+            self._popup_view_old_focus_policy = None
+
+        if viewport:
+            try:
+                self._popup_viewport_old_focus_policy = viewport.focusPolicy()
+                viewport.setFocusPolicy(Qt.NoFocus)
+            except Exception:
+                self._popup_viewport_old_focus_policy = None
+
+        self._popup_focus_suppressed = True
+
+    def _restore_popup_focus_policy_if_needed(self) -> None:
+        if not self._popup_focus_suppressed:
+            return
+
+        view = self._combo_popup_view
+        viewport = self._combo_popup_viewport
+
+        if view and qt_is_valid(view) and self._popup_view_old_focus_policy is not None:
+            try:
+                view.setFocusPolicy(self._popup_view_old_focus_policy)
+            except Exception:
+                pass
+        if viewport and qt_is_valid(viewport) and self._popup_viewport_old_focus_policy is not None:
+            try:
+                viewport.setFocusPolicy(self._popup_viewport_old_focus_policy)
+            except Exception:
+                pass
+
+        self._popup_focus_suppressed = False
+        self._popup_view_old_focus_policy = None
+        self._popup_viewport_old_focus_policy = None
+
+    def _restore_combo_line_edit_focus(self) -> None:
+        if self._app_about_to_quit or QtWidgets.QApplication.instance() is None:
+            return
+        if not self.combo or not qt_is_valid(self.combo):
+            return
+        line_edit = self.combo.lineEdit() if self.combo.isEditable() else None
+        if not line_edit or not qt_is_valid(line_edit):
+            return
+
+        try:
+            cursor_pos = line_edit.cursorPosition()
+        except Exception:
+            cursor_pos = None
+
+        try:
+            line_edit.setFocus(Qt.OtherFocusReason)
+            if cursor_pos is not None:
+                line_edit.setCursorPosition(cursor_pos)
+        except Exception:
+            pass
+
     def apply_filters(self) -> None:
         """Apply current filters and refresh the combo box."""
+
+        if self._app_about_to_quit or QtWidgets.QApplication.instance() is None:
+            return
 
         program_raw = self._program_combo.currentData() if self._program_combo else "all"
         program_filter = program_raw or "all"
@@ -163,6 +441,71 @@ class DatasetFilterFetcher(QObject):
         self._update_combo()
         self._update_count_label()
 
+    def _maybe_show_popup_for_user_input(self) -> None:
+        """Open the combo popup when the user is typing, so the filtered list is visible."""
+
+        # Do not show popup immediately; combo repopulation may close it.
+        # Instead, record the intent and open it after the combo update completes.
+        if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("RDE_TEST_ALLOW_COMBO_POPUP"):
+            return
+        # Coalesce multiple input signals (textEdited/textChanged) into a single popup.
+        self._pending_popup = True
+
+    def _show_pending_popup_if_needed(self) -> None:
+        if not self._pending_popup:
+            return
+        if self._app_about_to_quit or QtWidgets.QApplication.instance() is None:
+            self._pending_popup = False
+            return
+        if os.environ.get("PYTEST_CURRENT_TEST") and not os.environ.get("RDE_TEST_ALLOW_COMBO_POPUP"):
+            self._pending_popup = False
+            return
+        if not self.combo or not qt_is_valid(self.combo):
+            self._pending_popup = False
+            return
+
+        try:
+            if not self.combo.isEnabled() or not self.combo.isVisible():
+                self._pending_popup = False
+                return
+
+            # If it's already visible, avoid re-opening (re-opening may steal focus).
+            try:
+                if self.combo.view() and self.combo.view().isVisible():
+                    self._pending_popup = False
+                    return
+            except Exception:
+                pass
+
+            # Only pop up when the user is interacting with the combo.
+            if self.combo.hasFocus():
+                pass
+            elif self.combo.lineEdit() and self.combo.lineEdit().hasFocus():
+                pass
+            else:
+                self._pending_popup = False
+                return
+
+            self._pending_popup = False
+            logger.debug("DatasetFilterFetcher: showPopup (deferred)")
+
+            def _show_and_refocus() -> None:
+                if self._app_about_to_quit or QtWidgets.QApplication.instance() is None:
+                    return
+                if not self.combo or not qt_is_valid(self.combo):
+                    return
+                # Typing-driven popup: keep input focus in the lineEdit.
+                self._typing_popup_active = True
+                self._suppress_popup_focus_steal_for_typing()
+                self.combo.showPopup()
+                # Ensure refocus happens after showPopup() side-effects.
+                QTimer.singleShot(0, self._restore_combo_line_edit_focus)
+                QTimer.singleShot(30, self._restore_combo_line_edit_focus)
+
+            QTimer.singleShot(0, _show_and_refocus)
+        except Exception:
+            self._pending_popup = False
+
     def show_all(self) -> None:
         """Reset filters and open the combo popup."""
 
@@ -173,7 +516,10 @@ class DatasetFilterFetcher(QObject):
         if self._search_edit:
             self._search_edit.clear()
         self.apply_filters()
-        if self.combo and not os.environ.get("PYTEST_CURRENT_TEST"):
+        # Explicit "show all" (arrow click) should keep default focus behaviour.
+        self._typing_popup_active = False
+        self._restore_popup_focus_policy_if_needed()
+        if self.combo and (not os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("RDE_TEST_ALLOW_COMBO_POPUP")):
             self.combo.showPopup()
 
     # ------------------------------------------------------------------
@@ -243,12 +589,164 @@ class DatasetFilterFetcher(QObject):
         if self._search_edit:
             self._search_edit.textChanged.connect(self._on_search_text_changed)
 
+    def _connect_combo_signals(self) -> None:
+        if self._combo_signal_connected:
+            return
+        if not self.combo or not qt_is_valid(self.combo):
+            return
+        line_edit = self.combo.lineEdit() if self.combo.isEditable() else None
+        if not line_edit:
+            return
+
+        self._combo_line_edit = line_edit
+
+        # Also observe combo-level edit text changes. Some styles / platforms may not reliably
+        # emit lineEdit signals, but editTextChanged is provided by QComboBox itself.
+        try:
+            self.combo.editTextChanged.connect(self._on_combo_text_changed)
+        except Exception:
+            pass
+
+        # User typing directly into the combo should drive the same text filter.
+        # Use both textEdited and textChanged to be robust across IME / paste / platform.
+        # NOTE: textChanged は選択変更やプログラム更新でも発火するため、
+        # _on_combo_text_input 側で "検索入力が既にある場合は上書きしない" を保証する。
+        try:
+            line_edit.textEdited.connect(self._on_combo_text_edited)
+            line_edit.textChanged.connect(self._on_combo_text_changed)
+        except Exception:
+            return
+
+        if not self._logged_combo_connected:
+            logger.info("DatasetFilterFetcher: combo input signals connected")
+            self._logged_combo_connected = True
+
+        logger.debug(
+            "DatasetFilterFetcher: combo lineEdit signals connected (editable=%s)",
+            bool(self.combo and self.combo.isEditable()),
+        )
+
+        self._combo_signal_connected = True
+
+        if not self._combo_event_filter_installed:
+            try:
+                self.combo.installEventFilter(self)
+                self._combo_event_filter_installed = True
+            except Exception:
+                pass
+
+        if self._clear_on_blank_click and not self._combo_line_edit_event_filter_installed:
+            try:
+                line_edit.installEventFilter(self)
+                self._combo_line_edit_event_filter_installed = True
+            except Exception:
+                pass
+
+        if not self._combo_popup_event_filter_installed:
+            try:
+                view = self.combo.view()
+                if view:
+                    view.installEventFilter(self)
+                    viewport = view.viewport() if hasattr(view, "viewport") else None
+                    if viewport:
+                        viewport.installEventFilter(self)
+                    self._combo_popup_view = view
+                    self._combo_popup_viewport = viewport
+                self._combo_popup_event_filter_installed = True
+            except Exception:
+                pass
+
+    def _on_combo_text_edited(self, text: str) -> None:
+        self._on_combo_text_input(text)
+
+    def _on_combo_text_changed(self, text: str) -> None:
+        # textChanged can be emitted for programmatic updates as well; guard with suppress flag.
+        if self._suppress_filters:
+            return
+
+        # When the user selects an item from the popup, an editable QComboBox updates the
+        # lineEdit text to the item's display text and emits textChanged.
+        # That display text is not a stable search token (it may contain truncation / labels),
+        # and treating it as "typing" will re-filter and can wipe out the selection.
+        try:
+            if self.combo and qt_is_valid(self.combo):
+                index = self.combo.currentIndex()
+                if index >= 0 and (self.combo.itemText(index) or "") == (text or ""):
+                    self._typing_popup_active = False
+                    self._restore_popup_focus_policy_if_needed()
+                    return
+        except Exception:
+            pass
+
+        self._on_combo_text_input(text)
+
+    def _on_combo_text_input(self, text: str) -> None:
+        if self._suppress_filters:
+            return
+        if not self._search_edit:
+            return
+
+        # 検索欄が既にユーザー入力で埋まっている場合は、
+        # combo 側の入力（選択変更/プログラム更新/typing 等）で検索欄を上書きしない。
+        # - widget: combo入力で検索する場合は、検索欄が空の状態で入力される想定
+        # - unit: 検索欄入力後、combo lineEdit の更新で検索が壊れないことが要件
+        current_search = self._search_edit.text() or ""
+        normalized = text or ""
+
+        # Only protect the search box when it has been set directly (i.e., via the search box
+        # itself or an external programmatic setText). When the search box is being driven by
+        # combo typing (we set it under _suppress_filters), allow continuous updates.
+        if self._search_edit_authoritative and current_search and current_search != normalized:
+            # UIの一貫性のため、combo側の表示を検索欄へ戻す（フィルタも維持）。
+            if self.combo and self.combo.lineEdit():
+                self._suppress_filters = True
+                try:
+                    self.combo.lineEdit().setText(current_search)
+                finally:
+                    self._suppress_filters = False
+
+            self.apply_filters()
+            return
+
+        if not self._logged_first_combo_input:
+            logger.info("DatasetFilterFetcher: combo input detected")
+            self._logged_first_combo_input = True
+
+        logger.debug("DatasetFilterFetcher: combo text input: %r", text)
+
+        # normalized is the authoritative filter text when search_edit is empty.
+        if self._search_edit.text() == normalized:
+            # Still re-apply filters so the combo list follows the current text.
+            self.apply_filters()
+            self._maybe_show_popup_for_user_input()
+            return
+
+        self._suppress_filters = True
+        try:
+            self._search_edit.setText(normalized)
+        finally:
+            self._suppress_filters = False
+
+        self.apply_filters()
+        self._maybe_show_popup_for_user_input()
+
     def _on_search_text_changed(self, text: str) -> None:
         if self._suppress_filters:
             return
+
+        # The search box is now the authoritative input source until it's cleared.
+        self._search_edit_authoritative = True
+
+        logger.debug("DatasetFilterFetcher: search text changed: %r", text)
         if self.combo and self.combo.lineEdit():
-            self.combo.lineEdit().setText(text)
+            # Avoid triggering combo textChanged handlers during sync.
+            self._suppress_filters = True
+            try:
+                self.combo.lineEdit().setText(text)
+            finally:
+                self._suppress_filters = False
         self.apply_filters()
+        self._maybe_show_popup_for_user_input()
 
     def _update_combo(self) -> None:
         if not self.combo or not qt_is_valid(self.combo):
@@ -259,19 +757,36 @@ class DatasetFilterFetcher(QObject):
         async_threshold = 500
         chunk_size = 200
 
+        overall = len(self._datasets)
+        large_overall = overall > async_threshold
+
+        # Any combo refresh should invalidate previously scheduled async append chunks.
+        # Otherwise an in-flight async population may continue to append items after a later
+        # (sync) update, causing oscillation/duplication and unstable results.
+        self._populate_generation += 1
+        generation = self._populate_generation
+
         selected_id = self._current_selection_id()
+        line_edit = self.combo.lineEdit() if self.combo.isEditable() else None
+        typed_text = line_edit.text() if line_edit else ""
+
         self._suppress_filters = True
         async_started = False
         try:
             if not self.combo or not qt_is_valid(self.combo):
                 return
             self.combo.blockSignals(True)
+
+            if line_edit:
+                try:
+                    line_edit.blockSignals(True)
+                except Exception:
+                    pass
+
             self.combo.clear()
 
             # 大量件数は非同期更新（イベントループに制御を返す）
             if len(self._filtered_datasets) > async_threshold:
-                self._populate_generation += 1
-                generation = self._populate_generation
                 async_started = True
 
                 # まずプレースホルダを表示
@@ -279,48 +794,76 @@ class DatasetFilterFetcher(QObject):
                 self.combo.addItem(placeholder, None)
                 self.combo.setCurrentIndex(-1)
 
+                if line_edit and typed_text:
+                    line_edit.setText(typed_text)
+
                 if self.combo.lineEdit():
                     total = len(self._filtered_datasets)
                     overall = len(self._datasets)
                     self.combo.lineEdit().setPlaceholderText(f"データセットを検索・選択 ({total}/{overall}件)")
 
+                # IMPORTANT:
+                # Do not leave the combo/lineEdit signals blocked while we asynchronously append items.
+                # Otherwise user typing won't emit signals (and filtering will appear broken) on large datasets.
+                self.combo.blockSignals(False)
+                if line_edit:
+                    try:
+                        line_edit.blockSignals(False)
+                    except Exception:
+                        pass
+                self._suppress_filters = False
+
                 def _append_chunk(start: int) -> None:
+                    if self._app_about_to_quit or QtWidgets.QApplication.instance() is None:
+                        return
                     if generation != self._populate_generation:
                         return
                     if not self.combo or not qt_is_valid(self.combo):
                         return
 
-                    # 初回chunkでプレースホルダを消す
-                    if start == 0:
-                        self.combo.clear()
-
-                    end = min(start + chunk_size, len(self._filtered_datasets))
-                    for dataset in self._filtered_datasets[start:end]:
-                        text = self._format_display_text(dataset)
-                        self.combo.addItem(text, dataset)
-
-                    if end < len(self._filtered_datasets):
-                        QTimer.singleShot(0, lambda: _append_chunk(end))
-                        return
-
-                    # 追加完了
-                    if not self._filtered_datasets:
-                        empty_placeholder = "-- 該当するデータセットがありません --"
-                        self.combo.addItem(empty_placeholder, None)
-
-                    # Completerは大量件数だと重いので付与しない（入力はフィルタ欄で十分）
+                    # Avoid emitting selection/index signals while mutating the combo.
+                    # (User typing signals should still work between chunks.)
+                    self._suppress_filters = True
                     try:
-                        self.combo.setCompleter(None)
-                    except Exception:
-                        pass
+                        self.combo.blockSignals(True)
 
-                    if selected_id:
-                        self._restore_selection(selected_id)
-                    else:
-                        self.combo.setCurrentIndex(-1)
+                        # 初回chunkでプレースホルダを消す
+                        if start == 0:
+                            self.combo.clear()
 
-                    self.combo.blockSignals(False)
-                    self._suppress_filters = False
+                        end = min(start + chunk_size, len(self._filtered_datasets))
+                        for dataset in self._filtered_datasets[start:end]:
+                            text = self._format_display_text(dataset)
+                            self.combo.addItem(text, dataset)
+
+                        if end < len(self._filtered_datasets):
+                            QTimer.singleShot(0, lambda: _append_chunk(end))
+                            return
+
+                        # 追加完了
+                        if not self._filtered_datasets:
+                            empty_placeholder = "-- 該当するデータセットがありません --"
+                            self.combo.addItem(empty_placeholder, None)
+
+                        # Completerは大量件数だと重いので付与しない（入力はフィルタ欄で十分）
+                        try:
+                            self.combo.setCompleter(None)
+                        except Exception:
+                            pass
+
+                        if selected_id:
+                            self._restore_selection(selected_id)
+                        else:
+                            self.combo.setCurrentIndex(-1)
+
+                        if line_edit and self.combo.currentIndex() == -1 and typed_text:
+                            line_edit.setText(typed_text)
+                    finally:
+                        if self.combo and qt_is_valid(self.combo):
+                            self.combo.blockSignals(False)
+                        self._suppress_filters = False
+
+                    self._show_pending_popup_if_needed()
 
                 # 非同期開始
                 QTimer.singleShot(0, lambda: _append_chunk(0))
@@ -334,16 +877,26 @@ class DatasetFilterFetcher(QObject):
 
             if not self._filtered_datasets:
                 placeholder = "-- 該当するデータセットがありません --"
-                self.combo.addItem(placeholder, None)
+                # Guard against accidental duplicates.
+                if self.combo.count() == 0 or self.combo.itemText(self.combo.count() - 1) != placeholder:
+                    self.combo.addItem(placeholder, None)
                 display_list.append(placeholder)
 
-            completer = QCompleter(display_list, self.combo)
-            completer.setCaseSensitivity(Qt.CaseInsensitive)
-            completer.setFilterMode(Qt.MatchContains)
-            popup_view = completer.popup()
-            popup_view.setMinimumHeight(240)
-            popup_view.setMaximumHeight(240)
-            self.combo.setCompleter(completer)
+            # If there are many datasets overall, avoid installing a QCompleter.
+            # Completer can open its own popup on typing, which is confusing alongside combo.showPopup().
+            if large_overall:
+                try:
+                    self.combo.setCompleter(None)
+                except Exception:
+                    pass
+            else:
+                completer = QCompleter(display_list, self.combo)
+                completer.setCaseSensitivity(Qt.CaseInsensitive)
+                completer.setFilterMode(Qt.MatchContains)
+                popup_view = completer.popup()
+                popup_view.setMinimumHeight(240)
+                popup_view.setMaximumHeight(240)
+                self.combo.setCompleter(completer)
 
             if selected_id:
                 self._restore_selection(selected_id)
@@ -355,11 +908,20 @@ class DatasetFilterFetcher(QObject):
                 overall = len(self._datasets)
                 placeholder = f"データセットを検索・選択 ({total}/{overall}件)"
                 self.combo.lineEdit().setPlaceholderText(placeholder)
+
+            if line_edit and self.combo.currentIndex() == -1 and typed_text:
+                line_edit.setText(typed_text)
         finally:
             if not async_started:
                 if self.combo and qt_is_valid(self.combo):
                     self.combo.blockSignals(False)
+                if line_edit:
+                    try:
+                        line_edit.blockSignals(False)
+                    except Exception:
+                        pass
                 self._suppress_filters = False
+                self._show_pending_popup_if_needed()
 
     def _current_selection_id(self) -> Optional[str]:
         if not self.combo:

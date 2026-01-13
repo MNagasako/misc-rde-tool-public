@@ -1,5 +1,5 @@
 """
-テーマ管理 - ARIM RDE Tool v2.4.18
+テーマ管理 - ARIM RDE Tool
 
 ライト/ダークテーマの切り替えとカラー取得を一元管理。
 Singleton パターンで全UI要素から参照可能。

@@ -158,18 +158,21 @@ class AuthManager:
                 self._get_key_name(environment, "login_pass")
             )
             
-            # すべての情報が揃っている場合のみ返す
-            if all([basic_user, basic_pass, login_user, login_pass]):
+            # ログイン情報は必須 / Basic認証は任意
+            login_user_text = (login_user or "").strip()
+            login_pass_text = (login_pass or "").strip()
+
+            if login_user_text and login_pass_text:
                 logger.info(f"認証情報を取得しました: {environment} 環境")
                 return PortalCredentials(
-                    basic_username=basic_user,
-                    basic_password=basic_pass,
-                    login_username=login_user,
-                    login_password=login_pass
+                    basic_username=(basic_user or ""),
+                    basic_password=(basic_pass or ""),
+                    login_username=login_user_text,
+                    login_password=login_pass_text,
                 )
-            else:
-                logger.debug(f"認証情報が不完全です: {environment} 環境")
-                return None
+
+            logger.debug(f"認証情報が不完全です: {environment} 環境")
+            return None
             
         except keyring.errors.KeyringError as e:
             logger.error(f"認証情報の取得に失敗しました: {e}")

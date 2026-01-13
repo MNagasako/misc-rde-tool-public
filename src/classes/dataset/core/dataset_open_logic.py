@@ -1459,6 +1459,14 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     container._refresh_subgroup_data = refresh_subgroup_data
     container.add_show_refresh_callback(refresh_subgroup_data)
 
+    # create2等の呼び出し側が「最新の」team_groups/group_namesを参照できるようにアクセサを公開する。
+    # NOTE: update_group_list 内で team_groups が再代入されるため、戻り値のリスト参照だけだと外側が古いままになる。
+    try:
+        container._get_current_team_groups = lambda: team_groups  # type: ignore[attr-defined]
+        container._get_current_group_names = lambda: group_names  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
     if register_subgroup_notifier:
         # サブグループ更新通知システムに登録
         try:

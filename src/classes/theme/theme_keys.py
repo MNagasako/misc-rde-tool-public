@@ -1,4 +1,4 @@
-"""テーマキー定義 - ARIM RDE Tool v2.4.18
+"""テーマキー定義 - ARIM RDE Tool
 
 UI要素の色を参照するためのキー定義。
 セマンティックな命名規則に基づく階層構造。
@@ -216,6 +216,7 @@ class ThemeKey(str, Enum):
     # リンク
     TEXT_LINK = "text.link"
     TEXT_LINK_HOVER = "text.link.hover"
+    TEXT_LINK_HOVER_BACKGROUND = "text.link.hover.background"
     
     # ========================================
     # Input - 入力フィールド

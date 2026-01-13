@@ -6,6 +6,7 @@ QTextEdit等のウィジェット上に半透明のスピナーを表示
 
 import os
 import weakref
+from typing import Optional
 
 from qt_compat.widgets import QWidget, QLabel, QVBoxLayout, QPushButton
 from qt_compat.core import Qt, QTimer, Signal
@@ -22,7 +23,16 @@ class SpinnerOverlay(QWidget):
     # スピナー用の回転文字列パターン
     SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
     
-    def __init__(self, parent=None, message: str = "AI応答を待機中...", show_cancel: bool = False, cancel_text: str = "キャンセル"):
+    def __init__(
+        self,
+        parent=None,
+        message: str = "AI応答を待機中...",
+        show_cancel: bool = False,
+        cancel_text: str = "キャンセル",
+        *,
+        spinner_point_size: int = 24,
+        message_point_size: int = 12,
+    ):
         """
         Args:
             parent: 親ウィジェット
@@ -37,6 +47,9 @@ class SpinnerOverlay(QWidget):
         self._test_mode = bool(os.environ.get("PYTEST_CURRENT_TEST"))
         
         self._message = message
+        self._progress_current: Optional[int] = None
+        self._progress_total: Optional[int] = None
+        self._progress_prefix: str = ""
         self._spinner_index = 0
         self._show_cancel = show_cancel
         self._cancel_text = cancel_text
@@ -69,8 +82,11 @@ class SpinnerOverlay(QWidget):
         
         # スピナーラベル
         self.spinner_label = QLabel(self)
+        self._spinner_point_size = int(spinner_point_size or 24)
+        self._message_point_size = int(message_point_size or 12)
+
         font = QFont()
-        font.setPointSize(24)
+        font.setPointSize(self._spinner_point_size)
         self.spinner_label.setFont(font)
         self.spinner_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.spinner_label)
@@ -78,10 +94,19 @@ class SpinnerOverlay(QWidget):
         # メッセージラベル
         self.message_label = QLabel(message, self)
         message_font = QFont()
-        message_font.setPointSize(12)
+        message_font.setPointSize(self._message_point_size)
         self.message_label.setFont(message_font)
         self.message_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.message_label)
+
+        # 進捗ラベル（任意）
+        self.progress_label = QLabel("", self)
+        try:
+            self.progress_label.setAlignment(Qt.AlignCenter)
+        except Exception:
+            pass
+        self.progress_label.hide()
+        layout.addWidget(self.progress_label)
 
         # キャンセルボタン（任意）
         self.cancel_button = None
@@ -128,6 +153,10 @@ class SpinnerOverlay(QWidget):
     def stop(self):
         """スピナーアニメーションを停止"""
         self._spinner_timer.stop()
+        try:
+            self.clear_progress()
+        except Exception:
+            pass
         self.hide()
     
     def _update_spinner(self):
@@ -145,6 +174,76 @@ class SpinnerOverlay(QWidget):
         """
         self._message = message
         self.message_label.setText(message)
+
+    def set_progress(self, current: int | None, total: int | None, *, prefix: str = "処理済み") -> None:
+        """予定総数/処理済み数の進捗表示を更新する。
+
+        Args:
+            current: 処理済み数（Noneで非表示）
+            total: 予定総数（Noneで非表示）
+            prefix: 表示プレフィックス
+        """
+        try:
+            if current is None or total is None:
+                self.clear_progress()
+                return
+            cur = int(current)
+            tot = int(total)
+            if tot <= 0:
+                self.clear_progress()
+                return
+            if cur < 0:
+                cur = 0
+            if cur > tot:
+                cur = tot
+
+            self._progress_current = cur
+            self._progress_total = tot
+            self._progress_prefix = str(prefix or "").strip()
+
+            shown_prefix = (self._progress_prefix + ": ") if self._progress_prefix else ""
+            self.progress_label.setText(f"{shown_prefix}{cur} / {tot}")
+            self.progress_label.show()
+        except Exception:
+            # 表示更新に失敗してもアプリは継続
+            try:
+                self.clear_progress()
+            except Exception:
+                pass
+
+    def clear_progress(self) -> None:
+        """進捗表示をクリアして非表示にする。"""
+        try:
+            self._progress_current = None
+            self._progress_total = None
+            self._progress_prefix = ""
+            self.progress_label.setText("")
+            self.progress_label.hide()
+        except Exception:
+            return
+
+    def show_message(self, message: str):
+        """後方互換: show_message(message) を set_message に委譲する。"""
+        self.set_message(message)
+
+    def set_sizes(self, *, spinner_point_size: int | None = None, message_point_size: int | None = None) -> None:
+        """スピナー/メッセージのフォントサイズを変更する（任意）。"""
+        try:
+            if spinner_point_size is not None:
+                self._spinner_point_size = int(spinner_point_size)
+                f = self.spinner_label.font()
+                f.setPointSize(self._spinner_point_size)
+                self.spinner_label.setFont(f)
+        except Exception:
+            pass
+        try:
+            if message_point_size is not None:
+                self._message_point_size = int(message_point_size)
+                f = self.message_label.font()
+                f.setPointSize(self._message_point_size)
+                self.message_label.setFont(f)
+        except Exception:
+            pass
     
     def showEvent(self, event):
         """表示時に親のサイズに合わせる"""
@@ -170,6 +269,10 @@ class SpinnerOverlay(QWidget):
             self.setStyleSheet(f"background-color: {overlay_bg};")
             self.spinner_label.setStyleSheet(f"color: {overlay_text};")
             self.message_label.setStyleSheet(f"color: {overlay_text}; font-weight: bold; padding: 4px 12px;")
+            try:
+                self.progress_label.setStyleSheet(f"color: {overlay_text}; padding: 0px 12px 8px 12px;")
+            except Exception:
+                pass
             if self.cancel_button:
                 self.cancel_button.setStyleSheet(
                     f"""

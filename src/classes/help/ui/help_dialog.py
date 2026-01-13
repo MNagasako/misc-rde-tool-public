@@ -1,5 +1,5 @@
 """
-ヘルプダイアログ - ARIM RDE Tool v2.4.18
+ヘルプダイアログ - ARIM RDE Tool
 About（ライセンス）と使用方法を表示
 """
 

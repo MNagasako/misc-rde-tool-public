@@ -160,6 +160,8 @@ class AISuggestionDialog(QDialog):
         self._dataset_filter_fetcher: Optional[DatasetFilterFetcher] = None
         self._dataset_filter_widget: Optional[QWidget] = None
         self._dataset_combo_connected = False
+        self._dataset_dropdown_initialized = False
+        self._dataset_dropdown_initializing = False
         self._did_initial_top_align = False
         
         # AI拡張機能を取得
@@ -1131,14 +1133,17 @@ class AISuggestionDialog(QDialog):
         self.extension_dataset_combo.setInsertPolicy(QComboBox.NoInsert)
         self.extension_dataset_combo.setMaxVisibleItems(12)
         self.extension_dataset_combo.lineEdit().setPlaceholderText("データセットを検索・選択してください")
+
+        # コンボボックス高さを2倍（フォントサイズは変更しない）
+        try:
+            base_h = self.extension_dataset_combo.sizeHint().height()
+            if base_h and base_h > 0:
+                self.extension_dataset_combo.setFixedHeight(base_h * 2)
+                if self.extension_dataset_combo.lineEdit():
+                    self.extension_dataset_combo.lineEdit().setMinimumHeight(base_h * 2 - 6)
+        except Exception:
+            pass
         dataset_combo_layout.addWidget(self.extension_dataset_combo)
-        
-        # ▼ボタン追加
-        show_all_btn = QPushButton("▼")
-        show_all_btn.setToolTip("全件リスト表示")
-        show_all_btn.setFixedWidth(28)
-        show_all_btn.clicked.connect(self.show_all_datasets)
-        dataset_combo_layout.addWidget(show_all_btn)
         
         dataset_select_layout.addWidget(dataset_combo_container)
 
@@ -5940,7 +5945,7 @@ ARIMNO: {{ARIMNO}}
                 grant_number = ''
                 name = ''
                 try:
-                    if hasattr(self, 'extension_dataset_combo') and self.extension_dataset_combo.currentIndex() > 0:
+                    if hasattr(self, 'extension_dataset_combo') and self.extension_dataset_combo.currentIndex() >= 0:
                         selected_dataset = self.extension_dataset_combo.itemData(self.extension_dataset_combo.currentIndex())
                         if isinstance(selected_dataset, dict):
                             dataset_id = (selected_dataset.get('id') or '').strip()
@@ -6128,7 +6133,7 @@ ARIMNO: {{ARIMNO}}
                 logger.warning("context_dataが初期化されていません。フォールバックデータを使用します。")
             
             # データセット選択による更新があった場合は最新情報を使用
-            if hasattr(self, 'extension_dataset_combo') and self.extension_dataset_combo.currentIndex() > 0:
+            if hasattr(self, 'extension_dataset_combo') and self.extension_dataset_combo.currentIndex() >= 0:
                 selected_dataset = self.extension_dataset_combo.itemData(self.extension_dataset_combo.currentIndex())
                 if selected_dataset:
                     attrs = selected_dataset.get('attributes', {})
@@ -6148,6 +6153,7 @@ ARIMNO: {{ARIMNO}}
                 
                 dataset_id = context_data.get('dataset_id')
                 if dataset_id:
+                    dataset_id = (dataset_id or '').strip()
                     # データセットIDを一時的に除外
                     context_data_without_id = {k: v for k, v in context_data.items() if k != 'dataset_id'}
                     
@@ -6156,8 +6162,17 @@ ARIMNO: {{ARIMNO}}
                         dataset_id=dataset_id,
                         **context_data_without_id
                     )
-                    
-                    context_data.update(full_context)
+
+                    # collector側の戻り値に空のdataset_idが含まれていると、選択したdataset_idが消える。
+                    # 非空のdataset_idは常に保持する。
+                    if isinstance(full_context, dict):
+                        try:
+                            if dataset_id and not (full_context.get('dataset_id') or '').strip():
+                                full_context.pop('dataset_id', None)
+                        except Exception:
+                            pass
+                        context_data.update(full_context)
+                        context_data['dataset_id'] = dataset_id
             except Exception as context_error:
                 logger.warning("拡張コンテキスト収集でエラー: %s", context_error)
                 # エラーが発生してもbase contextで続行
@@ -7322,8 +7337,17 @@ ARIMNO: {{ARIMNO}}
         if not hasattr(self, 'extension_dataset_combo'):
             logger.debug("extension_dataset_combo が存在しません")
             return
+
+        # This method is triggered from multiple places (direct call + QTimer).
+        # If it runs twice, multiple DatasetFilterFetcher instances can stay connected to
+        # the same combo and fight each other (e.g., count label oscillation at startup).
+        if getattr(self, "_dataset_dropdown_initialized", False):
+            return
+        if getattr(self, "_dataset_dropdown_initializing", False):
+            return
             
         try:
+            self._dataset_dropdown_initializing = True
             from config.common import get_dynamic_file_path
 
             dataset_json_path = get_dynamic_file_path('output/rde/data/dataset.json')
@@ -7335,6 +7359,8 @@ ARIMNO: {{ARIMNO}}
                 dataset_json_path=dataset_json_path,
                 info_json_path=info_json_path,
                 combo=self.extension_dataset_combo,
+                show_text_search_field=False,
+                clear_on_blank_click=True,
                 parent=self,
             )
 
@@ -7354,10 +7380,14 @@ ARIMNO: {{ARIMNO}}
 
             logger.debug("データセット選択初期化完了")
 
+            self._dataset_dropdown_initialized = True
+
         except Exception as e:
             logger.error("データセット選択初期化エラー: %s", e)
             import traceback
             traceback.print_exc()
+        finally:
+            self._dataset_dropdown_initializing = False
     
     def select_current_dataset(self):
         """現在のコンテキストに基づいてデータセットを選択"""

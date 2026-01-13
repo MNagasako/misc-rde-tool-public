@@ -1,5 +1,5 @@
 """
-ダークテーマ定義 - ARIM RDE Tool v2.4.18
+ダークテーマ定義 - ARIM RDE Tool
 
 Material Design Dark準拠のダークモード配色。
 高コントラスト・視認性重視の配色設計。
@@ -224,6 +224,7 @@ class DarkTheme:
         # リンク
         ThemeKey.TEXT_LINK: "#64b5f6",  # Blue 300
         ThemeKey.TEXT_LINK_HOVER: "#90caf9",  # Blue 200
+        ThemeKey.TEXT_LINK_HOVER_BACKGROUND: "#2a3a4a",
         
         # ========================================
         # Input - 入力フィールド

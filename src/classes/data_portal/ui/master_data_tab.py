@@ -340,7 +340,9 @@ class MasterDataTab(QWidget):
             # PortalClientが未設定の場合、自動接続を試行
             success = self._try_auto_connect()
             if not success:
-                QMessageBox.warning(self, "エラー", "ログイン設定タブで接続テストを実行してください")
+                self._handle_missing_portal_client(
+                    reason="マテリアルインデックスマスタ取得",
+                )
                 return
         
         # プログレスダイアログ表示
@@ -478,7 +480,9 @@ class MasterDataTab(QWidget):
             # PortalClientが未設定の場合、自動接続を試行
             success = self._try_auto_connect()
             if not success:
-                QMessageBox.warning(self, "エラー", "ログイン設定タブで接続テストを実行してください")
+                self._handle_missing_portal_client(
+                    reason="タグマスタ取得",
+                )
                 return
         
         # プログレスダイアログ表示
@@ -619,27 +623,88 @@ class MasterDataTab(QWidget):
         """
         try:
             logger.info("自動接続を試行中...")
-            
-            # 親ウィジェットからログイン設定タブを取得
-            parent_widget = self.parent()
-            if not hasattr(parent_widget, 'login_settings_tab'):
+
+            # QTabWidget配下に挿入されると親が内部QStackedWidgetへ再設定されるため、
+            # immediate parent ではなく祖先を辿って DataPortalWidget を探す。
+            data_portal_widget = self._find_data_portal_widget()
+            if data_portal_widget is None or not hasattr(data_portal_widget, "login_settings_tab"):
                 logger.warning("ログイン設定タブが見つかりません")
                 return False
-            
-            login_tab = parent_widget.login_settings_tab
+
+            login_tab = data_portal_widget.login_settings_tab
             
             # PortalClientが既に存在する場合は使用
             if hasattr(login_tab, 'portal_client') and login_tab.portal_client:
                 self.set_portal_client(login_tab.portal_client)
                 logger.info("既存のPortalClientを使用しました")
                 return True
-            
-            logger.warning("PortalClientが存在しません")
+
+            # 接続テスト未実施でも、保存済み認証情報/フォームから PortalClient を構築して使う
+            client = None
+            try:
+                if hasattr(login_tab, "create_portal_client_for_environment"):
+                    client = login_tab.create_portal_client_for_environment(self.current_environment)
+            except Exception:
+                client = None
+
+            if client is not None:
+                self.set_portal_client(client)
+                logger.info("保存済み認証情報からPortalClientを構築しました")
+                return True
+
+            logger.warning("PortalClientが存在せず、認証情報からの構築にも失敗しました")
             return False
             
         except Exception as e:
             logger.error(f"自動接続エラー: {e}")
             return False
+
+    def _find_data_portal_widget(self):
+        """祖先ウィジェットから DataPortalWidget 相当を探す。
+
+        QTabWidget の内部スタックに reparent されても、親チェーンを辿れば
+        DataPortalWidget（login_settings_tab/switch_to_login_tab を持つ）へ到達できる。
+        """
+
+        w = self
+        while w is not None:
+            if hasattr(w, "login_settings_tab") or hasattr(w, "switch_to_login_tab"):
+                return w
+            try:
+                w = w.parentWidget()
+            except Exception:
+                break
+        return None
+
+    def _handle_missing_portal_client(self, *, reason: str) -> None:
+        """PortalClientが用意できない場合の誘導（ポップアップは出さない）。"""
+
+        try:
+            self.env_status_label.setText("⚠️ 認証情報未設定")
+        except Exception:
+            pass
+
+        data_portal_widget = self._find_data_portal_widget()
+        login_tab = getattr(data_portal_widget, "login_settings_tab", None)
+
+        # ログイン設定タブのステータス欄へ理由を書き込む
+        try:
+            if login_tab is not None and hasattr(login_tab, "_log_status"):
+                login_tab._log_status(
+                    f"⚠️ {reason}: 認証情報が未設定/不完全のため処理を開始できません。",
+                    error=True,
+                )
+                login_tab._log_status("→ 「ログイン設定」タブで認証情報を保存してください。")
+        except Exception:
+            pass
+
+        # 可能ならログイン設定タブへ切り替える
+        try:
+            switch_fn = getattr(data_portal_widget, "switch_to_login_tab", None)
+            if callable(switch_fn):
+                switch_fn()
+        except Exception:
+            pass
     
     def _auto_load_saved_data(self):
         """保存済みデータを自動読み込み"""

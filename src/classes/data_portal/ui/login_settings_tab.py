@@ -4,12 +4,14 @@
 データポータルサイトへのログイン認証情報を管理するタブ
 """
 
+import os
+
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, 
     QLabel, QLineEdit, QPushButton, QComboBox,
     QFormLayout, QTextEdit, QMessageBox
 )
-from qt_compat.core import Qt, Signal
+from qt_compat.core import Qt, Signal, QTimer
 
 from classes.theme import get_color, ThemeKey
 from classes.theme.theme_manager import ThemeManager
@@ -42,10 +44,28 @@ class LoginSettingsTab(QWidget):
         
         self.auth_manager = get_auth_manager()
         self.portal_client = None
+
+        # Debounce/guard for auto-tests
+        self._auto_test_inflight = False
+        self._auto_test_done = False
         
         self._init_ui()
         self._load_available_environments()
         logger.info("ログイン設定タブ初期化完了")
+
+    def showEvent(self, event):
+        """表示時に自動接続テストを一度だけ走らせる。"""
+        try:
+            super().showEvent(event)
+        except Exception:
+            # super が無い/失敗しても自動テストは可能な限り実行
+            pass
+
+        # 初回表示時にだけ実行（ネットワーク処理のためイベントループ後に遅延）
+        try:
+            QTimer.singleShot(0, self.auto_test_connections)
+        except Exception:
+            pass
     
     def _init_ui(self):
         """UI初期化"""
@@ -376,58 +396,156 @@ class LoginSettingsTab(QWidget):
         if not environment:
             self._show_error("環境が選択されていません")
             return
-        
-        # 入力値取得
+
+        credentials, err = self._credentials_from_form()
+        if credentials is None:
+            self._show_error(err or "ログイン情報を入力してください")
+            return
+
+        self._run_connection_test(environment, credentials, interactive=True)
+
+    def _credentials_from_form(self) -> tuple[PortalCredentials | None, str | None]:
+        """フォーム入力からPortalCredentialsを構築する（不足時はエラーを返す）"""
+
         basic_user = self.basic_user_input.text().strip()
         basic_pass = self.basic_pass_input.text().strip()
         login_user = self.login_user_input.text().strip()
         login_pass = self.login_pass_input.text().strip()
-        
+
         if not login_user or not login_pass:
-            self._show_error("ログイン情報を入力してください")
-            return
-        
+            return None, "ログイン情報を入力してください"
+
         credentials = PortalCredentials(
             basic_username=basic_user or "",
             basic_password=basic_pass or "",
             login_username=login_user,
-            login_password=login_pass
+            login_password=login_pass,
         )
-        
-        self._log_status(f"🔌 接続テスト開始: {environment}")
-        self.test_login_btn.setEnabled(False)
-        self.test_login_btn.setText("テスト中...")
-        
+        return credentials, None
+
+    def create_portal_client_for_environment(self, environment: str):
+        """保存済み/フォーム入力から PortalClient を作成して返す。
+
+        - 接続テストは行わない（各機能側で必要なAPIを叩くときに失敗するなら失敗させる）
+        - 既存の「接続テスト必須」導線を解消するためのヘルパ
+        """
+
+        env = str(environment or "").strip()
+        if not env:
+            return None
+
+        credentials = None
+        try:
+            if self.auth_manager.has_credentials(env):
+                credentials = self.auth_manager.get_credentials(env)
+        except Exception:
+            credentials = None
+
+        if credentials is None:
+            # フォームが同一環境の場合だけフォーム入力を使う
+            try:
+                if self.env_combo.currentData() == env:
+                    credentials, _err = self._credentials_from_form()
+            except Exception:
+                credentials = None
+
+        if credentials is None:
+            return None
+
         try:
             from ..core.portal_client import PortalClient
-            # PortalClient作成
-            client = PortalClient(environment)
+
+            client = PortalClient(env)
             client.set_credentials(credentials)
-            
-            # 接続テスト
-            success, message = client.test_connection()
-            
-            if success:
-                # 成功時にクライアントを保持
-                self.portal_client = client
-                self._log_status(f"✅ 接続テスト成功: {message}")
-                self._show_info(f"接続テスト成功\n{message}")
-                self.login_test_completed.emit(True, message)
-            else:
-                self.portal_client = None
-                self._log_status(f"❌ 接続テスト失敗: {message}", error=True)
-                self._show_error(f"接続テスト失敗\n{message}")
-                self.login_test_completed.emit(False, message)
-                
-        except Exception as e:
-            self.portal_client = None
-            error_msg = f"接続テストエラー: {e}"
-            self._log_status(f"❌ {error_msg}", error=True)
-            self._show_error(error_msg)
-            self.login_test_completed.emit(False, str(e))
+            return client
+        except Exception:
+            return None
+
+    def auto_test_connections(self) -> None:
+        """ログイン設定タブ表示時の自動接続テスト（本番/テスト）。
+
+        - UIブロック/ポップアップは出さず、ステータス欄へ結果を出す。
+        - pytest実行中はネットワークを避けるためスキップする。
+        """
+
+        if self._auto_test_done:
+            return
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            self._log_status("(pytest) 自動接続テストはスキップしました")
+            self._auto_test_done = True
+            return
+        if self._auto_test_inflight:
+            return
+        self._auto_test_inflight = True
+
+        try:
+            # 設定されている環境のみを対象にする（本番→テストの順）
+            config = get_data_portal_config()
+            available = list(config.get_available_environments())
+            targets = [env for env in ["production", "test"] if env in available]
+
+            for env in targets:
+                if not self.auth_manager.has_credentials(env):
+                    self._log_status(f"⚠️ 自動接続テスト: {env} は認証情報未登録")
+                    continue
+                creds = self.auth_manager.get_credentials(env)
+                if not creds:
+                    self._log_status(f"⚠️ 自動接続テスト: {env} の認証情報読込に失敗")
+                    continue
+                self._run_connection_test(env, creds, interactive=False)
         finally:
-            self.test_login_btn.setEnabled(True)
-            self.test_login_btn.setText("🔌 接続テスト")
+            self._auto_test_inflight = False
+            self._auto_test_done = True
+
+    def _run_connection_test(self, environment: str, credentials: PortalCredentials, *, interactive: bool) -> None:
+        """接続テスト実行（interactive=Falseの場合はポップアップなし）。"""
+
+        env = str(environment or "").strip()
+        if not env:
+            return
+
+        self._log_status(f"🔌 接続テスト開始: {env}")
+        if interactive:
+            self.test_login_btn.setEnabled(False)
+            self.test_login_btn.setText("テスト中...")
+
+        try:
+            from ..core.portal_client import PortalClient
+
+            client = PortalClient(env)
+            client.set_credentials(credentials)
+            success, message = client.test_connection()
+
+            if success:
+                # 成功時は、現在選択中の環境なら portal_client を保持する（既存挙動維持）
+                try:
+                    if self.env_combo.currentData() == env:
+                        self.portal_client = client
+                except Exception:
+                    pass
+                self._log_status(f"✅ 接続テスト成功({env}): {message}")
+                if interactive:
+                    self._show_info(f"接続テスト成功\n{message}")
+                    self.login_test_completed.emit(True, message)
+            else:
+                if interactive:
+                    self.portal_client = None
+                self._log_status(f"❌ 接続テスト失敗({env}): {message}", error=True)
+                if interactive:
+                    self._show_error(f"接続テスト失敗\n{message}")
+                    self.login_test_completed.emit(False, message)
+        except Exception as e:
+            if interactive:
+                self.portal_client = None
+            error_msg = f"接続テストエラー({env}): {e}"
+            self._log_status(f"❌ {error_msg}", error=True)
+            if interactive:
+                self._show_error(error_msg)
+                self.login_test_completed.emit(False, str(e))
+        finally:
+            if interactive:
+                self.test_login_btn.setEnabled(True)
+                self.test_login_btn.setText("🔌 接続テスト")
     
     def _log_status(self, message: str, error: bool = False):
         """ステータスログ出力"""

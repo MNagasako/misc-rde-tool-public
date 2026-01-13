@@ -39,9 +39,10 @@ from PySide6.QtCore import (
     QSortFilterProxyModel,
     QTimer,
     QAbstractProxyModel,
+    QRect,
 )
 from PySide6.QtGui import QKeySequence, QBrush, QFont, QDesktopServices
-from PySide6.QtWidgets import QTableView, QStyledItemDelegate
+from PySide6.QtWidgets import QTableView, QStyledItemDelegate, QStyle
 
 from classes.subgroup.util.subgroup_list_table_records import (
     SubgroupListColumn,
@@ -49,7 +50,7 @@ from classes.subgroup.util.subgroup_list_table_records import (
 )
 from classes.dataset.ui.spinner_overlay import SpinnerOverlay
 from classes.theme.theme_keys import ThemeKey
-from classes.theme.theme_manager import ThemeManager, get_color
+from classes.theme.theme_manager import ThemeManager, get_color, get_qcolor
 from config.common import get_dynamic_file_path
 
 
@@ -832,7 +833,15 @@ class SubgroupListingWidget(QWidget):
 
         # Per-line link clicks inside multi-line cells
         try:
-            self._table.setItemDelegate(MultiLineLinkDelegate(self._table))
+            self._link_delegate = MultiLineLinkDelegate(self._table)
+            self._table.setItemDelegate(self._link_delegate)
+            # Hover tracking for link-level background highlight
+            try:
+                self._table.setMouseTracking(True)
+                self._table.viewport().setMouseTracking(True)
+                self._table.viewport().installEventFilter(self._link_delegate)
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -1824,6 +1833,125 @@ class SubgroupListingWidget(QWidget):
 
 class MultiLineLinkDelegate(QStyledItemDelegate):
     """Open the clicked line's URL for multi-line related columns."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._hover: tuple[int, int, int] | None = None  # (row, col, line_idx)
+
+    def _calc_hover_line(self, view: QTableView, index: QModelIndex, pos) -> int | None:
+        try:
+            rect = view.visualRect(index)
+            if not rect.isValid() or not rect.contains(pos):
+                return None
+            fm = view.fontMetrics()
+            line_h = max(1, int(fm.height()))
+            y_in = int(pos.y()) - int(rect.top())
+            return int(y_in // line_h)
+        except Exception:
+            return None
+
+    def _set_hover(self, view: QTableView, hover_tuple: tuple[int, int, int] | None) -> None:
+        old = self._hover
+        if old == hover_tuple:
+            return
+        self._hover = hover_tuple
+
+        def _update_cell(cell: tuple[int, int, int] | None) -> None:
+            if cell is None:
+                return
+            r, c, _l = cell
+            try:
+                view.viewport().update(view.visualRect(view.model().index(r, c)))
+            except Exception:
+                return
+
+        _update_cell(old)
+        _update_cell(hover_tuple)
+
+    def eventFilter(self, obj, event):  # noqa: N802
+        try:
+            from PySide6.QtCore import QEvent
+
+            view = self.parent()
+            if not isinstance(view, QTableView):
+                return False
+
+            if event.type() == QEvent.Leave:
+                self._set_hover(view, None)
+                return False
+
+            if event.type() != QEvent.MouseMove:
+                return False
+
+            try:
+                pos = event.position().toPoint()
+            except Exception:
+                pos = event.pos()
+
+            index = view.indexAt(pos)
+            if not index.isValid():
+                self._set_hover(view, None)
+                return False
+
+            urls = index.data(Qt.UserRole)
+            if not (isinstance(urls, list) and urls):
+                self._set_hover(view, None)
+                return False
+
+            line = self._calc_hover_line(view, index, pos)
+            if line is None:
+                self._set_hover(view, None)
+                return False
+            if line < 0 or line >= len(urls):
+                self._set_hover(view, None)
+                return False
+
+            u = urls[line]
+            if not (isinstance(u, str) and u.strip()):
+                self._set_hover(view, None)
+                return False
+
+            self._set_hover(view, (int(index.row()), int(index.column()), int(line)))
+            return False
+        except Exception:
+            return False
+
+    def paint(self, painter, option, index):  # noqa: N802
+        super().paint(painter, option, index)
+
+        try:
+            if self._hover is None:
+                return
+            if option.state & QStyle.State_Selected:
+                return
+            r, c, line_idx = self._hover
+            if index.row() != r or index.column() != c:
+                return
+
+            urls = index.data(Qt.UserRole)
+            if not (isinstance(urls, list) and urls):
+                return
+            if line_idx < 0 or line_idx >= len(urls):
+                return
+            if not (isinstance(urls[line_idx], str) and urls[line_idx].strip()):
+                return
+
+            fm = option.fontMetrics
+            line_h = max(1, int(fm.height()))
+            rect = option.rect
+            top = int(rect.top()) + int(line_h * int(line_idx))
+            line_rect = QRect(int(rect.left()), top, int(rect.width()), int(line_h))
+
+            col = get_qcolor(ThemeKey.TEXT_LINK_HOVER_BACKGROUND)
+            try:
+                col.setAlpha(96)
+            except Exception:
+                pass
+            painter.save()
+            painter.fillRect(line_rect, col)
+            painter.restore()
+        except Exception:
+            return
 
     def editorEvent(self, event, model, option, index):  # noqa: N802
         try:

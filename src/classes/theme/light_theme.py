@@ -1,5 +1,5 @@
 """
-ライトテーマ定義 - ARIM RDE Tool v2.4.18
+ライトテーマ定義 - ARIM RDE Tool
 
 Material Design準拠のライトモード配色。
 現行アプリの配色を忠実に再現。
@@ -224,6 +224,7 @@ class LightTheme:
         # リンク
         ThemeKey.TEXT_LINK: "#2196f3",
         ThemeKey.TEXT_LINK_HOVER: "#1976d2",
+        ThemeKey.TEXT_LINK_HOVER_BACKGROUND: "#bbdefb",
         
         # ========================================
         # Input - 入力フィールド

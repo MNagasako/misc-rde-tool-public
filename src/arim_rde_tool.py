@@ -1229,7 +1229,6 @@ def main():
                                 from classes.core.app_updater import (
                                     download,
                                     get_default_download_path,
-                                    run_installer_and_restart,
                                     verify_sha256,
                                 )
 
@@ -1256,34 +1255,53 @@ def main():
                                         pass
                                     return True
 
-                                def _run_installer_on_ui_thread() -> None:
+                                def _open_folder_prompt_and_exit_on_ui_thread() -> None:
                                     try:
                                         try:
-                                            dl.append_log("Installer: launching (silent) ...")
-                                            dl.append_log("Note: アプリは更新のため終了します（クラッシュではありません）")
-                                            dl.set_status("インストーラを起動しました。更新のためアプリを終了します...")
+                                            dl.append_log("Download verified. Opening folder...")
                                         except Exception:
                                             pass
 
-                                        def _do_launch() -> None:
-                                            try:
-                                                run_installer_and_restart(dst)
-                                            except Exception as e:
-                                                logger.error("Installer launch failed: %s", e, exc_info=True)
-                                                try:
-                                                    dl.close()
-                                                except Exception:
-                                                    pass
-                                                QMessageBox.warning(browser, "更新エラー", f"インストーラ起動に失敗しました: {e}")
+                                        try:
+                                            if os.name == "nt":
+                                                import subprocess
 
-                                        QTimer.singleShot(250, browser, _do_launch)
-                                    except Exception as e:
-                                        logger.error("Installer launch prepare failed: %s", e, exc_info=True)
+                                                subprocess.Popen(["explorer", "/select,", os.path.normpath(dst)], close_fds=True)
+                                        except Exception:
+                                            pass
+
+                                        if not bool(os.environ.get("PYTEST_CURRENT_TEST")):
+                                            QMessageBox.information(
+                                                browser,
+                                                "更新の準備ができました",
+                                                "インストーラのダウンロードとsha256検証が完了しました。\n"
+                                                "保存フォルダを開きましたので、セットアップを実行してください。\n\n"
+                                                "OKを押すとアプリを終了します。",
+                                            )
+
+                                        if not bool(os.environ.get("PYTEST_CURRENT_TEST")):
+                                            try:
+                                                from qt_compat.widgets import QApplication
+
+                                                app = QApplication.instance()
+                                                if app is not None:
+                                                    app.quit()
+                                            except Exception:
+                                                pass
+                                            os._exit(0)
+
                                         try:
                                             dl.close()
                                         except Exception:
                                             pass
-                                        QMessageBox.warning(browser, "更新エラー", f"インストーラ起動に失敗しました: {e}")
+                                    except Exception as e:
+                                        logger.error("Post-download flow failed: %s", e, exc_info=True)
+                                        try:
+                                            dl.close()
+                                        except Exception:
+                                            pass
+                                        if not bool(os.environ.get("PYTEST_CURRENT_TEST")):
+                                            QMessageBox.warning(browser, "更新エラー", f"更新後処理に失敗しました: {e}")
 
                                 def _worker_download() -> None:
                                     try:
@@ -1316,8 +1334,8 @@ def main():
                                             QTimer.singleShot(0, browser, _bad_sha)
                                             return
 
-                                        dl.finish_success("インストーラを起動します...")
-                                        QTimer.singleShot(0, browser, _run_installer_on_ui_thread)
+                                        dl.finish_success("ダウンロード完了")
+                                        QTimer.singleShot(0, browser, _open_folder_prompt_and_exit_on_ui_thread)
                                     except Exception as e:
                                         logger.error("Update download/verify failed: %s", e, exc_info=True)
 
