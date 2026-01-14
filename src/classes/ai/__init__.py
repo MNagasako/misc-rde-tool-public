@@ -1,5 +1,4 @@
-"""
-AI機能パッケージ - ARIM RDE Tool v1.20.0 (REFACTOR_PLAN_01準拠)
+"""AI機能パッケージ - ARIM RDE Tool (REFACTOR_PLAN_01準拠)
 
 指示書準拠の標準構造:
 - core/: メインロジック(AI処理、データ管理等)
@@ -10,6 +9,6 @@ AI機能パッケージ - ARIM RDE Tool v1.20.0 (REFACTOR_PLAN_01準拠)
 
 # 最小限の公開API - 段階的実装
 __all__ = []
-__version__ = "1.20.3"
+from config.common import REVISION as __version__
 
 # 必要に応じて遅延インポートで実装

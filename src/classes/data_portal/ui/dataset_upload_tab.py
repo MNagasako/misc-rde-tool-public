@@ -14,12 +14,13 @@ from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QComboBox,
     QFormLayout, QTextEdit, QMessageBox, QFileDialog,
-    QCheckBox, QProgressBar, QRadioButton, QButtonGroup, QScrollArea
+    QCheckBox, QProgressBar, QRadioButton, QButtonGroup, QScrollArea, QGridLayout
 )
 from qt_compat.core import Qt, Signal, QThread, QTimer
 
 from config.common import OUTPUT_DIR, get_dynamic_file_path
 from classes.theme import get_color, ThemeKey
+from classes.utils.themed_checkbox_delegate import ThemedCheckboxDelegate
 from classes.managers.log_manager import get_logger
 from ..core.auth_manager import get_auth_manager
 if TYPE_CHECKING:
@@ -47,6 +48,25 @@ class UploadWorker(QThread):
             self.finished.emit(success, message)
         except Exception as e:
             self.finished.emit(False, f"アップロードエラー: {e}")
+class ContentsZipUploadWorker(QThread):
+    """コンテンツZIPアップロード処理を行うワーカースレッド"""
+
+    progress = Signal(str)  # 進捗メッセージ
+    finished = Signal(bool, str)  # 成功フラグ, メッセージ
+
+    def __init__(self, uploader: Uploader, t_code: str, zip_path: str):
+        super().__init__()
+        self.uploader = uploader
+        self.t_code = t_code
+        self.zip_path = zip_path
+
+    def run(self):
+        try:
+            self.progress.emit(f"ZIPアップロード開始: {Path(self.zip_path).name}")
+            success, message = self.uploader.upload_contents_zip(self.t_code, self.zip_path)
+            self.finished.emit(success, message)
+        except Exception as e:
+            self.finished.emit(False, f"ZIPアップロードエラー: {e}")
 
 
 class DatasetUploadTab(QWidget):
@@ -70,7 +90,9 @@ class DatasetUploadTab(QWidget):
         self.portal_client = None
         self.uploader = None
         self.upload_worker = None
+        self.contents_zip_upload_worker = None
         self.selected_json_path = None
+        self.selected_zip_path = None
         self.current_dataset_id = None  # 現在選択中のデータセットID
         self.json_uploaded = False  # JSONアップロード完了フラグ
         self.current_t_code = None  # 現在のt_code（画像アップロード用）
@@ -328,6 +350,30 @@ class DatasetUploadTab(QWidget):
                     """
                 )
 
+            # コンテンツZIPアップロード
+            if hasattr(self, "upload_zip_btn") and self.upload_zip_btn is not None:
+                self.upload_zip_btn.setStyleSheet(
+                    f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                        padding: 10px 20px;
+                        border: none;
+                        border-radius: 4px;
+                        font-weight: bold;
+                        font-size: 14px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+                    }}
+                    QPushButton:disabled {{
+                        background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                        border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+                    }}
+                    """
+                )
+
             # 公開ページ表示
             if hasattr(self, "public_view_btn") and self.public_view_btn is not None:
                 self.public_view_btn.setStyleSheet(
@@ -561,6 +607,12 @@ class DatasetUploadTab(QWidget):
         self.file_list_widget.installEventFilter(self)  # キーボードイベント（スペース）
         self.file_list_widget.currentCellChanged.connect(self._on_file_table_current_cell_changed)
         self.file_list_widget.itemChanged.connect(self._on_file_table_item_changed)
+
+        # 「選択」列のチェックボックスをテーマ準拠で描画（チェック状態が分かりやすいようにする）
+        try:
+            self.file_list_widget.setItemDelegateForColumn(0, ThemedCheckboxDelegate(self.file_list_widget))
+        except Exception as e:
+            logger.debug(f"file_list_widget checkbox delegate apply failed: {e}")
 
         header = self.file_list_widget.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -851,17 +903,28 @@ class DatasetUploadTab(QWidget):
         group.setLayout(layout)
         return group
     
-    def _create_upload_button_section(self) -> QHBoxLayout:
-        """アップロードボタンセクション"""
-        layout = QHBoxLayout()
-        
-        # ファイル検証ボタン
+    def _create_upload_button_section(self) -> QVBoxLayout:
+        """アップロードボタンセクション
+
+        NOTE: ボタン数が増えたため、デフォルト幅でも横スクロールが出にくいよう2段構成にする。
+        """
+
+        layout = QVBoxLayout()
+
+        # 1段目: 検証
+        top_row = QHBoxLayout()
         self.validate_btn = QPushButton("✓ ファイル検証")
         self.validate_btn.clicked.connect(self._on_validate_file)
-        layout.addWidget(self.validate_btn)
-        
-        layout.addStretch()
-        
+        top_row.addWidget(self.validate_btn)
+        top_row.addStretch()
+        layout.addLayout(top_row)
+
+        # 2段目: アクションボタン群（グリッドで折り返し）
+        action_grid = QGridLayout()
+        action_grid.setHorizontalSpacing(10)
+        action_grid.setVerticalSpacing(8)
+        action_grid.setContentsMargins(0, 0, 0, 0)
+
         # 書誌情報JSONアップロードボタン
         self.upload_btn = QPushButton("📤 書誌情報JSONアップロード")
         self.upload_btn.setEnabled(False)
@@ -883,8 +946,30 @@ class DatasetUploadTab(QWidget):
                 background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
             }}
         """)
-        layout.addWidget(self.upload_btn)
-        
+
+        # コンテンツZIPアップロードボタン（データカタログ修正が有効な場合のみ）
+        self.upload_zip_btn = QPushButton("📦 コンテンツZIPアップロード")
+        self.upload_zip_btn.setEnabled(False)
+        self.upload_zip_btn.clicked.connect(self._on_upload_zip)
+        self.upload_zip_btn.setToolTip("ローカルZIPアップロード、またはRDEから自動取得してZIP化→アップロードを選択できます")
+        self.upload_zip_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                padding: 10px 20px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            }}
+        """)
+
         # データポータル修正ボタン
         self.edit_portal_btn = QPushButton("✏️ データカタログ修正")
         self.edit_portal_btn.setEnabled(False)
@@ -907,8 +992,7 @@ class DatasetUploadTab(QWidget):
                 background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
             }}
         """)
-        layout.addWidget(self.edit_portal_btn)
-        
+
         # ブラウザ表示ボタン（公開ページ）
         self.public_view_btn = QPushButton("🌐 ブラウザで表示")
         self.public_view_btn.setEnabled(False)
@@ -931,8 +1015,7 @@ class DatasetUploadTab(QWidget):
                 background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
             }}
         """)
-        layout.addWidget(self.public_view_btn)
-        
+
         # ステータス変更ボタン
         self.toggle_status_btn = QPushButton("🔄 ステータス変更")
         self.toggle_status_btn.setEnabled(False)
@@ -955,9 +1038,47 @@ class DatasetUploadTab(QWidget):
                 background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
             }}
         """)
-        layout.addWidget(self.toggle_status_btn)
-        
+
+        # 配置（3列×2行）
+        action_grid.addWidget(self.upload_btn, 0, 0)
+        action_grid.addWidget(self.upload_zip_btn, 0, 1)
+        action_grid.addWidget(self.edit_portal_btn, 0, 2)
+        action_grid.addWidget(self.public_view_btn, 1, 0)
+        action_grid.addWidget(self.toggle_status_btn, 1, 1)
+
+        layout.addLayout(action_grid)
+
+        # コンテンツZIPアップ済み表示（コンテンツリンク有無で判定）
+        self.contents_zip_status_label = QLabel("")
+        self.contents_zip_status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 11px;")
+        self.contents_zip_status_label.setText("📦 コンテンツZIP: 未確認")
+        layout.addWidget(self.contents_zip_status_label)
+
         return layout
+
+    def _update_contents_zip_status_label(self, has_contents_link: bool | None) -> None:
+        """コンテンツZIPアップ済み表示を更新。"""
+        try:
+            if not hasattr(self, "contents_zip_status_label") or self.contents_zip_status_label is None:
+                return
+
+            if has_contents_link is True:
+                self.contents_zip_status_label.setText("✅ コンテンツZIPアップ済み")
+                self.contents_zip_status_label.setStyleSheet(
+                    f"color: {get_color(ThemeKey.TEXT_SUCCESS)}; font-size: 11px;"
+                )
+                return
+            if has_contents_link is False:
+                self.contents_zip_status_label.setText("📦 コンテンツZIP未アップロード")
+                self.contents_zip_status_label.setStyleSheet(
+                    f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 11px;"
+                )
+                return
+
+            self.contents_zip_status_label.setText("📦 コンテンツZIP: 未確認")
+            self.contents_zip_status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 11px;")
+        except Exception:
+            pass
     
     def _load_environments(self):
         """環境一覧を読み込み"""
@@ -1020,7 +1141,13 @@ class DatasetUploadTab(QWidget):
         
         # 選択解除
         self.selected_json_path = None
+        self.selected_zip_path = None
         self.upload_btn.setEnabled(False)
+        try:
+            if hasattr(self, "upload_zip_btn") and self.upload_zip_btn is not None:
+                self.upload_zip_btn.setEnabled(False)
+        except Exception:
+            pass
         
         mode_name = "ファイル直接選択" if is_direct else "データセット検索"
         self._log_status(f"選択モード: {mode_name}")
@@ -1211,6 +1338,7 @@ class DatasetUploadTab(QWidget):
                     self.bulk_download_btn.setEnabled(False)
                     self.upload_images_btn.setEnabled(False)
                     self.upload_btn.setEnabled(False)
+                    self.upload_zip_btn.setEnabled(False)
                     self.edit_portal_btn.setEnabled(False)
                     self.toggle_status_btn.setEnabled(False)
                     
@@ -1336,6 +1464,7 @@ class DatasetUploadTab(QWidget):
                 self.bulk_download_btn.setEnabled(False)
                 self.upload_images_btn.setEnabled(False)
                 self.upload_btn.setEnabled(False)
+                self.upload_zip_btn.setEnabled(False)
                 self.edit_portal_btn.setEnabled(False)
                 self.toggle_status_btn.setEnabled(False)
                 
@@ -1788,6 +1917,15 @@ class DatasetUploadTab(QWidget):
                 "「ログイン設定」タブで認証情報を保存してください"
             )
             return
+
+        # テスト環境ではBasic認証が必要（要件）
+        if str(environment) == "test":
+            if not getattr(credentials, "basic_username", "") or not getattr(credentials, "basic_password", ""):
+                self._show_error(
+                    "テスト環境ではBasic認証情報が必要です。\n"
+                    "『ログイン設定』タブで Basicユーザー/パスワード を保存してください。"
+                )
+                return
         
         # 匿名化処理
         upload_json_path = self.selected_json_path
@@ -1953,6 +2091,9 @@ class DatasetUploadTab(QWidget):
             if self.current_dataset_id:
                 self.edit_portal_btn.setEnabled(True)
                 logger.info(f"データポータル修正ボタン有効化: dataset_id={self.current_dataset_id}")
+
+            # ZIPアップロードボタンの有効化判定を更新
+            self._update_zip_upload_button_state()
             
         else:
             self._log_status("=" * 50)
@@ -1961,6 +2102,495 @@ class DatasetUploadTab(QWidget):
             self._show_error(f"アップロード失敗\n{message}")
         
         self.upload_completed.emit(success, message)
+
+    def _on_upload_zip(self) -> None:
+        """コンテンツZIPアップロードの起点"""
+        if not self.current_dataset_id:
+            self._show_warning("データセットが選択されていません")
+            return
+
+        if not self.edit_portal_btn.isEnabled():
+            self._show_warning("データカタログ修正が有効なデータセットのみ実行できます")
+            return
+
+        environment = self.env_combo.currentData()
+        if not environment:
+            self._show_error("環境が選択されていません")
+            return
+
+        credentials = self.auth_manager.get_credentials(environment)
+        if not credentials:
+            self._show_error(
+                f"認証情報が見つかりません\n"
+                "「ログイン設定」タブで認証情報を保存してください"
+            )
+            return
+
+        # テスト環境ではBasic認証が必要（要件）
+        if str(environment) == "test":
+            if not getattr(credentials, "basic_username", "") or not getattr(credentials, "basic_password", ""):
+                self._show_error(
+                    "テスト環境ではBasic認証情報が必要です。\n"
+                    "『ログイン設定』タブで Basicユーザー/パスワード を保存してください。"
+                )
+                return
+
+        # t_code を取得（選択データセットから導出）
+        self._log_status("t_codeを取得中...")
+        t_code = self._get_t_code_for_dataset(self.current_dataset_id)
+        if not t_code:
+            self._show_error(f"データセットID {self.current_dataset_id} に対応するt_codeが見つかりません")
+            return
+
+        # ボタン統合: ローカルZIPか自動作成かを選択
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("コンテンツZIPアップロード")
+        msg_box.setIcon(QMessageBox.Question)
+        msg_box.setText(
+            "コンテンツZIPのアップロード方法を選択してください。\n\n"
+            "ローカルZIP: 手元のZIPファイルをアップロード\n"
+            "自動作成: RDEから取得してZIP化し、そのZIPをアップロード"
+        )
+        local_btn = msg_box.addButton("ローカルZIPを選択", QMessageBox.YesRole)
+        auto_btn = msg_box.addButton("RDEから取得してZIP自動作成", QMessageBox.NoRole)
+        cancel_btn = msg_box.addButton("キャンセル", QMessageBox.RejectRole)
+        msg_box.setDefaultButton(local_btn)
+        msg_box.exec()
+
+        clicked = msg_box.clickedButton()
+        if clicked == cancel_btn:
+            self._log_status("ZIPアップロードをキャンセルしました")
+            return
+        if clicked == auto_btn:
+            # 既存の自動作成フローへ
+            self._on_upload_zip_auto()
+            return
+
+        zip_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "コンテンツZIPを選択",
+            get_dynamic_file_path("output"),
+            "ZIP Files (*.zip);;All Files (*)",
+        )
+        if not zip_path:
+            return
+
+        # ZIP形式のみ許可
+        from ..core.uploader import Uploader
+        ok, msg = Uploader.is_zip_file(zip_path)
+        if not ok:
+            self._show_error(msg)
+            return
+
+        self.selected_zip_path = zip_path
+
+        reply = QMessageBox.question(
+            self,
+            "ZIPアップロード確認",
+            "以下の内容でコンテンツZIPをアップロードしますか?\n\n"
+            f"環境: {self.env_combo.currentText()}\n"
+            f"データセットID: {self.current_dataset_id}\n"
+            f"t_code: {t_code}\n"
+            f"ファイル: {Path(zip_path).name}\n\n"
+            "※既存ファイルがある場合、上書きされる可能性があります",
+            QMessageBox.Yes | QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            self._log_status("ZIPアップロードをキャンセルしました")
+            return
+
+        self._execute_zip_upload(environment, credentials, t_code, zip_path)
+
+    def _on_upload_zip_auto(self) -> None:
+        """コンテンツZIPを自動作成してアップロードする"""
+        if not self.current_dataset_id:
+            self._show_warning("データセットが選択されていません")
+            return
+
+        if not self.edit_portal_btn.isEnabled():
+            self._show_warning("データカタログ修正が有効なデータセットのみ実行できます")
+            return
+
+        environment = self.env_combo.currentData()
+        if not environment:
+            self._show_error("環境が選択されていません")
+            return
+
+        credentials = self.auth_manager.get_credentials(environment)
+        if not credentials:
+            self._show_error(
+                "認証情報が見つかりません\n"
+                "『ログイン設定』タブで認証情報を保存してください"
+            )
+            return
+
+        # テスト環境ではBasic認証が必要（要件）
+        if str(environment) == "test":
+            if not getattr(credentials, "basic_username", "") or not getattr(credentials, "basic_password", ""):
+                self._show_error(
+                    "テスト環境ではBasic認証情報が必要です。\n"
+                    "『ログイン設定』タブで Basicユーザー/パスワード を保存してください。"
+                )
+                return
+
+        # t_code を取得（選択データセットから導出）
+        self._log_status("t_codeを取得中...")
+        t_code = self._get_t_code_for_dataset(self.current_dataset_id)
+        if not t_code:
+            self._show_error(f"データセットID {self.current_dataset_id} に対応するt_codeが見つかりません")
+            return
+
+        try:
+            from core.bearer_token_manager import BearerTokenManager
+            bearer_token = BearerTokenManager.get_token_with_relogin_prompt(self)
+            if not bearer_token:
+                self._show_error("Bearer Tokenが取得できません。ログインを確認してください。")
+                return
+
+            dataset_info = self._get_dataset_info_from_json(self.current_dataset_id)
+            if not dataset_info:
+                self._show_error(f"データセット情報が取得できません: {self.current_dataset_id}")
+                return
+
+            dataset_name = dataset_info.get('name', 'データセット名未設定')
+            grant_number = dataset_info.get('grantNumber', '不明')
+
+            data_ids = self._get_data_ids_from_dataset(self.current_dataset_id)
+            if not data_ids:
+                self._show_error(f"データセットに含まれるデータが見つかりません: {self.current_dataset_id}")
+                return
+
+            # dataEntry から tile 情報を引く（ベストエフォート）
+            tile_map = {}
+            try:
+                entry_path = get_dynamic_file_path(f"output/rde/data/dataEntry/{self.current_dataset_id}.json")
+                if os.path.exists(entry_path):
+                    with open(entry_path, 'r', encoding='utf-8') as f:
+                        entry_json = json.load(f)
+                    for entry in entry_json.get('data', []) or []:
+                        did = entry.get('id')
+                        attrs = entry.get('attributes', {}) or {}
+                        if did:
+                            tile_map[str(did)] = (
+                                str(attrs.get('name', '')),
+                                str(attrs.get('dataNumber', '0')),
+                            )
+            except Exception:
+                tile_map = {}
+
+            from qt_compat.widgets import QProgressDialog, QApplication
+            from qt_compat.core import Qt
+
+            progress = QProgressDialog("ファイル一覧を取得中...", "キャンセル", 0, len(data_ids), self)
+            progress.setWindowTitle("ZIP自動作成")
+            progress.setWindowModality(Qt.WindowModal)
+            progress.setMinimumDuration(0)
+            progress.show()
+            QApplication.processEvents()
+
+            from classes.utils.api_request_helper import api_request
+            from classes.data_fetch2.core.logic.fetch2_filelist_logic import replace_invalid_path_chars
+            from classes.data_portal.core.contents_zip_auto import filter_file_entries_excluding_nonshared_raw
+            from .contents_zip_builder_dialog import ContentsZipBuilderDialog, ContentsZipCandidate
+            from qt_compat.widgets import QDialog
+
+            safe_dataset_name = replace_invalid_path_chars(dataset_name)
+            safe_grant_number = replace_invalid_path_chars(grant_number)
+            save_dir_base = get_dynamic_file_path("output/rde/data/dataFiles")
+
+            candidates = []
+
+            def _expected_local_path(tile_name: str, tile_number: str, file_name: str) -> str:
+                safe_tile_name = replace_invalid_path_chars(tile_name or "unknown_tile")
+                safe_tile_number = (str(tile_number or "0").strip() or "0")
+                tile_dir = f"{safe_tile_number}_{safe_tile_name}".strip('_')
+                return os.path.join(save_dir_base, str(safe_grant_number), str(safe_dataset_name), tile_dir, str(file_name))
+
+            for i, data_id in enumerate(data_ids):
+                if progress.wasCanceled():
+                    self._log_status("ファイル一覧取得をキャンセルしました")
+                    return
+                progress.setValue(i)
+                progress.setLabelText(f"ファイル一覧取得中... ({i+1}/{len(data_ids)})\nデータID: {str(data_id)[:8]}...")
+                QApplication.processEvents()
+
+                files_json_path = os.path.join(OUTPUT_DIR, f"rde/data/dataFiles/sub/{data_id}.json")
+                files_data = None
+                try:
+                    if os.path.exists(files_json_path):
+                        with open(files_json_path, 'r', encoding='utf-8') as f:
+                            files_data = json.load(f)
+                    else:
+                        headers = {
+                            "Accept": "application/vnd.api+json",
+                            "Authorization": f"Bearer {bearer_token}",
+                        }
+                        # まずは fileType フィルタなしで取得（全タイプ対象）
+                        files_url = (
+                            f"https://rde-api.nims.go.jp/data/{data_id}/files"
+                            "?page%5Blimit%5D=100"
+                            "&page%5Boffset%5D=0"
+                        )
+                        resp = api_request("GET", files_url, headers=headers)
+                        if resp and resp.status_code == 200:
+                            files_data = resp.json()
+                        else:
+                            # フォールバック（従来のフィルタ付きURL）
+                            files_url = (
+                                f"https://rde-api.nims.go.jp/data/{data_id}/files"
+                                "?page%5Blimit%5D=100"
+                                "&page%5Boffset%5D=0"
+                                "&filter%5BfileType%5D%5B%5D=META"
+                                "&filter%5BfileType%5D%5B%5D=MAIN_IMAGE"
+                                "&filter%5BfileType%5D%5B%5D=OTHER_IMAGE"
+                                "&filter%5BfileType%5D%5B%5D=NONSHARED_RAW"
+                                "&filter%5BfileType%5D%5B%5D=RAW"
+                                "&filter%5BfileType%5D%5B%5D=STRUCTURED"
+                                "&fileTypeOrder=RAW%2CNONSHARED_RAW%2CMETA%2CSTRUCTURED%2CMAIN_IMAGE%2COTHER_IMAGE"
+                            )
+                            resp2 = api_request("GET", files_url, headers=headers)
+                            if resp2 and resp2.status_code == 200:
+                                files_data = resp2.json()
+                            else:
+                                continue
+
+                        if files_data is not None:
+                            os.makedirs(os.path.dirname(files_json_path), exist_ok=True)
+                            with open(files_json_path, 'w', encoding='utf-8') as f:
+                                json.dump(files_data, f, ensure_ascii=False, indent=2)
+
+                    file_entries = (files_data or {}).get('data', [])
+                    filtered = filter_file_entries_excluding_nonshared_raw(file_entries)
+
+                    tile_name, tile_number = tile_map.get(str(data_id), ("", "0"))
+
+                    for entry in filtered:
+                        attrs = entry.get('attributes', {}) or {}
+                        file_id = str(entry.get('id') or "")
+                        file_name = str(attrs.get('fileName') or "")
+                        file_type = str(attrs.get('fileType') or "UNKNOWN")
+                        file_size = int(attrs.get('fileSize') or 0)
+                        if not (file_id and file_name):
+                            continue
+
+                        local_path = _expected_local_path(tile_name, tile_number, file_name)
+                        candidates.append(
+                            ContentsZipCandidate(
+                                checked=True,
+                                file_id=file_id,
+                                file_name=file_name,
+                                file_type=file_type,
+                                file_size=file_size,
+                                data_entry_id=str(data_id),
+                                tile_name=tile_name,
+                                tile_number=str(tile_number or "0"),
+                                local_path=local_path,
+                                exists_locally=os.path.exists(local_path),
+                            )
+                        )
+                except Exception:
+                    continue
+
+            progress.setValue(len(data_ids))
+            progress.close()
+
+            if not candidates:
+                self._show_warning("対象ファイルが見つかりませんでした")
+                return
+
+            dialog = ContentsZipBuilderDialog(self, candidates)
+            if dialog.exec() != QDialog.Accepted:
+                self._log_status("ZIP自動作成をキャンセルしました")
+                return
+
+            selected = dialog.get_selected()
+            if not selected:
+                self._show_warning("ZIPに含めるファイルが選択されていません")
+                return
+
+            from classes.data_portal.core.contents_zip_auto import SelectedFile, compute_filetype_summary, format_bytes
+            selected_files = [
+                SelectedFile(
+                    file_id=c.file_id,
+                    file_name=c.file_name,
+                    file_type=c.file_type,
+                    file_size=c.file_size,
+                    local_path=c.local_path,
+                )
+                for c in selected
+            ]
+            summary = compute_filetype_summary(selected_files)
+            total_size = sum(v[1] for v in summary.values())
+            existing_count = sum(1 for c in selected if c.exists_locally)
+            summary_lines = [
+                f"- {ft}: {cnt}件 / {format_bytes(sz)}" for ft, (cnt, sz) in sorted(summary.items())
+            ]
+            summary_text = "\n".join(summary_lines)
+
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("ZIP自動作成 確認")
+            msg_box.setIcon(QMessageBox.Question)
+            msg_box.setText(
+                "選択ファイルをダウンロードしてZIP化し、アップロードします。\n\n"
+                f"データセットID: {self.current_dataset_id}\n"
+                f"t_code: {t_code}\n"
+                f"選択: {len(selected)}件 / 合計: {format_bytes(total_size)}\n"
+                f"既存ファイル: {existing_count}件\n\n"
+                "種類別:\n"
+                f"{summary_text}\n\n"
+                "既存ファイルがある場合の扱いを選択してください。"
+            )
+
+            use_existing_btn = msg_box.addButton("既存は再取得しない", QMessageBox.YesRole)
+            overwrite_btn = msg_box.addButton("上書きダウンロード", QMessageBox.NoRole)
+            cancel_btn = msg_box.addButton("キャンセル", QMessageBox.RejectRole)
+            msg_box.setDefaultButton(use_existing_btn)
+            msg_box.exec()
+
+            clicked = msg_box.clickedButton()
+            if clicked == cancel_btn:
+                self._log_status("ZIP自動作成をキャンセルしました")
+                return
+            overwrite = clicked == overwrite_btn
+
+            # ダウンロード
+            from classes.data_fetch2.core.logic.fetch2_filelist_logic import download_file_for_data_id
+
+            dl_progress = QProgressDialog("ファイルをダウンロード中...", "キャンセル", 0, len(selected), self)
+            dl_progress.setWindowTitle("ZIP自動作成")
+            dl_progress.setWindowModality(Qt.WindowModal)
+            dl_progress.setMinimumDuration(0)
+            dl_progress.show()
+            QApplication.processEvents()
+
+            downloaded = []
+            for idx, c in enumerate(selected):
+                if dl_progress.wasCanceled():
+                    self._log_status("ダウンロードをキャンセルしました")
+                    return
+                dl_progress.setValue(idx)
+                dl_progress.setLabelText(f"{idx+1}/{len(selected)}: {c.file_name}")
+                QApplication.processEvents()
+
+                expected_path = c.local_path
+                if (not overwrite) and expected_path and os.path.exists(expected_path):
+                    downloaded.append(
+                        SelectedFile(
+                            file_id=c.file_id,
+                            file_name=c.file_name,
+                            file_type=c.file_type,
+                            file_size=c.file_size,
+                            local_path=expected_path,
+                        )
+                    )
+                    continue
+
+                save_path = download_file_for_data_id(
+                    data_id=c.file_id,
+                    bearer_token=bearer_token,
+                    save_dir_base=save_dir_base,
+                    file_name=c.file_name,
+                    grantNumber=safe_grant_number,
+                    dataset_name=safe_dataset_name,
+                    tile_name=c.tile_name,
+                    tile_number=c.tile_number,
+                    parent=self,
+                )
+                if save_path:
+                    downloaded.append(
+                        SelectedFile(
+                            file_id=c.file_id,
+                            file_name=c.file_name,
+                            file_type=c.file_type,
+                            file_size=c.file_size,
+                            local_path=str(save_path),
+                        )
+                    )
+
+            dl_progress.setValue(len(selected))
+            dl_progress.close()
+
+            if not downloaded:
+                self._show_warning("ダウンロードできたファイルがありません")
+                return
+
+            # ZIP作成（dataFiles/{grant}/{dataset}/.ZIP 配下）
+            from datetime import datetime
+            from classes.data_portal.core.contents_zip_auto import build_zip
+
+            zip_dir = get_dynamic_file_path(
+                f"output/rde/data/dataFiles/{safe_grant_number}/{safe_dataset_name}/.ZIP"
+            )
+            os.makedirs(zip_dir, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            zip_path = os.path.join(zip_dir, f"{self.current_dataset_id}_{timestamp}.zip")
+            base_dir = get_dynamic_file_path(
+                f"output/rde/data/dataFiles/{safe_grant_number}/{safe_dataset_name}"
+            )
+            zip_path = build_zip(zip_path=zip_path, base_dir=base_dir, files=downloaded)
+            self._log_status(f"✅ ZIP作成完了: {Path(zip_path).name}")
+
+            # そのままアップロード
+            self._execute_zip_upload(environment, credentials, t_code, zip_path)
+
+        except Exception as e:
+            logger.error(f"ZIP自動作成アップロードエラー: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            self._show_error(f"ZIP自動作成アップロードでエラーが発生しました\n{e}")
+
+    def _execute_zip_upload(self, environment: str, credentials, t_code: str, zip_path: str) -> None:
+        try:
+            self._log_status("=" * 50)
+            self._log_status("📦 コンテンツZIPアップロード開始")
+            self._log_status("=" * 50)
+
+            # UIを無効化
+            self.upload_zip_btn.setEnabled(False)
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, 0)
+
+            # クライアント/アップローダー作成
+            from ..core.portal_client import PortalClient
+            from ..core.uploader import Uploader
+
+            self.portal_client = PortalClient(environment)
+            self.portal_client.set_credentials(credentials)
+            self.uploader = Uploader(self.portal_client)
+
+            self.contents_zip_upload_worker = ContentsZipUploadWorker(self.uploader, t_code, zip_path)
+            self.contents_zip_upload_worker.progress.connect(self._log_status)
+            self.contents_zip_upload_worker.finished.connect(self._on_upload_zip_finished)
+            self.contents_zip_upload_worker.start()
+
+        except Exception as e:
+            logger.error(f"ZIPアップロード実行エラー: {e}")
+            self._log_status(f"❌ ZIPアップロード実行エラー: {e}", error=True)
+            self._show_error(f"ZIPアップロード実行エラー: {e}")
+            self.progress_bar.setVisible(False)
+            self._update_zip_upload_button_state()
+
+    def _on_upload_zip_finished(self, success: bool, message: str) -> None:
+        self.progress_bar.setVisible(False)
+        self._update_zip_upload_button_state()
+
+        if success:
+            self._log_status("=" * 50)
+            self._log_status(f"✅ ZIPアップロード成功: {message}")
+            self._log_status("=" * 50)
+            self._show_info(f"ZIPアップロード成功\n{message}")
+
+            # コンテンツリンク（アップ済み）表示を更新
+            try:
+                if self.current_dataset_id:
+                    self._check_portal_entry_exists(self.current_dataset_id)
+            except Exception:
+                pass
+        else:
+            self._log_status("=" * 50)
+            self._log_status(f"❌ ZIPアップロード失敗: {message}", error=True)
+            self._log_status("=" * 50)
+            self._show_error(f"ZIPアップロード失敗\n{message}")
     
     def _log_status(self, message: str, error: bool = False):
         """ステータスログ"""
@@ -2486,6 +3116,39 @@ class DatasetUploadTab(QWidget):
             self.upload_images_btn.setToolTip("チェックした画像をデータポータルにアップロードします")
         else:
             self.upload_images_btn.setToolTip("画像ファイルを取得してください")
+
+    def _update_zip_upload_button_state(self) -> None:
+        """コンテンツZIPアップロードボタンの有効/無効を更新。
+
+        要件:
+        - データカタログ修正ボタンが有効な場合のみZIPアップロードを有効
+        - 環境別の認証情報（ログイン設定）が必須
+        """
+
+        try:
+            if not hasattr(self, "upload_zip_btn") or self.upload_zip_btn is None:
+                return
+
+            environment = self.current_environment or self.env_combo.currentData()
+            has_creds = bool(environment and self.auth_manager.has_credentials(environment))
+            can_upload = bool(self.current_dataset_id) and bool(self.edit_portal_btn.isEnabled()) and has_creds
+
+            worker = getattr(self, "contents_zip_upload_worker", None)
+            if worker is not None and hasattr(worker, "isRunning") and worker.isRunning():
+                can_upload = False
+
+            self.upload_zip_btn.setEnabled(can_upload)
+
+            if not self.current_dataset_id:
+                self.upload_zip_btn.setToolTip("データセットを選択してください")
+            elif not self.edit_portal_btn.isEnabled():
+                self.upload_zip_btn.setToolTip("データカタログ修正が有効なデータセットのみZIPアップロードできます")
+            elif not has_creds:
+                self.upload_zip_btn.setToolTip("認証情報が未設定です。『ログイン設定』タブで保存してください")
+            else:
+                self.upload_zip_btn.setToolTip("ローカルZIPアップロード、またはRDEから自動取得してZIP化→アップロードを選択できます")
+        except Exception as e:
+            logger.debug(f"ZIPアップロードボタン状態更新エラー: {e}")
     
     def eventFilter(self, obj, event):
         """
@@ -3296,6 +3959,7 @@ class DatasetUploadTab(QWidget):
         try:
             if not self.portal_client:
                 self.edit_portal_btn.setEnabled(False)
+                self._update_zip_upload_button_state()
                 return
             
             logger.info(f"[CHECK_ENTRY] ===== エントリ確認開始 =====")
@@ -3321,6 +3985,7 @@ class DatasetUploadTab(QWidget):
             if not success or not hasattr(response, 'text'):
                 logger.warning(f"[CHECK_ENTRY] 検索失敗 - success={success}, has_text={hasattr(response, 'text') if response else False}")
                 self.edit_portal_btn.setEnabled(False)
+                self._update_zip_upload_button_state()
                 return
             
             # デバッグ保存
@@ -3335,6 +4000,7 @@ class DatasetUploadTab(QWidget):
                 if not login_success:
                     logger.error(f"[CHECK_ENTRY] 再ログイン失敗: {login_message}")
                     self.edit_portal_btn.setEnabled(False)
+                    self._update_zip_upload_button_state()
                     return
                 
                 logger.info(f"[CHECK_ENTRY] 再ログイン成功 - 検索を再試行")
@@ -3345,6 +4011,7 @@ class DatasetUploadTab(QWidget):
                 if not success or not hasattr(response, 'text'):
                     logger.error("[CHECK_ENTRY] 再検索失敗")
                     self.edit_portal_btn.setEnabled(False)
+                    self._update_zip_upload_button_state()
                     return
                 
                 self._save_debug_response(f"check_entry_{dataset_id}_retry", response.text)
@@ -3355,9 +4022,22 @@ class DatasetUploadTab(QWidget):
             logger.info(f"[CHECK_ENTRY] データセットID存在チェック: {dataset_id_found}")
 
             from classes.data_portal.core.portal_entry_status import parse_portal_entry_search_html
+            from classes.data_portal.core.portal_entry_status import parse_portal_contents_link_search_html
 
             env = self.current_environment or self.env_combo.currentData() or 'production'
             parsed = parse_portal_entry_search_html(response.text, dataset_id, environment=str(env))
+
+            # コンテンツリンク有無（コンテンツZIPアップ済み判定）
+            try:
+                has_contents = parse_portal_contents_link_search_html(response.text, dataset_id)
+            except Exception:
+                has_contents = None
+
+            # ラベル更新（エントリ未登録や未ログイン時は未確認に寄せる）
+            if not parsed.dataset_id_found:
+                self._update_contents_zip_status_label(None)
+            else:
+                self._update_contents_zip_status_label(has_contents)
 
             # Persist best-effort portal label for dataset listing.
             # "公開（管理）" is determined by the same condition as enabling "非公開にする".
@@ -3415,12 +4095,14 @@ class DatasetUploadTab(QWidget):
             
             # 画像アップロードボタンの状態も更新
             self._update_image_upload_button_state()
+            self._update_zip_upload_button_state()
                 
         except Exception as e:
             logger.error(f"[CHECK_ENTRY] ❌ エラー発生: {e}", exc_info=True)
             self.edit_portal_btn.setEnabled(False)
             self.toggle_status_btn.setEnabled(False)
             self._update_image_upload_button_state()
+            self._update_zip_upload_button_state()
 
     def _on_open_public_view(self):
         """公開ページを既定ブラウザで開く"""

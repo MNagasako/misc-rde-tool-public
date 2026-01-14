@@ -1,9 +1,6 @@
-"""
-報告書機能モジュール
+"""報告書機能モジュール
 
 RDEから報告書情報を取得し、Excel/JSON形式で保存する機能を提供します。
-
-Version: 2.1.0
 """
 
-__version__ = "2.1.0"
+from config.common import REVISION as __version__

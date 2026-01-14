@@ -10,7 +10,7 @@ ARIM設備情報サイトからデータを取得し、Excel/JSON形式で出力
 - conf: 設定・定義
 """
 
-__version__ = "1.0.0"
+from config.common import REVISION as __version__
 __author__ = "ARIM RDE Tool"
 
 # UIコンポーネント（Qt環境が利用可能な場合のみインポート）

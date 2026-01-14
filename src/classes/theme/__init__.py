@@ -18,6 +18,8 @@ from .light_theme import LightTheme
 from .dark_theme import DarkTheme
 from .window_frame import apply_window_frame_theme
 
+from config.common import REVISION as __version__
+
 __all__ = [
     'ThemeKey',
     'ThemeManager',
@@ -30,4 +32,3 @@ __all__ = [
     'apply_window_frame_theme',
 ]
 
-__version__ = '1.0.0'

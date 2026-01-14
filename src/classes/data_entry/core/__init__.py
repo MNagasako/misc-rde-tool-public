@@ -1,5 +1,4 @@
-"""
-Data Entry Package - ARIM RDE Tool v1.20.0
+"""Data Entry Package - ARIM RDE Tool
 
 データ登録・ファイルアップロード機能パッケージ
 ARIMデータポータルへのデータ登録、ファイルアップロード、
@@ -12,7 +11,7 @@ ARIMデータポータルへのデータ登録、ファイルアップロード�
 - データ登録UI提供
 """
 
-__version__ = "2.0.8"
+from config.common import REVISION as __version__
 __all__ = [
     # Core data registration logic
     "run_data_register_logic",

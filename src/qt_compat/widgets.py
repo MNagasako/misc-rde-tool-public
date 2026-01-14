@@ -75,6 +75,7 @@ QListWidgetItem = QtWidgets.QListWidgetItem
 QTreeWidget = QtWidgets.QTreeWidget
 QTreeWidgetItem = QtWidgets.QTreeWidgetItem
 QAbstractItemView = QtWidgets.QAbstractItemView
+QStyledItemDelegate = QtWidgets.QStyledItemDelegate
 
 # その他
 QSizePolicy = QtWidgets.QSizePolicy
@@ -131,6 +132,7 @@ __all__ = [
     'QTreeWidget',
     'QTreeWidgetItem',
     'QAbstractItemView',
+    'QStyledItemDelegate',
     'QSizePolicy',
     'QCompleter',
     'QShortcut',

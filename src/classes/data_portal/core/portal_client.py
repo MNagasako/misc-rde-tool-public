@@ -76,9 +76,21 @@ class PortalClient:
         Returns:
             Tuple[str, str]: (username, password) または None
         """
-        if self.credentials:
-            return (self.credentials.basic_username, self.credentials.basic_password)
-        return None
+        # NOTE:
+        # - 本番環境(production)では現在 Basic認証は不要
+        # - テスト環境(test)では Basic認証が必要
+        # 仕様変更で完全に不要/必要が反転した場合は、この分岐を見直す。
+        if not self.credentials:
+            return None
+
+        if str(self.environment) != "test":
+            return None
+
+        user = (self.credentials.basic_username or "").strip()
+        pwd = (self.credentials.basic_password or "").strip()
+        if not user or not pwd:
+            return None
+        return (user, pwd)
     
     def _build_url(self, path: str = "") -> str:
         """

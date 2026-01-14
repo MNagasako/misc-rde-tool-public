@@ -1,5 +1,4 @@
-"""
-データ取得関連機能統合パッケージ v1.20.0
+"""データ取得関連機能統合パッケージ
 
 このパッケージは、ARIM RDE Toolのデータ取得関連機能を統合管理します。
 
@@ -16,7 +15,7 @@
 
 """
 
-__version__ = "2.0.8"
+from config.common import REVISION as __version__
 __author__ = "ARIM RDE Tool Team"
 
 # パッケージ内の主要クラス・関数のエクスポート

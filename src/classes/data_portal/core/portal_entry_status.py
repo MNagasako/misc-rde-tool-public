@@ -182,6 +182,68 @@ def parse_portal_entry_search_html(
     )
 
 
+def parse_portal_contents_link_search_html(html: str, dataset_id: str) -> bool:
+    """Parse portal search HTML and detect whether contents link exists.
+
+    The data portal (main.php mode=theme) listing includes a "コンテンツ" link when
+    content files are present. Operationally, we treat this as "コンテンツZIPアップ済み".
+
+    Args:
+        html: HTML text returned by portal main.php search.
+        dataset_id: dataset id to locate.
+
+    Returns:
+        True if a contents link (arim_data_file.php?mode=free) is found for the dataset.
+    """
+
+    dsid = str(dataset_id or "").strip()
+    if not dsid:
+        return False
+    text = html or ""
+    if dsid not in text:
+        return False
+
+    # Prefer structured parsing.
+    try:
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(text, "html.parser")
+        for td in soup.find_all("td", {"class": "l"}):
+            if td is None:
+                continue
+            if td.get_text(strip=True) != dsid:
+                continue
+
+            tr = td.find_parent("tr")
+            rows = [tr]
+            try:
+                if tr is not None:
+                    rows.append(tr.find_next_sibling("tr"))
+            except Exception:
+                pass
+
+            for row in rows:
+                if row is None:
+                    continue
+                for a in row.find_all("a", href=True):
+                    href = (a.get("href") or "").strip()
+                    if "arim_data_file.php" in href and "mode=free" in href:
+                        return True
+            return False
+    except Exception:
+        pass
+
+    # Fallback: local window search around dataset id.
+    try:
+        idx = text.find(dsid)
+        if idx < 0:
+            return False
+        window = text[idx : idx + 4000]
+        return ("arim_data_file.php" in window) and ("mode=free" in window)
+    except Exception:
+        return False
+
+
 class PortalEntryStatusCache:
     def __init__(self) -> None:
         self._lock = threading.Lock()

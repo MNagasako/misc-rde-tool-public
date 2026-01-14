@@ -16,6 +16,7 @@ QPixmap = QtGui.QPixmap
 QImage = QtGui.QImage
 QColor = QtGui.QColor
 QPainter = QtGui.QPainter
+QPainterPath = QtGui.QPainterPath
 QPen = QtGui.QPen
 QBrush = QtGui.QBrush
 QKeySequence = QtGui.QKeySequence
@@ -38,6 +39,7 @@ __all__ = [
     'QImage',
     'QColor',
     'QPainter',
+    'QPainterPath',
     'QPen',
     'QBrush',
     'QKeySequence',

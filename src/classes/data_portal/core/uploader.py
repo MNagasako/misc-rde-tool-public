@@ -7,7 +7,7 @@ JSONファイルをデータポータルサイトにアップロードする機�
 import json
 import logging
 from pathlib import Path
-from typing import Tuple, Optional, Dict, Any
+from typing import Tuple, Optional, Dict, Any, Iterable
 
 from classes.managers.log_manager import get_logger
 from .portal_client import PortalClient
@@ -139,6 +139,173 @@ class Uploader:
             
         except Exception as e:
             logger.error(f"アップロード処理でエラー: {e}")
+            return False, str(e)
+
+    @staticmethod
+    def is_zip_file(path: str) -> Tuple[bool, str]:
+        """ZIPファイルかどうかを簡易チェックする。
+
+        - 拡張子が .zip
+        - 先頭2バイトが PK
+
+        Returns:
+            (ok, message)
+        """
+
+        try:
+            p = Path(path)
+            if not p.exists():
+                return False, "ファイルが存在しません"
+            if p.suffix.lower() != ".zip":
+                return False, "ZIP形式のみアップロード可能です（拡張子が .zip ではありません）"
+            with open(p, "rb") as fh:
+                sig = fh.read(2)
+            if sig != b"PK":
+                return False, "ZIP形式のみアップロード可能です（ZIPシグネチャが一致しません）"
+            return True, "OK"
+        except Exception as e:
+            return False, f"ZIPファイル検証に失敗しました: {e}"
+
+    @staticmethod
+    def _contains_any(text: str, phrases: Iterable[str], *, strict: bool) -> bool:
+        """テキストがフレーズにマッチするか。
+
+        strict=False: 部分一致
+        strict=True : 完全一致
+        """
+
+        t = (text or "")
+        if strict:
+            return any(t == (p or "") for p in phrases)
+        return any((p or "") in t for p in phrases)
+
+    @classmethod
+    def parse_contents_upload_result(
+        cls,
+        html: str,
+        *,
+        strict_match: bool = False,
+    ) -> Tuple[bool, str]:
+        """contents_upload のレスポンスHTMLから成功/失敗を推定する。
+
+        要件:
+        - 基本は「部分一致」で判定
+        - ただし短すぎる条件は避ける
+        - 将来「完全一致」に切替できるように strict_match を用意
+
+        NOTE:
+        strict_match=True に切替えると完全一致になります。
+        UI側の要件により、現状は部分一致運用をデフォルトにしています。
+        """
+
+        text = html or ""
+
+        # 成功（上書き含む）
+        success_phrases = [
+            "アップロード（上書き）しました。",
+            "アップロード（上書き）しました",
+            "アップロードしました。",
+            "アップロードしました",
+        ]
+
+        # 失敗（代表的なもの）
+        error_phrases = [
+            "拡張子はzipです",
+            "アップロードできるファイルの拡張子はzip",
+            "ファイルが選択されていません",
+            "エラー",
+            "失敗",
+        ]
+
+        if cls._contains_any(text, success_phrases, strict=strict_match):
+            return True, "アップロード成功"
+
+        if cls._contains_any(text, error_phrases, strict=False):
+            # 失敗理由はUIログ用に先頭を返す（過度な短文化は避ける）
+            preview = text
+            preview = preview.replace("\r\n", "\n")
+            preview = preview[:500]
+            return False, f"アップロード失敗の可能性: {preview}"
+
+        # 判定不能は成功扱いにせず、UIに確認させる
+        preview = text.replace("\r\n", "\n")[:500]
+        return False, f"アップロード結果を判定できません: {preview}"
+
+    def upload_contents_zip(self, t_code: str, zip_file_path: str) -> Tuple[bool, str]:
+        """データポータルへコンテンツZIPをアップロード（mode2=contents_upload）。
+
+        既存ファイルがある場合でも上書きアップロード可能（ポータル側仕様）。
+        """
+
+        ok, msg = self.is_zip_file(zip_file_path)
+        if not ok:
+            return False, msg
+
+        t_code_text = str(t_code or "").strip()
+        if not t_code_text:
+            return False, "t_code が未設定です"
+
+        zip_path = Path(zip_file_path)
+
+        try:
+            logger.info(f"ZIPアップロード開始: t_code={t_code_text}, file={zip_path.name}")
+
+            # Step 0: ログイン（セッション確立）
+            login_success, login_message = self.client.login()
+            if not login_success:
+                return False, f"ログイン失敗: {login_message}"
+
+            # Step 1: 初期ページ取得
+            ok, resp = self.client.get("main.php", params={"mode": "theme"})
+            if not ok or not hasattr(resp, "text"):
+                return False, "初期ページ取得失敗"
+            self._save_debug_response("contents_step1_theme", resp.text)
+
+            # Step 2: アップロード画面へ遷移（application/x-www-form-urlencoded）
+            data_open = {
+                "mode": "theme",
+                "mode2": "contents_upload",
+                "t_code": t_code_text,
+                "keyword": "",
+                "search_inst": "",
+                "search_license_level": "",
+                "search_status": "",
+                "page": "1",
+            }
+            ok, resp = self.client.post("main.php", data=data_open)
+            if not ok or not hasattr(resp, "text"):
+                return False, "アップロード画面遷移失敗"
+            self._save_debug_response("contents_step2_open", resp.text)
+
+            # Step 3: multipart/form-data でZIP送信
+            with open(zip_path, "rb") as fh:
+                files = {
+                    "contents_file": (zip_path.name, fh, "application/x-zip-compressed"),
+                }
+                data_upload = {
+                    "mode": "theme",
+                    "mode2": "contents_upload",
+                    "mode3": "rec",
+                    "t_code": t_code_text,
+                    "keyword": "",
+                    "search_inst": "",
+                    "search_license_level": "",
+                    "search_status": "",
+                    "page": "1",
+                }
+
+                ok, resp = self.client.post("main.php", data=data_upload, files=files)
+                if not ok or not hasattr(resp, "text"):
+                    return False, "ZIPアップロード失敗"
+                self._save_debug_response("contents_step3_upload", resp.text)
+
+                # 成功判定（部分一致）
+                # NOTE: 将来、完全一致に切替する場合は strict_match=True にする
+                success, message = self.parse_contents_upload_result(resp.text, strict_match=False)
+                return success, message
+
+        except Exception as e:
+            logger.error(f"ZIPアップロード処理でエラー: {e}")
             return False, str(e)
     
     def _upload_file_confirmation(self, json_path: Path) -> Tuple[bool, Any]:
