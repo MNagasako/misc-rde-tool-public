@@ -3,7 +3,6 @@
 
 Excel設備情報とJSON methodsデータをマージします。
 
-Version: 2.1.0
 """
 
 import json

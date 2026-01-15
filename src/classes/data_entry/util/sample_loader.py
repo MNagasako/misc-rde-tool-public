@@ -47,26 +47,40 @@ def load_existing_samples(group_id):
         for item in data_items:
             attributes = item.get("attributes", {})
             sample_id = item.get("id", "")
-            
+
             # 試料名を取得（namesから）
             names = attributes.get("names", [])
-            sample_name = "未設定"
-            if names and len(names) > 0:
-                sample_name = names[0]
-            
+            if not isinstance(names, list):
+                names = []
+            name_texts = [str(x) for x in names if str(x).strip()]
+            sample_name = name_texts[0] if name_texts else "未設定"
+
+            # タグ
+            tags = attributes.get("tags", [])
+            if not isinstance(tags, list):
+                tags = []
+
             # 説明を取得
             description = attributes.get("description", "")
-            
+
             # 組成を取得
             composition = attributes.get("composition", "")
-            
+
+            # 参照URL
+            reference_url = attributes.get("referenceUrl", "")
+
             sample_info = {
                 "id": sample_id,
+                # 既存コード互換
                 "name": sample_name,
                 "description": description,
-                "composition": composition
+                "composition": composition,
+                # 拡張情報
+                "names": name_texts,
+                "tags": [str(x) for x in tags if str(x).strip()],
+                "referenceUrl": str(reference_url or ""),
             }
-            
+
             samples.append(sample_info)
         
         logger.info("[SAMPLE_LOADER] 既存試料データ取得完了: %s件", len(samples))

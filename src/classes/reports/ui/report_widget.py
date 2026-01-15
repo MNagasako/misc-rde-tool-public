@@ -4,7 +4,6 @@
 ARIM報告書データの並列取得・処理・出力機能を提供するUIです。
 タブ化構造：データ取得、Excel変換、研究データ生成
 
-Version: 2.1.0
 """
 
 import logging

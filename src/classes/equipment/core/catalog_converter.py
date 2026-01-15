@@ -3,7 +3,6 @@
 
 ARIMカタログExcelファイルをJSON形式に変換します。
 
-Version: 2.1.0
 """
 
 import json

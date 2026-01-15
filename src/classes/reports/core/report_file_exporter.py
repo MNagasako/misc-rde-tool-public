@@ -3,7 +3,6 @@
 
 Excel/JSON形式での報告書データ出力機能を提供します。
 
-Version: 2.1.0
 """
 
 import os

@@ -3,7 +3,6 @@
 
 BeautifulSoupを使用したHTML解析の補助関数を提供します。
 
-Version: 2.1.0
 """
 
 from typing import Optional

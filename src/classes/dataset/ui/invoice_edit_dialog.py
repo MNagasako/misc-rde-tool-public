@@ -131,6 +131,9 @@ class InvoiceEditDialog(QDialog):
         self._schema_initial_values: Dict[str, Any] = {}
         self._pending_attachments: List[Dict[str, str]] = []
         self._dataset_id_for_upload: str = ""
+        self._previous_sample_id: str = ""
+        self._previous_sample_values: Dict[str, Any] = {}
+        self._manual_sample_id: str = ""
 
         self.setWindowTitle("データエントリー編集（送り状）")
         self.setModal(True)
@@ -214,12 +217,16 @@ class InvoiceEditDialog(QDialog):
 
         self.sample_mode_combo = QComboBox()
         self.sample_mode_combo.setObjectName("invoiceSampleMode")
+        # 「既存試料IDを指定」は廃止し、既存試料名の一覧を選択肢として表示する。
+        # 初期状態では固定選択肢のみ（既存試料は _setup_sample_mode_combo() で追加）。
+        self.sample_mode_combo.addItem("新規", "new")
         self.sample_mode_combo.addItem("前回と同じ", "keep")
-        self.sample_mode_combo.addItem("既存試料IDを指定", "existing")
-        self.sample_mode_combo.addItem("新規試料を作成", "new")
+        self.sample_mode_combo.addItem("ID直接入力", "id_input")
 
         self.sample_id_edit = QLineEdit()
         self.sample_id_edit.setObjectName("invoiceSampleId")
+        # UUID欄はモードにより入力可否を切替
+        self.sample_id_edit.setReadOnly(True)
 
         self.sample_names_edit = QLineEdit()
         self.sample_names_edit.setObjectName("invoiceSampleNames")
@@ -237,9 +244,9 @@ class InvoiceEditDialog(QDialog):
         self.sample_reference_url_edit.setObjectName("invoiceSampleReferenceUrl")
 
         sample_labels = [
-            QLabel("試料の扱い"),
+            QLabel("新規/選択"),
             QLabel("試料ID（UUID）"),
-            QLabel("試料名（カンマ区切り）"),
+            QLabel("試料名"),
             QLabel("タグ（カンマ区切り）"),
             QLabel("試料の説明"),
             QLabel("化学式・組成式・分子式"),
@@ -353,6 +360,101 @@ class InvoiceEditDialog(QDialog):
 
         self._load()
 
+    def _get_sample_mode(self) -> str:
+        data = self.sample_mode_combo.currentData()
+        if data in ("keep", "new", "id_input"):
+            return str(data)
+        if isinstance(data, dict) and str(data.get("id") or "").strip():
+            return "existing"
+        return "new"
+
+    def _get_selected_existing_sample_id(self) -> str:
+        data = self.sample_mode_combo.currentData()
+        if isinstance(data, dict):
+            return str(data.get("id") or "").strip()
+        return ""
+
+    def _setup_sample_mode_combo(self, *, dataset_id: str) -> None:
+        """試料の扱いコンボを更新（新規作成/前回と同じ/既存試料名一覧）。"""
+        dataset_id = (dataset_id or "").strip()
+        combo = self.sample_mode_combo
+
+        # 現在の選択状態を可能な範囲で維持する
+        selected_mode = self._get_sample_mode()
+        selected_existing_id = self._get_selected_existing_sample_id() if selected_mode == "existing" else ""
+
+        combo.blockSignals(True)
+        try:
+            combo.clear()
+            combo.addItem("新規", "new")
+            combo.addItem("前回と同じ", "keep")
+            combo.addItem("ID直接入力", "id_input")
+
+            group_id = self._load_group_id_from_dataset(dataset_id)
+            if group_id:
+                try:
+                    from classes.data_entry.util.sample_loader import load_existing_samples, format_sample_display_name
+
+                    existing_samples = load_existing_samples(group_id)
+                    for sample in existing_samples:
+                        display_name = format_sample_display_name(sample)
+                        combo.addItem(display_name, sample)
+                except Exception as exc:
+                    logger.warning("既存試料一覧の取得に失敗: %s", exc)
+
+            # 選択を復元
+            if selected_mode == "existing" and selected_existing_id:
+                for i in range(combo.count()):
+                    d = combo.itemData(i)
+                    if isinstance(d, dict) and str(d.get("id") or "").strip() == selected_existing_id:
+                        combo.setCurrentIndex(i)
+                        break
+                else:
+                    # 選択肢にない場合は前回/新規へフォールバック
+                    combo.setCurrentIndex(1 if self._previous_sample_id else 0)
+            elif selected_mode == "keep":
+                combo.setCurrentIndex(1)
+            elif selected_mode == "id_input":
+                combo.setCurrentIndex(2)
+            else:
+                # new
+                combo.setCurrentIndex(0)
+        finally:
+            combo.blockSignals(False)
+
+        self._apply_sample_mode()
+
+    def _set_line_edit_editable(self, edit: QLineEdit, *, editable: bool) -> None:
+        # 入力不可時は Qt の disabled 状態にして、テーマ(:disabled)の配色に寄せる
+        edit.setEnabled(bool(editable))
+        edit.setReadOnly(not editable)
+
+    def _set_text_edit_editable(self, edit: QTextEdit, *, editable: bool) -> None:
+        # 入力不可時は Qt の disabled 状態にして、テーマ(:disabled)の配色に寄せる
+        edit.setEnabled(bool(editable))
+        edit.setReadOnly(not editable)
+
+    def _apply_sample_values(self, sample_values: Dict[str, Any]) -> None:
+        sample_id = str(sample_values.get("sampleId") or sample_values.get("id") or "").strip()
+        self.sample_id_edit.setText(sample_id)
+
+        names = sample_values.get("names")
+        if isinstance(names, list):
+            name_text = ", ".join([str(x) for x in names if str(x).strip()])
+        else:
+            name_text = str(sample_values.get("name") or "")
+        self.sample_names_edit.setText(name_text)
+
+        tags = sample_values.get("tags")
+        if isinstance(tags, list):
+            self.sample_tags_edit.setText(", ".join([str(x) for x in tags if str(x).strip()]))
+        else:
+            self.sample_tags_edit.setText("")
+
+        self.sample_description_edit.setPlainText(str(sample_values.get("description") or ""))
+        self.sample_composition_edit.setPlainText(str(sample_values.get("composition") or ""))
+        self.sample_reference_url_edit.setText(str(sample_values.get("referenceUrl") or ""))
+
     def _align_label_widths(self, labels: List[QLabel]) -> None:
         try:
             widths = [label.fontMetrics().horizontalAdvance(label.text()) for label in labels]
@@ -435,21 +537,47 @@ class InvoiceEditDialog(QDialog):
             combo.setEnabled(False)
 
     def _apply_sample_mode(self) -> None:
-        mode = self.sample_mode_combo.currentData()
+        mode = self._get_sample_mode()
         is_keep = mode == "keep"
+        is_id_input = mode == "id_input"
         is_existing = mode == "existing"
         is_new = mode == "new"
 
-        self.sample_id_edit.setEnabled(is_existing)
-        self.sample_names_edit.setEnabled(is_new)
-        self.sample_tags_edit.setEnabled(is_new)
-        self.sample_description_edit.setEnabled(is_new)
-        self.sample_composition_edit.setEnabled(is_new)
-        self.sample_reference_url_edit.setEnabled(is_new)
+        # 入力可否・配色の制御
+        self._set_line_edit_editable(self.sample_id_edit, editable=is_id_input)
+
+        # 試料名は、新規のみ編集可。前回/既存/ID直接入力では表示のみ。
+        self._set_line_edit_editable(self.sample_names_edit, editable=is_new)
+        self._set_line_edit_editable(self.sample_tags_edit, editable=is_new)
+        self._set_text_edit_editable(self.sample_description_edit, editable=is_new)
+        self._set_text_edit_editable(self.sample_composition_edit, editable=is_new)
+        self._set_line_edit_editable(self.sample_reference_url_edit, editable=is_new)
+
+        if is_id_input:
+            # ID直接入力の値は保持・復元
+            if self._manual_sample_id:
+                self.sample_id_edit.setText(self._manual_sample_id)
+            self._manual_sample_id = self.sample_id_edit.text().strip()
+            return
 
         if is_new:
-            # 新規作成の場合は sampleId は使わない
+            # 新規はUUID未使用
             self.sample_id_edit.setText("")
+            return
+
+        if is_keep:
+            # 前回と同じ: 前回の試料情報を表示
+            self._apply_sample_values(self._previous_sample_values)
+            return
+
+        if is_existing:
+            # 既存試料: 選択された既存試料の値を表示
+            data = self.sample_mode_combo.currentData()
+            if isinstance(data, dict):
+                self._apply_sample_values(data)
+            else:
+                self.sample_id_edit.setText(self._get_selected_existing_sample_id())
+            return
 
     def _load(self) -> None:
         try:
@@ -489,10 +617,16 @@ class InvoiceEditDialog(QDialog):
             self.sample_composition_edit.setPlainText(str(sample.get("composition", "") or ""))
             self.sample_reference_url_edit.setText(str(sample.get("referenceUrl", "") or ""))
 
-            self.sample_id_edit.setText(str(sample.get("sampleId", "") or ""))
+            # 前回試料情報として保持し、「前回と同じ」選択時に表示する
+            self._previous_sample_id = str(sample.get("sampleId", "") or "").strip()
+            self._previous_sample_values = dict(sample) if isinstance(sample, dict) else {}
+            self.sample_id_edit.setText(self._previous_sample_id)
 
-            # デフォルトは「前回と同じ」で編集不可にする（要件: 直接編集不可）
-            self.sample_mode_combo.setCurrentIndex(0)
+            # データセット選択済み相当のため、既存試料名のリストを構築
+            self._setup_sample_mode_combo(dataset_id=self._dataset_id_for_upload)
+
+            # デフォルト選択: 前回UUIDがあれば「前回と同じ」、なければ「新規」
+            self.sample_mode_combo.setCurrentIndex(1 if self._previous_sample_id else 0)
             self._apply_sample_mode()
 
             self._setup_schema_form(custom)
@@ -631,10 +765,10 @@ class InvoiceEditDialog(QDialog):
                 initial_values=self._schema_initial_values,
             )
 
-        sample_mode = self.sample_mode_combo.currentData()
-        is_keep = sample_mode == "keep"
-        is_existing = sample_mode == "existing"
-        is_new = sample_mode == "new"
+        mode = self._get_sample_mode()
+        is_keep = mode == "keep"
+        is_existing = mode in ("existing", "id_input")
+        is_new = mode == "new"
 
         merged = merge_invoice_attributes(
             self._original_attributes,
@@ -657,10 +791,26 @@ class InvoiceEditDialog(QDialog):
         if is_existing:
             sample_id = self.sample_id_edit.text().strip()
             if not sample_id:
-                QMessageBox.warning(self, "入力エラー", "既存試料IDを指定する場合、試料IDは必須です。")
+                QMessageBox.warning(self, "入力エラー", "試料を選択/指定する場合、試料IDは必須です。")
                 return
             sample: Dict[str, Any] = merged.get("sample") if isinstance(merged.get("sample"), dict) else {}
             sample["sampleId"] = sample_id
+            # 既存試料を一覧から選択した場合は、対応する試料情報も保存する
+            selected = self.sample_mode_combo.currentData()
+            if isinstance(selected, dict):
+                names = selected.get("names")
+                if isinstance(names, list):
+                    sample["names"] = [str(x) for x in names if str(x).strip()]
+                else:
+                    name_text = str(selected.get("name") or "")
+                    sample["names"] = split_comma_list(name_text)
+
+                tags = selected.get("tags")
+                if isinstance(tags, list):
+                    sample["tags"] = [str(x) for x in tags if str(x).strip()]
+                sample["description"] = str(selected.get("description") or "")
+                sample["composition"] = str(selected.get("composition") or "")
+                sample["referenceUrl"] = str(selected.get("referenceUrl") or "")
             merged["sample"] = sample
         elif is_new:
             sample: Dict[str, Any] = merged.get("sample") if isinstance(merged.get("sample"), dict) else {}
