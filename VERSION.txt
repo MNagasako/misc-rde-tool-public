@@ -1,4 +1,9 @@
-2.4.21
+2.4.22
+
+2026-01-15 v2.4.22 - 配布物整合（latest.json/checksum/README）
+	- 配布物（インストーラ）を v2.4.22 に更新。
+	- latest.json / checksums.sha256 を新配布物に整合。
+	- README の表記を v2.4.22 に更新。
 
 2026-01-15 v2.4.21 - 更新情報(latest.json)/配布物/チェックサムの整合
 	- 更新判定（latest.json）を v2.4.21 に更新。
