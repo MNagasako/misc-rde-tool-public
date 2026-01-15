@@ -492,6 +492,142 @@ def parallel_download(
         "errors": errors
     }
 
+
+def parallel_upload(
+    tasks: list,
+    worker_function: callable,
+    max_workers: int = 5,
+    progress_callback: Optional[callable] = None,
+    threshold: int = 1,
+    collect_results: bool = True,
+) -> Dict[str, Any]:
+    """並列アップロードを実行（結果収集対応）。
+
+    NOTE:
+        並列ダウンロード(parallel_download)の実装を参考にしています。
+        アップロードは後段処理で uploadId 等の結果が必要になるため、
+        デフォルトで各タスクの戻り値を results に収集します。
+
+    Args:
+        tasks: タスクリスト（各タスクは worker_function に渡される引数のタプル）
+        worker_function: 各タスクを処理する関数
+        max_workers: 最大並列数（デフォルト: 5）
+        progress_callback: プログレスコールバック (current, total, message) -> bool
+            current は 0-100 のパーセント値。
+        threshold: 並列化を行う最小タスク数（デフォルト: 1）
+        collect_results: True の場合、各タスクの結果を results に格納
+
+    Returns:
+        Dict[str, Any]: 実行結果
+            - success_count: 成功数
+            - failed_count: 失敗数
+            - skipped_count: スキップ数
+            - total: 総タスク数
+            - cancelled: キャンセルされたかどうか
+            - errors: エラーリスト
+            - results: （collect_results=True の場合）完了タスク結果リスト
+    """
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading
+
+    total_tasks = len(tasks)
+
+    # タスク数が閾値未満の場合は同期実行
+    if total_tasks < threshold or max_workers <= 1:
+        return _sequential_upload(tasks, worker_function, progress_callback, collect_results=collect_results)
+
+    success_count = 0
+    failed_count = 0
+    skipped_count = 0
+    completed_count = 0
+    cancelled = False
+    errors = []
+    results = []
+
+    lock = threading.Lock()
+
+    def update_progress() -> bool:
+        nonlocal completed_count
+        with lock:
+            completed_count += 1
+            if progress_callback:
+                progress_percent = int((completed_count / total_tasks) * 100)
+                message = f"並列アップロード中... ({completed_count}/{total_tasks})"
+                if not progress_callback(progress_percent, 100, message):
+                    return False
+        return True
+
+    try:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_task = {executor.submit(worker_function, *task): task for task in tasks}
+
+            for future in as_completed(future_to_task):
+                task = future_to_task[future]
+                try:
+                    result = future.result()
+
+                    if collect_results:
+                        results.append({"task": task, "result": result})
+
+                    if isinstance(result, dict):
+                        status = result.get("status", "unknown")
+                        if status == "success":
+                            with lock:
+                                success_count += 1
+                        elif status == "skipped":
+                            with lock:
+                                skipped_count += 1
+                        elif status == "failed":
+                            with lock:
+                                failed_count += 1
+                            errors.append({"task": task, "error": result.get("error")})
+                        else:
+                            with lock:
+                                success_count += 1
+                    elif isinstance(result, str):
+                        if "skipped" in result.lower():
+                            with lock:
+                                skipped_count += 1
+                        elif "failed" in result.lower() or "error" in result.lower():
+                            with lock:
+                                failed_count += 1
+                            errors.append({"task": task, "error": result})
+                        else:
+                            with lock:
+                                success_count += 1
+                    else:
+                        with lock:
+                            success_count += 1
+
+                except Exception as e:
+                    with lock:
+                        failed_count += 1
+                    errors.append({"task": task, "error": str(e)})
+                    if collect_results:
+                        results.append({"task": task, "result": {"status": "failed", "error": str(e)}})
+
+                if not update_progress():
+                    cancelled = True
+                    for f in future_to_task:
+                        f.cancel()
+                    break
+
+    except Exception as e:
+        errors.append({"error": f"並列実行エラー: {e}"})
+
+    payload = {
+        "success_count": success_count,
+        "failed_count": failed_count,
+        "skipped_count": skipped_count,
+        "total": total_tasks,
+        "cancelled": cancelled,
+        "errors": errors,
+    }
+    if collect_results:
+        payload["results"] = results
+    return payload
+
 def _sequential_download(
     tasks: list,
     worker_function: callable,
@@ -564,3 +700,78 @@ def _sequential_download(
         "cancelled": cancelled,
         "errors": errors
     }
+
+
+def _sequential_upload(
+    tasks: list,
+    worker_function: callable,
+    progress_callback: Optional[callable] = None,
+    *,
+    collect_results: bool = True,
+) -> Dict[str, Any]:
+    """同期アップロードを実行（並列化の閾値未満の場合）。"""
+
+    success_count = 0
+    failed_count = 0
+    skipped_count = 0
+    completed_count = 0
+    cancelled = False
+    errors = []
+    results = []
+    total_tasks = len(tasks)
+
+    for task in tasks:
+        try:
+            result = worker_function(*task)
+            completed_count += 1
+
+            if collect_results:
+                results.append({"task": task, "result": result})
+
+            if isinstance(result, dict):
+                status = result.get("status", "unknown")
+                if status == "success":
+                    success_count += 1
+                elif status == "skipped":
+                    skipped_count += 1
+                elif status == "failed":
+                    failed_count += 1
+                    errors.append({"task": task, "error": result.get("error")})
+                else:
+                    success_count += 1
+            elif isinstance(result, str):
+                if "skipped" in result.lower():
+                    skipped_count += 1
+                elif "failed" in result.lower() or "error" in result.lower():
+                    failed_count += 1
+                    errors.append({"task": task, "error": result})
+                else:
+                    success_count += 1
+            else:
+                success_count += 1
+
+        except Exception as e:
+            completed_count += 1
+            failed_count += 1
+            errors.append({"task": task, "error": str(e)})
+            if collect_results:
+                results.append({"task": task, "result": {"status": "failed", "error": str(e)}})
+
+        if progress_callback:
+            progress_percent = int((completed_count / total_tasks) * 100) if total_tasks else 100
+            message = f"アップロード中... ({completed_count}/{total_tasks})"
+            if not progress_callback(progress_percent, 100, message):
+                cancelled = True
+                break
+
+    payload = {
+        "success_count": success_count,
+        "failed_count": failed_count,
+        "skipped_count": skipped_count,
+        "total": total_tasks,
+        "cancelled": cancelled,
+        "errors": errors,
+    }
+    if collect_results:
+        payload["results"] = results
+    return payload

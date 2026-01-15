@@ -16,6 +16,7 @@ from qt_compat.widgets import (
     QTextEdit,
     QGroupBox,
     QComboBox,
+    QSpinBox,
     QSizePolicy,
     QMessageBox,
     QPushButton,
@@ -927,6 +928,23 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
     btn_layout.addWidget(button_attachment_file_select)
 
     layout.addLayout(btn_layout)
+
+    # 並列アップロード数（uploads 並列化）
+    parallel_layout = QHBoxLayout()
+    parallel_layout.setSpacing(8)
+    parallel_label = QLabel("並列アップロード数", widget)
+    parallel_spinbox = QSpinBox(widget)
+    parallel_spinbox.setRange(1, 20)
+    parallel_spinbox.setValue(5)
+    parallel_spinbox.setToolTip("uploads へのアップロード並列数（既定: 5）")
+    parallel_layout.addWidget(parallel_label)
+    parallel_layout.addWidget(parallel_spinbox)
+    parallel_layout.addStretch()
+
+    # controller / widget から参照できるように保持
+    parent_controller.parallel_upload_spinbox = parallel_spinbox
+    widget.parallel_upload_spinbox = parallel_spinbox
+    layout.addLayout(parallel_layout)
 
     # 最後にStretchを追加
     layout.addStretch()

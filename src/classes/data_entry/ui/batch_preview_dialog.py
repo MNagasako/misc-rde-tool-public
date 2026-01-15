@@ -16,7 +16,7 @@ from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QTableWidget, 
     QTableWidgetItem, QLabel, QPushButton, QTextEdit, QGroupBox,
     QHeaderView, QScrollArea, QWidget, QSplitter, QMessageBox,
-    QDialogButtonBox, QComboBox, QProgressDialog, QApplication
+    QDialogButtonBox, QComboBox, QProgressDialog, QApplication, QSpinBox
 )
 from qt_compat.core import Qt, Signal, QThread, Slot
 from qt_compat.gui import QFont
@@ -3659,12 +3659,21 @@ class BatchRegisterPreviewDialog(QDialog):
 class BatchRegisterPreviewDialog(QDialog):
     """一括登録プレビューダイアログ（複数ファイルセット対応）"""
     
-    def __init__(self, file_sets: List[FileSet], parent=None, bearer_token: str = None, allowed_exts: Optional[List[str]] = None):
+    def __init__(
+        self,
+        file_sets: List[FileSet],
+        parent=None,
+        bearer_token: str = None,
+        allowed_exts: Optional[List[str]] = None,
+        *,
+        parallel_upload_workers: int = 5,
+    ):
         super().__init__(parent)
         self.file_sets = file_sets
         self.duplicate_files = set()
         self.bearer_token = bearer_token
         self.allowed_exts = [e.lower().strip().lstrip('.') for e in (allowed_exts or [])]
+        self.parallel_upload_workers = parallel_upload_workers
         self.setWindowTitle("一括登録プレビュー（複数ファイルセット）")
         self.setModal(True)
         # 最前面表示設定（マルチディスプレイ環境対応）
@@ -3787,6 +3796,19 @@ class BatchRegisterPreviewDialog(QDialog):
         
         batch_buttons_layout.addWidget(self.batch_upload_all_button)
         batch_buttons_layout.addWidget(self.batch_register_all_button)
+
+        # 並列アップロード数（プレビューでも指定可能）
+        parallel_label = QLabel("並列アップロード数")
+        self.parallel_upload_spinbox = QSpinBox(self)
+        self.parallel_upload_spinbox.setRange(1, 20)
+        try:
+            self.parallel_upload_spinbox.setValue(max(1, int(self.parallel_upload_workers)))
+        except Exception:
+            self.parallel_upload_spinbox.setValue(5)
+        self.parallel_upload_spinbox.setToolTip("uploads へのアップロード並列数（既定: 5）")
+        batch_buttons_layout.addWidget(parallel_label)
+        batch_buttons_layout.addWidget(self.parallel_upload_spinbox)
+
         batch_buttons_layout.addStretch()
         
         buttons_layout.addLayout(batch_buttons_layout)
@@ -4000,27 +4022,66 @@ class BatchRegisterPreviewDialog(QDialog):
                             "注: 対応ファイルリストが最新でない場合、未掲載でもアップロード可能な場合があります。\n\n"
                             f"影響対象: {', '.join(zero_match_sets[:5])}{' ...' if len(zero_match_sets)>5 else ''}"
                         )
-                        res = QMessageBox.question(
-                            self,
-                            "対応ファイル未検出",
-                            text,
-                            QMessageBox.Yes | QMessageBox.No,
-                            QMessageBox.No
-                        )
+                        try:
+                            box = QMessageBox(self)
+                            box.setIcon(QMessageBox.Warning)
+                            box.setWindowTitle("対応ファイル未検出")
+                            box.setText(text)
+                            box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+                            box.setDefaultButton(QMessageBox.No)
+                            try:
+                                from ..core.data_register_logic import _center_on_parent
+
+                                _center_on_parent(box, self.window())
+                            except Exception:
+                                pass
+                            if os.environ.get("PYTEST_CURRENT_TEST"):
+                                raise RuntimeError("Force question() in pytest")
+                            res = box.exec()
+                        except Exception:
+                            res = QMessageBox.question(
+                                self,
+                                "対応ファイル未検出",
+                                text,
+                                QMessageBox.Yes | QMessageBox.No,
+                                QMessageBox.No,
+                            )
                         if res != QMessageBox.Yes:
                             logger.info("ユーザーが一致ゼロ警告でキャンセル")
                             return
             except Exception:
                 pass
             
-            reply = QMessageBox.question(
-                self, "全ファイルセット一括アップロード確認", 
-                f"全ファイルセット（{len(valid_file_sets)}個）の一括アップロードを実行しますか？\n\n"
-                f"対象ファイル数: {total_files}個\n"
-                f"処理には時間がかかる場合があります。",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
+            try:
+                box = QMessageBox(self)
+                box.setIcon(QMessageBox.Question)
+                box.setWindowTitle("全ファイルセット一括アップロード確認")
+                box.setText(
+                    f"全ファイルセット（{len(valid_file_sets)}個）の一括アップロードを実行しますか？\n\n"
+                    f"対象ファイル数: {total_files}個\n"
+                    f"処理には時間がかかる場合があります。"
+                )
+                box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+                box.setDefaultButton(QMessageBox.No)
+                try:
+                    from ..core.data_register_logic import _center_on_parent
+
+                    _center_on_parent(box, self.window())
+                except Exception:
+                    pass
+                if os.environ.get("PYTEST_CURRENT_TEST"):
+                    raise RuntimeError("Force question() in pytest")
+                reply = box.exec()
+            except Exception:
+                reply = QMessageBox.question(
+                    self,
+                    "全ファイルセット一括アップロード確認",
+                    f"全ファイルセット（{len(valid_file_sets)}個）の一括アップロードを実行しますか？\n\n"
+                    f"対象ファイル数: {total_files}個\n"
+                    f"処理には時間がかかる場合があります。",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
             
             if reply != QMessageBox.Yes:
                 logger.info("ユーザーが全ファイルセット一括アップロードをキャンセルしました")
@@ -4033,6 +4094,12 @@ class BatchRegisterPreviewDialog(QDialog):
             progress.setLabelText(f"アップロード準備中... (0/{len(valid_file_sets)})")
             QApplication.processEvents()  # UI更新を即座に反映
             progress.show()
+            try:
+                from ..core.data_register_logic import _center_on_screen
+
+                _center_on_screen(progress)
+            except Exception:
+                pass
             # 進捗計測（テスト用）
             self._last_upload_progress_values = []
             _orig_upload_set_value = progress.setValue
@@ -4212,12 +4279,30 @@ class BatchRegisterPreviewDialog(QDialog):
             
             confirmation_text += "\n実行内容:\n1. ファイル一括アップロード\n2. データエントリー登録\n3. 試料ID継承処理\n\n処理には時間がかかる場合があります。"
             
-            reply = QMessageBox.question(
-                self, "全ファイルセット一括データ登録確認", 
-                confirmation_text,
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
+            try:
+                box = QMessageBox(self)
+                box.setIcon(QMessageBox.Question)
+                box.setWindowTitle("全ファイルセット一括データ登録確認")
+                box.setText(confirmation_text)
+                box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+                box.setDefaultButton(QMessageBox.No)
+                try:
+                    from ..core.data_register_logic import _center_on_parent
+
+                    _center_on_parent(box, self.window())
+                except Exception:
+                    pass
+                if os.environ.get("PYTEST_CURRENT_TEST"):
+                    raise RuntimeError("Force question() in pytest")
+                reply = box.exec()
+            except Exception:
+                reply = QMessageBox.question(
+                    self,
+                    "全ファイルセット一括データ登録確認",
+                    confirmation_text,
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No,
+                )
             
             if reply != QMessageBox.Yes:
                 logger.info("ユーザーが全ファイルセット一括データ登録をキャンセルしました")
@@ -4230,6 +4315,12 @@ class BatchRegisterPreviewDialog(QDialog):
             progress.setLabelText(f"データ登録準備中... (0/{len(valid_file_sets)})")
             QApplication.processEvents()  # UI更新を即座に反映
             progress.show()
+            try:
+                from ..core.data_register_logic import _center_on_screen
+
+                _center_on_screen(progress)
+            except Exception:
+                pass
             # 進捗計測（テスト用）
             self._last_register_progress_values = []
             _orig_register_set_value = progress.setValue
@@ -4244,7 +4335,7 @@ class BatchRegisterPreviewDialog(QDialog):
             # 結果集計
             total_registered = 0
             total_failed = 0
-            skip_count = 0  # 404/401等によりスキップされたファイルセット数
+            skip_count = 0  # レスポンス待ち停止/タイムアウト/401/404 等によりスキップされたファイルセット数
             fileset_results = []
             previous_sample_id = None  # 前回のサンプルIDを保存
             
@@ -4356,6 +4447,8 @@ class BatchRegisterPreviewDialog(QDialog):
                         result_message += f"\n↷ {result['name']}: スキップ (データセット未検出)"
                     elif reason == 'unauthorized':
                         result_message += f"\n↷ {result['name']}: スキップ (未認証)"
+                    elif reason == 'response_wait_skipped':
+                        result_message += f"\n↷ {result['name']}: スキップ (レスポンス待ち)"
                     else:
                         result_message += f"\n↷ {result['name']}: スキップ"
                 elif result['success']:
@@ -4388,6 +4481,12 @@ class BatchRegisterPreviewDialog(QDialog):
                 msgbox.setDetailedText("\n\n---\n\n".join(detail_sections))
 
             msgbox.setWindowFlags(msgbox.windowFlags() | Qt.WindowStaysOnTopHint)
+            try:
+                from ..core.data_register_logic import _center_on_parent
+
+                _center_on_parent(msgbox, self.window())
+            except Exception:
+                pass
             msgbox.show()
             msgbox.raise_()
             msgbox.activateWindow()
@@ -4401,7 +4500,7 @@ class BatchRegisterPreviewDialog(QDialog):
             traceback.print_exc()
             QMessageBox.critical(self, "エラー", f"全ファイルセット一括データ登録処理でエラーが発生しました:\n{str(e)}")
     
-    def _upload_single_fileset(self, bearer_token: str, file_set: FileSet) -> dict:
+    def _upload_single_fileset(self, bearer_token: str, file_set: FileSet, progress: QProgressDialog | None = None) -> dict:
         """単一ファイルセットのアップロード処理"""
         try:
             logger.info("ファイルセットアップロード開始: %s", file_set.name)
@@ -4626,28 +4725,114 @@ class BatchRegisterPreviewDialog(QDialog):
             if not display_items:
                 return {'success_count': 0, 'failed_count': 0, 'error': 'アップロード対象ファイルがありません'}
             
-            # アップロード実行
+            # アップロード実行（ファイル単位で並列化）
+            from net.http_helpers import parallel_upload
+
             success_count = 0
             failed_count = 0
-            
-            for file_item in display_items:
+
+            try:
+                max_workers = int(getattr(self, 'parallel_upload_spinbox', None).value())
+            except Exception:
                 try:
-                    # bearer_tokenは不要（自動選択される）
-                    upload_result = self._execute_single_upload_for_fileset(None, dataset_id, file_item)
+                    max_workers = max(1, int(getattr(self, 'parallel_upload_workers', 5)))
+                except Exception:
+                    max_workers = 5
+
+            tasks = [(idx, item) for idx, item in enumerate(display_items)]
+
+            def worker(idx: int, item: FileItem) -> dict:
+                try:
+                    upload_result = self._execute_single_upload_for_fileset(None, dataset_id, item)
                     if upload_result and upload_result.get('upload_id'):
-                        upload_id = upload_result['upload_id']
-                        setattr(file_item, 'upload_id', upload_id)
-                        setattr(file_item, 'upload_response', upload_result.get('response_data', {}))
-                        # path_mapping.xlsx の場合は mapping_upload_id にセット
-                        if file_item.name == "path_mapping.xlsx":
-                            file_set.mapping_upload_id = upload_id
-                        success_count += 1
-                    else:
-                        # 失敗時は mapping_upload_id をクリアしない（前回成功分を保持）
-                        failed_count += 1
+                        return {
+                            'status': 'success',
+                            'idx': idx,
+                            'upload_id': upload_result['upload_id'],
+                            'response_data': upload_result.get('response_data', {}),
+                            'name': getattr(item, 'name', ''),
+                        }
+                    return {
+                        'status': 'failed',
+                        'idx': idx,
+                        'name': getattr(item, 'name', ''),
+                        'error': 'upload_id が取得できませんでした',
+                    }
                 except Exception as e:
-                    logger.error("ファイルアップロードエラー (%s): %s", file_item.name, e)
+                    return {
+                        'status': 'failed',
+                        'idx': idx,
+                        'name': getattr(item, 'name', ''),
+                        'error': str(e),
+                    }
+
+            progress_callback = None
+            if progress is not None:
+                try:
+                    from qt_compat.widgets import QApplication
+
+                    group_total = len(tasks)
+                    progress.setRange(0, group_total)
+                    progress.setValue(0)
+                    progress.setLabelText(f"ファイルアップロード中: {file_set.name}\n(0/{group_total})")
+                    QApplication.processEvents()
+
+                    def _cb(current: int, total: int, message: str) -> bool:
+                        try:
+                            done_in_group = int((current / 100) * group_total)
+                            value = min(group_total, done_in_group)
+                            progress.setValue(value)
+                            progress.setLabelText(f"ファイルアップロード中: {file_set.name}\n{message}\n({value}/{group_total})")
+                            QApplication.processEvents()
+                        except Exception:
+                            pass
+                        try:
+                            return not progress.wasCanceled()
+                        except Exception:
+                            return True
+
+                    progress_callback = _cb
+                except Exception:
+                    progress_callback = None
+
+            result = parallel_upload(
+                tasks,
+                worker,
+                max_workers=max_workers,
+                progress_callback=progress_callback,
+                threshold=2,
+                collect_results=True,
+            )
+
+            if isinstance(result, dict) and result.get('cancelled'):
+                logger.info("ファイルセットアップロードがキャンセルされました: %s", file_set.name)
+                return {
+                    'success_count': 0,
+                    'failed_count': 0,
+                    'total_files': len(display_items),
+                    'cancelled': True,
+                    'error': 'アップロードがキャンセルされました',
+                }
+
+            items = [r.get('result') for r in (result.get('results') or []) if isinstance(r, dict)]
+            items = [d for d in items if isinstance(d, dict)]
+            for item in sorted(items, key=lambda d: d.get('idx', 0)):
+                idx = item.get('idx')
+                if not isinstance(idx, int) or idx < 0 or idx >= len(display_items):
+                    continue
+
+                target = display_items[idx]
+                if item.get('status') == 'success':
+                    upload_id = item.get('upload_id')
+                    setattr(target, 'upload_id', upload_id)
+                    setattr(target, 'upload_response', item.get('response_data', {}))
+                    if getattr(target, 'name', None) == 'path_mapping.xlsx':
+                        file_set.mapping_upload_id = upload_id
+                    success_count += 1
+                else:
                     failed_count += 1
+                    logger.error("ファイルアップロード失敗 (%s): %s", item.get('name'), item.get('error'))
+
             logger.info("ファイルセットアップロード完了: %s - 成功=%s, 失敗=%s", file_set.name, success_count, failed_count)
             return {
                 'success_count': success_count,
@@ -4663,10 +4848,50 @@ class BatchRegisterPreviewDialog(QDialog):
         """単一ファイルセットのデータ登録処理"""
         try:
             logger.info("ファイルセットデータ登録開始: %s", file_set.name)
-            
-            # アップロードが先に実行されているかチェック・実行
-            upload_result = self._upload_single_fileset(bearer_token, file_set)
+
+            # ファイルセット単位の進捗ダイアログ（通常登録と同等の体験に寄せる）
+            fileset_progress = None
+            try:
+                from qt_compat.core import Qt
+                from qt_compat.widgets import QApplication
+
+                fileset_progress = QProgressDialog(f"ファイルセット処理中: {file_set.name}", "キャンセル", 0, 0, self)
+                fileset_progress.setWindowTitle("一括登録")
+                fileset_progress.setWindowModality(Qt.WindowModal)
+                fileset_progress.setAutoClose(False)
+                fileset_progress.setAutoReset(False)
+                fileset_progress.setMinimumDuration(0)
+                fileset_progress.show()
+                try:
+                    from ..core.data_register_logic import _center_on_screen
+
+                    _center_on_screen(fileset_progress)
+                except Exception:
+                    pass
+                QApplication.processEvents()
+            except Exception:
+                fileset_progress = None
+
+            # アップロードが先に実行されているかチェック・実行（進捗表示あり）
+            upload_result = self._upload_single_fileset(bearer_token, file_set, progress=fileset_progress)
+            if upload_result.get('cancelled'):
+                try:
+                    if fileset_progress is not None:
+                        fileset_progress.close()
+                except Exception:
+                    pass
+                return {
+                    'success': False,
+                    'skipped': True,
+                    'skip_reason': 'cancelled',
+                    'error': upload_result.get('error', 'キャンセルされました'),
+                }
             if upload_result.get('skipped'):
+                try:
+                    if fileset_progress is not None:
+                        fileset_progress.close()
+                except Exception:
+                    pass
                 return {
                     'success': False,
                     'skipped': True,
@@ -4674,6 +4899,11 @@ class BatchRegisterPreviewDialog(QDialog):
                     'error': upload_result.get('error', 'スキップされました')
                 }
             if upload_result['success_count'] == 0:
+                try:
+                    if fileset_progress is not None:
+                        fileset_progress.close()
+                except Exception:
+                    pass
                 return {'success': False, 'error': upload_result.get('error', 'ファイルアップロードに失敗しました')}
             
             # データセット情報取得・復元
@@ -4738,10 +4968,31 @@ class BatchRegisterPreviewDialog(QDialog):
             dataFiles, attachments = self._build_files_payload_for_fileset(file_set, uploaded_files)
             
             if not dataFiles.get('data') and not attachments:
+                try:
+                    if fileset_progress is not None:
+                        fileset_progress.close()
+                except Exception:
+                    pass
                 return {'success': False, 'error': 'データファイルまたは添付ファイルが必要です'}
             
             # entry_dataを呼び出し（bearer_token=Noneで自動選択）
             from ..core.data_register_logic import entry_data
+
+            # 通常登録の完了表示に upload 集計を反映させる
+            try:
+                if fileset_progress is not None:
+                    setattr(
+                        fileset_progress,
+                        "_upload_summary",
+                        {
+                            "upload_total": int(upload_result.get('total_files') or 0),
+                            "upload_success_data_files": int(len(dataFiles.get('data') or [])),
+                            "upload_success_attachments": int(len(attachments or [])),
+                            "failed_files": [],
+                        },
+                    )
+            except Exception:
+                pass
             
             result = entry_data(
                 bearer_token=None,
@@ -4749,8 +5000,15 @@ class BatchRegisterPreviewDialog(QDialog):
                 attachements=attachments,
                 dataset_info=dataset_info,
                 form_values=form_values,
+                progress=fileset_progress,
                 require_confirmation=False,
             )
+
+            try:
+                if fileset_progress is not None:
+                    fileset_progress.close()
+            except Exception:
+                pass
             
             if result and not result.get('error'):
                 # 成功処理
@@ -4760,10 +5018,40 @@ class BatchRegisterPreviewDialog(QDialog):
                     return {'success': True, 'sample_id': sample_info['sample_id']}
                 else:
                     return {'success': True, 'sample_id': None}
-            else:
-                # エラー処理
-                error_detail = result.get('detail', '不明なエラー') if result else 'レスポンスなし'
-                return {'success': False, 'error': error_detail}
+
+            # タイムアウト/応答待ち停止は「登録失敗」とは限らないため、登録状況で判定する
+            if isinstance(result, dict) and result.get('error') == 'timeout':
+                try:
+                    reg = result.get('registration_status')
+                    status = str((reg or {}).get('status') or '').strip().lower() if isinstance(reg, dict) else ''
+                except Exception:
+                    reg = None
+                    status = ''
+
+                # 直前に登録状況を確認できていてFAILEDでない限り成功扱い
+                if status and status != 'failed':
+                    return {'success': True, 'sample_id': None}
+
+                # status取得できない/FAILED の場合は「レスポンス待ちスキップ」として扱う
+                link_url = None
+                try:
+                    link_url = result.get('link_url')
+                except Exception:
+                    link_url = None
+                msg = "レスポンス待ちスキップ（タイムアウト/中断）"
+                if link_url:
+                    msg += f"\n{link_url}"
+                return {
+                    'success': False,
+                    'skipped': True,
+                    'skip_reason': 'response_wait_skipped',
+                    'error': msg,
+                    'error_details': result.get('detail') if isinstance(result, dict) else None,
+                }
+
+            # エラー処理
+            error_detail = result.get('detail', '不明なエラー') if result else 'レスポンスなし'
+            return {'success': False, 'error': error_detail}
             
         except Exception as e:
             logger.error("ファイルセットデータ登録エラー: %s", e)

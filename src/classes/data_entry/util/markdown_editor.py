@@ -162,7 +162,9 @@ class MarkdownEditor(QWidget):
 
         from qt_compat.widgets import QTextBrowser
 
-        self.preview = QTextBrowser()
+        # 親なしで生成→setVisible(True)すると一瞬トップレベルとして表示され得るため、
+        # 必ず parent を指定して生成する。
+        self.preview = QTextBrowser(self)
         try:
             self.preview.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             self.preview.viewport().setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -170,7 +172,6 @@ class MarkdownEditor(QWidget):
             pass
         self.preview.setOpenExternalLinks(True)
         self.preview.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
-        self.preview.setVisible(True)
 
         # Markdownレンダリングの完了（文書更新）を検知する
         try:

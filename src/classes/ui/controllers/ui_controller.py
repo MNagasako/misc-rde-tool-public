@@ -637,7 +637,23 @@ class UIController(UIControllerCore):
 
             # 通常登録の進捗ダイアログは「確認」押下まで閉じない仕様。
             # parent=None だと参照切れで自動クローズすることがあるため、親ウィンドウを渡す。
-            result = run_data_register_logic(parent=self.parent, bearer_token=bearer_token, dataset_info=dataset_info, form_values=form_values, file_paths=file_paths, attachment_paths=attachment_paths)
+            parallel_workers = 5
+            try:
+                spin = getattr(self, 'parallel_upload_spinbox', None)
+                if spin is not None:
+                    parallel_workers = int(spin.value())
+            except Exception:
+                parallel_workers = 5
+
+            result = run_data_register_logic(
+                parent=self.parent,
+                bearer_token=bearer_token,
+                dataset_info=dataset_info,
+                form_values=form_values,
+                file_paths=file_paths,
+                attachment_paths=attachment_paths,
+                parallel_upload_workers=parallel_workers,
+            )
             # 成功時ステータスダイアログ表示（最新1件確認）
             try:
                 if result and isinstance(result, dict) and result.get('success'):

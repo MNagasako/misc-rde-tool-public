@@ -830,7 +830,25 @@ class Browser(QWidget):
         # v2.0.4: デバッグモード終了時のクリーンアップ
         from classes.utils.token_cleanup import cleanup_on_exit
         cleanup_on_exit()
-        
+
+        # 一部環境で「閉じた直後に再表示される」事象があるため、
+        # 最終的にアプリを確実に終了させる。
+        try:
+            from qt_compat.widgets import QApplication
+
+            app = QApplication.instance()
+            if app is not None:
+                try:
+                    app.setQuitOnLastWindowClosed(True)
+                except Exception:
+                    pass
+                try:
+                    app.quit()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
         event.accept()
 
     @debug_log
@@ -1086,6 +1104,15 @@ def main():
                 app = QApplication(sys.argv)
         else:
             app = QApplication(sys.argv)
+
+        # 可能な限り全てのポップアップ（QMessageBox/QDialog/QProgressDialog等）を親ウィンドウ中央に寄せる
+        # NOTE: pytest 実行中は既定で無効（teardown時のQt不安定化を避ける）
+        try:
+            from classes.utils.dialog_centering import install_dialog_centering
+
+            install_dialog_centering(enabled=True)
+        except Exception:
+            logger.debug("dialog centering install failed", exc_info=True)
 
         # DEBUG時: 一瞬だけ出る余計なトップレベルウィンドウの発生源を特定する
         # （例: Windowsでタイトル"python"の空ウィンドウが表示されるケース）

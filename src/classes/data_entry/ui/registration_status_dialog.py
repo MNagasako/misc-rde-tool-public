@@ -98,6 +98,12 @@ def show_status_dialog_for_single(parent, dataset_name: str, data_item: Dict, en
     dlg.set_sources([data_item], dataset_name, entries, refresh_fn=lambda: _combine_entries(use_cache=False))
     dlg.setModal(True)
     dlg.resize(900, 400)
+    try:
+        from ..core.data_register_logic import _center_on_parent
+
+        _center_on_parent(dlg, parent.window() if hasattr(parent, 'window') else parent)
+    except Exception:
+        pass
     dlg.show()
     return dlg
 
@@ -111,5 +117,11 @@ def show_status_dialog_for_batch(parent, dataset_name: str, data_items: List[Dic
     dlg.set_sources(data_items, dataset_name, entries, refresh_fn=lambda: _combine_entries(use_cache=False))
     dlg.setModal(True)
     dlg.resize(1000, 520)
+    try:
+        from ..core.data_register_logic import _center_on_parent
+
+        _center_on_parent(dlg, parent.window() if hasattr(parent, 'window') else parent)
+    except Exception:
+        pass
     dlg.show()
     return dlg

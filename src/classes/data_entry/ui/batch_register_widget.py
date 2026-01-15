@@ -31,6 +31,44 @@ from qt_compat.core import Qt, Signal, QTimer, QThread
 from qt_compat.gui import QFont, QIcon, QPixmap, QPainter, QBrush
 
 
+def _centered_question(parent, title: str, text: str, buttons, default_button=None):
+    """QMessageBox.question 相当を「親ウィンドウ中央」に表示する。"""
+
+    try:
+        box = QMessageBox(parent)
+        box.setIcon(QMessageBox.Question)
+        box.setWindowTitle(title)
+        box.setText(text)
+        box.setStandardButtons(buttons)
+        if default_button is not None:
+            try:
+                box.setDefaultButton(default_button)
+            except Exception:
+                pass
+
+        try:
+            from ..core.data_register_logic import _center_on_parent
+
+            anchor = None
+            try:
+                anchor = parent.window() if parent is not None else None
+            except Exception:
+                anchor = None
+            _center_on_parent(box, anchor)
+        except Exception:
+            pass
+
+        return box.exec()
+    except Exception:
+        try:
+            # フォールバック
+            if default_button is not None:
+                return QMessageBox.question(parent, title, text, buttons, default_button)
+            return QMessageBox.question(parent, title, text, buttons)
+        except Exception:
+            return QMessageBox.No
+
+
 def _theme_brush(key: ThemeKey) -> QBrush:
     return QBrush(get_qcolor(key))
 
@@ -485,10 +523,14 @@ class FileTreeWidget(QTreeWidget):
                 if len(conflicts) > 10:
                     conflict_msg += f"\n... 他{len(conflicts) - 10}件"
                 conflict_msg += "\n\nこれらのファイルを除外して追加しますか？"
-                
-                reply = QMessageBox.question(self, "重複ファイル", conflict_msg,
-                                           QMessageBox.Yes | QMessageBox.No,
-                                           QMessageBox.Yes)
+
+                reply = _centered_question(
+                    self,
+                    "重複ファイル",
+                    conflict_msg,
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.Yes,
+                )
                 
                 if reply != QMessageBox.Yes:
                     return
@@ -1143,9 +1185,11 @@ class FileSetTableWidget(QTableWidget):
     
     def delete_fileset(self, fileset_id: int):
         """ファイルセット削除"""
-        reply = QMessageBox.question(
-            self, "確認", "選択されたファイルセットを削除しますか？",
-            QMessageBox.Yes | QMessageBox.No
+        reply = _centered_question(
+            self,
+            "確認",
+            "選択されたファイルセットを削除しますか？",
+            QMessageBox.Yes | QMessageBox.No,
         )
         
         if reply == QMessageBox.Yes:
@@ -1867,6 +1911,13 @@ class BatchRegisterWidget(QWidget):
         
         # データセット存在検証キャッシュ（重複検証を防止）
         self._verified_datasets = set()
+
+        # NOTE: タブごとのウィンドウサイズは DataRegisterTabWidget 側で管理する。
+        # ここでトップレベルの geometry を保存/復元すると他タブへ影響が出るため、管理しない。
+        self._batch_window_active = False
+        self._batch_window_size_initialized = False
+        self._saved_top_level_geometry = None
+        self._saved_top_level_title = None
         
         # ベアラートークンを初期化時に設定
         self.bearer_token = None
@@ -1880,7 +1931,6 @@ class BatchRegisterWidget(QWidget):
         self.setup_ui()
         self.connect_signals()
         self.load_initial_data()
-        self.adjust_window_size()
         logger.debug("BatchRegisterWidget初期化完了")
 
         # テーマ変更シグナル接続（動的再スタイル対応）
@@ -1893,6 +1943,12 @@ class BatchRegisterWidget(QWidget):
         DatasetLaunchManager.instance().register_receiver(
             "data_register_batch", self._apply_dataset_launch_payload
         )
+
+    def showEvent(self, event):  # noqa: N802
+        return super().showEvent(event)
+
+    def hideEvent(self, event):  # noqa: N802
+        return super().hideEvent(event)
         
     def setup_ui(self):
         """UIセットアップ"""
@@ -2515,6 +2571,14 @@ class BatchRegisterWidget(QWidget):
         preview_btn.clicked.connect(self.preview_batch_register)
         button_layout.addWidget(preview_btn)
         
+        # 並列アップロード数（「一括登録実行」ボタンの左側）
+        self.parallel_upload_spinbox = QSpinBox(self)
+        self.parallel_upload_spinbox.setRange(1, 20)
+        self.parallel_upload_spinbox.setValue(5)
+        self.parallel_upload_spinbox.setToolTip("uploads へのアップロード並列数（既定: 5）")
+        parallel_label = QLabel("並列", self)
+        parallel_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
+
         execute_btn = QPushButton("一括登録実行")
         execute_btn.setStyleSheet(f"""
             QPushButton {{
@@ -2530,7 +2594,12 @@ class BatchRegisterWidget(QWidget):
             }}
         """)
         execute_btn.clicked.connect(self.execute_batch_register)
-        button_layout.addWidget(execute_btn)
+
+        execute_row = QHBoxLayout()
+        execute_row.addWidget(parallel_label)
+        execute_row.addWidget(self.parallel_upload_spinbox)
+        execute_row.addWidget(execute_btn)
+        button_layout.addLayout(execute_row)
         
         # 一時フォルダ削除ボタンを追加
         cleanup_btn = QPushButton("一時フォルダ削除")
@@ -2677,11 +2746,12 @@ class BatchRegisterWidget(QWidget):
     def cleanup_temp_folders(self):
         """一時フォルダを一括削除（UUID対応版）"""
         try:
-            reply = QMessageBox.question(
-                self, "確認", 
+            reply = _centered_question(
+                self,
+                "確認",
                 "本アプリで作成した一時フォルダをすべて削除しますか？\n\n"
                 "この操作は元に戻せません。",
-                QMessageBox.Yes | QMessageBox.No
+                QMessageBox.Yes | QMessageBox.No,
             )
             
             if reply != QMessageBox.Yes:
@@ -2911,11 +2981,12 @@ class BatchRegisterWidget(QWidget):
             if row < len(self.file_set_manager.file_sets):
                 fileset = self.file_set_manager.file_sets[row]
                 
-                reply = QMessageBox.question(
-                    self, "確認",
+                reply = _centered_question(
+                    self,
+                    "確認",
                     f"ファイルセット '{fileset.name}' を削除しますか？",
                     QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No
+                    QMessageBox.No,
                 )
                 
                 if reply == QMessageBox.Yes:
@@ -2974,11 +3045,12 @@ class BatchRegisterWidget(QWidget):
             # 現在の設定を取得
             settings = self.get_current_settings()
             
-            reply = QMessageBox.question(
-                self, "確認",
+            reply = _centered_question(
+                self,
+                "確認",
                 f"現在の設定をすべてのファイルセット（{len(self.file_set_manager.file_sets)}個）に適用しますか？",
                 QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
+                QMessageBox.No,
             )
             
             if reply == QMessageBox.Yes:
@@ -3019,11 +3091,12 @@ class BatchRegisterWidget(QWidget):
             # 現在の設定を取得
             settings = self.get_current_settings()
             
-            reply = QMessageBox.question(
-                self, "確認",
+            reply = _centered_question(
+                self,
+                "確認",
                 f"現在の設定をファイルセット '{target_name}' に適用しますか？",
                 QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
+                QMessageBox.No,
             )
             
             if reply == QMessageBox.Yes:
@@ -3396,10 +3469,13 @@ class BatchRegisterWidget(QWidget):
     
     def refresh_file_tree_with_warning(self):
         """ファイルツリー更新（警告付き）"""
-        reply = QMessageBox.question(self, "確認", 
+        reply = _centered_question(
+            self,
+            "確認",
             "ファイルツリーを再読み込みします。\n\n「含む」状態がリセットされますが、続行しますか？",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No)
+            QMessageBox.No,
+        )
         
         if reply == QMessageBox.Yes:
             self.refresh_file_tree()
@@ -3611,30 +3687,39 @@ class BatchRegisterWidget(QWidget):
     
     def auto_assign_all_as_one_with_confirm(self):
         """全体で1つのファイルセット作成（確認ダイアログ付き）"""
-        reply = QMessageBox.question(self, "確認", 
+        reply = _centered_question(
+            self,
+            "確認",
             "既存のファイルセットをリセットして、全体を1つのファイルセットとして作成します。\n\n続行しますか？",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No)
+            QMessageBox.No,
+        )
         
         if reply == QMessageBox.Yes:
             self.auto_assign_all_as_one()
     
     def auto_assign_by_top_dirs_with_confirm(self):
         """最上位フォルダごとにファイルセット作成（確認ダイアログ付き）"""
-        reply = QMessageBox.question(self, "確認", 
+        reply = _centered_question(
+            self,
+            "確認",
             "既存のファイルセットをリセットして、最上位フォルダごとにファイルセットを作成します。\n\n続行しますか？",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No)
+            QMessageBox.No,
+        )
         
         if reply == QMessageBox.Yes:
             self.auto_assign_by_top_dirs()
     
     def auto_assign_all_dirs_with_confirm(self):
         """全フォルダを個別ファイルセット作成（確認ダイアログ付き）"""
-        reply = QMessageBox.question(self, "確認", 
+        reply = _centered_question(
+            self,
+            "確認",
             "既存のファイルセットをリセットして、全フォルダを個別にファイルセットとして作成します。\n\n続行しますか？",
             QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No)
+            QMessageBox.No,
+        )
         
         if reply == QMessageBox.Yes:
             self.auto_assign_all_dirs()
@@ -3809,9 +3894,11 @@ class BatchRegisterWidget(QWidget):
     
     def clear_all_filesets(self):
         """全ファイルセット削除"""
-        reply = QMessageBox.question(
-            self, "確認", "全てのファイルセットを削除しますか？",
-            QMessageBox.Yes | QMessageBox.No
+        reply = _centered_question(
+            self,
+            "確認",
+            "全てのファイルセットを削除しますか？",
+            QMessageBox.Yes | QMessageBox.No,
         )
         
         if reply == QMessageBox.Yes:
@@ -4056,11 +4143,11 @@ class BatchRegisterWidget(QWidget):
             QMessageBox.information(self, "情報", "設定を保存するファイルセットを選択してください")
             return
 
-        reply = QMessageBox.question(
+        reply = _centered_question(
             self,
             "確認",
             f"ファイルセット「{selected_fileset.name}」を更新します。よろしいですか？",
-            QMessageBox.Yes | QMessageBox.No
+            QMessageBox.Yes | QMessageBox.No,
         )
         if reply != QMessageBox.Yes:
             return
@@ -4307,7 +4394,19 @@ class BatchRegisterWidget(QWidget):
                     allowed_exts = getattr(self.fileset_table, 'required_exts', []) or []
             except Exception:
                 allowed_exts = []
-            dialog = BatchRegisterPreviewDialog(self.file_set_manager.file_sets, self, bearer_token=None, allowed_exts=allowed_exts)
+            parallel_workers = 5
+            try:
+                parallel_workers = int(getattr(self, 'parallel_upload_spinbox', None).value())
+            except Exception:
+                parallel_workers = 5
+
+            dialog = BatchRegisterPreviewDialog(
+                self.file_set_manager.file_sets,
+                self,
+                bearer_token=None,
+                allowed_exts=allowed_exts,
+                parallel_upload_workers=parallel_workers,
+            )
             result = dialog.exec()
             
             if result == QDialog.Accepted:
@@ -4340,17 +4439,40 @@ class BatchRegisterWidget(QWidget):
             QMessageBox.warning(self, "検証エラー", error_text)
             return
         
-        # 確認ダイアログ
-        reply = QMessageBox.question(
-            self, "確認", 
-            f"{len(self.file_set_manager.file_sets)}個のファイルセットを一括登録しますか？\n\n"
-            "この処理では以下が実行されます：\n"
-            "1. 各ファイルセットのファイル一括アップロード\n"
-            "2. 各ファイルセットのデータエントリー登録\n"
-            "3. 試料情報の保存\n\n"
-            "処理には時間がかかる場合があります。",
-            QMessageBox.Yes | QMessageBox.No
-        )
+        # 確認ダイアログ（親ウィンドウ中央に表示）
+        try:
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Question)
+            box.setWindowTitle("確認")
+            box.setText(
+                f"{len(self.file_set_manager.file_sets)}個のファイルセットを一括登録しますか？\n\n"
+                "この処理では以下が実行されます：\n"
+                "1. 各ファイルセットのファイル一括アップロード\n"
+                "2. 各ファイルセットのデータエントリー登録\n"
+                "3. 試料情報の保存\n\n"
+                "処理には時間がかかる場合があります。"
+            )
+            box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            try:
+                from ..core.data_register_logic import _center_on_parent
+
+                _center_on_parent(box, self.window())
+            except Exception:
+                pass
+            reply = box.exec()
+        except Exception:
+            # フォールバック
+            reply = QMessageBox.question(
+                self,
+                "確認",
+                f"{len(self.file_set_manager.file_sets)}個のファイルセットを一括登録しますか？\n\n"
+                "この処理では以下が実行されます：\n"
+                "1. 各ファイルセットのファイル一括アップロード\n"
+                "2. 各ファイルセットのデータエントリー登録\n"
+                "3. 試料情報の保存\n\n"
+                "処理には時間がかかる場合があります。",
+                QMessageBox.Yes | QMessageBox.No,
+            )
         
         if reply == QMessageBox.Yes:
             # 一括登録実行（複数ファイルセット一括処理）
@@ -4371,11 +4493,18 @@ class BatchRegisterWidget(QWidget):
                     allowed_exts = getattr(self.fileset_table, 'required_exts', []) or []
             except Exception:
                 allowed_exts = []
+            parallel_workers = 5
+            try:
+                parallel_workers = int(getattr(self, 'parallel_upload_spinbox', None).value())
+            except Exception:
+                parallel_workers = 5
+
             batch_dialog = BatchRegisterPreviewDialog(
                 file_sets=self.file_set_manager.file_sets,
                 parent=self,
                 bearer_token=None,  # v1.18.4: 自動選択に変更
-                allowed_exts=allowed_exts
+                allowed_exts=allowed_exts,
+                parallel_upload_workers=parallel_workers,
             )
             
             # プログレスダイアログの表示設定
@@ -4401,13 +4530,40 @@ class BatchRegisterWidget(QWidget):
     
     def on_batch_register_finished(self, result: BatchRegisterResult):
         """一括登録完了処理"""
+        def _centered_box(icon, title: str, text: str) -> None:
+            try:
+                box = QMessageBox(self)
+                box.setIcon(icon)
+                box.setWindowTitle(title)
+                box.setText(text)
+                box.setStandardButtons(QMessageBox.Ok)
+                try:
+                    from ..core.data_register_logic import _center_on_parent
+
+                    _center_on_parent(box, self.window())
+                except Exception:
+                    pass
+                box.exec()
+            except Exception:
+                # フォールバック
+                try:
+                    if icon == QMessageBox.Information:
+                        QMessageBox.information(self, title, text)
+                    elif icon == QMessageBox.Warning:
+                        QMessageBox.warning(self, title, text)
+                    else:
+                        QMessageBox.critical(self, title, text)
+                except Exception:
+                    pass
+
         # 結果表示
         if result.error_count == 0:
-            QMessageBox.information(
-                self, "完了", 
+            _centered_box(
+                QMessageBox.Information,
+                "完了",
                 f"一括登録が完了しました！\n\n"
                 f"成功: {result.success_count}個\n"
-                f"処理時間: {result.duration:.1f}秒"
+                f"処理時間: {result.duration:.1f}秒",
             )
         else:
             error_text = f"一括登録が完了しました。\n\n"
@@ -4421,7 +4577,7 @@ class BatchRegisterWidget(QWidget):
             if len(result.errors) > 5:
                 error_text += f"... および他{len(result.errors)-5}個のエラー"
             
-            QMessageBox.warning(self, "完了（一部エラー）", error_text)
+            _centered_box(QMessageBox.Warning, "完了（一部エラー）", error_text)
         
         # ファイルセット一覧をリセット（成功したもののみ残す）
         if self.file_set_manager:
@@ -4674,8 +4830,17 @@ class BatchRegisterWidget(QWidget):
         return True
     
     def adjust_window_size(self):
-        """一括登録用にウィンドウサイズを調整（通常登録と同等機能）"""
+        """一括登録用にウィンドウサイズを調整。
+
+        - 表示中のタブに限って適用（他タブへ影響させない）
+        - 初回のみ「画面幅の80%以上」へ拡大（ユーザー操作で可変）
+        """
         try:
+            if not getattr(self, "_batch_window_active", False):
+                return
+            if getattr(self, "_batch_window_size_initialized", False):
+                return
+
             # 画面サイズを取得
             screen = QApplication.primaryScreen()
             if not screen:
@@ -4685,66 +4850,31 @@ class BatchRegisterWidget(QWidget):
             screen_width = screen_geometry.width()
             screen_height = screen_geometry.height()
             
-            # 一括登録用サイズ設定（通常登録データ登録タブと同等）
-            # 横幅：画面の90%または最低1600px（通常登録と同等設定）
-            target_width = max(int(screen_width * 0.90), 1600)
-            # 高さ：画面の85%または最低900px（通常登録と同等設定）
-            target_height = max(int(screen_height * 0.85), 900)
-            
-            # 画面サイズを超えないよう制限（通常登録と同等）
-            target_width = min(target_width, screen_width - 40)
-            target_height = min(target_height, screen_height - 80)
+            # 初回表示時の目標: 画面幅の80%以上（可変）
+            target_width = int(screen_width * 0.80)
+            target_width = min(target_width, max(0, screen_width - 40))
             
             logger.debug("画面サイズ: %sx%s", screen_width, screen_height)
-            logger.debug("目標サイズ: %sx%s", target_width, target_height)
+            logger.debug("目標幅(80%%): %s", target_width)
             
             # 親ウィンドウを取得して調整
             top_level = self.window()
             if top_level and top_level != self:
-                logger.info("ウィンドウサイズ調整開始: 現在=%s, 目標=%sx%s", top_level.size(), target_width, target_height)
-                
-                # 既存の固定サイズ設定をクリア（通常登録と同等処理）
-                try:
-                    top_level.setFixedSize(16777215, 16777215)  # Qt最大値でクリア
-                except Exception:
-                    pass
-                
-                # サイズ制限を適切に設定（通常登録と同等）
-                top_level.setMinimumSize(1400, 800)
-                top_level.setMaximumSize(screen_width, screen_height)
-                
                 # 現在のサイズを確認
                 current_size = top_level.size()
                 current_width = current_size.width()
                 current_height = current_size.height()
-                
-                # ウィンドウサイズを調整
-                if (current_width != target_width or current_height != target_height):
-                    logger.debug("リサイズ実行中: %sx%s → %sx%s", current_width, current_height, target_width, target_height)
-                    top_level.resize(target_width, target_height)
-                    
-                    # 画面中央に配置
-                    x = max(0, (screen_width - target_width) // 2)
-                    y = max(0, (screen_height - target_height) // 2)
-                    top_level.move(x, y)
-                    
-                    # UI更新を強制
-                    top_level.update()
-                    QApplication.processEvents()
-                    
-                    # 結果確認
-                    new_size = top_level.size()
-                    logger.info("ウィンドウサイズ調整完了: 結果=%sx%s", new_size.width(), new_size.height())
-                else:
-                    logger.info("ウィンドウサイズは既に適切です: %sx%s", current_width, current_height)
-                
-                # フレキシブルなサイズ設定（通常登録と同等）
-                top_level.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-                
-                # ウィンドウタイトルを更新して一括登録モードを明示
-                if "一括登録" not in top_level.windowTitle():
-                    original_title = top_level.windowTitle()
-                    top_level.setWindowTitle(f"{original_title} - 一括登録モード")
+
+                # 幅が足りない場合のみ拡大（縮小はしない）
+                if current_width < target_width and target_width > 0:
+                    logger.info("ウィンドウ幅調整: %s → %s", current_width, target_width)
+                    try:
+                        top_level.resize(target_width, current_height)
+                    except Exception:
+                        pass
+
+                # 初回調整完了（以後のボタン操作等では触らない）
+                self._batch_window_size_initialized = True
                 
         except Exception as e:
             logger.warning("ウィンドウサイズ調整に失敗: %s", e)
