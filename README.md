@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.4.20** のバイナリ配布およびドキュメント公開用リポジトリです。  
+**ARIM事業 RDE→ARIMデータポータル　支援ツール v2.4.21** のバイナリ配布およびドキュメント公開用リポジトリです。  
 本ツールは、文部科学省ARIM事業の研究データ共有サイト「RDE」の操作補助とデータポータルへの登録支援を目的とした Windows デスクトップアプリケーションです。Web操作の煩雑さを軽減し、データの一括取得・登録・AI支援機能を提供します。
 
 > [!NOTE]
@@ -22,13 +22,12 @@
 
 ## 🚀 最新情報
 
-**2026-01-14 最新リリース**: バージョン2.4.20（バージョン表記の統一と配布物/更新情報の整合）
+**2026-01-15 最新リリース**: バージョン2.4.21（配布物/更新情報/チェックサム/README の整合）
 
-### v2.4.20 の主な改善
+### v2.4.21 の主な変更点
 
-- **表記統一**: アプリ/README/VERSION/latest.json/配布物のバージョン表記を v2.4.20 に統一。
-- **配布整合**: 更新判定（`latest.json`）と改変チェック（`sha256`/`checksums.sha256`）を v2.4.20 に整合。
-- **リリース準備**: pre-build の統合テスト実施と、配布物の更新。
+- **配布整合**: 更新判定（`latest.json`）と改変チェック（`checksums.sha256`）を v2.4.21 に整合。
+- **導線更新**: README の最新版表記・ダウンロード導線を v2.4.21 に更新。
 
 > ℹ️ リスティングタブは `output/arim-site/{equipment|reports}_latest.json` など最新エクスポートを前提とします。再読込前に各タブで「JSON再取得」を実行し、キャッシュディレクトリ（`output/arim-site/reports/cache/`）の残量にも留意してください。
 
@@ -45,7 +44,7 @@
 3. デスクトップに作成されたショートカットからアプリを起動します。
 4. 初回起動時、必要なフォルダ（`input/`, `output/`）が自動的に作成されます。
 
-> ✅ 現在のファイル名は `arim_rde_tool_setup.2.4.20.exe` です（改変チェックは `latest.json` の `sha256` または `checksums.sha256` を参照）。
+> ✅ 現在のファイル名は `arim_rde_tool_setup.2.4.21.exe` です（改変チェックは `latest.json` の `sha256` または `checksums.sha256` を参照）。
 #### 最新版バイナリへの直接リンク
 
 最新版: https://github.com/MNagasako/misc-rde-tool-public/releases/latest
@@ -131,13 +130,13 @@
 * **[ドキュメント一覧マップ](docs/DOCUMENT_MAP.md)**
 * **[第三者ライセンス通知](THIRD_PARTY_NOTICES/)**
 
-* **[リリースノート v2.4.20](docs/RELEASE_NOTES_v2.4.20.md)**
+* **[リリースノート v2.4.21](docs/RELEASE_NOTES_v2.4.21.md)**
 
 ---
 
 ## 🔢 バージョン情報
 
-現在配布バージョン: `v2.4.20` （`VERSION.txt` に基づく）
+現在配布バージョン: `v2.4.21` （`VERSION.txt` に基づく）
 
 更新履歴の詳細は `docs/CHANGELOG.md` を参照してください。
 
