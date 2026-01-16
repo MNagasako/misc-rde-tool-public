@@ -935,6 +935,13 @@ class UIController(UIControllerCore):
             lambda: self.switch_mode("data_register")
         )
 
+        self.menu_buttons['sample_dedup'] = self.create_auto_resize_button(
+            '試料', button_width, button_height, base_inactive_style
+        )
+        self.menu_buttons['sample_dedup'].clicked.connect(
+            lambda: self.switch_mode("sample_dedup")
+        )
+
         self.menu_buttons['data_fetch2'] = self.create_auto_resize_button(
             'データ取得２', button_width, button_height, base_inactive_style
         )
@@ -2217,6 +2224,15 @@ class UIController(UIControllerCore):
                     traceback.print_exc()
                     self.data_register_widget = self._create_widget("データ登録")
             return self.data_register_widget
+        elif mode == "sample_dedup":
+            if not hasattr(self, "sample_dedup_widget") or self.sample_dedup_widget is None:
+                try:
+                    from classes.subgroup.ui.sample_dedup_tab_widget import create_sample_dedup_tab_widget
+                    self.sample_dedup_widget = create_sample_dedup_tab_widget(self.parent)
+                except Exception as e:
+                    logger.error("試料ウィジェット作成エラー: %s", e)
+                    self.sample_dedup_widget = self._create_widget("試料")
+            return self.sample_dedup_widget
         elif mode == "request_analyzer":
             return self._create_request_analyzer_widget()
         elif mode == "settings":

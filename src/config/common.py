@@ -538,12 +538,40 @@ def get_user_config_dir():
 
 import json as _json
 from typing import Optional, Dict
+from urllib.parse import urlparse
 
 # RDEホスト定義
 RDE_HOSTS = {
     'rde': 'rde.nims.go.jp',
     'rde-material': 'rde-material.nims.go.jp'
 }
+
+
+_TOKEN_HOST_ALIASES: dict[str, list[str]] = {
+    # Material UI / API は同一のAccessTokenで動作する前提のため相互にフォールバック
+    "rde-material.nims.go.jp": ["rde-material-api.nims.go.jp"],
+    "rde-material-api.nims.go.jp": ["rde-material.nims.go.jp"],
+}
+
+
+def _normalize_token_host(host: str) -> str:
+    """Host/URLの入力ゆれを吸収し、トークン保存/検索用のホスト名に正規化する。"""
+    raw = str(host or "").strip()
+    if not raw:
+        return ""
+    try:
+        # URLが渡された場合はnetlocを採用
+        if "://" in raw:
+            parsed = urlparse(raw)
+            raw = parsed.netloc or parsed.path
+    except Exception:
+        pass
+
+    raw = raw.split("/")[0].strip()
+    # port除去（例: host:443）
+    if ":" in raw and raw.count(":") == 1:
+        raw = raw.split(":", 1)[0]
+    return raw.lower()
 
 def save_bearer_token(token, host: str = 'rde.nims.go.jp') -> bool:
     """
@@ -562,6 +590,11 @@ def save_bearer_token(token, host: str = 'rde.nims.go.jp') -> bool:
     try:
         import logging
         logger = logging.getLogger(__name__)
+
+        normalized_host = _normalize_token_host(host)
+        if not normalized_host:
+            logger.error("Bearer Token保存エラー: hostが空です")
+            return False
         
         # TokenManager形式（辞書）の場合はaccess_tokenを抽出
         if isinstance(token, dict):
@@ -573,17 +606,28 @@ def save_bearer_token(token, host: str = 'rde.nims.go.jp') -> bool:
         
         # 既存のトークンを読み込み
         logger.debug(f"[TOKEN-SAVE] 既存トークンを読み込み: {BEARER_TOKENS_FILE}")
-        logger.debug("保存開始 - host=%s, token=%s...", host, token_preview)
+        logger.debug("保存開始 - host=%s, token=%s...", normalized_host, token_preview)
         tokens = load_all_bearer_tokens()
         logger.debug("既存トークン数: %s, ホスト: %s", len(tokens), list(tokens.keys()))
         
         # 新しいトークンを追加
-        tokens[host] = token
-        logger.info(f"[TOKEN-SAVE] トークンを追加: host={host}, token={token_preview}...")
+        tokens[normalized_host] = token
+
+        # Material UI/API などの派生ホストへも同一トークンを保存（既存があれば上書きしない）
+        for alias in _TOKEN_HOST_ALIASES.get(normalized_host, []):
+            if alias not in tokens:
+                tokens[alias] = token
+
+        logger.info(f"[TOKEN-SAVE] トークンを追加: host={normalized_host}, token={token_preview}...")
         logger.debug("追加後トークン数: %s, ホスト: %s", len(tokens), list(tokens.keys()))
         
         # JSON形式で保存
         logger.debug(f"[TOKEN-SAVE] JSON形式で保存: {BEARER_TOKENS_FILE}")
+        try:
+            ensure_directory_exists(HIDDEN_DIR)
+        except Exception:
+            pass
+
         with open(BEARER_TOKENS_FILE, 'w', encoding='utf-8') as f:
             _json.dump(tokens, f, indent=2, ensure_ascii=False)
         logger.info(f"[TOKEN-SAVE] JSON保存完了: {len(tokens)}個のトークン")
@@ -623,9 +667,13 @@ def load_bearer_token(host: str = 'rde.nims.go.jp') -> Optional[str]:
     try:
         import logging
         logger = logging.getLogger(__name__)
+
+        normalized_host = _normalize_token_host(host)
+        if not normalized_host:
+            return None
         
-        logger.debug("トークン読み込み開始 - host=%s", host)
-        logger.debug(f"[TOKEN-LOAD] トークン読み込み開始: host={host}")
+        logger.debug("トークン読み込み開始 - host=%s", normalized_host)
+        logger.debug(f"[TOKEN-LOAD] トークン読み込み開始: host={normalized_host}")
         
         # 新形式のJSONファイルから読み込み
         if os.path.exists(BEARER_TOKENS_FILE):
@@ -634,35 +682,51 @@ def load_bearer_token(host: str = 'rde.nims.go.jp') -> Optional[str]:
             with open(BEARER_TOKENS_FILE, 'r', encoding='utf-8') as f:
                 tokens = _json.load(f)
                 logger.debug("ファイル内のホスト数: %s, ホスト: %s", len(tokens), list(tokens.keys()))
-                if host in tokens:
-                    token_data = tokens[host]
+                token_key = None
+                if normalized_host in tokens:
+                    token_key = normalized_host
+                else:
+                    # Material UI/API などの派生ホストは相互にフォールバック
+                    for alias in _TOKEN_HOST_ALIASES.get(normalized_host, []):
+                        if alias in tokens:
+                            token_key = alias
+                            break
+
+                if token_key:
+                    token_data = tokens[token_key]
                     
                     # TokenManager形式（辞書）の場合はaccess_tokenを抽出
                     if isinstance(token_data, dict):
                         access_token = token_data.get('access_token', '')
                         if access_token:
-                            logger.info(f"[TOKEN-LOAD] トークン読み込み成功 ({host}): {access_token[:20]}... (TokenManager形式)")
-                            logger.debug("トークン取得成功 (TokenManager形式) - host=%s, token=%s...", host, access_token[:20])
+                            if token_key == normalized_host:
+                                logger.info(f"[TOKEN-LOAD] トークン読み込み成功 ({normalized_host}): {access_token[:20]}... (TokenManager形式)")
+                            else:
+                                logger.info(f"[TOKEN-LOAD] トークン読み込み成功 ({normalized_host} <- {token_key}): {access_token[:20]}... (TokenManager形式)")
+                            logger.debug("トークン取得成功 (TokenManager形式) - host=%s, token=%s...", normalized_host, access_token[:20])
                             return access_token
                         else:
                             logger.warning(f"[TOKEN-LOAD] TokenManager形式だがaccess_tokenが空 ({host})")
                             logger.debug("access_token欠落")
                     else:
                         # 従来形式（文字列）
-                        logger.info(f"[TOKEN-LOAD] トークン読み込み成功 ({host}): {token_data[:20]}... (従来形式)")
-                        logger.debug("トークン取得成功 (従来形式) - host=%s, token=%s...", host, token_data[:20])
+                        if token_key == normalized_host:
+                            logger.info(f"[TOKEN-LOAD] トークン読み込み成功 ({normalized_host}): {token_data[:20]}... (従来形式)")
+                        else:
+                            logger.info(f"[TOKEN-LOAD] トークン読み込み成功 ({normalized_host} <- {token_key}): {token_data[:20]}... (従来形式)")
+                        logger.debug("トークン取得成功 (従来形式) - host=%s, token=%s...", normalized_host, token_data[:20])
                         return token_data
                 else:
-                    logger.warning(f"[TOKEN-LOAD] ホスト {host} のトークンが見つかりません")
-                    logger.debug("指定ホストのトークンなし - host=%s", host)
+                    logger.warning(f"[TOKEN-LOAD] ホスト {normalized_host} のトークンが見つかりません")
+                    logger.debug("指定ホストのトークンなし - host=%s", normalized_host)
         else:
             logger.debug(f"[TOKEN-LOAD] JSON形式トークンファイルが存在しません: {BEARER_TOKENS_FILE}")
             logger.debug("JSONファイルが存在しません")
         
         # v2.0.3: レガシーファイル（bearer_token.txt）からの読み込みは廃止
         
-        logger.warning(f"[TOKEN-LOAD] トークンが見つかりません ({host})")
-        logger.debug("トークンが見つかりませんでした - host=%s", host)
+        logger.warning(f"[TOKEN-LOAD] トークンが見つかりません ({normalized_host})")
+        logger.debug("トークンが見つかりませんでした - host=%s", normalized_host)
         return None
     except Exception as e:
         logger.debug("Bearer Token読み込みエラー (%s): %s", host, e)
@@ -753,14 +817,26 @@ def get_bearer_token_for_url(url: str) -> Optional[str]:
     
     for host in material_hosts:
         if host in url:
-            token = load_bearer_token('rde-material.nims.go.jp')
+            # Prefer the most specific host token first.
+            token = load_bearer_token(host)
             if token:
                 logger.debug(f"[TOKEN-SELECT] Material token selected for: {url[:50]}...")
                 logger.debug("Material token for %s", host)
                 return token
-            else:
-                logger.warning(f"[TOKEN-SELECT] Material token not found, falling back to RDE token")
-                logger.debug("Material token not found, using RDE token")
+
+            # Backward compatibility: allow using the UI-host token for API-host URLs (and vice-versa).
+            fallback_hosts = [h for h in material_hosts if h != host]
+            for fallback_host in fallback_hosts:
+                token = load_bearer_token(fallback_host)
+                if token:
+                    logger.debug(f"[TOKEN-SELECT] Material token selected (fallback) for: {url[:50]}...")
+                    logger.debug("Material token for %s (fallback)", fallback_host)
+                    return token
+
+            # 重要: Material APIへRDEトークンを送ると insufficient_scope になり得るため、
+            # ここではRDEトークンへフォールバックしない。
+            logger.warning("[TOKEN-SELECT] Material token not found for Material host. Returning None (no fallback).")
+            return None
     
     # 2. rde.nims.go.jp関連の派生ホスト（RDEメイントークン）
     # 注意: rde-entry-api-arim, rde-instrument-apiもRDEメイントークンを使用

@@ -83,7 +83,11 @@ class ThemedCheckboxDelegate(QStyledItemDelegate):
             except Exception:
                 cb_rect = rect
 
-            border_color = get_qcolor(ThemeKey.BORDER_DEFAULT)
+            # Match app-wide checkbox styling (see global_styles.py)
+            # - Unchecked: transparent fill + visible border
+            # - Checked: filled + border + checkmark
+            border_color = get_qcolor(ThemeKey.INPUT_BORDER)
+            checked_border = get_qcolor(ThemeKey.BUTTON_PRIMARY_BORDER)
             checked_bg = get_qcolor(ThemeKey.BUTTON_PRIMARY_BACKGROUND)
             check_color = get_qcolor(ThemeKey.BUTTON_PRIMARY_TEXT)
 
@@ -97,7 +101,7 @@ class ThemedCheckboxDelegate(QStyledItemDelegate):
 
             painter.setRenderHint(QPainter.Antialiasing, True)
 
-            pen = QPen(border_color)
+            pen = QPen(checked_border if is_checked else border_color)
             pen.setWidth(1)
             painter.setPen(pen)
 

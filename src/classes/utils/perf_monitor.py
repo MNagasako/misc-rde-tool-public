@@ -38,6 +38,22 @@ class PerfMonitor:
     _events: List[PerfEvent] = []
 
     @classmethod
+    def _log(cls, logger: logging.Logger, level: int, msg: str, *args: Any) -> None:
+        # NOTE: This app often uses LogManager-managed loggers (propagate=False).
+        # Under pytest, caplog captures via the root logger handler; if propagate=False,
+        # records won't reach caplog and tests become order-dependent.
+        if os.environ.get("PYTEST_CURRENT_TEST") and getattr(logger, "propagate", True) is False:
+            original_propagate = logger.propagate
+            logger.propagate = True
+            try:
+                logger.log(level, msg, *args)
+            finally:
+                logger.propagate = original_propagate
+            return
+
+        logger.log(level, msg, *args)
+
+    @classmethod
     def enable(cls, enabled: bool = True) -> None:
         cls._enabled = bool(enabled)
 
@@ -68,7 +84,7 @@ class PerfMonitor:
         cls._last_mark = now
         payload = {"since_start_sec": round(since_start, 6), "since_last_sec": round(since_last, 6)}
         payload.update(extra)
-        logger.log(level, "[PERF-MARK] %s %s", label, payload)
+        cls._log(logger, level, "[PERF-MARK] %s %s", label, payload)
 
     @classmethod
     @contextmanager
@@ -90,7 +106,7 @@ class PerfMonitor:
         finally:
             dt = time.perf_counter() - t0
             cls._record(name, dt, extra)
-            logger.log(level, "[PERF] %s: %.3f sec %s", name, dt, extra if extra else "")
+            cls._log(logger, level, "[PERF] %s: %.3f sec %s", name, dt, extra if extra else "")
 
     @classmethod
     def start(cls, key: str, *, logger: Optional[logging.Logger] = None, **extra: Any) -> None:
@@ -117,7 +133,7 @@ class PerfMonitor:
         merged = dict(start_extra)
         merged.update(extra)
         cls._record(key, dt, merged)
-        logger.log(level, "[PERF] %s: %.3f sec %s", key, dt, merged if merged else "")
+        cls._log(logger, level, "[PERF] %s: %.3f sec %s", key, dt, merged if merged else "")
         return dt
 
     @classmethod
@@ -141,9 +157,17 @@ class PerfMonitor:
 
         events_sorted = sorted(events, key=lambda e: e.duration_sec, reverse=True)
         total = sum(e.duration_sec for e in events)
-        logger.info("[PERF-SUMMARY] events=%s total_recorded_sec=%.3f", len(events), total)
+        cls._log(logger, logging.INFO, "[PERF-SUMMARY] events=%s total_recorded_sec=%.3f", len(events), total)
         for e in events_sorted[: max(1, int(top))]:
-            logger.info("[PERF-TOP] %s: %.3f sec thread=%s extra=%s", e.name, e.duration_sec, e.thread, e.extra)
+            cls._log(
+                logger,
+                logging.INFO,
+                "[PERF-TOP] %s: %.3f sec thread=%s extra=%s",
+                e.name,
+                e.duration_sec,
+                e.thread,
+                e.extra,
+            )
 
 
 def _atexit_dump() -> None:

@@ -135,6 +135,7 @@ _MENU_GROUP_BY_MODE: dict[str, int] = {
     "subgroup_create": 2,
     "dataset_open": 2,
     "data_register": 2,
+    "sample_dedup": 2,
     "data_fetch2": 2,
     "data_fetch": 2,  # optional/hidden by default
     # Group 3 (RDE prep)

@@ -25,6 +25,7 @@ import math
 from qt_compat.widgets import QWidget, QVBoxLayout, QLabel, QTabWidget, QScrollArea, QApplication
 from qt_compat.widgets import QHBoxLayout, QFormLayout, QLineEdit, QTextEdit, QPushButton
 from qt_compat.widgets import QButtonGroup, QComboBox, QRadioButton, QSizePolicy
+from qt_compat.widgets import QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
 from qt_compat.core import QDate, Qt
 from classes.dataset.core.dataset_open_logic import create_group_select_widget
 from classes.theme.theme_keys import ThemeKey
@@ -39,6 +40,28 @@ logger = logging.getLogger(__name__)
 
 def _parse_tags_text(text: str) -> list[str]:
     return [tag.strip() for tag in (text or "").split(",") if tag.strip()]
+
+
+def _sanitize_dataset_name_part(text: str) -> str:
+    text = (text or "").strip()
+    if not text:
+        return ""
+    for ch in ["\n", "\r", "\t"]:
+        text = text.replace(ch, " ")
+    # Replace common separators/spaces with underscore
+    for ch in [" ", "　", "/", "\\", ":", "|", "(", ")", "[", "]"]:
+        text = text.replace(ch, "_")
+    while "__" in text:
+        text = text.replace("__", "_")
+    return text.strip("_")
+
+
+def _contains_case_insensitive(haystack: str, needle: str) -> bool:
+    h = (haystack or "").lower()
+    n = (needle or "").lower().strip()
+    if not n:
+        return True
+    return n in h
 
 
 def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
@@ -161,6 +184,100 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
                 return json.load(f)
         except Exception:
             return {}
+
+    def _find_template_meta(template_id: str) -> dict | None:
+        if not template_id:
+            return None
+        for t in (template_list or []):
+            if isinstance(t, dict) and str(t.get("id") or "") == str(template_id):
+                return t
+        return None
+
+    def _extract_equipment_id_from_template(template_id: str, template_meta: dict | None, display_text: str) -> str:
+        try:
+            import re
+
+            def _find_id(s: str) -> str | None:
+                if not s:
+                    return None
+                # Prefer bracketed localId: [TU-507]
+                m = re.search(r"\[\s*([A-Za-z]{1,3}-[A-Za-z0-9-]{2,})\s*\]", s)
+                if m:
+                    return m.group(1)
+                # Generic equipment id patterns (TU-507, TU-FDL-215)
+                m = re.search(r"\b([A-Za-z]{1,3}-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)\b", s)
+                if m:
+                    return m.group(1)
+                return None
+
+            # instruments labels are the most reliable
+            insts = (template_meta or {}).get("instruments") if isinstance(template_meta, dict) else None
+            if isinstance(insts, list):
+                for inst_label in insts:
+                    eq = _find_id(str(inst_label or ""))
+                    if eq:
+                        return eq
+            eq = _find_id(str(template_id or ""))
+            if eq:
+                return eq
+            eq = _find_id(str(display_text or ""))
+            if eq:
+                return eq
+        except Exception:
+            pass
+        return ""
+
+    def _extract_registration_name_from_template(template_meta: dict | None, display_text: str) -> str:
+        # Prefer first instrument's name portion (before [localId])
+        try:
+            insts = (template_meta or {}).get("instruments") if isinstance(template_meta, dict) else None
+            if isinstance(insts, list) and insts:
+                first = str(insts[0] or "")
+                if "[" in first:
+                    first = first.split("[", 1)[0]
+                return first.strip()
+        except Exception:
+            pass
+        # Fallback: try parse from display text "... | <inst_label>"
+        try:
+            if "|" in (display_text or ""):
+                tail = display_text.split("|", 1)[1].strip()
+                if "[" in tail:
+                    tail = tail.split("[", 1)[0]
+                if tail:
+                    # if multiple instruments, take first
+                    if "," in tail:
+                        tail = tail.split(",", 1)[0].strip()
+                    return tail.strip()
+        except Exception:
+            pass
+        return ""
+
+    def _extract_individual_name_from_template(template_meta: dict | None, display_text: str) -> str:
+        # Heuristic: datasetTemplate nameJa is closest to an "individual" label in this context.
+        try:
+            name_ja = (template_meta or {}).get("nameJa") if isinstance(template_meta, dict) else ""
+            name_ja = str(name_ja or "").strip()
+            if name_ja:
+                return name_ja
+        except Exception:
+            pass
+        # Fallback: strip "(TYPE)" part from display label
+        try:
+            text = str(display_text or "").strip()
+            if " (" in text:
+                text = text.split(" (", 1)[0].strip()
+            return text
+        except Exception:
+            return ""
+
+    def _get_trash_icon():
+        try:
+            from PySide6.QtWidgets import QStyle  # type: ignore
+
+            return container.style().standardIcon(QStyle.StandardPixmap.SP_TrashIcon)
+        except Exception:
+            return None
 
     _all_dataset_ids_ref: dict[str, set[str]] = {"ids": set()}
 
@@ -641,6 +758,531 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     insert_row = _find_row_for_widget(open_btn)
     if insert_row < 0:
         insert_row = form_layout.rowCount()
+
+    # --- Open mode (通常 / まとめて開設) ---
+    open_mode_widget = QWidget(container)
+    open_mode_widget.setObjectName("dataset_create2_open_mode")
+    open_mode_layout = QHBoxLayout(open_mode_widget)
+    open_mode_layout.setContentsMargins(0, 0, 0, 0)
+    open_mode_layout.setSpacing(10)
+    open_mode_normal_radio = QRadioButton("通常", open_mode_widget)
+    open_mode_normal_radio.setObjectName("dataset_create2_open_mode_normal_radio")
+    open_mode_bulk_radio = QRadioButton("複数設備まとめて", open_mode_widget)
+    open_mode_bulk_radio.setObjectName("dataset_create2_open_mode_bulk_radio")
+    open_mode_normal_radio.setChecked(True)
+    open_mode_group = QButtonGroup(open_mode_widget)
+    open_mode_group.addButton(open_mode_normal_radio)
+    open_mode_group.addButton(open_mode_bulk_radio)
+    open_mode_layout.addWidget(open_mode_normal_radio)
+    open_mode_layout.addWidget(open_mode_bulk_radio)
+    open_mode_layout.addStretch(1)
+
+    # Insert after template combo row for better UX
+    try:
+        template_row = _find_row_for_widget(template_combo)
+        if template_row >= 0:
+            form_layout.insertRow(template_row + 1, QLabel("開設タイプ:"), open_mode_widget)
+        else:
+            form_layout.insertRow(insert_row, QLabel("開設タイプ:"), open_mode_widget)
+            insert_row += 1
+    except Exception:
+        form_layout.insertRow(insert_row, QLabel("開設タイプ:"), open_mode_widget)
+        insert_row += 1
+
+    # --- Bulk template table & presets ---
+    bulk_panel = QWidget(container)
+    bulk_panel.setObjectName("dataset_create2_bulk_panel")
+    bulk_layout = QVBoxLayout(bulk_panel)
+    bulk_layout.setContentsMargins(0, 0, 0, 0)
+    bulk_layout.setSpacing(6)
+
+    bulk_help = QLabel("複数設備まとめて: テンプレートを複数追加し、テンプレごとにデータセット名を設定して開設します。", bulk_panel)
+    bulk_help.setWordWrap(True)
+    bulk_layout.addWidget(bulk_help)
+
+    bulk_controls = QWidget(bulk_panel)
+    bulk_controls_layout = QHBoxLayout(bulk_controls)
+    bulk_controls_layout.setContentsMargins(0, 0, 0, 0)
+    bulk_controls_layout.setSpacing(8)
+    add_template_btn = QPushButton("選択テンプレを追加", bulk_controls)
+    add_template_btn.setObjectName("dataset_create2_bulk_add_template_button")
+    select_from_list_btn = QPushButton("一覧から選択", bulk_controls)
+    select_from_list_btn.setObjectName("dataset_create2_bulk_select_from_list_button")
+    clear_btn = QPushButton("クリア", bulk_controls)
+    clear_btn.setObjectName("dataset_create2_bulk_clear_button")
+    bulk_controls_layout.addWidget(add_template_btn)
+    bulk_controls_layout.addWidget(select_from_list_btn)
+    bulk_controls_layout.addWidget(clear_btn)
+    bulk_controls_layout.addStretch(1)
+    bulk_layout.addWidget(bulk_controls)
+
+    bulk_table = QTableWidget(0, 3, bulk_panel)
+    bulk_table.setObjectName("dataset_create2_bulk_table")
+    bulk_table.setHorizontalHeaderLabels(["テンプレート名", "データセット名", "除外"])
+    bulk_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+    bulk_table.setSelectionMode(QAbstractItemView.SingleSelection)
+    bulk_table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.SelectedClicked | QAbstractItemView.EditKeyPressed)
+    try:
+        header = bulk_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+    except Exception:
+        pass
+    bulk_table.setAlternatingRowColors(True)
+    bulk_layout.addWidget(bulk_table)
+
+    preset_row = QWidget(bulk_panel)
+    preset_row.setObjectName("dataset_create2_bulk_presets")
+    preset_layout = QHBoxLayout(preset_row)
+    preset_layout.setContentsMargins(0, 0, 0, 0)
+    preset_layout.setSpacing(6)
+    preset_layout.addWidget(QLabel("データセット名プリセット:", preset_row))
+
+    preset_btn_eq = QPushButton("設備ID", preset_row)
+    preset_btn_eq.setObjectName("dataset_create2_preset_equipment_id")
+    preset_btn_reg = QPushButton("登録名", preset_row)
+    preset_btn_reg.setObjectName("dataset_create2_preset_registration_name")
+    preset_btn_ind = QPushButton("個別名", preset_row)
+    preset_btn_ind.setObjectName("dataset_create2_preset_individual_name")
+    preset_btn_eq_reg = QPushButton("設備ID+登録名", preset_row)
+    preset_btn_eq_reg.setObjectName("dataset_create2_preset_equipment_registration")
+    preset_btn_eq_ind = QPushButton("設備ID+個別名", preset_row)
+    preset_btn_eq_ind.setObjectName("dataset_create2_preset_equipment_individual")
+
+    for b in [preset_btn_eq, preset_btn_reg, preset_btn_ind, preset_btn_eq_reg, preset_btn_eq_ind]:
+        preset_layout.addWidget(b)
+    preset_layout.addStretch(1)
+    bulk_layout.addWidget(preset_row)
+
+    def _bulk_table_template_ids() -> set[str]:
+        ids: set[str] = set()
+        for r in range(bulk_table.rowCount()):
+            it = bulk_table.item(r, 0)
+            if it is None:
+                continue
+            tid = it.data(Qt.UserRole)
+            if tid:
+                ids.add(str(tid))
+        return ids
+
+    def _bulk_remove_template_by_id(template_id: str) -> None:
+        try:
+            tid = str(template_id or "")
+            if not tid:
+                return
+            for r in range(bulk_table.rowCount()):
+                it = bulk_table.item(r, 0)
+                if it is None:
+                    continue
+                if str(it.data(Qt.UserRole) or "") == tid:
+                    bulk_table.removeRow(r)
+                    return
+        except Exception:
+            pass
+
+    def _bulk_set_delete_button(row: int, template_id: str) -> None:
+        btn = QPushButton("", bulk_table)
+        btn.setObjectName("dataset_create2_bulk_delete_button")
+        try:
+            icon = _get_trash_icon()
+            if icon is not None:
+                btn.setIcon(icon)
+            else:
+                btn.setText("🗑")
+        except Exception:
+            btn.setText("🗑")
+        btn.setToolTip("この行を削除")
+        btn.setMaximumWidth(34)
+        btn.clicked.connect(lambda *_: _bulk_remove_template_by_id(template_id))
+        bulk_table.setCellWidget(row, 2, btn)
+
+    def _bulk_insert_template_row(*, template_id: str, template_text: str) -> None:
+        if not template_id:
+            return
+        if template_id in _bulk_table_template_ids():
+            return
+
+        default_name = ""
+        try:
+            default_name = (name_edit.text().strip() if hasattr(name_edit, "text") else "")
+        except Exception:
+            default_name = ""
+
+        row = bulk_table.rowCount()
+        bulk_table.insertRow(row)
+
+        it0 = QTableWidgetItem(template_text or template_id)
+        it0.setFlags(it0.flags() & ~Qt.ItemIsEditable)
+        it0.setData(Qt.UserRole, template_id)
+        bulk_table.setItem(row, 0, it0)
+
+        it1 = QTableWidgetItem(default_name)
+        it1.setFlags(it1.flags() | Qt.ItemIsEditable)
+        bulk_table.setItem(row, 1, it1)
+
+        _bulk_set_delete_button(row, template_id)
+
+    def _bulk_add_current_template() -> None:
+        try:
+            tid = ""
+            ttext = ""
+            try:
+                tid = str(template_combo.currentData() or "") if template_combo else ""
+                ttext = str(template_combo.currentText() or "") if template_combo else ""
+            except Exception:
+                tid = ""
+                ttext = ""
+
+            # allow typed template name resolution similar to on_open2
+            if not tid and template_combo is not None and template_combo.isEditable():
+                typed = ""
+                try:
+                    typed = (template_combo.lineEdit().text() or "").strip()
+                except Exception:
+                    typed = ""
+                if typed:
+                    try:
+                        match_idx = template_combo.findText(typed)
+                    except Exception:
+                        match_idx = -1
+                    if match_idx is not None and match_idx >= 0:
+                        try:
+                            template_combo.setCurrentIndex(int(match_idx))
+                            tid = str(template_combo.currentData() or "")
+                            ttext = str(template_combo.currentText() or "")
+                        except Exception:
+                            pass
+
+            if not tid:
+                from qt_compat.widgets import QMessageBox
+                QMessageBox.warning(container, "入力エラー", "テンプレートを選択してください（複数設備まとめて）。")
+                return
+
+            _bulk_insert_template_row(template_id=tid, template_text=(ttext or tid))
+        except Exception:
+            logger.debug("新規開設2: bulk add template failed", exc_info=True)
+
+    def _bulk_clear() -> None:
+        try:
+            bulk_table.setRowCount(0)
+        except Exception:
+            pass
+
+    def _open_template_select_dialog() -> None:
+        try:
+            from qt_compat.widgets import QDialog
+
+            dlg = QDialog(container)
+            dlg.setObjectName("dataset_create2_template_select_dialog")
+            dlg.setWindowTitle("一覧から選択")
+            v = QVBoxLayout(dlg)
+
+            # Header: filter controls (mirror current tab's filter state)
+            filter_row = QWidget(dlg)
+            filter_row_layout = QHBoxLayout(filter_row)
+            filter_row_layout.setContentsMargins(0, 0, 0, 0)
+            filter_row_layout.setSpacing(8)
+
+            tab_mode_combo = getattr(container, "template_filter_combo", None)
+            tab_org_combo = getattr(container, "template_org_combo", None)
+
+            mode_combo = QComboBox(filter_row)
+            mode_combo.setObjectName("dataset_create2_template_select_mode_combo")
+            org_combo = QComboBox(filter_row)
+            org_combo.setObjectName("dataset_create2_template_select_org_combo")
+
+            # Copy items from tab combos
+            if isinstance(tab_mode_combo, QComboBox):
+                for i in range(tab_mode_combo.count()):
+                    mode_combo.addItem(tab_mode_combo.itemText(i), tab_mode_combo.itemData(i))
+                # match current
+                try:
+                    cur = tab_mode_combo.currentData()
+                    if cur is not None:
+                        idx = mode_combo.findData(cur)
+                        if idx >= 0:
+                            mode_combo.setCurrentIndex(idx)
+                except Exception:
+                    pass
+            else:
+                mode_combo.addItem("全件", "all")
+
+            def _sync_org_items_from_tab() -> None:
+                org_combo.blockSignals(True)
+                org_combo.clear()
+                if isinstance(tab_org_combo, QComboBox):
+                    for i in range(tab_org_combo.count()):
+                        org_combo.addItem(tab_org_combo.itemText(i), tab_org_combo.itemData(i))
+                    try:
+                        cur = tab_org_combo.currentData()
+                        if cur is not None:
+                            idx = org_combo.findData(cur)
+                            if idx >= 0:
+                                org_combo.setCurrentIndex(idx)
+                    except Exception:
+                        pass
+                else:
+                    org_combo.addItem("(選択してください)", "")
+                org_combo.blockSignals(False)
+
+            _sync_org_items_from_tab()
+
+            name_filter = QLineEdit(filter_row)
+            name_filter.setObjectName("dataset_create2_template_select_name_filter")
+            name_filter.setPlaceholderText("テンプレート名で絞り込み（部分一致）")
+
+            filter_row_layout.addWidget(QLabel("テンプレートフィルタ形式:", filter_row))
+            filter_row_layout.addWidget(mode_combo)
+            filter_row_layout.addWidget(QLabel("組織フィルタ:", filter_row))
+            filter_row_layout.addWidget(org_combo)
+            filter_row_layout.addWidget(QLabel("テンプレート名絞り込み:", filter_row))
+            filter_row_layout.addWidget(name_filter, 1)
+            v.addWidget(filter_row)
+
+            # Table
+            table = QTableWidget(0, 2, dlg)
+            table.setObjectName("dataset_create2_template_select_table")
+            table.setHorizontalHeaderLabels(["選択", "テンプレート名"])
+            table.setSelectionBehavior(QAbstractItemView.SelectRows)
+            table.setSelectionMode(QAbstractItemView.SingleSelection)
+            table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            table.setAlternatingRowColors(True)
+            try:
+                from classes.utils.themed_checkbox_delegate import ThemedCheckboxDelegate
+
+                table.setItemDelegateForColumn(0, ThemedCheckboxDelegate(table))
+            except Exception:
+                pass
+            try:
+                h = table.horizontalHeader()
+                h.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+                h.setSectionResizeMode(1, QHeaderView.Stretch)
+            except Exception:
+                pass
+            v.addWidget(table, 1)
+
+            def _collect_current_templates_from_combo() -> list[tuple[str, str]]:
+                items: list[tuple[str, str]] = []
+                # Use template_combo, which is already filtered by tab controls
+                try:
+                    for i in range(template_combo.count()):
+                        tid = template_combo.itemData(i)
+                        label = template_combo.itemText(i)
+                        if tid:
+                            items.append((str(label), str(tid)))
+                except Exception:
+                    pass
+                # Deduplicate by id, keep order
+                seen: set[str] = set()
+                uniq: list[tuple[str, str]] = []
+                for label, tid in items:
+                    if tid in seen:
+                        continue
+                    seen.add(tid)
+                    uniq.append((label, tid))
+                return uniq
+
+            def _refresh_table() -> None:
+                needle = name_filter.text() if hasattr(name_filter, "text") else ""
+                already_added = set()
+                try:
+                    already_added = _bulk_table_template_ids()
+                except Exception:
+                    already_added = set()
+                candidates = _collect_current_templates_from_combo()
+                filtered = [(lbl, tid) for (lbl, tid) in candidates if _contains_case_insensitive(lbl, needle)]
+                table.setRowCount(0)
+                for lbl, tid in filtered:
+                    r = table.rowCount()
+                    table.insertRow(r)
+                    it0 = QTableWidgetItem("")
+                    it0.setFlags((it0.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
+                    it0.setCheckState(Qt.Checked if tid in already_added else Qt.Unchecked)
+                    it0.setData(Qt.UserRole, tid)
+                    table.setItem(r, 0, it0)
+                    it1 = QTableWidgetItem(lbl)
+                    it1.setData(Qt.UserRole, tid)
+                    table.setItem(r, 1, it1)
+
+            def _apply_mode_to_tab() -> None:
+                if not isinstance(tab_mode_combo, QComboBox):
+                    return
+                try:
+                    data = mode_combo.currentData()
+                    if data is None:
+                        return
+                    idx = tab_mode_combo.findData(data)
+                    if idx >= 0:
+                        tab_mode_combo.setCurrentIndex(idx)
+                except Exception:
+                    pass
+
+            def _apply_org_to_tab() -> None:
+                if not isinstance(tab_org_combo, QComboBox):
+                    return
+                try:
+                    data = org_combo.currentData()
+                    if data is None:
+                        return
+                    idx = tab_org_combo.findData(data)
+                    if idx >= 0:
+                        tab_org_combo.setCurrentIndex(idx)
+                except Exception:
+                    pass
+
+            def _refresh_org_enabled() -> None:
+                try:
+                    org_combo.setEnabled(str(mode_combo.currentData() or "") == "org")
+                except Exception:
+                    pass
+
+            def _on_mode_changed(*_a):
+                _refresh_org_enabled()
+                _apply_mode_to_tab()
+                # tab side may rebuild org items
+                try:
+                    QApplication.processEvents()
+                except Exception:
+                    pass
+                _sync_org_items_from_tab()
+                _refresh_table()
+
+            def _on_org_changed(*_a):
+                _apply_org_to_tab()
+                try:
+                    QApplication.processEvents()
+                except Exception:
+                    pass
+                _refresh_table()
+
+            mode_combo.currentIndexChanged.connect(_on_mode_changed)
+            org_combo.currentIndexChanged.connect(_on_org_changed)
+            name_filter.textChanged.connect(lambda *_: _refresh_table())
+
+            _refresh_org_enabled()
+            _refresh_table()
+
+            # Footer buttons
+            footer = QWidget(dlg)
+            footer_layout = QHBoxLayout(footer)
+            footer_layout.setContentsMargins(0, 0, 0, 0)
+            footer_layout.setSpacing(8)
+
+            add_btn = QPushButton("テンプレを一括追加", footer)
+            add_btn.setObjectName("dataset_create2_template_select_add_button")
+            clear_btn2 = QPushButton("クリア", footer)
+            clear_btn2.setObjectName("dataset_create2_template_select_clear_button")
+            close_btn = QPushButton("閉じる", footer)
+            close_btn.setObjectName("dataset_create2_template_select_close_button")
+
+            def _clear_checks():
+                for r in range(table.rowCount()):
+                    it = table.item(r, 0)
+                    if it is not None:
+                        it.setCheckState(Qt.Unchecked)
+
+            def _bulk_add_selected_and_close():
+                selected: list[tuple[str, str]] = []
+                for r in range(table.rowCount()):
+                    it0 = table.item(r, 0)
+                    it1 = table.item(r, 1)
+                    if it0 is None or it1 is None:
+                        continue
+                    if it0.checkState() != Qt.Checked:
+                        continue
+                    tid = str(it0.data(Qt.UserRole) or "")
+                    lbl = str(it1.text() or "")
+                    if tid:
+                        selected.append((lbl, tid))
+                for lbl, tid in selected:
+                    _bulk_insert_template_row(template_id=tid, template_text=lbl)
+                dlg.accept()
+
+            add_btn.clicked.connect(_bulk_add_selected_and_close)
+            clear_btn2.clicked.connect(lambda *_: _clear_checks())
+            close_btn.clicked.connect(dlg.reject)
+
+            footer_layout.addWidget(add_btn)
+            footer_layout.addWidget(clear_btn2)
+            footer_layout.addStretch(1)
+            footer_layout.addWidget(close_btn)
+            v.addWidget(footer)
+
+            dlg.resize(900, 520)
+            dlg.exec()
+        except Exception:
+            logger.debug("新規開設2: template select dialog failed", exc_info=True)
+
+    def _bulk_apply_preset(mode: str) -> None:
+        base = ""
+        try:
+            base = (name_edit.text().strip() if hasattr(name_edit, "text") else "")
+        except Exception:
+            base = ""
+        base = _sanitize_dataset_name_part(base)
+
+        for r in range(bulk_table.rowCount()):
+            it0 = bulk_table.item(r, 0)
+            it1 = bulk_table.item(r, 1)
+            if it0 is None or it1 is None:
+                continue
+            tid = str(it0.data(Qt.UserRole) or "")
+            display = str(it0.text() or "")
+            meta = _find_template_meta(tid)
+            eq = _sanitize_dataset_name_part(_extract_equipment_id_from_template(tid, meta, display))
+            reg = _sanitize_dataset_name_part(_extract_registration_name_from_template(meta, display))
+            ind = _sanitize_dataset_name_part(_extract_individual_name_from_template(meta, display))
+
+            parts: list[str] = []
+            if base:
+                parts.append(base)
+
+            if mode == "equipment_id":
+                if eq:
+                    parts.append(eq)
+            elif mode == "registration_name":
+                if reg:
+                    parts.append(reg)
+            elif mode == "individual_name":
+                if ind:
+                    parts.append(ind)
+            elif mode == "equipment_registration":
+                if eq:
+                    parts.append(eq)
+                if reg:
+                    parts.append(reg)
+            elif mode == "equipment_individual":
+                if eq:
+                    parts.append(eq)
+                if ind:
+                    parts.append(ind)
+
+            new_name = "_".join([p for p in parts if p])
+            it1.setText(new_name)
+
+    add_template_btn.clicked.connect(_bulk_add_current_template)
+    clear_btn.clicked.connect(_bulk_clear)
+    select_from_list_btn.clicked.connect(_open_template_select_dialog)
+    preset_btn_eq.clicked.connect(lambda *_: _bulk_apply_preset("equipment_id"))
+    preset_btn_reg.clicked.connect(lambda *_: _bulk_apply_preset("registration_name"))
+    preset_btn_ind.clicked.connect(lambda *_: _bulk_apply_preset("individual_name"))
+    preset_btn_eq_reg.clicked.connect(lambda *_: _bulk_apply_preset("equipment_registration"))
+    preset_btn_eq_ind.clicked.connect(lambda *_: _bulk_apply_preset("equipment_individual"))
+
+    # Add bulk panel near bottom (before description/related fields)
+    form_layout.insertRow(insert_row, QLabel("まとめて開設:"), bulk_panel)
+    insert_row += 1
+
+    def _refresh_open_mode_visibility() -> None:
+        try:
+            bulk_panel.setVisible(bool(open_mode_bulk_radio.isChecked()))
+        except Exception:
+            pass
+
+    open_mode_normal_radio.toggled.connect(lambda *_: _refresh_open_mode_visibility())
+    open_mode_bulk_radio.toggled.connect(lambda *_: _refresh_open_mode_visibility())
+    _refresh_open_mode_visibility()
 
     # --- Description with AI assist ---
     description_layout = QHBoxLayout()
@@ -1296,7 +1938,14 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
             except Exception:
                 dataset_type = "ANALYSIS"
 
-        if not dataset_name:
+        # bulk mode: dataset names come from table; single mode: keep existing validation.
+        is_bulk_mode = False
+        try:
+            is_bulk_mode = bool(open_mode_bulk_radio.isChecked())
+        except Exception:
+            is_bulk_mode = False
+
+        if not is_bulk_mode and not dataset_name:
             from qt_compat.widgets import QMessageBox
             QMessageBox.warning(parent, "入力エラー", "データセット名は必須です。")
             return
@@ -1304,7 +1953,7 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
             from qt_compat.widgets import QMessageBox
             QMessageBox.warning(parent, "入力エラー", "エンバーゴ期間終了日は必須です。")
             return
-        if not template_id:
+        if not is_bulk_mode and not template_id:
             from qt_compat.widgets import QMessageBox
             QMessageBox.warning(parent, "入力エラー", "テンプレートは必須です。")
             return
@@ -1336,6 +1985,56 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
         anonymize = getattr(container, "anonymize_checkbox", None)
         share_core_scope_val = share_core_scope.isChecked() if share_core_scope else False
         anonymize_val = anonymize.isChecked() if anonymize else False
+
+        if is_bulk_mode:
+            from qt_compat.widgets import QMessageBox
+
+            bulk_items: list[dict] = []
+            for r in range(bulk_table.rowCount()):
+                it0 = bulk_table.item(r, 0)
+                it1 = bulk_table.item(r, 1)
+                if it0 is None or it1 is None:
+                    continue
+                tid = str(it0.data(Qt.UserRole) or "")
+                dname = str(it1.text() or "").strip()
+                if not tid:
+                    continue
+                if not dname:
+                    QMessageBox.warning(parent, "入力エラー", "まとめて開設: データセット名が未入力の行があります。")
+                    return
+
+                meta = _find_template_meta(tid) or {}
+                dtype = str(meta.get("datasetType") or "ANALYSIS")
+                bulk_items.append(
+                    {
+                        "template_id": tid,
+                        "template_text": str(it0.text() or ""),
+                        "dataset_name": dname,
+                        "dataset_type": dtype,
+                    }
+                )
+
+            if not bulk_items:
+                QMessageBox.warning(parent, "入力エラー", "まとめて開設: 対象テンプレートがありません（未追加）。")
+                return
+
+            from classes.dataset.core.dataset_open_logic import run_dataset_bulk_open_logic
+
+            run_dataset_bulk_open_logic(
+                parent,
+                bearer_token,
+                group_info,
+                bulk_items,
+                embargo_str,
+                share_core_scope_val,
+                anonymize_val,
+                manager_user_id=manager_user_id,
+                description=description,
+                related_links_text=related_info,
+                tags=tags,
+                related_dataset_ids=selected_related_ids,
+            )
+            return
 
         run_dataset_open_logic(
             parent,

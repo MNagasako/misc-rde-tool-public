@@ -18,7 +18,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple, Union
+from typing import Callable, Optional, Tuple, Union
 
 from config.common import get_dynamic_file_path
 
@@ -276,7 +276,7 @@ def verify_sha256(path: str, expected: str) -> bool:
 
 def _default_installer_log_path(version: str) -> str:
     safe_version = re.sub(r"[^0-9A-Za-z._-]", "_", str(version or ""))
-    return get_dynamic_file_path(f"output/.private/update/installer_{safe_version}.log")
+    return get_dynamic_file_path(f"output/update/installer_{safe_version}.log")
 
 
 def run_installer_and_exit(installer_path: str, log_path: Optional[str] = None) -> None:
@@ -488,4 +488,4 @@ def startup_update_precheck(config_manager, now: Optional[datetime] = None) -> S
 
 def get_default_download_path(version: str) -> str:
     filename = f"arim_rde_tool_setup.{version}.exe" if version else "arim_rde_tool_setup.latest.exe"
-    return get_dynamic_file_path(f"output/.private/update/{filename}")
+    return get_dynamic_file_path(f"output/update/{filename}")

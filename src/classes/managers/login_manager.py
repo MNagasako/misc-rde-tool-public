@@ -463,9 +463,20 @@ class LoginManager:
 
                 # rde-materialは materials scope / Material client_id を優先
                 if host == 'rde-material.nims.go.jp':
-                    if 'materials' in scopes:
+                    # 更新系APIに必要な materials.write を最優先
+                    if 'materials.write' in scopes:
+                        score += 30
+                    elif 'materials.read' in scopes:
+                        score += 15
+                    elif 'materials' in scopes:
                         score += 10
+
+                    # 既知のMaterial client_id/audience を優先
                     if aud == '329b7bb7-02c9-4437-a5cf-9742d238d3bf':
+                        score += 10
+                    azp = payload.get('azp', '') or ''
+                    # Web成功ログで確認された azp（32hex）も補助優先
+                    if azp == '329b70945b2f4265945dad45d1bb8771':
                         score += 10
                 # rde は materials を含まない / RDE client_id を優先
                 elif host == 'rde.nims.go.jp':
@@ -684,6 +695,30 @@ class LoginManager:
                         payload_data.get('aud'),
                         payload_data.get('scp'),
                     )
+
+                    # Materialのwrite権限トークンが遅延生成されるケースがあるため、
+                    # 一定時間だけ追加で待機してから確定する。
+                    if host == 'rde-material.nims.go.jp':
+                        scopes = payload_data.get('scp', '') or ''
+                        if 'materials.write' not in str(scopes):
+                            elapsed_ms = int((time.monotonic() - start_time) * 1000)
+                            grace_ms = 5000
+                            # write権限が遅延生成されるケースがあるため短時間だけ待機するが、
+                            # テスト環境（QTimer.singleShotを同期実行）でも再帰が暴走しないよう
+                            # 追加ポーリング回数を制限する。
+                            if elapsed_ms < grace_ms and deadline is not None and poll_state.get('attempt', 0) <= 2:
+                                logger.info(
+                                    "[TOKEN] Material write scope待機中（暫定token） scp=%s elapsed=%sms (<%sms)",
+                                    scopes,
+                                    elapsed_ms,
+                                    grace_ms,
+                                )
+                                _schedule_next_poll("missing materials.write")
+                                return
+                            logger.warning(
+                                "[TOKEN] Material token acquired but missing materials.write (scp=%s)",
+                                scopes,
+                            )
             
             # トークン保存処理
             if access_token:
@@ -713,7 +748,6 @@ class LoginManager:
                                 
                                 # exp (expiration time) からexpires_inを計算
                                 if 'exp' in payload_data:
-                                    import time
                                     current_time = int(time.time())
                                     expires_in = payload_data['exp'] - current_time
                                     logger.debug("JWT expiry: %s秒", expires_in)
@@ -987,6 +1021,7 @@ class LoginManager:
                         self.try_get_bearer_token(
                             retries=3,
                             host='rde-material.nims.go.jp',
+                            initial_delay=2000,
                             total_timeout_ms=material_total_timeout_ms,
                             allow_refresh_fallback=self._refresh_fallback_enabled,
                             on_completed=lambda _success: QTimer.singleShot(500, self.return_to_rde_datasets),
@@ -1094,6 +1129,7 @@ class LoginManager:
                         self.try_get_bearer_token(
                             retries=3, 
                             host='rde-material.nims.go.jp',
+                            initial_delay=2000,
                             total_timeout_ms=material_total_timeout_ms,
                             allow_refresh_fallback=self._refresh_fallback_enabled,
                             on_completed=lambda success: QTimer.singleShot(500, self.return_to_rde_datasets)

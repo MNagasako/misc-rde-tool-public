@@ -258,6 +258,304 @@ def _parse_related_links_text(related_links_text: str | None) -> list[dict]:
     return related_links
 
 
+def _build_dataset_create_payload(
+    *,
+    group_id: str,
+    manager_id: str,
+    grant_number: str,
+    dataset_name: str,
+    embargo_date_str: str,
+    template_id: str,
+    dataset_type: str,
+    share_core_scope: bool,
+    anonymize: bool,
+    description: str | None = None,
+    related_links_text: str | None = None,
+    tags: list[str] | None = None,
+    related_dataset_ids: list[str] | None = None,
+) -> tuple[dict, str]:
+    # embargoDate
+    embargo_date = (embargo_date_str or "").strip() or "2026-03-31"
+    embargo_date_iso = embargo_date + "T03:00:00.000Z"
+
+    payload: dict = {
+        "data": {
+            "type": "dataset",
+            "attributes": {
+                "datasetType": (dataset_type or "ANALYSIS"),
+                "name": (dataset_name or "").strip(),
+                "grantNumber": (grant_number or "").strip(),
+                "embargoDate": embargo_date_iso,
+                "dataListingType": "GALLERY",
+                "sharingPolicies": [
+                    {
+                        "scopeId": "4df8da18-a586-4a0d-81cb-ff6c6f52e70f",
+                        "permissionToView": True,
+                        "permissionToDownload": False,
+                    },
+                    {
+                        "scopeId": "22aec474-bbf2-4826-bf63-60c82d75df41",
+                        "permissionToView": bool(share_core_scope),
+                        "permissionToDownload": False,
+                    },
+                ],
+                "isAnonymized": bool(anonymize),
+            },
+            "relationships": {
+                "group": {"data": {"type": "group", "id": group_id}},
+                "manager": {"data": {"type": "user", "id": manager_id}},
+                "template": {"data": {"type": "datasetTemplate", "id": template_id}},
+            },
+        }
+    }
+
+    # Optional metadata for "新規開設2"
+    description = (description or "").strip()
+    if description:
+        payload["data"]["attributes"]["description"] = description
+
+    parsed_links = _parse_related_links_text(related_links_text)
+    if parsed_links:
+        payload["data"]["attributes"]["relatedLinks"] = parsed_links
+
+    if tags:
+        normalized_tags = [t.strip() for t in tags if isinstance(t, str) and t.strip()]
+        if normalized_tags:
+            payload["data"]["attributes"]["tags"] = normalized_tags
+
+    if related_dataset_ids:
+        rel_ids = [rid for rid in related_dataset_ids if isinstance(rid, str) and rid.strip()]
+        if rel_ids:
+            # Prevent 422 by excluding stale/nonexistent dataset IDs.
+            valid_ids = _load_dataset_id_set_from_dataset_json()
+            if valid_ids:
+                filtered_rel_ids = [rid for rid in rel_ids if rid in valid_ids]
+                dropped = [rid for rid in rel_ids if rid not in valid_ids]
+                if dropped:
+                    logger.warning("relatedDatasets: dataset.json に存在しないIDを除外しました: %s", dropped)
+                rel_ids = filtered_rel_ids
+            if rel_ids:
+                payload["data"]["relationships"]["relatedDatasets"] = {
+                    "data": [{"type": "dataset", "id": rid} for rid in rel_ids]
+                }
+
+    payload_str = json.dumps(payload, ensure_ascii=False, indent=2)
+    return payload, payload_str
+
+
+def run_dataset_bulk_open_logic(
+    parent,
+    bearer_token,
+    group_info,
+    bulk_items: list[dict],
+    embargo_date_str: str,
+    share_core_scope: bool,
+    anonymize: bool,
+    *,
+    manager_user_id: str | None = None,
+    description: str | None = None,
+    related_links_text: str | None = None,
+    tags: list[str] | None = None,
+    related_dataset_ids: list[str] | None = None,
+):
+    # Bearer Token統一管理システムで取得
+    if not bearer_token:
+        bearer_token = BearerTokenManager.get_token_with_relogin_prompt(parent)
+        if not bearer_token:
+            QMessageBox.warning(parent, "認証エラー", "Bearer Tokenが取得できません。ログインを確認してください。")
+            return
+
+    if group_info is None:
+        QMessageBox.warning(parent, "グループ情報エラー", "グループが選択されていません。")
+        return
+
+    group_id = group_info.get("id")
+    group_attr = group_info.get("attributes", {})
+    subjects = group_attr.get("subjects", [])
+    grant_number = group_info.get("grantNumber") or (subjects[0].get("grantNumber") if subjects else "")
+
+    owner_id = None
+    for role in group_attr.get("roles", []):
+        if role.get("role") == "OWNER":
+            owner_id = role.get("userId")
+            break
+    manager_id = manager_user_id or owner_id
+    if not (group_id and manager_id and grant_number):
+        QMessageBox.warning(parent, "グループ情報エラー", "グループID/管理者/課題番号が取得できませんでした。")
+        return
+
+    # Build payloads
+    items: list[dict] = [it for it in (bulk_items or []) if isinstance(it, dict)]
+    if not items:
+        QMessageBox.warning(parent, "入力エラー", "まとめて開設: 対象テンプレートがありません。")
+        return
+
+    payloads: list[dict] = []
+    payload_strs: list[str] = []
+
+    for it in items:
+        template_id = str(it.get("template_id") or "").strip()
+        dataset_name = str(it.get("dataset_name") or "").strip()
+        dataset_type = str(it.get("dataset_type") or "ANALYSIS").strip() or "ANALYSIS"
+        if not template_id or not dataset_name:
+            QMessageBox.warning(parent, "入力エラー", "まとめて開設: テンプレート/データセット名が未入力の行があります。")
+            return
+        payload, payload_str = _build_dataset_create_payload(
+            group_id=str(group_id),
+            manager_id=str(manager_id),
+            grant_number=str(grant_number),
+            dataset_name=dataset_name,
+            embargo_date_str=embargo_date_str,
+            template_id=template_id,
+            dataset_type=dataset_type,
+            share_core_scope=share_core_scope,
+            anonymize=anonymize,
+            description=description,
+            related_links_text=related_links_text,
+            tags=tags,
+            related_dataset_ids=related_dataset_ids,
+        )
+        payloads.append(payload)
+        payload_strs.append(payload_str)
+
+    # Confirmation dialog (common + variable)
+    common_attr = payloads[0]["data"]["attributes"]
+    count = len(payloads)
+    variable_lines: list[str] = []
+    for idx, it in enumerate(items, start=1):
+        tlabel = str(it.get("template_text") or it.get("template_id") or "")
+        dname = str(it.get("dataset_name") or "")
+        variable_lines.append(f"{idx}. {dname} / {tlabel}")
+
+    simple_text = (
+        "本当にデータセットをまとめて開設しますか？\n\n"
+        "【共通】\n"
+        f"課題番号: {common_attr.get('grantNumber')}\n"
+        f"データセットを匿名にする: {common_attr.get('isAnonymized')}\n"
+        f"エンバーゴ期間終了日: {common_attr.get('embargoDate')}\n"
+        f"共有範囲: {common_attr.get('sharingPolicies')}\n"
+        f"説明: {'入力あり' if common_attr.get('description') else '未入力'}\n"
+        f"関連情報: {len(common_attr.get('relatedLinks', []) or [])}件\n"
+        f"TAG: {', '.join(common_attr.get('tags', []) or [])}\n"
+        f"関連データセット: {len(payloads[0]['data'].get('relationships', {}).get('relatedDatasets', {}).get('data', []) or [])}件\n"
+        "\n"
+        "【可変】\n"
+        f"作成件数: {count}件\n"
+        + "\n".join(variable_lines[:20])
+        + ("\n..." if len(variable_lines) > 20 else "")
+        + "\n\nこの操作はRDEに新規データセットを作成します。"
+    )
+
+    from qt_compat.widgets import QPushButton, QDialog, QVBoxLayout, QTextEdit
+
+    msg_box = QMessageBox(parent)
+    msg_box.setWindowTitle("データセット開設の確認")
+    msg_box.setIcon(QMessageBox.Question)
+    msg_box.setText(simple_text)
+    yes_btn = msg_box.addButton(QMessageBox.Yes)
+    no_btn = msg_box.addButton(QMessageBox.No)
+    detail_btn = QPushButton("詳細表示")
+    msg_box.addButton(detail_btn, QMessageBox.ActionRole)
+    msg_box.setDefaultButton(no_btn)
+    msg_box.setStyleSheet("QLabel{font-family: 'Consolas'; font-size: 10pt;}")
+
+    all_payloads_str = json.dumps(payloads, ensure_ascii=False, indent=2)
+
+    def show_detail():
+        dlg = QDialog(parent)
+        dlg.setWindowTitle("Payload 全文表示（全件）")
+        layout = QVBoxLayout(dlg)
+        text_edit = QTextEdit(dlg)
+        text_edit.setReadOnly(True)
+        text_edit.setPlainText(all_payloads_str)
+        text_edit.setMinimumSize(700, 500)
+        layout.addWidget(text_edit)
+        dlg.setLayout(layout)
+        dlg.exec_()
+
+    detail_btn.clicked.connect(show_detail)
+
+    msg_box.exec_()
+    if msg_box.clickedButton() != yes_btn:
+        logger.info("データセットまとめて開設処理はユーザーによりキャンセルされました。")
+        return
+
+    created_ids: list[str] = []
+    first_failure: tuple[str, object] | None = None
+
+    for payload, payload_str in zip(payloads, payload_strs, strict=False):
+        success, result = create_dataset(bearer_token, payload=payload)
+        if success:
+            try:
+                did = result.get("data", {}).get("id") if isinstance(result, dict) else None
+                if did:
+                    created_ids.append(str(did))
+            except Exception:
+                pass
+            continue
+        if first_failure is None:
+            first_failure = (payload_str, result)
+
+    # データセット更新通知を発火（成功が1件でもあれば）
+    if created_ids:
+        try:
+            from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
+            dataset_notifier = get_dataset_refresh_notifier()
+            dataset_notifier.notify_refresh()
+            logger.info("データセットまとめて開設: 更新通知を発火")
+        except Exception as e:
+            logger.warning("データセット更新通知の発火に失敗: %s", e)
+
+    # 成功時にdataset.jsonを自動再取得（完了ダイアログなし）
+    try:
+        if created_ids and bearer_token:
+            from qt_compat.core import QTimer
+
+            def auto_refresh():
+                try:
+                    from classes.basic.core.basic_info_logic import auto_refresh_dataset_json
+                    from classes.utils.progress_worker import SimpleProgressWorker
+                    from classes.basic.ui.ui_basic_info import show_progress_dialog
+
+                    worker = SimpleProgressWorker(
+                        task_func=auto_refresh_dataset_json,
+                        task_kwargs={"bearer_token": bearer_token},
+                        task_name="データセット一覧自動更新",
+                    )
+                    show_progress_dialog(parent, "データセット一覧自動更新", worker, show_completion_dialog=False)
+
+                    def show_completion_and_notify():
+                        try:
+                            QMessageBox.information(
+                                parent,
+                                "データセット開設完了",
+                                f"データセットを{len(created_ids)}件開設しました。\n\nデータセット一覧も更新されました。",
+                            )
+                            from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
+                            get_dataset_refresh_notifier().notify_refresh()
+                        except Exception as e:
+                            logger.warning("完了ダイアログ表示・通知発火に失敗: %s", e)
+
+                    QTimer.singleShot(3000, show_completion_and_notify)
+                except Exception as e:
+                    logger.error("データセット一覧自動更新でエラー: %s", e)
+                    QMessageBox.critical(parent, "自動更新エラー", f"データセット開設には成功しましたが、一覧の自動更新に失敗しました。\n{e}")
+
+            QTimer.singleShot(1000, auto_refresh)
+    except Exception as e:
+        logger.warning("データセット一覧自動更新の設定に失敗: %s", e)
+
+    if first_failure is not None:
+        payload_str, result = first_failure
+        _show_dataset_open_error_dialog(parent, payload_str, result)
+
+    # Keep legacy behavior (currently stubbed)
+    try:
+        update_dataset(bearer_token)
+    except Exception:
+        pass
+
+
 def run_dataset_open_logic(
     parent,
     bearer_token,
@@ -309,67 +607,24 @@ def run_dataset_open_logic(
 
     # データセット名
     name = dataset_name if dataset_name else group_name
-    # embargoDate
-    embargo_date = embargo_date_str if embargo_date_str else "2026-03-31"
-    embargo_date_iso = embargo_date + "T03:00:00.000Z"
-    # テンプレートIDとタイプ
     template_id = template_id or "ARIM-R6_TU-504_TEM-STEM_20241121"
     dataset_type = dataset_type or "ANALYSIS"
 
-    # payload生成
-    payload = {
-        "data": {
-            "type": "dataset",
-            "attributes": {
-                "datasetType": dataset_type,
-                "name": name,
-                "grantNumber": grant_number,
-                "embargoDate": embargo_date_iso,
-                "dataListingType": "GALLERY",
-                "sharingPolicies": [
-                    {"scopeId": "4df8da18-a586-4a0d-81cb-ff6c6f52e70f", "permissionToView": True, "permissionToDownload": False},
-                    {"scopeId": "22aec474-bbf2-4826-bf63-60c82d75df41", "permissionToView": share_core_scope, "permissionToDownload": False}
-                ],
-                "isAnonymized": anonymize
-            },
-            "relationships": {
-                "group": {"data": {"type": "group", "id": group_id}},
-                "manager": {"data": {"type": "user", "id": manager_id}},
-                "template": {"data": {"type": "datasetTemplate", "id": template_id}}
-            }
-        }
-    }
-
-    # Optional metadata for "新規開設2"
-    description = (description or "").strip()
-    if description:
-        payload["data"]["attributes"]["description"] = description
-
-    parsed_links = _parse_related_links_text(related_links_text)
-    if parsed_links:
-        payload["data"]["attributes"]["relatedLinks"] = parsed_links
-
-    if tags:
-        normalized_tags = [t.strip() for t in tags if isinstance(t, str) and t.strip()]
-        if normalized_tags:
-            payload["data"]["attributes"]["tags"] = normalized_tags
-
-    if related_dataset_ids:
-        rel_ids = [rid for rid in related_dataset_ids if isinstance(rid, str) and rid.strip()]
-        if rel_ids:
-            # Prevent 422 by excluding stale/nonexistent dataset IDs.
-            valid_ids = _load_dataset_id_set_from_dataset_json()
-            if valid_ids:
-                filtered_rel_ids = [rid for rid in rel_ids if rid in valid_ids]
-                dropped = [rid for rid in rel_ids if rid not in valid_ids]
-                if dropped:
-                    logger.warning("relatedDatasets: dataset.json に存在しないIDを除外しました: %s", dropped)
-                rel_ids = filtered_rel_ids
-            if rel_ids:
-                payload["data"]["relationships"]["relatedDatasets"] = {
-                    "data": [{"type": "dataset", "id": rid} for rid in rel_ids]
-                }
-    payload_str = json.dumps(payload, ensure_ascii=False, indent=2)
+    payload, payload_str = _build_dataset_create_payload(
+        group_id=str(group_id),
+        manager_id=str(manager_id),
+        grant_number=str(grant_number),
+        dataset_name=str(name),
+        embargo_date_str=str(embargo_date_str or ""),
+        template_id=str(template_id),
+        dataset_type=str(dataset_type),
+        share_core_scope=bool(share_core_scope),
+        anonymize=bool(anonymize),
+        description=description,
+        related_links_text=related_links_text,
+        tags=tags,
+        related_dataset_ids=related_dataset_ids,
+    )
     logger.debug("payload sharingPolicies: %s", payload['data']['attributes']['sharingPolicies'])
     logger.debug("payload isAnonymized: %s", payload['data']['attributes']['isAnonymized'])
 
