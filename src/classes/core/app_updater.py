@@ -16,11 +16,12 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional, Tuple, Union
 
-from config.common import get_dynamic_file_path
+from config.common import ensure_directory_exists, get_dynamic_file_path
 
 logger = logging.getLogger(__name__)
 
@@ -274,17 +275,127 @@ def verify_sha256(path: str, expected: str) -> bool:
     return actual == normalized
 
 
-def _default_installer_log_path(version: str) -> str:
+def _default_installer_log_path(version: str, *, base_dir: str | None = None) -> str:
     safe_version = re.sub(r"[^0-9A-Za-z._-]", "_", str(version or ""))
+    if base_dir:
+        return os.path.join(str(base_dir), f"installer_{safe_version}.log")
     return get_dynamic_file_path(f"output/update/installer_{safe_version}.log")
 
 
+def _get_update_dir_for_installer(installer_path: str) -> str:
+    """インストーラと同じ update ディレクトリを返す（作成も保証）。"""
+    try:
+        p = os.path.abspath(str(installer_path or ""))
+        d = os.path.dirname(p) if p else ""
+    except Exception:
+        d = ""
+    if not d:
+        d = get_dynamic_file_path("output/update")
+    return ensure_directory_exists(d)
+
+
+def _safe_name_from_installer_path(installer_path: str) -> str:
+    base = os.path.basename(str(installer_path or "") or "")
+    m = re.search(r"(?i)arim_rde_tool_setup\.(?P<ver>[0-9]+(?:\.[0-9]+){1,4})\.exe$", base)
+    if m:
+        return re.sub(r"[^0-9A-Za-z._-]", "_", m.group("ver"))
+    base2 = re.sub(r"[^0-9A-Za-z._-]", "_", os.path.splitext(base)[0] or "installer")
+    return (base2[:48] if base2 else "installer")
+
+
+def build_update_runner_paths(*, installer_path: str) -> tuple[str, str, str]:
+        """更新ランナー(cmd/ps1)とランナーログのパスを返す。
+
+        NOTE:
+        - バイナリ実行時に「インストーラだけ保存され、runner/log が見当たらない」ケースを避けるため、
+            常に installer_path と同じフォルダ（update）へ出力する。
+        """
+        safe_name = _safe_name_from_installer_path(installer_path)
+        update_dir = _get_update_dir_for_installer(installer_path)
+        runner_cmd = os.path.join(update_dir, f"update_runner_{safe_name}.cmd")
+        runner_ps1 = os.path.join(update_dir, f"update_runner_{safe_name}.ps1")
+        runner_log = os.path.join(update_dir, f"update_runner_{safe_name}.log")
+        return runner_cmd, runner_ps1, runner_log
+
+
+def _runner_log_has_start_marker(runner_log: str) -> bool:
+    try:
+        if not runner_log or not os.path.exists(runner_log):
+            return False
+        # 大きくなっても末尾だけ見れば十分
+        with open(runner_log, "rb") as f:
+            try:
+                f.seek(-4096, os.SEEK_END)
+            except Exception:
+                f.seek(0)
+            tail = f.read().decode("utf-8", errors="ignore")
+        return "runner:start" in tail
+    except Exception:
+        return False
+
+
+def _wait_for_runner_start(*, runner_log: str, timeout_sec: float = 5.0) -> bool:
+    """runner:start がログに出るまで待つ（短時間ポーリング）。"""
+    deadline = time.time() + max(0.0, float(timeout_sec or 0.0))
+    while time.time() < deadline:
+        if _runner_log_has_start_marker(runner_log):
+            return True
+        time.sleep(0.10)
+    return _runner_log_has_start_marker(runner_log)
+
+
+def _default_install_stamp_path() -> str:
+    return get_dynamic_file_path("output/update/last_install.json")
+
+
+def _default_install_stamp_path_in_dir(update_dir: str) -> str:
+    return os.path.join(str(update_dir), "last_install.json")
+
+
+def get_last_install_info() -> dict:
+    """前回インストールの情報を返す（無ければ空dict）。"""
+    path = _default_install_stamp_path()
+    try:
+        if not os.path.exists(path):
+            return {}
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def get_last_install_datetime_text() -> str:
+    """前回インストール日時（ローカル表示）を返す。"""
+    info = get_last_install_info()
+    raw_local = str(info.get("installedAtLocal", "") or "").strip()
+    if raw_local:
+        return raw_local
+
+    raw = str(info.get("installedAtUtc", "") or "").strip()
+    if not raw:
+        return ""
+    try:
+        s = raw
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local_dt = dt.astimezone()  # OSのローカルTZ
+        return local_dt.strftime("%Y-%m-%d %H:%M:%S %Z")
+    except Exception:
+        return raw
+
+
 def _build_inno_installer_args(*, log_path: str, restart_apps: bool) -> list[str]:
-    """Inno Setup の共通引数を組み立てる。"""
+    """Inno Setup の共通引数を組み立てる。
+
+    NOTE:
+    - ユーザーが進捗を確認できるよう、サイレント実行は行わない。
+    - ただし /NORESTART など安全系は維持する。
+    """
     args = [
-        "/SP-",
-        "/VERYSILENT",
-        "/SUPPRESSMSGBOXES",
         "/NORESTART",  # OS再起動は行わない
         "/CLOSEAPPLICATIONS",  # 可能なら対象アプリを閉じる（ファイルロック回避）
         f"/LOG={log_path}",
@@ -305,7 +416,8 @@ def run_installer_and_exit(installer_path: str, log_path: Optional[str] = None) 
     if not installer_path or not os.path.exists(installer_path):
         raise FileNotFoundError(f"インストーラが見つかりません: {installer_path}")
 
-    log_path = log_path or _default_installer_log_path("latest")
+    update_dir = _get_update_dir_for_installer(installer_path)
+    log_path = log_path or _default_installer_log_path("latest", base_dir=update_dir)
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
     args = [installer_path] + _build_inno_installer_args(log_path=log_path, restart_apps=False)
@@ -386,8 +498,20 @@ def run_installer_and_restart(
     if not restart_exe:
         raise RuntimeError("再起動対象の実行ファイルパスが取得できません")
 
-    log_path = log_path or _default_installer_log_path("latest")
+    update_dir = _get_update_dir_for_installer(installer_path)
+    log_path = log_path or _default_installer_log_path("latest", base_dir=update_dir)
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
+
+    stamp_path = _default_install_stamp_path()
+    stamp_path2 = _default_install_stamp_path_in_dir(update_dir)
+    try:
+        os.makedirs(os.path.dirname(stamp_path), exist_ok=True)
+    except Exception:
+        pass
+    try:
+        os.makedirs(os.path.dirname(stamp_path2), exist_ok=True)
+    except Exception:
+        pass
 
     # インストーラ引数
     installer_args = _build_inno_installer_args(log_path=log_path, restart_apps=False)
@@ -397,42 +521,214 @@ def run_installer_and_restart(
     # そのため、別プロセス側で本体PIDの終了を待ってからインストーラを起動する。
     pid_to_wait = int(wait_pid) if wait_pid is not None else int(os.getpid())
 
-    # PowerShellで: インストーラ完了待ち → アプリ再起動
-    ps_script = (
-        "$ErrorActionPreference='SilentlyContinue';"
-        f"$pidToWait={pid_to_wait};"
-        "try { Wait-Process -Id $pidToWait -ErrorAction SilentlyContinue } catch {} ;"
-        f"$installer={_ps_quote(installer_path)};"
-        f"$app={_ps_quote(restart_exe)};"
-        "$appArgs=@(" + ",".join(_ps_quote(a) for a in (restart_args or [])) + ");"
-        "$argList=@(" + ",".join(_ps_quote(a) for a in installer_args) + ");"
-        "$p=Start-Process -FilePath $installer -ArgumentList $argList -PassThru;"
-        "$null=$p.WaitForExit();"
-        "if ($appArgs.Count -gt 0) { Start-Process -FilePath $app -ArgumentList $appArgs } else { Start-Process -FilePath $app } ;"
+    # ランナー生成（cmd優先 / ps1はデバッグ用に残す）
+    runner_cmd, runner_ps1, runner_log = build_update_runner_paths(installer_path=installer_path)
+    try:
+        os.makedirs(os.path.dirname(runner_cmd), exist_ok=True)
+        os.makedirs(os.path.dirname(runner_ps1), exist_ok=True)
+        os.makedirs(os.path.dirname(runner_log), exist_ok=True)
+    except Exception:
+        pass
+
+    try:
+        with open(runner_log, "a", encoding="utf-8") as lf:
+            lf.write(f"[launcher] created at {datetime.now().isoformat()}\n")
+    except Exception:
+        pass
+
+    # PowerShell版（診断用）
+    app_args_ps = ",".join(_ps_quote(a) for a in (restart_args or []))
+    installer_args_ps = ",".join(_ps_quote(a) for a in installer_args)
+    stamp2_ps = "" if os.path.normpath(stamp_path2) == os.path.normpath(stamp_path) else stamp_path2
+    ps1 = (
+        "$ErrorActionPreference='Stop'\n"
+        "$ProgressPreference='SilentlyContinue'\n"
+        f"$RunnerLog={_ps_quote(runner_log)}\n"
+        "function Write-RunnerLog([string]$msg) {\n"
+        "  try {\n"
+        "    $dir=Split-Path -Parent $RunnerLog; if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }\n"
+        "    $ts=(Get-Date).ToString('yyyy-MM-dd HH:mm:ss.fff');\n"
+        "    Add-Content -LiteralPath $RunnerLog -Encoding UTF8 -Value (\"[$ts] $msg\");\n"
+        "  } catch {}\n"
+        "}\n"
+        "Write-RunnerLog 'runner:start'\n"
+        f"$pidToWait={pid_to_wait}\n"
+        f"$installer={_ps_quote(installer_path)}\n"
+        f"$installerLog={_ps_quote(log_path)}\n"
+        f"$stamp={_ps_quote(stamp_path)}\n"
+        f"$stamp2={_ps_quote(stamp2_ps)}\n"
+        f"$app={_ps_quote(restart_exe)}\n"
+        f"$appArgs=@({app_args_ps});\n"
+        f"$installerArgs=@({installer_args_ps});\n"
+        "try {\n"
+        "  Write-RunnerLog (\"wait:pid=$pidToWait\");\n"
+        "  try { Wait-Process -Id $pidToWait -ErrorAction SilentlyContinue } catch {}\n"
+        "  if (-not (Test-Path -LiteralPath $installer)) { throw (\"installer not found: $installer\") }\n"
+        "  Write-RunnerLog (\"start-installer: $installer\");\n"
+        "  $p=Start-Process -FilePath $installer -ArgumentList $installerArgs -PassThru;\n"
+        "  $null=$p.WaitForExit();\n"
+        "  Write-RunnerLog (\"installer-exit: exitCode=$($p.ExitCode)\");\n"
+        "  try {\n"
+        "    $dir=Split-Path -Parent $stamp; if ($dir) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }\n"
+        "    $obj=@{ installedAtUtc=(Get-Date).ToUniversalTime().ToString('o'); exitCode=$p.ExitCode; installer=$installer; logPath=$installerLog; runnerLog=$RunnerLog }\n"
+        "    $json=$obj | ConvertTo-Json -Compress\n"
+        "    Set-Content -LiteralPath $stamp -Value $json -Encoding UTF8\n"
+        "    if ($stamp2) { try { Set-Content -LiteralPath $stamp2 -Value $json -Encoding UTF8 } catch {} }\n"
+        "    Write-RunnerLog (\"stamp-written: $stamp\");\n"
+        "  } catch { Write-RunnerLog (\"stamp-error: $($_.Exception.Message)\") }\n"
+        "  Write-RunnerLog (\"restart: $app\");\n"
+        "  if ($appArgs.Count -gt 0) { Start-Process -FilePath $app -ArgumentList $appArgs } else { Start-Process -FilePath $app }\n"
+        "  Write-RunnerLog 'runner:done'\n"
+        "} catch {\n"
+        "  Write-RunnerLog (\"runner-error: $($_.Exception.Message)\");\n"
+        "  throw\n"
+        "}\n"
     )
 
-    ps_exe = "pwsh" if shutil.which("pwsh") else "powershell"
+    try:
+        with open(runner_ps1, "w", encoding="utf-8") as f:
+            f.write(ps1)
+    except Exception as e:
+        raise RuntimeError(f"更新ランナーの作成に失敗しました: {e}")
+
+    # cmd版（本命）: PID待ち→インストーラ(start /wait)→スタンプ(JSON)→再起動
+    def _cmd_quote(arg: str) -> str:
+        s = str(arg)
+        if not s:
+            return '""'
+        if any(c in s for c in ' \t"'):
+            return '"' + s.replace('"', '""') + '"'
+        return s
+
+    installer_args_cmd = " ".join(_cmd_quote(a) for a in installer_args)
+    app_args_cmd = " ".join(_cmd_quote(a) for a in (restart_args or []))
+
+    # cmd版（本命）: パスに空白があっても壊れないよう set "VAR=..." を使用する。
+    stamp2_cmd = "" if os.path.normpath(stamp_path2) == os.path.normpath(stamp_path) else stamp_path2
+
+    restart_line = (
+        f"start \"\" {_cmd_quote(restart_exe)} {app_args_cmd}\r\n"
+        if (restart_args or [])
+        else f"start \"\" {_cmd_quote(restart_exe)}\r\n"
+    )
+
+    cmd_lines = [
+        "@echo off\r\n",
+        "setlocal EnableExtensions EnableDelayedExpansion\r\n",
+        f"set \"RUNNER_LOG={runner_log}\"\r\n",
+        f"set \"INSTALLER={installer_path}\"\r\n",
+        f"set \"PID_TO_WAIT={pid_to_wait}\"\r\n",
+        f"set \"STAMP={stamp_path}\"\r\n",
+        f"set \"STAMP2={stamp2_cmd}\"\r\n",
+        f"set \"APP={restart_exe}\"\r\n",
+        "echo [%%date%% %%time%%] runner:start>>\"%RUNNER_LOG%\"\r\n",
+        "echo [%%date%% %%time%%] wait:pid=%PID_TO_WAIT%>>\"%RUNNER_LOG%\"\r\n",
+        ":waitloop\r\n",
+        "tasklist /FI \"PID eq %PID_TO_WAIT%\" 2>NUL | findstr /I \"%PID_TO_WAIT%\" >NUL\r\n",
+        "if %ERRORLEVEL%==0 (timeout /t 1 /nobreak >NUL & goto waitloop)\r\n",
+        "if not exist \"%INSTALLER%\" (echo [%%date%% %%time%%] ERROR: installer not found: %INSTALLER%>>\"%RUNNER_LOG%\" & exit /b 2)\r\n",
+        "echo [%%date%% %%time%%] start-installer: %INSTALLER%>>\"%RUNNER_LOG%\"\r\n",
+        f"start \"\" /wait \"%INSTALLER%\" {installer_args_cmd}\r\n",
+        "set EC=%ERRORLEVEL%\r\n",
+        "echo [%%date%% %%time%%] installer-exit: exitCode=!EC!>>\"%RUNNER_LOG%\"\r\n",
+        "set LDT=\r\n",
+        "for /f \"tokens=2 delims==\" %%i in ('wmic os get localdatetime /value 2^>NUL ^| find \"=\"') do set LDT=%%i\r\n",
+        "if not defined LDT set LDT=%date% %time%\r\n",
+        "set INSTALLED_AT=!LDT!\r\n",
+        "set JSON={\"installedAtLocal\":\"!INSTALLED_AT!\",\"exitCode\":!EC!}\r\n",
+        "echo !JSON!>\"%STAMP%\"\r\n",
+        "if not \"%STAMP2%\"==\"\" (echo !JSON!>\"%STAMP2%\")\r\n",
+        "echo [%%date%% %%time%%] stamp-written: %STAMP%>>\"%RUNNER_LOG%\"\r\n",
+        "echo [%%date%% %%time%%] restart: %APP%>>\"%RUNNER_LOG%\"\r\n",
+        restart_line,
+        "echo [%%date%% %%time%%] runner:done>>\"%RUNNER_LOG%\"\r\n",
+        "endlocal\r\n",
+    ]
+    cmd_script = "".join(cmd_lines)
+
+    try:
+        with open(runner_cmd, "w", encoding="utf-8", newline="") as f:
+            f.write(cmd_script)
+    except Exception as e:
+        raise RuntimeError(f"更新ランナー(cmd)の作成に失敗しました: {e}")
+
+    # cmd.exe start でデタッチして実行（PowerShellより環境依存が少ない）
     popen_args = [
-        ps_exe,
-        "-NoProfile",
-        "-ExecutionPolicy",
-        "Bypass",
-        "-Command",
-        ps_script,
+        "cmd.exe",
+        "/c",
+        "start",
+        "",
+        runner_cmd,
     ]
 
     creationflags = 0
     try:
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+        # VS Code のターミナル/タスク経由で起動したプロセスは Job Object に入っており、
+        # 親終了と同時に子プロセスがまとめて終了することがある。
+        # breakaway できる環境では、更新ランナーをジョブから切り離して生存させる。
+        try:
+            creationflags |= subprocess.CREATE_BREAKAWAY_FROM_JOB
+        except Exception:
+            pass
     except Exception:
         creationflags = 0
 
     try:
         logger.info("インストーラ起動(再起動付き): %s", installer_path)
         logger.info("再起動コマンド: %s %s", restart_exe, " ".join(restart_args or []))
+        logger.info("更新ランナー(cmd): %s", runner_cmd)
+        logger.info("更新ランナー(ps1): %s", runner_ps1)
+        logger.info("更新ランナーログ: %s", runner_log)
+        try:
+            with open(runner_log, "a", encoding="utf-8") as lf:
+                lf.write(f"[launcher] ps={popen_args[0]} creationflags={creationflags}\n")
+                lf.write(f"[launcher] args={popen_args}\n")
+                lf.write(f"[launcher] runner_cmd={runner_cmd}\n")
+                lf.write(f"[launcher] runner_ps1={runner_ps1}\n")
+        except Exception:
+            pass
     except Exception:
         logger.info("インストーラ起動(再起動付き): %s", installer_path)
+
+    # まずはcmd runnerを起動
     subprocess.Popen(popen_args, close_fds=True, creationflags=creationflags)
+
+    # すぐに親が終了してしまうため、短時間だけ起動確認する（遅延起動もあるのでポーリング）
+    if not bool(os.environ.get("PYTEST_CURRENT_TEST")):
+        started = _wait_for_runner_start(runner_log=runner_log, timeout_sec=5.0)
+        if not started:
+            # 最後の手段: PowerShell版を start で起動してみる
+            try:
+                with open(runner_log, "a", encoding="utf-8") as lf:
+                    lf.write("[launcher] cmd runner did not start; fallback to pwsh -File\n")
+            except Exception:
+                pass
+            ps_exe = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
+            fallback_args = [
+                "cmd.exe",
+                "/c",
+                "start",
+                "",
+                ps_exe,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                runner_ps1,
+            ]
+            subprocess.Popen(fallback_args, close_fds=True)
+            started = _wait_for_runner_start(runner_log=runner_log, timeout_sec=5.0)
+
+        if not started:
+            raise RuntimeError(
+                "更新ランナーを起動できませんでした。"
+                f"\nrunner_log: {runner_log}"
+                f"\nrunner_cmd: {runner_cmd}"
+                f"\nrunner_ps1: {runner_ps1}"
+                "\n（セキュリティ製品/実行ポリシーにより start がブロックされている可能性があります。"
+                "runner_cmd をダブルクリックで実行できるかも確認してください）"
+            )
 
     # できるだけ穏当な終了を試みる
     try:

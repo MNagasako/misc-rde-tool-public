@@ -473,6 +473,12 @@ class MiscTab(QWidget):
                         return
 
                     updated_at_text = updated_at or "不明"
+                    try:
+                        from classes.core.app_updater import get_last_install_datetime_text
+
+                        last_install_text = get_last_install_datetime_text() or "記録なし"
+                    except Exception:
+                        last_install_text = "不明"
                     if not has_update:
                         try:
                             from classes.core.app_updater import is_same_version
@@ -491,6 +497,7 @@ class MiscTab(QWidget):
                                 f"現在: {REVISION}\n"
                                 f"latest.json: {latest_version}\n"
                                 f"更新日時: {updated_at_text}\n\n"
+                                f"最終インストール日時: {last_install_text}\n\n"
                                 "同一バージョンを再ダウンロードして、再インストールすることもできます。\n\n"
                                 f"リリースページ: {release_url}"
                             )
@@ -521,6 +528,7 @@ class MiscTab(QWidget):
                             f"現在: {REVISION}\n"
                             f"latest.json: {latest_version}\n"
                             f"更新日時: {updated_at_text}\n\n"
+                            f"最終インストール日時: {last_install_text}\n\n"
                             "最新版を再ダウンロードして再インストールすることもできます。\n\n"
                             f"リリースページ: {release_url}"
                         )
@@ -551,6 +559,7 @@ class MiscTab(QWidget):
                         f"現在: {REVISION}<br>"
                         f"latest.json: {latest_version}<br>"
                         f"更新日時: {updated_at_text}<br><br>"
+                        f"最終インストール日時: {last_install_text}<br><br>"
                         f"リリースページ: <a href=\"{release_url}\">{release_url}</a><br><br>"
                         "インストーラをダウンロードして更新しますか？<br><br>"
                         "（ダウンロード後にアプリを終了し、インストーラを自動で起動します。完了後にアプリを再起動します）"
@@ -763,14 +772,20 @@ class MiscTab(QWidget):
 
                     # UIを閉じてから終了フローへ
                     try:
-                        dlg.close()
+                        dlg.append_log("インストーラを起動します...")
                     except Exception:
                         pass
 
+                    # まず起動を試み、失敗した場合はアプリを終了せずダイアログにエラーを表示する
                     run_installer_and_restart(str(dst), wait_pid=int(os.getpid()))
                 except Exception as e:
-                    _finish_ui()
-                    QMessageBox.warning(self, "更新エラー", f"インストーラ起動に失敗しました: {e}")
+                    logger.error("インストーラ起動に失敗: %s", e, exc_info=True)
+                    try:
+                        dlg.append_log(f"ERROR: {e}")
+                        dlg.finish_error("インストーラを起動できませんでした（詳細はログを参照）")
+                    except Exception:
+                        pass
+                    _end_in_progress_keep_dialog()
             except Exception as e:
                 logger.error("更新後処理に失敗: %s", e, exc_info=True)
                 _finish_ui()

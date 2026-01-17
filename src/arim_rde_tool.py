@@ -1234,12 +1234,19 @@ def main():
 
                             def _show_result_dialog(has_update: bool, latest_version: str, updated_at: str) -> None:
                                 updated_at_text = updated_at or "不明"
+                                try:
+                                    from classes.core.app_updater import get_last_install_datetime_text
+
+                                    last_install_text = get_last_install_datetime_text() or "記録なし"
+                                except Exception:
+                                    last_install_text = "不明"
                                 if has_update:
                                     msg = (
                                         "新しいバージョンが利用可能です。\n\n"
                                         f"現在: {REVISION}\n"
                                         f"latest.json: {latest_version}\n"
-                                        f"更新日時: {updated_at_text}\n\n"
+                                        f"更新日時: {updated_at_text}\n"
+                                        f"最終インストール日時: {last_install_text}\n\n"
                                         "更新は『設定 → MISC』の『更新を確認』から実行してください。"
                                     )
                                     QMessageBox.information(browser, "更新のお知らせ", msg)
@@ -1248,7 +1255,8 @@ def main():
                                         "現在のバージョンは最新です。\n\n"
                                         f"現在: {REVISION}\n"
                                         f"latest.json: {latest_version}\n"
-                                        f"更新日時: {updated_at_text}"
+                                        f"更新日時: {updated_at_text}\n"
+                                        f"最終インストール日時: {last_install_text}"
                                     )
                                     QMessageBox.information(browser, "更新確認", msg)
 
@@ -1336,7 +1344,7 @@ def main():
                                             from classes.core.app_updater import run_installer_and_restart
 
                                             try:
-                                                dl.close()
+                                                dl.append_log("インストーラを起動します...")
                                             except Exception:
                                                 pass
 
@@ -1344,10 +1352,10 @@ def main():
                                         except Exception as e:
                                             logger.error("Failed to start installer: %s", e, exc_info=True)
                                             try:
-                                                dl.close()
+                                                dl.append_log(f"ERROR: {e}")
+                                                dl.finish_error("インストーラを起動できませんでした（詳細はログを参照）")
                                             except Exception:
                                                 pass
-                                            QMessageBox.warning(browser, "更新エラー", f"インストーラ起動に失敗しました: {e}")
                                     except Exception as e:
                                         logger.error("Post-download flow failed: %s", e, exc_info=True)
                                         try:
