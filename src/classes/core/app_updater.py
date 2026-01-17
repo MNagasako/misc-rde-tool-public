@@ -351,7 +351,38 @@ def run_installer_and_restart(
     if not installer_path or not os.path.exists(installer_path):
         raise FileNotFoundError(f"インストーラが見つかりません: {installer_path}")
 
-    restart_exe = restart_exe or sys.executable
+    # 再起動対象の実行ファイルと引数を推定する。
+    # - frozen（配布exe）: sys.executable をそのまま起動（必要ならargv[1:]を付与）
+    # - 開発実行（python + script）: python.exe に script + argv を付与しないと再起動できない
+    restart_args: list[str] = []
+    if restart_exe:
+        restart_exe = str(restart_exe)
+    else:
+        restart_exe = sys.executable
+        try:
+            is_frozen = bool(getattr(sys, "frozen", False))
+        except Exception:
+            is_frozen = False
+
+        if is_frozen:
+            # exe自身を起動する（argv[0]はexeなので除外）
+            try:
+                restart_args = [str(a) for a in (sys.argv[1:] or [])]
+            except Exception:
+                restart_args = []
+        else:
+            # python.exe + <script> + args
+            try:
+                argv0 = str((sys.argv or [""])[0] or "")
+                extra_args = [str(a) for a in (sys.argv[1:] or [])]
+                if argv0.lower().endswith("arim_rde_tool.py"):
+                    argv0 = get_dynamic_file_path("src/arim_rde_tool.py")
+                elif argv0:
+                    argv0 = os.path.abspath(argv0)
+                restart_args = ([argv0] if argv0 else []) + extra_args
+            except Exception:
+                restart_args = []
+
     if not restart_exe:
         raise RuntimeError("再起動対象の実行ファイルパスが取得できません")
 
@@ -373,10 +404,11 @@ def run_installer_and_restart(
         "try { Wait-Process -Id $pidToWait -ErrorAction SilentlyContinue } catch {} ;"
         f"$installer={_ps_quote(installer_path)};"
         f"$app={_ps_quote(restart_exe)};"
+        "$appArgs=@(" + ",".join(_ps_quote(a) for a in (restart_args or [])) + ");"
         "$argList=@(" + ",".join(_ps_quote(a) for a in installer_args) + ");"
         "$p=Start-Process -FilePath $installer -ArgumentList $argList -PassThru;"
         "$null=$p.WaitForExit();"
-        "Start-Process -FilePath $app;"
+        "if ($appArgs.Count -gt 0) { Start-Process -FilePath $app -ArgumentList $appArgs } else { Start-Process -FilePath $app } ;"
     )
 
     ps_exe = "pwsh" if shutil.which("pwsh") else "powershell"
@@ -395,7 +427,11 @@ def run_installer_and_restart(
     except Exception:
         creationflags = 0
 
-    logger.info("インストーラ起動(再起動付き): %s", installer_path)
+    try:
+        logger.info("インストーラ起動(再起動付き): %s", installer_path)
+        logger.info("再起動コマンド: %s %s", restart_exe, " ".join(restart_args or []))
+    except Exception:
+        logger.info("インストーラ起動(再起動付き): %s", installer_path)
     subprocess.Popen(popen_args, close_fds=True, creationflags=creationflags)
 
     # できるだけ穏当な終了を試みる
