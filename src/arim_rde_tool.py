@@ -1282,45 +1282,72 @@ def main():
                                         pass
                                     return True
 
-                                def _open_folder_prompt_and_exit_on_ui_thread() -> None:
+                                def _prompt_and_start_update_on_ui_thread() -> None:
                                     try:
-                                        try:
-                                            dl.append_log("Download verified. Opening folder...")
-                                        except Exception:
-                                            pass
-
-                                        try:
-                                            if os.name == "nt":
-                                                import subprocess
-
-                                                subprocess.Popen(["explorer", "/select,", os.path.normpath(dst)], close_fds=True)
-                                        except Exception:
-                                            pass
-
-                                        if not bool(os.environ.get("PYTEST_CURRENT_TEST")):
-                                            QMessageBox.information(
-                                                browser,
-                                                "更新の準備ができました",
-                                                "インストーラのダウンロードとsha256検証が完了しました。\n"
-                                                "保存フォルダを開きましたので、セットアップを実行してください。\n\n"
-                                                "OKを押すとアプリを終了します。",
-                                            )
-
-                                        if not bool(os.environ.get("PYTEST_CURRENT_TEST")):
+                                        if bool(os.environ.get("PYTEST_CURRENT_TEST")):
                                             try:
-                                                from qt_compat.widgets import QApplication
-
-                                                app = QApplication.instance()
-                                                if app is not None:
-                                                    app.quit()
+                                                dl.close()
                                             except Exception:
                                                 pass
-                                            os._exit(0)
+                                            return
+
+                                        box = QMessageBox(browser)
+                                        box.setIcon(QMessageBox.Question)
+                                        box.setWindowTitle("更新の準備ができました")
+                                        box.setText("インストーラのダウンロードとsha256検証が完了しました。")
+                                        box.setInformativeText(
+                                            "更新を開始するには、アプリを終了してからインストーラを起動する必要があります。\n\n"
+                                            "『更新を開始』を押すと、アプリを終了し、インストーラを自動で起動します。\n"
+                                            "インストール完了後にアプリを再起動します。"
+                                        )
+                                        start_btn = box.addButton("更新を開始", QMessageBox.AcceptRole)
+                                        open_folder_btn = box.addButton("保存先を開く（手動）", QMessageBox.ActionRole)
+                                        cancel_btn = box.addButton("キャンセル", QMessageBox.RejectRole)
+                                        box.setDefaultButton(start_btn)
+                                        box.exec()
+
+                                        if box.clickedButton() == cancel_btn:
+                                            try:
+                                                dl.close()
+                                            except Exception:
+                                                pass
+                                            return
+
+                                        if box.clickedButton() == open_folder_btn:
+                                            try:
+                                                if os.name == "nt":
+                                                    import subprocess
+
+                                                    subprocess.Popen(["explorer", "/select,", os.path.normpath(dst)], close_fds=True)
+                                            except Exception:
+                                                pass
+                                            QMessageBox.information(
+                                                browser,
+                                                "保存先を開きました",
+                                                "セットアップを手動で実行する場合は、必ずアプリを終了してから実行してください。",
+                                            )
+                                            try:
+                                                dl.close()
+                                            except Exception:
+                                                pass
+                                            return
 
                                         try:
-                                            dl.close()
-                                        except Exception:
-                                            pass
+                                            from classes.core.app_updater import run_installer_and_restart
+
+                                            try:
+                                                dl.close()
+                                            except Exception:
+                                                pass
+
+                                            run_installer_and_restart(str(dst), wait_pid=int(os.getpid()))
+                                        except Exception as e:
+                                            logger.error("Failed to start installer: %s", e, exc_info=True)
+                                            try:
+                                                dl.close()
+                                            except Exception:
+                                                pass
+                                            QMessageBox.warning(browser, "更新エラー", f"インストーラ起動に失敗しました: {e}")
                                     except Exception as e:
                                         logger.error("Post-download flow failed: %s", e, exc_info=True)
                                         try:
@@ -1362,17 +1389,46 @@ def main():
                                             return
 
                                         dl.finish_success("ダウンロード完了")
-                                        QTimer.singleShot(0, browser, _open_folder_prompt_and_exit_on_ui_thread)
+                                        QTimer.singleShot(0, browser, _prompt_and_start_update_on_ui_thread)
                                     except Exception as e:
                                         logger.error("Update download/verify failed: %s", e, exc_info=True)
 
                                         def _on_err() -> None:
                                             try:
-                                                dl.close()
+                                                if dl.is_cancelled():
+                                                    try:
+                                                        dl.close()
+                                                    except Exception:
+                                                        pass
+                                                    return
+
+                                                extra = ""
+                                                try:
+                                                    resp = getattr(e, "response", None)
+                                                    status = getattr(resp, "status_code", None)
+                                                    if int(status or 0) == 404 and "github.com" in str(url):
+                                                        extra = (
+                                                            "\n\nURLが見つかりません（404）でした。\n"
+                                                            "GitHub Releases にインストーラexeが添付されていないか、ファイル名/タグが一致していない可能性があります。\n\n"
+                                                            "対処: GitHubのリリースページで Assets を確認してください。\n"
+                                                            f"  期待ファイル名: arim_rde_tool_setup.{version}.exe\n"
+                                                        )
+                                                except Exception:
+                                                    extra = ""
+
+                                                try:
+                                                    dl.append_log(f"ERROR: {e}{extra}")
+                                                except Exception:
+                                                    pass
+                                                try:
+                                                    dl.finish_error("更新ダウンロードに失敗しました（詳細はログを参照）")
+                                                except Exception:
+                                                    pass
                                             except Exception:
-                                                pass
-                                            if not dl.is_cancelled():
-                                                QMessageBox.warning(browser, "更新エラー", f"更新処理に失敗しました: {e}")
+                                                try:
+                                                    dl.close()
+                                                except Exception:
+                                                    pass
 
                                         QTimer.singleShot(0, browser, _on_err)
 

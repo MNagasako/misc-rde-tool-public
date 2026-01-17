@@ -553,7 +553,7 @@ class MiscTab(QWidget):
                         f"更新日時: {updated_at_text}<br><br>"
                         f"リリースページ: <a href=\"{release_url}\">{release_url}</a><br><br>"
                         "インストーラをダウンロードして更新しますか？<br><br>"
-                        "（ダウンロード後に保存先を開きます。セットアップは手動で実行してください。OK押下でアプリを終了します）"
+                        "（ダウンロード後にアプリを終了し、インストーラを自動で起動します。完了後にアプリを再起動します）"
                     )
 
                     install_btn = box.addButton("インストール", QMessageBox.AcceptRole)
@@ -660,7 +660,7 @@ class MiscTab(QWidget):
                 QMessageBox.warning(self, "更新エラー", f"更新処理に失敗しました: {e}")
 
     def _download_and_install(self, *, url: str, version: str, sha256: str) -> None:
-        """更新インストーラをDL→sha256検証→保存先を開く→OKで終了（進捗/キャンセル対応）。"""
+        """更新インストーラをDL→sha256検証→アプリ終了→インストーラ自動起動（進捗/キャンセル対応）。"""
         from classes.core.app_updater import (
             download,
             get_default_download_path,
@@ -706,45 +706,71 @@ class MiscTab(QWidget):
                 self._update_check_btn.setEnabled(True)
             self._update_in_progress = False
 
-        def _open_folder_prompt_and_exit_on_ui_thread() -> None:
+        def _end_in_progress_keep_dialog() -> None:
+            """処理中フラグだけ解除し、ダイアログは残す（エラー内容を表示するため）。"""
+            if hasattr(self, "_update_check_btn"):
+                self._update_check_btn.setEnabled(True)
+            self._update_in_progress = False
+
+        def _prompt_and_start_update_on_ui_thread() -> None:
             try:
-                try:
-                    dlg.append_log("Download verified. Opening folder...")
-                except Exception:
-                    pass
+                # テスト中は更新（終了/インストーラ起動）を行わない
+                if bool(os.environ.get("PYTEST_CURRENT_TEST")):
+                    _finish_ui()
+                    return
 
-                # 保存先をExplorerで開く（ファイル選択）
-                try:
-                    if os.name == "nt":
-                        import subprocess
+                from qt_compat.widgets import QMessageBox
 
-                        subprocess.Popen(["explorer", "/select,", os.path.normpath(dst)], close_fds=True)
-                except Exception:
-                    pass
+                box = QMessageBox(self)
+                box.setIcon(QMessageBox.Question)
+                box.setWindowTitle("更新の準備ができました")
+                box.setText("インストーラのダウンロードとsha256検証が完了しました。")
+                box.setInformativeText(
+                    "更新を開始するには、アプリを終了してからインストーラを起動する必要があります。\n\n"
+                    "『更新を開始』を押すと、アプリを終了し、インストーラを自動で起動します。\n"
+                    "インストール完了後にアプリを再起動します。"
+                )
 
-                # メッセージ表示（OK押下で続行）
-                if not bool(os.environ.get("PYTEST_CURRENT_TEST")):
-                    QMessageBox.information(
-                        self,
-                        "更新の準備ができました",
-                        "インストーラのダウンロードとsha256検証が完了しました。\n"
-                        "保存フォルダを開きましたので、セットアップを実行してください。\n\n"
-                        "OKを押すとアプリを終了します。",
-                    )
+                start_btn = box.addButton("更新を開始", QMessageBox.AcceptRole)
+                open_folder_btn = box.addButton("保存先を開く（手動）", QMessageBox.ActionRole)
+                cancel_btn = box.addButton("キャンセル", QMessageBox.RejectRole)
+                box.setDefaultButton(start_btn)
+                box.exec()
 
-                # OK押下後に終了（テスト時は終了しない）
-                if not bool(os.environ.get("PYTEST_CURRENT_TEST")):
+                if box.clickedButton() == cancel_btn:
+                    _finish_ui()
+                    return
+
+                if box.clickedButton() == open_folder_btn:
                     try:
-                        from qt_compat.widgets import QApplication
+                        if os.name == "nt":
+                            import subprocess
 
-                        app = QApplication.instance()
-                        if app is not None:
-                            app.quit()
+                            subprocess.Popen(["explorer", "/select,", os.path.normpath(dst)], close_fds=True)
                     except Exception:
                         pass
-                    os._exit(0)
+                    QMessageBox.information(
+                        self,
+                        "保存先を開きました",
+                        "セットアップを手動で実行する場合は、必ずアプリを終了してから実行してください。",
+                    )
+                    _finish_ui()
+                    return
 
-                _finish_ui()
+                # 更新開始（アプリ終了後にインストーラを起動し、完了後に再起動）
+                try:
+                    from classes.core.app_updater import run_installer_and_restart
+
+                    # UIを閉じてから終了フローへ
+                    try:
+                        dlg.close()
+                    except Exception:
+                        pass
+
+                    run_installer_and_restart(str(dst), wait_pid=int(os.getpid()))
+                except Exception as e:
+                    _finish_ui()
+                    QMessageBox.warning(self, "更新エラー", f"インストーラ起動に失敗しました: {e}")
             except Exception as e:
                 logger.error("更新後処理に失敗: %s", e, exc_info=True)
                 _finish_ui()
@@ -780,14 +806,42 @@ class MiscTab(QWidget):
 
                 dlg.finish_success("ダウンロード完了")
 
-                # アプリ終了を伴うためUIスレッドで処理する
-                QTimer.singleShot(0, self, _open_folder_prompt_and_exit_on_ui_thread)
+                # アプリ終了/インストーラ起動を伴うためUIスレッドで処理する
+                QTimer.singleShot(0, self, _prompt_and_start_update_on_ui_thread)
             except Exception as e:
                 logger.error("更新ダウンロード/実行でエラー: %s", e, exc_info=True)
                 def _on_err():
-                    _finish_ui()
-                    if not dlg.is_cancelled():
-                        QMessageBox.warning(self, "更新エラー", f"更新処理に失敗しました: {e}")
+                    # workerスレッド→UIスレッドの呼び出しが環境によって不安定になり得るため、
+                    # まずはダイアログ内に確実にエラーを表示する。
+                    if dlg.is_cancelled():
+                        _finish_ui()
+                        return
+
+                    extra = ""
+                    try:
+                        resp = getattr(e, "response", None)
+                        status = getattr(resp, "status_code", None)
+                        if int(status or 0) == 404 and "github.com" in str(url):
+                            extra = (
+                                "\n\nURLが見つかりません（404）でした。\n"
+                                "GitHub Releases にインストーラexeが添付されていないか、ファイル名/タグが一致していない可能性があります。\n\n"
+                                "対処: GitHubのリリースページで Assets を確認してください。\n"
+                                f"  期待ファイル名: arim_rde_tool_setup.{version}.exe\n"
+                            )
+                    except Exception:
+                        extra = ""
+
+                    try:
+                        dlg.append_log(f"ERROR: {e}{extra}")
+                    except Exception:
+                        pass
+                    try:
+                        dlg.finish_error("更新ダウンロードに失敗しました（詳細はログを参照）")
+                    except Exception:
+                        pass
+
+                    # エラー表示のためダイアログは残し、ボタン等は復帰
+                    _end_in_progress_keep_dialog()
                 QTimer.singleShot(0, self, _on_err)
 
         threading.Thread(target=_worker_download, daemon=True).start()

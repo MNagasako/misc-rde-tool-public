@@ -279,6 +279,21 @@ def _default_installer_log_path(version: str) -> str:
     return get_dynamic_file_path(f"output/update/installer_{safe_version}.log")
 
 
+def _build_inno_installer_args(*, log_path: str, restart_apps: bool) -> list[str]:
+    """Inno Setup の共通引数を組み立てる。"""
+    args = [
+        "/SP-",
+        "/VERYSILENT",
+        "/SUPPRESSMSGBOXES",
+        "/NORESTART",  # OS再起動は行わない
+        "/CLOSEAPPLICATIONS",  # 可能なら対象アプリを閉じる（ファイルロック回避）
+        f"/LOG={log_path}",
+    ]
+    if restart_apps:
+        args.append("/RESTARTAPPLICATIONS")
+    return args
+
+
 def run_installer_and_exit(installer_path: str, log_path: Optional[str] = None) -> None:
     """Inno Setup インストーラをサイレント実行してアプリを終了する。
 
@@ -293,14 +308,7 @@ def run_installer_and_exit(installer_path: str, log_path: Optional[str] = None) 
     log_path = log_path or _default_installer_log_path("latest")
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
-    args = [
-        installer_path,
-        "/SP-",
-        "/VERYSILENT",
-        "/SUPPRESSMSGBOXES",
-        "/NORESTART",
-        f"/LOG={log_path}",
-    ]
+    args = [installer_path] + _build_inno_installer_args(log_path=log_path, restart_apps=False)
 
     logger.info("インストーラ起動: %s", " ".join(args))
     subprocess.Popen(args, close_fds=True)
@@ -327,6 +335,7 @@ def run_installer_and_restart(
     installer_path: str,
     log_path: Optional[str] = None,
     restart_exe: Optional[str] = None,
+    wait_pid: Optional[int] = None,
 ) -> None:
     """Inno Setup インストーラを実行し、完了後にアプリを再起動する。
 
@@ -349,18 +358,19 @@ def run_installer_and_restart(
     log_path = log_path or _default_installer_log_path("latest")
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
-    # インストーラ引数（run_installer_and_exit と同等）
-    installer_args = [
-        "/SP-",
-        "/VERYSILENT",
-        "/SUPPRESSMSGBOXES",
-        "/NORESTART",
-        f"/LOG={log_path}",
-    ]
+    # インストーラ引数
+    installer_args = _build_inno_installer_args(log_path=log_path, restart_apps=False)
+
+    # 更新対象（= 本体）が起動中のままインストーラを開始すると、
+    # サイレント時にファイル置換が遅延/失敗して「更新されない」ように見えやすい。
+    # そのため、別プロセス側で本体PIDの終了を待ってからインストーラを起動する。
+    pid_to_wait = int(wait_pid) if wait_pid is not None else int(os.getpid())
 
     # PowerShellで: インストーラ完了待ち → アプリ再起動
     ps_script = (
         "$ErrorActionPreference='SilentlyContinue';"
+        f"$pidToWait={pid_to_wait};"
+        "try { Wait-Process -Id $pidToWait -ErrorAction SilentlyContinue } catch {} ;"
         f"$installer={_ps_quote(installer_path)};"
         f"$app={_ps_quote(restart_exe)};"
         "$argList=@(" + ",".join(_ps_quote(a) for a in installer_args) + ");"
