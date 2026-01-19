@@ -924,10 +924,10 @@ def fetch_common_info_only(controller):
         QTimer.singleShot(0, handle_finished)
     
     # 通常のプログレス表示
-    progress_dialog = show_progress_dialog(controller.parent, "共通情報取得", worker)
-    
-    # 完了時処理を上書き
-    worker.finished.disconnect()  # 既存の接続を削除
+    # NOTE:
+    # show_progress_dialog は worker.finished で progress_dialog.close() を行う。
+    # ここで disconnect してしまうと、完了ダイアログが表示されてもプログレスが残る原因になる。
+    progress_dialog = show_progress_dialog(controller.parent, "共通情報取得", worker, show_completion_dialog=False)
     worker.finished.connect(on_finished_with_refresh)
 
 
@@ -984,7 +984,6 @@ def fetch_common_info_only2(controller):
         QTimer.singleShot(0, handle_finished)
 
     progress_dialog = show_progress_dialog(controller.parent, "共通情報取得2", worker, show_completion_dialog=False)
-    worker.finished.disconnect()
     worker.finished.connect(on_finished_with_refresh)
 
     return progress_dialog
@@ -1335,10 +1334,8 @@ def execute_individual_stage_ui(controller, stage_name):
         QTimer.singleShot(0, handle_finished)
     
     # 通常のプログレス表示
-    progress_dialog = show_progress_dialog(controller.parent, f"{stage_name}実行", worker)
-    
-    # 完了時処理を上書き
-    worker.finished.disconnect()  # 既存の接続を削除
+    # NOTE: disconnect すると show_progress_dialog 側の close が外れて残留し得るため、追加connectで拡張する。
+    progress_dialog = show_progress_dialog(controller.parent, f"{stage_name}実行", worker, show_completion_dialog=False)
     worker.finished.connect(on_finished_with_refresh)
 
 def create_individual_execution_widget(parent=None):
