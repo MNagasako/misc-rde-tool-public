@@ -197,6 +197,38 @@ class ThemeKey(str, Enum):
     BUTTON_BLUEGREY_BACKGROUND_PRESSED = "button.bluegrey.background.pressed"
     BUTTON_BLUEGREY_TEXT = "button.bluegrey.text"
     BUTTON_BLUEGREY_BORDER = "button.bluegrey.border"
+
+    # ========================================
+    # Button (Basic Info tab) - 基本情報タブ専用ボタン
+    # ========================================
+
+    # グループ1: 基本情報取得（ALL/検索）
+    BUTTON_BASICINFO_GROUP1_BACKGROUND = "button.basicinfo.group1.background"
+    BUTTON_BASICINFO_GROUP1_BACKGROUND_HOVER = "button.basicinfo.group1.background.hover"
+    BUTTON_BASICINFO_GROUP1_BACKGROUND_PRESSED = "button.basicinfo.group1.background.pressed"
+    BUTTON_BASICINFO_GROUP1_TEXT = "button.basicinfo.group1.text"
+    BUTTON_BASICINFO_GROUP1_BORDER = "button.basicinfo.group1.border"
+
+    # グループ2: 共通情報取得（共通情報のみ/共通情報取得2）
+    BUTTON_BASICINFO_GROUP2_BACKGROUND = "button.basicinfo.group2.background"
+    BUTTON_BASICINFO_GROUP2_BACKGROUND_HOVER = "button.basicinfo.group2.background.hover"
+    BUTTON_BASICINFO_GROUP2_BACKGROUND_PRESSED = "button.basicinfo.group2.background.pressed"
+    BUTTON_BASICINFO_GROUP2_TEXT = "button.basicinfo.group2.text"
+    BUTTON_BASICINFO_GROUP2_BORDER = "button.basicinfo.group2.border"
+
+    # グループ3: invoice_schema/サンプル情報取得
+    BUTTON_BASICINFO_GROUP3_BACKGROUND = "button.basicinfo.group3.background"
+    BUTTON_BASICINFO_GROUP3_BACKGROUND_HOVER = "button.basicinfo.group3.background.hover"
+    BUTTON_BASICINFO_GROUP3_BACKGROUND_PRESSED = "button.basicinfo.group3.background.pressed"
+    BUTTON_BASICINFO_GROUP3_TEXT = "button.basicinfo.group3.text"
+    BUTTON_BASICINFO_GROUP3_BORDER = "button.basicinfo.group3.border"
+
+    # テーブル内 再取得ボタン
+    BUTTON_BASICINFO_REFETCH_BACKGROUND = "button.basicinfo.refetch.background"
+    BUTTON_BASICINFO_REFETCH_BACKGROUND_HOVER = "button.basicinfo.refetch.background.hover"
+    BUTTON_BASICINFO_REFETCH_BACKGROUND_PRESSED = "button.basicinfo.refetch.background.pressed"
+    BUTTON_BASICINFO_REFETCH_TEXT = "button.basicinfo.refetch.text"
+    BUTTON_BASICINFO_REFETCH_BORDER = "button.basicinfo.refetch.border"
     
     # ========================================
     # Text - テキスト・ラベル

@@ -990,6 +990,109 @@ def main():
             print("   セキュリティリスクがあるため、開発用途のみに使用してください")
             print("="*80)
 
+        def _try_write_to_parent_console(text: str) -> bool:
+            """PyInstallerのwindowed実行でも、バージョン情報を可視化する。
+
+            console=False (runw) の場合、通常の print() は見えないことがあるため、
+            Windows では以下の順で出力を試みる。
+
+            1) 親プロセスのコンソールへ AttachConsole
+            2) 失敗したら AllocConsole で一時コンソール確保（--versionのみ）
+            3) CONOUT$ に対して WriteConsoleW / WriteFile
+            """
+
+            if not text:
+                return False
+
+            # 通常（ソース実行/console=True ビルド）では print で十分
+            if sys.platform != 'win32' or not getattr(sys, 'frozen', False):
+                try:
+                    print(text)
+                    return True
+                except Exception:
+                    return False
+
+            try:
+                import ctypes
+
+                kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+
+                ATTACH_PARENT_PROCESS = -1
+                ERROR_ACCESS_DENIED = 5
+
+                # 親のコンソールにアタッチ（既にアタッチ済みの場合は ERROR_ACCESS_DENIED）
+                attached = bool(kernel32.AttachConsole(ATTACH_PARENT_PROCESS))
+                if not attached:
+                    err = ctypes.get_last_error()
+                    if err == ERROR_ACCESS_DENIED:
+                        attached = True
+                    else:
+                        # 親にアタッチできない場合でも、--version だけは見えるように一時コンソールを確保
+                        attached = bool(kernel32.AllocConsole())
+
+                if not attached:
+                    return False
+
+                # CONOUT$ を直接開いて書き込む（STDOUT が無効なケースを回避）
+                GENERIC_WRITE = 0x40000000
+                FILE_SHARE_READ = 0x00000001
+                FILE_SHARE_WRITE = 0x00000002
+                OPEN_EXISTING = 3
+                INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+                handle = kernel32.CreateFileW(
+                    'CONOUT$',
+                    GENERIC_WRITE,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    None,
+                    OPEN_EXISTING,
+                    0,
+                    None,
+                )
+
+                if not handle or handle == INVALID_HANDLE_VALUE:
+                    STD_OUTPUT_HANDLE = -11
+                    handle = kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
+                    if not handle or handle == INVALID_HANDLE_VALUE:
+                        return False
+
+                # まずは Unicode をそのまま出せる WriteConsoleW を試す
+                # 失敗したら UTF-8 バイト列で WriteFile
+                text_to_write = f"{text}\r\n"
+                written_chars = ctypes.c_ulong(0)
+
+                ok = kernel32.WriteConsoleW(
+                    handle,
+                    ctypes.c_wchar_p(text_to_write),
+                    len(text_to_write),
+                    ctypes.byref(written_chars),
+                    None,
+                )
+
+                if not ok:
+                    data = text_to_write.encode('utf-8', errors='replace')
+                    written_bytes = ctypes.c_ulong(0)
+                    ok = kernel32.WriteFile(handle, data, len(data), ctypes.byref(written_bytes), None)
+
+                try:
+                    kernel32.CloseHandle(handle)
+                except Exception:
+                    pass
+
+                return bool(ok)
+            except Exception:
+                return False
+
+        def _show_version_messagebox(text: str) -> None:
+            if sys.platform != 'win32':
+                return
+            try:
+                import ctypes
+
+                ctypes.windll.user32.MessageBoxW(None, str(text), "ARIM RDE Tool", 0)
+            except Exception:
+                pass
+
         if args.version:
             version: str | None = None
 
@@ -1018,7 +1121,8 @@ def main():
                     version = None
 
             if version:
-                print(version)
+                if not _try_write_to_parent_console(version):
+                    _show_version_messagebox(version)
             else:
                 logger.debug("バージョン情報の取得に失敗しました")
             sys.exit(0)
@@ -1115,12 +1219,32 @@ def main():
             logger.debug("dialog centering install failed", exc_info=True)
 
         # DEBUG時: 一瞬だけ出る余計なトップレベルウィンドウの発生源を特定する
-        # （例: Windowsでタイトル"python"の空ウィンドウが表示されるケース）
+        # ただし、stack取得(traceback.extract_stack)は重く、ダイアログ操作が体感で重くなることがあるため
+        # 既定ではOFF（環境変数/設定で明示的にON）
         try:
             if args.log_level == 'DEBUG' and not os.environ.get("PYTEST_CURRENT_TEST"):
-                from classes.utils.window_show_probe import install_window_show_probe
+                enable_probe = False
+                capture_stack = False
 
-                install_window_show_probe(logger=logger)
+                # env var 優先
+                if str(os.environ.get("RDE_WINDOW_SHOW_PROBE", "")).strip() == "1":
+                    enable_probe = True
+                if str(os.environ.get("RDE_WINDOW_SHOW_PROBE_STACK", "")).strip() == "1":
+                    capture_stack = True
+
+                # config でも有効化可能
+                if not enable_probe:
+                    try:
+                        cfg = get_config_manager()
+                        enable_probe = bool(cfg.get("debug.window_show_probe.enabled", False) or False)
+                        capture_stack = bool(cfg.get("debug.window_show_probe.capture_stack", False) or False)
+                    except Exception:
+                        pass
+
+                if enable_probe:
+                    from classes.utils.window_show_probe import install_window_show_probe
+
+                    install_window_show_probe(logger=logger, enabled=True, capture_stack=capture_stack)
         except Exception:
             logger.debug("window show probe install failed", exc_info=True)
 

@@ -365,7 +365,8 @@ def parallel_download(
     worker_function: callable,
     max_workers: int = 10,
     progress_callback: Optional[callable] = None,
-    threshold: int = 50
+    threshold: int = 50,
+    progress_mode: str = "percent",
 ) -> Dict[str, Any]:
     """
     並列ダウンロードを実行
@@ -375,7 +376,10 @@ def parallel_download(
         worker_function: 各タスクを処理する関数
         max_workers: 最大並列数（デフォルト: 10）
         progress_callback: プログレスコールバック (current, total, message) -> bool
+            progress_mode="percent" の場合: current は 0-100 のパーセント値、total=100。
+            progress_mode="count" の場合: current は完了件数、total=総タスク数。
         threshold: 並列化を行う最小タスク数（デフォルト: 50）
+        progress_mode: 進捗通知の形式（"percent" | "count"）
         
     Returns:
         Dict[str, Any]: 実行結果
@@ -391,9 +395,13 @@ def parallel_download(
     
     total_tasks = len(tasks)
     
+    normalized_mode = str(progress_mode or "percent").strip().lower()
+    if normalized_mode not in {"percent", "count"}:
+        normalized_mode = "percent"
+
     # タスク数が閾値未満の場合は同期実行
     if total_tasks < threshold:
-        return _sequential_download(tasks, worker_function, progress_callback)
+        return _sequential_download(tasks, worker_function, progress_callback, progress_mode=normalized_mode)
     
     # 並列ダウンロード実行
     success_count = 0
@@ -412,11 +420,15 @@ def parallel_download(
         with lock:
             completed_count += 1
             if progress_callback:
-                # 0-100%に正規化
-                progress_percent = int((completed_count / total_tasks) * 100)
                 message = f"並列ダウンロード中... ({completed_count}/{total_tasks})"
-                if not progress_callback(progress_percent, 100, message):
-                    return False
+                if normalized_mode == "count":
+                    if not progress_callback(completed_count, total_tasks, message):
+                        return False
+                else:
+                    # 0-100%に正規化
+                    progress_percent = int((completed_count / total_tasks) * 100)
+                    if not progress_callback(progress_percent, 100, message):
+                        return False
         return True
     
     try:
@@ -631,7 +643,9 @@ def parallel_upload(
 def _sequential_download(
     tasks: list,
     worker_function: callable,
-    progress_callback: Optional[callable] = None
+    progress_callback: Optional[callable] = None,
+    *,
+    progress_mode: str = "percent",
 ) -> Dict[str, Any]:
     """
     同期ダウンロードを実行（並列化の閾値未満の場合）
@@ -651,6 +665,9 @@ def _sequential_download(
     cancelled = False
     errors = []
     total_tasks = len(tasks)
+    normalized_mode = str(progress_mode or "percent").strip().lower()
+    if normalized_mode not in {"percent", "count"}:
+        normalized_mode = "percent"
     
     for idx, task in enumerate(tasks):
         try:
@@ -686,11 +703,16 @@ def _sequential_download(
         # プログレス更新
         completed_count = idx + 1
         if progress_callback:
-            progress_percent = int((completed_count / total_tasks) * 100)
             message = f"同期ダウンロード中... ({completed_count}/{total_tasks})"
-            if not progress_callback(progress_percent, 100, message):
-                cancelled = True
-                break
+            if normalized_mode == "count":
+                if not progress_callback(completed_count, total_tasks, message):
+                    cancelled = True
+                    break
+            else:
+                progress_percent = int((completed_count / total_tasks) * 100)
+                if not progress_callback(progress_percent, 100, message):
+                    cancelled = True
+                    break
     
     return {
         "success_count": success_count,

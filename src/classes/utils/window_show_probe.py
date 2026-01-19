@@ -25,10 +25,19 @@ def _normalize_path(path: str) -> str:
 
 
 class _WindowShowProbe(QObject):
-    def __init__(self, logger: logging.Logger, *, max_stack_lines: int = 12) -> None:
+    def __init__(
+        self,
+        logger: logging.Logger,
+        *,
+        max_stack_lines: int = 12,
+        capture_stack: bool = True,
+        stack_limit: int = 80,
+    ) -> None:
         super().__init__()
         self._logger = logger
         self._max_stack_lines = max_stack_lines
+        self._capture_stack = bool(capture_stack)
+        self._stack_limit = int(stack_limit)
         self._seen: set[int] = set()
 
     def eventFilter(self, obj: object, event: object) -> bool:  # noqa: N802 - Qt override
@@ -133,20 +142,21 @@ class _WindowShowProbe(QObject):
                 extra,
             )
 
-            # Trim stack to repo frames only.
-            src_root = get_dynamic_file_path("src")
-            root = _normalize_path(os.path.join(src_root, ""))
-            stack = traceback.extract_stack(limit=80)
-            repo_frames: list[str] = []
-            for frame in stack:
-                fpath = _normalize_path(frame.filename)
-                if root in fpath:
-                    line = (frame.line or "").strip()
-                    repo_frames.append(f"{frame.filename}:{frame.lineno} in {frame.name} -> {line}")
+            if self._capture_stack:
+                # Trim stack to repo frames only.
+                src_root = get_dynamic_file_path("src")
+                root = _normalize_path(os.path.join(src_root, ""))
+                stack = traceback.extract_stack(limit=max(5, self._stack_limit))
+                repo_frames: list[str] = []
+                for frame in stack:
+                    fpath = _normalize_path(frame.filename)
+                    if root in fpath:
+                        line = (frame.line or "").strip()
+                        repo_frames.append(f"{frame.filename}:{frame.lineno} in {frame.name} -> {line}")
 
-            if repo_frames:
-                for line in repo_frames[-self._max_stack_lines :]:
-                    self._logger.warning("[WINDOW-SHOW]   %s", line)
+                if repo_frames:
+                    for line in repo_frames[-self._max_stack_lines :]:
+                        self._logger.warning("[WINDOW-SHOW]   %s", line)
 
         except Exception:  # pragma: no cover - diagnostic tool
             self._logger.debug("window show probe failed", exc_info=True)
@@ -157,8 +167,15 @@ def install_window_show_probe(
     *,
     logger: Optional[logging.Logger] = None,
     logger_name: str = "RDE_WebView",
+    enabled: bool = False,
+    capture_stack: bool = False,
+    max_stack_lines: int = 8,
+    stack_limit: int = 40,
 ) -> None:
     """Install a global event filter that logs top-level window shows."""
+
+    if not enabled:
+        return
 
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return
@@ -172,6 +189,11 @@ def install_window_show_probe(
         return
 
     logger = logger or logging.getLogger(logger_name)
-    probe = _WindowShowProbe(logger)
+    probe = _WindowShowProbe(
+        logger,
+        max_stack_lines=max_stack_lines,
+        capture_stack=capture_stack,
+        stack_limit=stack_limit,
+    )
     app.installEventFilter(probe)
     setattr(app, probe_attr, probe)

@@ -30,6 +30,8 @@ from qt_compat.widgets import (
 from qt_compat.core import Qt, Signal, QTimer, QThread
 from qt_compat.gui import QFont, QIcon, QPixmap, QPainter, QBrush
 
+from classes.data_entry.ui.toggle_section_widget import ToggleSectionWidget
+
 
 def _centered_question(parent, title: str, text: str, buttons, default_button=None):
     """QMessageBox.question 相当を「親ウィンドウ中央」に表示する。"""
@@ -865,18 +867,67 @@ class FileSetTableWidget(QTableWidget):
         self.file_sets = []
         self.file_set_manager = None  # file_set_managerへの参照
         self.required_exts = []  # テンプレート対応拡張子（正規化済み）
+        self._compact_visible_rows: int | None = None
         self.setup_ui()
+
+    def apply_theme_style(self) -> None:
+        """テーマ由来の基本スタイル + 本ウィジェット固有の微調整を反映する。"""
+
+        extra = """
+        QTableWidget::item { padding: 2px 4px; }
+        QHeaderView::section { padding: 1px; }
+        """
+        self.setStyleSheet(get_fileset_table_style() + extra)
+
+        # テーマ変更でヘッダ高さが変わる場合があるため、固定高さも追従させる
+        if self._compact_visible_rows is not None:
+            try:
+                self.set_compact_view_rows(self._compact_visible_rows)
+            except Exception:
+                pass
+
+    def compute_compact_height_for_rows(self, visible_rows: int) -> int:
+        """ヘッダ行 + データ行(visible_rows)分の表示に必要な高さを算出する。"""
+        rows = max(0, int(visible_rows))
+        try:
+            header_h = int(self.horizontalHeader().sizeHint().height())
+        except Exception:
+            header_h = 0
+
+        row_h = 0
+        try:
+            row_h = int(self.verticalHeader().defaultSectionSize())
+        except Exception:
+            row_h = 0
+
+        frame = 0
+        try:
+            frame = int(self.frameWidth()) * 2
+        except Exception:
+            frame = 0
+
+        # 見切れ防止の微小マージン
+        return header_h + (row_h * rows) + frame + 2
+
+    def set_compact_view_rows(self, visible_rows: int) -> None:
+        """一覧の表示行数を固定する（スクロールで全件閲覧する）。"""
+        try:
+            self._compact_visible_rows = max(0, int(visible_rows))
+            h = self.compute_compact_height_for_rows(visible_rows)
+            if h > 0:
+                self.setFixedHeight(h)
+        except Exception:
+            pass
     
     def setup_ui(self):
         """UIセットアップ"""
         self.setColumnCount(9)
         self.setHorizontalHeaderLabels([
-            "ファイルセット名", "ファイル数", "マッピングファイル", "サイズ", "整理方法", "データ名", "試料", "データセット", "操作"
+            "ファイルセット名", "ファイル数", "マッピング", "サイズ", "整理方法", "データ名", "試料", "データセット", "操作"
         ])
         
-        # スタイル設定
-        # ファイルセットテーブルスタイル適用（動的）
-        self.setStyleSheet(get_fileset_table_style())
+        # スタイル設定（テーマ + 微調整）
+        self.apply_theme_style()
         self.setAlternatingRowColors(True)
         self.setSelectionBehavior(QTableWidget.SelectRows)
         self.setSelectionMode(QTableWidget.SingleSelection)
@@ -902,7 +953,8 @@ class FileSetTableWidget(QTableWidget):
         # 初期幅設定（推奨値）
         self.setColumnWidth(0, 160)
         self.setColumnWidth(1, 110)  # F/D/M 表示で十分
-        self.setColumnWidth(2, 110)
+        # マッピング列は内容に合わせて初期幅を最小化する（後続の load_file_sets で resizeColumnToContents も実施）
+        self.setColumnWidth(2, 80)
         self.setColumnWidth(3, 70)
         self.setColumnWidth(4, 80)
         self.setColumnWidth(5, 110)
@@ -910,15 +962,22 @@ class FileSetTableWidget(QTableWidget):
         self.setColumnWidth(7, 130)
         self.setColumnWidth(8, 140)
 
-        # 行高さ・余白調整
+        # 行高さ・余白調整（視認性 + ボタン収まり改善）
+        # 既存 26px を +15% 程度に（約 30px）
         vh = self.verticalHeader()
-        vh.setDefaultSectionSize(26)
-        vh.setMinimumSectionSize(24)
+        vh.setDefaultSectionSize(30)
+        vh.setMinimumSectionSize(28)
         vh.setVisible(False)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        # セルのパディング微調整（既存スタイルに追加）
-        self.setStyleSheet(self.styleSheet() + "\nQTableWidget::item { padding: 2px 4px; }")
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        # 一覧の表示行数（ヘッダ + データ4行）
+        self.set_compact_view_rows(4)
+
+        # 表示後にヘッダ高さが確定してから再度固定高さを調整する
+        try:
+            QTimer.singleShot(0, lambda: self.set_compact_view_rows(4))
+        except Exception:
+            pass
         
         # 選択変更シグナル
         self.itemSelectionChanged.connect(self.on_selection_changed)
@@ -1018,19 +1077,25 @@ class FileSetTableWidget(QTableWidget):
             # 操作ボタンのコンテナウィジェット作成
             operations_widget = QWidget()
             operations_layout = QHBoxLayout(operations_widget)
-            operations_layout.setContentsMargins(2, 2, 2, 2)
+            operations_layout.setContentsMargins(0, 0, 0, 0)
             operations_layout.setSpacing(4)
             
             # 登録ボタン
             register_btn = QPushButton("登録")
+            try:
+                register_btn.setFont(self.font())
+            except Exception:
+                pass
+            register_btn.setToolTip("このファイルセットを登録します")
             register_btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
                     color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                     border: none;
-                    padding: 4px 8px;
+                    padding: 0px 6px;
                     border-radius: 4px;
                     min-width: 40px;
+                    min-height: 22px;
                 }}
                 QPushButton:hover {{
                     background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
@@ -1041,14 +1106,20 @@ class FileSetTableWidget(QTableWidget):
             
             # 削除ボタン
             delete_btn = QPushButton("削除")
+            try:
+                delete_btn.setFont(self.font())
+            except Exception:
+                pass
+            delete_btn.setToolTip("このファイルセットを削除します")
             delete_btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
                     color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
                     border: none;
-                    padding: 4px 8px;
+                    padding: 0px 6px;
                     border-radius: 4px;
                     min-width: 40px;
+                    min-height: 22px;
                 }}
                 QPushButton:hover {{
                     background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
@@ -1058,6 +1129,12 @@ class FileSetTableWidget(QTableWidget):
             operations_layout.addWidget(delete_btn)
             
             self.setCellWidget(row, 8, operations_widget)  # 操作列に配置
+
+        # マッピング列は内容に合わせて初期幅を最小化
+        try:
+            self.resizeColumnToContents(2)
+        except Exception:
+            pass
 
     def _compute_match_count(self, file_set: FileSet) -> int:
         """テンプレート対応拡張子に一致するファイル数を算出"""
@@ -1293,7 +1370,6 @@ class FileSetTableWidget(QTableWidget):
             QLabel {{
                 color: {get_color(ThemeKey.TEXT_SUCCESS) if mapping_file_exists else get_color(ThemeKey.TEXT_ERROR)};
                 font-weight: bold;
-                font-size: 12px;
             }}
         """)
         layout.addWidget(status_label)
@@ -1301,14 +1377,19 @@ class FileSetTableWidget(QTableWidget):
         # 表示ボタン
         view_btn = QPushButton("表示")
         view_btn.setEnabled(mapping_file_exists)
+        try:
+            view_btn.setFont(self.font())
+        except Exception:
+            pass
+        view_btn.setToolTip("マッピングファイルを表示します")
         view_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
                 color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
                 border: none;
-                padding: 2px 6px;
+                padding: 0px 4px;
                 border-radius: 3px;
-                font-size: 10px;
+                min-height: 22px;
             }}
             QPushButton:hover:enabled {{
                 background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
@@ -1323,14 +1404,19 @@ class FileSetTableWidget(QTableWidget):
         
         # 更新ボタン
         update_btn = QPushButton("更新")
+        try:
+            update_btn.setFont(self.font())
+        except Exception:
+            pass
+        update_btn.setToolTip("マッピングファイルを更新します")
         update_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
                 color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                 border: none;
-                padding: 2px 6px;
+                padding: 0px 4px;
                 border-radius: 3px;
-                font-size: 10px;
+                min-height: 22px;
             }}
             QPushButton:hover {{
                 background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
@@ -1361,15 +1447,20 @@ class FileSetTableWidget(QTableWidget):
         # フォルダ書き出しアイコンボタン
         export_icon = QPushButton("出力")
         export_icon.setToolTip("ファイルセットをフォルダまたはZIPファイルとして書き出し")
-        export_icon.setFixedSize(35, 25)
+        try:
+            export_icon.setFont(self.font())
+        except Exception:
+            pass
+        export_icon.setMinimumWidth(40)
+        export_icon.setFixedHeight(24)
         export_icon.setStyleSheet(f"""
             QPushButton {{
                 border: 1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)};
                 background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
-                font-size: 10px;
                 border-radius: 3px;
                 color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
                 font-weight: bold;
+                padding: 0px 4px;
             }}
             QPushButton:hover {{
                 background-color: {get_color(ThemeKey.PANEL_SUCCESS_BACKGROUND)};
@@ -1383,15 +1474,20 @@ class FileSetTableWidget(QTableWidget):
         # 内容表示アイコンボタン
         view_icon = QPushButton("表示")
         view_icon.setToolTip("ファイルセットの内容を表示・編集")
-        view_icon.setFixedSize(35, 25)
+        try:
+            view_icon.setFont(self.font())
+        except Exception:
+            pass
+        view_icon.setMinimumWidth(40)
+        view_icon.setFixedHeight(24)
         view_icon.setStyleSheet(f"""
             QPushButton {{
                 border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
                 background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
-                font-size: 10px;
                 border-radius: 3px;
                 color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
                 font-weight: bold;
+                padding: 0px 4px;
             }}
             QPushButton:hover {{
                 background-color: {get_color(ThemeKey.BUTTON_EXPAND_BACKGROUND)};
@@ -1933,6 +2029,15 @@ class BatchRegisterWidget(QWidget):
         self.load_initial_data()
         logger.debug("BatchRegisterWidget初期化完了")
 
+        # splitter状態（左右比率）はウィジェット存続期間中に独立して保持する
+        self._main_splitter = getattr(self, '_main_splitter', None)
+        self._splitter_sizes: Optional[List[int]] = None
+        self._splitter_initialized: bool = False
+
+        # 右ペイン（ファイルセット一覧/詳細）の縦splitter初期比率
+        self._fileset_splitter = getattr(self, '_fileset_splitter', None)
+        self._fileset_splitter_initialized: bool = False
+
         # テーマ変更シグナル接続（動的再スタイル対応）
         try:
             from classes.theme import ThemeManager
@@ -1945,7 +2050,18 @@ class BatchRegisterWidget(QWidget):
         )
 
     def showEvent(self, event):  # noqa: N802
-        return super().showEvent(event)
+        result = super().showEvent(event)
+        # 初回表示時に splitter 初期レイアウトを決定（ファイルツリー列幅に合わせる）
+        try:
+            QTimer.singleShot(0, self._ensure_splitter_initialized)
+        except Exception:
+            pass
+        # 右ペインの縦splitter（一覧:詳細 = 60:40）も初期化
+        try:
+            QTimer.singleShot(0, self._ensure_fileset_splitter_initialized)
+        except Exception:
+            pass
+        return result
 
     def hideEvent(self, event):  # noqa: N802
         return super().hideEvent(event)
@@ -1961,6 +2077,7 @@ class BatchRegisterWidget(QWidget):
         
         # スプリッターでエリア分割
         splitter = QSplitter(Qt.Horizontal)
+        self._main_splitter = splitter
         
         # 左側：ファイル操作エリア
         left_widget = self.create_file_operations_area()
@@ -1980,10 +2097,197 @@ class BatchRegisterWidget(QWidget):
         # ハンドルを見えるようにする
         splitter.setHandleWidth(5)
         splitter.setChildrenCollapsible(False)  # ペインが完全に折りたたまれることを防ぐ
+
+        try:
+            splitter.splitterMoved.connect(self._on_splitter_moved)
+        except Exception:
+            pass
         
         main_layout.addWidget(splitter)
         
         self.setLayout(main_layout)
+
+    def _on_splitter_moved(self, *_args) -> None:
+        try:
+            if self._main_splitter is not None:
+                self._splitter_sizes = list(self._main_splitter.sizes())
+        except Exception:
+            pass
+
+    def _compute_left_pane_min_width(self) -> int:
+        """左ペインの最小幅（ファイルツリーに水平スクロールが出ない幅）を推定する。"""
+        tree = getattr(self, 'file_tree', None)
+        if tree is None:
+            return 300
+
+        try:
+            header_len = int(tree.header().length())
+        except Exception:
+            header_len = 0
+
+        extra = 0
+        try:
+            extra += int(tree.frameWidth()) * 2
+        except Exception:
+            pass
+        try:
+            sb = tree.verticalScrollBar()
+            extra += int(sb.sizeHint().width())
+        except Exception:
+            # だいたいのスクロールバー幅
+            extra += 18
+
+        # GroupBox / レイアウトの余白分を少し上乗せ
+        extra += 48
+
+        return max(300, header_len + extra)
+
+    def _ensure_splitter_initialized(self) -> None:
+        """初回表示時に splitter の左右幅を適切に設定する。"""
+        try:
+            splitter = getattr(self, '_main_splitter', None)
+            if splitter is None:
+                return
+            # 破棄後に Qt の queued call が走ることがあるため、参照可能か軽く確認
+            _ = splitter.count()
+        except RuntimeError:
+            return
+        except Exception:
+            splitter = getattr(self, '_main_splitter', None)
+            if splitter is None:
+                return
+
+        # 既にユーザー操作で sizes を保持している場合はそれを優先
+        if isinstance(self._splitter_sizes, list) and self._splitter_sizes:
+            try:
+                splitter.setSizes(self._splitter_sizes)
+            except RuntimeError:
+                return
+            except Exception:
+                pass
+            return
+
+        if self._splitter_initialized:
+            return
+        self._splitter_initialized = True
+
+        left_min = self._compute_left_pane_min_width()
+
+        try:
+            left_widget = splitter.widget(0)
+            if left_widget is not None:
+                left_widget.setMinimumWidth(left_min)
+        except Exception:
+            pass
+
+        try:
+            right_widget = splitter.widget(1)
+            right_min = int(getattr(right_widget, 'minimumWidth', lambda: 300)()) if right_widget is not None else 300
+        except Exception:
+            right_min = 300
+
+        total = 0
+        try:
+            total = int(splitter.width())
+        except Exception:
+            total = 0
+
+        if total <= 0:
+            try:
+                splitter.setSizes([left_min, max(300, right_min)])
+                self._splitter_sizes = list(splitter.sizes())
+            except RuntimeError:
+                return
+            except Exception:
+                pass
+            return
+
+        left_width = min(max(left_min, 300), max(300, total - right_min))
+        right_width = max(right_min, total - left_width)
+        try:
+            splitter.setSizes([left_width, right_width])
+            self._splitter_sizes = list(splitter.sizes())
+        except RuntimeError:
+            return
+        except Exception:
+            pass
+
+    def _ensure_fileset_splitter_initialized(self) -> None:
+        """初回表示時に右ペインの縦splitterを初期化する。
+
+        一覧領域は「テーブルのヘッダ + データ4行」の高さを優先し、
+        収まらない場合のみ下側（詳細）を確保しつつ縮める。
+        """
+        if self._fileset_splitter_initialized:
+            return
+
+        splitter = getattr(self, '_fileset_splitter', None)
+        if splitter is None:
+            return
+
+        try:
+            _ = splitter.count()
+        except RuntimeError:
+            return
+        except Exception:
+            pass
+
+        try:
+            sizes = list(splitter.sizes())
+        except Exception:
+            sizes = []
+
+        total = 0
+        try:
+            total = int(sum(sizes)) if sizes else int(splitter.height())
+        except Exception:
+            total = 0
+
+        if total <= 0:
+            total = 1000
+
+        desired_top = 0
+        try:
+            group = getattr(self, '_fileset_list_group', None)
+            if group is not None:
+                desired_top = int(group.sizeHint().height())
+        except Exception:
+            desired_top = 0
+
+        if desired_top <= 0:
+            desired_top = int(total * 0.60)
+
+        bottom_min = 220
+        top = min(desired_top, max(1, total - bottom_min))
+        bottom = max(1, total - top)
+
+        try:
+            splitter.setSizes([top, bottom])
+            self._fileset_splitter_initialized = True
+        except RuntimeError:
+            return
+        except Exception:
+            pass
+
+        # 一覧領域を「ヘッダ + 4行」相当に固定する（初回レイアウト確定後）
+        try:
+            QTimer.singleShot(0, self._apply_fileset_list_group_fixed_height)
+        except Exception:
+            pass
+
+    def _apply_fileset_list_group_fixed_height(self) -> None:
+        """ファイルセット一覧グループの高さを sizeHint 基準で固定する。"""
+        try:
+            group = getattr(self, '_fileset_list_group', None)
+            if group is None:
+                return
+            if group.layout() is None:
+                return
+            h = int(group.sizeHint().height())
+            if h > 0:
+                group.setFixedHeight(h)
+        except Exception:
+            pass
 
     def refresh_theme(self):
         """テーマ変更時にスタイルを再適用"""
@@ -1995,7 +2299,16 @@ class BatchRegisterWidget(QWidget):
                 self.file_tree.setStyleSheet(get_file_tree_style())
             # ファイルセットテーブル
             if hasattr(self, 'fileset_table') and self.fileset_table:
-                self.fileset_table.setStyleSheet(get_fileset_table_style())
+                if hasattr(self.fileset_table, 'apply_theme_style'):
+                    self.fileset_table.apply_theme_style()
+                else:
+                    self.fileset_table.setStyleSheet(get_fileset_table_style())
+
+            # 一覧領域の固定高さも再適用（テーマ変更でsizeHintが変わることがある）
+            try:
+                QTimer.singleShot(0, self._apply_fileset_list_group_fixed_height)
+            except Exception:
+                pass
             # 登録実行エリア（execution_group）
             if hasattr(self, 'execution_group') and self.execution_group:
                 self.execution_group.setStyleSheet(f"""
@@ -2142,6 +2455,11 @@ class BatchRegisterWidget(QWidget):
         auto_all_dirs_btn.setToolTip("既存のファイルセットをリセットして、全フォルダを個別にファイルセットとして作成します")
         auto_all_dirs_btn.clicked.connect(self.auto_assign_all_dirs_with_confirm)
         buttons_layout.addWidget(auto_all_dirs_btn)
+
+        clear_all_btn = QPushButton("全て削除")
+        clear_all_btn.setToolTip("全てのファイルセットを削除します")
+        clear_all_btn.clicked.connect(self.clear_all_filesets)
+        buttons_layout.addWidget(clear_all_btn)
         
         auto_main_layout.addLayout(buttons_layout)
         
@@ -2159,30 +2477,26 @@ class BatchRegisterWidget(QWidget):
         """ファイルセット管理エリア作成"""
         widget = QWidget()
         layout = QVBoxLayout()
+
+        # 一覧(上)と詳細(下)を縦分割して、一覧を約60%確保
+        v_splitter = QSplitter(Qt.Vertical)
+        self._fileset_splitter = v_splitter
+        v_splitter.setChildrenCollapsible(False)
+        v_splitter.setHandleWidth(5)
         
         # ファイルセット一覧
         fileset_group = QGroupBox("ファイルセット一覧")
+        self._fileset_list_group = fileset_group
         fileset_layout = QVBoxLayout()
-        
-        # ツールバー
-        toolbar_layout = QHBoxLayout()
-        
-        toolbar_layout.addStretch()
-        
-        clear_all_btn = QPushButton("全て削除")
-        clear_all_btn.clicked.connect(self.clear_all_filesets)
-        toolbar_layout.addWidget(clear_all_btn)
-        
-        fileset_layout.addLayout(toolbar_layout)
         
         # ファイルセットテーブル
         self.fileset_table = FileSetTableWidget()
-        # スクロールが効かない・見えない対策として最低高さとサイズポリシーを設定
+        # 一覧は「ヘッダ + データ4行」の高さに固定し、スクロールで全件閲覧
         try:
-            self.fileset_table.setMinimumHeight(260)
-            self.fileset_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-            # スクロールバーの表示ポリシー（必要時）
-            self.fileset_table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            self.fileset_table.set_compact_view_rows(4)
+            self.fileset_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            # スクロールバーの表示ポリシー（縦は常時表示）
+            self.fileset_table.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
             self.fileset_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         except Exception:
             pass
@@ -2190,13 +2504,13 @@ class BatchRegisterWidget(QWidget):
         fileset_layout.addWidget(self.fileset_table)
         
         fileset_group.setLayout(fileset_layout)
-        # グループ自体にも最低高さを設定し、潰れないようにする
+        # グループ自体はテーブル高さに追従（一覧領域を固定する）
         try:
-            fileset_group.setMinimumHeight(300)
-            fileset_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+            fileset_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            fileset_group.setMaximumHeight(fileset_group.sizeHint().height())
         except Exception:
             pass
-        layout.addWidget(fileset_group)
+        v_splitter.addWidget(fileset_group)
         
         # ファイルセット詳細・設定
         detail_group = QGroupBox("選択ファイルセット設定")
@@ -2229,10 +2543,10 @@ class BatchRegisterWidget(QWidget):
             QPushButton {{
                 background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
                 color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
-                padding: 4px 8px;
+                padding: 2px 8px;
                 border-radius: 4px;
                 font-weight: bold;
-                min-height: 30px;
+                min-height: 28px;
             }}
             QPushButton:hover {{
                 background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
@@ -2247,10 +2561,10 @@ class BatchRegisterWidget(QWidget):
             QPushButton {{
                 background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
                 color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
-                padding: 4px 8px;
+                padding: 2px 8px;
                 border-radius: 4px;
                 font-weight: bold;
-                min-height: 30px;
+                min-height: 28px;
             }}
             QPushButton:hover {{
                 background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
@@ -2408,6 +2722,12 @@ class BatchRegisterWidget(QWidget):
         scroll_area = QScrollArea()
         self.scroll_widget = QWidget()  # クラス属性として保存
         scroll_layout = QVBoxLayout()
+
+        summary_style = (
+            f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
+            f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; "
+            f"border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)}; border-radius: 4px;"
+        )
         
         # 基本情報
         data_group = QGroupBox("基本情報")
@@ -2436,7 +2756,62 @@ class BatchRegisterWidget(QWidget):
         data_layout.addWidget(self.tags_edit, 4, 1)
         
         data_group.setLayout(data_layout)
-        scroll_layout.addWidget(data_group)
+        basic_toggle = ToggleSectionWidget("基本情報", self.scroll_widget, default_mode="summary")
+        basic_summary = QLabel("基本情報は『入力』に切り替えて編集できます。", basic_toggle)
+        basic_summary.setWordWrap(True)
+        basic_summary.setStyleSheet(summary_style)
+
+        def _refresh_basic_summary() -> None:
+            parts = []
+            try:
+                v = (self.data_name_edit.text() or '').strip()
+                if v:
+                    parts.append(f"データ名: {v}")
+            except Exception:
+                pass
+            try:
+                v = (self.experiment_id_edit.text() or '').strip()
+                if v:
+                    parts.append(f"実験ID: {v}")
+            except Exception:
+                pass
+            try:
+                v = (self.reference_url_edit.text() or '').strip()
+                if v:
+                    parts.append(f"参考URL: {v}")
+            except Exception:
+                pass
+            try:
+                v = (self.tags_edit.text() or '').strip()
+                if v:
+                    parts.append(f"タグ: {v}")
+            except Exception:
+                pass
+            try:
+                v = (self.description_edit.toPlainText() or '').strip()
+                if v:
+                    preview = v.replace("\n", " ")
+                    if len(preview) > 80:
+                        preview = preview[:77] + "..."
+                    parts.append(f"データ説明: {preview}")
+            except Exception:
+                pass
+
+            basic_summary.setText("\n".join(parts) if parts else "基本情報は『入力』に切り替えて編集できます。")
+
+        setattr(basic_summary, 'refresh', _refresh_basic_summary)
+        try:
+            self.data_name_edit.textChanged.connect(lambda *_: _refresh_basic_summary())
+            self.experiment_id_edit.textChanged.connect(lambda *_: _refresh_basic_summary())
+            self.reference_url_edit.textChanged.connect(lambda *_: _refresh_basic_summary())
+            self.tags_edit.textChanged.connect(lambda *_: _refresh_basic_summary())
+            self.description_edit.textChanged.connect(lambda *_: _refresh_basic_summary())
+        except Exception:
+            pass
+
+        basic_toggle.set_summary_widget(basic_summary)
+        basic_toggle.set_edit_widget(data_group)
+        scroll_layout.addWidget(basic_toggle)
         
         # 試料情報（統合フォーム）
         sample_group = QGroupBox("試料情報")
@@ -2465,13 +2840,117 @@ class BatchRegisterWidget(QWidget):
         sample_layout.addWidget(self.sample_composition_edit, 3, 1)
         
         sample_group.setLayout(sample_layout)
-        scroll_layout.addWidget(sample_group)
+        sample_toggle = ToggleSectionWidget("試料情報", self.scroll_widget, default_mode="summary")
+        sample_summary = QLabel("試料情報は『入力』に切り替えて編集できます。", sample_toggle)
+        sample_summary.setWordWrap(True)
+        sample_summary.setStyleSheet(summary_style)
+
+        def _refresh_sample_summary() -> None:
+            parts = []
+            try:
+                parts.append(f"試料選択: {self.sample_id_combo.currentText()}")
+            except Exception:
+                pass
+            try:
+                v = (self.sample_name_edit.text() or '').strip()
+                if v:
+                    parts.append(f"試料名: {v}")
+            except Exception:
+                pass
+            try:
+                v = (self.sample_composition_edit.text() or '').strip()
+                if v:
+                    parts.append(f"試料組成: {v}")
+            except Exception:
+                pass
+            try:
+                v = (self.sample_description_edit.toPlainText() or '').strip()
+                if v:
+                    preview = v.replace("\n", " ")
+                    if len(preview) > 80:
+                        preview = preview[:77] + "..."
+                    parts.append(f"試料説明: {preview}")
+            except Exception:
+                pass
+
+            sample_summary.setText("\n".join(parts) if parts else "試料情報は『入力』に切り替えて編集できます。")
+
+        setattr(sample_summary, 'refresh', _refresh_sample_summary)
+        try:
+            self.sample_id_combo.currentIndexChanged.connect(lambda *_: _refresh_sample_summary())
+            self.sample_name_edit.textChanged.connect(lambda *_: _refresh_sample_summary())
+            self.sample_composition_edit.textChanged.connect(lambda *_: _refresh_sample_summary())
+            self.sample_description_edit.textChanged.connect(lambda *_: _refresh_sample_summary())
+        except Exception:
+            pass
+
+        sample_toggle.set_summary_widget(sample_summary)
+        sample_toggle.set_edit_widget(sample_group)
+        scroll_layout.addWidget(sample_toggle)
         
         # 廃止されたsample_mode_comboの参照を削除（sample_id_comboで統合）
         self.sample_mode_combo = self.sample_id_combo  # 互換性維持
         
-        # 固有情報（インボイススキーマ対応）- QGroupBoxを削除し直接レイアウトに追加
-        self.schema_form_layout = QVBoxLayout()
+        # 固有情報（インボイススキーマ対応）
+        schema_toggle = ToggleSectionWidget("固有情報", self.scroll_widget, default_mode="summary")
+        self._schema_toggle = schema_toggle
+        self._current_invoice_schema_path = None
+
+        schema_summary = QLabel("固有情報は『入力』に切り替えて編集できます。", schema_toggle)
+        schema_summary.setWordWrap(True)
+        schema_summary.setStyleSheet(summary_style)
+
+        def _refresh_schema_summary() -> None:
+            form = getattr(self, 'invoice_schema_form', None)
+            key_to_widget = getattr(form, '_schema_key_to_widget', None) if form is not None else None
+            if not isinstance(key_to_widget, dict) or not key_to_widget:
+                schema_summary.setText("入力項目なし")
+                return
+
+            labels = {}
+            try:
+                p = getattr(self, '_current_invoice_schema_path', None)
+                if p:
+                    with open(p, 'r', encoding='utf-8') as f:
+                        schema_json = json.load(f)
+                    custom = (schema_json.get('properties', {}) or {}).get('custom') or {}
+                    props = (custom.get('properties', {}) or {}) if isinstance(custom, dict) else {}
+                    if isinstance(props, dict):
+                        for k, prop in props.items():
+                            if isinstance(prop, dict):
+                                label = (prop.get('label', {}) or {}).get('ja')
+                                labels[k] = label or k
+            except Exception:
+                labels = {}
+
+            filled_items = []
+            for k, w in key_to_widget.items():
+                try:
+                    if hasattr(w, 'currentText'):
+                        v = (w.currentText() or '').strip()
+                    elif hasattr(w, 'text'):
+                        v = (w.text() or '').strip()
+                    else:
+                        v = ''
+                except Exception:
+                    v = ''
+                if v:
+                    filled_items.append((labels.get(k) or k, v))
+
+            total = len(key_to_widget)
+            filled = len(filled_items)
+            lines = [f"入力済み: {filled}/{total}"]
+            for label, value in filled_items[:10]:
+                lines.append(f"- {label}: {value}")
+            if len(filled_items) > 10:
+                lines.append(f"… 他 {len(filled_items) - 10} 件")
+            schema_summary.setText("\n".join(lines))
+
+        self._refresh_schema_summary = _refresh_schema_summary
+        setattr(schema_summary, 'refresh', _refresh_schema_summary)
+
+        schema_edit_widget = QWidget(self.scroll_widget)
+        self.schema_form_layout = QVBoxLayout(schema_edit_widget)
         self.schema_form_layout.setContentsMargins(10, 10, 10, 10)
         
         # 初期状態のメッセージ
@@ -2479,9 +2958,10 @@ class BatchRegisterWidget(QWidget):
         self.schema_placeholder_label.setAlignment(Qt.AlignCenter)
         self.schema_placeholder_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-style: italic; padding: 20px;")
         self.schema_form_layout.addWidget(self.schema_placeholder_label)
-        
-        # 固有情報フォームを直接scroll_layoutに追加（QGroupBox不使用）
-        scroll_layout.addLayout(self.schema_form_layout)
+
+        schema_toggle.set_summary_widget(schema_summary)
+        schema_toggle.set_edit_widget(schema_edit_widget)
+        scroll_layout.addWidget(schema_toggle)
         
         self.scroll_widget.setLayout(scroll_layout)
         scroll_area.setWidget(self.scroll_widget)
@@ -2492,13 +2972,22 @@ class BatchRegisterWidget(QWidget):
         detail_layout.addWidget(scroll_area)
         
         detail_group.setLayout(detail_layout)
-        layout.addWidget(detail_group)
-        # 上:下 の高さ配分（ファイルセット一覧:詳細 = 1:1 に調整）
         try:
-            layout.setStretch(0, 1)
-            layout.setStretch(1, 1)
+            detail_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         except Exception:
             pass
+
+        v_splitter.addWidget(detail_group)
+
+        # 初期比率（一覧:詳細 = 60:40）
+        try:
+            v_splitter.setStretchFactor(0, 3)
+            v_splitter.setStretchFactor(1, 2)
+            v_splitter.setSizes([600, 400])
+        except Exception:
+            pass
+
+        layout.addWidget(v_splitter)
         
         widget.setLayout(layout)
         return widget
@@ -5867,6 +6356,10 @@ class BatchRegisterWidget(QWidget):
                         from classes.data_entry.util.data_entry_forms import create_schema_form_from_path
                         
                         invoice_schema_path = get_dynamic_file_path(f'output/rde/data/invoiceSchemas/{template_id}.json')
+                        try:
+                            self._current_invoice_schema_path = invoice_schema_path
+                        except Exception:
+                            pass
                         
                         logger.debug("invoiceSchemaファイル確認: %s", invoice_schema_path)
                         
@@ -5908,9 +6401,21 @@ class BatchRegisterWidget(QWidget):
                                 self.schema_form_layout.addWidget(schema_form)
                                 self.schema_form = schema_form  # 保存（後で値取得で使用）
                                 self.invoice_schema_form = schema_form  # 互換性のため（save_fileset_configで使用）
-                                
-                                # レイアウト追加後に表示制御
-                                schema_form.setVisible(True)  # レイアウト内でのみ表示
+
+                                # レイアウト追加後に表示制御（トグルがsummaryの場合は展開しない）
+                                try:
+                                    toggle = getattr(self, '_schema_toggle', None)
+                                    edit_mode = toggle is None or toggle.mode() == 'edit'
+                                except Exception:
+                                    edit_mode = True
+                                schema_form.setVisible(bool(edit_mode))
+
+                                try:
+                                    refresher = getattr(self, '_refresh_schema_summary', None)
+                                    if callable(refresher):
+                                        refresher()
+                                except Exception:
+                                    pass
                                 
                                 widget_count_after = self.schema_form_layout.count()
                                 logger.debug("フォーム追加後のレイアウト項目数: %s", widget_count_after)
@@ -6009,6 +6514,13 @@ class BatchRegisterWidget(QWidget):
             # プレースホルダーを表示
             self.schema_placeholder_label.setText("データセット選択後に固有情報入力フォームが表示されます")
             self.schema_placeholder_label.show()
+
+            try:
+                refresher = getattr(self, '_refresh_schema_summary', None)
+                if callable(refresher):
+                    refresher()
+            except Exception:
+                pass
             
         except Exception as e:
             logger.warning("スキーマフォームクリアエラー: %s", e)
@@ -6045,6 +6557,13 @@ class BatchRegisterWidget(QWidget):
             # 参照を設定
             self.schema_form = empty_form
             self.invoice_schema_form = empty_form
+
+            try:
+                refresher = getattr(self, '_refresh_schema_summary', None)
+                if callable(refresher):
+                    refresher()
+            except Exception:
+                pass
             
             logger.debug("空のinvoice_schema_form作成完了: %s", type(empty_form))
             

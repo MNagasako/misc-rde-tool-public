@@ -1602,89 +1602,161 @@ class UIController(UIControllerCore):
         Step 2.5.2.1: 基本情報UI構築層の分離
         データ取得・Excel・段階実行・ステータス表示の統合UI構築
         """
-        from qt_compat.widgets import QLabel, QHBoxLayout, QVBoxLayout, QLineEdit, QMessageBox, QInputDialog
+        from qt_compat.widgets import QApplication, QLabel, QHBoxLayout, QVBoxLayout, QMessageBox, QInputDialog, QSpinBox, QTabWidget, QWidget
         from classes.theme.theme_manager import ThemeManager
+
+        # 右ペインをタブ化（基本情報 / XLSX）
+        self.basic_info_tabs = QTabWidget()
+        self.basic_info_tabs.setObjectName("basic_info_tabs")
+        try:
+            from qt_compat.widgets import QSizePolicy
+
+            self.basic_info_tabs.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        except Exception:
+            pass
+
+        basic_tab = QWidget()
+        basic_tab_layout = QVBoxLayout(basic_tab)
+        xlsx_tab = QWidget()
+        xlsx_tab_layout = QVBoxLayout(xlsx_tab)
+
+        self.basic_info_tabs.addTab(basic_tab, "基本情報")
+        self.basic_info_tabs.addTab(xlsx_tab, "XLSX")
+        layout.addWidget(self.basic_info_tabs, 1)
         
         try:
             # RDE基本情報取得機能セクション
             data_fetch_label = QLabel("🔄 RDE基本情報取得機能:")
             data_fetch_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)}; margin-bottom: 8px; font-size: 12pt;")
-            layout.addWidget(data_fetch_label)
+            basic_tab_layout.addWidget(data_fetch_label)
             
-            # データ取得ボタン用のスタイル（INFO系）
+            # データ取得ボタン用のスタイル（基本情報タブ: 3グループで配色を分離）
             from classes.utils.button_styles import get_button_style
-            info_button_style = get_button_style('info')
-            
-            # 横並びで3ボタン配置（1行目）
+            g1_style = get_button_style('basicinfo_group1')
+            g2_style = get_button_style('basicinfo_group2')
+            g3_style = get_button_style('basicinfo_group3')
+
+            # 横並びで6ボタンを1行で配置
             btn_layout1 = QHBoxLayout()
+            try:
+                btn_layout1.setSpacing(6)
+            except Exception:
+                pass
+
             # 基本情報取得ボタン（invoice_schema取得も含む）
-            self.basic_btn = self.create_auto_resize_button("基本情報取得(ALL)", 180, 40, info_button_style)
+            self.basic_btn = self.create_auto_resize_button("基本情報取得(ALL)", 155, 36, g1_style)
             basic_btn = self.basic_btn
             basic_btn.setToolTip("全ての基本情報・インボイス情報・invoiceSchema情報を取得します")
             basic_btn.clicked.connect(self.fetch_basic_info)
             btn_layout1.addWidget(basic_btn)
-            self.basic_self_btn = self.create_auto_resize_button("基本情報取得(検索)", 220, 40, info_button_style)
+
+            self.basic_self_btn = self.create_auto_resize_button("基本情報取得(検索)", 170, 36, g1_style)
             basic_self_btn = self.basic_self_btn
             basic_self_btn.setToolTip("検索キーワードに基づく基本情報・インボイス情報・invoiceSchema情報を取得します")
             basic_self_btn.clicked.connect(self.fetch_basic_info_self)
             btn_layout1.addWidget(basic_self_btn)
+
             # 共通情報のみ取得ボタン
-            self.common_only_btn = self.create_auto_resize_button("共通情報のみ取得", 200, 40, info_button_style)
+            self.common_only_btn = self.create_auto_resize_button("共通情報のみ取得", 155, 36, g2_style)
             common_only_btn = self.common_only_btn
             common_only_btn.clicked.connect(self.fetch_common_info_only)
             btn_layout1.addWidget(common_only_btn)
-            layout.addLayout(btn_layout1)
-        except Exception as e:
-            self.show_error(f"基本情報画面の1行目ボタン作成でエラーが発生しました: {e}")
-            layout.addWidget(QLabel("基本情報機能の一部が利用できません"))
 
-        try:
-            # 検索用テキストボックスにラベルを追加
-            search_layout = QVBoxLayout()
-            search_label = QLabel("検索用キーワード (基本情報(検索)ボタン専用):")
-            self.basic_search_label = search_label
-            search_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)}; margin-top: 10px;")
-            search_layout.addWidget(search_label)
-            
-            self.basic_info_input = QLineEdit()
-            self.basic_info_input.setPlaceholderText("空欄の場合は自身が管理するデータセットが対象")
-            self.basic_info_input.setFixedHeight(32)
-            self.basic_info_input.setStyleSheet(f"""
-                QLineEdit {{
-                    border: 1px solid {get_color(ThemeKey.BORDER_INFO)};
-                    border-radius: 6px;
-                    padding: 5px;
-                    font-size: 11pt;
-                }}
-                QLineEdit:focus {{
-                    border-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
-                    background-color: {get_color(ThemeKey.PANEL_INFO_BACKGROUND)};
-                }}
-            """)
-            search_layout.addWidget(self.basic_info_input)
-            layout.addLayout(search_layout)
-        except Exception as e:
-            self.show_error(f"基本情報テキスト入力欄の作成でエラーが発生しました: {e}")
-            layout.addWidget(QLabel("テキスト入力欄が利用できません"))
+            # 共通情報取得2ボタン（取得対象を事前選択）
+            self.common_only2_btn = self.create_auto_resize_button("共通情報取得2", 145, 36, g2_style)
+            common_only2_btn = self.common_only2_btn
+            common_only2_btn.setToolTip("取得対象JSONと取得条件（上書き/古い/無い/スキップ）を選択して共通情報を取得します")
+            common_only2_btn.clicked.connect(self.fetch_common_info_only2)
+            btn_layout1.addWidget(common_only2_btn)
 
-        try:
-            # 2行目のボタンレイアウト
-            btn_layout1_2 = QHBoxLayout()
-            # invoice_schema取得ボタン（INFO系スタイル）
-            self.invoice_schema_btn = self.create_auto_resize_button("invoice_schema取得", 200, 40, info_button_style)
+            # invoice_schema取得ボタン
+            self.invoice_schema_btn = self.create_auto_resize_button("invoice_schema取得", 160, 36, g3_style)
             invoice_schema_btn = self.invoice_schema_btn
             invoice_schema_btn.clicked.connect(self.fetch_invoice_schema)
-            btn_layout1_2.addWidget(invoice_schema_btn)
-            
-            # サンプル情報強制取得ボタン（INFO系スタイル）
-            self.sample_info_btn = self.create_auto_resize_button("サンプル情報強制取得", 220, 40, info_button_style)
+            btn_layout1.addWidget(invoice_schema_btn)
+
+            # サンプル情報取得ボタン（旧: サンプル情報強制取得）
+            self.sample_info_btn = self.create_auto_resize_button("サンプル情報取得", 150, 36, g3_style)
             sample_info_btn = self.sample_info_btn
             sample_info_btn.clicked.connect(self.fetch_sample_info_only)
-            btn_layout1_2.addWidget(sample_info_btn)
-            layout.addLayout(btn_layout1_2)
+            btn_layout1.addWidget(sample_info_btn)
+
+            btn_layout1.addStretch(1)
+            basic_tab_layout.addLayout(btn_layout1)
         except Exception as e:
-            self.show_error(f"基本情報画面の2行目ボタン作成でエラーが発生しました: {e}")
-            layout.addWidget(QLabel("基本情報のサブ機能が利用できません"))
+            self.show_error(f"基本情報画面の1行目ボタン作成でエラーが発生しました: {e}")
+            basic_tab_layout.addWidget(QLabel("基本情報機能の一部が利用できません"))
+
+        # 並列ダウンロード数 / 保存フォルダを開く
+        try:
+            from classes.managers.app_config_manager import get_config_manager
+
+            parallel_row = QHBoxLayout()
+            parallel_row.setSpacing(8)
+
+            parallel_label = QLabel("並列ダウンロード数")
+            try:
+                parallel_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
+            except Exception:
+                pass
+
+            parallel_spin = QSpinBox(basic_tab)
+            parallel_spin.setRange(1, 50)
+            parallel_spin.setMinimumWidth(90)
+
+            default_workers = 10
+            try:
+                cfg = get_config_manager()
+                default_workers = int(cfg.get("basic_info.parallel_download_workers", default_workers) or default_workers)
+            except Exception:
+                default_workers = 10
+
+            parallel_spin.setValue(default_workers)
+            parallel_spin.setToolTip("同じエンドポイントへの詳細取得の並列数（既定: 10）")
+            self.basic_parallel_download_spinbox = parallel_spin
+
+            def _save_parallel_workers(v: int):
+                try:
+                    cfg = get_config_manager()
+                    cfg.set("basic_info.parallel_download_workers", int(v))
+                    cfg.save()
+                except Exception:
+                    pass
+
+            parallel_spin.valueChanged.connect(_save_parallel_workers)
+
+            from classes.utils.button_styles import get_button_style
+
+            self.open_basic_info_data_dir_btn = self.create_auto_resize_button(
+                "📁 保存フォルダを開く",
+                180,
+                32,
+                get_button_style("secondary"),
+            )
+
+            def open_basic_info_data_dir():
+                import os
+                from config.common import ensure_directory_exists, get_dynamic_file_path
+
+                directory = ensure_directory_exists(get_dynamic_file_path("output/rde/data"))
+                if not os.path.isdir(directory):
+                    QMessageBox.warning(self.parent, "フォルダがありません", f"ディレクトリを作成できませんでした:\n{directory}")
+                    return
+                try:
+                    os.startfile(directory)
+                except Exception as e:
+                    QMessageBox.warning(self.parent, "フォルダを開けません", f"エクスプローラーで開けませんでした:\n{e}")
+
+            self.open_basic_info_data_dir_btn.clicked.connect(open_basic_info_data_dir)
+
+            parallel_row.addWidget(parallel_label)
+            parallel_row.addWidget(parallel_spin)
+            parallel_row.addStretch(1)
+            parallel_row.addWidget(self.open_basic_info_data_dir_btn)
+
+            basic_tab_layout.addLayout(parallel_row)
+        except Exception as e:
+            logger.debug("basic_info parallel UI init failed: %s", e)
 
         # JSON個別取得ボタンは廃止された（v2.1.20）
 
@@ -1692,7 +1764,7 @@ class UIController(UIControllerCore):
             # XLSX関連機能セクション（データ取得機能と区別）
             xlsx_label = QLabel("📊 Excel関連機能:")
             xlsx_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_WARNING)}; margin-top: 5px; margin-bottom: 3px; font-size: 16pt;")
-            layout.addWidget(xlsx_label)
+            xlsx_tab_layout.addWidget(xlsx_label)
             
             # XLSX関連ボタン用のスタイル（橙色系）
             from classes.utils.button_styles import get_button_style
@@ -1768,50 +1840,130 @@ class UIController(UIControllerCore):
 
             open_output_dir_btn.clicked.connect(open_output_dir)
             btn_layout2.addWidget(open_output_dir_btn)
-            
-            layout.addLayout(btn_layout2)
+
+            xlsx_tab_layout.addLayout(btn_layout2)
         except Exception as e:
             self.show_error(f"基本情報のXLSX関連ボタン作成でエラーが発生しました: {e}")
-            layout.addWidget(QLabel("XLSX関連機能が利用できません"))
+            xlsx_tab_layout.addWidget(QLabel("XLSX関連機能が利用できません"))
 
         try:
-            # 段階別実行機能セクション
-            stage_label = QLabel("⚙️ 段階別実行機能:")
-            stage_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_SUCCESS)}; margin-top: 5px; margin-bottom: 3px; font-size: 10pt;")
-            layout.addWidget(stage_label)
-            
-            # 個別実行ウィジェットを追加
-            from classes.basic.ui.ui_basic_info import create_individual_execution_widget
-            self.individual_execution_widget = create_individual_execution_widget(self.parent)
-            self.individual_execution_widget.set_controller(self)
-            layout.addWidget(self.individual_execution_widget)
-        except ImportError as e:
-            self.show_error(f"個別実行ウィジェットのインポートに失敗しました: {e}")
-            layout.addWidget(QLabel("個別実行機能が利用できません"))
-        except Exception as e:
-            self.show_error(f"個別実行ウィジェットの作成でエラーが発生しました: {e}")
-            layout.addWidget(QLabel("個別実行機能にエラーが発生しました"))
+            from classes.basic.ui.basic_unified_status_widget import BasicUnifiedStatusWidget
+            self.basic_unified_status_widget = BasicUnifiedStatusWidget(self.parent)
+            try:
+                self.basic_unified_status_widget.set_controller(self)
+            except Exception:
+                pass
+            basic_tab_layout.addWidget(self.basic_unified_status_widget, 1)
 
-        try:
-            # JSON状況表示セクション
-            status_label = QLabel("📊 取得状況表示:")
-            status_label.setStyleSheet(f"font-weight: bold;  margin-top: 5px; margin-bottom: 3px; font-size: 10pt;")
-            layout.addWidget(status_label)
-            
-            # JSON取得状況表示ウィジェットを追加
-            from classes.basic.ui.ui_basic_info import create_json_status_widget
-            self.json_status_widget = create_json_status_widget(self.parent)
-            layout.addWidget(self.json_status_widget)
-            
             # 基本情報タブバリデータを初期化
             self._initialize_basic_info_tab_validator()
             
         except ImportError as e:
             self.show_error(f"基本情報ステータスウィジェットのインポートに失敗しました: {e}")
-            layout.addWidget(QLabel("ステータス表示機能が利用できません"))
+            basic_tab_layout.addWidget(QLabel("ステータス表示機能が利用できません"))
         except Exception as e:
             self.show_error(f"基本情報ステータスウィジェットの作成でエラーが発生しました: {e}")
-            layout.addWidget(QLabel("ステータス表示機能にエラーが発生しました"))
+            basic_tab_layout.addWidget(QLabel("ステータス表示機能にエラーが発生しました"))
+
+        # 初回のみ: ウィンドウ幅をディスプレイ幅90%上限で横スクロール不要な幅へ寄せる（可変のまま）
+        try:
+            top_level = self.parent
+
+            if top_level is not None and not getattr(top_level, "_basic_info_initial_resize_done", False):
+                top_level._basic_info_initial_resize_done = True
+
+                def _adjust_width_once():
+                    try:
+                        table = getattr(self, 'basic_unified_status_widget', None)
+                        table = getattr(table, 'table', None)
+                        if table is None:
+                            return
+
+                        header = table.horizontalHeader()
+
+                        # stretchLastSection=True のままだと「現在の表示幅」に合わせて過小評価されるため、一時的に解除して計測する
+                        old_stretch = None
+                        try:
+                            old_stretch = bool(header.stretchLastSection())
+                            header.setStretchLastSection(False)
+                        except Exception:
+                            old_stretch = None
+
+                        try:
+                            table.resizeColumnsToContents()
+                        except Exception:
+                            pass
+
+                        required_table_width = 0
+                        try:
+                            required_table_width = int(header.length())
+                        except Exception:
+                            required_table_width = 0
+                            for i in range(table.columnCount()):
+                                try:
+                                    required_table_width += int(header.sectionSize(i))
+                                except Exception:
+                                    pass
+
+                        try:
+                            if old_stretch is not None:
+                                header.setStretchLastSection(bool(old_stretch))
+                        except Exception:
+                            pass
+
+                        # 現在のviewport幅との差分だけウィンドウを広げる（左メニュー幅などは既にwindow幅に含まれるため差分で十分）
+                        viewport_w = 0
+                        try:
+                            viewport_w = int(table.viewport().width())
+                        except Exception:
+                            viewport_w = int(table.width()) if hasattr(table, 'width') else 0
+
+                        shortage = max(0, int(required_table_width) - int(viewport_w))
+
+                        # 余白（フレーム/スクロールバー/タブ余白）
+                        extra = 80
+                        desired = None
+                        if hasattr(top_level, 'width'):
+                            desired = int(top_level.width()) + int(shortage) + int(extra)
+                        else:
+                            desired = int(required_table_width) + int(extra)
+
+                        screen = None
+                        try:
+                            screen = top_level.screen()
+                        except Exception:
+                            screen = None
+                        if screen is None:
+                            try:
+                                screen = QApplication.primaryScreen()
+                            except Exception:
+                                screen = None
+
+                        if screen is not None:
+                            avail = screen.availableGeometry().width()
+                            cap = int(avail * 0.9)
+                            desired = min(desired, cap)
+
+                        if hasattr(top_level, 'width') and hasattr(top_level, 'resize'):
+                            current_w = int(top_level.width())
+                            # shortageが0でも横スクロールが見えている場合があるので、その場合も少し広げる
+                            h_scroll_visible = False
+                            try:
+                                h_scroll_visible = bool(table.horizontalScrollBar().isVisible())
+                            except Exception:
+                                h_scroll_visible = False
+
+                            if desired > current_w or h_scroll_visible:
+                                top_level.resize(max(current_w, desired), int(top_level.height()))
+                    except Exception:
+                        pass
+
+                # レイアウト確定/列自動調整のタイミング差を吸収するため、数回リトライ
+                self._schedule_qt_single_shot(150, _adjust_width_once, key="basic_info_initial_resize_1")
+                self._schedule_qt_single_shot(400, _adjust_width_once, key="basic_info_initial_resize_2")
+                self._schedule_qt_single_shot(800, _adjust_width_once, key="basic_info_initial_resize_3")
+        except Exception:
+            pass
 
         # 入力がある場合はポップアップ表示
 
@@ -1847,42 +1999,42 @@ class UIController(UIControllerCore):
                 return
 
             try:
-                # ボタンスタイル再生成
-                info_button_style_new = f"""
-                    background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                    color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                    font-weight: bold;
-                    border-radius: 6px;
-                    border: 1px solid {get_color(ThemeKey.BUTTON_INFO_BORDER)};
-                    padding: 3px;
-                """
+                # ボタンスタイル再生成（基本情報タブは3グループ配色）
+                from classes.utils.button_styles import get_button_style
+
+                g1_style = get_button_style('basicinfo_group1')
+                g2_style = get_button_style('basicinfo_group2')
+                g3_style = get_button_style('basicinfo_group3')
                 xlsx_button_style_new = f"background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)}; font-weight: bold; border-radius: 4px; border: 1px solid {get_color(ThemeKey.BUTTON_WARNING_BORDER)}; padding: 3px;"
-                for btn in [getattr(self_obj, 'basic_btn', None), getattr(self_obj, 'basic_self_btn', None), getattr(self_obj, 'common_only_btn', None), getattr(self_obj, 'invoice_schema_btn', None), getattr(self_obj, 'sample_info_btn', None)]:
-                    if btn:
-                        btn.setStyleSheet(info_button_style_new)
-                for btn in [getattr(self_obj, 'summary_basic_info_btn', None), getattr(self_obj, 'open_summary_xlsx_btn', None)]:
+
+                btn = getattr(self_obj, 'basic_btn', None)
+                if btn:
+                    btn.setStyleSheet(g1_style)
+                btn = getattr(self_obj, 'basic_self_btn', None)
+                if btn:
+                    btn.setStyleSheet(g1_style)
+                btn = getattr(self_obj, 'common_only_btn', None)
+                if btn:
+                    btn.setStyleSheet(g2_style)
+                btn = getattr(self_obj, 'common_only2_btn', None)
+                if btn:
+                    btn.setStyleSheet(g2_style)
+                btn = getattr(self_obj, 'invoice_schema_btn', None)
+                if btn:
+                    btn.setStyleSheet(g3_style)
+                btn = getattr(self_obj, 'sample_info_btn', None)
+                if btn:
+                    btn.setStyleSheet(g3_style)
+                for btn in [
+                    getattr(self_obj, 'summary_basic_info_btn', None),
+                    getattr(self_obj, 'open_summary_xlsx_btn', None),
+                    getattr(self_obj, 'open_output_dir_btn', None),
+                ]:
                     if btn:
                         btn.setStyleSheet(xlsx_button_style_new)
-                # 入力欄
-                if hasattr(self_obj, 'basic_info_input'):
-                    self_obj.basic_info_input.setStyleSheet(f"""
-                        QLineEdit {{
-       
-                            border: 1px solid {get_color(ThemeKey.BORDER_INFO)};
-                            border-radius: 6px;
-                            padding: 5px;
-                            font-size: 11pt;
-                        }}
-                        QLineEdit:focus {{
-                            border-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
-           
-                        }}
-                    """)
-                # ラベル色再適用
-                if hasattr(self_obj, 'basic_search_label'):
-                    self_obj.basic_search_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_INFO)}; margin-top: 10px;")
-                if hasattr(self_obj, 'json_status_widget') and hasattr(self_obj.json_status_widget, 'refresh_theme'):
-                    self_obj.json_status_widget.refresh_theme()
+                # 統合ステータスのテーマ再適用
+                if hasattr(self_obj, 'basic_unified_status_widget') and hasattr(self_obj.basic_unified_status_widget, 'refresh_theme'):
+                    self_obj.basic_unified_status_widget.refresh_theme()
             except Exception as e:
                 logger.debug("BasicInfo theme refresh failed: %s", e)
 
@@ -1892,12 +2044,7 @@ class UIController(UIControllerCore):
         except Exception as e:
             logger.debug("BasicInfo theme signal connect failed: %s", e)
         _refresh_basic_info_theme()
-        def show_input_popup():
-            text = self.basic_info_input.text()
-            if text.strip():
-                QMessageBox.information(self.parent, "入力内容", text)
-
-        self.basic_info_input.returnPressed.connect(show_input_popup)
+        # メイン画面の検索入力欄は廃止（検索はダイアログ側に集約）
 
     def _create_widget(self, title, color_key=None):
         """
@@ -4740,6 +4887,16 @@ class UIController(UIControllerCore):
             self.show_error(f"基本情報モジュールのインポートに失敗しました: {e}")
         except Exception as e:
             self.show_error(f"共通情報取得でエラーが発生しました: {e}")
+
+    def fetch_common_info_only2(self):
+        """共通情報取得2 - 取得対象選択付き（basicパッケージに委譲）"""
+        try:
+            from classes.basic.ui.ui_basic_info import fetch_common_info_only2
+            fetch_common_info_only2(self)
+        except ImportError as e:
+            self.show_error(f"基本情報モジュールのインポートに失敗しました: {e}")
+        except Exception as e:
+            self.show_error(f"共通情報取得2でエラーが発生しました: {e}")
     
     def fetch_invoice_schema(self):
         """invoice_schema取得 - basicパッケージに委譲"""

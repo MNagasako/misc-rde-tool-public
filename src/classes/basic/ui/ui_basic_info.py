@@ -2,8 +2,31 @@
 basic_info関連のUIロジック分離
 """
 import logging
+def _get_basic_info_parallel_workers(controller, default: int = 10) -> int:
+    """基本情報タブの並列ダウンロード数（UI選択/設定値）を取得する。"""
+    try:
+        spin = getattr(controller, 'basic_parallel_download_spinbox', None)
+        if spin is not None and hasattr(spin, 'value'):
+            value = int(spin.value())
+            if value < 1:
+                return default
+            return min(value, 50)
+    except Exception:
+        pass
+
+    try:
+        from classes.managers.app_config_manager import get_config_manager
+
+        cfg = get_config_manager()
+        value = int(cfg.get("basic_info.parallel_download_workers", default) or default)
+        if value < 1:
+            return default
+        return min(value, 50)
+    except Exception:
+        return default
+
 from qt_compat.core import QTimer, Qt
-from qt_compat.widgets import QProgressDialog, QMessageBox
+from qt_compat.widgets import QDialog, QProgressDialog, QMessageBox
 import threading
 from classes.utils.progress_worker import ProgressWorker, SimpleProgressWorker
 from classes.theme import get_color, ThemeKey
@@ -17,6 +40,68 @@ from .basic_info_search_dialog import (
 
 # ロガー設定
 logger = logging.getLogger(__name__)
+
+
+def _estimate_remaining_seconds(elapsed_seconds: float, current: int, total: int) -> float | None:
+    """現在の進捗から残り秒(推定)を返す。推定不能な場合はNone。"""
+    try:
+        if elapsed_seconds <= 0:
+            return None
+        if current <= 0 or total <= 0:
+            return None
+        if current > total:
+            return None
+        rate = float(current) / float(elapsed_seconds)
+        if rate <= 0:
+            return None
+        remaining = float(total - current) / rate
+        if remaining < 0:
+            return None
+        return remaining
+    except Exception:
+        return None
+
+
+def _format_hms(seconds: float) -> str:
+    """秒数を h:mm:ss / m:ss 形式で返す。"""
+    try:
+        total = int(round(float(seconds)))
+        if total < 0:
+            total = 0
+        h = total // 3600
+        m = (total % 3600) // 60
+        s = total % 60
+        if h > 0:
+            return f"{h}:{m:02d}:{s:02d}"
+        return f"{m}:{s:02d}"
+    except Exception:
+        return ""
+
+
+def _build_progress_label(*, message: str, current: int, total: int, elapsed_seconds: float) -> str:
+    """プログレスダイアログ用のラベル文言を組み立てる。"""
+    try:
+        parts: list[str] = [str(message)]
+
+        if total > 0:
+            percent = min(max(int((int(current) * 100 + int(total) - 1) / int(total)), 0), 100)
+            parts.append(f"進捗: {int(current)}/{int(total)} ({percent}%)")
+        elif current > 0:
+            parts.append(f"進捗: {int(current)}")
+
+        elapsed_text = _format_hms(elapsed_seconds)
+        if elapsed_text:
+            parts.append(f"経過: {elapsed_text}")
+
+        eta = _estimate_remaining_seconds(elapsed_seconds, int(current), int(total))
+        if eta is not None:
+            eta_text = _format_hms(eta)
+            if eta_text:
+                parts.append(f"残り(推定): {eta_text}")
+
+        return "\n".join(parts)
+    except Exception:
+        return str(message)
 
 def show_progress_dialog(parent, title, worker, show_completion_dialog=True):
     """プログレス表示付きで処理を実行する共通関数
@@ -40,33 +125,191 @@ def show_progress_dialog(parent, title, worker, show_completion_dialog=True):
     progress_dialog.setWindowModality(Qt.WindowModal)
     progress_dialog.setCancelButtonText("キャンセル")
     
+    import time
+    _started = time.perf_counter()
+
+    # 進捗イベントが来ない時間帯（長いHTTP待ち等）でも、経過時間表示だけは更新する。
+    # ※進捗・ETAは最後に受け取った (current/total) を使って再計算する。
+    _last_message: str = "処理を開始しています..."
+    _last_current: int = 0
+    _last_total: int = 100
+    _last_progress_event: float = _started
+    _in_busy_mode: bool = False
+    _busy_after_seconds: float = 3.0
+
     # プログレス更新の接続
     def update_progress(value, message):
+        # 旧インターフェイス: (percent, message)
         def set_progress():
             if progress_dialog:
-                progress_dialog.setValue(value)
-                progress_dialog.setLabelText(message)
+                nonlocal _last_message, _last_current, _last_total, _last_progress_event, _in_busy_mode
+                _last_message = str(message)
+                _last_current = int(value)
+                _last_total = 100
+                _last_progress_event = time.perf_counter()
+
+                if _in_busy_mode:
+                    _in_busy_mode = False
+
+                progress_dialog.setRange(0, 100)
+                progress_dialog.setValue(int(value))
+                elapsed = time.perf_counter() - _started
+                progress_dialog.setLabelText(
+                    _build_progress_label(
+                        message=str(message),
+                        current=int(value),
+                        total=100,
+                        elapsed_seconds=float(elapsed),
+                    )
+                )
+        QTimer.singleShot(0, set_progress)
+
+    def update_progress_detail(current, total, message):
+        # 新インターフェイス: (current, total, message)
+        def set_progress():
+            if not progress_dialog:
+                return
+
+            nonlocal _last_message, _last_current, _last_total, _last_progress_event, _in_busy_mode
+            _last_message = str(message)
+
+            try:
+                c = int(current)
+            except Exception:
+                c = 0
+            try:
+                t = int(total)
+            except Exception:
+                t = 0
+
+            _last_current = c
+            _last_total = t
+            _last_progress_event = time.perf_counter()
+
+            if _in_busy_mode:
+                _in_busy_mode = False
+
+            # totalが取れる場合は「件数ベース」でバーも動かす。
+            # total=100 の場合は従来どおり percent として扱う（互換）。
+            if t > 0 and not (t == 100 and c <= 100):
+                progress_dialog.setRange(0, t)
+                progress_dialog.setValue(min(max(c, 0), t))
+            else:
+                progress_dialog.setRange(0, 100)
+                if t > 0:
+                    percent = min(max(int((c * 100 + t - 1) / t), 0), 100)
+                else:
+                    percent = 0
+                progress_dialog.setValue(percent)
+
+            elapsed = time.perf_counter() - _started
+            progress_dialog.setLabelText(
+                _build_progress_label(
+                    message=str(message),
+                    current=c,
+                    total=t,
+                    elapsed_seconds=float(elapsed),
+                )
+            )
+
         QTimer.singleShot(0, set_progress)
     
+    def _format_elapsed(seconds: float) -> str:
+        try:
+            total = int(round(seconds))
+            h = total // 3600
+            m = (total % 3600) // 60
+            s = total % 60
+            if h > 0:
+                return f"{h}:{m:02d}:{s:02d}"
+            return f"{m}:{s:02d}"
+        except Exception:
+            return ""
+
     # 完了時の処理
     def on_finished(success, message):
         def handle_finished():
+            try:
+                tick_timer = getattr(progress_dialog, "_elapsed_update_timer", None)
+                if tick_timer is not None and hasattr(tick_timer, "stop"):
+                    tick_timer.stop()
+            except Exception:
+                pass
+
             if progress_dialog:
                 progress_dialog.close()
             # show_completion_dialog=Falseの場合はダイアログを表示しない
             if show_completion_dialog:
-                if success:
-                    QMessageBox.information(parent, title, message)
+                elapsed_text = _format_elapsed(time.perf_counter() - _started)
+                if elapsed_text:
+                    message_with_time = f"{message}\n\n所要時間: {elapsed_text}"
                 else:
-                    QMessageBox.critical(parent, f"{title} - エラー", message)
+                    message_with_time = message
+                if success:
+                    QMessageBox.information(parent, title, message_with_time)
+                else:
+                    QMessageBox.critical(parent, f"{title} - エラー", message_with_time)
         QTimer.singleShot(0, handle_finished)
     
     # キャンセル処理
     def on_cancel():
         worker.cancel()
+        try:
+            tick_timer = getattr(progress_dialog, "_elapsed_update_timer", None)
+            if tick_timer is not None and hasattr(tick_timer, "stop"):
+                tick_timer.stop()
+        except Exception:
+            pass
         progress_dialog.close()
+
+    # 進捗イベントが来ない間の「経過/残り(推定)」表示更新（UIスレッド）
+    tick_timer = QTimer(progress_dialog)
+    tick_timer.setInterval(250)
+
+    def _tick_update_label():
+        try:
+            nonlocal _last_message, _last_current, _last_total, _last_progress_event, _in_busy_mode
+            if not progress_dialog:
+                return
+            elapsed = time.perf_counter() - _started
+            now = time.perf_counter()
+
+            # 進捗イベントが一定時間来ない場合は“不定”バー（アニメーション）に切り替える。
+            # 長いHTTP待ち/リトライでも「動いている」ことが視覚的に分かるようにする。
+            if (not _in_busy_mode) and (now - _last_progress_event) >= _busy_after_seconds:
+                try:
+                    _in_busy_mode = True
+                    progress_dialog.setRange(0, 0)
+                except Exception:
+                    _in_busy_mode = False
+
+            message = str(_last_message)
+            if _in_busy_mode and "待機中" not in message and "応答待ち" not in message:
+                message = f"{message}\n(応答待ち...)"
+            progress_dialog.setLabelText(
+                _build_progress_label(
+                    message=message,
+                    current=int(_last_current),
+                    total=int(_last_total),
+                    elapsed_seconds=float(elapsed),
+                )
+            )
+        except Exception:
+            return
+
+    tick_timer.timeout.connect(_tick_update_label)
+    # 参照を保持してGCされないようにする
+    progress_dialog._elapsed_update_timer = tick_timer  # type: ignore[attr-defined]
+    tick_timer.start()
     
-    worker.progress.connect(update_progress)
+    # 新しい進捗(件数/ETA)が使える場合はそちらを優先
+    if hasattr(worker, 'progress_detail'):
+        try:
+            worker.progress_detail.connect(update_progress_detail)
+        except Exception:
+            worker.progress.connect(update_progress)
+    else:
+        worker.progress.connect(update_progress)
     worker.finished.connect(on_finished)
     progress_dialog.canceled.connect(on_cancel)
     
@@ -232,8 +475,11 @@ def fetch_basic_info_self(controller):
             return
         
         webview = getattr(controller.parent, 'webview', controller.parent)
-        default_keyword = controller.basic_info_input.text().strip() if hasattr(controller, 'basic_info_input') else ""
         previous_selection = getattr(controller, '_basic_info_search_state', None)
+        if isinstance(previous_selection, BasicInfoSearchSelection):
+            default_keyword = (previous_selection.manual_keyword or "").strip()
+        else:
+            default_keyword = ""
         if not isinstance(previous_selection, BasicInfoSearchSelection):
             previous_selection = None
 
@@ -251,13 +497,7 @@ def fetch_basic_info_self(controller):
         searchWordsBatch = selection.keyword_batch or None
         keyword_preview = selection.display_keywords()
 
-        if hasattr(controller, 'basic_info_input'):
-            if selection.mode == PATTERN_MANUAL and searchWords:
-                controller.basic_info_input.setText(searchWords)
-            elif selection.mode == PATTERN_INSTITUTION and searchWordsBatch:
-                controller.basic_info_input.setText(searchWordsBatch[0])
-            elif selection.mode == "self":
-                controller.basic_info_input.clear()
+        # 検索条件の入力欄はダイアログ側に一本化したため、メイン画面の入力欄は更新しない
 
         # 確認ダイアログをメインスレッドで表示
         preview_list = keyword_preview if keyword_preview else None
@@ -481,12 +721,15 @@ def fetch_invoice_schema(controller):
     
     output_dir = get_dynamic_file_path("output/rde/data")
 
+    parallel_max_workers = _get_basic_info_parallel_workers(controller, default=10)
+
     # プログレス表示付きワーカーを作成
     worker = ProgressWorker(
         task_func=fetch_invoice_schemas,
         task_kwargs={
             'bearer_token': bearer_token,
-            'output_dir': output_dir
+            'output_dir': output_dir,
+            'max_workers': parallel_max_workers,
         },
         task_name="invoiceSchemas取得"
     )
@@ -533,11 +776,13 @@ def fetch_sample_info_only(controller):
         return
     
     # プログレス表示付きワーカーを作成
+    parallel_max_workers = _get_basic_info_parallel_workers(controller, default=10)
     worker = ProgressWorker(
         task_func=fetch_sample_info_only_logic,
         task_kwargs={
             'bearer_token': bearer_token,
-            'output_dir': get_dynamic_file_path("output/rde/data")
+            'output_dir': get_dynamic_file_path("output/rde/data"),
+            'max_workers': parallel_max_workers,
         },
         task_name="サンプル情報強制取得"
     )
@@ -676,11 +921,72 @@ def fetch_common_info_only(controller):
     worker.finished.disconnect()  # 既存の接続を削除
     worker.finished.connect(on_finished_with_refresh)
 
+
+def fetch_common_info_only2(controller):
+    """共通情報取得2: 取得対象/条件を事前選択して共通情報を取得する"""
+    from core.bearer_token_manager import BearerTokenManager
+    from .common_info_selection_dialog import (
+        CommonInfoSelectionDialog,
+        load_common_info2_selection_state,
+        save_common_info2_selection_state,
+    )
+    from ..core.common_info_selection_logic import fetch_common_info_with_selection_logic
+
+    bearer_token = BearerTokenManager.get_token_with_relogin_prompt(controller.parent)
+    if not bearer_token:
+        logger.warning("共通情報取得2: トークンが取得できませんでした")
+        QMessageBox.warning(
+            controller.parent,
+            "認証エラー",
+            "認証トークンが取得できません。\n"
+            "ログインタブでRDEシステムにログインしてから再度実行してください。",
+        )
+        return
+
+    previous_state = load_common_info2_selection_state()
+    dialog = CommonInfoSelectionDialog(parent=controller.parent, initial_state=previous_state)
+    if dialog.exec() != QDialog.Accepted:
+        logger.info("共通情報取得2はユーザーによりキャンセルされました（ダイアログ）")
+        return
+
+    selection_state = dialog.get_state()
+    save_common_info2_selection_state(selection_state)
+
+    webview = getattr(controller.parent, 'webview', controller.parent)
+
+    worker = ProgressWorker(
+        task_func=fetch_common_info_with_selection_logic,
+        task_kwargs={
+            'bearer_token': bearer_token,
+            'parent': controller.parent,
+            'webview': webview,
+            'selection_state': selection_state,
+        },
+        task_name="共通情報取得2",
+    )
+
+    def on_finished_with_refresh(success, message):
+        def handle_finished():
+            if success:
+                QMessageBox.information(controller.parent, "共通情報取得2", message)
+                QTimer.singleShot(100, lambda: refresh_json_status_display(controller))
+            else:
+                QMessageBox.critical(controller.parent, "共通情報取得2 - エラー", message)
+        QTimer.singleShot(0, handle_finished)
+
+    progress_dialog = show_progress_dialog(controller.parent, "共通情報取得2", worker, show_completion_dialog=False)
+    worker.finished.disconnect()
+    worker.finished.connect(on_finished_with_refresh)
+
+    return progress_dialog
+
 def refresh_json_status_display(controller):
     """
     JSON取得状況表示を更新
     """
-    if hasattr(controller, 'json_status_widget'):
+    if hasattr(controller, 'basic_unified_status_widget'):
+        controller.basic_unified_status_widget.update_status()
+    elif hasattr(controller, 'json_status_widget'):
         controller.json_status_widget.update_status()
 
 def create_json_status_widget(parent=None):
@@ -900,6 +1206,8 @@ def execute_individual_stage_ui(controller, stage_name):
         return
     
     webview = getattr(controller.parent, 'webview', controller.parent)
+
+    parallel_max_workers = _get_basic_info_parallel_workers(controller, default=10)
     
     # 確認ダイアログ
     reply = QMessageBox.question(
@@ -920,16 +1228,23 @@ def execute_individual_stage_ui(controller, stage_name):
     searchWordsBatch = None
     if stage_name == "データセット情報":
         selection = getattr(controller, '_basic_info_search_state', None)
+        if not isinstance(selection, BasicInfoSearchSelection):
+            # メイン画面から入力欄を除去したため、必要ならここで検索条件ダイアログを表示
+            selection = prompt_basic_info_search_options(
+                controller.parent,
+                default_keyword="",
+                previous_state=None,
+            )
+            if not selection:
+                logger.info("データセット情報(個別実行)はユーザーによりキャンセルされました。(検索ダイアログ)")
+                return
+            controller._basic_info_search_state = selection
+
         if isinstance(selection, BasicInfoSearchSelection):
             onlySelf = selection.mode in ("self", PATTERN_MANUAL, PATTERN_INSTITUTION)
             searchWords = selection.manual_keyword or None
             if selection.keyword_batch:
                 searchWordsBatch = list(selection.keyword_batch)
-        elif hasattr(controller, 'basic_info_input'):
-            search_text = controller.basic_info_input.text().strip()
-            if search_text:
-                onlySelf = True
-                searchWords = search_text
 
     force_download = False
     if stage_name == "グループ関連情報":
@@ -970,20 +1285,44 @@ def execute_individual_stage_ui(controller, stage_name):
             'parent_widget': controller.parent,
             'force_program_dialog': (stage_name == "グループ関連情報"),
             'force_download': force_download,
+            'parallel_max_workers': parallel_max_workers,
         },
         task_name=f"{stage_name}実行"
     )
     
     # プログレス表示
+    import time
+    _started = time.perf_counter()
+
+    def _format_elapsed(seconds: float) -> str:
+        try:
+            total = int(round(seconds))
+            h = total // 3600
+            m = (total % 3600) // 60
+            s = total % 60
+            if h > 0:
+                return f"{h}:{m:02d}:{s:02d}"
+            return f"{m}:{s:02d}"
+        except Exception:
+            return ""
+
     def on_finished_with_refresh(success, message):
         def handle_finished():
+            elapsed = time.perf_counter() - _started
+            elapsed_text = _format_elapsed(elapsed)
+            if elapsed_text:
+                message_with_time = f"{message}\n\n所要時間: {elapsed_text}"
+            else:
+                message_with_time = message
             if success:
-                QMessageBox.information(controller.parent, f"{stage_name}実行", message)
+                QMessageBox.information(controller.parent, f"{stage_name}実行", message_with_time)
                 # JSON状況表示を更新
-                if hasattr(controller, 'json_status_widget'):
+                if hasattr(controller, 'basic_unified_status_widget'):
+                    QTimer.singleShot(100, lambda: controller.basic_unified_status_widget.update_status())
+                elif hasattr(controller, 'json_status_widget'):
                     QTimer.singleShot(100, lambda: controller.json_status_widget.update_status())
             else:
-                QMessageBox.critical(controller.parent, f"{stage_name}実行 - エラー", message)
+                QMessageBox.critical(controller.parent, f"{stage_name}実行 - エラー", message_with_time)
         QTimer.singleShot(0, handle_finished)
     
     # 通常のプログレス表示
@@ -1007,9 +1346,7 @@ def create_individual_execution_widget(parent=None):
             super().__init__(parent)
             self.controller = None  # 後で設定される
             self.init_ui()
-            self.update_status_timer = QTimer()
-            self.update_status_timer.timeout.connect(self.update_stage_status)
-            self.update_status_timer.start(10000)  # 10秒ごとに更新
+            # 自動更新は統合ステータス側で実施する
             
         def init_ui(self):
             layout = QVBoxLayout(self)
@@ -1078,21 +1415,7 @@ def create_individual_execution_widget(parent=None):
             control_layout.addWidget(self.refresh_btn)
             
             layout.addLayout(control_layout)
-            
-            # 段階完了状況表示エリア
-            self.status_text = QTextEdit()
-            self.status_text.setReadOnly(True)
-            self.status_text.setMaximumHeight(150)
-            self.status_text.setStyleSheet(f"""
-                font-family: 'Consolas';
-                font-size: 9pt;
-
-                border: 1px solid {get_color(ThemeKey.PANEL_BORDER)};
-                border-radius: 4px;
-            """)
-            layout.addWidget(self.status_text)
-            
-            # 初期状態を表示
+            # 段階別完了状況/取得状況は統合ステータス表示に一本化
             self.update_stage_status()
             
         def set_controller(self, controller):
@@ -1116,55 +1439,18 @@ def create_individual_execution_widget(parent=None):
             self.update_stage_status()
             
         def update_stage_status(self):
-            """段階完了状況を更新"""
             try:
-                from ..core.basic_info_logic import get_stage_completion_status
-                status_data = get_stage_completion_status()
-                
-                status_text = "【段階別完了状況】\n"
-                selected_stage = self.stage_combo.currentText()
-                
-                for stage_name, stage_info in status_data.items():
-                    completed = stage_info["completed"]
-                    total = stage_info["total"]
-                    rate = stage_info["rate"]
-                    status = stage_info["status"]
-                    
-                    # 選択中の段階をハイライト
-                    marker = "★" if stage_name == selected_stage else "　"
-                    status_icon = "✓" if rate == 100 else "△" if rate > 0 else "✗"
-                    
-                    status_text += f"{marker}{status_icon} {stage_name:18} | {completed:2}/{total} | {rate:5.1f}% | {status}\n"
-                
-                # 全体の進捗情報
-                total_stages = len(status_data)
-                completed_stages = len([s for s in status_data.values() if s["rate"] == 100])
-                partial_stages = len([s for s in status_data.values() if 0 < s["rate"] < 100])
-                
-                status_text += f"\n【全体進捗】完了: {completed_stages}/{total_stages}段階"
-                if partial_stages > 0:
-                    status_text += f", 部分完了: {partial_stages}段階"
-                
-                # 選択中段階の詳細
-                if selected_stage in status_data:
-                    selected_info = status_data[selected_stage]
-                    status_text += f"\n\n【{selected_stage}】\n"
-                    status_text += f"状況: {selected_info['status']}\n"
-                    status_text += f"完了率: {selected_info['rate']:.1f}% ({selected_info['completed']}/{selected_info['total']})"
-                
-                # 自動更新機能の説明
-                status_text += f"\n\n【自動更新機能】\n"
-                status_text += f"✓ サブグループ作成成功→subGroup.json自動更新\n"
-                status_text += f"✓ データセット開設成功→dataset.json自動更新"
-                
-                self.status_text.setPlainText(status_text)
-                
-            except ImportError as e:
-                self.status_text.setPlainText(f"モジュールインポートエラー: {e}")
+                if self.controller is None:
+                    return
+
+                if hasattr(self.controller, 'basic_unified_status_widget'):
+                    self.controller.basic_unified_status_widget.update_status()
+                elif hasattr(self.controller, 'json_status_widget'):
+                    # 統合ウィジェットがない場合のフォールバック
+                    self.controller.json_status_widget.update_status()
             except Exception as e:
-                self.status_text.setPlainText(f"状況取得エラー: {e}")
                 import traceback
-                logger.error(f"段階状況更新エラー: {e}")
+                logger.error(f"統合ステータス更新エラー: {e}")
                 logger.error(traceback.format_exc())
     
     return IndividualExecutionWidget(parent)

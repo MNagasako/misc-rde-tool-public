@@ -222,59 +222,29 @@ class BasicInfoTabValidator:
     def _update_status_display(self, status_text, border_color_key=None):
         """ステータス表示を更新"""
         try:
-            # JSON状況ウィジェットのステータスを更新
-            if hasattr(self.controller, 'json_status_widget'):
-                # ステータステキストにプレフィックスを追加
-                status_prefix = f"[認証状況: {status_text}]\n\n"
-                
-                # 既存のステータステキストを取得
-                current_text = self.controller.json_status_widget.status_text.toPlainText()
-                
-                # プレフィックスがない場合のみ追加
-                if not current_text.startswith("[認証状況:"):
-                    new_text = status_prefix + current_text
-                else:
-                    # 既存のプレフィックスを置き換え
-                    lines = current_text.split("\n")
-                    new_text = status_prefix + "\n".join(lines[2:])
-                
-                self.controller.json_status_widget.status_text.setPlainText(new_text)
-                
-                # 色に応じてスタイルを変更
-                from classes.theme import get_color, ThemeKey
-                
-                # Base style components
-                bg_color = get_color(ThemeKey.INPUT_BACKGROUND)
-                text_color = get_color(ThemeKey.INPUT_TEXT)
-                
-                border_style = ""
-                if isinstance(border_color_key, ThemeKey):
-                    border_style = f"border: 1px solid {get_color(border_color_key)};"
-                
-                # Construct the stylesheet
-                style = (
-                    "QTextEdit { "
-                    "font-family: 'Consolas'; "
-                    "font-size: 9pt; "
-                    f"{border_style} "
-                    f"background-color: {bg_color}; "
-                    f"color: {text_color}; "
-                    "}"
-                )
-                
-                # Debug: Log the stylesheet
-                logger.debug(f"[TabValidator] Setting QTextEdit stylesheet (border_color_key={border_color_key})")
-                logger.debug(f"[TabValidator] Stylesheet: {style}")
-                logger.debug(f"[TabValidator] Stylesheet length: {len(style)}")
-                
+            # 統合ステータス表示（優先）
+            if hasattr(self.controller, 'basic_unified_status_widget'):
                 try:
-                    self.controller.json_status_widget.status_text.setStyleSheet(style)
-                    logger.debug(f"[TabValidator] Stylesheet applied successfully")
-                except Exception as style_error:
-                    logger.error(f"[TabValidator] setStyleSheet failed: {style_error}")
-                    logger.error(f"[TabValidator] Problematic stylesheet: {style}")
-                    import traceback
-                    traceback.print_exc()
+                    self.controller.basic_unified_status_widget.set_auth_status(status_text, border_color_key)
+                except Exception as e:
+                    logger.error(f"統合ステータスの認証表示更新エラー: {e}")
+                return
+
+            # フォールバック: 旧 JSON状況ウィジェットへの追記（互換）
+            if hasattr(self.controller, 'json_status_widget'):
+                try:
+                    status_prefix = f"[認証状況: {status_text}]\n\n"
+                    current_text = self.controller.json_status_widget.status_text.toPlainText()
+
+                    if not current_text.startswith("[認証状況:"):
+                        new_text = status_prefix + current_text
+                    else:
+                        lines = current_text.split("\n")
+                        new_text = status_prefix + "\n".join(lines[2:])
+
+                    self.controller.json_status_widget.status_text.setPlainText(new_text)
+                except Exception as e:
+                    logger.error(f"旧ステータス表示更新エラー: {e}")
                 
         except Exception as e:
             logger.error(f"ステータス表示更新エラー: {e}")

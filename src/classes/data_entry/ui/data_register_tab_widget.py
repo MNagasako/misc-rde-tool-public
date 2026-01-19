@@ -53,9 +53,13 @@ class DataRegisterTabWidget(QWidget):
         # key: tab index, value: QSize
         self._tab_window_sizes: dict[int, object] = {}
         self._current_tab_index: int | None = None
+        # 「その他タブ」（例: メール通知タブ等）で復元するウィンドウサイズ
+        self._last_other_window_size = None
         # showEvent/WindowActivate 経由で同一タブに対して _on_tab_changed が再実行されることがある。
         # その際に resize() を再適用すると、ユーザーが調整した幅が戻る原因になるため、最後に適用したタブを記録する。
         self._last_tab_index_applied = None
+        # タブ初回表示時のみ「位置調整」を行うためのフラグ
+        self._tab_window_positions_applied: set[int] = set()
         self.setup_ui()
         
         # テーマ変更シグナルに接続（Singletonを必ず使用）
@@ -349,10 +353,10 @@ class DataRegisterTabWidget(QWidget):
             if hasattr(top_level, 'setMaximumWidth'):
                 top_level.setMaximumWidth(16777215)
 
-            # 一括登録タブ：初回は画面幅の80%以上へ拡大（縮小はしない）
+            # 一括登録タブ：初回は画面幅の90%以上へ拡大（縮小はしない）
             if screen:
                 screen_size = screen.size()
-                target_width = int(screen_size.width() * 0.80)
+                target_width = int(screen_size.width() * 0.90)
                 target_height = int(screen_size.height() * 0.90)
                 
                 logger.debug("スクリーンサイズ: %sx%s", screen_size.width(), screen_size.height())
@@ -390,6 +394,34 @@ class DataRegisterTabWidget(QWidget):
                     # リサイズ直後のサイズを確認
                     actual_size = top_level.size()
                     logger.debug("リサイズ後の実際のサイズ: %sx%s", actual_size.width(), actual_size.height())
+
+                # 一括登録タブ初回表示時のみ、ウィンドウ位置を「画面内に収まるよう中央寄せ＋クランプ」する。
+                # 以後はユーザーが任意に移動できるよう、再適用しない。
+                if not os.environ.get("PYTEST_CURRENT_TEST"):
+                    try:
+                        if index not in self._tab_window_positions_applied:
+                            target_screen = None
+                            try:
+                                target_screen = QApplication.screenAt(top_level.frameGeometry().center())
+                            except Exception:
+                                target_screen = None
+                            if target_screen is None:
+                                target_screen = screen
+
+                            if target_screen is not None:
+                                available = target_screen.availableGeometry()
+                                frame = top_level.frameGeometry()
+                                frame.moveCenter(available.center())
+
+                                max_x = available.right() - frame.width() + 1
+                                max_y = available.bottom() - frame.height() + 1
+                                x = max(available.left(), min(frame.x(), max_x))
+                                y = max(available.top(), min(frame.y(), max_y))
+                                top_level.move(int(x), int(y))
+
+                            self._tab_window_positions_applied.add(index)
+                    except Exception:
+                        pass
                 # NOTE: top_level は既に可視のため、show() は呼ばない。
                 # Windows環境で一瞬のポップアップ/フォーカス変更を誘発することがある。
                     

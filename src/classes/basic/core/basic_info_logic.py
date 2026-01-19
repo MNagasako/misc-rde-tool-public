@@ -92,8 +92,15 @@ INSTRUMENT_CHUNK_FILE_TEMPLATE = "instrument_chunk_{:04d}.json"
 
 # 他エンドポイントでも同一閾値を用いる（ユーザー要望: 1000件単位）
 DEFAULT_CHUNK_PAGE_SIZE = 1000
-TEMPLATE_PAGE_SIZE = DEFAULT_CHUNK_PAGE_SIZE
+
+# テンプレートAPIは offset>0 のページング取得でタイムアウト/不安定になりやすい報告があるため、
+# 旧実装互換としてまずは大きめlimitで単発取得を優先する（通常は1回で完結）。
+# ※実際に 10,000 を超える場合のみページングとなる。
+TEMPLATE_PAGE_SIZE = 10_000
+
 INSTRUMENT_PAGE_SIZE = DEFAULT_CHUNK_PAGE_SIZE
+
+# タイムアウトは旧実装相当（短縮すると read timeout を誘発しやすい）
 TEMPLATE_REQUEST_TIMEOUT = 30
 INSTRUMENT_REQUEST_TIMEOUT = 10
 
@@ -117,6 +124,9 @@ def stage_error_handler(operation_name: str):
         def wrapper(*args, **kwargs):
             try:
                 return func(*args, **kwargs)
+            except GroupFetchCancelled:
+                # UIのキャンセル操作はエラー扱いにせず、統一メッセージを返す
+                return "キャンセルされました"
             except Exception as e:
                 error_msg = f"{operation_name}でエラーが発生しました: {e}"
                 logger.error(error_msg)
@@ -146,53 +156,78 @@ def _subgroups_folder_complete() -> bool:
         expected_ids = set()
         logger.info("\n[フォルダ完全性チェック開始] v2.1.24")
 
-        org_dir = Path(GROUP_ORGNIZATION_DIR)
-        if org_dir.exists():
-            logger.info(f"  📂 groupOrgnizations/ディレクトリをスキャン: {org_dir}")
-
-            org_json_files = list(org_dir.glob("*.json"))
-            logger.info(f"  📋 プロジェクトJSONファイル数: {len(org_json_files)}個")
-
-            for json_file in org_json_files:
-                try:
-                    with open(json_file, 'r', encoding='utf-8') as f:
-                        proj_data = json.load(f)
-
-                    included = proj_data.get("included", [])
-                    subgroup_count = 0
-                    for item in included:
-                        if (
-                            item.get("type") == "group" and
-                            item.get("attributes", {}).get("groupType") == "TEAM"
-                        ):
-                            item_id = item.get("id")
-                            expected_ids.add(item_id)
-                            subgroup_count += 1
-
-                    logger.debug(f"    ✓ {json_file.name}: {subgroup_count}個のサブグループを抽出")
-                except Exception as e:
-                    logger.warning(f"    ❌ プロジェクトJSON読み込みエラー（{json_file.name}）: {e}")
-                    continue
-        else:
-            logger.info(f"  ℹ️  groupOrgnizations/ディレクトリが存在しません: {org_dir}")
-
-        # groupOrgnizations/ に情報がない場合でも、subGroup.json から TEAM を推定できる
-        if not expected_ids:
+        def _expected_team_ids_from_subgroup_json() -> set[str]:
+            """subGroup.json から期待TEAM IDを抽出する（可能ならこれを最優先）。"""
             try:
                 subgroup_json_path = Path(SUBGROUP_JSON_PATH)
-                if subgroup_json_path.exists():
-                    with open(subgroup_json_path, "r", encoding="utf-8") as f:
-                        subgroup_data = json.load(f)
-                    included = subgroup_data.get("included", [])
-                    for item in included:
-                        if (
-                            item.get("type") == "group" and
-                            item.get("attributes", {}).get("groupType") == "TEAM"
-                        ):
-                            item_id = item.get("id")
-                            expected_ids.add(item_id)
+                if not subgroup_json_path.exists():
+                    return set()
+                with open(subgroup_json_path, "r", encoding="utf-8") as f:
+                    subgroup_data = json.load(f)
+
+                extracted: set[str] = set()
+                included = subgroup_data.get("included", [])
+                for item in included:
+                    if (
+                        item.get("type") == "group"
+                        and item.get("attributes", {}).get("groupType") == "TEAM"
+                    ):
+                        gid = item.get("id")
+                        if isinstance(gid, str) and gid:
+                            extracted.add(gid)
+
+                # included に TEAM が無い場合、relationships.children をフォールバックで利用
+                if not extracted:
+                    relationships = subgroup_data.get("data", {}).get("relationships", {})
+                    children = relationships.get("children", {}).get("data", []) if isinstance(relationships, dict) else []
+                    if isinstance(children, list):
+                        for child in children:
+                            if not isinstance(child, dict):
+                                continue
+                            gid = child.get("id")
+                            if isinstance(gid, str) and gid:
+                                extracted.add(gid)
+
+                return extracted
             except Exception as e:
                 logger.debug("subGroup.json からのサブグループ推定に失敗（取得を続行）: %s", e)
+                return set()
+
+        # v2.2.x: キャッシュ完全性判定は subGroup.json を優先（groupOrgnizations が stale でも引きずられない）
+        expected_ids = _expected_team_ids_from_subgroup_json()
+
+        # subGroup.json から取れない場合のみ、互換のため groupOrgnizations/ を参照
+        if not expected_ids:
+            org_dir = Path(GROUP_ORGNIZATION_DIR)
+            if org_dir.exists():
+                logger.info(f"  📂 groupOrgnizations/ディレクトリをスキャン: {org_dir}")
+
+                org_json_files = list(org_dir.glob("*.json"))
+                logger.info(f"  📋 プロジェクトJSONファイル数: {len(org_json_files)}個")
+
+                for json_file in org_json_files:
+                    try:
+                        with open(json_file, 'r', encoding='utf-8') as f:
+                            proj_data = json.load(f)
+
+                        included = proj_data.get("included", [])
+                        subgroup_count = 0
+                        for item in included:
+                            if (
+                                item.get("type") == "group" and
+                                item.get("attributes", {}).get("groupType") == "TEAM"
+                            ):
+                                item_id = item.get("id")
+                                if isinstance(item_id, str) and item_id:
+                                    expected_ids.add(item_id)
+                                    subgroup_count += 1
+
+                        logger.debug(f"    ✓ {json_file.name}: {subgroup_count}個のサブグループを抽出")
+                    except Exception as e:
+                        logger.warning(f"    ❌ プロジェクトJSON読み込みエラー（{json_file.name}）: {e}")
+                        continue
+            else:
+                logger.info(f"  ℹ️  groupOrgnizations/ディレクトリが存在しません: {org_dir}")
 
         # 期待されるサブグループが0件なら、subGroups/ のファイル有無で欠損扱いにしない
         if not expected_ids:
@@ -736,6 +771,7 @@ def _download_paginated_resource(
     page_size: int,
     timeout: int,
     record_callback: Optional[Callable[..., None]] = None,
+    progress_callback: Optional[Callable[[int, int, str], bool]] = None,
     chunk_label: str,
     chunk_dir_factory: Optional[Callable[[], Path]] = None,
     chunk_file_template: Optional[str] = None,
@@ -809,6 +845,20 @@ def _download_paginated_resource(
         total_processed += chunk_count
         if total_expected is None:
             total_expected = payload.get("meta", {}).get("totalCounts")
+
+        if progress_callback:
+            try:
+                total_for_progress = int(total_expected) if total_expected is not None else 0
+            except Exception:
+                total_for_progress = 0
+
+            if not _progress_ok(
+                progress_callback,
+                int(total_processed),
+                int(total_for_progress),
+                f"{chunk_label}: {total_processed}/{total_for_progress if total_for_progress else '?'} (chunk={chunk_index}, offset={offset})",
+            ):
+                raise GroupFetchCancelled("キャンセルされました")
 
         logger.info(
             "%s: チャンク%04dを取得 (件数=%d, offset=%d)",
@@ -921,7 +971,7 @@ def _download_dataset_list_in_chunks(
     )
     return merged_payload
 
-def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
+def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None, max_workers: int = 10):
     """
     template.jsonの全テンプレートIDについてinvoiceSchemasを取得し保存する
     v2.1.0: 並列ダウンロード対応（50件以上で自動並列化）
@@ -931,7 +981,7 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
         import threading
         
         if progress_callback:
-            if not progress_callback(0, 100, "invoiceSchemas取得を開始しています... (並列: 有効)"):
+            if not progress_callback(0, 100, f"invoiceSchemas取得を開始しています... (並列: {max_workers})"):
                 return "キャンセルされました"
                 
         os.makedirs(os.path.join(output_dir, "invoiceSchemas"), exist_ok=True)
@@ -939,7 +989,7 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
         log_path = os.path.join(output_dir, "invoiceSchemas", "invoiceSchemas_fetch.log")
 
         if progress_callback:
-            if not progress_callback(5, 100, "template.jsonを読み込み中... (並列: 有効)"):
+            if not progress_callback(5, 100, f"template.jsonを読み込み中... (並列: {max_workers})"):
                 return "キャンセルされました"
 
         try:
@@ -952,7 +1002,7 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
             template_ids = []
 
         if progress_callback:
-            if not progress_callback(10, 100, f"取得対象: {len(template_ids)}件のテンプレート (並列: 有効)"):
+            if not progress_callback(10, 100, f"取得対象: {len(template_ids)}件のテンプレート (並列: {max_workers})"):
                 return "キャンセルされました"
 
         summary_path = os.path.join(output_dir, "invoiceSchemas", "summary.json")
@@ -1014,7 +1064,7 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
         result = parallel_download(
             tasks=tasks,
             worker_function=worker,
-            max_workers=10,
+            max_workers=max_workers,
             progress_callback=adjusted_progress_callback,
             threshold=50
         )
@@ -1024,7 +1074,7 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None):
             json.dump(summary, f, ensure_ascii=False, indent=2)
 
         if progress_callback:
-            progress_callback(100, 100, "invoiceSchema取得完了 (並列: 有効)")
+            progress_callback(100, 100, f"invoiceSchema取得完了 (並列: {max_workers})")
             
         success_count = len(summary.get("success", []))
         failed_count = len(summary.get("failed", {}))
@@ -1212,7 +1262,7 @@ def fetch_all_data_entrys_info(bearer_token, output_dir=None, progress_callback=
             return
         
         if progress_callback:
-            if not progress_callback(0, 100, "データエントリ情報取得準備中..."):
+            if not progress_callback(0, 0, f"データエントリ情報取得準備中... (並列: {max_workers})"):
                 return "キャンセルされました"
             
         with open(dataset_json, "r", encoding="utf-8") as f:
@@ -1223,7 +1273,7 @@ def fetch_all_data_entrys_info(bearer_token, output_dir=None, progress_callback=
         logger.info(f"データエントリ情報取得開始: {total_datasets}件のデータセット処理")
         
         if progress_callback:
-            if not progress_callback(5, 100, f"データセット総数: {total_datasets}件"):
+            if not progress_callback(0, total_datasets, f"データエントリ取得開始: 総数={total_datasets}件 (並列: {max_workers})"):
                 return "キャンセルされました"
         
         # タスクリストを作成（並列実行用）
@@ -1239,11 +1289,10 @@ def fetch_all_data_entrys_info(bearer_token, output_dir=None, progress_callback=
                 logger.error(f"データエントリ処理失敗: ds_id={ds_id}, error={e}")
                 return f"failed: {e}"
         
-        # プログレスコールバックを調整（5-95%の範囲にマッピング）
+        # 件数ベースで進捗を通知（QProgressDialog側で current/total と ETA を表示）
         def adjusted_progress_callback(current, total, message):
             if progress_callback:
-                progress_percent = 5 + int((current / 100) * 90)  # 5-95%
-                return progress_callback(progress_percent, 100, message)
+                return progress_callback(int(current), int(total), f"データエントリ取得中: {message}")
             return True
         
         result = parallel_download(
@@ -1251,7 +1300,8 @@ def fetch_all_data_entrys_info(bearer_token, output_dir=None, progress_callback=
             worker_function=worker,
             max_workers=max_workers,
             progress_callback=adjusted_progress_callback,
-            threshold=parallel_threshold
+            threshold=parallel_threshold,
+            progress_mode="count",
         )
         
         result_msg = (f"データエントリ情報取得完了: "
@@ -1352,7 +1402,7 @@ def fetch_invoice_info_from_api(bearer_token, entry_id, output_dir=None):
         raise
 
 
-def fetch_all_invoices_info(bearer_token, output_dir=None, progress_callback=None):
+def fetch_all_invoices_info(bearer_token, output_dir=None, progress_callback=None, max_workers: int = 10):
     """
     dataEntry.json内の全エントリIDでfetch_invoice_info_from_apiを呼び出す
     
@@ -1378,7 +1428,7 @@ def fetch_all_invoices_info(bearer_token, output_dir=None, progress_callback=Non
         
         # === 事前カウント：総予定取得数を計算 ===
         if progress_callback:
-            if not progress_callback(0, 100, "インボイス総数を計算中... (並列: 有効)"):
+            if not progress_callback(0, 100, f"インボイス総数を計算中... (並列: {max_workers})"):
                 return "キャンセルされました"
         
         dataentry_files = glob.glob(os.path.join(dataentry_dir, "*.json"))
@@ -1406,7 +1456,7 @@ def fetch_all_invoices_info(bearer_token, output_dir=None, progress_callback=Non
         logger.info(f"インボイス取得計画: 総数={total_entries}件")
         
         if progress_callback:
-            msg = f"インボイス取得開始 (データセット: {len(dataentry_files)}件, タイル総数: {total_entries}件, 並列: 有効)"
+            msg = f"インボイス取得開始 (データセット: {len(dataentry_files)}件, タイル総数: {total_entries}件, 並列: {max_workers})"
             if not progress_callback(5, 100, msg):
                 return "キャンセルされました"
         
@@ -1423,19 +1473,19 @@ def fetch_all_invoices_info(bearer_token, output_dir=None, progress_callback=Non
                 logger.error(f"インボイス処理失敗: entry_id={entry_id}, error={e}")
                 return f"failed: {e}"
         
-        # プログレスコールバックを調整（5-95%の範囲にマッピング）
+        # 件数ベースで進捗を通知（QProgressDialog側で current/total と ETA を表示）
         def adjusted_progress_callback(current, total, message):
             if progress_callback:
-                progress_percent = 5 + int((current / 100) * 90)  # 5-95%
-                return progress_callback(progress_percent, 100, f"並列インボイス取得中: {message}")
+                return progress_callback(int(current), int(total), f"インボイス取得中: {message}")
             return True
         
         result = parallel_download(
             tasks=tasks,
             worker_function=worker,
-            max_workers=10,
+            max_workers=max_workers,
             progress_callback=adjusted_progress_callback,
-            threshold=50
+            threshold=50,
+            progress_mode="count",
         )
         
         # === 完了処理 ===
@@ -1637,9 +1687,8 @@ def fetch_all_dataset_info(
                 return "failed"
 
         def detail_progress(current, total, message):
-            mapped = 5 + int((current / 100) * 90)
-            mapped = max(5, min(95, mapped))
-            return emit_progress(mapped, 100, f"データセット詳細取得中 (並列: 有効) {message}")
+            # 進捗は件数ベースで通知（show_progress_dialog 側で current/total/ETA を表示）
+            return emit_progress(int(current), int(total), f"データセット詳細取得中 (並列: 有効) {message}")
 
         try:
             from net.http_helpers import parallel_download
@@ -1650,6 +1699,7 @@ def fetch_all_dataset_info(
                 max_workers=max_workers,
                 progress_callback=detail_progress,
                 threshold=1,
+                progress_mode="count",
             )
         except Exception as parallel_error:
             logger.error("データセット詳細並列取得でエラー: %s", parallel_error)
@@ -1804,7 +1854,7 @@ def fetch_organization_info_from_api(bearer_token, save_path):
         logger.error("組織情報の取得・保存に失敗しました: %s", e)
 
 
-def fetch_template_info_from_api(bearer_token, output_dir=None):
+def fetch_template_info_from_api(bearer_token, output_dir=None, progress_callback=None):
     """
     テンプレート情報をAPIから取得し、template.jsonとして保存
     v1.18.4: Bearer Token自動選択対応
@@ -1826,6 +1876,15 @@ def fetch_template_info_from_api(bearer_token, output_dir=None):
 
         for idx, team_id in enumerate(team_candidates, 1):
             logger.info("テンプレート取得: teamId候補(%d/%d)=%s を試行します", idx, len(team_candidates), team_id)
+
+            if progress_callback:
+                _progress_ok(
+                    progress_callback,
+                    0,
+                    0,
+                    f"テンプレート情報: teamId候補({idx}/{len(team_candidates)})={team_id} を取得中...",
+                )
+
             base_params = {
                 "programId": program_id,
                 "teamId": team_id,
@@ -1838,25 +1897,43 @@ def fetch_template_info_from_api(bearer_token, output_dir=None):
             def _reuse_chunk_dir(chunk_dir=chunk_dir):
                 return chunk_dir
 
-            payload = _download_paginated_resource(
-                base_url=TEMPLATE_API_BASE_URL,
-                base_params=base_params,
-                headers=headers,
-                bearer_token=None,
-                page_size=TEMPLATE_PAGE_SIZE,
-                timeout=TEMPLATE_REQUEST_TIMEOUT,
-                record_callback=lambda url, hdrs, status_code, elapsed_ms, success, error=None: record_api_call_for_template(
-                    url,
-                    hdrs,
-                    status_code,
-                    elapsed_ms,
-                    success=success,
-                    error=error,
-                ),
-                chunk_label="テンプレート情報",
-                chunk_dir_factory=_reuse_chunk_dir,
-                chunk_file_template=TEMPLATE_CHUNK_FILE_TEMPLATE,
-            )
+            try:
+                payload = _download_paginated_resource(
+                    base_url=TEMPLATE_API_BASE_URL,
+                    base_params=base_params,
+                    headers=headers,
+                    bearer_token=None,
+                    page_size=TEMPLATE_PAGE_SIZE,
+                    timeout=TEMPLATE_REQUEST_TIMEOUT,
+                    record_callback=lambda url, hdrs, status_code, elapsed_ms, success, error=None: record_api_call_for_template(
+                        url,
+                        hdrs,
+                        status_code,
+                        elapsed_ms,
+                        success=success,
+                        error=error,
+                    ),
+                    progress_callback=progress_callback,
+                    chunk_label="テンプレート情報",
+                    chunk_dir_factory=_reuse_chunk_dir,
+                    chunk_file_template=TEMPLATE_CHUNK_FILE_TEMPLATE,
+                )
+            except GroupFetchCancelled:
+                raise
+            except Exception as per_team_error:
+                logger.warning(
+                    "テンプレート取得: teamId=%s の取得に失敗しました。次の候補を試行します: %s",
+                    team_id,
+                    per_team_error,
+                )
+                if progress_callback:
+                    _progress_ok(
+                        progress_callback,
+                        0,
+                        0,
+                        f"テンプレート情報: teamId候補({idx}/{len(team_candidates)}) 失敗。次の候補へ...",
+                    )
+                continue
 
             last_payload = payload
             if _template_payload_is_preferred(payload):
@@ -1868,7 +1945,10 @@ def fetch_template_info_from_api(bearer_token, output_dir=None):
             logger.info("テンプレート取得: teamId=%s では有意なデータが得られませんでした。次の候補を試行します。", team_id)
 
         if selected_payload is None:
-            selected_payload = last_payload or {"data": []}
+            if last_payload is None:
+                raise RuntimeError("テンプレート情報: 全teamId候補で取得に失敗しました")
+
+            selected_payload = last_payload
             selected_team_id = team_candidates[-1] if team_candidates else DEFAULT_TEAM_ID
             logger.info(
                 "テンプレート取得: 有意なデータが得られなかったため最後のレスポンスを採用します (teamId=%s)",
@@ -1886,7 +1966,7 @@ def fetch_template_info_from_api(bearer_token, output_dir=None):
     except Exception as e:
         logger.error("テンプレートの取得・保存に失敗しました: %s", e)
 
-def fetch_instruments_info_from_api(bearer_token, output_dir=None):
+def fetch_instruments_info_from_api(bearer_token, output_dir=None, progress_callback=None):
     """
     設備リスト情報をAPIから取得し、instruments.jsonとして保存
     v1.18.4: Bearer Token自動選択対応
@@ -1898,6 +1978,8 @@ def fetch_instruments_info_from_api(bearer_token, output_dir=None):
         "Referer": "https://rde.nims.go.jp/"
     }
     try:
+        if progress_callback:
+            _progress_ok(progress_callback, 0, 0, "設備情報取得を開始しています...")
         base_params = {
             "programId": DEFAULT_PROGRAM_ID,
             "sort": "id",
@@ -1917,6 +1999,7 @@ def fetch_instruments_info_from_api(bearer_token, output_dir=None):
                 success=success,
                 error=error,
             ),
+            progress_callback=progress_callback,
             chunk_label="設備情報",
             chunk_dir_factory=_prepare_instrument_chunk_directory,
             chunk_file_template=INSTRUMENT_CHUNK_FILE_TEMPLATE,
@@ -1929,7 +2012,7 @@ def fetch_instruments_info_from_api(bearer_token, output_dir=None):
     except Exception as e:
         logger.error("設備情報の取得・保存に失敗しました: %s", e)
 
-def fetch_licenses_info_from_api(bearer_token, output_dir=None):
+def fetch_licenses_info_from_api(bearer_token, output_dir=None, progress_callback=None):
     """
     利用ライセンスマスタ情報をAPIから取得し、licenses.jsonとして保存
     v1.18.4: Bearer Token自動選択対応
@@ -1945,6 +2028,8 @@ def fetch_licenses_info_from_api(bearer_token, output_dir=None):
         "Referer": "https://rde.nims.go.jp/"
     }
     try:
+        if progress_callback:
+            _progress_ok(progress_callback, 0, 1, "利用ライセンス情報取得を開始しています...")
         # v1.18.4: bearer_token=Noneで自動選択させる
         resp = api_request("GET", url, bearer_token=None, headers=headers, timeout=10)
         elapsed_ms = (time.time() - start_time) * 1000
@@ -1965,6 +2050,9 @@ def fetch_licenses_info_from_api(bearer_token, output_dir=None):
             json.dump(data, f, ensure_ascii=False, indent=2)
         logger.info("利用ライセンス情報(licenses.json)の取得・保存に成功しました。")
         logger.info(f"利用ライセンス情報取得完了: {len(data.get('data', []))}件のライセンス")
+
+        if progress_callback:
+            _progress_ok(progress_callback, 1, 1, "利用ライセンス情報取得が完了しました")
         try:
             from classes.basic.core.api_recording_wrapper import record_api_call_for_licenses
             record_api_call_for_licenses(url, headers, 200, elapsed_ms, True)
@@ -2059,6 +2147,7 @@ def run_group_hierarchy_pipeline(
     force_program_dialog: bool = False,
     force_download: bool = False,
     skip_dialog: bool = False,
+    max_workers: int = 10,
 ) -> GroupFetchResult:
     """root→program→project→subgroup の取得フローを共通実装で実行する
     
@@ -2111,63 +2200,33 @@ def run_group_hierarchy_pipeline(
     emit_progress(15, "プログラム詳細取得中...")
     program_details: Dict[str, Dict] = {}
     selected_program_data: Optional[Dict] = None
-    total_programs = max(len(program_groups), 1)
-    for idx, program in enumerate(program_groups, 1):
-        program_id = program.get("id")
-        if not program_id:
-            continue
-        program_name = program.get("attributes", {}).get("name", "名称不明")
-        detail_url = f"https://rde-api.nims.go.jp/groups/{program_id}?include=children%2Cmembers"
-        save_path = [GROUP_PROJECT_DIR, f"{program_id}.json"]
-        emit_progress(15 + int((idx / total_programs) * 15), f"プログラム取得: {program_name[:30]}...")
-        detail_data = fetch_group_info_from_api(detail_url, headers, save_path)
-        program_details[program_id] = detail_data
-        if program_id == selected_program_id:
-            selected_program_data = detail_data
 
-    if not selected_program_data:
-        selected_program_data = program_details.get(next(iter(program_details.keys()), ""))
+    # 速度最適化: プログラム詳細は選択済みの1件のみ取得
+    selected_program_name = "名称不明"
+    for program in program_groups:
+        if program.get("id") == selected_program_id:
+            selected_program_name = program.get("attributes", {}).get("name", "名称不明")
+            break
+
+    detail_url = f"https://rde-api.nims.go.jp/groups/{selected_program_id}?include=children%2Cmembers"
+    save_path = [GROUP_PROJECT_DIR, f"{selected_program_id}.json"]
+    emit_progress(25, f"プログラム取得: {selected_program_name[:30]}...")
+    selected_program_data = fetch_group_info_from_api(detail_url, headers, save_path)
     if not selected_program_data:
         raise Exception("プログラム詳細の取得に失敗しました。")
+    program_details[selected_program_id] = selected_program_data
 
     save_json(selected_program_data, GROUP_DETAIL_JSON_PATH)
 
 
     project_groups_by_program: Dict[str, List[Dict]] = {}
-    project_candidates: List[Dict] = []
-    for program_id, detail_data in program_details.items():
-        groups = _extract_group_items(detail_data)
-        project_groups_by_program[program_id] = groups
-        for group in groups:
-            metadata = dict(group)
-            metadata["program_id"] = program_id
-            project_candidates.append(metadata)
+    program_projects = _extract_group_items(selected_program_data)
+    project_groups_by_program[selected_program_id] = program_projects
 
-    if not project_groups_by_program.get(selected_program_id):
+    if not program_projects:
         raise Exception("選択されたプログラムに紐づくプロジェクトが見つかりません。")
 
-    emit_progress(35, "プロジェクト詳細取得中...")
-    project_details: Dict[str, Dict] = {}
-    project_meta: Dict[str, Dict[str, str]] = {}
-    processed_ids = set()
-    total_projects = max(len(project_candidates), 1)
-    for idx, candidate in enumerate(project_candidates, 1):
-        project_id = candidate.get("id")
-        if not project_id or project_id in processed_ids:
-            continue
-        processed_ids.add(project_id)
-        project_name = candidate.get("attributes", {}).get("name", "名称不明")
-        detail_url = f"https://rde-api.nims.go.jp/groups/{project_id}?include=children%2Cmembers"
-        save_path = [GROUP_ORGNIZATION_DIR, f"{project_id}.json"]
-        emit_progress(35 + int((idx / total_projects) * 25), f"プロジェクト取得: {project_name[:30]}...")
-        project_data = fetch_group_info_from_api(detail_url, headers, save_path)
-        project_details[project_id] = project_data
-        project_meta[project_id] = {
-            "name": project_name,
-            "program_id": candidate.get("program_id", "")
-        }
-
-    program_projects = project_groups_by_program.get(selected_program_id, [])
+    # 速度最適化: プロジェクト詳細は選択後に1件のみ取得
     selection = show_group_selection_if_needed(
         program_projects,
         parent_widget,
@@ -2180,11 +2239,19 @@ def run_group_hierarchy_pipeline(
         raise GroupFetchCancelled("プロジェクト選択がキャンセルされました")
     selected_project_id = selection["id"]
 
-    selected_project_data = project_details.get(selected_project_id)
-    if not selected_project_data:
-        detail_url = f"https://rde-api.nims.go.jp/groups/{selected_project_id}?include=children%2Cmembers"
-        selected_project_data = fetch_group_info_from_api(detail_url, headers, [GROUP_ORGNIZATION_DIR, f"{selected_project_id}.json"])
-        project_details[selected_project_id] = selected_project_data
+    emit_progress(35, "プロジェクト詳細取得中...")
+    project_details: Dict[str, Dict] = {}
+    project_meta: Dict[str, Dict[str, str]] = {}
+    selected_project_name = selection.get("attributes", {}).get("name", "名称不明")
+    detail_url = f"https://rde-api.nims.go.jp/groups/{selected_project_id}?include=children%2Cmembers"
+    emit_progress(50, f"プロジェクト取得: {selected_project_name[:30]}...")
+    selected_project_data = fetch_group_info_from_api(
+        detail_url,
+        headers,
+        [GROUP_ORGNIZATION_DIR, f"{selected_project_id}.json"],
+    )
+    project_details[selected_project_id] = selected_project_data
+    project_meta[selected_project_id] = {"name": selected_project_name, "program_id": selected_program_id}
 
     save_json(selected_project_data, SUBGROUP_JSON_PATH)
 
@@ -2199,47 +2266,38 @@ def run_group_hierarchy_pipeline(
         progress_range=7,
         destination_dir=SUBGROUP_REL_DETAILS_DIR,
         force_download=force_download,
+        max_workers=max_workers,
     )
 
     emit_progress(60, "サブグループ詳細取得中...")
     subgroup_summary: Dict[str, Dict[str, int]] = {}
-    total_project_details = max(len(project_details), 1)
-    for idx, (project_id, project_data) in enumerate(project_details.items(), 1):
-        project_name = project_meta.get(project_id, {}).get("name", "名称不明")
-        emit_progress(60 + int((idx / total_project_details) * 20), f"サブグループ展開: {project_name[:30]}...")
-        success, fail, errors = fetch_all_subgroups(
-            bearer_token=bearer_token,
-            sub_group_data=project_data,
-            headers=headers,
-            progress_callback=emit_progress,
-            base_progress=65,
-            progress_range=20,
-            destination_dir=SUBGROUP_DETAILS_DIR,
-            legacy_dir=LEGACY_SUBGROUP_DETAILS_DIR,
-            project_group_id=project_id,
-            project_group_name=project_name,
-            force_download=force_download,
-        )
+    project_id = selected_project_id
+    project_data = selected_project_data
+    project_name = project_meta.get(project_id, {}).get("name", "名称不明")
+    emit_progress(70, f"サブグループ展開: {project_name[:30]}...")
+    success, fail, errors = fetch_all_subgroups(
+        bearer_token=bearer_token,
+        sub_group_data=project_data,
+        headers=headers,
+        progress_callback=emit_progress,
+        base_progress=65,
+        progress_range=30,
+        destination_dir=SUBGROUP_DETAILS_DIR,
+        legacy_dir=LEGACY_SUBGROUP_DETAILS_DIR,
+        project_group_id=project_id,
+        project_group_name=project_name,
+        force_download=force_download,
+        max_workers=max_workers,
+    )
 
-        rel_success, rel_fail, rel_skipped = fetch_relationship_group_details(
-            bearer_token=bearer_token,
-            sub_group_data=project_data,
-            headers=headers,
-            progress_callback=emit_progress,
-            base_progress=85,
-            progress_range=10,
-            destination_dir=SUBGROUP_REL_DETAILS_DIR,
-            force_download=force_download,
-        )
-
-        subgroup_summary[project_id] = {
-            "success": success,
-            "fail": fail,
-            "errors": len(errors),
-            "relationship_success": rel_success,
-            "relationship_fail": rel_fail,
-            "relationship_skipped": rel_skipped,
-        }
+    subgroup_summary[project_id] = {
+        "success": success,
+        "fail": fail,
+        "errors": len(errors),
+        "relationship_success": 0,
+        "relationship_fail": 0,
+        "relationship_skipped": 0,
+    }
 
     emit_progress(100, "グループ階層取得完了")
 
@@ -2297,6 +2355,7 @@ def fetch_all_subgroups(
     project_group_id: Optional[str] = None,
     project_group_name: Optional[str] = None,
     force_download: bool = False,
+    max_workers: int = 10,
 ):
     """
     複数サブグループの個別詳細を一括取得して保存（v2.1.19改修）
@@ -2365,119 +2424,121 @@ def fetch_all_subgroups(
     fail_count = 0
     skipped_count = 0
     error_messages = []
-    
-    for i, subgroup in enumerate(subgroups, 1):
+
+    # 速度最適化: 既存ファイルを除外し、件数が多い場合は並列化
+    download_targets: list[tuple[str, str]] = []
+    for subgroup in subgroups:
         subgroup_id = subgroup.get("id", "")
         subgroup_name = subgroup.get("attributes", {}).get("name", "名称不明")
-        
         if not subgroup_id:
-            logger.warning(f"サブグループ {i}/{len(subgroups)}: IDが見つかりません。スキップします。")
-            fail_count += 1
             continue
-        
-        # 保存先パスを確認
         save_path = target_dir / f"{subgroup_id}.json"
-        
-        # v2.1.24: 個別ファイル存在確認（ログ強化版）
-        file_exists = save_path.exists()
-        logger.debug(f"\n  [{i:3d}/{len(subgroups)}] サブグループ: {subgroup_name}")
-        logger.debug(f"       ID: {subgroup_id}")
-        logger.debug(f"       保存先: {save_path}")
-        logger.debug(f"       ファイル存在: {file_exists}")
-        
-        if not force_download and file_exists:
+        if save_path.exists() and not force_download:
             skipped_count += 1
-            logger.info(f"  [{i:3d}] [スキップ] {subgroup_name} (既存ファイルを使用)")
-            if progress_callback:
-                current_progress = base_progress + int((i / len(subgroups)) * progress_range)
-                message = f"サブグループ確認中 ({i}/{len(subgroups)}): {subgroup_name[:30]}... [スキップ済み]"
-                if not progress_callback(current_progress, 100, message):
-                    logger.warning("ユーザーによりキャンセルされました")
-                    return (success_count, fail_count, error_messages)
             continue
-        
-        if force_download and file_exists:
-            logger.info(f"  [{i:3d}] [上書き予定] {subgroup_name} (force_download=True)")
-        
-        # プログレス更新
-        current_progress = base_progress + int((i / len(subgroups)) * progress_range)
-        message = f"サブグループ取得中 ({i}/{len(subgroups)}): {subgroup_name[:30]}..."
-        if not _progress_ok(progress_callback, current_progress, 100, message):
-            logger.warning("ユーザーによりキャンセルされました")
-            return (success_count, fail_count, error_messages)
-        
-        # API呼び出し
-        subgroup_url = f"https://rde-api.nims.go.jp/groups/{subgroup_id}?include=children%2Cmembers"
-        logger.info(f"  [{i:3d}] [API取得開始] {subgroup_name}")
-        logger.debug(f"       URL: {subgroup_url}")
+        download_targets.append((subgroup_id, subgroup_name))
 
-        
+    def _download_one(subgroup_id: str, subgroup_name: str) -> dict:
+        save_path = target_dir / f"{subgroup_id}.json"
+        if save_path.exists() and not force_download:
+            return {"status": "skipped"}
+
+        subgroup_url = f"https://rde-api.nims.go.jp/groups/{subgroup_id}?include=children%2Cmembers"
         start_time = time.time()
         try:
             resp = api_request("GET", subgroup_url, bearer_token=bearer_token, headers=headers, timeout=10)
             elapsed_ms = (time.time() - start_time) * 1000
-            
+
             if resp is None:
-                logger.warning(f"  [{i:3d}] [API失敗] {subgroup_name} - リクエスト失敗")
-                error_msg = f"サブグループ {subgroup_name}: リクエスト失敗"
-                logger.warning(error_msg)
-                error_messages.append(error_msg)
-                fail_count += 1
-                
-                # API記録（失敗）
                 try:
                     from classes.basic.core.api_recording_wrapper import record_api_call_for_subgroup_detail
                     record_api_call_for_subgroup_detail(
-                        subgroup_url, headers, 0, elapsed_ms, subgroup_id, subgroup_name,
-                        step_index=1, success=False, error="APIリクエスト失敗"
+                        subgroup_url,
+                        headers,
+                        0,
+                        elapsed_ms,
+                        subgroup_id,
+                        subgroup_name,
+                        step_index=1,
+                        success=False,
+                        error="APIリクエスト失敗",
                     )
-                except Exception as e:
-                    logger.debug(f"API記録追加失敗: {e}")
-                
-                continue
-            
+                except Exception:
+                    pass
+                return {"status": "failed", "error": "APIリクエスト失敗"}
+
             resp.raise_for_status()
             subgroup_detail = resp.json()
-            
-            # ファイル保存
+
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(subgroup_detail, f, ensure_ascii=False, indent=2)
             if legacy_target:
                 legacy_path = legacy_target / f"{subgroup_id}.json"
                 with open(legacy_path, "w", encoding="utf-8") as f:
                     json.dump(subgroup_detail, f, ensure_ascii=False, indent=2)
-            
-            logger.info(f"  [{i:3d}] [保存完了] {subgroup_name} ({elapsed_ms:.0f}ms)")
-            logger.debug(f"       保存先: {save_path.name}")
-            success_count += 1
-            
-            # API記録（成功）
+
             try:
                 from classes.basic.core.api_recording_wrapper import record_api_call_for_subgroup_detail
                 record_api_call_for_subgroup_detail(
-                    subgroup_url, headers, 200, elapsed_ms, subgroup_id, subgroup_name,
-                    step_index=1, success=True
+                    subgroup_url,
+                    headers,
+                    200,
+                    elapsed_ms,
+                    subgroup_id,
+                    subgroup_name,
+                    step_index=1,
+                    success=True,
                 )
-            except Exception as e:
-                logger.debug(f"API記録追加失敗: {e}")
-        
+            except Exception:
+                pass
+
+            return {"status": "success"}
         except Exception as e:
             elapsed_ms = (time.time() - start_time) * 1000
-            logger.warning(f"  [{i:3d}] [API例外] {subgroup_name} - {str(e)[:80]}")
-            error_msg = f"サブグループ {subgroup_name}: {str(e)[:100]}"
-            logger.error(error_msg)
-            error_messages.append(error_msg)
-            fail_count += 1
-            
-            # API記録（エラー）
             try:
                 from classes.basic.core.api_recording_wrapper import record_api_call_for_subgroup_detail
                 record_api_call_for_subgroup_detail(
-                    subgroup_url, headers, 500, elapsed_ms, subgroup_id, subgroup_name,
-                    step_index=1, success=False, error=str(e)
+                    subgroup_url,
+                    headers,
+                    500,
+                    elapsed_ms,
+                    subgroup_id,
+                    subgroup_name,
+                    step_index=1,
+                    success=False,
+                    error=str(e),
                 )
-            except Exception as e2:
-                logger.debug(f"API記録追加失敗: {e2}")
+            except Exception:
+                pass
+            return {"status": "failed", "error": str(e)}
+
+    if download_targets:
+        from net.http_helpers import parallel_download
+
+        def _pd_progress(progress_percent: int, _total: int, message: str) -> bool:
+            mapped_progress = base_progress + int((progress_percent / 100.0) * max(progress_range, 1))
+            msg = f"サブグループ取得中... {message}"
+            return _progress_ok(progress_callback, mapped_progress, 100, msg)
+
+        result = parallel_download(
+            tasks=download_targets,
+            worker_function=_download_one,
+            max_workers=max(1, int(max_workers)),
+            progress_callback=_pd_progress if progress_callback else None,
+            threshold=10,
+        )
+
+        success_count += int(result.get("success_count", 0))
+        fail_count += int(result.get("failed_count", 0))
+        skipped_count += int(result.get("skipped_count", 0))
+
+        for item in result.get("errors", []) or []:
+            task = item.get("task")
+            err = item.get("error")
+            if isinstance(task, (list, tuple)) and len(task) >= 2:
+                error_messages.append(f"サブグループ {task[1]}: {err}")
+            else:
+                error_messages.append(f"サブグループ取得失敗: {err}")
     
     # 結果サマリー
     logger.info(f"\n[サブグループ個別取得ループ完了] v2.1.24")
@@ -2532,6 +2593,7 @@ def fetch_relationship_group_details(
     progress_range: int = 10,
     destination_dir: Optional[str] = None,
     force_download: bool = False,
+    max_workers: int = 10,
 ):
     """Fetch additional group details for relationship IDs in subGroup.json.
 
@@ -2559,43 +2621,53 @@ def fetch_relationship_group_details(
     fail_count = 0
     skipped_count = 0
 
-    for idx, group_id in enumerate(group_ids, 1):
+    download_ids: list[str] = []
+    for group_id in group_ids:
         save_path = target_dir / f"{group_id}.json"
         if save_path.exists() and not force_download:
             skipped_count += 1
-            logger.debug("[%s/%s] 既存ファイルを利用しスキップ: %s", idx, len(group_ids), group_id)
             continue
+        download_ids.append(group_id)
 
-        current_progress = base_progress + int((idx / max(len(group_ids), 1)) * progress_range)
-        message = f"関係グループ取得中 ({idx}/{len(group_ids)}): {group_id[:8]}..."
-        if not _progress_ok(progress_callback, current_progress, 100, message):
-            logger.warning("ユーザーにより追加取得がキャンセルされました")
-            return (success_count, fail_count, skipped_count)
+    def _download_one(group_id: str) -> dict:
+        save_path = target_dir / f"{group_id}.json"
+        if save_path.exists() and not force_download:
+            return {"status": "skipped"}
 
         detail_url = f"https://rde-api.nims.go.jp/groups/{group_id}?include=ancestors%2Cmembers"
-
         start_time = time.time()
         try:
             resp = api_request("GET", detail_url, bearer_token=bearer_token, headers=headers, timeout=10)
-            elapsed_ms = (time.time() - start_time) * 1000
-
             if resp is None:
-                logger.warning("[%s/%s] リクエスト失敗: %s", idx, len(group_ids), group_id)
-                fail_count += 1
-                continue
-
+                return {"status": "failed", "error": "APIリクエスト失敗"}
             resp.raise_for_status()
             payload = resp.json()
-
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
-
-            logger.info("[%s/%s] 関係グループ詳細保存完了: %s (%.0fms)", idx, len(group_ids), group_id, elapsed_ms)
-            success_count += 1
-
+            _ = (time.time() - start_time) * 1000
+            return {"status": "success"}
         except Exception as e:
-            logger.warning("[%s/%s] 関係グループ詳細取得に失敗: %s", idx, len(group_ids), e)
-            fail_count += 1
+            return {"status": "failed", "error": str(e)}
+
+    if download_ids:
+        from net.http_helpers import parallel_download
+
+        def _pd_progress(progress_percent: int, _total: int, message: str) -> bool:
+            mapped_progress = base_progress + int((progress_percent / 100.0) * max(progress_range, 1))
+            msg = f"関係グループ取得中... {message}"
+            return _progress_ok(progress_callback, mapped_progress, 100, msg)
+
+        result = parallel_download(
+            tasks=[(gid,) for gid in download_ids],
+            worker_function=_download_one,
+            max_workers=max(1, int(max_workers)),
+            progress_callback=_pd_progress if progress_callback else None,
+            threshold=10,
+        )
+
+        success_count += int(result.get("success_count", 0))
+        fail_count += int(result.get("failed_count", 0))
+        skipped_count += int(result.get("skipped_count", 0))
 
     logger.info(
         "[関係グループ詳細取得完了] 成功=%s, 失敗=%s, スキップ=%s",
@@ -2878,6 +2950,7 @@ def fetch_group_info_stage(
     force_download: bool = False,
     force_refresh_subgroup: bool = False,
     skip_dialog: bool = False,
+    max_workers: int = 10,
 ):
     """
     段階2: グループ関連情報取得（グループ・詳細・サブグループ）
@@ -2946,6 +3019,7 @@ def fetch_group_info_stage(
                     progress_range=10,
                     destination_dir=SUBGROUP_REL_DETAILS_DIR,
                     force_download=False,
+                    max_workers=max_workers,
                 )
 
             if progress_callback:
@@ -2961,6 +3035,7 @@ def fetch_group_info_stage(
             force_program_dialog=force_program_dialog,
             force_download=force_download,
             skip_dialog=skip_dialog,
+            max_workers=max_workers,
         )
 
         total_success = sum(item.get("success", 0) for item in result.subgroup_summary.values())
@@ -3011,7 +3086,7 @@ def fetch_organization_stage(bearer_token, progress_callback=None):
     return "組織・装置情報取得が完了しました"
 
 @stage_error_handler("サンプル情報取得")
-def fetch_sample_info_stage(bearer_token, progress_callback=None):
+def fetch_sample_info_stage(bearer_token, progress_callback=None, max_workers: int = 10):
     """
     段階4: サンプル情報取得
     v2.1.1: 並列ダウンロード対応（50件以上で自動並列化）
@@ -3064,7 +3139,7 @@ def fetch_sample_info_stage(bearer_token, progress_callback=None):
         result = parallel_download(
             tasks=tasks,
             worker_function=_fetch_single_sample_worker,
-            max_workers=10,
+            max_workers=max_workers,
             progress_callback=sample_progress_callback,
             threshold=50  # 50サンプル以上で並列化
         )
@@ -3213,76 +3288,190 @@ def fetch_dataset_info_stage(
     searchWords=None,
     searchWordsBatch: Optional[List[str]] = None,
     progress_callback=None,
+    max_workers: int = 10,
 ):
     """段階5: データセット情報取得"""
-    if progress_callback:
-        if not progress_callback(10, 100, "データセット情報取得中..."):
-            return "キャンセルされました"
-    
-    fetch_all_dataset_info(
+    result = fetch_all_dataset_info(
         bearer_token,
         output_dir=os.path.join(OUTPUT_DIR, "rde", "data"),
         onlySelf=onlySelf,
         searchWords=searchWords,
         searchWordsBatch=searchWordsBatch,
+        progress_callback=progress_callback,
+        max_workers=max_workers,
     )
-    
-    if progress_callback:
-        if not progress_callback(100, 100, "データセット情報取得完了"):
-            return "キャンセルされました"
-    
-    return "データセット情報取得が完了しました"
+
+    return result or "データセット情報取得が完了しました"
 
 @stage_error_handler("データエントリ情報取得")
-def fetch_data_entry_stage(bearer_token, progress_callback=None):
+def fetch_data_entry_stage(bearer_token, progress_callback=None, max_workers: int = 10):
     """段階6: データエントリ情報取得"""
-    if progress_callback:
-        if not progress_callback(10, 100, "データエントリ情報取得中..."):
-            return "キャンセルされました"
-    
-    fetch_all_data_entrys_info(bearer_token)
-    
-    if progress_callback:
-        if not progress_callback(100, 100, "データエントリ情報取得完了"):
-            return "キャンセルされました"
-    
-    return "データエントリ情報取得が完了しました"
+    result = fetch_all_data_entrys_info(
+        bearer_token,
+        output_dir=os.path.join(OUTPUT_DIR, "rde", "data"),
+        progress_callback=progress_callback,
+        max_workers=max_workers,
+    )
+
+    return result or "データエントリ情報取得が完了しました"
 
 @stage_error_handler("インボイス情報取得")
-def fetch_invoice_stage(bearer_token, progress_callback=None):
+def fetch_invoice_stage(bearer_token, progress_callback=None, max_workers: int = 10):
     """段階7: インボイス情報取得"""
-    if progress_callback:
-        if not progress_callback(10, 100, "インボイス情報取得中..."):
-            return "キャンセルされました"
-    
-    fetch_all_invoices_info(bearer_token)
-    
-    if progress_callback:
-        if not progress_callback(100, 100, "インボイス情報取得完了"):
-            return "キャンセルされました"
-    
-    return "インボイス情報取得が完了しました"
+    result = fetch_all_invoices_info(
+        bearer_token,
+        output_dir=os.path.join(OUTPUT_DIR, "rde", "data"),
+        progress_callback=progress_callback,
+        max_workers=max_workers,
+    )
+
+    return result or "インボイス情報取得が完了しました"
 
 @stage_error_handler("テンプレート・設備・ライセンス情報取得")
-def fetch_template_instrument_stage(bearer_token, progress_callback=None):
+def fetch_template_instrument_stage(bearer_token, progress_callback=None, max_workers: int = 10):
     """段階7: テンプレート・設備・ライセンス情報取得"""
     if progress_callback:
         if not progress_callback(15, 100, "テンプレート情報取得中..."):
             return "キャンセルされました"
+
+    def _map_percent(current: int, total: int, start: int, span: int) -> int:
+        try:
+            c = int(current)
+        except Exception:
+            c = 0
+        try:
+            t = int(total)
+        except Exception:
+            t = 0
+
+        if t <= 0:
+            return int(start)
+        if c < 0:
+            c = 0
+        if c > t:
+            c = t
+        return int(start + int((c / max(t, 1)) * span))
+
+    def template_progress(current, total, message):
+        if not progress_callback:
+            return True
+        mapped = _map_percent(current, total, 15, 35)  # 15% → 50%
+        return _progress_ok(progress_callback, mapped, 100, str(message))
+
+    # テンプレート取得（ページング進捗を 15→50% にマップ）
+    fetch_template_info_from_api(bearer_token, progress_callback=template_progress)
     
-    fetch_template_info_from_api(bearer_token)
-    
+    # 速度最適化: instruments/licenses は独立なので並列実行
     if progress_callback:
-        if not progress_callback(50, 100, "設備情報取得中..."):
+        if not progress_callback(50, 100, "設備・利用ライセンス情報取得中..."):
             return "キャンセルされました"
-    
-    fetch_instruments_info_from_api(bearer_token)
-    
-    if progress_callback:
-        if not progress_callback(85, 100, "利用ライセンス情報取得中..."):
-            return "キャンセルされました"
-    
-    fetch_licenses_info_from_api(bearer_token)
+
+    resolved_workers = 1
+    try:
+        resolved_workers = max(1, int(max_workers))
+    except Exception:
+        resolved_workers = 1
+
+    if resolved_workers <= 1:
+        def instruments_progress(current, total, message):
+            if not progress_callback:
+                return True
+            mapped = _map_percent(current, total, 50, 35)  # 50% → 85%
+            return _progress_ok(progress_callback, mapped, 100, str(message))
+
+        fetch_instruments_info_from_api(bearer_token, progress_callback=instruments_progress)
+        if progress_callback:
+            if not progress_callback(85, 100, "利用ライセンス情報取得中..."):
+                return "キャンセルされました"
+        fetch_licenses_info_from_api(bearer_token)
+    else:
+        from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+        import threading
+        import time
+
+        state_lock = threading.Lock()
+        # 進捗状態（各タスクは自分の state を更新するだけ。UIへの反映はメインループがまとめて行う）
+        states = {
+            "instruments": {"current": 0, "total": 0, "message": "設備情報取得中..."},
+            "licenses": {"current": 0, "total": 1, "message": "利用ライセンス情報取得中..."},
+        }
+
+        def make_state_updater(name: str):
+            def _update(current, total, message):
+                with state_lock:
+                    try:
+                        states[name]["current"] = int(current)
+                    except Exception:
+                        states[name]["current"] = 0
+                    try:
+                        states[name]["total"] = int(total)
+                    except Exception:
+                        states[name]["total"] = 0
+                    states[name]["message"] = str(message)
+                return True
+
+            return _update
+
+        def instruments_job():
+            fetch_instruments_info_from_api(bearer_token, progress_callback=make_state_updater("instruments"))
+
+        def licenses_job():
+            # licenses は単発なので擬似的に 0/1 → 1/1 を更新
+            updater = make_state_updater("licenses")
+            updater(0, 1, "利用ライセンス情報取得中...")
+            fetch_licenses_info_from_api(bearer_token)
+            updater(1, 1, "利用ライセンス情報取得完了")
+
+        with ThreadPoolExecutor(max_workers=min(resolved_workers, 2)) as executor:
+            future_to_name = {
+                executor.submit(instruments_job): "instruments",
+                executor.submit(licenses_job): "licenses",
+            }
+
+            remaining = set(future_to_name.keys())
+            completed = 0
+            total = len(remaining)
+
+            # ポーリングしながら進捗表示を更新
+            while remaining:
+                done, not_done = wait(remaining, timeout=0.2, return_when=FIRST_COMPLETED)
+
+                # 進捗の合成（平均進捗率）
+                if progress_callback:
+                    with state_lock:
+                        snapshots = {k: dict(v) for k, v in states.items()}
+
+                    fractions = []
+                    for name, st in snapshots.items():
+                        t = int(st.get("total") or 0)
+                        c = int(st.get("current") or 0)
+                        if t > 0:
+                            c = min(max(c, 0), t)
+                            fractions.append(float(c) / float(t))
+                        else:
+                            fractions.append(0.0)
+
+                    overall = sum(fractions) / max(len(fractions), 1)
+                    mapped = 50 + int(overall * 35)  # 50% → 85%
+                    msg = (
+                        f"設備: {snapshots['instruments']['current']}/{snapshots['instruments']['total'] or '?'} | "
+                        f"ライセンス: {snapshots['licenses']['current']}/{snapshots['licenses']['total'] or '?'}"
+                    )
+                    if not _progress_ok(progress_callback, mapped, 100, msg):
+                        return "キャンセルされました"
+
+                # 完了 future を処理
+                for future in done:
+                    name = future_to_name[future]
+                    # 例外はここで再送出して stage_error_handler に拾わせる
+                    future.result()
+                    completed += 1
+                    remaining.remove(future)
+
+                    if progress_callback:
+                        mapped = 50 + int((completed / max(total, 1)) * 35)
+                        if not progress_callback(mapped, 100, f"取得完了: {name} ({completed}/{total})"):
+                            return "キャンセルされました"
     
     if progress_callback:
         if not progress_callback(100, 100, "テンプレート・設備・ライセンス情報取得完了"):
@@ -3291,14 +3480,14 @@ def fetch_template_instrument_stage(bearer_token, progress_callback=None):
     return "テンプレート・設備・ライセンス情報取得が完了しました"
 
 @stage_error_handler("invoiceSchema情報取得")
-def fetch_invoice_schema_stage(bearer_token, progress_callback=None):
+def fetch_invoice_schema_stage(bearer_token, progress_callback=None, max_workers: int = 10):
     """段階8: invoiceSchema情報取得"""
     if progress_callback:
         if not progress_callback(10, 100, "invoiceSchema情報取得中..."):
             return "キャンセルされました"
     
     output_dir = OUTPUT_RDE_DATA_DIR
-    result = fetch_invoice_schemas(bearer_token, output_dir, progress_callback)
+    result = fetch_invoice_schemas(bearer_token, output_dir, progress_callback, max_workers=max_workers)
     
     if progress_callback:
         if not progress_callback(100, 100, "invoiceSchema情報取得完了"):
@@ -3458,6 +3647,7 @@ def execute_individual_stage(
     parent_widget=None,
     force_program_dialog: bool = False,
     force_download: bool = False,
+    parallel_max_workers: Optional[int] = None,
 ):
     """指定された段階を個別実行する"""
     if stage_name not in STAGE_FUNCTIONS:
@@ -3472,6 +3662,15 @@ def execute_individual_stage(
     try:
         func = STAGE_FUNCTIONS[stage_name]
         
+        resolved_workers: Optional[int] = None
+        try:
+            if parallel_max_workers is not None:
+                resolved_workers = int(parallel_max_workers)
+                if resolved_workers < 1:
+                    resolved_workers = None
+        except Exception:
+            resolved_workers = None
+
         # 関数のシグネチャに応じて引数を調整
         if stage_name == "データセット情報":
             result = func(
@@ -3480,6 +3679,7 @@ def execute_individual_stage(
                 searchWords=searchWords,
                  searchWordsBatch=searchWordsBatch,
                 progress_callback=progress_callback,
+                max_workers=resolved_workers or 10,
             )
         elif stage_name == "統合情報生成":
             result = func(webview=webview, progress_callback=progress_callback)
@@ -3493,12 +3693,20 @@ def execute_individual_stage(
                 parent_widget=parent_widget,
                 force_program_dialog=force_program_dialog,
                 force_download=force_download,
+                max_workers=resolved_workers or 10,
             )
         elif stage_name in ["subGroup.json自動更新", "dataset.json自動更新"]:
             # 自動更新関数は bearer_token と progress_callback のみ
             result = func(bearer_token, progress_callback=progress_callback)
         else:
-            result = func(bearer_token, progress_callback=progress_callback)
+            if stage_name in {"サンプル情報", "データエントリ情報", "インボイス情報", "invoiceSchema情報", "テンプレート・設備・ライセンス情報"}:
+                result = func(
+                    bearer_token,
+                    progress_callback=progress_callback,
+                    max_workers=resolved_workers or 10,
+                )
+            else:
+                result = func(bearer_token, progress_callback=progress_callback)
         
         logger.info(f"個別段階実行完了: {stage_name}")
         return result
@@ -3519,6 +3727,7 @@ def fetch_basic_info_logic(
     progress_callback=None,
     program_id=None,
     force_download: bool = False,
+    parallel_max_workers: Optional[int] = None,
 ):
     """
     基本情報取得・保存・WebView遷移（開発用）
@@ -3539,6 +3748,16 @@ def fetch_basic_info_logic(
     from pathlib import Path
     from core.bearer_token_manager import BearerTokenManager
     from qt_compat.widgets import QMessageBox
+
+    try:
+        resolved_workers = int(parallel_max_workers) if parallel_max_workers is not None else None
+        if resolved_workers is not None and resolved_workers < 1:
+            resolved_workers = None
+    except Exception:
+        resolved_workers = None
+
+    # 既存のデフォルト値(多くの箇所で10)を維持しつつ、UIから上書き可能にする
+    parallel_workers = resolved_workers or 10
     
     # ===== 1. トークン検証（v2.0.1新規追加） =====
     logger.info("基本情報取得開始: トークン検証")
@@ -3807,7 +4026,7 @@ def fetch_basic_info_logic(
                 result = parallel_download(
                     tasks=tasks,
                     worker_function=_fetch_single_sample_worker_force,
-                    max_workers=10,
+                    max_workers=parallel_workers,
                     progress_callback=sample_parallel_progress,
                     threshold=1,
                 )
@@ -3915,6 +4134,7 @@ def fetch_basic_info_logic(
                 searchWords=searchWords,
                 searchWordsBatch=searchWordsBatch,
                 progress_callback=dataset_progress_adapter,
+                max_workers=parallel_workers,
             )
             if dataset_result == "キャンセルされました":
                 return "キャンセルされました"
@@ -3948,7 +4168,11 @@ def fetch_basic_info_logic(
             def dataentry_progress_callback(current, total, message):
                 return update_stage_progress(7, current, message)
             
-            result = fetch_all_data_entrys_info(bearer_token, progress_callback=dataentry_progress_callback)
+            result = fetch_all_data_entrys_info(
+                bearer_token,
+                progress_callback=dataentry_progress_callback,
+                max_workers=parallel_workers,
+            )
             if result == "キャンセルされました":
                 return "キャンセルされました"
         
@@ -3976,7 +4200,11 @@ def fetch_basic_info_logic(
             def invoice_progress_callback(current, total, message):
                 return update_stage_progress(8, current, message)
             
-            result = fetch_all_invoices_info(bearer_token, progress_callback=invoice_progress_callback)
+            result = fetch_all_invoices_info(
+                bearer_token,
+                progress_callback=invoice_progress_callback,
+                max_workers=parallel_workers,
+            )
             if result == "キャンセルされました":
                 return "キャンセルされました"
         
@@ -4010,6 +4238,7 @@ def fetch_basic_info_logic(
                     bearer_token,
                     output_dir,
                     progress_callback=invoiceschema_progress_adapter,
+                    max_workers=parallel_workers,
                 )
                 if invoice_schema_result == "キャンセルされました":
                     return "キャンセルされました"
@@ -4029,23 +4258,44 @@ def fetch_basic_info_logic(
         else:
             logger.info("テンプレート情報: 既存の template.json を利用するため取得をスキップします")
         
-        if not update_stage_progress(10, 33, "設備情報取得中"):
+        # devices/licenses は独立なので、必要分があれば並列化して短縮
+        if not update_stage_progress(10, 33, "設備・利用ライセンス情報取得中"):
             return "キャンセルされました"
-            
-        logger.debug("fetch_instruments_info_from_api")
-        if force_download or not _exists(INSTRUMENTS_JSON_PATH):
-            fetch_instruments_info_from_api(bearer_token)
-        else:
+
+        need_instruments = force_download or not _exists(INSTRUMENTS_JSON_PATH)
+        need_licenses = force_download or not _exists(LICENSES_JSON_PATH)
+
+        if not need_instruments:
             logger.info("設備情報: 既存の instruments.json を利用するため取得をスキップします")
-        
-        if not update_stage_progress(10, 66, "利用ライセンス情報取得中"):
-            return "キャンセルされました"
-            
-        logger.debug("fetch_licenses_info_from_api")
-        if force_download or not _exists(LICENSES_JSON_PATH):
-            fetch_licenses_info_from_api(bearer_token)
-        else:
+        if not need_licenses:
             logger.info("利用ライセンス情報: 既存の licenses.json を利用するため取得をスキップします")
+
+        tasks = []
+        if need_instruments:
+            tasks.append(("instruments", lambda: fetch_instruments_info_from_api(bearer_token)))
+        if need_licenses:
+            tasks.append(("licenses", lambda: fetch_licenses_info_from_api(bearer_token)))
+
+        if len(tasks) <= 1 or parallel_workers <= 1:
+            for name, fn in tasks:
+                logger.debug("fetch_%s_info_from_api", name)
+                fn()
+        else:
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
+            with ThreadPoolExecutor(max_workers=min(int(parallel_workers), len(tasks))) as executor:
+                future_to_name = {executor.submit(fn): name for name, fn in tasks}
+                completed = 0
+                total = len(future_to_name)
+                for future in as_completed(future_to_name):
+                    name = future_to_name[future]
+                    future.result()
+                    completed += 1
+                    if not update_stage_progress(10, 33 + int((completed / max(total, 1)) * 33), f"完了: {name} ({completed}/{total})"):
+                        return "キャンセルされました"
+
+        if not update_stage_progress(10, 66, "完了"):
+            return "キャンセルされました"
         
         if not update_stage_progress(10, 100, "完了"):
             return "キャンセルされました"
@@ -4092,7 +4342,7 @@ def fetch_basic_info_logic(
         traceback.print_exc()
         return error_msg
 
-def fetch_sample_info_only(bearer_token, output_dir=None, progress_callback=None):
+def fetch_sample_info_only(bearer_token, output_dir=None, progress_callback=None, max_workers: int = 10):
     """
     サンプル情報のみを強制取得・保存（既存ファイルも上書き）
     v2.1.0: 並列ダウンロード対応（50件以上で自動並列化）
@@ -4184,7 +4434,7 @@ def fetch_sample_info_only(bearer_token, output_dir=None, progress_callback=None
         result = parallel_download(
             tasks=tasks,
             worker_function=worker,
-            max_workers=10,
+            max_workers=max_workers,
             progress_callback=adjusted_progress_callback,
             threshold=50
         )
@@ -4823,6 +5073,15 @@ def get_stage_completion_status():
     各段階の完了状況を取得する
     """
     base_path = os.path.join(OUTPUT_DIR, "rde", "data")
+
+    def _dir_has_any_entry(path: str) -> bool:
+        try:
+            with os.scandir(path) as it:
+                for _ in it:
+                    return True
+            return False
+        except Exception:
+            return False
     
     stages = {
         "ユーザー情報": ["self.json"],
@@ -4852,7 +5111,7 @@ def get_stage_completion_status():
                         completed_items += 1
                 elif os.path.isdir(item_path):
                     # ディレクトリの場合は中身があるかチェック
-                    if os.listdir(item_path):
+                    if _dir_has_any_entry(item_path):
                         completed_items += 1
         
         completion_rate = (completed_items / total_items) * 100 if total_items > 0 else 0

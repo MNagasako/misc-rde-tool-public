@@ -28,6 +28,7 @@ from qt_compat.gui import QFont
 from qt_compat.core import QTimer, Qt
 from config.common import get_dynamic_file_path
 from classes.managers.log_manager import get_logger
+from classes.data_entry.ui.toggle_section_widget import ToggleSectionWidget
 
 # ロガー設定
 logger = get_logger(__name__)
@@ -164,6 +165,10 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
 
     # --- 固有情報フォームの動的生成用 ---
     schema_form_widget = None
+
+    # --- トグル用コンテナ（試料/固有） ---
+    parent_controller.sample_form_container = None
+    parent_controller.schema_form_container = None
     
     # --- ファイル検証用バリデータ ---
     from classes.data_entry.util.template_format_validator import TemplateFormatValidator
@@ -215,12 +220,16 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
         from classes.dataset.util.dataset_dropdown_util import get_current_user_id
 
         # --- 既存の試料フォーム・スキーマフォームを削除 ---
-        if hasattr(parent_controller, 'sample_form_widget') and parent_controller.sample_form_widget:
-            safe_remove_widget(layout, parent_controller.sample_form_widget)
-            parent_controller.sample_form_widget = None
-        if hasattr(parent_controller, 'schema_form_widget') and parent_controller.schema_form_widget:
-            safe_remove_widget(layout, parent_controller.schema_form_widget)
-            parent_controller.schema_form_widget = None
+        # NOTE: 試料/固有はトグル用コンテナでラップしているため、コンテナを削除する。
+        if getattr(parent_controller, 'sample_form_container', None) is not None:
+            safe_remove_widget(layout, parent_controller.sample_form_container)
+            parent_controller.sample_form_container = None
+        if getattr(parent_controller, 'schema_form_container', None) is not None:
+            safe_remove_widget(layout, parent_controller.schema_form_container)
+            parent_controller.schema_form_container = None
+
+        parent_controller.sample_form_widget = None
+        parent_controller.schema_form_widget = None
 
         # --- データセット情報取得 ---
         dataset_item = combo.itemData(idx, 0x0100)
@@ -288,9 +297,104 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
             parent_controller.sample_form_widget = create_sample_form(widget, group_id, parent_controller)
             if parent_controller.sample_form_widget:
                 # データセット選択(0), ドロップダウン(1), 他機能連携(2), 基本情報(3)の次に挿入
-                layout.insertWidget(4, parent_controller.sample_form_widget)
-                parent_controller.sample_form_widget.setVisible(True)
-                parent_controller.sample_form_widget.update()
+                sample_toggle = ToggleSectionWidget("試料情報", widget, default_mode="summary")
+
+                sample_summary_label = QLabel("試料情報は『入力』に切り替えて編集できます。", sample_toggle)
+                sample_summary_label.setWordWrap(True)
+                sample_summary_label.setStyleSheet(
+                    f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
+                    f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; "
+                    f"border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)}; border-radius: 4px;"
+                )
+
+                def _refresh_sample_summary() -> None:
+                    widgets = getattr(parent_controller, 'sample_input_widgets', None) or {}
+                    parts = []
+                    try:
+                        combo_widget = widgets.get('sample_combo')
+                        if combo_widget is not None:
+                            parts.append(f"新規/選択: {combo_widget.currentText()}")
+                    except Exception:
+                        pass
+                    try:
+                        name_widget = widgets.get('name')
+                        names = None
+                        if name_widget is not None:
+                            getter = getattr(name_widget, 'get_sample_names', None)
+                            if callable(getter):
+                                names = getter()
+                        if names:
+                            parts.append(f"試料名: {', '.join([n for n in names if n])}")
+                    except Exception:
+                        pass
+                    try:
+                        composition = widgets.get('composition')
+                        if composition is not None and hasattr(composition, 'text'):
+                            value = (composition.text() or '').strip()
+                            if value:
+                                parts.append(f"化学式: {value}")
+                    except Exception:
+                        pass
+                    try:
+                        url_widget = widgets.get('url')
+                        if url_widget is not None and hasattr(url_widget, 'text'):
+                            value = (url_widget.text() or '').strip()
+                            if value:
+                                parts.append(f"参考URL: {value}")
+                    except Exception:
+                        pass
+                    try:
+                        tags_widget = widgets.get('tags')
+                        if tags_widget is not None and hasattr(tags_widget, 'text'):
+                            value = (tags_widget.text() or '').strip()
+                            if value:
+                                parts.append(f"タグ: {value}")
+                    except Exception:
+                        pass
+                    try:
+                        manager = widgets.get('manager')
+                        if manager is not None:
+                            value = (manager.currentText() or '').strip()
+                            if value:
+                                parts.append(f"試料管理者: {value}")
+                    except Exception:
+                        pass
+                    try:
+                        hide_owner = widgets.get('hide_owner')
+                        if hide_owner is not None and hasattr(hide_owner, 'isChecked'):
+                            parts.append(f"匿名化: {'ON' if hide_owner.isChecked() else 'OFF'}")
+                    except Exception:
+                        pass
+
+                    if parts:
+                        sample_summary_label.setText("\n".join(parts))
+                    else:
+                        sample_summary_label.setText("試料情報は『入力』に切り替えて編集できます。")
+
+                # Optional hook for ToggleSectionWidget
+                setattr(sample_summary_label, 'refresh', _refresh_sample_summary)
+
+                try:
+                    widgets = getattr(parent_controller, 'sample_input_widgets', None) or {}
+                    for key in ('sample_combo', 'composition', 'url', 'tags', 'manager', 'hide_owner'):
+                        w = widgets.get(key)
+                        if w is None:
+                            continue
+                        if hasattr(w, 'currentIndexChanged'):
+                            w.currentIndexChanged.connect(lambda *_: _refresh_sample_summary())
+                        if hasattr(w, 'textChanged'):
+                            w.textChanged.connect(lambda *_: _refresh_sample_summary())
+                        if hasattr(w, 'stateChanged'):
+                            w.stateChanged.connect(lambda *_: _refresh_sample_summary())
+                except Exception:
+                    pass
+
+                sample_toggle.set_summary_widget(sample_summary_label)
+                sample_toggle.set_edit_widget(parent_controller.sample_form_widget)
+                parent_controller.sample_form_container = sample_toggle
+
+                layout.insertWidget(4, sample_toggle)
+                sample_toggle.setVisible(True)
                 widget.update()
 
                 # 必須項目の状態（試料管理者など）を反映
@@ -348,13 +452,84 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
                 except Exception:
                     pass
 
-                layout.insertWidget(5, form)
-                schema_form_widget = form
-                parent_controller.schema_form_widget = schema_form_widget
+                schema_toggle = ToggleSectionWidget("固有情報", widget, default_mode="summary")
+
+                schema_summary_label = QLabel("固有情報は『入力』に切り替えて編集できます。", schema_toggle)
+                schema_summary_label.setWordWrap(True)
+                schema_summary_label.setStyleSheet(
+                    f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
+                    f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; "
+                    f"border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)}; border-radius: 4px;"
+                )
+
+                schema_field_labels = {}
                 try:
-                    form.setVisible(True)
+                    if invoice_schema_path:
+                        with open(invoice_schema_path, 'r', encoding='utf-8') as f:
+                            schema_json = json.load(f)
+                        custom = (schema_json.get('properties', {}) or {}).get('custom') or {}
+                        props = (custom.get('properties', {}) or {}) if isinstance(custom, dict) else {}
+                        if isinstance(props, dict):
+                            for key, prop in props.items():
+                                if not isinstance(prop, dict):
+                                    continue
+                                label = (prop.get('label', {}) or {}).get('ja')
+                                schema_field_labels[key] = label or key
+                except Exception:
+                    schema_field_labels = {}
+
+                def _refresh_schema_summary() -> None:
+                    key_to_widget = getattr(form, '_schema_key_to_widget', None)
+                    if not isinstance(key_to_widget, dict) or not key_to_widget:
+                        schema_summary_label.setText("入力項目なし")
+                        return
+
+                    filled_items = []
+                    for key, w in key_to_widget.items():
+                        try:
+                            if hasattr(w, 'currentText'):
+                                value = (w.currentText() or '').strip()
+                            elif hasattr(w, 'text'):
+                                value = (w.text() or '').strip()
+                            else:
+                                value = ''
+                        except Exception:
+                            value = ''
+
+                        if value:
+                            label = schema_field_labels.get(key) or key
+                            filled_items.append((label, value))
+
+                    total = len(key_to_widget)
+                    filled = len(filled_items)
+
+                    lines = [f"入力済み: {filled}/{total}"]
+                    if filled_items:
+                        # 内容表示（長くなりすぎないよう最大10件まで）
+                        for label, value in filled_items[:10]:
+                            lines.append(f"- {label}: {value}")
+                        if len(filled_items) > 10:
+                            lines.append(f"… 他 {len(filled_items) - 10} 件")
+                    schema_summary_label.setText("\n".join(lines))
+
+                setattr(schema_summary_label, 'refresh', _refresh_schema_summary)
+
+                try:
+                    for w in getattr(form, '_schema_key_to_widget', {}).values():
+                        if hasattr(w, 'textChanged'):
+                            w.textChanged.connect(lambda *_: _refresh_schema_summary())
+                        if hasattr(w, 'currentIndexChanged'):
+                            w.currentIndexChanged.connect(lambda *_: _refresh_schema_summary())
                 except Exception:
                     pass
+
+                schema_toggle.set_summary_widget(schema_summary_label)
+                schema_toggle.set_edit_widget(form)
+                parent_controller.schema_form_container = schema_toggle
+
+                layout.insertWidget(5, schema_toggle)
+                schema_form_widget = form
+                parent_controller.schema_form_widget = schema_form_widget
 
                 try:
                     widget.setUpdatesEnabled(True)

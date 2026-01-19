@@ -898,6 +898,19 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     manager_completer.setCaseSensitivity(Qt.CaseInsensitive)
     manager_completer.setFilterMode(Qt.MatchContains)
     manager_combo.setCompleter(manager_completer)
+
+    # 選択中サブグループの説明（description）表示
+    subgroup_desc_label = QLabel("", parent)
+    subgroup_desc_label.setObjectName("selectedSubgroupDescriptionLabel")
+    subgroup_desc_label.setWordWrap(True)
+    try:
+        from classes.theme.theme_keys import ThemeKey as _TK_DESC
+        from classes.theme.theme_manager import get_color as _gc_desc
+
+        subgroup_desc_label.setStyleSheet(f"color: {_gc_desc(_TK_DESC.TEXT_MUTED)};")
+    except Exception:
+        pass
+    subgroup_desc_label.setVisible(False)
     
     # グループ選択コンボボックス
     def update_group_list(filter_type="member"):
@@ -940,6 +953,13 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         grant_combo.clear()
         grant_combo.setEnabled(False)
         grant_combo.lineEdit().setPlaceholderText("先にグループを選択してください")
+
+        # サブグループ説明もクリア
+        try:
+            subgroup_desc_label.clear()
+            subgroup_desc_label.setVisible(False)
+        except Exception:
+            pass
         
         return group_names_new
 
@@ -1150,6 +1170,18 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
                 break
         
         if selected_group:
+            # 説明（description）
+            try:
+                desc = str((selected_group.get('attributes', {}) or {}).get('description') or '').strip()
+            except Exception:
+                desc = ''
+            if desc:
+                subgroup_desc_label.setText(desc)
+                subgroup_desc_label.setVisible(True)
+            else:
+                subgroup_desc_label.clear()
+                subgroup_desc_label.setVisible(False)
+
             subjects = selected_group.get('attributes', {}).get('subjects', [])
             if subjects:
                 grant_combo.setEnabled(True)
@@ -1203,6 +1235,11 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         else:
             _populate_manager_combo(None)
             grant_combo.lineEdit().setPlaceholderText("先にグループを選択してください")
+            try:
+                subgroup_desc_label.clear()
+                subgroup_desc_label.setVisible(False)
+            except Exception:
+                pass
     
     # グループ選択の変更イベントを接続
     combo.lineEdit().textChanged.connect(on_group_changed)
@@ -1423,6 +1460,7 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     #apply_label_style(label_template, _TKey.TEXT_PRIMARY, bold=True)
     form_layout.addRow(label_filter, filter_combo)
     form_layout.addRow(label_group, combo)
+    form_layout.addRow(QLabel(""), subgroup_desc_label)
     form_layout.addRow(label_grant, grant_combo)
     form_layout.addRow(label_manager, manager_combo)
     form_layout.addRow(label_name, name_edit)

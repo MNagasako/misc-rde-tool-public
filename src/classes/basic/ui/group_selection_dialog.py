@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 
 _SELECTION_HISTORY_PATH = Path(GROUP_SELECTION_HISTORY_FILE)
 
+# worker thread -> UI thread 委譲中の invoker をGCから保護するための強参照。
+# Qt QObject はスレッドをまたいだPython側GCのタイミングで不安定になり得る。
+_ACTIVE_DIALOG_INVOKERS: list[object] = []
+
 
 def _exec_dialog_on_ui_thread(groups, parent, context_name, force_dialog, default_group_id, remember_context):
     """Run the selection dialog on the UI thread.
@@ -101,6 +105,22 @@ def _exec_dialog_on_ui_thread(groups, parent, context_name, force_dialog, defaul
             self.finished.emit(res)
 
     invoker = _DialogInvoker()
+
+    # invoker を完了まで強参照で保持（setParentが何らかの理由で失敗しても安全にする）
+    _ACTIVE_DIALOG_INVOKERS.append(invoker)
+
+    def _cleanup_invoker(_res=None, inv=invoker):
+        try:
+            _ACTIVE_DIALOG_INVOKERS.remove(inv)
+        except ValueError:
+            pass
+        except Exception:
+            pass
+
+    try:
+        invoker.finished.connect(_cleanup_invoker, QtCore.Qt.ConnectionType.QueuedConnection)
+    except Exception:
+        pass
     # Create in current (worker) thread, then move to UI thread.
     # IMPORTANT: After moving, ensure the object is Qt-owned (parented on UI thread),
     # otherwise Python GC may delete the underlying QObject from the worker thread.

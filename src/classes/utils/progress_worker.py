@@ -9,6 +9,9 @@ from qt_compat.core import QObject, Signal
 class ProgressWorker(QObject):
     """プログレス表示付きの処理を実行するワーカー"""
     progress = Signal(int, str)  # (進捗率, メッセージ)
+    # (現在, 総数, メッセージ)
+    # show_progress_dialog 側で planned/current/ETA 表示に利用する。
+    progress_detail = Signal(int, int, str)
     finished = Signal(bool, str)  # (成功/失敗, 結果メッセージ)
     
     def __init__(self, task_func, task_args=None, task_kwargs=None, task_name="処理"):
@@ -23,6 +26,10 @@ class ProgressWorker(QObject):
         """タスクを実行してプログレスを更新"""
         try:
             self.progress.emit(0, f"{self.task_name}を開始しています...")
+            try:
+                self.progress_detail.emit(0, 0, f"{self.task_name}を開始しています...")
+            except Exception:
+                pass
             time.sleep(0.1)  # UI更新のための短時間待機
             
             # プログレスコールバック関数を定義
@@ -37,9 +44,18 @@ class ProgressWorker(QObject):
                     progress_percent = int(current)
                 else:
                     # カウント値の場合
-                    progress_percent = min(int((current / total) * 100), 100) if total > 0 else 0
-                
+                    if total > 0:
+                        # 体感改善: 初期の0%張り付き回避のため、切り上げで進捗率を算出する。
+                        # 例: 1/500 -> 1% になる
+                        progress_percent = min(int((int(current) * 100 + int(total) - 1) / int(total)), 100)
+                    else:
+                        progress_percent = 0
+
                 self.progress.emit(progress_percent, message)
+                try:
+                    self.progress_detail.emit(int(current), int(total), message)
+                except Exception:
+                    pass
                 return True
                 
             # task_kwargsにprogress_callbackを追加

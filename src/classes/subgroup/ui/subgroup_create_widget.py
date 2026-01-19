@@ -3,7 +3,7 @@ import json
 import logging
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QLabel, QScrollArea, QPushButton, QHBoxLayout, 
-    QMessageBox, QTabWidget, QDialog, QApplication
+    QMessageBox, QTabWidget, QDialog, QApplication, QComboBox, QSizePolicy
 )
 from ..core import subgroup_api_helper
 from ..util.subgroup_ui_helpers import (
@@ -13,6 +13,11 @@ from ..util.subgroup_ui_helpers import (
 from .subgroup_listing_widget import create_subgroup_listing_widget
 from classes.theme import get_color, ThemeKey
 from classes.utils.label_style import apply_label_style
+from .subgroup_inherit_dialog import (
+    GRANT_NUMBER_NOT_INHERITED_MESSAGE,
+    SubgroupInheritDialog,
+    build_subjects_with_grant_number_placeholder,
+)
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -149,6 +154,73 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
 
     button_style = f"background-color: {color}; color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; font-weight: bold; border-radius: 6px;"
 
+    # --- 既存サブグループ読込（新規作成タブ最上段） ---
+    # 閲覧・修正タブのフィルタ+コンボ実装を参照し、同等のUIを提供する
+    existing_load_panel = QWidget()
+    existing_load_panel.setObjectName("existingSubgroupLoadPanel")
+    existing_load_panel.setStyleSheet(
+        f"QWidget#existingSubgroupLoadPanel {{ "
+        f"background-color: {get_color(ThemeKey.PANEL_BACKGROUND)}; "
+        f"border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; "
+        f"border-radius: 6px; "
+        f"}}"
+    )
+    existing_load_layout = QVBoxLayout(existing_load_panel)
+    existing_load_layout.setContentsMargins(10, 8, 10, 8)
+    existing_load_layout.setSpacing(6)
+
+    existing_load_title = QLabel("既存サブグループ読込")
+    apply_label_style(existing_load_title, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
+    existing_load_layout.addWidget(existing_load_title)
+
+    filter_row = QHBoxLayout()
+    filter_label = QLabel("表示フィルタ:")
+    filter_combo = QComboBox()
+    filter_combo.setObjectName("existingSubgroupFilterCombo")
+    filter_combo.addItem("OWNER", "owner")
+    filter_combo.addItem("OWNER+ASSISTANT", "both")
+    filter_combo.addItem("ASSISTANT", "assistant")
+    filter_combo.addItem("MEMBER", "member")
+    filter_combo.addItem("AGENT", "agent")
+    filter_combo.addItem("VIEWER", "viewer")
+    filter_combo.addItem("フィルタ無し", "none")
+    filter_combo.setCurrentIndex(0)
+    filter_row.addWidget(filter_label)
+    filter_row.addWidget(filter_combo)
+
+    refresh_btn = QPushButton("サブグループリスト更新")
+    refresh_btn.setObjectName("existingSubgroupRefreshButton")
+    filter_row.addWidget(refresh_btn)
+    filter_row.addStretch()
+    existing_load_layout.addLayout(filter_row)
+
+    existing_group_combo = QComboBox()
+    existing_group_combo.setObjectName("existingSubgroupCombo")
+    existing_group_combo.setEditable(True)
+    existing_group_combo.setInsertPolicy(QComboBox.NoInsert)
+    existing_group_combo.setMaxVisibleItems(12)
+    try:
+        existing_group_combo.view().setMinimumHeight(240)
+    except Exception:
+        pass
+    existing_group_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    load_row = QHBoxLayout()
+    load_row.addWidget(existing_group_combo, 1)
+    load_btn = QPushButton("読込")
+    load_btn.setObjectName("existingSubgroupLoadButton")
+    load_btn.setFixedWidth(80)
+    load_row.addWidget(load_btn)
+    existing_load_layout.addLayout(load_row)
+
+    existing_desc_label = QLabel("")
+    existing_desc_label.setObjectName("existingSubgroupDescriptionLabel")
+    existing_desc_label.setWordWrap(True)
+    existing_desc_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
+    existing_load_layout.addWidget(existing_desc_label)
+
+    layout.addWidget(existing_load_panel)
+
     # --- メンバー選択部（共通化コード使用） ---
     from config.common import OUTPUT_RDE_DIR, INPUT_DIR
     from ..util.subgroup_member_selector_common import create_common_subgroup_member_selector
@@ -214,18 +286,8 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     scroll.setMinimumWidth(520)  # スクロールエリア幅も調整
     scroll.setMaximumWidth(800)  # 余分な余白を削除
     
-    # 画面サイズを取得してスクロールエリアの高さを動的に設定
-    from qt_compat.widgets import QApplication
-    screen = QApplication.primaryScreen().geometry()
-    max_scroll_height = int(screen.height() * 0.35)  # 画面の35%まで
-    
-    # メンバー数に応じた動的高さ調整（画面サイズを考慮）
-    member_count = len(member_selector.user_rows) if member_selector.user_rows else 0
-    calculated_height = 47 + (member_count * 22)  # ヘッダー25px + 行22px
-    optimal_height = min(calculated_height, max_scroll_height)
-    
-    scroll.setMinimumHeight(min(150, optimal_height))
-    scroll.setMaximumHeight(optimal_height)
+    # 余白はできるだけメンバー領域が消費し、スクロールバーを出しにくくする
+    scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     
     # メインウィンドウサイズ調整（親ウィジェットから辿る）- 画面サイズ制限付き
     try:
@@ -263,10 +325,98 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     member_label = QLabel("グループメンバー選択（複数可）:")
     apply_label_style(member_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
     member_layout.addWidget(member_label)
-    member_layout.addWidget(scroll)
+    # stretch=1 で余白を優先的に消費
+    member_layout.addWidget(scroll, 1)
     
     layout.addLayout(member_layout)
     scroll.setWidget(member_selector)
+
+    def _adjust_scroll_height_for_selector(selector_widget) -> None:
+        try:
+            screen = QApplication.primaryScreen().geometry()
+            # できるだけスクロールを抑制するため、上限を少し大きめに取る
+            max_scroll_height = int(screen.height() * 0.55)
+
+            hinted = 0
+            try:
+                hinted = int(selector_widget.sizeHint().height())
+            except Exception:
+                hinted = 0
+
+            member_count = len(getattr(selector_widget, "user_rows", []) or [])
+            estimated = 47 + (member_count * 22)
+            desired = max(hinted, estimated)
+
+            # 小人数でもテーブルが見えない事故を防ぐ
+            min_h = max(220, min(desired, max_scroll_height))
+            scroll.setMinimumHeight(min_h)
+            scroll.setMaximumHeight(max_scroll_height)
+        except Exception:
+            pass
+
+    def _apply_inherited_members(group_data: dict) -> None:
+        try:
+            from ..util.subgroup_member_selector_common import (
+                create_common_subgroup_member_selector_with_api_complement,
+            )
+            from core.bearer_token_manager import BearerTokenManager
+
+            current_roles = {}
+            for m in (group_data or {}).get("members", []) or []:
+                if isinstance(m, dict) and m.get("id"):
+                    current_roles[str(m.get("id"))] = str(m.get("role") or "MEMBER")
+
+            token = BearerTokenManager.get_valid_token()
+            new_selector = create_common_subgroup_member_selector_with_api_complement(
+                initial_roles=current_roles,
+                prechecked_user_ids=set(current_roles.keys()),
+                subgroup_id=str((group_data or {}).get("id", "") or ""),
+                bearer_token=token,
+                show_filter=True,
+                disable_internal_scroll=False,
+            )
+
+            scroll.setWidget(new_selector)
+            widget.user_rows = new_selector.user_rows
+            widget.owner_radio_group = new_selector.owner_radio_group
+            widget.member_selector = new_selector
+            try:
+                create_handler.member_selector = new_selector
+            except Exception:
+                pass
+            _adjust_scroll_height_for_selector(new_selector)
+        except Exception as e:
+            logger.warning("既存サブグループメンバー引継ぎに失敗: %s", e)
+
+    def _apply_inherited_form_values(group_data: dict, form_widgets: dict, options: dict) -> None:
+        if options.get("group_name"):
+            form_widgets["group_name_edit"].setText(str((group_data or {}).get("name", "") or ""))
+        if options.get("description"):
+            form_widgets["desc_edit"].setText(str((group_data or {}).get("description", "") or ""))
+        if options.get("subjects"):
+            subjects_src = (group_data or {}).get("subjects", [])
+            subjects = build_subjects_with_grant_number_placeholder(subjects_src)
+            if not subjects:
+                subjects = [{"grantNumber": GRANT_NUMBER_NOT_INHERITED_MESSAGE, "title": ""}]
+            try:
+                form_widgets["subjects_widget"].set_subjects_data(subjects)
+            except Exception:
+                pass
+        if options.get("funds") and "funds_widget" in form_widgets:
+            funds_src = (group_data or {}).get("funds", [])
+            funds_list = []
+            if isinstance(funds_src, list):
+                for f in funds_src:
+                    if isinstance(f, dict):
+                        num = f.get("fundNumber", "")
+                        if num:
+                            funds_list.append(str(num))
+                    else:
+                        funds_list.append(str(f))
+            try:
+                form_widgets["funds_widget"].set_funding_numbers(funds_list)
+            except Exception:
+                pass
 
     # --- 選択ユーザー/ロール表示ボタン & カスタムメンバー編集ボタン ---
     button_row = QHBoxLayout()
@@ -302,6 +452,62 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     
     # --- イベントハンドラー作成 ---
     create_handler = SubgroupCreateHandler(widget, parent, member_selector)
+
+    # 既存サブグループ選択ロジック（閲覧・修正タブの SubgroupSelector を参照）
+    try:
+        from .subgroup_edit_widget import SubgroupSelector
+
+        selector = SubgroupSelector(existing_group_combo, filter_combo, on_selection_changed=None)
+        selector.load_existing_subgroups()
+
+        # 新規作成タブでは「選択だけ」で外部チェック等を走らせないため、
+        # currentTextChanged 経由のハンドラを外して indexChanged で description を更新する。
+        try:
+            existing_group_combo.currentTextChanged.disconnect(selector._on_combo_selection_changed)
+        except Exception:
+            pass
+
+        def _update_selected_subgroup_description() -> None:
+            try:
+                group_data = existing_group_combo.currentData()
+                if isinstance(group_data, dict):
+                    desc = str(group_data.get("description", "") or "")
+                    existing_desc_label.setText(desc)
+                else:
+                    existing_desc_label.setText("")
+            except Exception:
+                existing_desc_label.setText("")
+
+        existing_group_combo.currentIndexChanged.connect(lambda _i: _update_selected_subgroup_description())
+        _update_selected_subgroup_description()
+
+        def on_refresh_existing_groups():
+            selector.load_existing_subgroups()
+            try:
+                existing_desc_label.setText("")
+            except Exception:
+                pass
+
+        refresh_btn.clicked.connect(on_refresh_existing_groups)
+
+        def on_click_load_existing_group():
+            group_data = existing_group_combo.currentData()
+            if not isinstance(group_data, dict):
+                QMessageBox.warning(widget, "選択エラー", "読み込むサブグループを選択してください。")
+                return
+
+            dialog = SubgroupInheritDialog(widget, group_data)
+            if dialog.exec() != QDialog.Accepted:
+                return
+            options = dialog.selected_options()
+
+            if options.get("members"):
+                _apply_inherited_members(group_data)
+            _apply_inherited_form_values(group_data, form_widgets, options)
+
+        load_btn.clicked.connect(on_click_load_existing_group)
+    except Exception as e:
+        logger.warning("既存サブグループ読込UI初期化に失敗: %s", e)
 
     def on_create_subgroup_manual(user_entries_param=None):
         # 新しいクラスを使用して入力値とロール情報を取得
@@ -414,6 +620,5 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
         'manual': on_create_subgroup_manual
     })
 
-    layout.addStretch()
     widget.setLayout(layout)
     return widget

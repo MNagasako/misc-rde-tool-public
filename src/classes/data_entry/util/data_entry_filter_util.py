@@ -66,27 +66,44 @@ def get_subgroups_for_data_entry():
         list: サブグループ一覧、取得できない場合は空リスト
     """
     try:
-        subgroup_path = DATASET_JSON_PATH.replace('dataset.json', 'subGroup.json')
-        if not os.path.exists(subgroup_path):
+        # dataset_open と同様に subGroup.json の included(TEAM) を優先して使う
+        subgroup_path = None
+        try:
+            from config.common import SUBGROUP_JSON_PATH
+
+            subgroup_path = SUBGROUP_JSON_PATH
+        except Exception:
+            subgroup_path = DATASET_JSON_PATH.replace('dataset.json', 'subGroup.json')
+
+        if not subgroup_path or not os.path.exists(subgroup_path):
             print(f"[WARNING] subGroup.jsonが見つかりません: {subgroup_path}")
             return []
-        
+
         with open(subgroup_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-        
-        # dataが単一オブジェクトか配列かを確認
+
+        included = data.get('included', [])
+        if isinstance(included, list) and included:
+            team_groups = []
+            for item in included:
+                if not isinstance(item, dict):
+                    continue
+                if item.get('type') != 'group':
+                    continue
+                group_type = (item.get('attributes', {}) or {}).get('groupType')
+                if group_type == 'TEAM':
+                    team_groups.append(item)
+            if team_groups:
+                return team_groups
+
+        # フォールバック: data 側に入っている形式
         subgroups_raw = data.get('data', [])
         if isinstance(subgroups_raw, dict):
-            # 単一オブジェクトの場合は配列として扱う
-            subgroups = [subgroups_raw]
-        elif isinstance(subgroups_raw, list):
-            # 配列の場合はそのまま
-            subgroups = subgroups_raw
-        else:
-            print(f"[WARNING] subGroup.jsonの構造が予期しない形式です: {type(subgroups_raw)}")
-            subgroups = []
-        
-        return subgroups
+            return [subgroups_raw]
+        if isinstance(subgroups_raw, list):
+            return subgroups_raw
+        print(f"[WARNING] subGroup.jsonの構造が予期しない形式です: {type(subgroups_raw)}")
+        return []
         
     except Exception as e:
         print(f"[ERROR] subGroup.json読み込みエラー: {e}")

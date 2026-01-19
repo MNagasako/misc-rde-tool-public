@@ -3,9 +3,14 @@ HTTP リクエスト共通化ヘルパーモジュール v2
 セッション管理ベースでプロキシ対応HTTPリクエストを提供
 循環参照を回避した安全な設計
 """
-# === セッション管理ベースのプロキシ対応 ===
-from net.session_manager import get_proxy_session, _session_manager
-import requests as _requests_types  # 型ヒント専用
+"""HTTP リクエスト共通化ヘルパー
+
+重要: このリポジトリでは HTTP リクエストは net.http_helpers 経由で行う。
+このモジュールは互換APIとして残しつつ、内部実装を http_helpers に委譲する。
+"""
+
+from net import http_helpers
+import requests as _requests_types  # 型ヒント/例外型専用
 import logging
 from typing import Dict, Optional, Any, Union
 from datetime import datetime
@@ -28,13 +33,17 @@ except ImportError:
     logger = logging.getLogger(__name__)
 
 
-def _base_request(method: str, url: str, headers: Optional[Dict[str, str]] = None,
-                 data: Optional[Union[Dict, str, bytes]] = None,
-                 json_data: Optional[Dict] = None,
-                 params: Optional[Dict[str, str]] = None,
-                 timeout: int = 30,
-                 stream: bool = False,
-                 cookies: Optional[Dict] = None) -> Optional[_requests_types.Response]:
+def _base_request(
+    method: str,
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    data: Optional[Union[Dict, str, bytes]] = None,
+    json_data: Optional[Dict] = None,
+    params: Optional[Dict[str, str]] = None,
+    timeout: int = 30,
+    stream: bool = False,
+    cookies: Optional[Dict] = None,
+) -> Optional[_requests_types.Response]:
     """
     内部共通リクエスト処理関数（セッション管理ベース + APIログ統合）
     
@@ -54,129 +63,49 @@ def _base_request(method: str, url: str, headers: Optional[Dict[str, str]] = Non
     """
     try:
         start_time = datetime.now()
-        start_time_perf = time.time()  # APIログ用の高精度タイマー
-        
+
         # デフォルトヘッダー設定
-        default_headers = {
+        request_headers: Dict[str, str] = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        
         if headers:
-            default_headers.update(headers)
-        
-        # セッション管理ベースのリクエスト実行
-        session = get_proxy_session()
-        
-        # APIログ記録（リクエスト開始）
-        if API_LOGGER_AVAILABLE:
-            proxies = session.proxies or {}
-            verify = session.verify
-            truststore_enabled = hasattr(_session_manager, '_truststore_ssl_context') and _session_manager._truststore_ssl_context is not None
-            
-            api_logger.log_request(
-                method=method.upper(),
-                url=url,
-                proxies=proxies,
-                verify=verify,
-                ssl_context_used=truststore_enabled,
-                truststore_enabled=truststore_enabled
-            )
-        
-        response = session.request(
-            method=method,
-            url=url,
-            headers=default_headers,
-            data=data,
-            json=json_data,
-            params=params,
-            timeout=timeout,
-            stream=stream,
-            cookies=cookies
-        )
-        
-        # パフォーマンス計測
-        elapsed_time = (datetime.now() - start_time).total_seconds()
-        elapsed_ms = (time.time() - start_time_perf) * 1000
-        
-        # APIログ記録（レスポンス）
-        if API_LOGGER_AVAILABLE:
-            api_logger.log_response(
-                method=method.upper(),
-                url=url,
-                status_code=response.status_code,
-                elapsed_ms=elapsed_ms,
-                success=True
-            )
-        
-        # デバッグログ出力
-        if hasattr(logger, 'log') and logger.__class__.__name__ == 'DebugLog':
-            logger.log(logging.INFO, f"HTTP {method.upper()} {url} -> {response.status_code} ({elapsed_time:.2f}s)")
+            request_headers.update(headers)
+
+        method_upper = (method or '').upper()
+        kwargs = {
+            'headers': request_headers,
+            'data': data,
+            'json': json_data,
+            'params': params,
+            'timeout': timeout,
+            'stream': stream,
+            'cookies': cookies,
+        }
+
+        if method_upper == 'GET':
+            response = http_helpers.proxy_get(url, **kwargs)
+        elif method_upper == 'POST':
+            response = http_helpers.proxy_post(url, data=data, json=json_data, headers=request_headers, params=params, timeout=timeout, stream=stream, cookies=cookies)
+        elif method_upper == 'PUT':
+            response = http_helpers.proxy_put(url, data=data, json=json_data, headers=request_headers, params=params, timeout=timeout, stream=stream, cookies=cookies)
+        elif method_upper == 'PATCH':
+            response = http_helpers.proxy_patch(url, data=data, json=json_data, headers=request_headers, params=params, timeout=timeout, stream=stream, cookies=cookies)
+        elif method_upper == 'DELETE':
+            response = http_helpers.proxy_delete(url, data=data, json=json_data, headers=request_headers, params=params, timeout=timeout, stream=stream, cookies=cookies)
         else:
-            logger.info(f"HTTP {method.upper()} {url} -> {response.status_code} ({elapsed_time:.2f}s)")
-        
+            # http_helpersに無いメソッドはセッション直叩きを避ける
+            raise ValueError(f"Unsupported HTTP method: {method_upper}")
+
+        elapsed_time = (datetime.now() - start_time).total_seconds()
+        if hasattr(logger, 'log') and logger.__class__.__name__ == 'DebugLog':
+            logger.log(logging.INFO, f"HTTP {method_upper} {url} -> {getattr(response, 'status_code', '?')} ({elapsed_time:.2f}s)")
+        else:
+            logger.info(f"HTTP {method_upper} {url} -> {getattr(response, 'status_code', '?')} ({elapsed_time:.2f}s)")
+
         return response
         
     except _requests_types.exceptions.Timeout:
-        elapsed_ms = (time.time() - start_time_perf) * 1000 if 'start_time_perf' in locals() else 0
         error_msg = f"HTTP Timeout: {method.upper()} {url} (timeout={timeout}s)"
-        
-        # APIログ記録（タイムアウト）
-        if API_LOGGER_AVAILABLE:
-            api_logger.log_response(
-                method=method.upper(),
-                url=url,
-                status_code=0,
-                elapsed_ms=elapsed_ms,
-                success=False,
-                error=f"Timeout ({timeout}s)"
-            )
-        
-        if hasattr(logger, 'log') and logger.__class__.__name__ == 'DebugLog':
-            logger.log(f"[ERROR] {error_msg}", "ERROR")
-        elif hasattr(logger, 'log'):
-            logger.log(logging.ERROR, f"[ERROR] {error_msg}")
-        else:
-            logger.error(f"[ERROR] {error_msg}")
-        return None
-        
-    except _requests_types.exceptions.ConnectionError as e:
-        elapsed_ms = (time.time() - start_time_perf) * 1000 if 'start_time_perf' in locals() else 0
-        error_msg = f"HTTP Connection Error: {method.upper()} {url}"
-        
-        # APIログ記録（接続エラー）
-        if API_LOGGER_AVAILABLE:
-            api_logger.log_response(
-                method=method.upper(),
-                url=url,
-                status_code=0,
-                elapsed_ms=elapsed_ms,
-                success=False,
-                error=f"Connection Error: {str(e)[:100]}"
-            )
-        
-        if hasattr(logger, 'log') and logger.__class__.__name__ == 'DebugLog':
-            logger.log(f"[ERROR] {error_msg}", "ERROR")
-        elif hasattr(logger, 'log'):
-            logger.log(logging.ERROR, f"[ERROR] {error_msg}")
-        else:
-            logger.error(f"[ERROR] {error_msg}")
-        return None
-        
-    except _requests_types.exceptions.SSLError as e:
-        elapsed_ms = (time.time() - start_time_perf) * 1000 if 'start_time_perf' in locals() else 0
-        error_msg = f"HTTP SSL Error: {method.upper()} {url}"
-        
-        # APIログ記録（SSLエラー）
-        if API_LOGGER_AVAILABLE:
-            api_logger.log_response(
-                method=method.upper(),
-                url=url,
-                status_code=0,
-                elapsed_ms=elapsed_ms,
-                success=False,
-                error=f"SSL Error: {str(e)[:100]}"
-            )
-            api_logger.log_ssl_verification_failure(url, str(e)[:200])
         
         if hasattr(logger, 'log') and logger.__class__.__name__ == 'DebugLog':
             logger.log(f"[ERROR] {error_msg}", "ERROR")
@@ -187,26 +116,29 @@ def _base_request(method: str, url: str, headers: Optional[Dict[str, str]] = Non
         return None
         
     except _requests_types.exceptions.ProxyError as e:
-        elapsed_ms = (time.time() - start_time_perf) * 1000 if 'start_time_perf' in locals() else 0
         error_msg = f"HTTP Proxy Error: {method.upper()} {url}"
         
-        # APIログ記録（プロキシエラー）
-        if API_LOGGER_AVAILABLE:
-            session = get_proxy_session()
-            proxies = session.proxies or {}
-            
-            api_logger.log_response(
-                method=method.upper(),
-                url=url,
-                status_code=0,
-                elapsed_ms=elapsed_ms,
-                success=False,
-                error=f"Proxy Error: {str(e)[:100]}"
-            )
-            
-            proxy_url = proxies.get('https') or proxies.get('http')
-            if proxy_url:
-                api_logger.log_proxy_connection(proxy_url, False)
+        if hasattr(logger, 'log') and logger.__class__.__name__ == 'DebugLog':
+            logger.log(f"[ERROR] {error_msg}", "ERROR")
+        elif hasattr(logger, 'log'):
+            logger.log(logging.ERROR, f"[ERROR] {error_msg}")
+        else:
+            logger.error(f"[ERROR] {error_msg}")
+        return None
+
+    except _requests_types.exceptions.SSLError as e:
+        error_msg = f"HTTP SSL Error: {method.upper()} {url}"
+        
+        if hasattr(logger, 'log') and logger.__class__.__name__ == 'DebugLog':
+            logger.log(f"[ERROR] {error_msg}", "ERROR")
+        elif hasattr(logger, 'log'):
+            logger.log(logging.ERROR, f"[ERROR] {error_msg}")
+        else:
+            logger.error(f"[ERROR] {error_msg}")
+        return None
+        
+    except _requests_types.exceptions.ConnectionError as e:
+        error_msg = f"HTTP Connection Error: {method.upper()} {url}"
         
         if hasattr(logger, 'log') and logger.__class__.__name__ == 'DebugLog':
             logger.log(f"[ERROR] {error_msg}", "ERROR")
@@ -217,19 +149,7 @@ def _base_request(method: str, url: str, headers: Optional[Dict[str, str]] = Non
         return None
     
     except Exception as e:
-        elapsed_ms = (time.time() - start_time_perf) * 1000 if 'start_time_perf' in locals() else 0
         error_msg = f"HTTP Request Error: {method.upper()} {url}, error={str(e)}"
-        
-        # APIログ記録（汎用エラー）
-        if API_LOGGER_AVAILABLE:
-            api_logger.log_response(
-                method=method.upper(),
-                url=url,
-                status_code=0,
-                elapsed_ms=elapsed_ms,
-                success=False,
-                error=f"{type(e).__name__}: {str(e)[:100]}"
-            )
         
         if hasattr(logger, 'log') and logger.__class__.__name__ == 'DebugLog':
             logger.log(f"[ERROR] {error_msg}", "ERROR")

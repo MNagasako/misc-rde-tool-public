@@ -205,6 +205,38 @@ class LightTheme:
         ThemeKey.BUTTON_BLUEGREY_BACKGROUND_PRESSED: "#455a64",
         ThemeKey.BUTTON_BLUEGREY_TEXT: "#ffffff",
         ThemeKey.BUTTON_BLUEGREY_BORDER: "#546e7a",
+
+        # ========================================
+        # Button (Basic Info tab) - 基本情報タブ専用ボタン
+        # ========================================
+
+        # グループ1: 基本情報取得（ALL/検索） - Blue
+        ThemeKey.BUTTON_BASICINFO_GROUP1_BACKGROUND: "#1976d2",
+        ThemeKey.BUTTON_BASICINFO_GROUP1_BACKGROUND_HOVER: "#1565c0",
+        ThemeKey.BUTTON_BASICINFO_GROUP1_BACKGROUND_PRESSED: "#0d47a1",
+        ThemeKey.BUTTON_BASICINFO_GROUP1_TEXT: "#ffffff",
+        ThemeKey.BUTTON_BASICINFO_GROUP1_BORDER: "#1565c0",
+
+        # グループ2: 共通情報取得（共通情報のみ/共通情報取得2） - Green
+        ThemeKey.BUTTON_BASICINFO_GROUP2_BACKGROUND: "#2e7d32",
+        ThemeKey.BUTTON_BASICINFO_GROUP2_BACKGROUND_HOVER: "#1b5e20",
+        ThemeKey.BUTTON_BASICINFO_GROUP2_BACKGROUND_PRESSED: "#104315",
+        ThemeKey.BUTTON_BASICINFO_GROUP2_TEXT: "#ffffff",
+        ThemeKey.BUTTON_BASICINFO_GROUP2_BORDER: "#1b5e20",
+
+        # グループ3: invoice_schema/サンプル情報取得 - Purple
+        ThemeKey.BUTTON_BASICINFO_GROUP3_BACKGROUND: "#6a1b9a",
+        ThemeKey.BUTTON_BASICINFO_GROUP3_BACKGROUND_HOVER: "#4a148c",
+        ThemeKey.BUTTON_BASICINFO_GROUP3_BACKGROUND_PRESSED: "#38006b",
+        ThemeKey.BUTTON_BASICINFO_GROUP3_TEXT: "#ffffff",
+        ThemeKey.BUTTON_BASICINFO_GROUP3_BORDER: "#4a148c",
+
+        # テーブル内 再取得ボタン - Orange
+        ThemeKey.BUTTON_BASICINFO_REFETCH_BACKGROUND: "#f57c00",
+        ThemeKey.BUTTON_BASICINFO_REFETCH_BACKGROUND_HOVER: "#e65100",
+        ThemeKey.BUTTON_BASICINFO_REFETCH_BACKGROUND_PRESSED: "#bf360c",
+        ThemeKey.BUTTON_BASICINFO_REFETCH_TEXT: "#ffffff",
+        ThemeKey.BUTTON_BASICINFO_REFETCH_BORDER: "#e65100",
         
         # ========================================
         # Text - テキスト・ラベル

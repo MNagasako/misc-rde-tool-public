@@ -21,6 +21,9 @@ from classes.theme import ThemeKey, get_color
 # ベース共通部品
 _BASE = "font-weight: bold; border-radius: 6px; margin: 2px; padding: 4px 8px;"
 
+# コンパクト（横並びで詰めたいボタン向け）
+_BASE_COMPACT = "font-weight: bold; border-radius: 6px; margin: 1px; padding: 3px 6px;"
+
 _MAPPING = {
     'primary': (ThemeKey.BUTTON_PRIMARY_BACKGROUND, ThemeKey.BUTTON_PRIMARY_TEXT, ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER),
     'secondary': (ThemeKey.BUTTON_SECONDARY_BACKGROUND, ThemeKey.BUTTON_SECONDARY_TEXT, ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER),
@@ -35,6 +38,36 @@ _MAPPING = {
     'auth': (ThemeKey.BUTTON_AUTH_BACKGROUND, ThemeKey.BUTTON_AUTH_TEXT, ThemeKey.BUTTON_AUTH_BACKGROUND_HOVER),
     'api': (ThemeKey.BUTTON_API_BACKGROUND, ThemeKey.BUTTON_API_TEXT, ThemeKey.BUTTON_API_BACKGROUND_HOVER),
     'default': (ThemeKey.BUTTON_DEFAULT_BACKGROUND, ThemeKey.BUTTON_DEFAULT_TEXT, ThemeKey.BUTTON_DEFAULT_BACKGROUND_HOVER),
+
+    # Basic Info tab grouped actions
+    'basicinfo_group1': (
+        ThemeKey.BUTTON_BASICINFO_GROUP1_BACKGROUND,
+        ThemeKey.BUTTON_BASICINFO_GROUP1_TEXT,
+        ThemeKey.BUTTON_BASICINFO_GROUP1_BACKGROUND_HOVER,
+        ThemeKey.BUTTON_BASICINFO_GROUP1_BACKGROUND_PRESSED,
+        ThemeKey.BUTTON_BASICINFO_GROUP1_BORDER,
+    ),
+    'basicinfo_group2': (
+        ThemeKey.BUTTON_BASICINFO_GROUP2_BACKGROUND,
+        ThemeKey.BUTTON_BASICINFO_GROUP2_TEXT,
+        ThemeKey.BUTTON_BASICINFO_GROUP2_BACKGROUND_HOVER,
+        ThemeKey.BUTTON_BASICINFO_GROUP2_BACKGROUND_PRESSED,
+        ThemeKey.BUTTON_BASICINFO_GROUP2_BORDER,
+    ),
+    'basicinfo_group3': (
+        ThemeKey.BUTTON_BASICINFO_GROUP3_BACKGROUND,
+        ThemeKey.BUTTON_BASICINFO_GROUP3_TEXT,
+        ThemeKey.BUTTON_BASICINFO_GROUP3_BACKGROUND_HOVER,
+        ThemeKey.BUTTON_BASICINFO_GROUP3_BACKGROUND_PRESSED,
+        ThemeKey.BUTTON_BASICINFO_GROUP3_BORDER,
+    ),
+    'basicinfo_refetch': (
+        ThemeKey.BUTTON_BASICINFO_REFETCH_BACKGROUND,
+        ThemeKey.BUTTON_BASICINFO_REFETCH_TEXT,
+        ThemeKey.BUTTON_BASICINFO_REFETCH_BACKGROUND_HOVER,
+        ThemeKey.BUTTON_BASICINFO_REFETCH_BACKGROUND_PRESSED,
+        ThemeKey.BUTTON_BASICINFO_REFETCH_BORDER,
+    ),
 }
 
 
@@ -64,18 +97,26 @@ def _get_button_style_cached(kind_lower: str, theme_key: str) -> str:
     mapping = _MAPPING.get(kind_lower, _MAPPING['secondary'])
     bg_key, fg_key = mapping[0], mapping[1]
     hover_key = mapping[2] if len(mapping) > 2 else None
+    pressed_key = mapping[3] if len(mapping) > 3 else hover_key
+    border_key = mapping[4] if len(mapping) > 4 else None
+
+    base = _BASE_COMPACT if kind_lower.startswith("basicinfo_") else _BASE
+    border_css = f"border: 1px solid {get_color(border_key)}; " if border_key else ""
 
     style = (
         "QPushButton { "
         f"background-color: {get_color(bg_key)}; "
         f"color: {get_color(fg_key)}; "
-        f"{_BASE} }}"
+        f"{border_css}{base} }}"
     )
 
     if hover_key:
         hover_bg = get_color(hover_key)
         style += f" QPushButton:hover {{ background-color: {hover_bg}; }}"
-        style += f" QPushButton:pressed {{ background-color: {hover_bg}; }}"
+
+    if pressed_key:
+        pressed_bg = get_color(pressed_key)
+        style += f" QPushButton:pressed {{ background-color: {pressed_bg}; }}"
 
     style += (
         " QPushButton:disabled { "

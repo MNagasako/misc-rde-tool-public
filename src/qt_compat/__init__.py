@@ -11,7 +11,7 @@ PyQt5の依存を完全に削除し、PySide6のみで動作します。
     from qt_compat import QT_VERSION
     logger.debug("Using: %s", QT_VERSION)
 
-バージョン: 2.0.0 (PySide6 Only)
+バージョン: (PySide6 Only)
 作成日: 2025-11-08
 更新日: 2025-11-08
 """

@@ -205,6 +205,38 @@ class DarkTheme:
         ThemeKey.BUTTON_BLUEGREY_BACKGROUND_PRESSED: "#b0bec5",  # 200
         ThemeKey.BUTTON_BLUEGREY_TEXT: "#000000",
         ThemeKey.BUTTON_BLUEGREY_BORDER: "#90a4ae",
+
+        # ========================================
+        # Button (Basic Info tab) - 基本情報タブ専用ボタン
+        # ========================================
+
+        # グループ1: 基本情報取得（ALL/検索） - Blue
+        ThemeKey.BUTTON_BASICINFO_GROUP1_BACKGROUND: "#42a5f5",  # Blue 400
+        ThemeKey.BUTTON_BASICINFO_GROUP1_BACKGROUND_HOVER: "#64b5f6",  # Blue 300
+        ThemeKey.BUTTON_BASICINFO_GROUP1_BACKGROUND_PRESSED: "#90caf9",  # Blue 200
+        ThemeKey.BUTTON_BASICINFO_GROUP1_TEXT: "#000000",
+        ThemeKey.BUTTON_BASICINFO_GROUP1_BORDER: "#64b5f6",
+
+        # グループ2: 共通情報取得（共通情報のみ/共通情報取得2） - Green
+        ThemeKey.BUTTON_BASICINFO_GROUP2_BACKGROUND: "#66bb6a",  # Green 400
+        ThemeKey.BUTTON_BASICINFO_GROUP2_BACKGROUND_HOVER: "#81c784",  # Green 300
+        ThemeKey.BUTTON_BASICINFO_GROUP2_BACKGROUND_PRESSED: "#a5d6a7",  # Green 200
+        ThemeKey.BUTTON_BASICINFO_GROUP2_TEXT: "#000000",
+        ThemeKey.BUTTON_BASICINFO_GROUP2_BORDER: "#81c784",
+
+        # グループ3: invoice_schema/サンプル情報取得 - Purple
+        ThemeKey.BUTTON_BASICINFO_GROUP3_BACKGROUND: "#ba68c8",  # Purple 300
+        ThemeKey.BUTTON_BASICINFO_GROUP3_BACKGROUND_HOVER: "#ce93d8",  # Purple 200
+        ThemeKey.BUTTON_BASICINFO_GROUP3_BACKGROUND_PRESSED: "#e1bee7",  # Purple 100
+        ThemeKey.BUTTON_BASICINFO_GROUP3_TEXT: "#000000",
+        ThemeKey.BUTTON_BASICINFO_GROUP3_BORDER: "#ce93d8",
+
+        # テーブル内 再取得ボタン - Orange
+        ThemeKey.BUTTON_BASICINFO_REFETCH_BACKGROUND: "#ffa726",  # Orange 400
+        ThemeKey.BUTTON_BASICINFO_REFETCH_BACKGROUND_HOVER: "#ffcc80",  # Orange 200
+        ThemeKey.BUTTON_BASICINFO_REFETCH_BACKGROUND_PRESSED: "#ffe0b2",  # Orange 100
+        ThemeKey.BUTTON_BASICINFO_REFETCH_TEXT: "#000000",
+        ThemeKey.BUTTON_BASICINFO_REFETCH_BORDER: "#ffb74d",
         
         # ========================================
         # Text - テキスト・ラベル（Material Dark準拠）

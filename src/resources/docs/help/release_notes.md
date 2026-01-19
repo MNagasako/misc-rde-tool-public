@@ -6,8 +6,15 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.4.23）。VERSION/README/配布物のバージョン表記を更新。 |
-| テスト/品質 | pytest 段階ゲート → pre-build 統合テスト → PyInstaller ビルドを実行して回帰を抑止。 |
+| リリース/品質 | リビジョンアップ（v2.5.0）。VERSION/README/配布物のバージョン表記を更新。 |
+| テスト/品質 | pre-build（Non-Widget/Widget + coverage）→ PyInstaller の段階ゲートを完走し、回帰を抑止。 |
+
+## v2.5.0 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.0）。VERSION/README/配布物のバージョン表記を更新。 |
+| テスト/品質 | pre-build（Non-Widget/Widget + coverage）を通過するようユニットテストとゲート運用を安定化。 |
 
 ## v2.4.23 の主な更新点
 

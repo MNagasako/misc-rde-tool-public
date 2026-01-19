@@ -13,6 +13,7 @@ from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, 
     QCheckBox, QCompleter, QMessageBox, QPushButton
 )
+from qt_compat.widgets import QSizePolicy
 from qt_compat.core import Qt
 from qt_compat.gui import QFont
 from classes.theme.theme_keys import ThemeKey
@@ -204,11 +205,13 @@ def get_user_subgroups_and_grants(user_id):
                                 group_grants.append(grant_number)
                     
                     if group_grants:  # grantNumberがある場合のみ追加
+                        desc = str(attributes.get('description') or '').strip()
                         user_subgroups.append({
                             'id': group.get('id'),
                             'name': attributes.get('name', 'Unknown Group'),
                             'role': user_role,
                             'grant_numbers': group_grants,
+                            'description': desc,
                             'subjects_count': len(subjects)
                         })
             
@@ -572,6 +575,59 @@ def create_checkbox_filter_dropdown(parent=None):
     status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 9pt;")
     
     layout.addWidget(filter_widget)
+
+    # サブグループ / 課題番号フィルタ（上位フィルタ）
+    subgroup_filter_widget = QWidget(container)
+    subgroup_layout = QHBoxLayout(subgroup_filter_widget)
+    subgroup_layout.setContentsMargins(0, 0, 0, 0)
+    subgroup_layout.setSpacing(6)
+
+    subgroup_label = QLabel("サブグループ:")
+    subgroup_label.setFont(QFont("", 9))
+    subgroup_layout.addWidget(subgroup_label)
+
+    subgroup_combo = QComboBox(subgroup_filter_widget)
+    subgroup_combo.setMinimumWidth(340)
+    subgroup_combo.setEditable(True)
+    subgroup_combo.setInsertPolicy(QComboBox.NoInsert)
+    subgroup_combo.setMaxVisibleItems(12)
+    subgroup_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    subgroup_combo.setToolTip("サブグループでデータセット候補を絞り込みます")
+    try:
+        subgroup_combo.lineEdit().setPlaceholderText("サブグループで絞り込み")
+    except Exception:
+        pass
+    subgroup_layout.addWidget(subgroup_combo, 1)
+
+    grant_label = QLabel("課題番号:")
+    grant_label.setFont(QFont("", 9))
+    subgroup_layout.addWidget(grant_label)
+
+    grant_combo = QComboBox(subgroup_filter_widget)
+    grant_combo.setEditable(True)
+    grant_combo.setInsertPolicy(QComboBox.NoInsert)
+    grant_combo.setMinimumWidth(180)
+    grant_combo.setToolTip("課題番号(grantNumber)でデータセット候補を絞り込みます")
+    try:
+        grant_combo.lineEdit().setPlaceholderText("課題番号で絞り込み")
+    except Exception:
+        pass
+    subgroup_layout.addWidget(grant_combo)
+    subgroup_layout.addStretch()
+
+    # スタイル
+    try:
+        base_color = get_color(ThemeKey.TEXT_PRIMARY)
+        muted_color = get_color(ThemeKey.TEXT_MUTED)
+        subgroup_label.setStyleSheet(f"color: {muted_color};")
+        grant_label.setStyleSheet(f"color: {muted_color};")
+        _combo_style = f"QComboBox {{ color: {base_color}; }}"
+        subgroup_combo.setStyleSheet(_combo_style)
+        grant_combo.setStyleSheet(_combo_style)
+    except Exception:
+        pass
+
+    layout.addWidget(subgroup_filter_widget)
     layout.addWidget(status_label)
     layout.addWidget(combo)
 
@@ -620,6 +676,283 @@ def create_checkbox_filter_dropdown(parent=None):
             combo.blockSignals(prev)
         _ensure_completer()
 
+    def _ensure_grant_completer():
+        completer = getattr(container, "_grant_completer", None)
+        try:
+            if completer is None:
+                completer = QCompleter(grant_combo.model(), grant_combo)
+                completer.setFilterMode(Qt.MatchContains)
+                completer.setCaseSensitivity(Qt.CaseInsensitive)
+                grant_combo.setCompleter(completer)
+                container._grant_completer = completer
+            else:
+                completer.setModel(grant_combo.model())
+        except Exception:
+            pass
+
+    def _ensure_subgroup_completer():
+        completer = getattr(container, "_subgroup_completer", None)
+        try:
+            if completer is None:
+                completer = QCompleter(subgroup_combo.model(), subgroup_combo)
+                completer.setFilterMode(Qt.MatchContains)
+                completer.setCaseSensitivity(Qt.CaseInsensitive)
+                subgroup_combo.setCompleter(completer)
+                container._subgroup_completer = completer
+            else:
+                completer.setModel(subgroup_combo.model())
+        except Exception:
+            pass
+
+    def _get_selected_roles() -> list[str]:
+        roles: list[str] = []
+        if checkbox_owner.isChecked():
+            roles.append("OWNER")
+        if checkbox_assistant.isChecked():
+            roles.append("ASSISTANT")
+        if checkbox_member.isChecked():
+            roles.append("MEMBER")
+        if checkbox_agent.isChecked():
+            roles.append("AGENT")
+        return roles
+
+    def _normalize_subgroup_item(raw: dict) -> Optional[dict]:
+        """subGroup.json由来のgroupオブジェクトを、UIが扱う簡易dictへ正規化する。"""
+        if not isinstance(raw, dict):
+            return None
+        if raw.get("type") != "group":
+            return None
+        gid = raw.get("id")
+        attrs = raw.get("attributes", {}) if isinstance(raw.get("attributes"), dict) else {}
+        name = str(attrs.get("name") or "").strip() or "Unknown Group"
+        desc = str(attrs.get("description") or "").strip()
+        subjects = attrs.get("subjects") if isinstance(attrs.get("subjects"), list) else []
+        grant_numbers: list[str] = []
+        for subject in subjects:
+            if not isinstance(subject, dict):
+                continue
+            g = subject.get("grantNumber")
+            if g:
+                g = str(g).strip()
+                if g:
+                    grant_numbers.append(g)
+        # 重複除去（順序維持）
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for g in grant_numbers:
+            if g in seen:
+                continue
+            seen.add(g)
+            deduped.append(g)
+
+        return {
+            "id": gid,
+            "name": name,
+            "description": desc,
+            # フィルタなしでは全件表示するため role は空欄
+            "role": "",
+            "grant_numbers": deduped,
+            "subjects_count": len(subjects),
+        }
+
+    def _populate_subgroup_combo(user_subgroups: list[dict]):
+        # 可能なら現在の選択を維持
+        prev_selected_id = None
+        try:
+            current = subgroup_combo.currentData()
+            if isinstance(current, dict) and current.get("id"):
+                prev_selected_id = str(current.get("id"))
+        except Exception:
+            prev_selected_id = None
+
+        prev = subgroup_combo.blockSignals(True)
+        try:
+            subgroup_combo.clear()
+            subgroup_combo.addItem("(フィルタなし)", None)
+            for sg in user_subgroups:
+                try:
+                    name = str(sg.get('name') or '').strip() or 'Unknown'
+                    role = str(sg.get('role') or '').strip()
+                    desc = str(sg.get('description') or '').strip()
+                    caption = f"{name}" if not desc else f"{name} ({desc})"
+                    if role:
+                        caption = f"{caption} [{role}]"
+                    subgroup_combo.addItem(caption, sg)
+                except Exception:
+                    continue
+            # 可能なら選択維持
+            if prev_selected_id:
+                restored = False
+                for i in range(subgroup_combo.count()):
+                    try:
+                        data = subgroup_combo.itemData(i)
+                        if isinstance(data, dict) and str(data.get("id")) == prev_selected_id:
+                            subgroup_combo.setCurrentIndex(i)
+                            restored = True
+                            break
+                    except Exception:
+                        continue
+                if not restored:
+                    subgroup_combo.setCurrentIndex(0)
+            else:
+                subgroup_combo.setCurrentIndex(0)
+        finally:
+            subgroup_combo.blockSignals(prev)
+        _ensure_subgroup_completer()
+
+    def _populate_grant_combo(grants: list[str]):
+        prev = grant_combo.blockSignals(True)
+        try:
+            current_text = (grant_combo.currentText() or '').strip()
+            grant_combo.clear()
+            grant_combo.addItem("(フィルタなし)")
+            for g in grants:
+                grant_combo.addItem(str(g))
+            # 可能なら既存入力を維持
+            if current_text and current_text in grants:
+                idx = grant_combo.findText(current_text)
+                if idx >= 0:
+                    grant_combo.setCurrentIndex(idx)
+            else:
+                grant_combo.setCurrentIndex(0)
+        finally:
+            grant_combo.blockSignals(prev)
+        _ensure_grant_completer()
+
+    def _set_grant_combo_enabled(enabled: bool, placeholder: str | None = None):
+        try:
+            grant_combo.setEnabled(bool(enabled))
+        except Exception:
+            pass
+        if placeholder is not None:
+            try:
+                if grant_combo.lineEdit():
+                    grant_combo.lineEdit().setPlaceholderText(str(placeholder))
+            except Exception:
+                pass
+
+    def _get_selected_subgroup() -> Optional[dict]:
+        try:
+            data = subgroup_combo.currentData()
+            return data if isinstance(data, dict) else None
+        except Exception:
+            return None
+
+    def _get_selected_grant() -> str:
+        try:
+            text = (grant_combo.currentText() or '').strip()
+            if not text or text == "(フィルタなし)":
+                return ""
+            return text
+        except Exception:
+            return ""
+
+    def _get_allowed_grants_by_subgroup() -> Optional[set[str]]:
+        sg = _get_selected_subgroup()
+        if not sg:
+            return None
+        grants = sg.get('grant_numbers')
+        if not isinstance(grants, list) or not grants:
+            return None
+        try:
+            return {str(g).strip() for g in grants if str(g).strip()}
+        except Exception:
+            return None
+
+    def refresh_subgroup_and_grant_filters():
+        """サブグループ/課題番号候補を読み込み、コンボを更新する。
+
+        - 権限フィルタあり: ユーザー所属サブグループを、選択ロールで絞って表示
+        - フィルタなし: subGroup.json由来の全サブグループを表示
+        """
+        try:
+            current_user_id = get_current_user_id_for_data_entry()
+            if not current_user_id:
+                _populate_subgroup_combo([])
+                _populate_grant_combo([])
+                return
+
+            # フィルタなし: 全サブグループ
+            if checkbox_no_filter.isChecked():
+                all_raw = get_subgroups_for_data_entry()
+                all_items: list[dict] = []
+                if isinstance(all_raw, list):
+                    for raw in all_raw:
+                        norm = _normalize_subgroup_item(raw)
+                        if norm:
+                            all_items.append(norm)
+                elif isinstance(all_raw, dict):
+                    norm = _normalize_subgroup_item(all_raw)
+                    if norm:
+                        all_items.append(norm)
+
+                _populate_subgroup_combo(all_items)
+
+                # 課題番号は「サブグループ選択後」に、そのサブグループに紐づくもののみを表示
+                allowed = _get_allowed_grants_by_subgroup()
+                if allowed is None:
+                    _populate_grant_combo([])
+                    _set_grant_combo_enabled(False, "先にサブグループを選択してください")
+                else:
+                    _populate_grant_combo(sorted(allowed))
+                    _set_grant_combo_enabled(True, "課題番号で絞り込み")
+                return
+
+            # 権限フィルタあり: ユーザー所属サブグループ（選択ロールで絞る）
+            info = get_user_subgroups_and_grants(current_user_id)
+            user_subgroups = info.get("subgroups") if isinstance(info, dict) else []
+            if not isinstance(user_subgroups, list):
+                user_subgroups = []
+
+            selected_roles = _get_selected_roles()
+            if selected_roles:
+                filtered_subgroups = [
+                    sg for sg in user_subgroups
+                    if isinstance(sg, dict) and str(sg.get("role") or "") in selected_roles
+                ]
+            else:
+                filtered_subgroups = user_subgroups
+
+            # 課題番号候補も、表示サブグループに合わせて絞る
+            grants_from_subgroups: set[str] = set()
+            for sg in filtered_subgroups:
+                try:
+                    for g in (sg.get("grant_numbers") or []):
+                        if g:
+                            grants_from_subgroups.add(str(g).strip())
+                except Exception:
+                    continue
+
+            _populate_subgroup_combo(filtered_subgroups)
+            _populate_grant_combo(sorted({g for g in grants_from_subgroups if g}))
+            _set_grant_combo_enabled(True, "課題番号で絞り込み")
+        except Exception:
+            _populate_subgroup_combo([])
+            _populate_grant_combo([])
+            _set_grant_combo_enabled(False, "先にサブグループを選択してください")
+
+    def _on_subgroup_changed(*_args):
+        # サブグループ選択に応じて課題番号候補も絞り込み
+        allowed = _get_allowed_grants_by_subgroup()
+        if allowed is None:
+            # 全候補へ戻す
+            try:
+                # いまの状態に応じて、候補を再構築
+                refresh_subgroup_and_grant_filters()
+                # refresh_subgroup_and_grant_filters() 内で grant_combo を更新済み
+                update_filtered_datasets()
+                return
+            except Exception:
+                _populate_grant_combo([])
+                _set_grant_combo_enabled(False, "先にサブグループを選択してください")
+        else:
+            _populate_grant_combo(sorted(allowed))
+            _set_grant_combo_enabled(True, "課題番号で絞り込み")
+        update_filtered_datasets()
+
+    def _on_grant_changed(*_args):
+        update_filtered_datasets()
+
     def _build_no_filter_items(force_reload: bool = False):
         if (not force_reload) and no_filter_cache.get("ready") and isinstance(no_filter_cache.get("items"), list):
             return no_filter_cache["items"], int(no_filter_cache.get("count", 0))
@@ -642,13 +975,32 @@ def create_checkbox_filter_dropdown(parent=None):
             status_label.setText("⚠️ ユーザー情報が取得できません")
             return
         
-        # フィルタなしの場合は全件表示
+        # フィルタなしの場合は全件表示（ただしサブグループ/課題番号の上位フィルタは適用する）
         if checkbox_no_filter.isChecked():
             try:
                 status_label.setText("🔍 フィルタなし: 読み込み中...")
                 items, total = _build_no_filter_items(force_reload=False)
+                allowed_grants = _get_allowed_grants_by_subgroup()
+                selected_grant = _get_selected_grant()
+                if allowed_grants or selected_grant:
+                    filtered_items = []
+                    for display_name, dataset in items:
+                        try:
+                            grant_number = (dataset.get('attributes', {}) or {}).get('grantNumber') if isinstance(dataset, dict) else None
+                            grant_number = str(grant_number).strip() if grant_number else ""
+                        except Exception:
+                            grant_number = ""
+
+                        if selected_grant:
+                            if grant_number == selected_grant:
+                                filtered_items.append((display_name, dataset))
+                        elif allowed_grants is not None:
+                            if grant_number and grant_number in allowed_grants:
+                                filtered_items.append((display_name, dataset))
+                    items = filtered_items
+
                 _populate_combo(items)
-                status_label.setText(f"✅ フィルタなし: {total}件")
+                status_label.setText(f"✅ フィルタなし: {len(items)}件")
                 return
             except Exception as e:
                 status_label.setText(f"❌ エラー: {str(e)}")
@@ -681,6 +1033,26 @@ def create_checkbox_filter_dropdown(parent=None):
             
             # 最適化されたフィルタリング実行
             filtered_datasets = filter_datasets_by_checkbox_selection_optimized(current_user_id, selected_roles)
+
+            # 上位フィルタ: サブグループ/課題番号
+            allowed_grants = _get_allowed_grants_by_subgroup()
+            selected_grant = _get_selected_grant()
+            if allowed_grants or selected_grant:
+                narrowed = []
+                for dataset in filtered_datasets:
+                    try:
+                        grant_number = (dataset.get('attributes', {}) or {}).get('grantNumber') if isinstance(dataset, dict) else None
+                        grant_number = str(grant_number).strip() if grant_number else ""
+                    except Exception:
+                        grant_number = ""
+
+                    if selected_grant:
+                        if grant_number == selected_grant:
+                            narrowed.append(dataset)
+                    elif allowed_grants is not None:
+                        if grant_number and grant_number in allowed_grants:
+                            narrowed.append(dataset)
+                filtered_datasets = narrowed
             
             # ドロップダウンの更新
             # 先頭に空欄を維持
@@ -703,6 +1075,9 @@ def create_checkbox_filter_dropdown(parent=None):
     
     # フィルタ変更時の処理
     def on_filter_changed():
+        # 権限チェック状態に応じてサブグループ候補も連動
+        if not checkbox_no_filter.isChecked():
+            refresh_subgroup_and_grant_filters()
         update_filtered_datasets()
 
     def on_no_filter_changed():
@@ -711,6 +1086,7 @@ def create_checkbox_filter_dropdown(parent=None):
         for cb in (checkbox_owner, checkbox_assistant, checkbox_member, checkbox_agent):
             cb.setEnabled(enabled)
         refresh_no_filter_btn.setEnabled(not enabled)
+        refresh_subgroup_and_grant_filters()
         update_filtered_datasets()
 
     def on_refresh_no_filter_cache():
@@ -735,8 +1111,23 @@ def create_checkbox_filter_dropdown(parent=None):
     checkbox_agent.stateChanged.connect(on_filter_changed)
     checkbox_no_filter.stateChanged.connect(on_no_filter_changed)
     refresh_no_filter_btn.clicked.connect(on_refresh_no_filter_cache)
+
+    # 上位フィルタ（サブグループ/課題番号）
+    try:
+        subgroup_combo.currentIndexChanged.connect(_on_subgroup_changed)
+    except Exception:
+        pass
+    try:
+        grant_combo.currentIndexChanged.connect(_on_grant_changed)
+    except Exception:
+        pass
+    try:
+        grant_combo.editTextChanged.connect(_on_grant_changed)
+    except Exception:
+        pass
     
     # 初回読み込み
+    refresh_subgroup_and_grant_filters()
     update_filtered_datasets()
     
     # データセット更新通知システムに登録
@@ -781,6 +1172,9 @@ def create_checkbox_filter_dropdown(parent=None):
     container.status_label = status_label
     container.update_datasets = update_filtered_datasets
     container.clear_cache = clear_user_cache
+    container.subgroup_filter_combo = subgroup_combo
+    container.grant_number_combo = grant_combo
+    container.refresh_subgroup_and_grant_filters = refresh_subgroup_and_grant_filters
 
     def _apply_role_filter_state(owner=True, assistant=True, member=True, agent=True, force_reload=False):
         # ロール指定が入る場合は「フィルタなし」を解除
