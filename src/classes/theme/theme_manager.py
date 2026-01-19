@@ -92,6 +92,11 @@ class ThemeManager(QObject):
                 def eventFilter(self, obj, event):  # type: ignore[override]
                     try:
                         from PySide6.QtWidgets import QWidget
+                        try:
+                            if not _shiboken_is_valid(obj):
+                                return False
+                        except Exception:
+                            return False
                         if not isinstance(obj, QWidget):
                             return False
                         # Top-level only (dialogs/windows)
@@ -204,6 +209,11 @@ class ThemeManager(QObject):
             class _ComboPlaceholderCompatStyler(QObject):
                 def eventFilter(self, obj, event):  # type: ignore[override]
                     try:
+                        try:
+                            if not _shiboken_is_valid(obj):
+                                return False
+                        except Exception:
+                            return False
                         et = event.type()
                         if et in (event.Type.Show, event.Type.ParentChange):
                             theme_manager._apply_combo_placeholder_compat(obj)
@@ -318,9 +328,31 @@ class ThemeManager(QObject):
             class _ScrollAreaViewportStyler(QObject):
                 def eventFilter(self, obj, event):  # type: ignore[override]
                     try:
+                        try:
+                            if not _shiboken_is_valid(obj):
+                                return False
+                        except Exception:
+                            return False
+
                         et = event.type()
                         if et in (event.Type.Polish, event.Type.Show, event.Type.ParentChange):
+                            # Re-entrancy guard:
+                            # setStyleSheet()/setAttribute() が StyleChange/Polish を誘発し、
+                            # 同一ウィジェットに対して eventFilter が再入するとスパイクし得る。
+                            try:
+                                if getattr(obj, "property", None) and obj.property("_rde_scroll_area_viewport_styling") is True:
+                                    return False
+                            except Exception:
+                                pass
+                            try:
+                                obj.setProperty("_rde_scroll_area_viewport_styling", True)
+                            except Exception:
+                                pass
                             theme_manager._apply_scroll_area_viewport_style(obj)
+                            try:
+                                obj.setProperty("_rde_scroll_area_viewport_styling", False)
+                            except Exception:
+                                pass
                     except Exception:
                         pass
                     return False
@@ -401,10 +433,32 @@ class ThemeManager(QObject):
             class _TextAreaViewportStyler(QObject):
                 def eventFilter(self, obj, event):  # type: ignore[override]
                     try:
+                        try:
+                            if not _shiboken_is_valid(obj):
+                                return False
+                        except Exception:
+                            return False
+
                         et = event.type()
                         # Polish/Show/ParentChange あたりで拾う（取りこぼしを減らす）
                         if et in (event.Type.Polish, event.Type.Show, event.Type.ParentChange):
+                            # Re-entrancy guard:
+                            # setStyleSheet() が同期的に Polish/StyleChange を誘発し、
+                            # eventFilter がネストして呼ばれるとフリーズ級に膨らむことがある。
+                            try:
+                                if getattr(obj, "property", None) and obj.property("_rde_text_area_viewport_styling") is True:
+                                    return False
+                            except Exception:
+                                pass
+                            try:
+                                obj.setProperty("_rde_text_area_viewport_styling", True)
+                            except Exception:
+                                pass
                             theme_manager._apply_text_area_viewport_style(obj)
+                            try:
+                                obj.setProperty("_rde_text_area_viewport_styling", False)
+                            except Exception:
+                                pass
                     except Exception:
                         pass
                     return False

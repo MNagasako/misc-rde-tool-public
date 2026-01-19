@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from typing import Optional
 
+from shiboken6 import isValid as _shiboken_is_valid
+
 
 def install_dialog_centering(*, enabled: bool = True, force: bool = False) -> bool:
     """アプリ全体のポップアップダイアログを親ウィンドウ中央へ寄せる。
@@ -40,6 +42,12 @@ def install_dialog_centering(*, enabled: bool = True, force: bool = False) -> bo
                 try:
                     from qt_compat.core import QTimer
                     from qt_compat.widgets import QApplication, QDialog, QWidget
+
+                    try:
+                        if not _shiboken_is_valid(obj):
+                            return False
+                    except Exception:
+                        return False
 
                     if not isinstance(obj, QWidget):
                         return False

@@ -120,6 +120,15 @@ def show_progress_dialog(parent, title, worker, show_completion_dialog=True):
     progress_dialog.setLabelText("処理を開始しています...")
     progress_dialog.setRange(0, 100)
     progress_dialog.setValue(0)
+    # NOTE:
+    # QProgressDialog は value==maximum になると autoClose/autoReset により自動で閉じることがある。
+    # 本アプリでは完了/失敗のタイミングは worker.finished で管理するため、自動close/resetは無効化する。
+    # これにより「途中で閉じたり開いたりを高速で繰り返す」症状を防ぐ。
+    try:
+        progress_dialog.setAutoClose(False)
+        progress_dialog.setAutoReset(False)
+    except Exception:
+        pass
     # 短時間処理で一瞬だけ表示されるのを避ける（必要ならQt側が自動で表示）
     progress_dialog.setMinimumDuration(700)
     progress_dialog.setWindowModality(Qt.WindowModal)
