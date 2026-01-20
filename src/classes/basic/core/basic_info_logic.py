@@ -3852,8 +3852,9 @@ def fetch_basic_info_logic(
             ("データセット情報取得", 16),
             ("データエントリ情報取得", 12),
             ("インボイス情報取得", 10),
-            ("invoiceSchema情報取得", 10),
             ("テンプレート・設備・ライセンス情報取得", 8),
+            # invoiceSchemas は template.json に依存するため、テンプレート取得後に実行する
+            ("invoiceSchema情報取得", 10),
             ("統合情報生成・WebView遷移", 5)
         ]
 
@@ -4256,44 +4257,8 @@ def fetch_basic_info_logic(
         if not update_stage_progress(8, 100, "インボイス情報取得完了"):
             return "キャンセルされました"
 
-        # 10. invoiceSchema情報取得
-        if not update_stage_progress(9, 0, "invoiceSchema情報取得中"):
-            return "キャンセルされました"
-            
-        logger.debug("fetch_invoice_schemas")
-        
-        # invoiceSchemas フォルダ内のファイル数をチェック（v2.1.21: 欠損判定）
-        invoiceschemas_dir = os.path.join(OUTPUT_DIR, "rde", "data", "invoiceSchemas")
-        invoiceschemas_has_files, invoiceschemas_count = _folder_has_files(invoiceschemas_dir)
-        
-        skip_invoiceschema_fetch = not force_download and invoiceschemas_has_files
-        
-        if skip_invoiceschema_fetch:
-            logger.info(f"invoiceSchema情報: 既存フォルダ({invoiceschemas_count}件)を利用するため取得をスキップします")
-            if not update_stage_progress(9, 100, f"キャッシュ完了 (既存: {invoiceschemas_count}件)"):
-                return "キャンセルされました"
-        else:
-            try:
-                output_dir = os.path.join(OUTPUT_DIR, "rde", "data")
-
-                invoiceschema_progress_adapter = _make_stage_progress_adapter(9)
-
-                invoice_schema_result = fetch_invoice_schemas(
-                    bearer_token,
-                    output_dir,
-                    progress_callback=invoiceschema_progress_adapter,
-                    max_workers=parallel_workers,
-                )
-                if invoice_schema_result == "キャンセルされました":
-                    return "キャンセルされました"
-            except Exception as e:
-                logger.warning(f"invoiceSchema取得でエラーが発生しましたが処理を続行します: {e}")
-        
-            if not update_stage_progress(9, 100, "完了"):
-                return "キャンセルされました"
-
-        # 11. テンプレート・設備・ライセンス情報取得
-        if not update_stage_progress(10, 0, "テンプレート情報取得中"):
+        # 10. テンプレート・設備・ライセンス情報取得
+        if not update_stage_progress(9, 0, "テンプレート情報取得中"):
             return "キャンセルされました"
             
         logger.debug("fetch_template_info_from_api")
@@ -4303,7 +4268,7 @@ def fetch_basic_info_logic(
             logger.info("テンプレート情報: 既存の template.json を利用するため取得をスキップします")
         
         # devices/licenses は独立なので、必要分があれば並列化して短縮
-        if not update_stage_progress(10, 33, "設備・利用ライセンス情報取得中"):
+        if not update_stage_progress(9, 33, "設備・利用ライセンス情報取得中"):
             return "キャンセルされました"
 
         need_instruments = force_download or not _exists(INSTRUMENTS_JSON_PATH)
@@ -4335,12 +4300,40 @@ def fetch_basic_info_logic(
                     name = future_to_name[future]
                     future.result()
                     completed += 1
-                    if not update_stage_progress(10, 33 + int((completed / max(total, 1)) * 33), f"完了: {name} ({completed}/{total})"):
+                    if not update_stage_progress(9, 33 + int((completed / max(total, 1)) * 33), f"完了: {name} ({completed}/{total})"):
                         return "キャンセルされました"
 
-        if not update_stage_progress(10, 66, "完了"):
+        if not update_stage_progress(9, 66, "完了"):
             return "キャンセルされました"
         
+        if not update_stage_progress(9, 100, "完了"):
+            return "キャンセルされました"
+
+        # 11. invoiceSchema情報取得（template.json 取得後）
+        if not update_stage_progress(10, 0, "invoiceSchema情報取得中"):
+            return "キャンセルされました"
+
+        logger.debug("fetch_invoice_schemas")
+
+        try:
+            output_dir = os.path.join(OUTPUT_DIR, "rde", "data")
+
+            invoiceschema_progress_adapter = _make_stage_progress_adapter(10)
+
+            # invoice_schema取得ボタンと同様に fetch_invoice_schemas を実行する。
+            # fetch_invoice_schema_from_api 側で既存ファイル/summaryはスキップされるため、
+            # ここでフォルダ存在だけで丸ごとスキップしない。
+            invoice_schema_result = fetch_invoice_schemas(
+                bearer_token,
+                output_dir,
+                progress_callback=invoiceschema_progress_adapter,
+                max_workers=parallel_workers,
+            )
+            if invoice_schema_result == "キャンセルされました":
+                return "キャンセルされました"
+        except Exception as e:
+            logger.warning(f"invoiceSchema取得でエラーが発生しましたが処理を続行します: {e}")
+
         if not update_stage_progress(10, 100, "完了"):
             return "キャンセルされました"
 

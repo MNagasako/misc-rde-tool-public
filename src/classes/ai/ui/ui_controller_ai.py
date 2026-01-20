@@ -1451,7 +1451,7 @@ class UIControllerAI:
 
     def _build_prompt_by_type(self, prompt_file, prompt_template, experiment_data, static_data, prepared_data, response_display):
         """
-        Step 2.5.1.2: プロンプト構築層の分離
+        Step: プロンプト構築層の分離
         プロンプトファイルの種類に応じて適切な構築方法を選択し、ARIMデータ統合を実行
         """
         try:
@@ -1541,7 +1541,7 @@ class UIControllerAI:
 
     def _execute_ai_analysis(self, formatted_prompt, provider, model, experiment_data, is_batch_mode, response_display):
         """
-        Step 2.5.1.4: AI実行・結果処理層の分離
+        Step: AI実行・結果処理層の分離
         AI分析の実行と結果処理を統合
         """
         import datetime
@@ -1685,7 +1685,7 @@ class UIControllerAI:
 
     def _get_ai_config(self, response_display):
         """
-        Step 2.5.1.3: AI設定管理層の分離
+        Step: AI設定管理層の分離
         AI プロバイダーとモデルの設定取得を統合
         """
         # プロバイダーとモデルを安全に取得

@@ -470,6 +470,7 @@ def fetch_basic_info(controller):
                 # group.jsonが読めない場合はデフォルト値を使用（後続処理で設定）
         
         # プログレス表示付きワーカーを作成
+        parallel_max_workers = _get_basic_info_parallel_workers(controller, default=10)
         worker = ProgressWorker(
             task_func=fetch_basic_info_logic,
             task_kwargs={
@@ -480,6 +481,7 @@ def fetch_basic_info(controller):
                 'searchWords': None,
                 'skip_confirmation': True,
                 'force_download': force_download,
+                'parallel_max_workers': parallel_max_workers,
             },
             task_name="基本情報取得"
         )
@@ -625,6 +627,7 @@ def fetch_basic_info_self(controller):
                 logger.warning(f"group.json の読み込みに失敗: {e}")
         
         # プログレス表示付きワーカーを作成
+        parallel_max_workers = _get_basic_info_parallel_workers(controller, default=10)
         worker = ProgressWorker(
             task_func=fetch_basic_info_logic,
             task_kwargs={
@@ -637,6 +640,7 @@ def fetch_basic_info_self(controller):
                 'skip_confirmation': True,
                 'program_id': selected_program_id,
                 'force_download': force_download,
+                'parallel_max_workers': parallel_max_workers,
             },
             task_name="検索付き基本情報取得"
         )
@@ -977,13 +981,13 @@ def fetch_common_info_only(controller):
                 QTimer.singleShot(100, lambda: refresh_json_status_display(controller))
             else:
                 QMessageBox.critical(controller.parent, "共通情報取得 - エラー", message)
-        QTimer.singleShot(0, handle_finished)
+        # 先にプログレスダイアログを閉じる処理（show_progress_dialog側）を通してから表示する
+        QTimer.singleShot(50, handle_finished)
     
     # 通常のプログレス表示
-    progress_dialog = show_progress_dialog(controller.parent, "共通情報取得", worker)
-    
-    # 完了時処理を上書き
-    worker.finished.disconnect()  # 既存の接続を削除
+    progress_dialog = show_progress_dialog(controller.parent, "共通情報取得", worker, show_completion_dialog=False)
+
+    # 完了時の追加処理（プログレス側の close/timer停止を妨げない）
     worker.finished.connect(on_finished_with_refresh)
 
 
@@ -1037,10 +1041,10 @@ def fetch_common_info_only2(controller):
                 QTimer.singleShot(100, lambda: refresh_json_status_display(controller))
             else:
                 QMessageBox.critical(controller.parent, "共通情報取得2 - エラー", message)
-        QTimer.singleShot(0, handle_finished)
+        # 先にプログレスダイアログを閉じる処理（show_progress_dialog側）を通してから表示する
+        QTimer.singleShot(50, handle_finished)
 
     progress_dialog = show_progress_dialog(controller.parent, "共通情報取得2", worker, show_completion_dialog=False)
-    worker.finished.disconnect()
     worker.finished.connect(on_finished_with_refresh)
 
     return progress_dialog

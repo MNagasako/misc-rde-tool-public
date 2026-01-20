@@ -23,6 +23,7 @@ from qt_compat.widgets import (
     QDialogButtonBox,
     QHBoxLayout,
     QLabel,
+    QApplication,
     QPushButton,
     QSpinBox,
     QTableWidget,
@@ -30,7 +31,7 @@ from qt_compat.widgets import (
     QVBoxLayout,
     QWidget,
 )
-from qt_compat.core import Qt
+from qt_compat.core import Qt, QTimer
 
 from classes.theme import ThemeManager, ThemeKey, get_color
 from classes.managers.app_config_manager import get_config_manager
@@ -77,8 +78,11 @@ class CommonInfoSelectionDialog(QDialog):
     def __init__(self, parent=None, initial_state: Optional[Dict[str, Any]] = None):
         super().__init__(parent)
         self.setWindowTitle("共通情報取得2 - 取得対象の選択")
-        self.setMinimumWidth(980)
-        self.setMinimumHeight(520)
+
+        # 初期サイズはテーブルの内容から後で算出（スクロールバーを抑制しつつ画面90%を上限）
+        self.setMinimumWidth(760)
+        self.setMinimumHeight(480)
+        self._did_initial_resize = False
 
         self._theme_manager = ThemeManager.instance()
         self._row_bindings: list[_RowBinding] = []
@@ -94,6 +98,9 @@ class CommonInfoSelectionDialog(QDialog):
         self._apply_theme(self._theme_manager.get_mode())
 
         self._refresh_table()
+
+        # 初期サイズ調整（ウィジェット構築後に一度だけ）
+        QTimer.singleShot(0, self._adjust_initial_size_to_table)
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -181,6 +188,12 @@ class CommonInfoSelectionDialog(QDialog):
         self.buttons.rejected.connect(self.reject)
         root.addWidget(self.buttons)
 
+        ok_btn = self.buttons.button(QDialogButtonBox.Ok)
+        if ok_btn is not None:
+            ok_btn.setText("取得開始")
+            ok_btn.setMinimumHeight(40)
+            ok_btn.setMinimumWidth(140)
+
     @staticmethod
     def _select_combo_by_user_data(combo: QComboBox, user_data: str) -> None:
         for i in range(combo.count()):
@@ -208,6 +221,76 @@ class CommonInfoSelectionDialog(QDialog):
             }}
             """
         )
+
+        # 「取得開始」ボタンを強調（色はテーマから取得）
+        try:
+            from classes.utils.button_styles import get_button_style
+
+            ok_btn = self.buttons.button(QDialogButtonBox.Ok)
+            if ok_btn is not None:
+                # Basic Info tab のグループ2配色（共通情報取得系）を利用
+                ok_btn.setStyleSheet(
+                    get_button_style("basicinfo_group2")
+                    + " QPushButton { font-size: 13px; padding: 6px 14px; }"
+                )
+        except Exception:
+            pass
+
+    def _adjust_initial_size_to_table(self) -> None:
+        """テーブル内容に合わせて初期サイズを調整する。
+
+        - 可能な限りスクロールバーが出ないサイズにする
+        - ただし画面の90%を上限とし、超過分はスクロールバーで吸収
+        """
+        if self._did_initial_resize:
+            return
+        self._did_initial_resize = True
+
+        # 画面サイズ（オフスクリーン環境も考慮）
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return
+        avail = screen.availableGeometry()
+        max_w = max(320, int(avail.width() * 0.6))
+        max_h = max(240, int(avail.height() * 0.9))
+        try:
+            self.setMaximumSize(max_w, max_h)
+        except Exception:
+            pass
+
+        try:
+            self.table.resizeRowsToContents()
+            self.table.resizeColumnsToContents()
+        except Exception:
+            pass
+
+        # 現在の sizeHint を基準に、テーブル部分だけ「全行が見える」サイズに差し替える
+        try:
+            base_hint = self.sizeHint()
+            base_table_hint = self.table.sizeHint()
+
+            header_h = int(self.table.horizontalHeader().height())
+            rows_h = int(self.table.verticalHeader().length())
+            frame = int(self.table.frameWidth()) * 2
+            desired_table_h = header_h + rows_h + frame + 16
+
+            header_w = int(self.table.verticalHeader().width())
+            cols_w = int(self.table.horizontalHeader().length())
+            desired_table_w = header_w + cols_w + frame + 24
+
+            ideal_w = int(base_hint.width() - base_table_hint.width() + desired_table_w)
+            ideal_h = int(base_hint.height() - base_table_hint.height() + desired_table_h)
+
+            ideal_w = min(max(ideal_w, self.minimumWidth()), max_w)
+            ideal_h = min(max(ideal_h, self.minimumHeight()), max_h)
+
+            self.resize(ideal_w, ideal_h)
+            try:
+                self.setSizeGripEnabled(True)
+            except Exception:
+                pass
+        except Exception:
+            return
 
     def _set_all_enabled(self, enabled: bool) -> None:
         for binding in self._row_bindings:
