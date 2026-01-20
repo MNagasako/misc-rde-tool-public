@@ -1,5 +1,5 @@
 """
-UIコントローラー基盤クラス - ARIM RDE Tool v1.13.1
+UIコントローラー基盤クラス - ARIM RDE Tool
 UI Controllerの基本機能・初期化・モード管理を担当
 """
 import logging

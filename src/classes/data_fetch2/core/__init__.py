@@ -1,5 +1,5 @@
 """
-Data Fetch2 Package - ARIM RDE Tool v1.17.2
+Data Fetch2 Package - ARIM RDE Tool
 
 データセット選択・ファイル一括取得機能の改良版パッケージ
 データ取得UIウィジェットとファイル取得ロジックを統合

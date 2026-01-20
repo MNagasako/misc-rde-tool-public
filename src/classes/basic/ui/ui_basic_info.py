@@ -120,10 +120,8 @@ def show_progress_dialog(parent, title, worker, show_completion_dialog=True):
     progress_dialog.setLabelText("処理を開始しています...")
     progress_dialog.setRange(0, 100)
     progress_dialog.setValue(0)
-    # NOTE:
-    # QProgressDialog は value==maximum になると autoClose/autoReset により自動で閉じることがある。
-    # 本アプリでは完了/失敗のタイミングは worker.finished で管理するため、自動close/resetは無効化する。
-    # これにより「途中で閉じたり開いたりを高速で繰り返す」症状を防ぐ。
+    # QProgressDialog の autoClose/autoReset は 100% 到達時に勝手に閉じるため、
+    # 長い処理や「丸めで一瞬100%」になるケースでチラつき/再表示の原因になり得る。
     try:
         progress_dialog.setAutoClose(False)
         progress_dialog.setAutoReset(False)
@@ -236,6 +234,16 @@ def show_progress_dialog(parent, title, worker, show_completion_dialog=True):
             return ""
 
     # 完了時の処理
+    # NOTE: completion_in_dialog=True の場合は、完了を同一ダイアログ内で表示して
+    # 「閉じる」押下まで残す（別ダイアログを増やさない）。
+    completion_in_dialog = False
+    try:
+        completion_in_dialog = bool(getattr(worker, "completion_in_dialog", False))
+    except Exception:
+        completion_in_dialog = False
+
+    _state = {"done": False}
+
     def on_finished(success, message):
         def handle_finished():
             try:
@@ -245,15 +253,40 @@ def show_progress_dialog(parent, title, worker, show_completion_dialog=True):
             except Exception:
                 pass
 
+            _state["done"] = True
+
+            elapsed_text = _format_elapsed(time.perf_counter() - _started)
+            if elapsed_text:
+                message_with_time = f"{message}\n\n所要時間: {elapsed_text}"
+            else:
+                message_with_time = str(message)
+
+            if completion_in_dialog:
+                try:
+                    progress_dialog.setRange(0, 100)
+                    progress_dialog.setValue(100)
+                except Exception:
+                    pass
+                try:
+                    prefix = "✅ 完了" if success else "❌ エラー"
+                    progress_dialog.setLabelText(f"{prefix}\n\n{message_with_time}")
+                except Exception:
+                    pass
+                try:
+                    progress_dialog.setCancelButtonText("閉じる")
+                except Exception:
+                    pass
+                try:
+                    progress_dialog.raise_()
+                    progress_dialog.activateWindow()
+                except Exception:
+                    pass
+                return
+
             if progress_dialog:
                 progress_dialog.close()
             # show_completion_dialog=Falseの場合はダイアログを表示しない
             if show_completion_dialog:
-                elapsed_text = _format_elapsed(time.perf_counter() - _started)
-                if elapsed_text:
-                    message_with_time = f"{message}\n\n所要時間: {elapsed_text}"
-                else:
-                    message_with_time = message
                 if success:
                     QMessageBox.information(parent, title, message_with_time)
                 else:
@@ -262,6 +295,11 @@ def show_progress_dialog(parent, title, worker, show_completion_dialog=True):
     
     # キャンセル処理
     def on_cancel():
+        # 完了後はキャンセルではなく「閉じる」として扱う
+        if _state.get("done"):
+            progress_dialog.close()
+            return
+
         worker.cancel()
         try:
             tick_timer = getattr(progress_dialog, "_elapsed_update_timer", None)
@@ -386,17 +424,23 @@ def fetch_basic_info(controller):
         force_download = False
 
         if existing_files:
-            overwrite_reply = QMessageBox.question(
-                controller.parent,
-                "上書き取得の確認",
+            msg_box = QMessageBox(controller.parent)
+            msg_box.setIcon(QMessageBox.Question)
+            msg_box.setWindowTitle("上書き取得の確認")
+            msg_box.setText(
                 "既存の基本情報JSONが見つかりました。\n"
-                "再取得して上書き保存しますか？\n\n"
-                "• はい: すべて再取得して最新データで上書き\n"
-                "• いいえ: 新規ファイルのみ取得し、既存ファイルは維持",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
+                "再取得して上書き保存しますか？"
             )
-            force_download = overwrite_reply == QMessageBox.Yes
+            msg_box.setInformativeText(
+                "• はい（上書き取得）: すべて再取得して最新データで上書き\n"
+                "• いいえ（新規のみ取得）: 新規ファイルのみ取得します。\n"
+                "  既存ファイルは内容が古くても更新されません。"
+            )
+            yes_btn = msg_box.addButton("はい（上書き取得）", QMessageBox.YesRole)
+            no_btn = msg_box.addButton("いいえ（新規のみ取得）", QMessageBox.NoRole)
+            msg_box.setDefaultButton(no_btn)
+            msg_box.exec()
+            force_download = msg_box.clickedButton() == yes_btn
         else:
             force_download = True  # 取得対象が存在しない場合は強制取得
         
@@ -536,17 +580,23 @@ def fetch_basic_info_self(controller):
         force_download = False
 
         if existing_files:
-            overwrite_reply = QMessageBox.question(
-                controller.parent,
-                "上書き取得の確認",
+            msg_box = QMessageBox(controller.parent)
+            msg_box.setIcon(QMessageBox.Question)
+            msg_box.setWindowTitle("上書き取得の確認")
+            msg_box.setText(
                 "既存の基本情報JSONが見つかりました。\n"
-                "再取得して上書き保存しますか？\n\n"
-                "• はい: すべて再取得して最新データで上書き\n"
-                "• いいえ: 新規ファイルのみ取得し、既存ファイルは維持",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
+                "再取得して上書き保存しますか？"
             )
-            force_download = overwrite_reply == QMessageBox.Yes
+            msg_box.setInformativeText(
+                "• はい（上書き取得）: すべて再取得して最新データで上書き\n"
+                "• いいえ（新規のみ取得）: 新規ファイルのみ取得します。\n"
+                "  既存ファイルは内容が古くても更新されません。"
+            )
+            yes_btn = msg_box.addButton("はい（上書き取得）", QMessageBox.YesRole)
+            no_btn = msg_box.addButton("いいえ（新規のみ取得）", QMessageBox.NoRole)
+            msg_box.setDefaultButton(no_btn)
+            msg_box.exec()
+            force_download = msg_box.clickedButton() == yes_btn
         else:
             force_download = True  # 取得対象が存在しない場合は強制取得
         
@@ -863,17 +913,23 @@ def fetch_common_info_only(controller):
     force_download = False
 
     if existing_files:
-        overwrite_reply = QMessageBox.question(
-            controller.parent,
-            "上書き取得の確認",
+        msg_box = QMessageBox(controller.parent)
+        msg_box.setIcon(QMessageBox.Question)
+        msg_box.setWindowTitle("上書き取得の確認")
+        msg_box.setText(
             "既存の共通情報JSONが見つかりました。\n"
-            "再取得して上書き保存しますか？\n\n"
-            "• はい: すべて再取得して最新データで上書き\n"
-            "• いいえ: 新規ファイルのみ取得し、既存ファイルは維持",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No,
+            "再取得して上書き保存しますか？"
         )
-        force_download = overwrite_reply == QMessageBox.Yes
+        msg_box.setInformativeText(
+            "• はい（上書き取得）: すべて再取得して最新データで上書き\n"
+            "• いいえ（新規のみ取得）: 新規ファイルのみ取得します。\n"
+            "  既存ファイルは内容が古くても更新されません。"
+        )
+        yes_btn = msg_box.addButton("はい（上書き取得）", QMessageBox.YesRole)
+        no_btn = msg_box.addButton("いいえ（新規のみ取得）", QMessageBox.NoRole)
+        msg_box.setDefaultButton(no_btn)
+        msg_box.exec()
+        force_download = msg_box.clickedButton() == yes_btn
 
     # === グループ選択ダイアログ（v2.1.16追加） ===
     selected_program_id = None
@@ -924,10 +980,10 @@ def fetch_common_info_only(controller):
         QTimer.singleShot(0, handle_finished)
     
     # 通常のプログレス表示
-    # NOTE:
-    # show_progress_dialog は worker.finished で progress_dialog.close() を行う。
-    # ここで disconnect してしまうと、完了ダイアログが表示されてもプログレスが残る原因になる。
-    progress_dialog = show_progress_dialog(controller.parent, "共通情報取得", worker, show_completion_dialog=False)
+    progress_dialog = show_progress_dialog(controller.parent, "共通情報取得", worker)
+    
+    # 完了時処理を上書き
+    worker.finished.disconnect()  # 既存の接続を削除
     worker.finished.connect(on_finished_with_refresh)
 
 
@@ -984,6 +1040,7 @@ def fetch_common_info_only2(controller):
         QTimer.singleShot(0, handle_finished)
 
     progress_dialog = show_progress_dialog(controller.parent, "共通情報取得2", worker, show_completion_dialog=False)
+    worker.finished.disconnect()
     worker.finished.connect(on_finished_with_refresh)
 
     return progress_dialog
@@ -1334,8 +1391,10 @@ def execute_individual_stage_ui(controller, stage_name):
         QTimer.singleShot(0, handle_finished)
     
     # 通常のプログレス表示
-    # NOTE: disconnect すると show_progress_dialog 側の close が外れて残留し得るため、追加connectで拡張する。
-    progress_dialog = show_progress_dialog(controller.parent, f"{stage_name}実行", worker, show_completion_dialog=False)
+    progress_dialog = show_progress_dialog(controller.parent, f"{stage_name}実行", worker)
+    
+    # 完了時処理を上書き
+    worker.finished.disconnect()  # 既存の接続を削除
     worker.finished.connect(on_finished_with_refresh)
 
 def create_individual_execution_widget(parent=None):

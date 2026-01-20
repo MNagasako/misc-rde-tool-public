@@ -1,5 +1,5 @@
 """
-スキーマフォーム生成ユーティリティ - ARIM RDE Tool v1.17.2
+スキーマフォーム生成ユーティリティ - ARIM RDE Tool
 invoiceSchemaからUIフォームを動的生成する機能
 
 主要機能:
@@ -10,7 +10,7 @@ invoiceSchemaからUIフォームを動的生成する機能
 """
 
 import json
-from qt_compat.widgets import QGroupBox, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit
+from qt_compat.widgets import QGroupBox, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit, QWidget
 from qt_compat.core import Qt
 
 import logging
@@ -57,7 +57,18 @@ def create_schema_form(schema_path, parent=None):
     if isinstance(custom, dict):
         properties = custom.get("properties", {}) or {}
 
+    required_keys: set[str] = set()
+    try:
+        if isinstance(custom, dict):
+            req_list = custom.get("required")
+            if isinstance(req_list, list):
+                required_keys.update([str(k) for k in req_list if k])
+    except Exception:
+        required_keys = set()
+
     key_to_widget = {}
+    key_to_label_widget = {}
+    key_to_row_widget = {}
 
     if not properties:
         # フォーム項目が定義されていない場合は説明ラベルのみ表示
@@ -71,16 +82,19 @@ def create_schema_form(schema_path, parent=None):
     else:
         # プロパティ解析・フォーム要素生成
         for key, prop in properties.items():
-            row = QHBoxLayout()
+            row_widget = QWidget(group)
+            row = QHBoxLayout(row_widget)
+            row.setContentsMargins(0, 0, 0, 0)
 
             # ラベル作成
-            label = QLabel(prop.get("label", {}).get("ja", key))
+            label = QLabel(prop.get("label", {}).get("ja", key), row_widget)
             row.addWidget(label)
+            key_to_label_widget[key] = label
 
             # 入力要素作成
             if "enum" in prop:
                 # 選択肢がある場合：コンボボックス
-                combo = QComboBox()
+                combo = QComboBox(row_widget)
                 combo.addItem("")  # 初期値として空欄を追加
                 combo.addItems([str(v) for v in prop["enum"]])
                 combo.setEditable(False)
@@ -90,16 +104,26 @@ def create_schema_form(schema_path, parent=None):
                 key_to_widget[key] = combo
             else:
                 # 自由入力：テキストフィールド
-                edit = QLineEdit()
+                edit = QLineEdit(row_widget)
                 edit.setPlaceholderText(prop.get("options", {}).get("placeholder", {}).get("ja", ""))
                 row.addWidget(edit)
                 key_to_widget[key] = edit
 
-            layout.addLayout(row)
+            layout.addWidget(row_widget)
+            key_to_row_widget[key] = row_widget
+
+            try:
+                if isinstance(prop, dict) and prop.get("required") is True:
+                    required_keys.add(str(key))
+            except Exception:
+                pass
 
     group.setLayout(layout)
     # 英語key→widgetマッピングを保存
     group._schema_key_to_widget = key_to_widget
+    group._schema_key_to_label_widget = key_to_label_widget
+    group._schema_key_to_row_widget = key_to_row_widget
+    group._schema_required_keys = sorted(required_keys)
     
     # フォーム操作メソッドを追加
     def get_form_data():

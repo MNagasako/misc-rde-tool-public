@@ -20,7 +20,7 @@ BatchProcessor - バッチ処理クラス
 
 # -*- coding: utf-8 -*-
 """
-BatchProcessor: バッチ処理機能を管理するクラス - ARIM RDE Tool v1.13.1
+BatchProcessor: バッチ処理機能を管理するクラス - ARIM RDE Tool
 複数プロジェクトの一括処理・進行状況管理・結果集約機能
 【注意】バージョン更新時はconfig/common.py のREVISIONも要確認
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-アプリケーション設定管理クラス - ARIM RDE Tool v1.13.1
+アプリケーション設定管理クラス - ARIM RDE Tool
 """
 
 import json

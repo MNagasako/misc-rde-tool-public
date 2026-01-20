@@ -1,5 +1,5 @@
 """
-UI関連のユーティリティクラス - ARIM RDE Tool v1.13.1
+UI関連のユーティリティクラス - ARIM RDE Tool
 UIControllerから分離したユーティリティメソッド群
 """
 from qt_compat.widgets import QPushButton

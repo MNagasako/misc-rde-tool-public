@@ -1,5 +1,5 @@
 """
-UIコントローラーフォーム機能クラス - ARIM RDE Tool v1.13.2
+UIコントローラーフォーム機能クラス - ARIM RDE Tool
 UIControllerのフォーム生成・バリデーション・入力管理機能を担当
 """
 import logging

@@ -146,6 +146,12 @@ class RegistrationStatusWidget(QWidget):
         self.filter_data = QLineEdit(); self.filter_data.setPlaceholderText("データ名フィルタ")
         self.filter_dataset = QLineEdit(); self.filter_dataset.setPlaceholderText("データセットフィルタ")
         self.filter_status = QComboBox(); self.filter_status.addItem("(すべて)")
+        # 省略されないよう、内容に合わせて最小幅を確保（後でステータス一覧更新時にも再調整）
+        try:
+            if hasattr(QComboBox, 'AdjustToContents'):
+                self.filter_status.setSizeAdjustPolicy(QComboBox.AdjustToContents)  # type: ignore[attr-defined]
+        except Exception:
+            pass
         self.filter_creator = QLineEdit(); self.filter_creator.setPlaceholderText("データ投入者(所属)フィルタ")
         self.filter_inst = QLineEdit(); self.filter_inst.setPlaceholderText("装置フィルタ")
         filters.addWidget(self.filter_start)
@@ -207,10 +213,17 @@ class RegistrationStatusWidget(QWidget):
         # 列幅（リンク列の幅/ボタン幅を小さめに）
         try:
             self.table.setColumnWidth(self.COL_AUTO, 86)
+            self.table.setColumnWidth(self.COL_START, 150)
+            self.table.setColumnWidth(self.COL_STATUS, 120)
+            self.table.setColumnWidth(self.COL_ERROR_CODE, 90)
+            self.table.setColumnWidth(self.COL_ERROR_MESSAGE, 240)
+            self.table.setColumnWidth(self.COL_INSTRUMENT, 140)
             self.table.setColumnWidth(self.COL_ENTRY_ID, 220)
             self.table.setColumnWidth(self.COL_LINK, 60)
         except Exception:
             pass
+
+        self._adjust_filter_status_width()
 
         # Signals
         self.btn_latest.clicked.connect(self.load_latest)
@@ -230,6 +243,29 @@ class RegistrationStatusWidget(QWidget):
             self.destroyed.connect(self._on_destroyed)
         except Exception:
             pass
+
+    def _adjust_filter_status_width(self) -> None:
+        """ステータスフィルタの表示が省略されないよう最小幅を調整する。"""
+        try:
+            items = []
+            for i in range(self.filter_status.count()):
+                items.append(self.filter_status.itemText(i) or "")
+            if not items:
+                return
+            fm = self.filter_status.fontMetrics()
+            max_px = 0
+            for t in items:
+                try:
+                    max_px = max(max_px, int(fm.horizontalAdvance(t)))
+                except Exception:
+                    pass
+            # 矢印/余白分を加算し、過度に広がらないよう上限を設定
+            target = max_px + 48
+            target = max(target, 140)
+            target = min(target, 280)
+            self.filter_status.setMinimumWidth(int(target))
+        except Exception:
+            return
 
     @Slot()
     def _on_retired_worker_finished(self) -> None:
@@ -475,6 +511,11 @@ class RegistrationStatusWidget(QWidget):
         if idx >= 0:
             self.filter_status.setCurrentIndex(idx)
         self.filter_status.blockSignals(False)
+
+        try:
+            QTimer.singleShot(0, self._adjust_filter_status_width)
+        except Exception:
+            pass
 
         try:
             if was_sorting:

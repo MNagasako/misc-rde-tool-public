@@ -106,7 +106,10 @@ class SimpleProgressWorker(QObject):
             
             if not self.is_cancelled:
                 self.progress.emit(100, f"{self.task_name}が完了しました")
-                self.finished.emit(True, f"{self.task_name}が正常に完了しました")
+                if isinstance(result, str) and result:
+                    self.finished.emit(True, result)
+                else:
+                    self.finished.emit(True, f"{self.task_name}が正常に完了しました")
                 
         except Exception as e:
             self.progress.emit(100, f"{self.task_name}でエラーが発生しました")

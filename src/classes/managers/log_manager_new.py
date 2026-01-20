@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ログ管理クラス - ARIM RDE Tool v1.13.1
+ログ管理クラス - ARIM RDE Tool
 """
 
 import logging

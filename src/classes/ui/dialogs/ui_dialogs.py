@@ -1,5 +1,5 @@
 """
-UI関連のダイアログクラス - ARIM RDE Tool v1.13.1
+UI関連のダイアログクラス - ARIM RDE Tool
 UIControllerから分離したダイアログクラス群
 """
 import logging

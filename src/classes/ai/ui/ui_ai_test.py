@@ -1,5 +1,5 @@
 """
-AIテスト機能のUI作成とロジック - ARIM RDE Tool v1.17.2
+AIテスト機能のUI作成とロジック - ARIM RDE Tool
 UIControllerから分離したAIテスト機能専用モジュール（リファクタリング版）
 """
 import os

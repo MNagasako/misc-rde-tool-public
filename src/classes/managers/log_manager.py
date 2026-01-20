@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-ログ管理クラス - ARIM RDE Tool v1.13.1
+ログ管理クラス - ARIM RDE Tool
 
 概要:
 アプリケーション全体のログ設定と管理を統一的に行うクラスです。
@@ -25,6 +25,9 @@ import logging.handlers
 from typing import Optional, Dict, Any
 from config.common import OUTPUT_LOG_DIR
 from classes.managers.app_config_manager import get_config_manager
+
+
+logger = logging.getLogger(__name__)
 
 class LogManager:
     """ログ管理クラス"""

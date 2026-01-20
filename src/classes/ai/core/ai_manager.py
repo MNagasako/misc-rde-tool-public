@@ -1,5 +1,5 @@
 """
-AI Manager - ARIM RDE Tool v1.13.0 AI機能テスト（パス管理修正版）
+AI Manager - ARIM RDE Tool AI機能テスト（パス管理修正版）
 各種AI API（OpenAI、Gemini、ローカルLLM）との連携機能
 プロキシ対応: net.httpラッパーを使用してプロキシ設定を透過的に適用
 """

@@ -18,7 +18,7 @@ ImageProcessor - 画像処理・管理クラス
 画像処理を専門化し、メインクラスからメディア処理ロジックを分離します。
 """
 
-# src/classes/image_processor.py - ARIM RDE Tool v1.13.1
+# src/classes/image_processor.py - ARIM RDE Tool
 # 画像処理・blob画像取得・重複チェック・保存処理を専門に扱うクラス
 # 大容量画像対応・効率的な処理アルゴリズム実装
 # 【注意】バージョン更新時はconfig/common.py のREVISIONも要確認

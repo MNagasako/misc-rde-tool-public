@@ -1,5 +1,5 @@
 """
-UIコントローラーデータ処理機能クラス - ARIM RDE Tool v1.13.1
+UIコントローラーデータ処理機能クラス - ARIM RDE Tool
 UIControllerのデータ処理UI機能・データ取得・データ登録・データセット管理を担当
 """
 import logging

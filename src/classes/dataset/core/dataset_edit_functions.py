@@ -415,7 +415,7 @@ def send_dataset_update_request(widget, parent, selected_dataset,
             
             response = api_request('PATCH', api_url, headers=headers, json_data=payload, timeout=15)
             if response.status_code in (200, 201):
-                # 成功時にdataset.jsonを自動再取得（完了ダイアログなし）
+                # 成功時にdataset.jsonを自動再取得（完了表示は同一ダイアログ内に統合）
                 try:
                     from qt_compat.core import QTimer
                     def auto_refresh():
@@ -425,49 +425,51 @@ def send_dataset_update_request(widget, parent, selected_dataset,
                             from classes.basic.ui.ui_basic_info import show_progress_dialog
                             
                             if bearer_token:
-                                # プログレス表示付きで自動更新（完了ダイアログなし）
+                                def _refresh_task(bearer_token: str) -> str:
+                                    auto_refresh_dataset_json(bearer_token=bearer_token)
+                                    return (
+                                        f"データセット[{dataset_name}]の更新に成功しました。\n"
+                                        "データセット一覧も更新されました。"
+                                    )
+
+                                # プログレス表示付きで自動更新（完了は同一ダイアログ内に統合）
                                 worker = SimpleProgressWorker(
-                                    task_func=auto_refresh_dataset_json,
+                                    task_func=_refresh_task,
                                     task_kwargs={'bearer_token': bearer_token},
                                     task_name="データセット一覧自動更新"
                                 )
-                                
-                                # プログレス表示（完了ダイアログなし）
-                                progress_dialog = show_progress_dialog(widget, "データセット一覧自動更新", worker, show_completion_dialog=False)
-                                
-                                # dataset.json更新完了後に統合完了ダイアログを表示
-                                def show_completion_and_notify():
+                                worker.completion_in_dialog = True
+
+                                # 完了後のUI更新/通知はUIスレッドで実行
+                                def _on_refresh_finished(success: bool, _message: str):
+                                    if not success:
+                                        return
                                     try:
-                                        # 統合完了ダイアログ表示（詳細表示ボタン付き）
-                                        show_response_dialog(
-                                            widget, 
-                                            "更新完了", 
-                                            f"データセット[{dataset_name}]の更新に成功しました。\n\nデータセット一覧も更新されました。", 
-                                            response.text
-                                        )
-                                        
-                                        # UIリフレッシュコールバックを呼び出し
                                         if ui_refresh_callback:
-                                            QTimer.singleShot(500, ui_refresh_callback)
-                                        
-                                        # グローバル通知を発行（他のタブも更新）
+                                            QTimer.singleShot(300, ui_refresh_callback)
+                                    except Exception:
+                                        pass
+                                    try:
                                         notifier = get_dataset_refresh_notifier()
                                         notifier.notify_refresh()
                                         logger.info("データセット更新完了: グローバル通知を発火")
-                                        
-                                    except Exception as e:
-                                        logger.error("完了ダイアログ表示・通知発火エラー: %s", e)
-                                
-                                # 自動更新完了後に統合ダイアログ表示（3秒後）
-                                QTimer.singleShot(3000, show_completion_and_notify)
+                                    except Exception:
+                                        pass
+
+                                try:
+                                    worker.finished.connect(_on_refresh_finished)
+                                except Exception:
+                                    pass
+
+                                show_progress_dialog(widget, "データセット更新", worker, show_completion_dialog=False)
                                 
                         except Exception as e:
                             logger.error("データセット一覧自動更新でエラー: %s", e)
                             # エラー時は即座にエラーダイアログを表示
                             show_response_dialog(
-                                widget, 
-                                "更新成功（一覧更新失敗）", 
-                                f"データセット[{dataset_name}]の更新には成功しましたが、一覧の自動更新に失敗しました。\n\n{e}", 
+                                widget,
+                                "更新成功（一覧更新失敗）",
+                                f"データセット[{dataset_name}]の更新には成功しましたが、一覧の自動更新に失敗しました。\n\n{e}",
                                 response.text
                             )
                     

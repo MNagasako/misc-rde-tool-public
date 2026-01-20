@@ -1,5 +1,5 @@
 """
-UIコントローラークラス - ARIM RDE Tool v1.13.2
+UIコントローラークラス - ARIM RDE Tool
 Browserクラスから UI制御ロジックを分離
 統一メニュー表示・位置固定・フォント自動調整機能・レスポンシブデザイン対応・テキストエリア拡大機能
 【注意】バージョン更新時はconfig/common.py のREVISIONも要確認

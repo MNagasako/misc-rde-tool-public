@@ -1,5 +1,5 @@
 """
-AI テスト機能のダイアログクラス - ARIM RDE Tool v1.17.2
+AI テスト機能のダイアログクラス - ARIM RDE Tool
 ui_ai_test.py から分離したダイアログ専用モジュール
 """
 from qt_compat.widgets import (

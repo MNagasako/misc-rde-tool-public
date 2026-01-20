@@ -60,6 +60,8 @@ class DataRegisterTabWidget(QWidget):
         self._last_tab_index_applied = None
         # タブ初回表示時のみ「位置調整」を行うためのフラグ
         self._tab_window_positions_applied: set[int] = set()
+        # タブ初回表示時のみ「初期サイズ調整」を行うためのフラグ
+        self._tab_window_initial_sizes_applied: set[int] = set()
         self.setup_ui()
         
         # テーマ変更シグナルに接続（Singletonを必ず使用）
@@ -454,6 +456,38 @@ class DataRegisterTabWidget(QWidget):
             if hasattr(top_level, 'showNormal'):
                 top_level.showNormal()
 
+            # タブごとのサイズを独立管理（初回だけ幅を広めにし、以後は保存サイズを復元）
+            try:
+                saved = self._tab_window_sizes.get(index)
+            except Exception:
+                saved = None
+
+            if saved is not None and hasattr(top_level, 'resize'):
+                try:
+                    # 同一タブでの再実行ではユーザー調整を尊重する
+                    if self._last_tab_index_applied != index:
+                        top_level.resize(saved)
+                except Exception:
+                    pass
+            else:
+                # 初回表示のみ: 画面幅と文字数ベースで初期横幅を調整
+                try:
+                    if index not in self._tab_window_initial_sizes_applied and screen and hasattr(top_level, 'resize'):
+                        screen_size = screen.availableGeometry().size()
+                        # 文字数基準（概ね140文字分）+ 画面上限
+                        try:
+                            fm = top_level.fontMetrics()
+                            char_w = max(int(fm.horizontalAdvance('W')), 6)
+                        except Exception:
+                            char_w = 8
+                        desired_by_chars = int(char_w * 140)
+                        desired_by_screen = int(screen_size.width() * 0.95)
+                        target_width = min(max(top_level.width(), desired_by_chars), desired_by_screen)
+                        top_level.resize(int(target_width), int(top_level.height()))
+                        self._tab_window_initial_sizes_applied.add(index)
+                except Exception:
+                    pass
+
             # pytest中はWindowsで不安定になり得るため processEvents を避ける
             if not os.environ.get("PYTEST_CURRENT_TEST"):
                 QApplication.processEvents()
@@ -591,6 +625,7 @@ class DataRegisterTabWidget(QWidget):
         try:
             from .registration_status_widget import RegistrationStatusWidget
             status_widget = RegistrationStatusWidget(self)
+            self.status_widget = status_widget
             # スクロールは不要なため直接追加（行数が多い場合は後でScrollArea化）
             self.tab_widget.addTab(status_widget, "登録状況")
         except Exception as e:

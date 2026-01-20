@@ -90,12 +90,21 @@ class SampleNamesWidget(QWidget):
         
         # 追加ボタン
         self.add_button = QPushButton("+ 試料名を追加")
+        self.add_button.setObjectName("sample_name_add_button")
         self.add_button.clicked.connect(lambda: self.add_sample_input())
         self.add_button.setStyleSheet(self._get_add_button_style())
         self.main_layout.addWidget(self.add_button)
         
         # 初期状態で1つ追加
         self.add_sample_input()
+
+    def set_add_button_visible(self, visible: bool) -> None:
+        """試料名の追加ボタン表示を切り替える。"""
+
+        try:
+            self.add_button.setVisible(bool(visible))
+        except Exception:
+            return
         
     def add_sample_input(self, text=""):
         if len(self.sample_inputs) >= self.max_samples:

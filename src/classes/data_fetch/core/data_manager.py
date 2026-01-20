@@ -1,5 +1,5 @@
 """
-データ管理クラス - ARIM RDE Tool v1.13.1
+データ管理クラス - ARIM RDE Tool
 データセットの取得・保存・管理を担当
 画像データ取得・詳細情報管理機能
 【注意】バージョン更新時はconfig/common.py のREVISIONも要確認

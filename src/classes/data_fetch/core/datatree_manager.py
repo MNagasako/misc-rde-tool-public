@@ -1,5 +1,5 @@
 """
-新データツリー管理モジュール - ARIM RDE Tool v1.12.6
+新データツリー管理モジュール - ARIM RDE Tool
 - datatree.json（新構造）を作成・更新・参照するためのクラス
 - 既存のdatatree.jsonとは独立して動作し、干渉しない
 - ドキュメント記載のツリー構造（grant_number→datasets→details→images）に準拠

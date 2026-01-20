@@ -242,14 +242,20 @@ def _create_sample_input_area(group_id=None):
     input_widgets = {
         "sample_combo": sample_combo,
         "name": sample_names_widget, # Widget自体を格納
+        "name_label": name_label,
         "description": markdown_editor, # Widget自体を格納
+        "description_label": desc_label,
         "composition": formula_input,
+        "composition_label": formula_label,
         "url": url_input,
+        "url_label": url_label,
         "tags": tag_input,
+        "tags_label": tag_label,
         "manager": manager_combo,
         "manager_label": manager_label,
         "hide_owner": hide_owner_check,
         "related_samples": related_samples_widget,
+        "related_samples_label": related_label,
         "save_button": save_button
     }
     

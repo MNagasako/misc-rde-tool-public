@@ -3856,6 +3856,8 @@ def fetch_basic_info_logic(
             ("テンプレート・設備・ライセンス情報取得", 8),
             ("統合情報生成・WebView遷移", 5)
         ]
+
+        total_stage_weight = sum(stage[1] for stage in stages) or 100
         
         current_progress = 0
         
@@ -3869,13 +3871,59 @@ def fetch_basic_info_logic(
             stage_weight = stages[stage_index][1]
             stage_contribution = (stage_progress / 100) * stage_weight
             total_progress = current_progress + stage_contribution
+
+            # 段階ウェイト合計が 100 でない場合でも、UI には 0-100% として通知する。
+            try:
+                scaled_progress = int(max(0.0, min(100.0, (float(total_progress) / float(total_stage_weight)) * 100.0)))
+            except Exception:
+                scaled_progress = 0
             
             stage_name = stages[stage_index][0]
             message = f"{stage_name}: {sub_message}" if sub_message else stage_name
             
             if progress_callback:
-                return progress_callback(int(total_progress), 100, message)
+                return progress_callback(int(scaled_progress), 100, message)
             return True
+
+        def _make_stage_progress_adapter(stage_index: int, *, prefix: str = ""):
+            """下位処理の progress_callback を「段階の%」へ変換して forward する。
+
+            下位処理は (percent, 100, msg) と (current, total, msg) を混在させる場合があるため、
+            total の値から推定して 0-100% に正規化する。
+            """
+
+            def _adapter(current, total, message):
+                try:
+                    c = int(current)
+                except Exception:
+                    c = 0
+                try:
+                    t = int(total)
+                except Exception:
+                    t = 0
+
+                # total=100 かつ current<=100 は「percentモード」とみなす（互換）
+                if t == 100 and 0 <= c <= 100:
+                    percent = c
+                # total>0 は「countモード」とみなして percent に変換
+                elif t > 0:
+                    # 進捗が total を超えても 100% に丸める
+                    percent = 100 if c >= t else max(0, int((c * 100) / max(t, 1)))
+                # total 不明だが current が 0-100 の場合は percent とみなす
+                elif 0 <= c <= 100:
+                    percent = c
+                else:
+                    percent = 0
+
+                text = str(message) if message is not None else ""
+                if prefix:
+                    text = f"{prefix}{text}" if text else prefix.rstrip()
+                if t > 0 and not (t == 100 and 0 <= c <= 100):
+                    # countモードのときは件数も見せる（同じ内容が含まれていれば重複は許容）
+                    text = f"{text} ({c}/{t})" if text else f"{c}/{t}"
+                return update_stage_progress(stage_index, percent, text)
+
+            return _adapter
 
         # 1. ユーザー自身情報取得
         if not update_stage_progress(0, 0, "開始"):
@@ -4123,8 +4171,7 @@ def fetch_basic_info_logic(
             
         logger.debug("fetch_all_dataset_info")
 
-        def dataset_progress_adapter(current, total, message):
-            return update_stage_progress(6, current, message)
+        dataset_progress_adapter = _make_stage_progress_adapter(6)
 
         if force_download or not _exists(DATASET_JSON_PATH):
             dataset_result = fetch_all_dataset_info(
@@ -4165,8 +4212,7 @@ def fetch_basic_info_logic(
                 return "キャンセルされました"
         else:
             # プログレスコールバックを作成（ステージ7の0-100%をマッピング）
-            def dataentry_progress_callback(current, total, message):
-                return update_stage_progress(7, current, message)
+            dataentry_progress_callback = _make_stage_progress_adapter(7)
             
             result = fetch_all_data_entrys_info(
                 bearer_token,
@@ -4197,8 +4243,7 @@ def fetch_basic_info_logic(
                 return "キャンセルされました"
         else:
             # プログレスコールバックを作成（ステージ8の0-100%をマッピング）
-            def invoice_progress_callback(current, total, message):
-                return update_stage_progress(8, current, message)
+            invoice_progress_callback = _make_stage_progress_adapter(8)
             
             result = fetch_all_invoices_info(
                 bearer_token,
@@ -4231,8 +4276,7 @@ def fetch_basic_info_logic(
             try:
                 output_dir = os.path.join(OUTPUT_DIR, "rde", "data")
 
-                def invoiceschema_progress_adapter(current, total, message):
-                    return update_stage_progress(9, current, message)
+                invoiceschema_progress_adapter = _make_stage_progress_adapter(9)
 
                 invoice_schema_result = fetch_invoice_schemas(
                     bearer_token,

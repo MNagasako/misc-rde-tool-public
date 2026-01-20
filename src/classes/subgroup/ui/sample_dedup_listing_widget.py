@@ -68,6 +68,7 @@ from classes.theme.theme_manager import ThemeManager, get_color
 from classes.subgroup.ui.sample_entry_sample_relink_dialog import SampleEntrySampleRelinkDialog
 from classes.subgroup.ui.sample_edit_dialog import SampleEditDialog
 from classes.managers.log_manager import get_logger
+from classes.dataset.ui.spinner_overlay import SpinnerOverlay
 
 
 # NOTE: This app uses LogManager-managed loggers (propagate=False). If we use a
@@ -902,6 +903,15 @@ class SampleEditButtonDelegate(QStyledItemDelegate):
 class ColumnSelectorDialog(QDialog):
     def __init__(self, parent: QWidget, columns: List[SampleDedupColumn], visible_by_key: Dict[str, bool]):
         super().__init__(parent)
+        try:
+            # 初回表示時の一瞬の黒/無色フラッシュを抑制するため、親のスタイルを先に適用する。
+            self.setStyleSheet(parent.styleSheet())
+        except Exception:
+            pass
+        try:
+            self.setUpdatesEnabled(False)
+        except Exception:
+            pass
         self.setWindowTitle("列選択")
         self._columns = columns
 
@@ -947,6 +957,11 @@ class ColumnSelectorDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+        try:
+            self.setUpdatesEnabled(True)
+        except Exception:
+            pass
 
     def _select_all(self) -> None:
         for cb in self._checkbox_by_key.values():
@@ -1012,6 +1027,7 @@ class SampleDedupListingWidget(QWidget):
         self._range_spins_by_col_index: Dict[int, tuple[QSpinBox, QSpinBox]] = {}
         self._fetch_thread: Optional[SampleFetchThread] = None
         self._refresh_thread: Optional[QThread] = None
+        self._spinner_overlay: Optional[SpinnerOverlay] = None
         self._filters_collapsed: bool = False
         self._filter_relayout_timer = QTimer(self)
         self._filter_relayout_timer.setSingleShot(True)
@@ -1316,6 +1332,11 @@ class SampleDedupListingWidget(QWidget):
         header.setSectionResizeMode(QHeaderView.Interactive)
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.table)
+
+        try:
+            self._spinner_overlay = SpinnerOverlay(self.table)
+        except Exception:
+            self._spinner_overlay = None
 
         self.setLayout(layout)
         self._apply_target_width()
@@ -1806,11 +1827,95 @@ class SampleDedupListingWidget(QWidget):
                     pass
             if col.key == "sample_edit":
                 try:
-                    self.table.setColumnWidth(idx, 110)
+                    fm = QFontMetrics(self.table.font())
+                    header_w = int(fm.horizontalAdvance(col.label)) + 24
+                    self.table.setColumnWidth(idx, min(max(header_w, 72), 110))
+                except Exception:
+                    pass
+
+            # 数値列は広がりすぎないよう上限を設ける（ヘッダ/内容ベースで最小幅は確保）
+            if col.key in {"data_entry_count", "dataset_count", "subgroup_dataset_count", "grant_count"}:
+                try:
+                    fm = QFontMetrics(self.table.font())
+                    header_w = int(fm.horizontalAdvance(col.label)) + 24
+                    # 想定最大桁(～6桁程度) + 余白
+                    digit_w = int(fm.horizontalAdvance("0"))
+                    content_w = digit_w * 6 + 24
+                    max_w = 110
+                    # 「データセット数」は特に細く（過剰に幅を取らない）
+                    if col.key == "dataset_count":
+                        max_w = 90
+                    self.table.setColumnWidth(idx, min(max(header_w, content_w, 60), max_w))
+                except Exception:
+                    pass
+
+            # 主要列は省略が減るよう最低文字数を確保
+            major_min_chars = {
+                # 要望: できるだけ省略表示しない初期列幅
+                "subgroup_name": 20,
+                "subgroup_description": 20,
+                # 課題番号: 半角15文字相当
+                "grant_numbers": 15,
+                "dataset_names": 20,
+                "tile_name": 20,
+                "sample_name": 20,
+                "tile_dataset_grant": 20,
+            }
+            if col.key in major_min_chars:
+                try:
+                    fm = QFontMetrics(self.table.font())
+                    # grant_numbers は「半角15文字」目安なので数字幅で計算する
+                    if col.key == "grant_numbers":
+                        char_w = max(5, int(fm.horizontalAdvance("0")))
+                    else:
+                        char_w = max(6, int(fm.horizontalAdvance("W")))
+                    min_w = char_w * int(major_min_chars.get(col.key, 20)) + 24
+                    self.table.setColumnWidth(idx, max(int(self.table.columnWidth(idx)), int(min_w)))
                 except Exception:
                     pass
 
         self._schedule_row_resize()
+
+    def _show_loading(self, message: str) -> None:
+        try:
+            self.status_label.setText(str(message))
+        except Exception:
+            pass
+        try:
+            if self._spinner_overlay is None:
+                return
+
+            msg = str(message or "")
+
+            # テーブルが表示済みなのにスピナーが被さると「表示されているのに読み込み中」に見える。
+            # 更新系メッセージでは、既に行がある場合はステータスだけ更新してスピナーは出さない。
+            has_rows = False
+            try:
+                has_rows = int(self._model.rowCount()) > 0 or int(self._filter_proxy.rowCount()) > 0
+            except Exception:
+                has_rows = False
+
+            force_overlay = ("不足試料" in msg)
+            allow_overlay = force_overlay or (not has_rows)
+
+            if allow_overlay:
+                self._spinner_overlay.set_message("読み込み中…")
+                self._spinner_overlay.start()
+            else:
+                # 念のため、既に動いている場合は止める
+                try:
+                    self._spinner_overlay.stop()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _hide_loading(self) -> None:
+        try:
+            if self._spinner_overlay is not None:
+                self._spinner_overlay.stop()
+        except Exception:
+            pass
 
     def _visible_by_key(self) -> Dict[str, bool]:
         visible: Dict[str, bool] = {}
@@ -2465,7 +2570,7 @@ class SampleDedupListingWidget(QWidget):
         if self._refresh_thread is not None and self._refresh_thread.isRunning():
             return
 
-        self.status_label.setText("試料一覧を更新中...")
+        self._show_loading("試料一覧を更新中...")
 
         class _RefreshThread(QThread):
             completed = Signal(object, object, object, object)
@@ -2485,6 +2590,7 @@ class SampleDedupListingWidget(QWidget):
         self._refresh_thread.start()
 
     def _on_refresh_completed(self, columns: object, rows: object, missing: object, meta: object, auto_fetch: bool) -> None:
+        self._hide_loading()
         if isinstance(columns, list):
             self._columns = [c for c in columns if isinstance(c, SampleDedupColumn)]
         if isinstance(rows, list):
@@ -2584,7 +2690,7 @@ class SampleDedupListingWidget(QWidget):
     def _start_fetch_thread(self, missing: List[str]) -> None:
         if self._fetch_thread and self._fetch_thread.isRunning():
             return
-        self.status_label.setText("不足試料を取得中...")
+        self._show_loading("不足試料を取得中...")
         self._fetch_thread = SampleFetchThread(missing, self)
         self._fetch_thread.completed.connect(self._on_fetch_completed)
         self._fetch_thread.start()
@@ -2605,6 +2711,7 @@ class SampleDedupListingWidget(QWidget):
         self._start_fetch_thread(missing)
 
     def _on_fetch_completed(self, message: str) -> None:
+        self._hide_loading()
         self.status_label.setText(message)
         self._load_from_cache_and_refresh_if_needed(auto_fetch=False, force_refresh=True)
 

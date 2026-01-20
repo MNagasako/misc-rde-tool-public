@@ -1,5 +1,5 @@
 """
-HTML出力とログ処理を担当するクラス - ARIM RDE Tool v1.13.1
+HTML出力とログ処理を担当するクラス - ARIM RDE Tool
 Browserクラスからログ・HTML保存ロジックを分離
 WebView HTML保存・URL追跡・ログ管理機能
 【注意】バージョン更新時はconfig/common.py のREVISIONも要確認

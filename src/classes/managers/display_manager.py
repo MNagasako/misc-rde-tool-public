@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DisplayManager - 表示・メッセージ管理クラス - ARIM RDE Tool v1.13.1
+DisplayManager - 表示・メッセージ管理クラス - ARIM RDE Tool
 
 概要:
 アプリケーションの表示要素とメッセージ管理を専門に行うクラスです。

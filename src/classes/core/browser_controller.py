@@ -1,5 +1,5 @@
 """
-BrowserControllerクラス - ARIM RDE Tool v1.13.1
+BrowserControllerクラス - ARIM RDE Tool
 Browserクラスからブラウザ制御ロジックを分離
 WebView管理・URL変更・ページナビゲーション・JavaScript実行機能
 【注意】バージョン更新時はconfig/common.py のREVISIONも要確認

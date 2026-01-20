@@ -1,5 +1,5 @@
 """
-イベントハンドラークラス - ARIM RDE Tool v1.13.1
+イベントハンドラークラス - ARIM RDE Tool
 Browserクラスから イベント処理ロジックを分離
 リサイズイベント・フォント再調整・安全性向上対応
 【注意】バージョン更新時はconfig/common.py のREVISIONも要確認

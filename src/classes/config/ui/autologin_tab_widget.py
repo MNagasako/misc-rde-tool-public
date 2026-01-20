@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-自動ログインタブウィジェット - ARIM RDE Tool v1.16
+自動ログインタブウィジェット - ARIM RDE Tool
 認証情報の保存・取得・ソース選択の統合UI
 
 主要機能:

@@ -1,5 +1,5 @@
 """
-UIコントローラーAI機能クラス - ARIM RDE Tool v1.13.1
+UIコントローラーAI機能クラス - ARIM RDE Tool
 UIControllerのAI関連機能・レスポンス表示・AI設定・AI分析実行を担当
 """
 import logging

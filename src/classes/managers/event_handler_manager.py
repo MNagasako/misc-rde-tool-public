@@ -1,5 +1,5 @@
 """
-EventHandlerManager - ARIM RDE Tool v1.13.1
+EventHandlerManager - ARIM RDE Tool
 メインアプリケーションのイベント処理統合管理クラス
 UIイベント・フォーム処理・ボタンクリック処理の統合管理
 Phase 6.1: 更なる責務分離による300行以下目標達成

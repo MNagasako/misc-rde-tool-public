@@ -1,5 +1,5 @@
 """
-AI機能用データ管理クラス - ARIM RDE Tool v1.13.2
+AI機能用データ管理クラス - ARIM RDE Tool
 UIControllerから分離したAI関連データ管理専用モジュール
 """
 import os

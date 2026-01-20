@@ -297,104 +297,103 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
             parent_controller.sample_form_widget = create_sample_form(widget, group_id, parent_controller)
             if parent_controller.sample_form_widget:
                 # データセット選択(0), ドロップダウン(1), 他機能連携(2), 基本情報(3)の次に挿入
-                sample_toggle = ToggleSectionWidget("試料情報", widget, default_mode="summary")
+                sample_section = QWidget(widget)
+                sample_section_layout = QVBoxLayout(sample_section)
+                sample_section_layout.setContentsMargins(0, 0, 0, 0)
+                sample_section_layout.setSpacing(6)
 
-                sample_summary_label = QLabel("試料情報は『入力』に切り替えて編集できます。", sample_toggle)
-                sample_summary_label.setWordWrap(True)
-                sample_summary_label.setStyleSheet(
-                    f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
-                    f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; "
-                    f"border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)}; border-radius: 4px;"
+                sample_header = QWidget(sample_section)
+                sample_header_layout = QHBoxLayout(sample_header)
+                sample_header_layout.setContentsMargins(0, 0, 0, 0)
+                sample_header_layout.setSpacing(8)
+
+                sample_title = QLabel("試料情報", sample_header)
+                sample_title.setStyleSheet(
+                    f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-weight: bold;"
                 )
 
-                def _refresh_sample_summary() -> None:
+                sample_mode_btn = QPushButton(sample_header)
+                sample_mode_btn.setObjectName("sample_toggle_button")
+                sample_mode_btn.setCheckable(True)
+                sample_mode_btn.setChecked(False)  # デフォルト: 必須項目のみ表示
+                sample_mode_btn.setToolTip("クリックで表示項目を切り替えます")
+                sample_mode_btn.setStyleSheet(
+                    "QPushButton {"
+                    f"  background-color: {get_color(ThemeKey.BUTTON_NEUTRAL_BACKGROUND)};"
+                    f"  color: {get_color(ThemeKey.BUTTON_NEUTRAL_TEXT)};"
+                    f"  border: 1px solid {get_color(ThemeKey.BUTTON_NEUTRAL_BORDER)};"
+                    "  border-radius: 6px;"
+                    "  padding: 2px 10px;"
+                    "  min-height: 24px;"
+                    "}"
+                    "QPushButton:hover {"
+                    f"  background-color: {get_color(ThemeKey.BUTTON_NEUTRAL_BACKGROUND_HOVER)};"
+                    "}"
+                    "QPushButton:checked {"
+                    f"  background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};"
+                    f"  color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};"
+                    f"  border: 1px solid {get_color(ThemeKey.BUTTON_INFO_BORDER)};"
+                    "}"
+                    "QPushButton:checked:hover {"
+                    f"  background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};"
+                    "}"
+                )
+
+                def _apply_sample_mode() -> None:
                     widgets = getattr(parent_controller, 'sample_input_widgets', None) or {}
-                    parts = []
-                    try:
-                        combo_widget = widgets.get('sample_combo')
-                        if combo_widget is not None:
-                            parts.append(f"新規/選択: {combo_widget.currentText()}")
-                    except Exception:
-                        pass
+
+                    show_all = bool(sample_mode_btn.isChecked())
+                    # ラベルは「切り替え先（次にする動作）」が分かる文言にする
+                    sample_mode_btn.setText("必須項目のみ表示する" if show_all else "全項目表示に切り替える")
+
+                    # 試料名の「追加」ボタンは全項目表示のときのみ表示
                     try:
                         name_widget = widgets.get('name')
-                        names = None
-                        if name_widget is not None:
-                            getter = getattr(name_widget, 'get_sample_names', None)
-                            if callable(getter):
-                                names = getter()
-                        if names:
-                            parts.append(f"試料名: {', '.join([n for n in names if n])}")
-                    except Exception:
-                        pass
-                    try:
-                        composition = widgets.get('composition')
-                        if composition is not None and hasattr(composition, 'text'):
-                            value = (composition.text() or '').strip()
-                            if value:
-                                parts.append(f"化学式: {value}")
-                    except Exception:
-                        pass
-                    try:
-                        url_widget = widgets.get('url')
-                        if url_widget is not None and hasattr(url_widget, 'text'):
-                            value = (url_widget.text() or '').strip()
-                            if value:
-                                parts.append(f"参考URL: {value}")
-                    except Exception:
-                        pass
-                    try:
-                        tags_widget = widgets.get('tags')
-                        if tags_widget is not None and hasattr(tags_widget, 'text'):
-                            value = (tags_widget.text() or '').strip()
-                            if value:
-                                parts.append(f"タグ: {value}")
-                    except Exception:
-                        pass
-                    try:
-                        manager = widgets.get('manager')
-                        if manager is not None:
-                            value = (manager.currentText() or '').strip()
-                            if value:
-                                parts.append(f"試料管理者: {value}")
-                    except Exception:
-                        pass
-                    try:
-                        hide_owner = widgets.get('hide_owner')
-                        if hide_owner is not None and hasattr(hide_owner, 'isChecked'):
-                            parts.append(f"匿名化: {'ON' if hide_owner.isChecked() else 'OFF'}")
+                        if name_widget is not None and hasattr(name_widget, 'set_add_button_visible'):
+                            name_widget.set_add_button_visible(show_all)
+                        elif name_widget is not None:
+                            add_btn = name_widget.findChild(QPushButton, 'sample_name_add_button')
+                            if add_btn is not None:
+                                add_btn.setVisible(show_all)
                     except Exception:
                         pass
 
-                    if parts:
-                        sample_summary_label.setText("\n".join(parts))
-                    else:
-                        sample_summary_label.setText("試料情報は『入力』に切り替えて編集できます。")
-
-                # Optional hook for ToggleSectionWidget
-                setattr(sample_summary_label, 'refresh', _refresh_sample_summary)
-
-                try:
-                    widgets = getattr(parent_controller, 'sample_input_widgets', None) or {}
-                    for key in ('sample_combo', 'composition', 'url', 'tags', 'manager', 'hide_owner'):
+                    # 必須項目（新規/選択、試料名、試料管理者、匿名化）は常時表示
+                    optional_keys = (
+                        'description_label', 'description',
+                        'composition_label', 'composition',
+                        'url_label', 'url',
+                        'tags_label', 'tags',
+                        'related_samples_label', 'related_samples',
+                    )
+                    for key in optional_keys:
                         w = widgets.get(key)
                         if w is None:
                             continue
-                        if hasattr(w, 'currentIndexChanged'):
-                            w.currentIndexChanged.connect(lambda *_: _refresh_sample_summary())
-                        if hasattr(w, 'textChanged'):
-                            w.textChanged.connect(lambda *_: _refresh_sample_summary())
-                        if hasattr(w, 'stateChanged'):
-                            w.stateChanged.connect(lambda *_: _refresh_sample_summary())
+                        try:
+                            w.setVisible(show_all)
+                        except Exception:
+                            pass
+
+                sample_mode_btn.toggled.connect(lambda *_: _apply_sample_mode())
+
+                sample_header_layout.addWidget(sample_title, 1)
+                sample_header_layout.addWidget(sample_mode_btn, 0, Qt.AlignRight)
+                sample_section_layout.addWidget(sample_header)
+
+                # グループボックスの二重見出しを抑制（可能なら）
+                try:
+                    if hasattr(parent_controller.sample_form_widget, 'setTitle'):
+                        parent_controller.sample_form_widget.setTitle("")
                 except Exception:
                     pass
+                sample_section_layout.addWidget(parent_controller.sample_form_widget)
 
-                sample_toggle.set_summary_widget(sample_summary_label)
-                sample_toggle.set_edit_widget(parent_controller.sample_form_widget)
-                parent_controller.sample_form_container = sample_toggle
+                _apply_sample_mode()
+                parent_controller.sample_form_container = sample_section
 
-                layout.insertWidget(4, sample_toggle)
-                sample_toggle.setVisible(True)
+                layout.insertWidget(4, sample_section)
+                sample_section.setVisible(True)
                 widget.update()
 
                 # 必須項目の状態（試料管理者など）を反映
@@ -451,83 +450,179 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
                     widget.setUpdatesEnabled(False)
                 except Exception:
                     pass
-
-                schema_toggle = ToggleSectionWidget("固有情報", widget, default_mode="summary")
-
-                schema_summary_label = QLabel("固有情報は『入力』に切り替えて編集できます。", schema_toggle)
-                schema_summary_label.setWordWrap(True)
-                schema_summary_label.setStyleSheet(
-                    f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
-                    f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; "
-                    f"border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)}; border-radius: 4px;"
+                # 固有情報は全て任意入力のため、フォーム表示/最小化トグルにする。
+                # 最小化時も枠線（領域の枠）を残すため、外枠は QGroupBox で保持する。
+                schema_group = QGroupBox(widget)
+                schema_group.setObjectName("schema_form_group")
+                try:
+                    schema_group.setTitle("")
+                except Exception:
+                    pass
+                schema_group.setStyleSheet(
+                    "QGroupBox {"
+                    f"  border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)};"
+                    "  border-radius: 6px;"
+                    "  margin-top: 6px;"
+                    "}"
                 )
 
-                schema_field_labels = {}
-                try:
-                    if invoice_schema_path:
-                        with open(invoice_schema_path, 'r', encoding='utf-8') as f:
-                            schema_json = json.load(f)
-                        custom = (schema_json.get('properties', {}) or {}).get('custom') or {}
-                        props = (custom.get('properties', {}) or {}) if isinstance(custom, dict) else {}
-                        if isinstance(props, dict):
-                            for key, prop in props.items():
-                                if not isinstance(prop, dict):
-                                    continue
-                                label = (prop.get('label', {}) or {}).get('ja')
-                                schema_field_labels[key] = label or key
-                except Exception:
-                    schema_field_labels = {}
+                schema_section = QWidget(schema_group)
+                schema_section_layout = QVBoxLayout(schema_section)
+                schema_section_layout.setContentsMargins(10, 8, 10, 8)
+                schema_section_layout.setSpacing(6)
 
-                def _refresh_schema_summary() -> None:
-                    key_to_widget = getattr(form, '_schema_key_to_widget', None)
-                    if not isinstance(key_to_widget, dict) or not key_to_widget:
-                        schema_summary_label.setText("入力項目なし")
+                schema_group_layout = QVBoxLayout(schema_group)
+                schema_group_layout.setContentsMargins(0, 0, 0, 0)
+                schema_group_layout.setSpacing(0)
+                schema_group_layout.addWidget(schema_section)
+
+                schema_header = QWidget(schema_section)
+                schema_header_layout = QHBoxLayout(schema_header)
+                schema_header_layout.setContentsMargins(0, 0, 0, 0)
+                schema_header_layout.setSpacing(8)
+
+                schema_title = QLabel("固有情報", schema_header)
+                schema_title.setStyleSheet(
+                    f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-weight: bold;"
+                )
+
+                schema_mode_btn = QPushButton(schema_header)
+                schema_mode_btn.setObjectName("schema_toggle_button")
+                schema_mode_btn.setCheckable(True)
+                schema_mode_btn.setChecked(False)  # デフォルト: 最小化
+                schema_mode_btn.setToolTip("クリックで入力フォームの表示/最小化を切り替えます")
+                schema_mode_btn.setStyleSheet(
+                    "QPushButton {"
+                    f"  background-color: {get_color(ThemeKey.BUTTON_NEUTRAL_BACKGROUND)};"
+                    f"  color: {get_color(ThemeKey.BUTTON_NEUTRAL_TEXT)};"
+                    f"  border: 1px solid {get_color(ThemeKey.BUTTON_NEUTRAL_BORDER)};"
+                    "  border-radius: 6px;"
+                    "  padding: 2px 10px;"
+                    "  min-height: 24px;"
+                    "}"
+                    "QPushButton:hover {"
+                    f"  background-color: {get_color(ThemeKey.BUTTON_NEUTRAL_BACKGROUND_HOVER)};"
+                    "}"
+                    "QPushButton:checked {"
+                    f"  background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};"
+                    f"  color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};"
+                    f"  border: 1px solid {get_color(ThemeKey.BUTTON_INFO_BORDER)};"
+                    "}"
+                    "QPushButton:checked:hover {"
+                    f"  background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};"
+                    "}"
+                )
+
+                schema_header_layout.addWidget(schema_title, 1)
+                schema_header_layout.addWidget(schema_mode_btn, 0, Qt.AlignRight)
+                schema_section_layout.addWidget(schema_header)
+
+                schema_summary_label = QLabel("", schema_section)
+                schema_summary_label.setObjectName("schema_summary_label")
+                schema_summary_label.setWordWrap(True)
+                schema_summary_label.setStyleSheet(
+                    f"color: {get_color(ThemeKey.TEXT_SECONDARY)};"
+                )
+                schema_section_layout.addWidget(schema_summary_label)
+
+                # グループボックスの二重見出しを抑制（可能なら）
+                try:
+                    if hasattr(form, 'setTitle'):
+                        form.setTitle("")
+                except Exception:
+                    pass
+                schema_section_layout.addWidget(form)
+
+                def _get_schema_value(w) -> str:
+                    try:
+                        if hasattr(w, 'currentText'):
+                            return (w.currentText() or '').strip()
+                        if hasattr(w, 'text'):
+                            return (w.text() or '').strip()
+                    except Exception:
+                        return ''
+                    return ''
+
+                def _schema_summary_text() -> str:
+                    # 可能なら schema_form_util 側で構築した key->widget/label を使って安定表示。
+                    key_to_widget = getattr(form, '_schema_key_to_widget', {}) or {}
+                    key_to_label = getattr(form, '_schema_key_to_label_widget', {}) or {}
+
+                    parts: list[str] = []
+
+                    if isinstance(key_to_widget, dict) and key_to_widget:
+                        for key, w in key_to_widget.items():
+                            if w is None:
+                                continue
+                            val = _get_schema_value(w)
+                            label_text = None
+                            try:
+                                lw = key_to_label.get(key)
+                                if lw is not None and hasattr(lw, 'text'):
+                                    label_text = (lw.text() or '').strip()
+                            except Exception:
+                                label_text = None
+                            label = label_text or str(key)
+                            display = val if val else "（未入力）"
+                            parts.append(f"{label}={display}")
+
+                    # フォールバック（極力落ちないように）
+                    if not parts:
+                        try:
+                            # QLineEdit / QComboBox を列挙（空の場合も未入力として列挙）
+                            for w in (form.findChildren(QLineEdit) + form.findChildren(QComboBox)):
+                                val = _get_schema_value(w)
+                                name = (w.objectName() or w.placeholderText() or w.__class__.__name__).strip()
+                                if not name:
+                                    continue
+                                display = val if val else "（未入力）"
+                                parts.append(f"{name}={display}")
+                        except Exception:
+                            parts = []
+
+                    if parts:
+                        return "設定内容: " + "、".join(parts)
+                    return "設定内容: （項目なし）"
+
+                def _apply_schema_form_visibility() -> None:
+                    expanded = bool(schema_mode_btn.isChecked())
+                    # ラベルは「切り替え先（次にする動作）」が分かる文言にする
+                    schema_mode_btn.setText("入力フォームを最小化" if expanded else "入力フォームを表示")
+                    try:
+                        form.setVisible(bool(expanded))
+                    except Exception:
+                        pass
+                    try:
+                        schema_summary_label.setVisible(not bool(expanded))
+                        if not expanded:
+                            schema_summary_label.setText(_schema_summary_text())
+                    except Exception:
+                        pass
+
+                def _refresh_schema_summary_if_needed() -> None:
+                    # 最小化中だけサマリを更新
+                    try:
+                        if bool(schema_mode_btn.isChecked()):
+                            return
+                        schema_summary_label.setText(_schema_summary_text())
+                    except Exception:
                         return
 
-                    filled_items = []
-                    for key, w in key_to_widget.items():
-                        try:
-                            if hasattr(w, 'currentText'):
-                                value = (w.currentText() or '').strip()
-                            elif hasattr(w, 'text'):
-                                value = (w.text() or '').strip()
-                            else:
-                                value = ''
-                        except Exception:
-                            value = ''
-
-                        if value:
-                            label = schema_field_labels.get(key) or key
-                            filled_items.append((label, value))
-
-                    total = len(key_to_widget)
-                    filled = len(filled_items)
-
-                    lines = [f"入力済み: {filled}/{total}"]
-                    if filled_items:
-                        # 内容表示（長くなりすぎないよう最大10件まで）
-                        for label, value in filled_items[:10]:
-                            lines.append(f"- {label}: {value}")
-                        if len(filled_items) > 10:
-                            lines.append(f"… 他 {len(filled_items) - 10} 件")
-                    schema_summary_label.setText("\n".join(lines))
-
-                setattr(schema_summary_label, 'refresh', _refresh_schema_summary)
+                schema_mode_btn.toggled.connect(lambda *_: _apply_schema_form_visibility())
+                _apply_schema_form_visibility()
 
                 try:
                     for w in getattr(form, '_schema_key_to_widget', {}).values():
                         if hasattr(w, 'textChanged'):
-                            w.textChanged.connect(lambda *_: _refresh_schema_summary())
+                            w.textChanged.connect(lambda *_: _refresh_schema_summary_if_needed())
                         if hasattr(w, 'currentIndexChanged'):
-                            w.currentIndexChanged.connect(lambda *_: _refresh_schema_summary())
+                            w.currentIndexChanged.connect(lambda *_: _refresh_schema_summary_if_needed())
                 except Exception:
                     pass
 
-                schema_toggle.set_summary_widget(schema_summary_label)
-                schema_toggle.set_edit_widget(form)
-                parent_controller.schema_form_container = schema_toggle
+                parent_controller.schema_form_container = schema_group
 
-                layout.insertWidget(5, schema_toggle)
+                layout.insertWidget(5, schema_group)
                 schema_form_widget = form
                 parent_controller.schema_form_widget = schema_form_widget
 

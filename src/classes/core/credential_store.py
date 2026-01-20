@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-認証情報ストア - ARIM RDE Tool v1.16
+認証情報ストア - ARIM RDE Tool
 安全な認証情報の保存・取得・削除を提供する抽象化レイヤー
 
 主要機能:

@@ -1,5 +1,5 @@
 """
-プロジェクト・課題管理クラス - ARIM RDE Tool v1.13.1
+プロジェクト・課題管理クラス - ARIM RDE Tool
 grantNumberの設定、検索、データ取得を管理
 プロジェクト状態管理・データツリー操作機能
 【注意】バージョン更新時はconfig/common.py のREVISIONも要確認
