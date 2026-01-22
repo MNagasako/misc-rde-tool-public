@@ -993,12 +993,12 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     dataset_selection_widget.setLayout(dataset_selection_layout)
     layout.addWidget(dataset_selection_widget)
 
-    # 選択中データセットの日時（JST）を表示
+    # 選択中データセットの日時（JST）+ サブグループ名を表示
     try:
-        from classes.utils.dataset_datetime_display import create_dataset_dates_label, attach_dataset_dates_label
+        from classes.utils.dataset_datetime_display import create_dataset_dates_label, attach_dataset_dates_label_with_subgroup
 
         dataset_dates_label = create_dataset_dates_label(widget)
-        attach_dataset_dates_label(combo=existing_dataset_combo, label=dataset_dates_label)
+        attach_dataset_dates_label_with_subgroup(combo=existing_dataset_combo, label=dataset_dates_label)
         layout.addWidget(dataset_dates_label)
     except Exception:
         pass
@@ -1089,6 +1089,28 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         btn.clicked.connect(lambda _=None, key=target_key: _handle_dataset_launch(key))
         launch_controls_layout.addWidget(btn)
         launch_buttons.append(btn)
+
+    def _launch_to_subgroup_edit() -> None:
+        payload = _get_selected_dataset_payload()
+        if not payload:
+            return
+        try:
+            from classes.utils.subgroup_launch_helper import launch_to_subgroup_edit
+
+            launch_to_subgroup_edit(
+                owner_widget=widget,
+                dataset_id=str(payload.get("dataset_id") or ""),
+                raw_dataset=payload.get("raw_dataset"),
+                source_name="dataset_edit",
+            )
+        except Exception:
+            logger.debug("dataset_edit: launch_to_subgroup_edit failed", exc_info=True)
+
+    subgroup_btn = QPushButton("サブグループ閲覧・修正")
+    subgroup_btn.setStyleSheet(launch_button_style)
+    subgroup_btn.clicked.connect(_launch_to_subgroup_edit)
+    launch_controls_layout.addWidget(subgroup_btn)
+    launch_buttons.append(subgroup_btn)
 
     # テーマ切替時に「他機能連携」の個別styleSheetを再適用（更新漏れ対策）
     try:

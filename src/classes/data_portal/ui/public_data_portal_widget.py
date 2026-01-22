@@ -59,6 +59,21 @@ class PublicDataPortalWidget(QWidget):
 
     def _on_tab_changed(self, index: int) -> None:
         tab = self.tab_widget.widget(index)
+
+        # 取得タブの環境選択に合わせて一覧表示タブの参照先フォルダを切り替える
+        try:
+            fetch_tab = getattr(self, "fetch_tab", None)
+            listing_tab = getattr(self, "listing_tab", None)
+            env = None
+            if fetch_tab is not None and hasattr(fetch_tab, "env_combo"):
+                env = fetch_tab.env_combo.currentData()
+            if listing_tab is not None:
+                set_env = getattr(listing_tab, "set_environment", None)
+                if callable(set_env):
+                    set_env(str(env or "production"))
+        except Exception:
+            pass
+
         refresh = getattr(tab, "refresh_from_disk", None)
         if callable(refresh):
             refresh()

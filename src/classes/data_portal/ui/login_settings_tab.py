@@ -5,13 +5,15 @@
 """
 
 import os
+from datetime import datetime
+from pathlib import Path
 
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, 
     QLabel, QLineEdit, QPushButton, QComboBox,
     QFormLayout, QTextEdit, QMessageBox
 )
-from qt_compat.core import Qt, Signal, QTimer
+from qt_compat.core import Qt, Signal, QTimer, QThread
 
 from classes.theme import get_color, ThemeKey
 from classes.theme.theme_manager import ThemeManager
@@ -19,8 +21,48 @@ from classes.theme.theme_manager import ThemeManager
 from classes.managers.log_manager import get_logger
 from ..core.auth_manager import get_auth_manager, PortalCredentials, AuthManager
 from ..conf.config import get_data_portal_config
+from ..util.managed_csv_paths import build_managed_csv_path, find_latest_managed_csv, format_mtime_jst, format_size
 
 logger = get_logger("DataPortal.LoginSettingsTab")
+
+
+class _DownloadManagedCsvThread(QThread):
+    succeeded = Signal(str)
+    failed = Signal(str)
+
+    def __init__(self, *, environment: str, client, parent=None):
+        super().__init__(parent)
+        self.environment = str(environment or "").strip() or "production"
+        self.client = client
+
+    def run(self) -> None:  # noqa: D401
+        try:
+            ok, resp = self.client.download_theme_csv()
+            if not ok:
+                self.failed.emit(str(resp))
+                return
+
+            payload = getattr(resp, "content", None)
+            if isinstance(payload, bytes):
+                data = payload
+            else:
+                text = getattr(resp, "text", "")
+                data = (text or "").encode("utf-8", errors="replace")
+
+            if not data:
+                self.failed.emit("CSVの内容が空です")
+                return
+
+            path = build_managed_csv_path(self.environment, now=datetime.now())
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+
+            path.write_bytes(data)
+            self.succeeded.emit(str(path))
+        except Exception as exc:
+            self.failed.emit(str(exc))
 
 
 class LoginSettingsTab(QWidget):
@@ -83,6 +125,12 @@ class LoginSettingsTab(QWidget):
         # ボタンセクション
         button_layout = self._create_button_section()
         layout.addLayout(button_layout)
+
+        # 管理CSV（最新版）情報
+        self.managed_csv_info_label = QLabel("")
+        self.managed_csv_info_label.setWordWrap(True)
+        self.managed_csv_info_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
+        layout.addWidget(self.managed_csv_info_label)
         
         # ステータス表示エリア
         self.status_text = QTextEdit()
@@ -264,6 +312,27 @@ class LoginSettingsTab(QWidget):
             }}
         """)
         layout.addWidget(self.test_login_btn)
+
+        # 管理CSV取得ボタン
+        self.fetch_csv_btn = QPushButton("⬇️ CSV取得")
+        self.fetch_csv_btn.clicked.connect(self._on_fetch_managed_csv)
+        self.fetch_csv_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                padding: 8px 16px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+            }}
+        """)
+        layout.addWidget(self.fetch_csv_btn)
         
         return layout
     
@@ -303,9 +372,29 @@ class LoginSettingsTab(QWidget):
             # 保存済み認証情報があれば自動読込
             if self.auth_manager.has_credentials(environment):
                 self._auto_load_credentials(environment)
+
+            self._refresh_managed_csv_info()
         else:
             self.url_label.setText("設定なし")
             self._log_status(f"⚠️ 環境 '{environment}' の設定が見つかりません", error=True)
+
+            self._refresh_managed_csv_info()
+
+    def _refresh_managed_csv_info(self) -> None:
+        env = str(self.env_combo.currentData() or "production")
+        try:
+            info = find_latest_managed_csv(env)
+        except Exception:
+            info = None
+
+        if info is None:
+            self.managed_csv_info_label.setText(f"管理CSV(最新): なし（{env}）")
+            return
+
+        ts = format_mtime_jst(info.mtime)
+        sz = format_size(info.size_bytes)
+        name = info.path.name
+        self.managed_csv_info_label.setText(f"管理CSV(最新): {ts} / {sz} / {name}（{env}）")
     
     def _on_save_credentials(self):
         """認証情報保存"""
@@ -403,6 +492,65 @@ class LoginSettingsTab(QWidget):
             return
 
         self._run_connection_test(environment, credentials, interactive=True)
+
+    def _on_fetch_managed_csv(self) -> None:
+        """管理CSV（テーマ一覧CSV）を取得して保存する。"""
+
+        env = str(self.env_combo.currentData() or "").strip()
+        if not env:
+            self._show_error("環境が選択されていません")
+            return
+
+        client = self.create_portal_client_for_environment(env)
+        if client is None:
+            self._show_error("認証情報が不足しています（保存済み認証情報、またはフォーム入力を確認してください）")
+            return
+
+        # pytestでは同期実行（widgetテスト安定化 + ネットワークはダミークライアントで回避）
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            try:
+                ok, resp = client.download_theme_csv()
+                if not ok:
+                    self._log_status(f"❌ 管理CSV取得失敗({env}): {resp}", error=True)
+                    return
+
+                payload = getattr(resp, "content", None)
+                if isinstance(payload, bytes):
+                    data = payload
+                else:
+                    data = (getattr(resp, "text", "") or "").encode("utf-8", errors="replace")
+
+                path = build_managed_csv_path(env, now=datetime.now())
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+                path.write_bytes(data)
+                self._log_status(f"✅ 管理CSV保存: {path}")
+                self._refresh_managed_csv_info()
+            except Exception as exc:
+                self._log_status(f"❌ 管理CSV取得エラー({env}): {exc}", error=True)
+            return
+
+        self.fetch_csv_btn.setEnabled(False)
+        self.fetch_csv_btn.setText("取得中...")
+        self._log_status(f"⬇️ 管理CSV取得開始: {env}")
+
+        self._csv_thread = _DownloadManagedCsvThread(environment=env, client=client, parent=self)
+        self._csv_thread.succeeded.connect(self._on_fetch_managed_csv_succeeded)
+        self._csv_thread.failed.connect(self._on_fetch_managed_csv_failed)
+        self._csv_thread.finished.connect(lambda: self.fetch_csv_btn.setEnabled(True))
+        self._csv_thread.finished.connect(lambda: self.fetch_csv_btn.setText("⬇️ CSV取得"))
+        self._csv_thread.start()
+
+    def _on_fetch_managed_csv_succeeded(self, path: str) -> None:
+        self._log_status(f"✅ 管理CSV保存: {path}")
+        self._refresh_managed_csv_info()
+
+    def _on_fetch_managed_csv_failed(self, message: str) -> None:
+        env = str(self.env_combo.currentData() or "production")
+        self._log_status(f"❌ 管理CSV取得失敗({env}): {message}", error=True)
+        self._show_error(f"管理CSV取得に失敗しました\n{message}")
 
     def _credentials_from_form(self) -> tuple[PortalCredentials | None, str | None]:
         """フォーム入力からPortalCredentialsを構築する（不足時はエラーを返す）"""

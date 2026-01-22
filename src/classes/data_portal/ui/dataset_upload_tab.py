@@ -783,12 +783,12 @@ class DatasetUploadTab(QWidget):
                     w.setParent(None)
             self._dataset_dropdown_container_layout.addLayout(search_row)
 
-            # 選択中データセットの日時（JST）を表示
+            # 選択中データセットの日時（JST）+ サブグループ名を表示
             try:
-                from classes.utils.dataset_datetime_display import create_dataset_dates_label, attach_dataset_dates_label
+                from classes.utils.dataset_datetime_display import create_dataset_dates_label, attach_dataset_dates_label_with_subgroup
 
                 self._dataset_dates_label = create_dataset_dates_label(self)
-                attach_dataset_dates_label(combo=self.dataset_combo, label=self._dataset_dates_label)
+                attach_dataset_dates_label_with_subgroup(combo=self.dataset_combo, label=self._dataset_dates_label)
                 self._dataset_dropdown_container_layout.addWidget(self._dataset_dates_label)
             except Exception:
                 self._dataset_dates_label = None

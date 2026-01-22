@@ -411,12 +411,12 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     
     layout.addWidget(combo_container)
 
-    # 選択中データセットの日時（JST）を表示
+    # 選択中データセットの日時（JST）+ サブグループ名を表示
     try:
-        from classes.utils.dataset_datetime_display import create_dataset_dates_label, attach_dataset_dates_label
+        from classes.utils.dataset_datetime_display import create_dataset_dates_label, attach_dataset_dates_label_with_subgroup
 
         dataset_dates_label = create_dataset_dates_label(container)
-        attach_dataset_dates_label(combo=combo, label=dataset_dates_label)
+        attach_dataset_dates_label_with_subgroup(combo=combo, label=dataset_dates_label)
         layout.addWidget(dataset_dates_label)
         container.dataset_dates_label = dataset_dates_label
     except Exception:
@@ -1077,6 +1077,28 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
         btn.clicked.connect(lambda _=None, key=target_key: _handle_launch_request(key))
         launch_controls_layout.addWidget(btn)
         launch_buttons.append(btn)
+
+    def _launch_to_subgroup_edit() -> None:
+        payload = _get_current_dataset_payload()
+        if not payload:
+            return
+        try:
+            from classes.utils.subgroup_launch_helper import launch_to_subgroup_edit
+
+            launch_to_subgroup_edit(
+                owner_widget=widget,
+                dataset_id=str(payload.get("dataset_id") or ""),
+                raw_dataset=payload.get("raw_dataset"),
+                source_name="data_fetch2",
+            )
+        except Exception:
+            logger.debug("data_fetch2: launch_to_subgroup_edit failed", exc_info=True)
+
+    subgroup_btn = QPushButton("サブグループ閲覧・修正")
+    subgroup_btn.setStyleSheet(launch_button_style)
+    subgroup_btn.clicked.connect(_launch_to_subgroup_edit)
+    launch_controls_layout.addWidget(subgroup_btn)
+    launch_buttons.append(subgroup_btn)
 
     launch_controls_layout.addStretch()
     launch_controls.setLayout(launch_controls_layout)

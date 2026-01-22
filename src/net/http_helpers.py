@@ -154,13 +154,16 @@ def proxy_post(url: str, data: Optional[Union[Dict, str, bytes]] = None,
     Returns:
         requests.Response: レスポンスオブジェクト
     """
+    # 内部制御用オプション（requestsへは渡さない）
+    skip_bearer_token = bool(kwargs.pop("skip_bearer_token", False))
+
     session = get_proxy_session()
     
     # Bearer Token自動付与
     if 'headers' not in kwargs or kwargs['headers'] is None:
         kwargs['headers'] = {}
     
-    if 'Authorization' not in kwargs['headers']:
+    if (not skip_bearer_token) and ('Authorization' not in kwargs['headers']):
         try:
             from config.common import get_bearer_token_for_url
             bearer_token = get_bearer_token_for_url(url)

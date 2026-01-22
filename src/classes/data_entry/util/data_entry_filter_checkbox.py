@@ -15,7 +15,7 @@ from qt_compat.widgets import (
 )
 from qt_compat.widgets import QSizePolicy
 from qt_compat.core import Qt
-from qt_compat.gui import QFont
+from qt_compat.gui import QFont, QFontMetrics
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
 
@@ -633,10 +633,100 @@ def create_checkbox_filter_dropdown(parent=None):
 
     # 選択中データセットの日時（JST）を表示
     try:
-        from classes.utils.dataset_datetime_display import create_dataset_dates_label, attach_dataset_dates_label
+        import webbrowser
+
+        from config.common import get_dynamic_file_path
+        from classes.data_entry.util.group_member_loader import load_group_name
+        from classes.utils.dataset_datetime_display import create_dataset_dates_label, format_iso_to_jst, resolve_dataset_date_info
+
+        def _resolve_group_id_from_dataset_id(dataset_id: str) -> str:
+            dataset_id = str(dataset_id or "").strip()
+            if not dataset_id:
+                return ""
+            dataset_path = get_dynamic_file_path(f"output/rde/data/datasets/{dataset_id}.json")
+            if not dataset_path or not os.path.exists(dataset_path):
+                return ""
+            try:
+                with open(dataset_path, "r", encoding="utf-8") as f:
+                    payload = json.load(f)
+                group_data = (
+                    (((payload.get("data") or {}).get("relationships") or {}).get("group") or {}).get("data")
+                    or {}
+                )
+                if isinstance(group_data, dict):
+                    return str(group_data.get("id") or "")
+                return ""
+            except Exception:
+                return ""
+
+        def _resolve_group_id(combo_data: object) -> str:
+            if isinstance(combo_data, dict):
+                # 可能なら listing 側の relationships も試す
+                try:
+                    rel = combo_data.get("relationships") or {}
+                    gid = (((rel.get("group") or {}).get("data") or {}).get("id") or "")
+                    if gid:
+                        return str(gid)
+                except Exception:
+                    pass
+                dataset_id = str(combo_data.get("id") or "")
+                return _resolve_group_id_from_dataset_id(dataset_id)
+            if isinstance(combo_data, str):
+                return _resolve_group_id_from_dataset_id(combo_data)
+            return ""
+
+        def _build_subgroup_link_text(name: str, *, max_px: int) -> str:
+            name = str(name or "").strip() or "--"
+            metrics = QFontMetrics(dataset_dates_label.font())
+            return metrics.elidedText(name, Qt.ElideRight, max_px)
 
         dataset_dates_label = create_dataset_dates_label(container)
-        attach_dataset_dates_label(combo=combo, label=dataset_dates_label, data_role=Qt.UserRole)
+        dataset_dates_label.setTextFormat(Qt.RichText)
+        dataset_dates_label.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        dataset_dates_label.setOpenExternalLinks(False)
+
+        def _on_link_activated(url: str) -> None:
+            try:
+                if url:
+                    webbrowser.open(url)
+            except Exception:
+                pass
+
+        try:
+            dataset_dates_label.linkActivated.connect(_on_link_activated)
+        except Exception:
+            pass
+
+        def _current_data() -> object:
+            idx = combo.currentIndex()
+            if idx < 0:
+                return None
+            try:
+                return combo.itemData(idx, Qt.UserRole)
+            except Exception:
+                return None
+
+        def _refresh_dataset_dates(*_args) -> None:
+            combo_data = _current_data()
+            info = resolve_dataset_date_info(combo_data)
+            created = format_iso_to_jst(info.created) or "--"
+            modified = format_iso_to_jst(info.modified) or "--"
+            open_at = format_iso_to_jst(info.open_at) or "--"
+
+            group_id = _resolve_group_id(combo_data)
+            group_name = load_group_name(group_id) if group_id else ""
+            subgroup_url = f"https://rde.nims.go.jp/rde/datasets/groups/{group_id}" if group_id else ""
+
+            if group_id:
+                elided = _build_subgroup_link_text(group_name, max_px=320)
+                subgroup_part = f"    サブグループ: <a href=\"{subgroup_url}\">{elided}</a>"
+            else:
+                subgroup_part = "    サブグループ: --"
+
+            dataset_dates_label.setText(f"開設日: {created}    更新日: {modified}    公開日: {open_at}{subgroup_part}")
+
+        combo.currentIndexChanged.connect(_refresh_dataset_dates)
+        _refresh_dataset_dates()
         layout.addWidget(dataset_dates_label)
         container.dataset_dates_label = dataset_dates_label
     except Exception:

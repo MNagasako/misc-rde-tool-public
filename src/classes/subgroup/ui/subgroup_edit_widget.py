@@ -1004,6 +1004,12 @@ def create_subgroup_edit_widget(parent, title, color, create_auto_resize_button)
         existing_group_combo, filter_combo, scroll_area, 
         form_section['builder'], form_widgets, widget, related_dataset_section
     )
+
+    # 外部連携用（データ登録→サブグループ閲覧・修正ジャンプ等）
+    try:
+        widget._subgroup_selector = managers.get('selector')
+    except Exception:
+        pass
     
     # === 7. イベントハンドラー設定 ===
     _setup_event_handlers(

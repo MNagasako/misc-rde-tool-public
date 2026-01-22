@@ -159,6 +159,22 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
     parent_controller.experiment_id_input = basic_info_widgets["exp_id"]
     parent_controller.data_owner_combo = basic_info_widgets["data_owner"]
     parent_controller.data_owner_label = basic_info_widgets.get("data_owner_label")
+    parent_controller.data_owner_error_button = basic_info_widgets.get("data_owner_error_button")
+
+    if getattr(parent_controller, "data_owner_error_button", None) is not None:
+        def _show_data_owner_debug_dialog() -> None:
+            try:
+                from classes.data_entry.ui.data_owner_debug_dialog import show_data_owner_debug_dialog
+
+                ctx = getattr(parent_controller, "_data_owner_debug_context", None)
+                show_data_owner_debug_dialog(widget, context=ctx)
+            except Exception as exc:
+                logger.error("エラー詳細ダイアログ表示失敗: %s", exc, exc_info=True)
+
+        try:
+            parent_controller.data_owner_error_button.clicked.connect(_show_data_owner_debug_dialog)
+        except Exception:
+            pass
     # URLとタグは試料情報へ移動のため削除
     # parent_controller.sample_reference_url_input = basic_info_widgets["url"]
     # parent_controller.sample_tags_input = basic_info_widgets["tags"]
@@ -219,6 +235,90 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
         from classes.data_entry.util.group_member_loader import load_group_members
         from classes.dataset.util.dataset_dropdown_util import get_current_user_id
 
+        def _build_owner_debug_context(*, dataset_id: str, dataset_json_path: str, dataset_data: dict | None, group_id: str, members: list | None, notes: list[str]) -> dict:
+            def _safe_dict_get(d: dict | None, *keys, default=None):
+                cur = d
+                for k in keys:
+                    if not isinstance(cur, dict):
+                        return default
+                    cur = cur.get(k)
+                return cur if cur is not None else default
+
+            # サブグループJSON候補（実装上は group_id=サブグループID）
+            subgroup_candidates: list[str] = []
+            if group_id:
+                subgroup_candidates = [
+                    get_dynamic_file_path(f"output/rde/data/subGroups/{group_id}.json"),
+                    get_dynamic_file_path(f"output/rde/data/subGroupsAncestors/{group_id}.json"),
+                    get_dynamic_file_path(f"output/rde/data/subgroups/{group_id}.json"),
+                ]
+
+            existing_subgroup_paths = [p for p in subgroup_candidates if p and os.path.exists(p)]
+
+            dataset_rel_keys = []
+            try:
+                relationships = _safe_dict_get(dataset_data, "data", "relationships", default={})
+                if isinstance(relationships, dict):
+                    dataset_rel_keys = sorted(list(relationships.keys()))
+            except Exception:
+                dataset_rel_keys = []
+
+            dataset_included_types: dict[str, int] = {}
+            try:
+                included = (dataset_data or {}).get("included")
+                if isinstance(included, list):
+                    for item in included:
+                        if isinstance(item, dict):
+                            t = str(item.get("type") or "")
+                            if t:
+                                dataset_included_types[t] = dataset_included_types.get(t, 0) + 1
+            except Exception:
+                dataset_included_types = {}
+
+            member_ids: list[str] = []
+            displayable_members: list[dict] = []
+            for m in (members or []):
+                if not isinstance(m, dict):
+                    continue
+                mid = str(m.get("id") or "").strip()
+                if mid:
+                    member_ids.append(mid)
+                attrs = m.get("attributes") if isinstance(m.get("attributes"), dict) else {}
+                displayable_members.append(
+                    {
+                        "id": mid,
+                        "userName": str(attrs.get("userName") or ""),
+                        "organizationName": str(attrs.get("organizationName") or ""),
+                        "isDeleted": attrs.get("isDeleted"),
+                    }
+                )
+
+            return {
+                "dataset_id": str(dataset_id or ""),
+                "dataset_json_path": str(dataset_json_path or ""),
+                "dataset_json_exists": bool(dataset_json_path and os.path.exists(dataset_json_path)),
+                "dataset_relationship_keys": dataset_rel_keys,
+                "dataset_included_type_counts": dataset_included_types,
+                "group_id": str(group_id or ""),
+                "subgroup_candidate_paths": subgroup_candidates,
+                "subgroup_existing_paths": existing_subgroup_paths,
+                "members_count": len(members or []),
+                "member_ids": member_ids,
+                "members_preview": displayable_members[:20],
+                "notes": list(notes or []),
+            }
+
+        def _set_owner_error_button_visible(visible: bool, *, context: dict | None) -> None:
+            btn = getattr(parent_controller, "data_owner_error_button", None)
+            if btn is None:
+                return
+            parent_controller._data_owner_debug_context = context
+            btn.setVisible(bool(visible))
+            try:
+                btn.setEnabled(bool(visible))
+            except Exception:
+                pass
+
         # --- 既存の試料フォーム・スキーマフォームを削除 ---
         # NOTE: 試料/固有はトグル用コンテナでラップしているため、コンテナを削除する。
         if getattr(parent_controller, 'sample_form_container', None) is not None:
@@ -237,14 +337,49 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
             return
         dataset_id = dataset_item.get('id', '')
         dataset_json_path = get_dynamic_file_path(f'output/rde/data/datasets/{dataset_id}.json')
+        dataset_data = None
+        group_id = ""
+        notes: list[str] = []
         if not os.path.exists(dataset_json_path):
-            QMessageBox.warning(widget, "エラー", f"データセットファイルが見つかりません: {dataset_json_path}")
+            notes.append("データセットJSONが存在しません")
+            # UI側で原因を可視化（エラー詳細）
+            if hasattr(parent_controller, 'data_owner_combo') and parent_controller.data_owner_combo:
+                combo_owner = parent_controller.data_owner_combo
+                combo_owner.clear()
+                combo_owner.addItem("データセットJSONなし（エラー詳細を確認）", None)
+                combo_owner.setEnabled(False)
+            _set_owner_error_button_visible(True, context=_build_owner_debug_context(
+                dataset_id=str(dataset_id or ""),
+                dataset_json_path=str(dataset_json_path or ""),
+                dataset_data=None,
+                group_id="",
+                members=None,
+                notes=notes,
+            ))
             return
-        with open(dataset_json_path, 'r', encoding='utf-8') as f:
-            dataset_data = json.load(f)
-            relationships = dataset_data.get("data",{}).get('relationships', {})
+
+        try:
+            with open(dataset_json_path, 'r', encoding='utf-8') as f:
+                dataset_data = json.load(f)
+            relationships = (dataset_data or {}).get("data", {}).get('relationships', {})
             group = relationships.get('group', {}).get('data', {})
             group_id = group.get('id', '')
+        except Exception as e:
+            notes.append(f"データセットJSONの読み込みに失敗: {e}")
+            if hasattr(parent_controller, 'data_owner_combo') and parent_controller.data_owner_combo:
+                combo_owner = parent_controller.data_owner_combo
+                combo_owner.clear()
+                combo_owner.addItem("データセットJSON読込エラー（エラー詳細を確認）", None)
+                combo_owner.setEnabled(False)
+            _set_owner_error_button_visible(True, context=_build_owner_debug_context(
+                dataset_id=str(dataset_id or ""),
+                dataset_json_path=str(dataset_json_path or ""),
+                dataset_data=None,
+                group_id="",
+                members=None,
+                notes=notes,
+            ))
+            return
 
         # --- データ所有者（所属）コンボボックス更新 ---
         if hasattr(parent_controller, 'data_owner_combo') and parent_controller.data_owner_combo:
@@ -257,6 +392,48 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
                     members = load_group_members(group_id)
                     current_user_id = get_current_user_id()
                     default_index = 0
+                    if not members:
+                        notes.append("サブグループメンバーが0件です")
+                        combo_owner.clear()
+                        combo_owner.addItem("メンバー0件（エラー詳細を確認）", None)
+                        combo_owner.setEnabled(False)
+                        _set_owner_error_button_visible(True, context=_build_owner_debug_context(
+                            dataset_id=str(dataset_id or ""),
+                            dataset_json_path=str(dataset_json_path or ""),
+                            dataset_data=dataset_data if isinstance(dataset_data, dict) else None,
+                            group_id=str(group_id or ""),
+                            members=[],
+                            notes=notes,
+                        ))
+                    else:
+                        # 詳細不足（attributes が空）を検知
+                        has_any_details = False
+                        for m in members:
+                            if not isinstance(m, dict):
+                                continue
+                            attrs = m.get('attributes', {}) if isinstance(m.get('attributes', {}), dict) else {}
+                            if attrs.get('userName') or attrs.get('organizationName') or attrs.get('name'):
+                                has_any_details = True
+                                break
+                        if not has_any_details:
+                            notes.append("メンバー詳細（userName/organizationName）が取得できていません（IDのみ表示）")
+                            _set_owner_error_button_visible(True, context=_build_owner_debug_context(
+                                dataset_id=str(dataset_id or ""),
+                                dataset_json_path=str(dataset_json_path or ""),
+                                dataset_data=dataset_data if isinstance(dataset_data, dict) else None,
+                                group_id=str(group_id or ""),
+                                members=members,
+                                notes=notes,
+                            ))
+                        else:
+                            _set_owner_error_button_visible(False, context=_build_owner_debug_context(
+                                dataset_id=str(dataset_id or ""),
+                                dataset_json_path=str(dataset_json_path or ""),
+                                dataset_data=dataset_data if isinstance(dataset_data, dict) else None,
+                                group_id=str(group_id or ""),
+                                members=members,
+                                notes=notes,
+                            ))
                     
                     for i, member in enumerate(members):
                         user_id = member.get('id')
@@ -288,9 +465,27 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
                     logger.error("グループメンバー取得エラー: %s", e)
                     combo_owner.addItem("メンバー取得エラー", None)
                     combo_owner.setEnabled(False)
+                    notes.append(f"メンバー取得エラー: {e}")
+                    _set_owner_error_button_visible(True, context=_build_owner_debug_context(
+                        dataset_id=str(dataset_id or ""),
+                        dataset_json_path=str(dataset_json_path or ""),
+                        dataset_data=dataset_data if isinstance(dataset_data, dict) else None,
+                        group_id=str(group_id or ""),
+                        members=None,
+                        notes=notes,
+                    ))
             else:
                 combo_owner.addItem("グループ情報なし", None)
                 combo_owner.setEnabled(False)
+                notes.append("dataset.json の relationships.group.data.id が空です")
+                _set_owner_error_button_visible(True, context=_build_owner_debug_context(
+                    dataset_id=str(dataset_id or ""),
+                    dataset_json_path=str(dataset_json_path or ""),
+                    dataset_data=dataset_data if isinstance(dataset_data, dict) else None,
+                    group_id="",
+                    members=None,
+                    notes=notes,
+                ))
 
         # --- 試料フォーム生成（常に基本情報の次に挿入） ---
         try:
@@ -796,6 +991,83 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
             source_name="data_register",
         )
 
+    def _resolve_group_id_for_launch(dataset_id: str, raw_dataset: dict | None) -> str:
+        # 可能なら listing 側の relationships から先に試す
+        if isinstance(raw_dataset, dict):
+            try:
+                rel = raw_dataset.get("relationships") or {}
+                gid = (((rel.get("group") or {}).get("data") or {}).get("id") or "")
+                if gid:
+                    return str(gid)
+            except Exception:
+                pass
+
+        dataset_id = str(dataset_id or "").strip()
+        if not dataset_id:
+            return ""
+
+        dataset_path = get_dynamic_file_path(f"output/rde/data/datasets/{dataset_id}.json")
+        if not dataset_path or not os.path.exists(dataset_path):
+            return ""
+        try:
+            with open(dataset_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            group_data = (
+                (((payload.get("data") or {}).get("relationships") or {}).get("group") or {}).get("data")
+                or {}
+            )
+            if isinstance(group_data, dict):
+                return str(group_data.get("id") or "")
+        except Exception:
+            pass
+        return ""
+
+    def _launch_to_subgroup_edit() -> None:
+        payload = _get_current_dataset_payload_for_launch()
+        if not payload:
+            QMessageBox.warning(widget, "データセット未選択", "連携するデータセットを選択してください。")
+            return
+
+        group_id = _resolve_group_id_for_launch(payload["dataset_id"], payload.get("raw_dataset"))
+        if not group_id:
+            QMessageBox.warning(widget, "サブグループ未解決", "選択中データセットのサブグループIDを取得できませんでした。")
+            return
+
+        logger.info(
+            "data_register: launch request target=subgroup_edit group_id=%s dataset_id=%s",
+            group_id,
+            payload["dataset_id"],
+        )
+
+        try:
+            parent_controller.switch_mode("subgroup_create")
+        except Exception:
+            QMessageBox.warning(widget, "画面遷移失敗", "サブグループ画面へ遷移できませんでした。")
+            return
+
+        def _try_focus() -> None:
+            try:
+                root = None
+                host = getattr(parent_controller, "parent", None)
+                layout = getattr(host, "menu_area_layout", None)
+                if layout is not None and hasattr(layout, "count") and layout.count() > 0:
+                    item = layout.itemAt(layout.count() - 1)
+                    root = item.widget() if item is not None else None
+
+                if root is not None and hasattr(root, "focus_edit_subgroup_by_id"):
+                    ok = bool(root.focus_edit_subgroup_by_id(group_id))
+                    if not ok:
+                        QMessageBox.information(
+                            widget,
+                            "サブグループ選択",
+                            "サブグループ画面へ遷移しましたが、指定IDの自動選択に失敗しました。\n"
+                            "閲覧・修正タブで手動選択してください。",
+                        )
+            except Exception:
+                logger.debug("data_register: focus subgroup edit failed", exc_info=True)
+
+        QTimer.singleShot(0, _try_focus)
+
     # 他機能連携ボタン（データセットコンボボックス直下に配置）
     # 他タブ（データセット編集/データエントリー）と同様に、項目名ラベルの右側へボタンを並べる
     launch_controls_widget = QWidget()
@@ -818,12 +1090,19 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
     launch_dataset_dataentry_button.clicked.connect(_launch_to_dataset_dataentry)
     launch_controls_layout.addWidget(launch_dataset_dataentry_button)
 
+    # 他機能連携ボタン（サブグループ閲覧・修正）
+    launch_subgroup_edit_button = QPushButton("サブグループ閲覧・修正")
+    launch_subgroup_edit_button.setStyleSheet(launch_button_style)
+    launch_subgroup_edit_button.clicked.connect(_launch_to_subgroup_edit)
+    launch_controls_layout.addWidget(launch_subgroup_edit_button)
+
     launch_controls_layout.addStretch()
     launch_controls_widget.setLayout(launch_controls_layout)
 
     widget._dataset_launch_buttons = [
         launch_dataset_edit_button,
         launch_dataset_dataentry_button,
+        launch_subgroup_edit_button,
     ]  # type: ignore[attr-defined]
 
     # テーマ切替時に「他機能連携」の個別styleSheetを再適用（更新漏れ対策）
@@ -1299,7 +1578,15 @@ def create_basic_info_group():
     # NOTE: setStyleSheet("") は設定しない（親/グローバルQSSに追従）
     owner_combo.addItem("データセット選択後に選択可能", None)
     owner_combo.setEnabled(False)
+    from qt_compat.widgets import QPushButton
+    owner_error_btn = QPushButton("エラー詳細")
+    owner_error_btn.setObjectName("data_owner_error_button")
+    owner_error_btn.setVisible(False)
+    owner_error_btn.setEnabled(False)
+    owner_error_btn.setToolTip("データ所有者候補が生成できない原因を表示します")
+
     owner_row.addWidget(owner_label)
+    owner_row.addWidget(owner_error_btn)
     owner_row.addWidget(owner_combo)
     layout.addLayout(owner_row)
 
@@ -1309,6 +1596,7 @@ def create_basic_info_group():
         "exp_id": expid_input,
         "data_owner": owner_combo,
         "data_owner_label": owner_label,
+        "data_owner_error_button": owner_error_btn,
     }
     return group_box, widgets
 

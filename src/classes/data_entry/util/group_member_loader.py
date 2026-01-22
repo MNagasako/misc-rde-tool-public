@@ -8,6 +8,20 @@ from classes.subgroup.core.subgroup_data_manager import SubgroupDataManager
 
 logger = logging.getLogger(__name__)
 
+
+def load_group_name(group_id: str) -> str:
+    """指定されたグループ(サブグループ)IDの名称を取得する。
+
+    後方互換のため本モジュールに残すが、実装は共通ヘルパへ委譲する。
+    """
+
+    try:
+        from classes.utils.group_name_resolver import load_group_name as _impl
+
+        return _impl(group_id)
+    except Exception:
+        return ""
+
 def load_group_members(group_id: str) -> List[Dict[str, Any]]:
     """
     指定されたグループIDのメンバー情報を取得します。
@@ -74,28 +88,77 @@ def _load_from_local_file(group_id: str) -> List[Dict[str, Any]]:
     return users
 
 def _load_from_api(group_id: str) -> List[Dict[str, Any]]:
-    # NOTE: include=members は環境によって 404 になる事例があるため、まずは基本のgroupsエンドポイントを使用する。
-    url = f"https://rde-api.nims.go.jp/groups/{group_id}"
-    
-    try:
-        response = proxy_get(url)
-        
-        if response.status_code == 200:
-            data = response.json()
-            members = []
-            if 'included' in data:
-                for item in data['included']:
-                    if item.get('type') == 'user':
-                        members.append(item)
-            
-            if not members and 'members' in data:
-                 members = data['members']
+    def _dedupe_by_id(users: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        seen: set[str] = set()
+        deduped: List[Dict[str, Any]] = []
+        for u in users or []:
+            uid = str((u or {}).get("id") or "").strip()
+            if not uid or uid in seen:
+                continue
+            seen.add(uid)
+            deduped.append(u)
+        return deduped
 
-            return members
-        else:
-            logger.error(f"Failed to load group members from API. Status: {response.status_code}")
+    def _extract_users(payload: Any) -> List[Dict[str, Any]]:
+        if not isinstance(payload, dict):
             return []
-            
-    except Exception as e:
-        logger.error(f"Error loading group members from API for group {group_id}: {e}")
-        return []
+
+        users: List[Dict[str, Any]] = []
+
+        included = payload.get("included")
+        if isinstance(included, list):
+            for item in included:
+                if isinstance(item, dict) and item.get("type") == "user":
+                    users.append(item)
+        if users:
+            return _dedupe_by_id(users)
+
+        # include が無い/権限等で included が落ちる場合に備え、members のIDだけでも返す。
+        relationships = (payload.get("data") or {}).get("relationships")
+        if isinstance(relationships, dict):
+            members_rel = (relationships.get("members") or {}).get("data")
+            if isinstance(members_rel, list):
+                for m in members_rel:
+                    if not isinstance(m, dict):
+                        continue
+                    if m.get("type") != "user":
+                        continue
+                    mid = str(m.get("id") or "").strip()
+                    if not mid:
+                        continue
+                    users.append({"id": mid, "type": "user", "attributes": {}})
+
+        # 旧形式/独自形式（念のため）
+        if not users and isinstance(payload.get("members"), list):
+            for m in payload.get("members"):
+                if isinstance(m, dict):
+                    users.append(m)
+
+        return _dedupe_by_id(users)
+
+    # NOTE: include=members は環境によって 404 になる事例があるため、まずは include=members を試し、失敗時に素のgroupsへフォールバック。
+    base_url = f"https://rde-api.nims.go.jp/groups/{group_id}"
+    urls_to_try = [
+        # なるべくユーザー表示に必要な最小限のフィールドだけに絞る
+        base_url + "?include=members&fields%5Buser%5D=id%2CuserName%2CorganizationName%2CisDeleted",
+        base_url,
+    ]
+
+    last_status: int | None = None
+    for url in urls_to_try:
+        try:
+            response = proxy_get(url)
+            last_status = getattr(response, "status_code", None)
+            if response.status_code != 200:
+                continue
+            payload = response.json()
+            users = _extract_users(payload)
+            if users:
+                return users
+        except Exception as e:
+            logger.error(f"Error loading group members from API for group {group_id}: {e}")
+            continue
+
+    if last_status is not None:
+        logger.error(f"Failed to load group members from API. Status: {last_status}")
+    return []

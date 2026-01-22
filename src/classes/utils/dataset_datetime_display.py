@@ -22,9 +22,11 @@ from config.common import get_dynamic_file_path
 try:
     from qt_compat.core import Qt
     from qt_compat.widgets import QComboBox, QLabel
+    from qt_compat.gui import QFontMetrics
 except Exception:  # pragma: no cover
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QComboBox, QLabel
+    from PySide6.QtGui import QFontMetrics
 
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import ThemeManager, get_color
@@ -223,6 +225,137 @@ def update_dataset_dates_label(label: QLabel, combo_data: Any) -> None:
     open_at = format_iso_to_jst(info.open_at) or "--"
 
     label.setText(f"開設日: {created}    更新日: {modified}    公開日: {open_at}")
+
+
+def _resolve_group_id(combo_data: Any) -> str:
+    """combo_data から group_id(=サブグループID) を解決する。"""
+
+    # 1) listing/詳細どちらでも relationships.group.data.id があればそれを優先
+    try:
+        if isinstance(combo_data, dict):
+            rel = combo_data.get("relationships") or {}
+            gid = (((rel.get("group") or {}).get("data") or {}).get("id") or "")
+            gid = str(gid or "").strip()
+            if gid:
+                return gid
+    except Exception:
+        pass
+
+    # 2) dataset_id から詳細JSONを読む
+    dataset_id = ""
+    if isinstance(combo_data, dict):
+        dataset_id = str(combo_data.get("id") or "")
+    elif isinstance(combo_data, str):
+        dataset_id = combo_data
+    dataset_id = str(dataset_id or "").strip()
+    if not dataset_id:
+        return ""
+
+    detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dataset_id}.json")
+    if not detail_path or not os.path.exists(detail_path):
+        return ""
+    try:
+        with open(detail_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        group_data = (
+            (((payload.get("data") or {}).get("relationships") or {}).get("group") or {}).get("data") or {}
+        )
+        if isinstance(group_data, dict):
+            return str(group_data.get("id") or "").strip()
+    except Exception:
+        return ""
+    return ""
+
+
+def update_dataset_dates_label_with_subgroup(
+    label: QLabel,
+    combo_data: Any,
+    *,
+    subgroup_name_max_px: int = 320,
+) -> None:
+    """日付ラベルへサブグループ名(リンク)を追加して表示する。"""
+
+    info = resolve_dataset_date_info(combo_data)
+
+    created = format_iso_to_jst(info.created) or "--"
+    modified = format_iso_to_jst(info.modified) or "--"
+    open_at = format_iso_to_jst(info.open_at) or "--"
+
+    group_id = _resolve_group_id(combo_data)
+    group_name = ""
+    if group_id:
+        try:
+            from classes.utils.group_name_resolver import load_group_name
+
+            group_name = load_group_name(group_id)
+        except Exception:
+            group_name = ""
+
+    # rich text (リンク) を使う
+    try:
+        label.setTextFormat(Qt.RichText)
+        label.setTextInteractionFlags(Qt.TextBrowserInteraction)
+        label.setOpenExternalLinks(False)
+    except Exception:
+        pass
+
+    if group_id:
+        url = f"https://rde.nims.go.jp/rde/datasets/groups/{group_id}"
+        try:
+            metrics = QFontMetrics(label.font())
+            elided = metrics.elidedText((group_name or "--"), Qt.ElideRight, int(subgroup_name_max_px))
+        except Exception:
+            elided = (group_name or "--")
+        subgroup_part = f"    サブグループ: <a href=\"{url}\">{elided}</a>"
+    else:
+        subgroup_part = "    サブグループ: --"
+
+    label.setText(f"開設日: {created}    更新日: {modified}    公開日: {open_at}{subgroup_part}")
+
+
+def attach_dataset_dates_label_with_subgroup(
+    *,
+    combo: QComboBox,
+    label: QLabel,
+    data_role: Optional[int] = None,
+    subgroup_name_max_px: int = 320,
+) -> None:
+    """コンボ選択に追従する日付+サブグループ表示ラベルをバインドする。"""
+
+    def _current_data() -> Any:
+        idx = combo.currentIndex()
+        if idx < 0:
+            return None
+        try:
+            if data_role is None:
+                return combo.itemData(idx)
+            return combo.itemData(idx, data_role)
+        except Exception:
+            return None
+
+    def _refresh(*_args) -> None:
+        update_dataset_dates_label_with_subgroup(
+            label,
+            _current_data(),
+            subgroup_name_max_px=subgroup_name_max_px,
+        )
+
+    def _on_link_activated(url: str) -> None:
+        try:
+            import webbrowser
+
+            if url:
+                webbrowser.open(url)
+        except Exception:
+            pass
+
+    try:
+        label.linkActivated.connect(_on_link_activated)
+    except Exception:
+        pass
+
+    combo.currentIndexChanged.connect(_refresh)
+    _refresh()
 
 
 def attach_dataset_dates_label(

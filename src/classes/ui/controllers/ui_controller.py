@@ -1599,7 +1599,7 @@ class UIController(UIControllerCore):
        
     def _create_basic_info_ui(self, layout, button_style):
         """
-        Step 2.5.2.1: 基本情報UI構築層の分離
+        Step: 基本情報UI構築層の分離
         データ取得・Excel・段階実行・ステータス表示の統合UI構築
         """
         from qt_compat.widgets import QApplication, QLabel, QHBoxLayout, QVBoxLayout, QMessageBox, QInputDialog, QSpinBox, QTabWidget, QWidget
@@ -2106,7 +2106,7 @@ class UIController(UIControllerCore):
 
     def _create_subgroup_ui(self, layout, title, color):
         """
-        Step 2.5.2.2: サブグループUI構築層の分離
+        Step: サブグループUI構築層の分離
         サブグループ作成機能のモジュール化
         """
         from qt_compat.widgets import QLabel
@@ -2122,7 +2122,7 @@ class UIController(UIControllerCore):
 
     def _create_data_fetch2_ui(self, layout, widget):
         """
-        Step 2.5.2.5b: データ取得2 UI構築層の分離
+        Step: データ取得2 UI構築層の分離
         データ取得2機能の高度なUI構築とキャッシュ管理
         """
         # DataFetch2TabWidgetを使ってタブUI化
@@ -2161,7 +2161,7 @@ class UIController(UIControllerCore):
 
     def _create_dataset_ui(self, layout, widget):
         """
-        Step 2.5.2.3: データセットUI構築層の分離  
+        Step: データセットUI構築層の分離  
         データセット開設・修正・データエントリー機能のタブ統合UI構築
         """
         # DatasetTabWidgetを使ってタブUI化
@@ -2294,7 +2294,7 @@ class UIController(UIControllerCore):
 
     def _create_dummy_ui(self, layout, title, button_style):
         """
-        Step 2.5.2.5c: ダミーUI構築層の分離
+        Step: ダミーUI構築層の分離
         未実装機能用の汎用ダミーUI構築
         """
         button_text = f"{title}実行（ダミー）"

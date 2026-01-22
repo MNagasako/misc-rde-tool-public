@@ -27,8 +27,19 @@ class PublicDataPortalListingTab(ListingTabBase):
         ListingColumn("key", "key", width=180, preview_limit=120),
     )
 
+    def __init__(self, parent=None, *, environment: str = "production"):
+        self.environment = str(environment or "production").strip() or "production"
+        super().__init__(parent)
+
+    def set_environment(self, environment: str) -> None:
+        env = str(environment or "production").strip() or "production"
+        if env == getattr(self, "environment", "production"):
+            return
+        self.environment = env
+        self.refresh_from_disk()
+
     def load_records_from_disk(self) -> Tuple[Iterable[dict], Optional[Path]]:
-        base_dir = get_public_data_portal_root_dir()
+        base_dir = get_public_data_portal_root_dir(getattr(self, "environment", "production"))
         latest_file = find_latest_matching_file(
             base_dir,
             (

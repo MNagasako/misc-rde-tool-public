@@ -2684,6 +2684,29 @@ class BatchRegisterWidget(QWidget):
             launch_controls_layout.addWidget(btn)
             self._launch_buttons.append(btn)
 
+        def _launch_to_subgroup_edit() -> None:
+            dataset_id = str(self.get_selected_dataset_id() or "").strip()
+            if not dataset_id:
+                QMessageBox.warning(self, "データセット未選択", "連携するデータセットを選択してください。")
+                return
+            try:
+                from classes.utils.subgroup_launch_helper import launch_to_subgroup_edit
+
+                launch_to_subgroup_edit(
+                    owner_widget=self,
+                    dataset_id=dataset_id,
+                    raw_dataset=None,
+                    source_name="data_register_batch",
+                )
+            except Exception:
+                logger.debug("batch_register: launch_to_subgroup_edit failed", exc_info=True)
+
+        subgroup_btn = QPushButton("サブグループ閲覧・修正")
+        subgroup_btn.setStyleSheet(launch_button_style)
+        subgroup_btn.clicked.connect(_launch_to_subgroup_edit)
+        launch_controls_layout.addWidget(subgroup_btn)
+        self._launch_buttons.append(subgroup_btn)
+
         # テーマ切替時に「他機能連携」の個別styleSheetを再適用（更新漏れ対策）
         try:
             from classes.utils.launch_ui_styles import apply_launch_controls_theme, bind_launch_controls_to_theme

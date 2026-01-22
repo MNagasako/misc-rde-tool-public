@@ -136,6 +136,46 @@ def create_subgroup_create_widget(parent, title, color, create_auto_resize_butto
             logger.error("タブ切り替え時のリフレッシュ処理でエラー: %s", e)
 
     tab_widget.currentChanged.connect(on_tab_changed)
+
+    # 外部連携用（データ登録→サブグループ閲覧・修正ジャンプ等）
+    main_widget.tab_widget = tab_widget  # type: ignore[attr-defined]
+
+    def focus_edit_subgroup_by_id(group_id: str) -> bool:
+        group_id = str(group_id or "").strip()
+        if not group_id:
+            return False
+
+        try:
+            edit_index = -1
+            for i in range(tab_widget.count()):
+                if tab_widget.tabText(i) == "閲覧・修正":
+                    edit_index = i
+                    break
+            if edit_index < 0:
+                return False
+
+            tab_widget.setCurrentIndex(edit_index)
+            _ensure_edit_tab_built()
+
+            if edit_tab is None:
+                return False
+
+            selector = getattr(edit_tab, "_subgroup_selector", None)
+            if selector is not None and hasattr(selector, "select_group_by_id"):
+                try:
+                    # 一覧が古い可能性があるため、必要に応じて更新
+                    refresh = getattr(edit_tab, "_refresh_subgroup_list", None)
+                    if callable(refresh):
+                        refresh()
+                except Exception:
+                    pass
+                return bool(selector.select_group_by_id(group_id, prompt_clear_filter=True))
+        except Exception:
+            logger.debug("subgroup_create: focus_edit_subgroup_by_id failed", exc_info=True)
+
+        return False
+
+    main_widget.focus_edit_subgroup_by_id = focus_edit_subgroup_by_id  # type: ignore[attr-defined]
     
     main_layout.addWidget(tab_widget)
     main_widget.setLayout(main_layout)

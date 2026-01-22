@@ -26,6 +26,7 @@ from qt_compat.widgets import (
 )
 
 from classes.data_portal.util.public_output_paths import get_public_data_portal_root_dir
+from classes.data_portal.core.auth_manager import get_auth_manager
 from classes.theme import ThemeKey, get_color
 from classes.utils.data_portal_public import (
     PublicArimDataDetail,
@@ -47,6 +48,7 @@ class _FetchThread(QThread):
         *,
         keyword: str,
         environment: str,
+        basic_auth: tuple[str, str] | None,
         timeout: int,
         start_page: int,
         end_page: int,
@@ -57,6 +59,7 @@ class _FetchThread(QThread):
         super().__init__(parent)
         self.keyword = keyword
         self.environment = environment
+        self.basic_auth = basic_auth
         self.timeout = timeout
         self.start_page = start_page
         self.end_page = end_page
@@ -66,7 +69,10 @@ class _FetchThread(QThread):
     def run(self) -> None:  # noqa: D401
         try:
             # 旧キャッシュの *_raw 形式を新形式（英語キーdict）へ移行
-            migrated, failed = migrate_public_data_portal_cache_dir(progress_callback=lambda c, t, m: self.progress.emit(c, t, m))
+            migrated, failed = migrate_public_data_portal_cache_dir(
+                environment=self.environment,
+                progress_callback=lambda c, t, m: self.progress.emit(c, t, m),
+            )
             if migrated or failed:
                 self.progress.emit(0, 0, f"キャッシュ移行: migrated={migrated}, failed={failed}")
 
@@ -81,11 +87,12 @@ class _FetchThread(QThread):
                 timeout=self.timeout,
                 start_page=self.start_page,
                 end_page=self.end_page,
+                basic_auth=self.basic_auth,
                 progress_callback=on_search_progress,
             )
             self.progress.emit(0, max(0, len(links)), f"リンク取得: {len(links)}件（detail取得開始）")
 
-            out_dir = get_public_data_portal_root_dir()
+            out_dir = get_public_data_portal_root_dir(self.environment)
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             out_path = out_dir / f"public_arim_data_details_{ts}.json"
             latest_path = out_dir / "output.json"
@@ -126,6 +133,7 @@ class _FetchThread(QThread):
                 environment=self.environment,
                 timeout=self.timeout,
                 headers=headers,
+                basic_auth=self.basic_auth,
                 max_workers=self.max_workers,
                 cache_enabled=self.cache_enabled,
                 progress_callback=on_detail_progress,
@@ -304,6 +312,17 @@ class PublicDataPortalFetchTab(QWidget):
         max_workers = int(self.max_workers_spin.value())
         cache_enabled = bool(self.cache_checkbox.isChecked())
 
+        basic_auth: tuple[str, str] | None = None
+        try:
+            credentials = get_auth_manager().get_credentials(str(env))
+            if credentials is not None:
+                user = (credentials.basic_username or "").strip()
+                password = (credentials.basic_password or "").strip()
+                if user and password:
+                    basic_auth = (user, password)
+        except Exception:
+            basic_auth = None
+
         self.fetch_button.setEnabled(False)
         self.fetch_all_button.setEnabled(False)
         self.status_label.setText("取得中...")
@@ -316,6 +335,7 @@ class PublicDataPortalFetchTab(QWidget):
         self._thread = _FetchThread(
             keyword=keyword,
             environment=env,
+            basic_auth=basic_auth,
             timeout=30,
             start_page=start_page,
             end_page=end_page,
@@ -351,7 +371,8 @@ class PublicDataPortalFetchTab(QWidget):
 
     def _on_open_output_folder(self) -> None:
         try:
-            out_dir = get_public_data_portal_root_dir()
+            env = self.env_combo.currentData() or "production"
+            out_dir = get_public_data_portal_root_dir(str(env))
             import os
             os.startfile(str(out_dir))  # noqa: S606
         except Exception as exc:

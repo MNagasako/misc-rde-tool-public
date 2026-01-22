@@ -31,14 +31,14 @@ _PUBLIC_OUTPUT_DATASET_ID_CACHE: dict[str, object] = {
 }
 
 
-def get_public_published_dataset_ids(*, use_cache: bool = True) -> set[str]:
+def get_public_published_dataset_ids(*, environment: str = "production", use_cache: bool = True) -> set[str]:
     """Return dataset_id set from public (no-login) portal `output.json`.
 
     This is used as a best-effort fallback when portal status cannot be resolved
     via logged-in access (e.g., no permission).
     """
 
-    path = get_public_data_portal_root_dir() / "output.json"
+    path = get_public_data_portal_root_dir(environment) / "output.json"
     cache_path = _PUBLIC_OUTPUT_DATASET_ID_CACHE.get("path")
     try:
         mtime = path.stat().st_mtime
@@ -111,7 +111,11 @@ def _page_size_from_display_result(display_result: int) -> int:
     return 20
 
 
-def migrate_public_data_portal_cache_dir(*, progress_callback: Optional[ProgressCallback] = None) -> tuple[int, int]:
+def migrate_public_data_portal_cache_dir(
+    *,
+    environment: str = "production",
+    progress_callback: Optional[ProgressCallback] = None,
+) -> tuple[int, int]:
     """公開データポータルのキャッシュJSONを新スキーマへ移行する。
 
     - 旧: fields_raw/data_metrics_raw/data_index_raw が list[{label,value}]
@@ -120,7 +124,7 @@ def migrate_public_data_portal_cache_dir(*, progress_callback: Optional[Progress
     戻り値: (migrated_count, failed_count)
     """
 
-    cache_dir = get_public_data_portal_cache_dir()
+    cache_dir = get_public_data_portal_cache_dir(environment)
     paths = sorted(cache_dir.glob("*.json"))
     migrated = 0
     failed = 0
@@ -643,9 +647,11 @@ def fetch_public_arim_data_detail(
     environment: str = "production",
     timeout: int = 30,
     headers: Optional[dict] = None,
+    basic_auth: Optional[tuple[str, str]] = None,
+    cache_enabled: bool = True,
 ) -> PublicArimDataDetail:
     url = build_public_detail_url(environment, code, key)
-    resp = proxy_get(url, headers=headers, timeout=timeout)
+    resp = proxy_get(url, headers=headers, timeout=timeout, auth=basic_auth, skip_bearer_token=True)
     resp.encoding = "utf-8"
     return parse_public_arim_data_detail(resp.text, page_url=url)
 
@@ -656,6 +662,7 @@ def fetch_public_arim_data_details(
     environment: str = "production",
     timeout: int = 30,
     headers: Optional[dict] = None,
+    basic_auth: Optional[tuple[str, str]] = None,
     max_items: Optional[int] = None,
     max_workers: int = 1,
     cache_enabled: bool = False,
@@ -667,87 +674,81 @@ def fetch_public_arim_data_details(
         safe_key = re.sub(r"[^A-Za-z0-9_-]", "_", str(key))
         return f"{safe_code}_{safe_key}.json"
 
-    cache_dir: Path = get_public_data_portal_cache_dir()
+    cache_dir: Path = get_public_data_portal_cache_dir(environment)
+
+    def _load_detail_from_cache(payload: dict, *, fallback_code: str, fallback_key: str) -> PublicArimDataDetail:
+        payload_fields = payload.get("fields")
+        payload_data_metrics = payload.get("data_metrics")
+        payload_data_index = payload.get("data_index")
+
+        raw_fields_payload = payload.get("fields_raw")
+        raw_metrics_payload = payload.get("data_metrics_raw")
+        raw_index_payload = payload.get("data_index_raw")
+
+        # 新仕様: *_raw は dict で保持
+        needs_upgrade = not isinstance(raw_fields_payload, dict)
+
+        if isinstance(raw_fields_payload, dict):
+            fields = dict(payload_fields or {})
+            fields_raw = dict(raw_fields_payload)
+        elif isinstance(raw_fields_payload, list):
+            jp = {str(i.get("label")): str(i.get("value")) for i in raw_fields_payload if isinstance(i, dict)}
+            fields, fields_raw = _normalize_kv_items(jp)
+        else:
+            fields, fields_raw = _normalize_kv_items(dict(payload_fields or {}))
+
+        if isinstance(raw_metrics_payload, dict):
+            data_metrics = dict(payload_data_metrics or {})
+            data_metrics_raw = dict(raw_metrics_payload)
+        elif isinstance(raw_metrics_payload, list):
+            jp = {str(i.get("label")): str(i.get("value")) for i in raw_metrics_payload if isinstance(i, dict)}
+            data_metrics, data_metrics_raw = _normalize_kv_items(jp)
+        else:
+            data_metrics, data_metrics_raw = _normalize_kv_items(dict(payload_data_metrics or {}))
+
+        if isinstance(raw_index_payload, dict):
+            data_index = dict(payload_data_index or {})
+            data_index_raw = dict(raw_index_payload)
+        elif isinstance(raw_index_payload, list):
+            jp = {str(i.get("label")): str(i.get("value")) for i in raw_index_payload if isinstance(i, dict)}
+            data_index, data_index_raw = _normalize_kv_items(jp)
+        else:
+            data_index, data_index_raw = _normalize_kv_items(dict(payload_data_index or {}))
+
+        detail = PublicArimDataDetail(
+            code=str(payload.get("code") or fallback_code),
+            key=str(payload.get("key") or fallback_key),
+            detail_url=str(payload.get("detail_url") or payload.get("url") or ""),
+            title=str(payload.get("title") or ""),
+            summary=str(payload.get("summary") or ""),
+            fields=fields,
+            fields_raw=fields_raw,
+            data_metrics=data_metrics,
+            data_metrics_raw=data_metrics_raw,
+            data_index=data_index,
+            data_index_raw=data_index_raw,
+            equipment_links=list(payload.get("equipment_links") or []),
+            download_links=list(payload.get("download_links") or []),
+            thumbnails=list(payload.get("thumbnails") or []),
+        )
+        return detail, needs_upgrade
 
     def _fetch_one(code: str, key: str) -> PublicArimDataDetail:
         cache_path = cache_dir / _safe_cache_name(code, key)
-        # cache_enabled=True の場合のみ、既存キャッシュを使ってHTTPをスキップする。
-        # cache_enabled=False の場合でも、取得結果は再開性のため常にキャッシュへ保存する（=上書き）。
         if cache_enabled and cache_path.exists():
             try:
                 with cache_path.open("r", encoding="utf-8") as handle:
                     payload = json.load(handle)
                 if isinstance(payload, dict):
-                    # 旧キャッシュとの互換（不足キーはデフォルト値）
-                    # - v1: fields/data_metrics/data_index が日本語キーのdict
-                    # - v2: fields等は英語キーのdict + *_raw は dict（en_key->value） もしくは旧list(label/value)
-                    payload_fields = payload.get("fields")
-                    payload_data_metrics = payload.get("data_metrics")
-                    payload_data_index = payload.get("data_index")
-
-                    raw_fields_payload = payload.get("fields_raw")
-                    raw_metrics_payload = payload.get("data_metrics_raw")
-                    raw_index_payload = payload.get("data_index_raw")
-
-                    # 新仕様: *_raw は dict で保持
-                    needs_upgrade = not isinstance(raw_fields_payload, dict)
-
-                    if isinstance(raw_fields_payload, dict):
-                        fields = dict(payload_fields or {})
-                        fields_raw = dict(raw_fields_payload)
-                    elif isinstance(raw_fields_payload, list):
-                        # 旧: [{label,value}] から英語キーdictへ変換
-                        jp = {str(i.get("label")): str(i.get("value")) for i in raw_fields_payload if isinstance(i, dict)}
-                        fields, fields_raw = _normalize_kv_items(jp)
-                    else:
-                        # v1: 日本語dict
-                        fields, fields_raw = _normalize_kv_items(dict(payload_fields or {}))
-
-                    if isinstance(raw_metrics_payload, dict):
-                        data_metrics = dict(payload_data_metrics or {})
-                        data_metrics_raw = dict(raw_metrics_payload)
-                    elif isinstance(raw_metrics_payload, list):
-                        jp = {str(i.get("label")): str(i.get("value")) for i in raw_metrics_payload if isinstance(i, dict)}
-                        data_metrics, data_metrics_raw = _normalize_kv_items(jp)
-                    else:
-                        data_metrics, data_metrics_raw = _normalize_kv_items(dict(payload_data_metrics or {}))
-
-                    if isinstance(raw_index_payload, dict):
-                        data_index = dict(payload_data_index or {})
-                        data_index_raw = dict(raw_index_payload)
-                    elif isinstance(raw_index_payload, list):
-                        jp = {str(i.get("label")): str(i.get("value")) for i in raw_index_payload if isinstance(i, dict)}
-                        data_index, data_index_raw = _normalize_kv_items(jp)
-                    else:
-                        data_index, data_index_raw = _normalize_kv_items(dict(payload_data_index or {}))
-
-                    detail = PublicArimDataDetail(
-                        code=str(payload.get("code", code)),
-                        key=str(payload.get("key", key)),
-                        detail_url=str(payload.get("detail_url", "")),
-                        title=str(payload.get("title", "")),
-                        summary=str(payload.get("summary", "")),
-                        fields=fields,
-                        fields_raw=fields_raw,
-                        data_metrics=data_metrics,
-                        data_metrics_raw=data_metrics_raw,
-                        data_index=data_index,
-                        data_index_raw=data_index_raw,
-                        equipment_links=list(payload.get("equipment_links") or []),
-                        download_links=list(payload.get("download_links") or []),
-                        thumbnails=list(payload.get("thumbnails") or []),
-                    )
-
+                    detail, needs_upgrade = _load_detail_from_cache(payload, fallback_code=code, fallback_key=key)
                     if needs_upgrade:
                         try:
                             with cache_path.open("w", encoding="utf-8") as handle:
                                 json.dump(detail.__dict__, handle, ensure_ascii=False, indent=2)
                         except OSError:
                             pass
-
                     return detail
             except Exception:
-                # キャッシュ破損等は再取得にフォールバック
                 pass
 
         detail = fetch_public_arim_data_detail(
@@ -756,18 +757,20 @@ def fetch_public_arim_data_details(
             environment=environment,
             timeout=timeout,
             headers=headers,
+            basic_auth=basic_auth,
+            cache_enabled=True,
         )
 
-        # 再開性のため、キャッシュは常に保存する（cache_enabled=False の場合は上書き）
         try:
-            with cache_path.open("w", encoding="utf-8") as handle:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            with (cache_dir / _safe_cache_name(code, key)).open("w", encoding="utf-8") as handle:
                 json.dump(detail.__dict__, handle, ensure_ascii=False, indent=2)
         except OSError:
             pass
 
         return detail
 
-    selected = links
+    selected = list(links)
     if max_items is not None:
         selected = selected[: max(0, max_items)]
 
@@ -801,10 +804,7 @@ def fetch_public_arim_data_details(
 
     results: list[Optional[PublicArimDataDetail]] = [None] * len(selected)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        future_map = {
-            executor.submit(_fetch_one, link.code, link.key): idx
-            for idx, link in enumerate(selected)
-        }
+        future_map = {executor.submit(_fetch_one, link.code, link.key): idx for idx, link in enumerate(selected)}
         for future in as_completed(future_map):
             idx = future_map[future]
             detail = future.result()
@@ -824,7 +824,6 @@ def fetch_public_arim_data_details(
                 except Exception:
                     pass
 
-    # mypy的には Optional が残るが、全futureが埋める前提
     return [r for r in results if r is not None]
 
 
@@ -838,22 +837,16 @@ def search_public_arim_data(
     max_pages: Optional[int] = None,
     start_page: int = 1,
     end_page: Optional[int] = None,
+    basic_auth: Optional[tuple[str, str]] = None,
     progress_callback: Optional[ProgressCallback] = None,
 ) -> List[PublicArimDataLink]:
-    """公開ARIMデータポータルに対して keyword 検索（POST）を行い、詳細リンク一覧を返す。
-
-    方針:
-    - 最初に `/data_service/` をGETしてセッションCookie（arim_data_session_id等）を確立
-    - 次に `/data_service/arim_data.php` へ `keyword=<...>` をフォームPOST
-    - 200でもHTMLで判定（リンク抽出できるか）
-    """
+    """公開ARIMデータポータルに対して keyword 検索（POST）を行い、詳細リンク一覧を返す。"""
     search_url_base = _get_public_search_url(environment)
     search_url = _with_display_params(search_url_base, display_result=display_result, display_order=display_order)
     data_service_root = _get_data_service_root_url(search_url)
     headers = _build_public_headers(origin_url=search_url, referer_url=data_service_root)
 
     page_size = _page_size_from_display_result(display_result)
-
     hard_max_pages = 200
 
     if start_page < 1:
@@ -867,10 +860,8 @@ def search_public_arim_data(
                 progress_callback(0, 0, "Cookie確立中...")
             except Exception:
                 pass
-        # Cookie確立
-        root_resp = proxy_get(data_service_root, timeout=timeout)
-        if root_resp is not None:
-            root_resp.encoding = "utf-8"
+
+        proxy_get(data_service_root, timeout=timeout, auth=basic_auth, skip_bearer_token=True)
 
         if progress_callback is not None:
             try:
@@ -879,7 +870,14 @@ def search_public_arim_data(
                 pass
 
         form_data = {"keyword": keyword or ""}
-        resp = proxy_post(search_url, data=form_data, headers=headers, timeout=timeout)
+        resp = proxy_post(
+            search_url,
+            data=form_data,
+            headers=headers,
+            timeout=timeout,
+            auth=basic_auth,
+            skip_bearer_token=True,
+        )
         resp.encoding = "utf-8"
         if resp.status_code != 200:
             logger.warning("公開データポータル検索失敗: HTTP %s", resp.status_code)
@@ -906,7 +904,6 @@ def search_public_arim_data(
             effective_max_page = min(effective_max_page, max_pages)
 
         if end_page is not None:
-            # HTMLからページ数が検出できない（=1）場合でも、UIで範囲指定された分は走査する。
             if detected_max_page <= 1 and end_page > 1:
                 effective_max_page = min(end_page, hard_max_pages)
             else:
@@ -914,7 +911,6 @@ def search_public_arim_data(
 
         effective_max_page = min(effective_max_page, hard_max_pages)
 
-        # page=2以降はGETで遷移できる（セッションCookieに検索条件が保持される前提）
         loop_start = max(2, start_page)
         for page in range(loop_start, effective_max_page + 1):
             if progress_callback is not None:
@@ -923,7 +919,13 @@ def search_public_arim_data(
                 except Exception:
                     pass
             page_url = _build_page_url(search_url, page)
-            page_resp = proxy_get(page_url, headers=headers, timeout=timeout)
+            page_resp = proxy_get(
+                page_url,
+                headers=headers,
+                timeout=timeout,
+                auth=basic_auth,
+                skip_bearer_token=True,
+            )
             page_resp.encoding = "utf-8"
             if page_resp.status_code != 200:
                 logger.warning("公開データポータルページ取得失敗: page=%s HTTP %s", page, page_resp.status_code)
@@ -931,7 +933,6 @@ def search_public_arim_data(
 
             page_links = parse_public_arim_data_links(page_resp.text, base_url=page_url)
             if not page_links:
-                # これ以上ページを辿っても結果が得られない可能性が高い
                 break
             _extend(page_links)
 
