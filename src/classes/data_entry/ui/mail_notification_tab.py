@@ -143,16 +143,19 @@ def _filter_planned_rows_by_list_filter(
 ) -> List[PlannedNotificationRow]:
     st = list_filter_state or {}
     ec = st.get("error_codes") or []
+    ss = st.get("statuses") or []
     eq = st.get("equipment_ids") or []
     mn = st.get("manager_names") or []
     me = st.get("manager_emails") or []
 
-    if not (ec or eq or mn or me):
+    if not (ec or ss or eq or mn or me):
         return list(planned or [])
 
     rows: List[PlannedNotificationRow] = []
     for r in planned or []:
         if not _list_filter_match_patterns(r.error_code, ec):
+            continue
+        if not _list_filter_match_patterns(getattr(r, "status", ""), ss):
             continue
         if not _list_filter_match_patterns(r.equipment_id, eq):
             continue
@@ -506,6 +509,7 @@ class _ListFilterDialog(QDialog):
         parent: QWidget,
         *,
         error_codes: str,
+        statuses: str,
         equipment_ids: str,
         manager_names: str,
         manager_emails: str,
@@ -519,6 +523,11 @@ class _ListFilterDialog(QDialog):
         self.error_codes_edit = QTextEdit()
         self.error_codes_edit.setPlainText(error_codes or "")
         layout.addWidget(self.error_codes_edit)
+
+        layout.addWidget(QLabel("ステータス（複数指定可 / ワイルドカード * 可 / 区切り: 改行 ; ,）"))
+        self.statuses_edit = QTextEdit()
+        self.statuses_edit.setPlainText(statuses or "")
+        layout.addWidget(self.statuses_edit)
 
         layout.addWidget(QLabel("設備ID（複数指定可 / ワイルドカード * 可 / 区切り: 改行 ; ,）"))
         self.equipment_ids_edit = QTextEdit()
@@ -554,6 +563,7 @@ class _ListFilterDialog(QDialog):
     def values(self) -> Dict[str, str]:
         return {
             "error_codes": self.error_codes_edit.toPlainText() or "",
+            "statuses": self.statuses_edit.toPlainText() or "",
             "equipment_ids": self.equipment_ids_edit.toPlainText() or "",
             "manager_names": self.manager_names_edit.toPlainText() or "",
             "manager_emails": self.manager_emails_edit.toPlainText() or "",
@@ -1149,6 +1159,7 @@ class MailNotificationTab(QWidget):
         # 列定義（要件: 開始時刻, エラーコード, 設備ID, 装置名_日, データセット, データ名, データセットテンプレ, ...）
         self._table_headers = [
             "開始時刻(JST)",
+            "ステータス",
             "エラーコード",
             "設備ID",
             "管理者名",
@@ -1174,6 +1185,7 @@ class MailNotificationTab(QWidget):
         # フィルタはダイアログで設定（一覧領域には設定ボタン＋設定済み表示のみ）
         self._list_filter_state: Dict[str, List[str]] = {
             "error_codes": [],
+            "statuses": [],
             "equipment_ids": [],
             "manager_names": [],
             "manager_emails": [],
@@ -1635,12 +1647,13 @@ class MailNotificationTab(QWidget):
 
     def _update_list_filter_summary(self):
         st = getattr(self, "_list_filter_state", {}) or {}
+        ss = st.get("statuses") or []
         ec = st.get("error_codes") or []
         eq = st.get("equipment_ids") or []
         mn = st.get("manager_names") or []
         me = st.get("manager_emails") or []
 
-        if not (ec or eq or mn or me):
+        if not (ss or ec or eq or mn or me):
             self.list_filter_summary.setText("未設定")
             return
 
@@ -1652,6 +1665,7 @@ class MailNotificationTab(QWidget):
         self.list_filter_summary.setText(
             "  ".join(
                 [
+                    f"ステータス: {_fmt(ss)}",
                     f"エラーコード: {_fmt(ec)}",
                     f"設備ID: {_fmt(eq)}",
                     f"管理者名: {_fmt(mn)}",
@@ -1664,6 +1678,7 @@ class MailNotificationTab(QWidget):
         st = getattr(self, "_list_filter_state", {}) or {}
         dlg = _ListFilterDialog(
             self,
+            statuses="\n".join(st.get("statuses") or []),
             error_codes="\n".join(st.get("error_codes") or []),
             equipment_ids="\n".join(st.get("equipment_ids") or []),
             manager_names="\n".join(st.get("manager_names") or []),
@@ -1673,6 +1688,7 @@ class MailNotificationTab(QWidget):
             return
         values = dlg.values()
         self._list_filter_state = {
+            "statuses": self._parse_filter_patterns(values.get("statuses") or ""),
             "error_codes": self._parse_filter_patterns(values.get("error_codes") or ""),
             "equipment_ids": self._parse_filter_patterns(values.get("equipment_ids") or ""),
             "manager_names": self._parse_filter_patterns(values.get("manager_names") or ""),
@@ -1683,19 +1699,23 @@ class MailNotificationTab(QWidget):
 
     def _apply_list_filter_to_table(self):
         st = getattr(self, "_list_filter_state", {}) or {}
+        ss = st.get("statuses") or []
         ec = st.get("error_codes") or []
         eq = st.get("equipment_ids") or []
         mn = st.get("manager_names") or []
         me = st.get("manager_emails") or []
 
-        # 対象列: エラーコード(1) / 設備ID(2) / 管理者名(3) / 管理者メール(4)
+        # 対象列: ステータス(1) / エラーコード(2) / 設備ID(3) / 管理者名(4) / 管理者メール(5)
         for r in range(self.table.rowCount()):
-            v_error = (self.table.item(r, 1).text() if self.table.item(r, 1) else "")
-            v_equip = (self.table.item(r, 2).text() if self.table.item(r, 2) else "")
-            v_mname = (self.table.item(r, 3).text() if self.table.item(r, 3) else "")
-            v_mmail = (self.table.item(r, 4).text() if self.table.item(r, 4) else "")
+            v_status = (self.table.item(r, 1).text() if self.table.item(r, 1) else "")
+            v_error = (self.table.item(r, 2).text() if self.table.item(r, 2) else "")
+            v_equip = (self.table.item(r, 3).text() if self.table.item(r, 3) else "")
+            v_mname = (self.table.item(r, 4).text() if self.table.item(r, 4) else "")
+            v_mmail = (self.table.item(r, 5).text() if self.table.item(r, 5) else "")
 
             hide = False
+            if not self._match_patterns(v_status, ss):
+                hide = True
             if not self._match_patterns(v_error, ec):
                 hide = True
             if not hide and not self._match_patterns(v_equip, eq):
@@ -2343,15 +2363,16 @@ class MailNotificationTab(QWidget):
             row = self.table.rowCount()
             self.table.insertRow(row)
             self.table.setItem(row, 0, QTableWidgetItem(r.start_time_jst))
-            self.table.setItem(row, 1, QTableWidgetItem(r.error_code))
-            self.table.setItem(row, 2, QTableWidgetItem(r.equipment_id))
-            self.table.setItem(row, 3, QTableWidgetItem(r.equipment_manager_names))
-            self.table.setItem(row, 4, QTableWidgetItem(r.equipment_manager_emails_display))
-            self.table.setItem(row, 5, QTableWidgetItem(r.device_name_ja))
-            self.table.setItem(row, 6, QTableWidgetItem(r.dataset_name))
-            self.table.setItem(row, 7, QTableWidgetItem(r.data_name))
-            self.table.setItem(row, 8, QTableWidgetItem(r.dataset_template_name))
-            self.table.setItem(row, 9, QTableWidgetItem(_format_iso_to_jst(r.production_sent_at)))
+            self.table.setItem(row, 1, QTableWidgetItem(getattr(r, "status", "")))
+            self.table.setItem(row, 2, QTableWidgetItem(r.error_code))
+            self.table.setItem(row, 3, QTableWidgetItem(r.equipment_id))
+            self.table.setItem(row, 4, QTableWidgetItem(r.equipment_manager_names))
+            self.table.setItem(row, 5, QTableWidgetItem(r.equipment_manager_emails_display))
+            self.table.setItem(row, 6, QTableWidgetItem(r.device_name_ja))
+            self.table.setItem(row, 7, QTableWidgetItem(r.dataset_name))
+            self.table.setItem(row, 8, QTableWidgetItem(r.data_name))
+            self.table.setItem(row, 9, QTableWidgetItem(r.dataset_template_name))
+            self.table.setItem(row, 10, QTableWidgetItem(_format_iso_to_jst(r.production_sent_at)))
             created_display = (r.created_name or "")
             if r.created_org:
                 created_display = f"{created_display} ({r.created_org})" if created_display else f"({r.created_org})"
@@ -2359,23 +2380,23 @@ class MailNotificationTab(QWidget):
             if r.owner_org:
                 owner_display = f"{owner_display} ({r.owner_org})" if owner_display else f"({r.owner_org})"
 
-            self.table.setItem(row, 10, QTableWidgetItem(created_display))
-            self.table.setItem(row, 11, QTableWidgetItem(r.created_mail))
-            self.table.setItem(row, 12, QTableWidgetItem(owner_display))
-            self.table.setItem(row, 13, QTableWidgetItem(r.owner_mail))
-            self.table.setItem(row, 14, QTableWidgetItem(r.test_to))
-            self.table.setItem(row, 15, QTableWidgetItem(r.production_to))
-            self.table.setItem(row, 16, QTableWidgetItem(r.effective_to))
-            self.table.setItem(row, 17, QTableWidgetItem(r.error_message))
-            self.table.setItem(row, 18, QTableWidgetItem(r.subject))
-            self.table.setItem(row, 19, QTableWidgetItem(r.entry_id))
+            self.table.setItem(row, 11, QTableWidgetItem(created_display))
+            self.table.setItem(row, 12, QTableWidgetItem(r.created_mail))
+            self.table.setItem(row, 13, QTableWidgetItem(owner_display))
+            self.table.setItem(row, 14, QTableWidgetItem(r.owner_mail))
+            self.table.setItem(row, 15, QTableWidgetItem(r.test_to))
+            self.table.setItem(row, 16, QTableWidgetItem(r.production_to))
+            self.table.setItem(row, 17, QTableWidgetItem(r.effective_to))
+            self.table.setItem(row, 18, QTableWidgetItem(r.error_message))
+            self.table.setItem(row, 19, QTableWidgetItem(r.subject))
+            self.table.setItem(row, 20, QTableWidgetItem(r.entry_id))
 
             # 長文は省略表示＋ツールチップで全文
             try:
-                if self.table.item(row, 17):
-                    self.table.item(row, 17).setToolTip(r.error_message)
                 if self.table.item(row, 18):
-                    self.table.item(row, 18).setToolTip(r.subject)
+                    self.table.item(row, 18).setToolTip(r.error_message)
+                if self.table.item(row, 19):
+                    self.table.item(row, 19).setToolTip(r.subject)
             except Exception:
                 pass
 

@@ -86,6 +86,7 @@ def select_failed_entries_by_reference(
 class PlannedNotificationRow:
     entry_id: str
     start_time_jst: str
+    status: str
     equipment_id: str
     device_name_ja: str
     equipment_manager_names: str
@@ -255,6 +256,7 @@ def build_planned_notification_rows(
             PlannedNotificationRow(
                 entry_id=entry_id,
                 start_time_jst=start_time_jst,
+                status=str(e.get("status") or ""),
                 equipment_id=str(e.get("equipmentId") or ""),
                 device_name_ja=str(e.get("deviceNameJa") or ""),
                 equipment_manager_names=equipment_manager_names,

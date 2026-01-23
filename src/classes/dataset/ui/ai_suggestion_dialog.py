@@ -185,7 +185,13 @@ class AISuggestionDialog(QDialog):
             self.setAttribute(Qt.WA_DontShowOnScreen, True)
         else:
             self.setModal(True)
+        try:
+            # ユーザーが自由にサイズ変更できるようにする（右下グリップ表示）
+            self.setSizeGripEnabled(True)
+        except Exception:
+            pass
         self.resize(900, 700)
+        self._apply_window_height_policy()
         # 位置は showEvent で上端揃え（要件）
         
         layout = QVBoxLayout(self)
@@ -205,7 +211,7 @@ class AISuggestionDialog(QDialog):
         # タブウィジェット
         self.tab_widget = QTabWidget()
         layout.addWidget(self.tab_widget, 1)
-        
+
         # モードに応じてタブを選択的に追加
         if self.mode == "dataset_suggestion":
             # データセット提案モード: AI提案、プロンプト全文、詳細情報
@@ -316,25 +322,276 @@ class AISuggestionDialog(QDialog):
         button_layout.addWidget(self.cancel_button)
         
         layout.addLayout(button_layout)
-        
+
         # タブ切替時のボタン表示制御
         self.tab_widget.currentChanged.connect(self.toggle_action_buttons)
-        
+
         # 初期状態でボタン表示を更新
         QTimer.singleShot(50, self.toggle_action_buttons)
-        
+
         # データセット選択ドロップダウンを初期化
         QTimer.singleShot(100, self.initialize_dataset_dropdown)
-        
+
         # テーマ変更に追従
         try:
             from classes.theme.theme_manager import ThemeManager
+
             ThemeManager.instance().theme_changed.connect(self.refresh_theme)
         except Exception:
             pass
 
         # 初期テーマ適用
         self.refresh_theme()
+
+    # ------------------------------------------------------------------
+    # Layout helpers (AI拡張/データセット/報告書)
+    # ------------------------------------------------------------------
+    def _register_conditional_tab_scroll(self, tab_widget: QWidget, scroll_area, response_widget: QWidget) -> None:
+        """応答領域がタブ高の50%を超える場合のみ、タブ全体スクロールを有効化する。"""
+        try:
+            if not hasattr(self, '_conditional_tab_scroll_policies'):
+                self._conditional_tab_scroll_policies = {}
+            self._conditional_tab_scroll_policies[int(id(tab_widget))] = {
+                'tab': tab_widget,
+                'scroll': scroll_area,
+                'response': response_widget,
+            }
+            try:
+                tab_widget.installEventFilter(self)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def _update_conditional_tab_scroll(self, tab_widget: QWidget) -> None:
+        try:
+            policies = getattr(self, '_conditional_tab_scroll_policies', {})
+            entry = policies.get(int(id(tab_widget))) if isinstance(policies, dict) else None
+            if not isinstance(entry, dict):
+                return
+
+            scroll = entry.get('scroll')
+            response_widget = entry.get('response')
+            if scroll is None or response_widget is None:
+                return
+
+            try:
+                viewport_h = int(scroll.viewport().height())
+            except Exception:
+                viewport_h = int(tab_widget.height())
+            if viewport_h <= 0:
+                return
+
+            try:
+                response_h = int(response_widget.height())
+            except Exception:
+                response_h = 0
+            if response_h <= 0:
+                try:
+                    response_h = int(response_widget.sizeHint().height())
+                except Exception:
+                    response_h = 0
+
+            enable_scroll = (response_h > int(viewport_h * 0.5)) if response_h > 0 else False
+            try:
+                if enable_scroll:
+                    scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+                else:
+                    scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    def eventFilter(self, obj, event):  # noqa: N802 - Qt互換
+        try:
+            from PySide6.QtCore import QEvent
+
+            if event is not None and event.type() in (QEvent.Resize, QEvent.Show):
+                policies = getattr(self, '_conditional_tab_scroll_policies', {})
+                if isinstance(policies, dict):
+                    entry = policies.get(int(id(obj)))
+                    if isinstance(entry, dict) and entry.get('tab') is obj:
+                        try:
+                            QTimer.singleShot(0, lambda o=obj: self._update_conditional_tab_scroll(o))
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+        return super().eventFilter(obj, event)
+
+    def _configure_table_visible_rows(self, table_widget, visible_rows_including_header: int) -> None:
+        """QTableWidgetの表示高さを「ヘッダ + N行」に固定し、超過分はテーブル側でスクロールさせる。"""
+        try:
+            rows_total = int(visible_rows_including_header)
+        except Exception:
+            rows_total = 0
+        if rows_total <= 1:
+            return
+
+        def _apply():
+            try:
+                header_h = int(table_widget.horizontalHeader().height())
+            except Exception:
+                header_h = 0
+            try:
+                row_h = int(table_widget.verticalHeader().defaultSectionSize())
+            except Exception:
+                row_h = 0
+            if row_h <= 0:
+                row_h = 24
+
+            data_rows = max(0, rows_total - 1)
+            try:
+                frame = int(table_widget.frameWidth()) * 2
+            except Exception:
+                frame = 0
+
+            target_h = header_h + (row_h * data_rows) + frame
+            target_h = max(80, int(target_h) + 2)
+
+            try:
+                table_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            except Exception:
+                pass
+            try:
+                table_widget.setFixedHeight(int(target_h))
+            except Exception:
+                pass
+
+        try:
+            QTimer.singleShot(0, _apply)
+        except Exception:
+            _apply()
+
+    def _apply_minimum_height_policy(self):
+        """(互換) ダイアログ最小高さを画面高の50%に設定（利用可能な場合）。"""
+        try:
+            screen = self.screen() if hasattr(self, 'screen') else None
+            if screen is None:
+                from qt_compat.widgets import QApplication
+                screen = QApplication.primaryScreen()
+            if screen is None:
+                return
+
+            geo = screen.availableGeometry()
+            if not geo or geo.height() <= 0:
+                return
+
+            min_h = int(geo.height() * 0.5)
+            if min_h > 0:
+                self.setMinimumHeight(min_h)
+        except Exception:
+            logger.debug("AISuggestionDialog: minimum height policy failed", exc_info=True)
+
+    def _apply_window_height_policy(self):
+        """ダイアログの高さ制約を画面サイズに合わせて設定する。
+
+        - 最小高さ: 画面高の50%
+        - 最大高さ: 画面高（利用可能領域）
+        """
+        try:
+            screen = self.screen() if hasattr(self, 'screen') else None
+            if screen is None:
+                from qt_compat.widgets import QApplication
+
+                screen = QApplication.primaryScreen()
+            if screen is None:
+                return
+
+            geo = screen.availableGeometry()
+            if not geo or geo.height() <= 0:
+                return
+
+            min_h = int(geo.height() * 0.5)
+            max_h = int(geo.height())
+            if min_h > 0:
+                self.setMinimumHeight(min_h)
+            if max_h > 0:
+                self.setMaximumHeight(max_h)
+        except Exception:
+            logger.debug("AISuggestionDialog: window height policy failed", exc_info=True)
+
+    def _response_text_area_initial_min_height(self) -> int:
+        """AI応答結果テキストエリアの初期高さ（画面高の45%）。
+
+        縮小時は下部領域のスクロールで吸収される前提のため、
+        "初期表示で十分に見える" ことを優先して minHeight を付与する。
+        """
+        try:
+            screen = self.screen() if hasattr(self, 'screen') else None
+            if screen is None:
+                from qt_compat.widgets import QApplication
+
+                screen = QApplication.primaryScreen()
+            if screen is None:
+                return 320
+
+            geo = screen.availableGeometry()
+            if not geo or geo.height() <= 0:
+                return 320
+
+            h = int(geo.height() * 0.3)
+            return max(240, h)
+        except Exception:
+            return 320
+
+    def _estimate_bottom_area_min_height(self, button_count: int) -> int:
+        """下部領域の最小高さをボタン数ベースで推定（重なり防止 + スクロール発生条件）。"""
+        try:
+            # 目安: ボタン(約60px) + 余白/ラベル + 応答ボタンバー + ある程度の応答表示
+            per_btn = 45  # 60px + spacing
+            buttons_h = max(1, int(button_count)) * per_btn
+            chrome_h = 140  # ラベル/チェック/並列数/応答ボタン等の目安
+            response_min = 220
+            return max(response_min + chrome_h, buttons_h + chrome_h)
+        except Exception:
+            return 520
+
+    def _register_tab_vertical_splitter(self, key: str, splitter: QSplitter, bottom_button_count: int) -> None:
+        try:
+            if not hasattr(self, '_tab_vertical_splitters'):
+                self._tab_vertical_splitters = {}
+            self._tab_vertical_splitters[str(key)] = (splitter, int(bottom_button_count))
+        except Exception:
+            pass
+
+    def _apply_registered_tab_splitter_sizes(self) -> None:
+        """登録済みタブの上下分割の初期サイズを適用（タブごとに1回）。
+
+        データセット/報告書タブは遅延初期化のため、タブ生成後にも適用できるよう
+        "一括で1回" ではなく "タブごとに1回" の制御にする。
+        """
+        try:
+            m = getattr(self, '_tab_vertical_splitters', None)
+            if not isinstance(m, dict) or not m:
+                return
+
+            applied = getattr(self, '_tab_vertical_splitters_applied', None)
+            if not isinstance(applied, set):
+                applied = set()
+                self._tab_vertical_splitters_applied = applied
+
+            for _key, entry in list(m.items()):
+                try:
+                    if _key in applied:
+                        continue
+                    splitter, btn_count = entry
+                    if splitter is None:
+                        continue
+
+                    total_h = int(splitter.height())
+                    if total_h <= 0:
+                        continue
+                    bottom_h = self._estimate_bottom_area_min_height(int(btn_count))
+                    bottom_h = min(bottom_h, max(1, total_h - 50))
+                    top_h = max(1, total_h - bottom_h)
+                    splitter.setSizes([top_h, bottom_h])
+                    applied.add(_key)
+                except Exception:
+                    continue
+        except Exception:
+            pass
 
     def showEvent(self, event):  # noqa: N802 - Qt互換
         super().showEvent(event)
@@ -356,6 +613,7 @@ class AISuggestionDialog(QDialog):
             max_w = max(400, int(geo.width() - margin_px))
             max_h = max(300, int(geo.height() - margin_px))
             desired_w = min(max(self.width(), 900), int(max_w))
+            # 最大は画面サイズまで（要件）
             desired_h = min(max(self.height(), int(max_h * 0.95)), int(max_h))
             if desired_w != self.width() or desired_h != self.height():
                 self.resize(int(desired_w), int(desired_h))
@@ -371,6 +629,16 @@ class AISuggestionDialog(QDialog):
             logger.debug("AISuggestionDialog: top align failed", exc_info=True)
         finally:
             self._did_initial_top_align = True
+            try:
+                # 画面サイズに基づく最大高さを再適用（screenが確定してから反映される環境向け）
+                self._apply_window_height_policy()
+            except Exception:
+                pass
+            try:
+                # タブ分割の初期比率
+                QTimer.singleShot(0, self._apply_registered_tab_splitter_sizes)
+            except Exception:
+                pass
         
     def setup_main_tab(self, tab_widget):
         """メインタブのセットアップ"""
@@ -1216,13 +1484,14 @@ class AISuggestionDialog(QDialog):
     
     def setup_extension_tab(self, tab_widget):
         """AI拡張タブのセットアップ"""
+        from qt_compat.widgets import QScrollArea, QSizePolicy
         layout = QVBoxLayout(tab_widget)
         
         # ヘッダー
         header_layout = QHBoxLayout()
         
         title_label = QLabel("AI拡張サジェスト機能")
-        title_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 5px;")
+        title_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 2px;")
         header_layout.addWidget(title_label)
         
         header_layout.addStretch()
@@ -1235,7 +1504,7 @@ class AISuggestionDialog(QDialog):
         default_model = ai_manager.get_default_model(default_provider)
         
         ai_config_label = QLabel(f"🤖 使用AI: {default_provider.upper()} / {default_model}")
-        ai_config_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin: 5px; font-size: 11px;")
+        ai_config_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin: 2px; font-size: 11px;")
         ai_config_label.setToolTip("グローバル設定で指定されたデフォルトAIを使用します")
         header_layout.addWidget(ai_config_label)
         
@@ -1247,16 +1516,42 @@ class AISuggestionDialog(QDialog):
         header_layout.addWidget(config_button)
         
         layout.addLayout(header_layout)
+
+        # タブ全体スクロール（通常OFF、応答領域が50%超でON）
+        tab_scroll = QScrollArea()
+        tab_scroll.setWidgetResizable(True)
+        tab_scroll.setFrameShape(QScrollArea.NoFrame)
+        tab_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        tab_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        layout.addWidget(tab_scroll, 1)
+        # テスト/デバッグ用参照
+        self._ai_extension_tab_scroll_area = tab_scroll
+
+        # 上ペイン / 下ペイン（境界は自動。手動リサイズ不可）
+        content_root = QWidget()
+        content_layout = QVBoxLayout(content_root)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)  # 上下ペイン間の余白を詰める
+        tab_scroll.setWidget(content_root)
+
+        top_container = QWidget()
+        top_layout = QVBoxLayout(top_container)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(3)
+        try:
+            top_layout.setAlignment(Qt.AlignTop)
+        except Exception:
+            pass
         
         # データセット選択エリア
         dataset_select_widget = QWidget()
         dataset_select_layout = QVBoxLayout(dataset_select_widget)
-        dataset_select_layout.setContentsMargins(10, 5, 10, 5)
+        dataset_select_layout.setContentsMargins(6, 3, 6, 3)
         self.dataset_select_layout = dataset_select_layout
         
         # データセット選択ラベル
         dataset_select_label = QLabel("分析対象データセットを選択:")
-        dataset_select_label.setStyleSheet("font-weight: bold; margin: 5px;")
+        dataset_select_label.setStyleSheet("font-weight: bold; margin: 2px;")
         dataset_select_layout.addWidget(dataset_select_label)
         
         # データセット選択コンボボックス
@@ -1293,12 +1588,12 @@ class AISuggestionDialog(QDialog):
             dataset_select_layout.addWidget(self._extension_dataset_dates_label)
         except Exception:
             self._extension_dataset_dates_label = None
-        layout.addWidget(dataset_select_widget)
+        top_layout.addWidget(dataset_select_widget)
         
         # データセット情報エリア（既存）
         dataset_info_widget = QWidget()
         dataset_info_layout = QVBoxLayout(dataset_info_widget)
-        dataset_info_layout.setContentsMargins(10, 5, 10, 5)
+        dataset_info_layout.setContentsMargins(6, 3, 6, 3)
         
         # データセット情報を取得・表示
         dataset_name = self.context_data.get('name', '').strip()
@@ -1313,8 +1608,8 @@ class AISuggestionDialog(QDialog):
             dataset_type = "タイプ未設定"
         
         dataset_info_html = f"""
-        <div style="border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)}; border-radius: 5px; padding: 10px; margin: 5px 0;">
-            <h4 style="margin: 0 0 8px 0;">📊 対象データセット情報</h4>
+        <div style="border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)}; border-radius: 5px; padding: 6px; margin: 3px 0;">
+            <h4 style="margin: 0 0 6px 0;">📊 対象データセット情報</h4>
             <table style="width: 100%; border-collapse: collapse;">
                 <tr>
                     <td style="font-weight: bold;  padding: 2px 10px 2px 0; width: 100px;">データセット名:</td>
@@ -1336,44 +1631,56 @@ class AISuggestionDialog(QDialog):
         self.dataset_info_label.setWordWrap(True)
         dataset_info_layout.addWidget(self.dataset_info_label)
         
-        layout.addWidget(dataset_info_widget)
-        
-        # メインコンテンツエリア（左右分割）
-        from qt_compat.widgets import QSplitter
-        content_splitter = QSplitter(Qt.Horizontal)
-        layout.addWidget(content_splitter)
+        top_layout.addWidget(dataset_info_widget)
+
+        try:
+            top_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        except Exception:
+            pass
+        content_layout.addWidget(top_container, 0)
+
+        bottom_container = QWidget()
+        bottom_layout = QHBoxLayout(bottom_container)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(4)
         
         # 左側: ボタンエリア
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(5, 5, 5, 5)
+        left_layout.setContentsMargins(2, 2, 2, 2)
         
         buttons_label = QLabel("🤖 AIサジェスト機能")
-        buttons_label.setStyleSheet(f"font-weight: bold; margin: 5px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};")
+        buttons_label.setStyleSheet(f"font-weight: bold; margin: 2px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};")
         left_layout.addWidget(buttons_label)
         # refresh_theme用に保持
         self._buttons_label = buttons_label
         
-        # ボタンエリア（スクロールなしで直接配置）
+        # ボタンエリア（ボタン群のみスクロール）
         self.buttons_widget = QWidget()
         self.buttons_layout = QVBoxLayout(self.buttons_widget)
-        self.buttons_layout.setContentsMargins(5, 5, 5, 5)
-        self.buttons_layout.setSpacing(6)  # ボタン間の間隔を狭く
-        
-        left_layout.addWidget(self.buttons_widget)
-        left_layout.addStretch()  # 下部にストレッチを追加
+        self.buttons_layout.setContentsMargins(2, 2, 2, 2)
+        self.buttons_layout.setSpacing(4)  # ボタン間の間隔をさらに狭く
+
+        from qt_compat.widgets import QScrollArea
+
+        self.buttons_scroll_area = QScrollArea()
+        self.buttons_scroll_area.setWidgetResizable(True)
+        self.buttons_scroll_area.setFrameShape(QScrollArea.NoFrame)
+        self.buttons_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.buttons_scroll_area.setWidget(self.buttons_widget)
+        left_layout.addWidget(self.buttons_scroll_area, 1)
         
         left_widget.setMaximumWidth(280)  # 幅を調整
         left_widget.setMinimumWidth(250)
-        content_splitter.addWidget(left_widget)
+        bottom_layout.addWidget(left_widget, 0)
         
         # 右側: 応答表示エリア
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(5, 5, 5, 5)
+        right_layout.setContentsMargins(2, 2, 2, 2)
         
         response_label = QLabel("📝 AI応答結果")
-        response_label.setStyleSheet(f"font-weight: bold; margin: 5px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};")
+        response_label.setStyleSheet(f"font-weight: bold; margin: 2px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};")
         right_layout.addWidget(response_label)
         # refresh_theme用に保持
         self._response_label = response_label
@@ -1388,6 +1695,15 @@ class AISuggestionDialog(QDialog):
         self.extension_response_display = QTextBrowser()
         self.extension_response_display.setReadOnly(True)
         self.extension_response_display.setOpenExternalLinks(False)  # セキュリティのため外部リンクは無効
+        try:
+            # ボタン群がウィンドウ内に収まるよう、応答表示は伸縮可能にする（最小は控えめ）
+            self.extension_response_display.setMinimumHeight(120)
+        except Exception:
+            pass
+        try:
+            self.extension_response_display.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        except Exception:
+            pass
         self.extension_response_display.setPlaceholderText(
             "🤖 AI拡張サジェスト機能へようこそ！\n\n"
             "左側のボタンをクリックすると、選択した機能に応じたAI分析結果がここに表示されます。\n\n"
@@ -1407,7 +1723,7 @@ class AISuggestionDialog(QDialog):
                 font-family: 'Yu Gothic', 'Meiryo', sans-serif;
                 font-size: 12px;
                 line-height: 1.3;
-                padding: 6px;
+                padding: 4px;
             }}
             QTextBrowser h1 {{
                 font-size: 16px;
@@ -1518,10 +1834,12 @@ class AISuggestionDialog(QDialog):
             logger.debug("extension spinner overlay init failed: %s", _e)
             self.extension_spinner_overlay = None
 
-        right_layout.addWidget(response_container)
+        right_layout.addWidget(response_container, 1)
         
         # 応答制御ボタン
         response_button_layout = QHBoxLayout()
+        response_button_layout.setContentsMargins(0, 0, 0, 0)
+        response_button_layout.setSpacing(4)
         
         self.clear_response_button = QPushButton("🗑️ クリア")
         self.clear_response_button.clicked.connect(self.clear_extension_response)
@@ -1532,7 +1850,7 @@ class AISuggestionDialog(QDialog):
                 color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
                 border: none;
                 border-radius: 4px;
-                padding: 6px 12px;
+                padding: 4px 10px;
                 font-size: 12px;
                 font-weight: bold;
             }}
@@ -1553,7 +1871,7 @@ class AISuggestionDialog(QDialog):
                 color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                 border: 1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)};
                 border-radius: 4px;
-                padding: 6px 12px;
+                padding: 4px 10px;
                 font-size: 12px;
                 font-weight: bold;
             }}
@@ -1577,7 +1895,7 @@ class AISuggestionDialog(QDialog):
                 color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
                 border: none;
                 border-radius: 4px;
-                padding: 6px 12px;
+                padding: 4px 10px;
                 font-size: 12px;
                 font-weight: bold;
             }}
@@ -1601,9 +1919,16 @@ class AISuggestionDialog(QDialog):
         response_button_layout.addWidget(self.show_api_params_button)
         response_button_layout.addStretch()
         
-        right_layout.addLayout(response_button_layout)
+        right_layout.addLayout(response_button_layout, 0)
         
-        content_splitter.addWidget(right_widget)
+        bottom_layout.addWidget(right_widget, 1)
+
+        content_layout.addWidget(bottom_container, 1)
+
+        self._register_conditional_tab_scroll(tab_widget, tab_scroll, right_widget)
+        # テスト/デバッグ用参照
+        self._ai_extension_response_widget = right_widget
+        QTimer.singleShot(0, lambda: self._update_conditional_tab_scroll(tab_widget))
         
         # 初期状態でボタンを読み込み
         try:
@@ -1631,7 +1956,7 @@ class AISuggestionDialog(QDialog):
     def setup_report_tab(self, tab_widget):
         """報告書タブのセットアップ（converted.xlsx エントリーを対象）"""
         from qt_compat.widgets import QTableWidget, QTableWidgetItem, QTextBrowser, QLineEdit, QAbstractItemView
-        from qt_compat.widgets import QSplitter
+        from qt_compat.widgets import QScrollArea, QSizePolicy
 
         layout = QVBoxLayout(tab_widget)
 
@@ -1664,6 +1989,32 @@ class AISuggestionDialog(QDialog):
         header_layout.addWidget(config_button)
 
         layout.addLayout(header_layout)
+
+        # タブ全体スクロール（通常OFF、応答領域が50%超でON）
+        tab_scroll = QScrollArea()
+        tab_scroll.setWidgetResizable(True)
+        tab_scroll.setFrameShape(QScrollArea.NoFrame)
+        tab_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        tab_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        layout.addWidget(tab_scroll, 1)
+        # テスト/デバッグ用参照
+        self._report_tab_scroll_area = tab_scroll
+
+        # 上ペイン / 下ペイン（境界は自動。手動リサイズ不可）
+        content_root = QWidget()
+        content_layout = QVBoxLayout(content_root)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)  # 上下ペイン間の余白を詰める
+        tab_scroll.setWidget(content_root)
+
+        top_container = QWidget()
+        top_layout = QVBoxLayout(top_container)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(4)
+        try:
+            top_layout.setAlignment(Qt.AlignTop)
+        except Exception:
+            pass
 
         # フィルタ & 一覧
         filter_widget = QWidget()
@@ -1748,7 +2099,7 @@ class AISuggestionDialog(QDialog):
         self.report_refresh_button.setMaximumWidth(70)
         row1.addWidget(self.report_refresh_button)
 
-        layout.addWidget(filter_widget)
+        top_layout.addWidget(filter_widget)
 
         self.report_entries_table = QTableWidget()
         self.report_entries_table.setColumnCount(9)
@@ -1767,25 +2118,35 @@ class AISuggestionDialog(QDialog):
         # 一括問い合わせ（選択複数）に備えて複数選択可能にする
         self.report_entries_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.report_entries_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.report_entries_table.setMinimumHeight(180)
+        try:
+            self._configure_table_visible_rows(self.report_entries_table, 9)
+        except Exception:
+            pass
         try:
             self.report_entries_table.setSortingEnabled(True)
         except Exception:
             pass
-        layout.addWidget(self.report_entries_table)
+        top_layout.addWidget(self.report_entries_table, 1)
 
-        # メインコンテンツエリア（左右分割）
-        content_splitter = QSplitter(Qt.Horizontal)
-        layout.addWidget(content_splitter)
+        try:
+            top_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        except Exception:
+            pass
+        content_layout.addWidget(top_container, 0)
+
+        bottom_container = QWidget()
+        bottom_layout = QHBoxLayout(bottom_container)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(4)
 
         # 左側: ボタン
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(5, 5, 5, 5)
+        left_layout.setContentsMargins(2, 2, 2, 2)
 
         buttons_label = QLabel("🤖 AIサジェスト機能（報告書）")
         buttons_label.setStyleSheet(
-            f"font-weight: bold; margin: 5px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};"
+            f"font-weight: bold; margin: 2px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};"
         )
         left_layout.addWidget(buttons_label)
 
@@ -1809,23 +2170,28 @@ class AISuggestionDialog(QDialog):
 
         self.report_buttons_widget = QWidget()
         self.report_buttons_layout = QVBoxLayout(self.report_buttons_widget)
-        self.report_buttons_layout.setContentsMargins(5, 5, 5, 5)
-        self.report_buttons_layout.setSpacing(6)
-        left_layout.addWidget(self.report_buttons_widget)
-        left_layout.addStretch()
+        self.report_buttons_layout.setContentsMargins(2, 2, 2, 2)
+        self.report_buttons_layout.setSpacing(4)
+
+        self.report_buttons_scroll_area = QScrollArea()
+        self.report_buttons_scroll_area.setWidgetResizable(True)
+        self.report_buttons_scroll_area.setFrameShape(QScrollArea.NoFrame)
+        self.report_buttons_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.report_buttons_scroll_area.setWidget(self.report_buttons_widget)
+        left_layout.addWidget(self.report_buttons_scroll_area, 1)
 
         left_widget.setMaximumWidth(280)
         left_widget.setMinimumWidth(250)
-        content_splitter.addWidget(left_widget)
+        bottom_layout.addWidget(left_widget, 0)
 
         # 右側: 応答表示
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(5, 5, 5, 5)
+        right_layout.setContentsMargins(2, 2, 2, 2)
 
         response_label = QLabel("📝 AI応答結果")
         response_label.setStyleSheet(
-            f"font-weight: bold; margin: 5px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};"
+            f"font-weight: bold; margin: 2px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};"
         )
         right_layout.addWidget(response_label)
 
@@ -1836,6 +2202,15 @@ class AISuggestionDialog(QDialog):
         self.report_response_display = QTextBrowser()
         self.report_response_display.setReadOnly(True)
         self.report_response_display.setOpenExternalLinks(False)
+        try:
+            # ボタン群がウィンドウ内に収まるよう、応答表示は伸縮可能にする（最小は控えめ）
+            self.report_response_display.setMinimumHeight(120)
+        except Exception:
+            pass
+        try:
+            self.report_response_display.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        except Exception:
+            pass
         self.report_response_display.setPlaceholderText(
             "左側のボタンをクリックすると、選択した報告書エントリーに基づくAI結果がここに表示されます。\n\n"
             "上部のARIMNO/年度で絞り込み、一覧から1件選択してください。"
@@ -1862,10 +2237,12 @@ class AISuggestionDialog(QDialog):
             logger.debug("report spinner overlay init failed: %s", _e)
             self.report_spinner_overlay = None
 
-        right_layout.addWidget(response_container)
+        right_layout.addWidget(response_container, 1)
 
         # 応答制御ボタン（AI拡張タブと同等）
         response_button_layout = QHBoxLayout()
+        response_button_layout.setContentsMargins(0, 0, 0, 0)
+        response_button_layout.setSpacing(4)
 
         self.report_clear_response_button = QPushButton("🗑️ クリア")
         self.report_clear_response_button.clicked.connect(self.clear_report_response)
@@ -1876,7 +2253,7 @@ class AISuggestionDialog(QDialog):
                 color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
                 border: none;
                 border-radius: 4px;
-                padding: 6px 12px;
+                padding: 4px 10px;
                 font-size: 12px;
                 font-weight: bold;
             }}
@@ -1897,7 +2274,7 @@ class AISuggestionDialog(QDialog):
                 color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                 border: 1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)};
                 border-radius: 4px;
-                padding: 6px 12px;
+                padding: 4px 10px;
                 font-size: 12px;
                 font-weight: bold;
             }}
@@ -1917,7 +2294,7 @@ class AISuggestionDialog(QDialog):
                 color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
                 border: none;
                 border-radius: 4px;
-                padding: 6px 12px;
+                padding: 4px 10px;
                 font-size: 12px;
                 font-weight: bold;
             }}
@@ -1941,9 +2318,16 @@ class AISuggestionDialog(QDialog):
         response_button_layout.addWidget(self.report_show_prompt_button)
         response_button_layout.addWidget(self.report_show_api_params_button)
         response_button_layout.addStretch()
-        right_layout.addLayout(response_button_layout)
+        right_layout.addLayout(response_button_layout, 0)
 
-        content_splitter.addWidget(right_widget)
+        bottom_layout.addWidget(right_widget, 1)
+
+        content_layout.addWidget(bottom_container, 1)
+
+        self._register_conditional_tab_scroll(tab_widget, tab_scroll, right_widget)
+        # テスト/デバッグ用参照
+        self._report_response_widget = right_widget
+        QTimer.singleShot(0, lambda: self._update_conditional_tab_scroll(tab_widget))
 
         # 接続
         self.report_refresh_button.clicked.connect(self.refresh_report_entries)
@@ -1971,7 +2355,7 @@ class AISuggestionDialog(QDialog):
     def setup_dataset_tab(self, tab_widget):
         """データセットタブのセットアップ（dataset.json エントリーを対象）"""
         from qt_compat.widgets import QTableWidget, QTableWidgetItem, QTextBrowser, QLineEdit, QAbstractItemView
-        from qt_compat.widgets import QSplitter
+        from qt_compat.widgets import QScrollArea, QSizePolicy
 
         layout = QVBoxLayout(tab_widget)
 
@@ -2004,10 +2388,40 @@ class AISuggestionDialog(QDialog):
 
         layout.addLayout(header_layout)
 
+        # タブ全体スクロール（通常OFF、応答領域が50%超でON）
+        tab_scroll = QScrollArea()
+        tab_scroll.setWidgetResizable(True)
+        tab_scroll.setFrameShape(QScrollArea.NoFrame)
+        tab_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        tab_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        layout.addWidget(tab_scroll, 1)
+        # テスト/デバッグ用参照
+        self._dataset_tab_scroll_area = tab_scroll
+
+        # 上ペイン / 下ペイン（境界は自動。手動リサイズ不可）
+        content_root = QWidget()
+        content_layout = QVBoxLayout(content_root)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)  # 上下ペイン間の余白を詰める
+        tab_scroll.setWidget(content_root)
+
+        top_container = QWidget()
+        top_layout = QVBoxLayout(top_container)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(4)
+        try:
+            top_layout.setAlignment(Qt.AlignTop)
+        except Exception:
+            pass
+
         # フィルタ & 一覧
         filter_widget = QWidget()
         filter_container_layout = QVBoxLayout(filter_widget)
-        filter_container_layout.setContentsMargins(10, 5, 10, 5)
+        filter_container_layout.setContentsMargins(8, 4, 8, 4)
+        try:
+            filter_container_layout.setSpacing(4)
+        except Exception:
+            pass
 
         row1 = QHBoxLayout()
         row2 = QHBoxLayout()
@@ -2074,7 +2488,7 @@ class AISuggestionDialog(QDialog):
 
         filter_container_layout.addLayout(row1)
         filter_container_layout.addLayout(row2)
-        layout.addWidget(filter_widget)
+        top_layout.addWidget(filter_widget)
 
         self.dataset_entries_table = QTableWidget()
         self.dataset_entries_table.setColumnCount(8)
@@ -2091,24 +2505,34 @@ class AISuggestionDialog(QDialog):
         self.dataset_entries_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.dataset_entries_table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.dataset_entries_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
-        self.dataset_entries_table.setMinimumHeight(180)
+        try:
+            self._configure_table_visible_rows(self.dataset_entries_table, 6)
+        except Exception:
+            pass
         try:
             self.dataset_entries_table.setSortingEnabled(True)
         except Exception:
             pass
-        layout.addWidget(self.dataset_entries_table)
+        top_layout.addWidget(self.dataset_entries_table, 1)
 
-        # メインコンテンツ（左右分割）
-        content_splitter = QSplitter(Qt.Horizontal)
-        layout.addWidget(content_splitter)
+        try:
+            top_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        except Exception:
+            pass
+        content_layout.addWidget(top_container, 0)
+
+        bottom_container = QWidget()
+        bottom_layout = QHBoxLayout(bottom_container)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(4)
 
         left_widget = QWidget()
         left_layout = QVBoxLayout(left_widget)
-        left_layout.setContentsMargins(5, 5, 5, 5)
+        left_layout.setContentsMargins(2, 2, 2, 2)
 
         buttons_label = QLabel("🤖 AIサジェスト機能（データセット）")
         buttons_label.setStyleSheet(
-            f"font-weight: bold; margin: 5px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};"
+            f"font-weight: bold; margin: 2px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};"
         )
         left_layout.addWidget(buttons_label)
 
@@ -2131,22 +2555,27 @@ class AISuggestionDialog(QDialog):
 
         self.dataset_buttons_widget = QWidget()
         self.dataset_buttons_layout = QVBoxLayout(self.dataset_buttons_widget)
-        self.dataset_buttons_layout.setContentsMargins(5, 5, 5, 5)
-        self.dataset_buttons_layout.setSpacing(6)
-        left_layout.addWidget(self.dataset_buttons_widget)
-        left_layout.addStretch()
+        self.dataset_buttons_layout.setContentsMargins(2, 2, 2, 2)
+        self.dataset_buttons_layout.setSpacing(4)
+
+        self.dataset_buttons_scroll_area = QScrollArea()
+        self.dataset_buttons_scroll_area.setWidgetResizable(True)
+        self.dataset_buttons_scroll_area.setFrameShape(QScrollArea.NoFrame)
+        self.dataset_buttons_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.dataset_buttons_scroll_area.setWidget(self.dataset_buttons_widget)
+        left_layout.addWidget(self.dataset_buttons_scroll_area, 1)
 
         left_widget.setMaximumWidth(280)
         left_widget.setMinimumWidth(250)
-        content_splitter.addWidget(left_widget)
+        bottom_layout.addWidget(left_widget, 0)
 
         right_widget = QWidget()
         right_layout = QVBoxLayout(right_widget)
-        right_layout.setContentsMargins(5, 5, 5, 5)
+        right_layout.setContentsMargins(2, 2, 2, 2)
 
         response_label = QLabel("📝 AI応答結果")
         response_label.setStyleSheet(
-            f"font-weight: bold; margin: 5px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};"
+            f"font-weight: bold; margin: 2px 0; font-size: 13px; color: {get_color(ThemeKey.TEXT_SECONDARY)};"
         )
         right_layout.addWidget(response_label)
 
@@ -2157,6 +2586,15 @@ class AISuggestionDialog(QDialog):
         self.dataset_response_display = QTextBrowser()
         self.dataset_response_display.setReadOnly(True)
         self.dataset_response_display.setOpenExternalLinks(False)
+        try:
+            # ボタン群がウィンドウ内に収まるよう、応答表示は伸縮可能にする（最小は控えめ）
+            self.dataset_response_display.setMinimumHeight(120)
+        except Exception:
+            pass
+        try:
+            self.dataset_response_display.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        except Exception:
+            pass
         self.dataset_response_display.setPlaceholderText(
             "左側のボタンをクリックすると、選択したデータセットに基づくAI結果がここに表示されます。\n\n"
             "上部の各列フィルタで絞り込み、一覧から1件選択してください。"
@@ -2183,9 +2621,11 @@ class AISuggestionDialog(QDialog):
             logger.debug("dataset spinner overlay init failed: %s", _e)
             self.dataset_spinner_overlay = None
 
-        right_layout.addWidget(response_container)
+        right_layout.addWidget(response_container, 1)
 
         response_button_layout = QHBoxLayout()
+        response_button_layout.setContentsMargins(0, 0, 0, 0)
+        response_button_layout.setSpacing(4)
         self.dataset_clear_response_button = QPushButton("🗑️ クリア")
         self.dataset_clear_response_button.clicked.connect(self.clear_dataset_response)
         self.dataset_clear_response_button.setStyleSheet(
@@ -2195,7 +2635,7 @@ class AISuggestionDialog(QDialog):
                 color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
                 border: none;
                 border-radius: 4px;
-                padding: 6px 12px;
+                padding: 4px 10px;
                 font-size: 12px;
                 font-weight: bold;
             }}
@@ -2216,7 +2656,7 @@ class AISuggestionDialog(QDialog):
                 color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
                 border: 1px solid {get_color(ThemeKey.BUTTON_SUCCESS_BORDER)};
                 border-radius: 4px;
-                padding: 6px 12px;
+                padding: 4px 10px;
                 font-size: 12px;
                 font-weight: bold;
             }}
@@ -2237,7 +2677,7 @@ class AISuggestionDialog(QDialog):
                 color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
                 border: none;
                 border-radius: 4px;
-                padding: 6px 12px;
+                padding: 4px 10px;
                 font-size: 12px;
                 font-weight: bold;
             }}
@@ -2262,9 +2702,16 @@ class AISuggestionDialog(QDialog):
         response_button_layout.addWidget(self.dataset_show_prompt_button)
         response_button_layout.addWidget(self.dataset_show_api_params_button)
         response_button_layout.addStretch()
-        right_layout.addLayout(response_button_layout)
+        right_layout.addLayout(response_button_layout, 0)
 
-        content_splitter.addWidget(right_widget)
+        bottom_layout.addWidget(right_widget, 1)
+
+        content_layout.addWidget(bottom_container, 1)
+
+        self._register_conditional_tab_scroll(tab_widget, tab_scroll, right_widget)
+        # テスト/デバッグ用参照
+        self._dataset_response_widget = right_widget
+        QTimer.singleShot(0, lambda: self._update_conditional_tab_scroll(tab_widget))
 
         # 接続
         self.dataset_refresh_button.clicked.connect(self.refresh_dataset_entries)
@@ -6023,9 +6470,9 @@ ARIMNO: {{ARIMNO}}
                 font-size: 11px;
                 font-weight: bold;
                 border-radius: 6px;
-                padding: 8px 12px;
+                padding: 5px 8px;
                 text-align: left;
-                margin: 2px;
+                margin: 0px;
             }}
             QPushButton:hover {{
                 background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};

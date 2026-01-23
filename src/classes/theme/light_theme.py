@@ -256,7 +256,8 @@ class LightTheme:
         # リンク
         ThemeKey.TEXT_LINK: "#2196f3",
         ThemeKey.TEXT_LINK_HOVER: "#1976d2",
-        ThemeKey.TEXT_LINK_HOVER_BACKGROUND: "#bbdefb",
+        # セル内の行要素 hover（複数行リンク）の背景: ライトモードでは視認性優先で黄色系
+        ThemeKey.TEXT_LINK_HOVER_BACKGROUND: "#fff59d",
         
         # ========================================
         # Input - 入力フィールド

@@ -18,6 +18,8 @@ from qt_compat.widgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QFileDialog,
+    QMessageBox,
     QtWidgets,
     QVBoxLayout,
     QWidget,
@@ -131,6 +133,14 @@ class ListingTabBase(QWidget):
         self.reload_button.clicked.connect(self.refresh_from_disk)
         control_layout.addWidget(self.reload_button)
 
+        self.export_csv_button = QPushButton("CSV出力")
+        self.export_csv_button.clicked.connect(lambda: self._export("csv"))
+        control_layout.addWidget(self.export_csv_button)
+
+        self.export_xlsx_button = QPushButton("XLSX出力")
+        self.export_xlsx_button.clicked.connect(lambda: self._export("xlsx"))
+        control_layout.addWidget(self.export_xlsx_button)
+
         self.count_label = QLabel("0件")
         control_layout.addWidget(self.count_label)
 
@@ -218,12 +228,73 @@ class ListingTabBase(QWidget):
                 )
                 item = QStandardItem(display)
                 item.setEditable(False)
+
+                # Keep raw value for exports (avoid preview truncation).
+                try:
+                    item.setData(record.get(column.key, ""), int(Qt.ItemDataRole.UserRole) + 1)
+                except Exception:
+                    pass
                 if tooltip and tooltip != display:
                     item.setToolTip(tooltip)
                 row_items.append(item)
             if row_items:
                 self.table_model.appendRow(row_items)
         self._update_count_label()
+
+    def _export(self, kind: str) -> None:
+        kind = str(kind or "").strip().lower()
+        if kind not in {"csv", "xlsx"}:
+            return
+
+        visible_cols = list(range(int(self.proxy_model.columnCount())))
+        headers: list[str] = []
+        for col in visible_cols:
+            header = self.proxy_model.headerData(col, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
+            headers.append(str(header or ""))
+
+        rows: list[dict[str, object]] = []
+        raw_role = int(Qt.ItemDataRole.UserRole) + 1
+        for row_idx in range(int(self.proxy_model.rowCount())):
+            out: dict[str, object] = {}
+            for col_idx, header in zip(visible_cols, headers, strict=False):
+                idx = self.proxy_model.index(row_idx, int(col_idx))
+                if not idx.isValid():
+                    continue
+                val = idx.data(raw_role)
+                if val is None:
+                    val = idx.data(Qt.ItemDataRole.DisplayRole)
+                out[header] = val
+            if out:
+                rows.append(out)
+
+        if not rows:
+            QMessageBox.information(self, "出力", "出力対象の行がありません")
+            return
+
+        import time
+
+        default_name = f"listing_{time.strftime('%Y%m%d_%H%M%S')}"
+        if kind == "csv":
+            suggested = f"{default_name}.csv"
+            path, _ = QFileDialog.getSaveFileName(self, "CSV出力", suggested, "CSV Files (*.csv)")
+        else:
+            suggested = f"{default_name}.xlsx"
+            path, _ = QFileDialog.getSaveFileName(self, "XLSX出力", suggested, "Excel Files (*.xlsx)")
+
+        if not path:
+            return
+
+        try:
+            import pandas as pd
+
+            df = pd.DataFrame(rows)
+            if kind == "csv":
+                df.to_csv(path, index=False, encoding="utf-8-sig")
+            else:
+                df.to_excel(path, index=False)
+            QMessageBox.information(self, "出力", f"出力しました: {path}")
+        except Exception as exc:
+            QMessageBox.warning(self, "出力失敗", f"出力に失敗しました: {exc}")
 
     def _update_status_label(self) -> None:
         if self._current_source and self._current_source.exists():

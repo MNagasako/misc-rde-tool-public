@@ -44,8 +44,8 @@ from PySide6.QtCore import (
     QPoint,
     QRect,
 )
-from PySide6.QtGui import QBrush, QCursor, QFont, QFontMetrics
-from PySide6.QtWidgets import QTableView, QStyledItemDelegate, QToolTip, QStyle, QStyleOptionButton
+from PySide6.QtGui import QBrush, QCursor, QFont, QFontMetrics, QPen
+from PySide6.QtWidgets import QTableView, QStyledItemDelegate, QToolTip, QStyle, QStyleOptionButton, QStyleOptionViewItem
 
 from config.site_rde import URLS
 
@@ -63,7 +63,7 @@ from classes.subgroup.util.sample_dedup_table_records import (
     update_sample_listing_cache_for_subgroups,
 )
 from classes.theme.theme_keys import ThemeKey
-from classes.theme.theme_manager import ThemeManager, get_color
+from classes.theme.theme_manager import ThemeManager, get_color, get_qcolor
 
 from classes.subgroup.ui.sample_entry_sample_relink_dialog import SampleEntrySampleRelinkDialog
 from classes.subgroup.ui.sample_edit_dialog import SampleEditDialog
@@ -81,6 +81,8 @@ class SampleDedupTableView(QTableView):
 
     cell_clicked_with_pos = Signal(object, object)
     cell_double_clicked_with_pos = Signal(object, object)
+    cell_hovered_with_pos = Signal(object, object)
+    viewport_left = Signal()
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -186,6 +188,47 @@ class SampleDedupTableView(QTableView):
                 except Exception:
                     pass
                 self.cell_double_clicked_with_pos.emit(idx, pos)
+            except Exception:
+                pass
+            return result
+
+        if et in {QEvent.MouseMove, QEvent.HoverMove}:
+            try:
+                pos = self._event_pos(event)
+                idx = self.indexAt(pos)
+            except Exception:
+                pos = QPoint()
+                idx = QModelIndex()
+
+            # Optional diagnostics (guarded): confirm hover events reach the view.
+            try:
+                if os.environ.get("RDE_SAMPLE_DEDUP_HOVER_LOG"):
+                    now = time.monotonic()
+                    if (now - float(getattr(self, "_hover_diag_last_info_at", 0.0))) >= 1.0:
+                        self._hover_diag_last_info_at = now
+                        logger.info(
+                            "[HOVER] viewport %s pos=(%s,%s) valid=%s row=%s col=%s",
+                            "HoverMove" if et == QEvent.HoverMove else "MouseMove",
+                            int(pos.x()),
+                            int(pos.y()),
+                            bool(getattr(idx, "isValid", lambda: False)()),
+                            int(idx.row()) if getattr(idx, "isValid", lambda: False)() else -1,
+                            int(idx.column()) if getattr(idx, "isValid", lambda: False)() else -1,
+                        )
+            except Exception:
+                pass
+
+            result = super().viewportEvent(event)
+            try:
+                self.cell_hovered_with_pos.emit(idx, pos)
+            except Exception:
+                pass
+            return result
+
+        if et in {QEvent.Leave, QEvent.HoverLeave}:
+            result = super().viewportEvent(event)
+            try:
+                self.viewport_left.emit()
             except Exception:
                 pass
             return result
@@ -363,7 +406,25 @@ class SampleDedupTableModel(QAbstractTableModel):
                 }
             if col.key == "tile_dataset_grant":
                 links = row.get("tile_dataset_grant_links")
-                return links if isinstance(links, list) else []
+                if isinstance(links, list) and links:
+                    return links
+
+                # Fallback for older caches / partial rows:
+                # derive per-line link mapping from the UUID columns.
+                entry_ids = [x.strip() for x in _safe_str(row.get("data_entry_ids")).splitlines() if x.strip()]
+                dataset_ids = [x.strip() for x in _safe_str(row.get("dataset_ids")).splitlines() if x.strip()]
+                n = max(len(entry_ids), len(dataset_ids))
+                if n <= 0:
+                    return []
+                derived: List[Dict[str, str]] = []
+                for i in range(n):
+                    derived.append(
+                        {
+                            "data_entry_id": entry_ids[i] if i < len(entry_ids) else "",
+                            "dataset_id": dataset_ids[i] if i < len(dataset_ids) else "",
+                        }
+                    )
+                return derived
             return None
 
         if role == Qt.ForegroundRole:
@@ -675,32 +736,225 @@ class MultiLineCompositeLinkDelegate(QStyledItemDelegate):
         if not text:
             return super().paint(painter, option, index)
 
-        lines = text.splitlines()
+        # Keep line splitting consistent with hover hit testing (which ignores empty lines).
+        lines = [x for x in text.splitlines() if x]
         if not lines:
             return super().paint(painter, option, index)
 
-        # draw background/selection
-        super().paint(painter, option, index)
+        # Diagnostics: confirm paint is running at all.
+        try:
+            if os.environ.get("RDE_SAMPLE_DEDUP_HOVER_LOG"):
+                now = time.monotonic()
+                last_at = float(getattr(self, "_paint_any_last_info_at", 0.0))
+                if (now - last_at) >= 2.0:
+                    setattr(self, "_paint_any_last_info_at", now)
+                    logger.info(
+                        "[DELEGATE-PAINT] composite(any) row=%s col=%s state=%s",
+                        int(index.row()),
+                        int(index.column()),
+                        str(getattr(option, "state", "?")),
+                    )
+        except Exception:
+            pass
+
+        # Draw item background/selection/focus ONLY.
+        # NOTE: Do NOT call super().paint() here.
+        # QStyledItemDelegate.paint() calls initStyleOption() internally and will
+        # overwrite opt.text with DisplayRole again, causing double text rendering
+        # (default + custom).
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.text = ""
+        try:
+            # We paint per-line hover ourselves.
+            opt.state &= ~QStyle.State_MouseOver
+        except Exception:
+            pass
+        style = opt.widget.style() if opt.widget is not None else QApplication.style()
+        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)
+
+        # Visual paint probe for environment-specific debugging.
+        # If this tint does not appear, this delegate's paint() is not being used.
+        try:
+            if os.environ.get("RDE_SAMPLE_DEDUP_HOVER_PAINT_PROBE"):
+                probe_bg = get_qcolor(ThemeKey.TEXT_WARNING)
+                try:
+                    probe_bg.setAlpha(60)
+                except Exception:
+                    pass
+                painter.save()
+                painter.fillRect(option.rect, QBrush(probe_bg))
+                try:
+                    painter.setPen(QPen(get_qcolor(ThemeKey.TEXT_ERROR), 2))
+                    painter.drawRect(option.rect.adjusted(1, 1, -2, -2))
+                except Exception:
+                    pass
+                painter.restore()
+        except Exception:
+            pass
 
         try:
-            # If selected, use default highlighted text to keep contrast.
-            if option.state & option.State_Selected:
-                return
-
             rect = option.rect
             fm = option.fontMetrics
             line_h = max(1, int(fm.height()))
 
-            tile_color = get_color(ThemeKey.TEXT_LINK)
-            dataset_color = get_color(ThemeKey.TEXT_INFO)
-            grant_color = get_color(ThemeKey.TEXT_WARNING)
-            sep_color = get_color(ThemeKey.TEXT_SECONDARY)
+            selected = bool(option.state & QStyle.State_Selected)
+
+            # Prefer delegate-local state (always accessible), then fall back to widget/viewport properties.
+            hover = getattr(self, "_hover_link_state", None)
+
+            view = option.widget
+
+            def _normalize_hover_state(value: object) -> object:
+                # Qt property can come back as a wrapper (e.g., QVariant-like) depending on binding.
+                try:
+                    if value is not None and hasattr(value, "value") and callable(value.value):
+                        value = value.value()  # type: ignore[assignment]
+                except Exception:
+                    pass
+                return value
+
+            def _read_hover_state(obj: object) -> object:
+                try:
+                    # Prefer Qt property (stored in C++ object, stable across wrappers).
+                    v = obj.property("_hover_link_state")  # type: ignore[attr-defined]
+                    if v is not None:
+                        return _normalize_hover_state(v)
+                except Exception:
+                    pass
+                try:
+                    return _normalize_hover_state(getattr(obj, "_hover_link_state", None))
+                except Exception:
+                    return None
+
+            # Hover state is tracked on the viewport (mouse events are delivered there).
+            # Keep backward compatibility by also checking the view and its parent.
+            if hover is None:
+                candidates = []
+                if view is not None:
+                    try:
+                        candidates.append(view.viewport())
+                    except Exception:
+                        pass
+                    candidates.append(view)
+                    try:
+                        candidates.append(view.parent())
+                    except Exception:
+                        pass
+                for cand in candidates:
+                    hover = _read_hover_state(cand)
+                    if hover is not None:
+                        break
+            hover_line_idx = -1
+            if isinstance(hover, (tuple, list)) and len(hover) == 3:
+                try:
+                    if int(hover[0]) == int(index.row()) and int(hover[1]) == int(index.column()):
+                        hover_line_idx = int(hover[2])
+                except Exception:
+                    hover_line_idx = -1
+
+            # Fallback: if hover state isn't available/matching, derive hovered line from the actual cursor
+            # position (more robust across platform/style variations).
+            if hover_line_idx < 0:
+                try:
+                    if bool(option.state & QStyle.State_MouseOver) and view is not None:
+                        vp = view.viewport() if hasattr(view, "viewport") else None
+                        if vp is not None:
+                            cur_pos = vp.mapFromGlobal(QCursor.pos())
+                            idx2 = view.indexAt(cur_pos)
+                            if idx2.isValid() and int(idx2.row()) == int(index.row()) and int(idx2.column()) == int(index.column()):
+                                y_in = int(cur_pos.y()) - int(option.rect.top())
+                                hover_line_idx = int(y_in // line_h)
+                                if not (0 <= hover_line_idx < len(lines)):
+                                    hover_line_idx = -1
+                except Exception:
+                    hover_line_idx = -1
+
+            # Keep hover highlight purely visual: as long as the hovered line index is within
+            # the rendered lines, paint it. (Link validity is handled elsewhere for click actions.)
+            if not (0 <= hover_line_idx < len(lines)):
+                hover_line_idx = -1
+
+            # Diagnostics: confirm this delegate is painting the hovered cell.
+            try:
+                if os.environ.get("RDE_SAMPLE_DEDUP_HOVER_LOG"):
+                    now = time.monotonic()
+                    last_at = float(getattr(self, "_hover_cell_paint_last_info_at", 0.0))
+                    if (now - last_at) >= 1.0:
+                        setattr(self, "_hover_cell_paint_last_info_at", now)
+                        logger.info(
+                            "[HOVER-PAINT] composite(cell) row=%s col=%s hover_line=%s lines=%s hover=%s delegate_id=%s",
+                            int(index.row()),
+                            int(index.column()),
+                            int(hover_line_idx),
+                            int(len(lines)),
+                            str(hover),
+                            hex(id(self)),
+                        )
+            except Exception:
+                pass
+
+            if selected:
+                try:
+                    from PySide6.QtGui import QPalette
+
+                    selected_text = option.palette.color(QPalette.HighlightedText)
+                except Exception:
+                    selected_text = get_qcolor(ThemeKey.TEXT_PRIMARY)
+                tile_color = selected_text
+                dataset_color = selected_text
+                grant_color = selected_text
+                sep_color = selected_text
+            else:
+                tile_color = get_qcolor(ThemeKey.TEXT_LINK)
+                dataset_color = get_qcolor(ThemeKey.TEXT_INFO)
+                grant_color = get_qcolor(ThemeKey.TEXT_WARNING)
+                sep_color = get_qcolor(ThemeKey.TEXT_SECONDARY)
 
             painter.save()
             painter.setClipRect(rect)
 
             y = int(rect.top())
-            for raw in lines:
+            for i, raw in enumerate(lines):
+                if i == hover_line_idx:
+                    try:
+                        hover_bg = get_qcolor(ThemeKey.TEXT_LINK_HOVER_BACKGROUND)
+                        try:
+                            if hasattr(hover_bg, "isValid") and callable(hover_bg.isValid) and not hover_bg.isValid():
+                                hover_bg = get_qcolor(ThemeKey.PANEL_WARNING_BACKGROUND)
+                            elif hasattr(hover_bg, "alpha") and callable(hover_bg.alpha) and int(hover_bg.alpha()) == 0:
+                                hover_bg = get_qcolor(ThemeKey.PANEL_WARNING_BACKGROUND)
+                        except Exception:
+                            pass
+                        line_rect = QRect(int(rect.left()), int(y), int(rect.width()), int(line_h))
+                        painter.fillRect(line_rect, QBrush(hover_bg))
+
+                        # Draw a thin border to make hover visually obvious even if backgrounds are subtle.
+                        try:
+                            painter.setPen(QPen(get_qcolor(ThemeKey.TEXT_WARNING), 1))
+                            painter.drawRect(line_rect.adjusted(0, 0, -1, -1))
+                        except Exception:
+                            pass
+
+                        # Optional diagnostics: confirm paint is actually running for the hovered line.
+                        try:
+                            if os.environ.get("RDE_SAMPLE_DEDUP_HOVER_LOG"):
+                                now = time.monotonic()
+                                last_at = float(getattr(self, "_hover_paint_last_info_at", 0.0))
+                                if (now - last_at) >= 1.0:
+                                    setattr(self, "_hover_paint_last_info_at", now)
+                                    logger.info(
+                                        "[HOVER-PAINT] composite row=%s col=%s line=%s rect=%s bg=%s",
+                                        int(index.row()),
+                                        int(index.column()),
+                                        int(hover_line_idx),
+                                        f"{int(line_rect.x())},{int(line_rect.y())},{int(line_rect.width())},{int(line_rect.height())}",
+                                        str(getattr(hover_bg, "name", lambda: "?")()),
+                                    )
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
                 tile, dataset, grant = self._split_line(raw)
                 x = int(rect.left())
 
@@ -797,6 +1051,233 @@ class MultiLineUuidLinkDelegate(QStyledItemDelegate):
             return super().helpEvent(event, view, option, index)
         except Exception:
             return super().helpEvent(event, view, option, index)
+
+    def paint(self, painter, option, index):  # noqa: N802
+        text = str(index.data(Qt.DisplayRole) or "")
+        if not text:
+            return super().paint(painter, option, index)
+
+        lines = [x for x in text.splitlines() if x.strip()]
+        if not lines:
+            return super().paint(painter, option, index)
+
+        # Draw item background/selection/focus ONLY.
+        # NOTE: Do NOT call super().paint() here.
+        # QStyledItemDelegate.paint() calls initStyleOption() internally and will
+        # overwrite opt.text with DisplayRole again, causing double text rendering
+        # (default + custom).
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        opt.text = ""
+        try:
+            # We paint per-line hover ourselves.
+            opt.state &= ~QStyle.State_MouseOver
+        except Exception:
+            pass
+        style = opt.widget.style() if opt.widget is not None else QApplication.style()
+        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)
+
+        # Visual paint probe for environment-specific debugging.
+        # If this tint does not appear, this delegate's paint() is not being used.
+        try:
+            if os.environ.get("RDE_SAMPLE_DEDUP_HOVER_PAINT_PROBE"):
+                probe_bg = get_qcolor(ThemeKey.TEXT_WARNING)
+                try:
+                    probe_bg.setAlpha(60)
+                except Exception:
+                    pass
+                painter.save()
+                painter.fillRect(option.rect, QBrush(probe_bg))
+                try:
+                    painter.setPen(QPen(get_qcolor(ThemeKey.TEXT_ERROR), 2))
+                    painter.drawRect(option.rect.adjusted(1, 1, -2, -2))
+                except Exception:
+                    pass
+                painter.restore()
+        except Exception:
+            pass
+
+        # Diagnostics: confirm paint is running at all.
+        try:
+            if os.environ.get("RDE_SAMPLE_DEDUP_HOVER_LOG"):
+                now = time.monotonic()
+                last_at = float(getattr(self, "_paint_any_last_info_at", 0.0))
+                if (now - last_at) >= 2.0:
+                    setattr(self, "_paint_any_last_info_at", now)
+                    logger.info(
+                        "[DELEGATE-PAINT] uuid(any) row=%s col=%s state=%s",
+                        int(index.row()),
+                        int(index.column()),
+                        str(getattr(option, "state", "?")),
+                    )
+        except Exception:
+            pass
+
+        try:
+            selected = bool(option.state & QStyle.State_Selected)
+
+            # Prefer delegate-local state (always accessible), then fall back to widget/viewport properties.
+            hover = getattr(self, "_hover_link_state", None)
+
+            view = option.widget
+
+            def _normalize_hover_state(value: object) -> object:
+                # Qt property can come back as a wrapper (e.g., QVariant-like) depending on binding.
+                try:
+                    if value is not None and hasattr(value, "value") and callable(value.value):
+                        value = value.value()  # type: ignore[assignment]
+                except Exception:
+                    pass
+                return value
+
+            def _read_hover_state(obj: object) -> object:
+                try:
+                    # Prefer Qt property (stored in C++ object, stable across wrappers).
+                    v = obj.property("_hover_link_state")  # type: ignore[attr-defined]
+                    if v is not None:
+                        return _normalize_hover_state(v)
+                except Exception:
+                    pass
+                try:
+                    return _normalize_hover_state(getattr(obj, "_hover_link_state", None))
+                except Exception:
+                    return None
+
+            # Hover state is tracked on the viewport (mouse events are delivered there).
+            # Keep backward compatibility by also checking the view and its parent.
+            if hover is None:
+                candidates = []
+                if view is not None:
+                    try:
+                        candidates.append(view.viewport())
+                    except Exception:
+                        pass
+                    candidates.append(view)
+                    try:
+                        candidates.append(view.parent())
+                    except Exception:
+                        pass
+                for cand in candidates:
+                    hover = _read_hover_state(cand)
+                    if hover is not None:
+                        break
+            hover_line_idx = -1
+            if isinstance(hover, (tuple, list)) and len(hover) == 3:
+                try:
+                    if int(hover[0]) == int(index.row()) and int(hover[1]) == int(index.column()):
+                        hover_line_idx = int(hover[2])
+                except Exception:
+                    hover_line_idx = -1
+
+            # Fallback: compute hovered line from actual cursor position.
+            if hover_line_idx < 0:
+                try:
+                    if bool(option.state & QStyle.State_MouseOver) and view is not None:
+                        vp = view.viewport() if hasattr(view, "viewport") else None
+                        if vp is not None:
+                            cur_pos = vp.mapFromGlobal(QCursor.pos())
+                            idx2 = view.indexAt(cur_pos)
+                            if idx2.isValid() and int(idx2.row()) == int(index.row()) and int(idx2.column()) == int(index.column()):
+                                fm = option.fontMetrics
+                                line_h = max(1, int(fm.height()))
+                                y_in = int(cur_pos.y()) - int(option.rect.top())
+                                hover_line_idx = int(y_in // line_h)
+                                if not (0 <= hover_line_idx < len(lines)):
+                                    hover_line_idx = -1
+                except Exception:
+                    hover_line_idx = -1
+
+            # Keep hover highlight purely visual: as long as the hovered line index is within
+            # the rendered lines, paint it. (URL validity is handled elsewhere for click actions.)
+            if not (0 <= hover_line_idx < len(lines)):
+                hover_line_idx = -1
+
+            # Diagnostics: confirm this delegate is painting the hovered cell.
+            try:
+                if os.environ.get("RDE_SAMPLE_DEDUP_HOVER_LOG") and isinstance(hover, (tuple, list)) and len(hover) == 3:
+                    if int(hover[0]) == int(index.row()) and int(hover[1]) == int(index.column()):
+                        now = time.monotonic()
+                        last_at = float(getattr(self, "_hover_cell_paint_last_info_at", 0.0))
+                        if (now - last_at) >= 1.0:
+                            setattr(self, "_hover_cell_paint_last_info_at", now)
+                            logger.info(
+                                "[HOVER-PAINT] uuid(cell) row=%s col=%s hover_line=%s",
+                                int(index.row()),
+                                int(index.column()),
+                                int(hover_line_idx),
+                            )
+            except Exception:
+                pass
+
+            rect = option.rect
+            fm = option.fontMetrics
+            line_h = max(1, int(fm.height()))
+            if selected:
+                try:
+                    from PySide6.QtGui import QPalette
+
+                    selected_text = option.palette.color(QPalette.HighlightedText)
+                except Exception:
+                    selected_text = get_qcolor(ThemeKey.TEXT_PRIMARY)
+                link_color = selected_text
+                hover_color = selected_text
+            else:
+                link_color = get_qcolor(ThemeKey.TEXT_LINK)
+                hover_color = get_qcolor(ThemeKey.TEXT_LINK_HOVER)
+            hover_bg = get_qcolor(ThemeKey.TEXT_LINK_HOVER_BACKGROUND)
+
+            painter.save()
+            painter.setClipRect(rect)
+
+            y = int(rect.top())
+            for i, line in enumerate(lines):
+                if i == hover_line_idx:
+                    try:
+                        line_rect = QRect(int(rect.left()), int(y), int(rect.width()), int(line_h))
+                        painter.fillRect(line_rect, QBrush(hover_bg))
+
+                        # Draw a thin border to make hover visually obvious.
+                        try:
+                            painter.setPen(QPen(get_qcolor(ThemeKey.TEXT_LINK_HOVER), 1))
+                            painter.drawRect(line_rect.adjusted(0, 0, -1, -1))
+                        except Exception:
+                            pass
+
+                        # Optional diagnostics: confirm paint is actually running for the hovered line.
+                        try:
+                            if os.environ.get("RDE_SAMPLE_DEDUP_HOVER_LOG"):
+                                now = time.monotonic()
+                                last_at = float(getattr(self, "_hover_paint_last_info_at", 0.0))
+                                if (now - last_at) >= 1.0:
+                                    setattr(self, "_hover_paint_last_info_at", now)
+                                    logger.info(
+                                        "[HOVER-PAINT] uuid row=%s col=%s line=%s rect=%s bg=%s",
+                                        int(index.row()),
+                                        int(index.column()),
+                                        int(hover_line_idx),
+                                        f"{int(line_rect.x())},{int(line_rect.y())},{int(line_rect.width())},{int(line_rect.height())}",
+                                        str(getattr(hover_bg, "name", lambda: "?")()),
+                                    )
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                try:
+                    painter.setPen(hover_color if i == hover_line_idx else link_color)
+                except Exception:
+                    painter.setPen(link_color)
+                try:
+                    f = QFont(option.font)
+                    f.setUnderline(True)
+                    painter.setFont(f)
+                except Exception:
+                    pass
+                painter.drawText(int(rect.left()), int(y) + int(fm.ascent()), line)
+                y += line_h
+
+            painter.restore()
+        except Exception:
+            return
 
     def editorEvent(self, event, model, option, index):  # noqa: N802
         try:
@@ -996,8 +1477,19 @@ class SampleFetchThread(QThread):
         self._subgroup_ids = subgroup_ids
 
     def run(self):
-        msg = fetch_samples_for_subgroups(self._subgroup_ids)
-        self.completed.emit(msg)
+        msg = ""
+        try:
+            msg = fetch_samples_for_subgroups(self._subgroup_ids)
+        except Exception as e:
+            msg = f"試料情報取得に失敗しました: {e}"
+            try:
+                logger.exception("[SAMPLE-FETCH] failed: %s", str(e))
+            except Exception:
+                pass
+        try:
+            self.completed.emit(str(msg or ""))
+        except Exception:
+            pass
 
 
 class SampleDedupListingWidget(QWidget):
@@ -1051,6 +1543,15 @@ class SampleDedupListingWidget(QWidget):
 
         # Avoid double-opening relink dialog on double click (Qt emits multiple mouse events).
         self._last_relink_open_at: float = 0.0
+
+        # Hover state for per-line link highlighting: (row, col, line_idx) on the view's model.
+        self._hover_link_state: tuple[int, int, int] | None = None
+
+        self._hover_diag_enabled: bool = bool(os.environ.get("RDE_SAMPLE_DEDUP_HOVER_DIAG"))
+        self._hover_diag_moves: int = 0
+        self._hover_diag_hits: int = 0
+        self._hover_diag_last: str = ""
+        self._hover_diag_label = None
 
         self._init_ui()
         self._init_models()
@@ -1240,6 +1741,14 @@ class SampleDedupListingWidget(QWidget):
         self.status_label.setWordWrap(True)
         controls.addWidget(self.status_label, 1)
 
+        if self._hover_diag_enabled:
+            try:
+                self._hover_diag_label = QLabel("[HOVER-DIAG] enabled", self)
+                self._hover_diag_label.setWordWrap(True)
+                controls.addWidget(self._hover_diag_label, 1)
+            except Exception:
+                self._hover_diag_label = None
+
         controls.addWidget(QLabel("表示行数:"))
         self._row_limit = QSpinBox(self)
         self._row_limit.setMinimum(0)
@@ -1319,12 +1828,29 @@ class SampleDedupListingWidget(QWidget):
             # Enable hover effects in delegates.
             self.table.setMouseTracking(True)
             self.table.viewport().setMouseTracking(True)
+            try:
+                self.table.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+                self.table.viewport().setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+            except Exception:
+                # Fallback for older enum access
+                try:
+                    self.table.setAttribute(Qt.WA_Hover, True)
+                    self.table.viewport().setAttribute(Qt.WA_Hover, True)
+                except Exception:
+                    pass
         except Exception:
             pass
 
         try:
             # Ensure link-hover cursor works even when table hover styles are enabled.
             self.table.viewport().installEventFilter(self)
+        except Exception:
+            pass
+
+        try:
+            # MouseMove/Leave events are routed through QTableView.viewportEvent; use signals for reliable hover tracking.
+            self.table.cell_hovered_with_pos.connect(self._on_table_cell_hovered)
+            self.table.viewport_left.connect(self._on_table_viewport_left)
         except Exception:
             pass
         header = self.table.horizontalHeader()
@@ -2000,40 +2526,96 @@ class SampleDedupListingWidget(QWidget):
         except Exception:
             return str(line), "", ""
 
-    def eventFilter(self, obj: QObject, event: QObject) -> bool:  # noqa: N802
+    def _on_table_cell_hovered(self, index: object, pos: object) -> None:
         try:
-            if getattr(self, "table", None) is None:
-                return super().eventFilter(obj, event)
-            if obj is not self.table.viewport():
-                return super().eventFilter(obj, event)
+            from PySide6.QtCore import QPoint
 
-            from PySide6.QtCore import QEvent
+            if not isinstance(pos, QPoint):
+                return
+            self._update_link_hover_from_viewport_pos(pos)
+        except Exception:
+            return
 
-            if event.type() == QEvent.Leave:
-                try:
-                    self.table.viewport().unsetCursor()
-                except Exception:
-                    pass
-                return False
+    def _on_table_viewport_left(self) -> None:
+        self._clear_link_hover_state()
 
-            if event.type() != QEvent.MouseMove:
-                return super().eventFilter(obj, event)
+    def _clear_link_hover_state(self) -> None:
+        try:
+            try:
+                self.table.viewport().unsetCursor()
+            except Exception:
+                pass
 
-            pos = event.pos()
+            prev = getattr(self, "_hover_link_state", None)
+            self._hover_link_state = None
+            try:
+                if self._multiline_link_delegate is not None:
+                    setattr(self._multiline_link_delegate, "_hover_link_state", None)
+            except Exception:
+                pass
+            try:
+                if self._multiline_uuid_delegate is not None:
+                    setattr(self._multiline_uuid_delegate, "_hover_link_state", None)
+            except Exception:
+                pass
+            try:
+                self.table.setProperty("_hover_link_state", None)
+            except Exception:
+                pass
+            try:
+                self.table.viewport().setProperty("_hover_link_state", None)
+            except Exception:
+                pass
+
+            if isinstance(prev, tuple) and len(prev) == 3:
+                prev_idx = self.table.model().index(int(prev[0]), int(prev[1]))
+                if prev_idx.isValid():
+                    self.table.viewport().update(self.table.visualRect(prev_idx))
+
+            try:
+                if self._hover_diag_enabled and self._hover_diag_label is not None:
+                    self._hover_diag_last = "cleared"
+                    self._hover_diag_label.setText(
+                        f"[HOVER-DIAG] moves={self._hover_diag_moves} hits={self._hover_diag_hits} last={self._hover_diag_last}"
+                    )
+            except Exception:
+                pass
+        except Exception:
+            return
+
+    def _update_link_hover_from_viewport_pos(self, pos) -> None:
+        """Update per-line hover state based on a viewport-relative mouse position."""
+        try:
+            try:
+                if self._hover_diag_enabled:
+                    self._hover_diag_moves += 1
+            except Exception:
+                pass
+
             index = self.table.indexAt(pos)
             if not index.isValid() or not (0 <= index.column() < len(self._columns)):
-                try:
-                    self.table.viewport().unsetCursor()
-                except Exception:
-                    pass
-                return False
+                self._clear_link_hover_state()
+                return
 
             col_key = self._columns[index.column()].key
+            try:
+                col_label = str(self._columns[index.column()].label)
+            except Exception:
+                col_label = ""
             rect = self.table.visualRect(index)
-            fm = QFontMetrics(self.table.font())
-            line_h = max(1, int(fm.height()))
 
             is_link = False
+            hover_line_idx = -1
+
+            # Throttled probe log for diagnosing per-column behavior.
+            # This runs even when state does not change, but only when explicitly enabled.
+            probe_enabled = bool(os.environ.get("RDE_SAMPLE_DEDUP_HOVER_LOG"))
+            probe_now = 0.0
+            if probe_enabled:
+                try:
+                    probe_now = time.monotonic()
+                except Exception:
+                    probe_now = 0.0
 
             if col_key in {"subgroup_id", "dataset_ids", "data_entry_ids", "sample_id"}:
                 ur = index.data(Qt.UserRole)
@@ -2045,10 +2627,36 @@ class SampleDedupListingWidget(QWidget):
                     urls = [str(x).strip() for x in ur if isinstance(x, str) and str(x).strip()]
 
                 if urls:
-                    y_in = int(pos.y()) - int(rect.top())
-                    line_idx = int(y_in // line_h)
+                    text = str(index.data(Qt.DisplayRole) or "")
+                    lines = [x for x in text.splitlines() if x.strip()] if text else []
+                    max_lines = min(len(urls), max(1, len(lines)))
+                    if max_lines <= 0:
+                        max_lines = len(urls)
+                    line_idx = self._line_index_in_cell(rect, int(pos.y()), max_lines)
                     if 0 <= line_idx < len(urls):
                         is_link = True
+                        hover_line_idx = line_idx
+
+                if probe_enabled:
+                    try:
+                        last_at = float(getattr(self, "_hover_probe_last_info_at", 0.0))
+                    except Exception:
+                        last_at = 0.0
+                    try:
+                        if probe_now and (probe_now - last_at) >= 1.0:
+                            setattr(self, "_hover_probe_last_info_at", probe_now)
+                            logger.info(
+                                "[HOVER] probe row=%s col=%s key=%s label=%s urls=%s is_link=%s line=%s",
+                                int(index.row()),
+                                int(index.column()),
+                                str(col_key),
+                                str(col_label),
+                                int(len(urls)),
+                                bool(is_link),
+                                int(hover_line_idx),
+                            )
+                    except Exception:
+                        pass
 
             if not is_link and self._multiline_link_column_key and col_key == self._multiline_link_column_key:
                 links = index.data(Qt.UserRole)
@@ -2061,6 +2669,178 @@ class SampleDedupListingWidget(QWidget):
                         if isinstance(item, dict):
                             entry_id = str(item.get("data_entry_id") or "").strip()
                             is_link = bool(entry_id)
+                            if is_link:
+                                hover_line_idx = line_idx
+
+                if probe_enabled:
+                    try:
+                        text = str(index.data(Qt.DisplayRole) or "")
+                        lines_count = len([x for x in text.splitlines() if x]) if text else 0
+                    except Exception:
+                        lines_count = 0
+                    try:
+                        links_count = len(links) if isinstance(links, list) else 0
+                    except Exception:
+                        links_count = 0
+                    try:
+                        last_at = float(getattr(self, "_hover_probe_last_info_at", 0.0))
+                    except Exception:
+                        last_at = 0.0
+                    try:
+                        if probe_now and (probe_now - last_at) >= 1.0:
+                            setattr(self, "_hover_probe_last_info_at", probe_now)
+                            logger.info(
+                                "[HOVER] probe row=%s col=%s key=%s label=%s lines=%s links=%s is_link=%s line=%s",
+                                int(index.row()),
+                                int(index.column()),
+                                str(col_key),
+                                str(col_label),
+                                int(lines_count),
+                                int(links_count),
+                                bool(is_link),
+                                int(hover_line_idx),
+                            )
+                    except Exception:
+                        pass
+
+            try:
+                if self._hover_diag_enabled:
+                    if is_link:
+                        self._hover_diag_hits += 1
+                    self._hover_diag_last = f"row={int(index.row())} col={int(index.column())} key={col_key} line={int(hover_line_idx)} link={bool(is_link)}"
+                    if self._hover_diag_label is not None:
+                        self._hover_diag_label.setText(
+                            f"[HOVER-DIAG] moves={self._hover_diag_moves} hits={self._hover_diag_hits} last={self._hover_diag_last}"
+                        )
+            except Exception:
+                pass
+
+            prev = getattr(self, "_hover_link_state", None)
+            new_state = (
+                (int(index.row()), int(index.column()), int(hover_line_idx))
+                if is_link and hover_line_idx >= 0
+                else None
+            )
+            if prev != new_state:
+                self._hover_link_state = new_state
+                try:
+                    if self._multiline_link_delegate is not None:
+                        setattr(self._multiline_link_delegate, "_hover_link_state", new_state)
+                except Exception:
+                    pass
+                try:
+                    if self._multiline_uuid_delegate is not None:
+                        setattr(self._multiline_uuid_delegate, "_hover_link_state", new_state)
+                except Exception:
+                    pass
+                try:
+                    self.table.setProperty("_hover_link_state", new_state)
+                except Exception:
+                    pass
+                try:
+                    self.table.viewport().setProperty("_hover_link_state", new_state)
+                except Exception:
+                    pass
+
+                # Diagnostics: confirm delegate-local hover state is actually set.
+                try:
+                    if os.environ.get("RDE_SAMPLE_DEDUP_HOVER_LOG"):
+                        now = time.monotonic()
+                        last_at = float(getattr(self, "_hover_delegate_state_diag_last_info_at", 0.0))
+                        if (now - last_at) >= 1.0:
+                            setattr(self, "_hover_delegate_state_diag_last_info_at", now)
+                            link_state = getattr(getattr(self, "_multiline_link_delegate", None), "_hover_link_state", None)
+                            uuid_state = getattr(getattr(self, "_multiline_uuid_delegate", None), "_hover_link_state", None)
+                            logger.info(
+                                "[HOVER-DELEGATE-STATE] new=%s link_delegate=%s uuid_delegate=%s",
+                                str(new_state),
+                                str(link_state),
+                                str(uuid_state),
+                            )
+                except Exception:
+                    pass
+
+                # Optional diagnostics (guarded): confirm per-line hover is computed.
+                try:
+                    if os.environ.get("RDE_SAMPLE_DEDUP_HOVER_LOG"):
+                        try:
+                            col_label = str(col_label)
+                        except Exception:
+                            col_label = ""
+                        logger.info(
+                            "[HOVER] state %s -> %s key=%s label=%s is_link=%s line=%s",
+                            str(prev),
+                            str(new_state),
+                            str(col_key),
+                            str(col_label),
+                            bool(is_link),
+                            int(hover_line_idx),
+                        )
+                except Exception:
+                    pass
+
+                if isinstance(prev, tuple) and len(prev) == 3:
+                    prev_idx = self.table.model().index(int(prev[0]), int(prev[1]))
+                    if prev_idx.isValid():
+                        self.table.viewport().update(self.table.visualRect(prev_idx))
+                self.table.viewport().update(rect)
+
+                # Force a synchronous repaint in diagnostics mode to rule out update scheduling issues.
+                try:
+                    if os.environ.get("RDE_SAMPLE_DEDUP_HOVER_LOG"):
+                        # If per-rect repaint does not trigger delegate paint on some platforms/styles,
+                        # repaint the whole viewport (diagnostics only).
+                        self.table.viewport().repaint(rect)
+                        self.table.viewport().repaint()
+                except Exception:
+                    pass
+
+                # Diagnostics: confirm which delegate Qt will use for this specific index.
+                try:
+                    if os.environ.get("RDE_SAMPLE_DEDUP_HOVER_LOG"):
+                        now = time.monotonic()
+                        last_at = float(getattr(self, "_hover_delegate_index_diag_last_info_at", 0.0))
+                        if (now - last_at) >= 1.0:
+                            setattr(self, "_hover_delegate_index_diag_last_info_at", now)
+                            try:
+                                idx_delegate = self.table.itemDelegateForIndex(index)
+                            except Exception:
+                                idx_delegate = None
+                            logger.info(
+                                "[HOVER-DELEGATE-INDEX] row=%s col=%s key=%s delegate=%s updatesEnabled(view)=%s updatesEnabled(vp)=%s rect=%s",
+                                int(index.row()),
+                                int(index.column()),
+                                str(col_key),
+                                (type(idx_delegate).__name__ if idx_delegate is not None else "None"),
+                                bool(self.table.updatesEnabled()),
+                                bool(self.table.viewport().updatesEnabled()),
+                                f"{int(rect.x())},{int(rect.y())},{int(rect.width())},{int(rect.height())}",
+                            )
+                except Exception:
+                    pass
+
+                # Diagnostics: confirm which delegate is actually installed for this column.
+                try:
+                    if os.environ.get("RDE_SAMPLE_DEDUP_HOVER_LOG"):
+                        now = time.monotonic()
+                        last_at = float(getattr(self, "_hover_delegate_diag_last_info_at", 0.0))
+                        if (now - last_at) >= 1.0:
+                            setattr(self, "_hover_delegate_diag_last_info_at", now)
+                            d = None
+                            try:
+                                d = self.table.itemDelegateForColumn(int(index.column()))
+                            except Exception:
+                                d = None
+                            logger.info(
+                                "[HOVER-DELEGATE] col=%s key=%s delegate=%s is_multiline_link=%s is_multiline_uuid=%s",
+                                int(index.column()),
+                                str(col_key),
+                                (type(d).__name__ if d is not None else "None"),
+                                bool(d is not None and d is getattr(self, "_multiline_link_delegate", None)),
+                                bool(d is not None and d is getattr(self, "_multiline_uuid_delegate", None)),
+                            )
+                except Exception:
+                    pass
 
             try:
                 if is_link:
@@ -2069,6 +2849,27 @@ class SampleDedupListingWidget(QWidget):
                     self.table.viewport().unsetCursor()
             except Exception:
                 pass
+        except Exception:
+            return
+
+    def eventFilter(self, obj: QObject, event: QObject) -> bool:  # noqa: N802
+        try:
+            if getattr(self, "table", None) is None:
+                return super().eventFilter(obj, event)
+            if obj is not self.table.viewport():
+                return super().eventFilter(obj, event)
+
+            from PySide6.QtCore import QEvent
+
+            if event.type() == QEvent.Leave:
+                self._clear_link_hover_state()
+                return False
+
+            if event.type() != QEvent.MouseMove:
+                return super().eventFilter(obj, event)
+
+            pos = event.pos()
+            self._update_link_hover_from_viewport_pos(pos)
 
             return False
         except Exception:
@@ -2582,15 +3383,48 @@ class SampleDedupListingWidget(QWidget):
                 self._signature = dict(signature)
 
             def run(self):
-                columns, rows, missing = self.parent()._rows_builder(self._subgroup_ids)  # type: ignore[attr-defined]
-                self.completed.emit(columns, rows, missing, {"subgroup_order": self._subgroup_order, "signature": self._signature})
+                columns: object = []
+                rows: object = []
+                missing: object = []
+                err = ""
+                try:
+                    columns, rows, missing = self.parent()._rows_builder(self._subgroup_ids)  # type: ignore[attr-defined]
+                except Exception as e:
+                    err = str(e)
+                    try:
+                        logger.exception("[SAMPLE-LIST] refresh failed: %s", err)
+                    except Exception:
+                        pass
+                meta = {"subgroup_order": self._subgroup_order, "signature": self._signature}
+                if err:
+                    meta["error"] = err
+                try:
+                    self.completed.emit(columns, rows, missing, meta)
+                except Exception:
+                    pass
 
         self._refresh_thread = _RefreshThread(subgroup_ids, subgroup_order, signature, self)
         self._refresh_thread.completed.connect(lambda cols, rows, missing, meta: self._on_refresh_completed(cols, rows, missing, meta, auto_fetch))
+        try:
+            # Safety net: even if the thread crashes before emitting, hide the spinner.
+            self._refresh_thread.finished.connect(self._hide_loading)
+        except Exception:
+            pass
         self._refresh_thread.start()
 
     def _on_refresh_completed(self, columns: object, rows: object, missing: object, meta: object, auto_fetch: bool) -> None:
         self._hide_loading()
+
+        meta_dict = meta if isinstance(meta, dict) else {}
+        err = str(meta_dict.get("error") or "").strip()
+        if err:
+            # Keep current table as-is and surface the error.
+            try:
+                self.status_label.setText(f"試料一覧更新に失敗: {err}")
+            except Exception:
+                pass
+            return
+
         if isinstance(columns, list):
             self._columns = [c for c in columns if isinstance(c, SampleDedupColumn)]
         if isinstance(rows, list):
@@ -2618,7 +3452,6 @@ class SampleDedupListingWidget(QWidget):
             return
 
         # Merge into cache (partial refresh per subgroup)
-        meta_dict = meta if isinstance(meta, dict) else {}
         subgroup_order = meta_dict.get("subgroup_order") if isinstance(meta_dict.get("subgroup_order"), list) else []
         signature = meta_dict.get("signature") if isinstance(meta_dict.get("signature"), dict) else {}
         state = self._current_prefilter_state()

@@ -442,6 +442,14 @@ class PortalListingTab(QWidget):
         self.select_columns_btn.clicked.connect(self._on_select_columns)
         controls.addWidget(self.select_columns_btn)
 
+        self.export_csv_btn = QPushButton("CSV出力")
+        self.export_csv_btn.clicked.connect(lambda: self._export("csv"))
+        controls.addWidget(self.export_csv_btn)
+
+        self.export_xlsx_btn = QPushButton("XLSX出力")
+        self.export_xlsx_btn.clicked.connect(lambda: self._export("xlsx"))
+        controls.addWidget(self.export_xlsx_btn)
+
         self.count_label = QLabel("0件")
         controls.addWidget(self.count_label)
 
@@ -515,6 +523,74 @@ class PortalListingTab(QWidget):
         self._filter_apply_timer = QtCore.QTimer(self)
         self._filter_apply_timer.setSingleShot(True)
         self._filter_apply_timer.timeout.connect(self._apply_filters_now)
+
+    def _export(self, kind: str) -> None:
+        kind = str(kind or "").strip().lower()
+        if kind not in {"csv", "xlsx"}:
+            return
+
+        # Export current view (filtered + sorted). Hidden columns are excluded.
+        visible_cols: list[int] = []
+        headers: list[str] = []
+        for col in range(int(self.proxy_model.columnCount())):
+            try:
+                if self.table_view.isColumnHidden(col):
+                    continue
+            except Exception:
+                pass
+            header = self.proxy_model.headerData(col, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
+            headers.append(str(header or ""))
+            visible_cols.append(int(col))
+
+        if not visible_cols:
+            return
+
+        rows: list[dict[str, object]] = []
+        raw_role = int(Qt.ItemDataRole.UserRole) + 1
+        for row_idx in range(int(self.proxy_model.rowCount())):
+            out: dict[str, object] = {}
+            for col_idx, header in zip(visible_cols, headers, strict=False):
+                idx = self.proxy_model.index(row_idx, int(col_idx))
+                if not idx.isValid():
+                    continue
+                val = idx.data(raw_role)
+                if val is None:
+                    val = idx.data(Qt.ItemDataRole.DisplayRole)
+                out[header] = val
+            if out:
+                rows.append(out)
+
+        if not rows:
+            from qt_compat.widgets import QMessageBox
+
+            QMessageBox.information(self, "出力", "出力対象の行がありません")
+            return
+
+        from qt_compat.widgets import QFileDialog, QMessageBox
+        import time
+
+        default_name = f"data_portal_listing_{time.strftime('%Y%m%d_%H%M%S')}"
+        if kind == "csv":
+            suggested = f"{default_name}.csv"
+            path, _ = QFileDialog.getSaveFileName(self, "CSV出力", suggested, "CSV Files (*.csv)")
+        else:
+            suggested = f"{default_name}.xlsx"
+            path, _ = QFileDialog.getSaveFileName(self, "XLSX出力", suggested, "Excel Files (*.xlsx)")
+
+        if not path:
+            return
+
+        try:
+            import pandas as pd
+
+            df = pd.DataFrame(rows)
+            if kind == "csv":
+                df.to_csv(path, index=False, encoding="utf-8-sig")
+            else:
+                df.to_excel(path, index=False)
+            QMessageBox.information(self, "出力", f"出力しました: {path}")
+        except Exception as exc:
+            QMessageBox.warning(self, "出力失敗", f"出力に失敗しました: {exc}")
 
     def showEvent(self, event: QtGui.QShowEvent) -> None:  # type: ignore[override]
         super().showEvent(event)
@@ -925,6 +1001,12 @@ class PortalListingTab(QWidget):
                 display, tooltip = prepare_display_value(val, col.preview_limit)
                 item = QtGui.QStandardItem(display)
                 item.setEditable(False)
+
+                # Keep raw value for exports (and other non-truncated uses).
+                try:
+                    item.setData(val, int(Qt.ItemDataRole.UserRole) + 1)
+                except Exception:
+                    pass
 
                 # Title behaves like a link (opens row URL) even when URL column is hidden.
                 if col.key == "title":
