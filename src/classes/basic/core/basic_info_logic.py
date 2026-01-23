@@ -5122,7 +5122,7 @@ def get_stage_completion_status():
     
     stages = {
         "ユーザー情報": ["self.json"],
-        "グループ関連情報": ["group.json", "groupDetail.json", "subGroup.json"],
+        "グループ関連情報": ["group.json", "groupDetail.json", "subGroup.json", "subGroups", "subGroupsAncestors"],
         "組織・装置情報": ["organization.json", "instrumentType.json"],
         "サンプル情報": ["samples"],  # ディレクトリ
         "データセット情報": ["dataset.json", "datasets"],  # ファイル+ディレクトリ

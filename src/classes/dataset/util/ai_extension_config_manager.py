@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 class AIExtensionConfigManager:
     """In-memory manager for AI extension button definitions."""
 
+    _DATASET_DESC_PROMPT_BUTTON_ID_KEY = "dataset_description_ai_proposal_prompt_button_id"
+    _DATASET_QUICK_AI_PROMPT_BUTTON_ID_KEY = "dataset_quick_ai_prompt_button_id"
+    _DATASET_AI_CHECK_PROMPT_BUTTON_ID_KEY = "dataset_ai_check_prompt_button_id"
+
     def __init__(self, config_data: Optional[Dict[str, Any]] = None):
         self._config_data = copy.deepcopy(config_data) if config_data else load_ai_extension_config()
         self._buttons: List[Dict[str, Any]] = self._normalize(self._config_data.get('buttons', []))
@@ -49,6 +53,66 @@ class AIExtensionConfigManager:
         config['buttons'] = copy.deepcopy(self._buttons)
         config['default_buttons'] = copy.deepcopy(self._default_buttons)
         return config
+
+    def get_dataset_description_ai_proposal_prompt_button_id(self) -> str:
+        """Return button id used for dataset description AI proposal prompt (or empty)."""
+        try:
+            v = self._config_data.get(self._DATASET_DESC_PROMPT_BUTTON_ID_KEY, "")
+            return str(v).strip() if v is not None else ""
+        except Exception:
+            return ""
+
+    def set_dataset_description_ai_proposal_prompt_button_id(self, button_id: Optional[str]) -> None:
+        """Set button id used for dataset description AI proposal prompt.
+
+        - When set, callers are responsible for ensuring the id exists.
+        - When empty/None, the key is removed.
+        """
+        key = self._DATASET_DESC_PROMPT_BUTTON_ID_KEY
+        if not button_id or not str(button_id).strip():
+            self._config_data.pop(key, None)
+            return
+        self._config_data[key] = str(button_id).strip()
+
+    def get_dataset_quick_ai_prompt_button_id(self) -> str:
+        """Return button id used for dataset QUICK AI prompt (or empty)."""
+        try:
+            v = self._config_data.get(self._DATASET_QUICK_AI_PROMPT_BUTTON_ID_KEY, "")
+            return str(v).strip() if v is not None else ""
+        except Exception:
+            return ""
+
+    def set_dataset_quick_ai_prompt_button_id(self, button_id: Optional[str]) -> None:
+        """Set button id used for dataset QUICK AI prompt.
+
+        - When set, callers are responsible for ensuring the id exists.
+        - When empty/None, the key is removed.
+        """
+        key = self._DATASET_QUICK_AI_PROMPT_BUTTON_ID_KEY
+        if not button_id or not str(button_id).strip():
+            self._config_data.pop(key, None)
+            return
+        self._config_data[key] = str(button_id).strip()
+
+    def get_dataset_ai_check_prompt_button_id(self) -> str:
+        """Return button id used for dataset AI CHECK prompt (or empty)."""
+        try:
+            v = self._config_data.get(self._DATASET_AI_CHECK_PROMPT_BUTTON_ID_KEY, "")
+            return str(v).strip() if v is not None else ""
+        except Exception:
+            return ""
+
+    def set_dataset_ai_check_prompt_button_id(self, button_id: Optional[str]) -> None:
+        """Set button id used for dataset AI CHECK prompt.
+
+        - When set, callers are responsible for ensuring the id exists.
+        - When empty/None, the key is removed.
+        """
+        key = self._DATASET_AI_CHECK_PROMPT_BUTTON_ID_KEY
+        if not button_id or not str(button_id).strip():
+            self._config_data.pop(key, None)
+            return
+        self._config_data[key] = str(button_id).strip()
 
     def find_by_id(self, button_id: str) -> Optional[int]:
         for idx, button in enumerate(self._buttons):

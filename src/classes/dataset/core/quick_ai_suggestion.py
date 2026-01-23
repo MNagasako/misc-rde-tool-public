@@ -69,27 +69,55 @@ def generate_quick_suggestion(context_data: Dict[str, Any]) -> Optional[str]:
         context['llm_provider'] = provider
         context['llm_model'] = model
         context['llm_model_name'] = f"{provider}:{model}"  # プロンプトテンプレート用
-        
-        # 外部テンプレートファイルを最新の状態で読み込み
-        logger.debug("外部テンプレートファイルを再読み込み中...")
-        reload_success = ai_extension.reload_external_templates()
-        if reload_success:
-            logger.debug("外部テンプレート再読み込み成功")
-        else:
-            logger.warning("外部テンプレート再読み込み失敗、既存テンプレートを使用")
-        
-        # クイック版テンプレートを取得
-        template = ai_extension.get_template("quick")
-        if not template:
-            logger.warning("クイック版テンプレートが取得できませんでした、基本テンプレートにフォールバック")
-            template = ai_extension.get_template("basic")
-            
-        if not template:
-            logger.error("利用可能なテンプレートがありません")
-            return None
-        
-        # プロンプトをレンダリング（contextを使用）
-        prompt = template.render(context)
+
+        # QUICK AI は AIサジェスト機能定義のボタンからプロンプトを選択可能
+        # （未設定/不在時は従来の quick テンプレートへフォールバック）
+        prompt: Optional[str] = None
+        try:
+            from classes.dataset.util.ai_extension_helper import load_ai_extension_config, load_prompt_file, format_prompt_with_context
+
+            ext_conf = load_ai_extension_config() or {}
+            selected_button_id = (
+                ext_conf.get("dataset_quick_ai_prompt_button_id")
+                or "dataset_explanation_quick"
+            )
+
+            button_config = None
+            for entry in ext_conf.get("buttons", []):
+                if entry.get("id") == selected_button_id:
+                    button_config = entry
+                    break
+
+            if button_config:
+                prompt_file = button_config.get("prompt_file") or ""
+                prompt_template = button_config.get("prompt_template") or ""
+                template_text = load_prompt_file(prompt_file) if prompt_file else (prompt_template.strip() or "")
+                if template_text:
+                    prompt = format_prompt_with_context(template_text, context)
+        except Exception as _e:
+            logger.debug("QUICK AI: ボタン定義からのプロンプト構築に失敗: %s", _e)
+
+        if not prompt:
+            # 外部テンプレートファイルを最新の状態で読み込み
+            logger.debug("外部テンプレートファイルを再読み込み中...")
+            reload_success = ai_extension.reload_external_templates()
+            if reload_success:
+                logger.debug("外部テンプレート再読み込み成功")
+            else:
+                logger.warning("外部テンプレート再読み込み失敗、既存テンプレートを使用")
+
+            # クイック版テンプレートを取得
+            template = ai_extension.get_template("quick")
+            if not template:
+                logger.warning("クイック版テンプレートが取得できませんでした、基本テンプレートにフォールバック")
+                template = ai_extension.get_template("basic")
+
+            if not template:
+                logger.error("利用可能なテンプレートがありません")
+                return None
+
+            # プロンプトをレンダリング（contextを使用）
+            prompt = template.render(context)
         
         logger.debug("生成されたプロンプト長: %s 文字", len(prompt))
         logger.debug("ARIM関連情報含有: %s", 'ARIM課題関連情報' in prompt)

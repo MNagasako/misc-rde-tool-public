@@ -487,6 +487,20 @@ def load_ai_extension_config():
                 config = json.load(f)
             logger.info("AI拡張設定ファイルを読み込みました: %s", config_path)
 
+            # 既定(setup)に存在するキー/ボタンを補完（古い input/ai/ai_ext_conf.json を自動マイグレーション）
+            # - 既存ユーザーのカスタム設定を壊さない（欠落分だけ追加）
+            # - pytest 実行中はワークスペースを汚さない
+            try:
+                defaults = get_default_ai_extension_config()
+                changed = _merge_missing_ai_extension_config(config, defaults)
+                if changed and not os.environ.get("PYTEST_CURRENT_TEST"):
+                    try:
+                        save_ai_extension_config(config)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
             # Backward compatible normalization: add target_kind in-memory
             try:
                 for btn in config.get('buttons', []) or []:
@@ -504,7 +518,15 @@ def load_ai_extension_config():
             return copy.deepcopy(config)
         else:
             logger.info("AI拡張設定ファイルが見つかりません。デフォルト設定を使用します: %s", config_path)
-            return get_default_ai_extension_config()
+            config = get_default_ai_extension_config()
+            # 初回起動時は setup 側の既定を userdir/input に複製して永続化する
+            # pytest 実行中はワークスペースを汚さない
+            if not os.environ.get("PYTEST_CURRENT_TEST"):
+                try:
+                    save_ai_extension_config(config)
+                except Exception:
+                    pass
+            return config
 
     except Exception as e:
         logger.error("AI拡張設定読み込みエラー: %s", e)
@@ -575,9 +597,44 @@ def save_ai_extension_config(config: Dict):
 
 def get_default_ai_extension_config():
     """デフォルトのAI拡張設定を取得"""
+    # 既定は setup/input/ai/ai_ext_conf.json を優先（ソース実行時/バイナリ同梱時の両対応）
+    candidates: list[str] = []
+    try:
+        candidates.append(get_dynamic_file_path("setup/input/ai/ai_ext_conf.json"))
+    except Exception:
+        pass
+    try:
+        # バイナリ時に _MEIPASS 配下へ同梱されている場合
+        from config.common import get_static_resource_path
+
+        candidates.append(get_static_resource_path("setup/input/ai/ai_ext_conf.json"))
+    except Exception:
+        pass
+
+    for path in candidates:
+        try:
+            if not path or not os.path.exists(path):
+                continue
+            with open(path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            # Backward compatible normalization: add target_kind in-memory
+            try:
+                for btn in config.get('buttons', []) or []:
+                    if isinstance(btn, dict):
+                        btn.setdefault('target_kind', infer_ai_suggest_target_kind(btn))
+                for btn in config.get('default_buttons', []) or []:
+                    if isinstance(btn, dict):
+                        btn.setdefault('target_kind', infer_ai_suggest_target_kind(btn))
+            except Exception:
+                pass
+            return config
+        except Exception:
+            continue
+
+    # 最終フォールバック（最低限）
     return {
         "version": "1.0.0",
-        "description": "デフォルトAI拡張設定",
+        "description": "デフォルトAI拡張設定（最終フォールバック）",
         "buttons": [
             {
                 "id": "default_analysis",
@@ -585,7 +642,8 @@ def get_default_ai_extension_config():
                 "description": "データセットの総合的な分析を実行",
                 "prompt_template": "以下のデータセットについて総合的な分析を行ってください。\n\nデータセット名: {name}\nタイプ: {type}\n課題番号: {grant_number}\n既存説明: {description}\n\n分析項目:\n1. 技術的特徴\n2. 学術的価値\n3. 応用可能性\n4. データ品質\n5. 改善提案\n\n各項目について詳しく分析し、200文字程度で要約してください。",
                 "icon": "📊",
-                "category": "総合"
+                "category": "総合",
+                "target_kind": "dataset",
             }
         ],
         "default_buttons": [],
@@ -598,6 +656,64 @@ def get_default_ai_extension_config():
             "show_icons": True
         }
     }
+
+
+def _merge_missing_ai_extension_config(config: Dict, defaults: Dict) -> bool:
+    """Merge missing keys/buttons from defaults into config.
+
+    - Does NOT overwrite existing user values.
+    - Returns True if config is modified.
+    """
+    if not isinstance(config, dict) or not isinstance(defaults, dict):
+        return False
+
+    changed = False
+
+    # Top-level keys: add only if missing
+    for key, default_value in defaults.items():
+        if key in {"buttons", "default_buttons"}:
+            continue
+        if key not in config:
+            config[key] = copy.deepcopy(default_value)
+            changed = True
+            continue
+        # Shallow merge dicts
+        if isinstance(default_value, dict) and isinstance(config.get(key), dict):
+            for sub_k, sub_v in default_value.items():
+                if sub_k not in config[key]:
+                    config[key][sub_k] = copy.deepcopy(sub_v)
+                    changed = True
+
+    # default_buttons list: add if missing
+    if "default_buttons" not in config and "default_buttons" in defaults:
+        config["default_buttons"] = copy.deepcopy(defaults.get("default_buttons") or [])
+        changed = True
+
+    # buttons: ensure default buttons exist by id
+    config_buttons = config.get("buttons")
+    default_buttons = defaults.get("buttons")
+    if not isinstance(config_buttons, list):
+        config_buttons = []
+        config["buttons"] = config_buttons
+        changed = True
+    if isinstance(default_buttons, list) and default_buttons:
+        existing_ids = set()
+        for b in config_buttons:
+            if isinstance(b, dict):
+                bid = (b.get("id") or "").strip()
+                if bid:
+                    existing_ids.add(bid)
+        for b in default_buttons:
+            if not isinstance(b, dict):
+                continue
+            bid = (b.get("id") or "").strip()
+            if not bid or bid in existing_ids:
+                continue
+            config_buttons.append(copy.deepcopy(b))
+            existing_ids.add(bid)
+            changed = True
+
+    return changed
 
 def load_prompt_file(prompt_file_path):
     """プロンプトファイルを読み込む"""

@@ -388,7 +388,9 @@ class AISuggestionDialog(QDialog):
         list_layout.addWidget(list_label)
         
         self.suggestion_list = QListWidget()
-        self.suggestion_list.setMaximumWidth(250)
+        # 候補リストは「改行が発生しない程度に狭く」し、プレビュー側を広く確保
+        self.suggestion_list.setMinimumWidth(160)
+        self.suggestion_list.setMaximumWidth(220)
         list_layout.addWidget(self.suggestion_list)
         
         content_splitter.addWidget(list_widget)
@@ -425,6 +427,13 @@ class AISuggestionDialog(QDialog):
         preview_layout.addWidget(preview_container)
         
         content_splitter.addWidget(preview_widget)
+
+        # 右側プレビューを優先して伸ばす
+        try:
+            content_splitter.setStretchFactor(0, 1)
+            content_splitter.setStretchFactor(1, 4)
+        except Exception:
+            pass
         
     def setup_prompt_tab(self, tab_widget):
         """プロンプト表示タブのセットアップ"""
@@ -548,6 +557,10 @@ class AISuggestionDialog(QDialog):
             
             # データセット提案モードのみスピナーオーバーレイ表示
             if self.mode == "dataset_suggestion" and hasattr(self, 'spinner_overlay'):
+                try:
+                    self.spinner_overlay.set_message("AI応答を待機中...")
+                except Exception:
+                    pass
                 self.spinner_overlay.start()
             
             # プロンプトを構築
@@ -612,6 +625,11 @@ class AISuggestionDialog(QDialog):
             self.progress_bar.setVisible(True)
             self.progress_bar.setRange(0, 0)
             if hasattr(self, 'spinner_overlay'):
+                try:
+                    retries = int(getattr(self, "_json_retry_count", 0) or 0)
+                    self.spinner_overlay.set_message(f"JSON解析に失敗: 再問い合わせ中... ({retries}/3)")
+                except Exception:
+                    pass
                 self.spinner_overlay.start()
             # 再送
             self.ai_thread = AIRequestThread(prompt, self.context_data)
@@ -629,36 +647,130 @@ class AISuggestionDialog(QDialog):
 
     def _try_parse_json_suggestions(self, response_text) -> bool:
         """JSON形式の応答から提案候補を抽出。成功時True"""
+        def _try_load(text: str):
+            try:
+                import json as _json
+
+                return _json.loads(text)
+            except Exception:
+                return None
+
+        def _strip_code_fences(text: str) -> str:
+            try:
+                import re
+
+                cleaned = (text or "").strip()
+                cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
+                cleaned = re.sub(r'\s*```\s*$', '', cleaned)
+                return cleaned.strip()
+            except Exception:
+                return (text or "").strip()
+
+        def _extract_json_segment(text: str) -> str | None:
+            s = text
+            lb, rb = s.find("["), s.rfind("]")
+            if lb != -1 and rb != -1 and rb > lb:
+                return s[lb:rb + 1]
+            lb, rb = s.find("{"), s.rfind("}")
+            if lb != -1 and rb != -1 and rb > lb:
+                return s[lb:rb + 1]
+            return None
+
+        def _parse_ai_json(text: str):
+            try:
+                import re
+
+                t = _strip_code_fences(text)
+                if not t:
+                    return None
+
+                # そのまま
+                obj = _try_load(t)
+                if isinstance(obj, str):
+                    obj2 = _try_load(obj.strip())
+                    if obj2 is not None:
+                        return obj2
+                if obj is not None:
+                    return obj
+
+                # 外側の引用を除去（例: '"{...}"' や "'{...}'" など）
+                if (t.startswith('"') and t.endswith('"')) or (t.startswith("'") and t.endswith("'")):
+                    t2 = t[1:-1].strip()
+                    obj = _try_load(t2)
+                    if isinstance(obj, str):
+                        obj2 = _try_load(obj.strip())
+                        if obj2 is not None:
+                            return obj2
+                    if obj is not None:
+                        return obj
+
+                # 文中にJSONが含まれるケース: 最大セグメント抽出
+                seg = _extract_json_segment(t)
+                if seg:
+                    obj = _try_load(seg)
+                    if isinstance(obj, str):
+                        obj2 = _try_load(obj.strip())
+                        if obj2 is not None:
+                            return obj2
+                    if obj is not None:
+                        return obj
+
+                # 軽微修正: トレーリングカンマ
+                t2 = re.sub(r",(\s*[\]\}])", r"\1", t)
+                obj = _try_load(t2)
+                if isinstance(obj, str):
+                    obj2 = _try_load(obj.strip())
+                    if obj2 is not None:
+                        return obj2
+                if obj is not None:
+                    return obj
+
+                if seg:
+                    seg2 = re.sub(r",(\s*[\]\}])", r"\1", seg)
+                    obj = _try_load(seg2)
+                    if isinstance(obj, str):
+                        obj2 = _try_load(obj.strip())
+                        if obj2 is not None:
+                            return obj2
+                    if obj is not None:
+                        return obj
+
+                return None
+            except Exception:
+                return None
+
         try:
-            import json as _json
-            data = _json.loads(response_text)
+            data = _parse_ai_json(response_text)
+            if not isinstance(data, dict):
+                return False
             keys = [
                 ("explain_normal", "簡潔版"),
                 ("explain_full", "詳細版"),
-                ("explain_simple", "一般版")
+                ("explain_simple", "一般版"),
             ]
             suggestions = []
             for k, title in keys:
                 val = data.get(k)
                 if isinstance(val, str) and val.strip():
                     suggestions.append({"title": title, "text": val.strip()})
-            if suggestions:
-                # 既存候補を置換
-                self.suggestions.clear()
+            if not suggestions:
+                return False
+
+            # 既存候補を置換
+            self.suggestions.clear()
+            if hasattr(self, 'suggestion_list'):
+                self.suggestion_list.clear()
+            for s in suggestions:
+                self.suggestions.append(s)
                 if hasattr(self, 'suggestion_list'):
-                    self.suggestion_list.clear()
-                for s in suggestions:
-                    self.suggestions.append(s)
-                    if hasattr(self, 'suggestion_list'):
-                        self.suggestion_list.addItem(s['title'])
-                # 最初を選択
-                if hasattr(self, 'suggestion_list') and self.suggestion_list.count() > 0:
-                    self.suggestion_list.setCurrentRow(0)
-                self.apply_button.setEnabled(True)
-                # プレビュー更新
-                self.display_all_suggestions()
-                return True
-            return False
+                    self.suggestion_list.addItem(s['title'])
+            # 最初を選択
+            if hasattr(self, 'suggestion_list') and self.suggestion_list.count() > 0:
+                self.suggestion_list.setCurrentRow(0)
+            self.apply_button.setEnabled(True)
+            # プレビュー更新
+            self.display_all_suggestions()
+            return True
         except Exception as e:
             logger.debug("JSON候補解析失敗: %s", e)
             return False
@@ -752,22 +864,34 @@ class AISuggestionDialog(QDialog):
             context['llm_model'] = model
             context['llm_model_name'] = f"{provider}:{model}"  # プロンプトテンプレート用
             
-            # JSONデータセット説明基本のテンプレートをAI拡張設定から読み込み
+            # データセット説明AI提案（AI提案タブ）で使用するテンプレートをAI拡張設定から読み込み
             from classes.dataset.util.ai_extension_helper import load_ai_extension_config, load_prompt_file, format_prompt_with_context
             ext_conf = load_ai_extension_config()
             prompt_file = None
-            self._expected_output_format = "text"
+            # 本タブはJSON応答を前提とする
+            self._expected_output_format = "json"
             try:
+                selected_button_id = (
+                    (ext_conf or {}).get("dataset_description_ai_proposal_prompt_button_id")
+                    or "json_explain_dataset_basic"
+                )
                 for btn in ext_conf.get("buttons", []):
-                    if btn.get("id") == "json_explain_dataset_basic":
+                    if btn.get("id") == selected_button_id:
                         prompt_file = btn.get("prompt_file") or btn.get("prompt_template")
-                        self._expected_output_format = btn.get("output_format", "text")
+                        # 出力形式はjson前提。設定がtextでもここではjson扱いにする。
+                        configured_format = (btn.get("output_format") or "").strip().lower() or "text"
+                        if configured_format != "json":
+                            logger.warning(
+                                "dataset_description_ai_proposal_prompt_button_id=%s は output_format=%s です。json前提のため json として扱います。",
+                                selected_button_id,
+                                configured_format,
+                            )
                         break
             except Exception as _e:
                 logger.warning("AI拡張設定の解析に失敗: %s", _e)
 
             if not prompt_file:
-                logger.warning("json_explain_dataset_basic のテンプレート定義が見つかりません。フォールバックします。")
+                logger.warning("データセット説明AI提案のテンプレート定義が見つかりません。フォールバックします。")
                 return f"データセット '{context.get('name', '未設定')}' の説明文を提案してください。"
 
             # テンプレートファイルを読み込み、プレースホルダを動的置換
@@ -888,11 +1012,17 @@ class AISuggestionDialog(QDialog):
                         self._resend_ai_request(prompt)
                         return
                     if not parsed_ok and retries >= 3:
-                        logger.warning("JSON解析失敗が続いたため、テキスト解析へフォールバック")
-                        self.parse_suggestions(response_text)
-                    else:
-                        # JSON解析成功時はUI更新済み
-                        pass
+                        # 本タブはJSON前提。フォールバックでテキスト解析はしない。
+                        self.apply_button.setEnabled(False)
+                        QMessageBox.critical(
+                            self,
+                            "AI応答エラー",
+                            "AIの応答をJSONとして解釈できませんでした。\n"
+                            "（引用符で囲まれたJSON/本文中JSON抽出も試行済み）\n"
+                            "AI設定またはプロンプトテンプレートを見直してください。",
+                        )
+                        return
+                    # JSON解析成功時はUI更新済み
                 else:
                     self.parse_suggestions(response_text)
             else:
@@ -940,8 +1070,15 @@ class AISuggestionDialog(QDialog):
                 if self._try_parse_json_suggestions(response_text):
                     parsed_suggestions = self.suggestions  # 既に設定済み
                 else:
-                    # JSON解析に失敗した場合はテキスト解析にフォールバック
-                    parsed_suggestions = self.ai_extension.process_ai_response(response_text)
+                    # 本タブはJSON前提。テキスト解析フォールバックはしない。
+                    self.apply_button.setEnabled(False)
+                    QMessageBox.critical(
+                        self,
+                        "AI応答エラー",
+                        "AIの応答をJSONとして解釈できませんでした。\n"
+                        "AI設定またはプロンプトテンプレートを見直してください。",
+                    )
+                    return
             else:
                 parsed_suggestions = self.ai_extension.process_ai_response(response_text)
             

@@ -232,7 +232,7 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
 
         # 選択時にのみ必要な重い依存を import（初回表示を軽くする）
         from classes.data_entry.util.data_entry_forms import create_schema_form_from_path
-        from classes.data_entry.util.group_member_loader import load_group_members
+        from classes.data_entry.util.group_member_loader import load_group_members_with_debug
         from classes.dataset.util.dataset_dropdown_util import get_current_user_id
 
         def _build_owner_debug_context(*, dataset_id: str, dataset_json_path: str, dataset_data: dict | None, group_id: str, members: list | None, notes: list[str]) -> dict:
@@ -308,14 +308,20 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
                 "notes": list(notes or []),
             }
 
-        def _set_owner_error_button_visible(visible: bool, *, context: dict | None) -> None:
+        def _set_owner_detail_button_state(*, is_error: bool, context: dict | None) -> None:
             btn = getattr(parent_controller, "data_owner_error_button", None)
             if btn is None:
                 return
             parent_controller._data_owner_debug_context = context
-            btn.setVisible(bool(visible))
             try:
-                btn.setEnabled(bool(visible))
+                btn.setEnabled(context is not None)
+            except Exception:
+                pass
+
+            label = "詳細（エラー）" if is_error else "詳細"
+            try:
+                btn.setText(label)
+                btn.setFixedWidth(btn.sizeHint().width())
             except Exception:
                 pass
 
@@ -346,16 +352,18 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
             if hasattr(parent_controller, 'data_owner_combo') and parent_controller.data_owner_combo:
                 combo_owner = parent_controller.data_owner_combo
                 combo_owner.clear()
-                combo_owner.addItem("データセットJSONなし（エラー詳細を確認）", None)
+                combo_owner.addItem("データセットJSONなし（詳細（エラー）を確認）", None)
                 combo_owner.setEnabled(False)
-            _set_owner_error_button_visible(True, context=_build_owner_debug_context(
+            ctx = _build_owner_debug_context(
                 dataset_id=str(dataset_id or ""),
                 dataset_json_path=str(dataset_json_path or ""),
                 dataset_data=None,
                 group_id="",
                 members=None,
                 notes=notes,
-            ))
+            )
+            ctx["is_error"] = True
+            _set_owner_detail_button_state(is_error=True, context=ctx)
             return
 
         try:
@@ -369,16 +377,18 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
             if hasattr(parent_controller, 'data_owner_combo') and parent_controller.data_owner_combo:
                 combo_owner = parent_controller.data_owner_combo
                 combo_owner.clear()
-                combo_owner.addItem("データセットJSON読込エラー（エラー詳細を確認）", None)
+                combo_owner.addItem("データセットJSON読込エラー（詳細（エラー）を確認）", None)
                 combo_owner.setEnabled(False)
-            _set_owner_error_button_visible(True, context=_build_owner_debug_context(
+            ctx = _build_owner_debug_context(
                 dataset_id=str(dataset_id or ""),
                 dataset_json_path=str(dataset_json_path or ""),
                 dataset_data=None,
                 group_id="",
                 members=None,
                 notes=notes,
-            ))
+            )
+            ctx["is_error"] = True
+            _set_owner_detail_button_state(is_error=True, context=ctx)
             return
 
         # --- データ所有者（所属）コンボボックス更新 ---
@@ -389,22 +399,25 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
             
             if group_id:
                 try:
-                    members = load_group_members(group_id)
+                    members, members_debug = load_group_members_with_debug(group_id)
                     current_user_id = get_current_user_id()
                     default_index = 0
                     if not members:
                         notes.append("サブグループメンバーが0件です")
                         combo_owner.clear()
-                        combo_owner.addItem("メンバー0件（エラー詳細を確認）", None)
+                        combo_owner.addItem("メンバー0件（詳細（エラー）を確認）", None)
                         combo_owner.setEnabled(False)
-                        _set_owner_error_button_visible(True, context=_build_owner_debug_context(
+                        ctx = _build_owner_debug_context(
                             dataset_id=str(dataset_id or ""),
                             dataset_json_path=str(dataset_json_path or ""),
                             dataset_data=dataset_data if isinstance(dataset_data, dict) else None,
                             group_id=str(group_id or ""),
                             members=[],
                             notes=notes,
-                        ))
+                        )
+                        ctx["is_error"] = True
+                        ctx["members_debug"] = members_debug
+                        _set_owner_detail_button_state(is_error=True, context=ctx)
                     else:
                         # 詳細不足（attributes が空）を検知
                         has_any_details = False
@@ -417,23 +430,29 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
                                 break
                         if not has_any_details:
                             notes.append("メンバー詳細（userName/organizationName）が取得できていません（IDのみ表示）")
-                            _set_owner_error_button_visible(True, context=_build_owner_debug_context(
+                            ctx = _build_owner_debug_context(
                                 dataset_id=str(dataset_id or ""),
                                 dataset_json_path=str(dataset_json_path or ""),
                                 dataset_data=dataset_data if isinstance(dataset_data, dict) else None,
                                 group_id=str(group_id or ""),
                                 members=members,
                                 notes=notes,
-                            ))
+                            )
+                            ctx["is_error"] = False
+                            ctx["members_debug"] = members_debug
+                            _set_owner_detail_button_state(is_error=False, context=ctx)
                         else:
-                            _set_owner_error_button_visible(False, context=_build_owner_debug_context(
+                            ctx = _build_owner_debug_context(
                                 dataset_id=str(dataset_id or ""),
                                 dataset_json_path=str(dataset_json_path or ""),
                                 dataset_data=dataset_data if isinstance(dataset_data, dict) else None,
                                 group_id=str(group_id or ""),
                                 members=members,
                                 notes=notes,
-                            ))
+                            )
+                            ctx["is_error"] = False
+                            ctx["members_debug"] = members_debug
+                            _set_owner_detail_button_state(is_error=False, context=ctx)
                     
                     for i, member in enumerate(members):
                         user_id = member.get('id')
@@ -453,6 +472,21 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
                             default_index = i + 1
                     
                     combo_owner.setEnabled(True)
+
+                    # 詳細ダイアログで「実際にリストにエントリーされた要素」を強調するために保存
+                    try:
+                        ctx = getattr(parent_controller, "_data_owner_debug_context", None)
+                        if isinstance(ctx, dict):
+                            ctx["combo_entries"] = [
+                                {
+                                    "user_id": str(combo_owner.itemData(j) or ""),
+                                    "text": str(combo_owner.itemText(j) or ""),
+                                }
+                                for j in range(combo_owner.count())
+                                if j > 0
+                            ]
+                    except Exception:
+                        pass
                     
                     # デフォルト選択: ログインユーザー > 先頭のメンバー
                     if default_index > 0:
@@ -466,26 +500,30 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
                     combo_owner.addItem("メンバー取得エラー", None)
                     combo_owner.setEnabled(False)
                     notes.append(f"メンバー取得エラー: {e}")
-                    _set_owner_error_button_visible(True, context=_build_owner_debug_context(
+                    ctx = _build_owner_debug_context(
                         dataset_id=str(dataset_id or ""),
                         dataset_json_path=str(dataset_json_path or ""),
                         dataset_data=dataset_data if isinstance(dataset_data, dict) else None,
                         group_id=str(group_id or ""),
                         members=None,
                         notes=notes,
-                    ))
+                    )
+                    ctx["is_error"] = True
+                    _set_owner_detail_button_state(is_error=True, context=ctx)
             else:
                 combo_owner.addItem("グループ情報なし", None)
                 combo_owner.setEnabled(False)
                 notes.append("dataset.json の relationships.group.data.id が空です")
-                _set_owner_error_button_visible(True, context=_build_owner_debug_context(
+                ctx = _build_owner_debug_context(
                     dataset_id=str(dataset_id or ""),
                     dataset_json_path=str(dataset_json_path or ""),
                     dataset_data=dataset_data if isinstance(dataset_data, dict) else None,
                     group_id="",
                     members=None,
                     notes=notes,
-                ))
+                )
+                ctx["is_error"] = True
+                _set_owner_detail_button_state(is_error=True, context=ctx)
 
         # --- 試料フォーム生成（常に基本情報の次に挿入） ---
         try:
@@ -1579,11 +1617,19 @@ def create_basic_info_group():
     owner_combo.addItem("データセット選択後に選択可能", None)
     owner_combo.setEnabled(False)
     from qt_compat.widgets import QPushButton
-    owner_error_btn = QPushButton("エラー詳細")
+    owner_error_btn = QPushButton("詳細")
     owner_error_btn.setObjectName("data_owner_error_button")
-    owner_error_btn.setVisible(False)
+    owner_error_btn.setVisible(True)
     owner_error_btn.setEnabled(False)
-    owner_error_btn.setToolTip("データ所有者候補が生成できない原因を表示します")
+    owner_error_btn.setToolTip("データ所有者（所属）の候補生成で参照したJSON/キーを表示します")
+    try:
+        owner_error_btn.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+    except Exception:
+        pass
+    try:
+        owner_error_btn.setFixedWidth(owner_error_btn.sizeHint().width())
+    except Exception:
+        pass
 
     owner_row.addWidget(owner_label)
     owner_row.addWidget(owner_error_btn)

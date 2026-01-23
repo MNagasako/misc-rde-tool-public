@@ -1443,10 +1443,21 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
             from classes.dataset.util.ai_extension_helper import load_ai_extension_config
             ai_ext_config = load_ai_extension_config()
             button_config = None
-            for entry in ai_ext_config.get("buttons", []):
-                if entry.get("id") == "json_check_dataset_summary_simple_quality":
+            selected_button_id = (
+                (ai_ext_config or {}).get("dataset_ai_check_prompt_button_id")
+                or "json_check_dataset_summary_simple_quality"
+            )
+            for entry in (ai_ext_config or {}).get("buttons", []):
+                if entry.get("id") == selected_button_id:
                     button_config = entry
                     break
+
+            # フォールバック（設定が壊れていても従来の既定で動かす）
+            if not button_config and selected_button_id != "json_check_dataset_summary_simple_quality":
+                for entry in (ai_ext_config or {}).get("buttons", []):
+                    if entry.get("id") == "json_check_dataset_summary_simple_quality":
+                        button_config = entry
+                        break
             if not button_config:
                 from qt_compat.widgets import QMessageBox
                 QMessageBox.critical(container, "エラー", "品質チェック設定が見つかりません")

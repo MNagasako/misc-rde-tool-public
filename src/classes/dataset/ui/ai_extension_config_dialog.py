@@ -37,13 +37,27 @@ class AIExtensionConfigDialog(QDialog):
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setWindowTitle("AIサジェスト機能定義の管理")
-        self.resize(980, 600)
+        # できるだけスクロールバーが不要になるよう、少し大きめに確保
+        self.resize(1100, 720)
         self.setModal(True)
 
         self._manager = AIExtensionConfigManager()
         self._locked_ids = {btn.get('id') for btn in self._manager.buttons if not btn.get('allow_delete', False)}
         self._current_index: int = -1
         self._is_loading_form = False
+        # 設定キーが未存在でも従来のデフォルトを維持
+        self._dataset_desc_prompt_button_id = (
+            self._manager.get_dataset_description_ai_proposal_prompt_button_id() or "json_explain_dataset_basic"
+        )
+        self._quick_ai_prompt_button_id = self._manager.get_dataset_quick_ai_prompt_button_id() or ""
+        if not self._quick_ai_prompt_button_id:
+            if self._manager.find_by_id("dataset_explanation_quick") is not None:
+                self._quick_ai_prompt_button_id = "dataset_explanation_quick"
+
+        self._ai_check_prompt_button_id = self._manager.get_dataset_ai_check_prompt_button_id() or ""
+        if not self._ai_check_prompt_button_id:
+            if self._manager.find_by_id("json_check_dataset_summary_simple_quality") is not None:
+                self._ai_check_prompt_button_id = "json_check_dataset_summary_simple_quality"
 
         self._build_ui()
         self._refresh_button_list(select_index=0)
@@ -126,6 +140,32 @@ class AIExtensionConfigDialog(QDialog):
         self.output_format_combo.addItems(["text", "json"])
         form.addRow("出力形式", self.output_format_combo)
 
+        self.dataset_desc_prompt_checkbox = QCheckBox("「データセット説明 AI提案」のプロンプトテンプレートとして使用")
+        self.dataset_desc_prompt_checkbox.setToolTip(
+            "AI説明文提案（AI提案タブ）で使用するプロンプトを、このボタンのプロンプトに切り替えます。\n"
+            "選択できるのは1つだけで、最後にチェックしたものが優先されます。\n"
+            "※ 出力形式が json のボタンのみ推奨です。"
+        )
+        self.dataset_desc_prompt_checkbox.toggled.connect(self._on_dataset_desc_prompt_toggled)
+        form.addRow("データセット説明AI提案", self.dataset_desc_prompt_checkbox)
+
+        self.quick_ai_prompt_checkbox = QCheckBox("「⚡ Quick AI」のプロンプトテンプレートとして使用")
+        self.quick_ai_prompt_checkbox.setToolTip(
+            "⚡ Quick AI で使用するプロンプトを、このボタンのプロンプトに切り替えます。\n"
+            "選択できるのは1つだけで、最後にチェックしたものが優先されます。"
+        )
+        self.quick_ai_prompt_checkbox.toggled.connect(self._on_quick_ai_prompt_toggled)
+        form.addRow("⚡ Quick AI", self.quick_ai_prompt_checkbox)
+
+        self.ai_check_prompt_checkbox = QCheckBox("「📋 AI CHECK」のプロンプトテンプレートとして使用")
+        self.ai_check_prompt_checkbox.setToolTip(
+            "📋 AI CHECK で使用するプロンプトを、このボタンのプロンプトに切り替えます。\n"
+            "選択できるのは1つだけで、最後にチェックしたものが優先されます。\n"
+            "※ JSON出力のプロンプトが推奨です（スコア等の表示が安定します）。"
+        )
+        self.ai_check_prompt_checkbox.toggled.connect(self._on_ai_check_prompt_toggled)
+        form.addRow("📋 AI CHECK", self.ai_check_prompt_checkbox)
+
         self.allow_delete_checkbox = QCheckBox("このボタンの削除を許可する")
         form.addRow("削除許可", self.allow_delete_checkbox)
 
@@ -173,13 +213,18 @@ class AIExtensionConfigDialog(QDialog):
     def _refresh_button_list(self, select_index: Optional[int] = None) -> None:
         self.button_list.clear()
         for button in self._manager.buttons:
-            prefix = '🔒 ' if not button.get('allow_delete', False) else ''
+            locked_prefix = '🔒 ' if not button.get('allow_delete', False) else ''
+            selected_prefix = '★ ' if button.get('id') == self._dataset_desc_prompt_button_id else ''
+            quick_prefix = '⚡ ' if button.get('id') == self._quick_ai_prompt_button_id else ''
+            check_prefix = '📋 ' if button.get('id') == self._ai_check_prompt_button_id else ''
             icon = button.get('icon', '') or ''
             label = button.get('label', '(ラベル未設定)')
 
             target_kind = infer_ai_suggest_target_kind(button)
             target_tag = '［報告書］' if target_kind == 'report' else '［AI拡張］'
-            item = QListWidgetItem(f"{prefix}{target_tag} {icon} {label} ({button.get('id', '???')})")
+            item = QListWidgetItem(
+                f"{selected_prefix}{quick_prefix}{check_prefix}{locked_prefix}{target_tag} {icon} {label} ({button.get('id', '???')})"
+            )
             self.button_list.addItem(item)
         if self._manager.buttons:
             index = select_index if select_index is not None else min(self._current_index, len(self._manager.buttons) - 1)
@@ -228,6 +273,29 @@ class AIExtensionConfigDialog(QDialog):
             self.allow_delete_checkbox.setChecked(deletable)
             self.allow_delete_checkbox.setEnabled(not locked)
             self.id_edit.setEnabled(not locked)
+
+            # データセット説明AI提案のプロンプト指定
+            button_id = button.get('id', '')
+            is_selected = bool(button_id) and button_id == self._dataset_desc_prompt_button_id
+            self.dataset_desc_prompt_checkbox.blockSignals(True)
+            self.dataset_desc_prompt_checkbox.setChecked(is_selected)
+            self.dataset_desc_prompt_checkbox.blockSignals(False)
+            # json推奨: 明示的にjson以外は警告し、チェック操作時に弾く
+            self.dataset_desc_prompt_checkbox.setEnabled(True)
+
+            # QUICK AI のプロンプト指定
+            is_quick_selected = bool(button_id) and button_id == self._quick_ai_prompt_button_id
+            self.quick_ai_prompt_checkbox.blockSignals(True)
+            self.quick_ai_prompt_checkbox.setChecked(is_quick_selected)
+            self.quick_ai_prompt_checkbox.blockSignals(False)
+            self.quick_ai_prompt_checkbox.setEnabled(True)
+
+            # AI CHECK のプロンプト指定
+            is_check_selected = bool(button_id) and button_id == self._ai_check_prompt_button_id
+            self.ai_check_prompt_checkbox.blockSignals(True)
+            self.ai_check_prompt_checkbox.setChecked(is_check_selected)
+            self.ai_check_prompt_checkbox.blockSignals(False)
+            self.ai_check_prompt_checkbox.setEnabled(True)
         finally:
             self._is_loading_form = False
 
@@ -244,6 +312,21 @@ class AIExtensionConfigDialog(QDialog):
         self.allow_delete_checkbox.setChecked(False)
         self.allow_delete_checkbox.setEnabled(False)
         self.id_edit.setEnabled(False)
+        if hasattr(self, 'dataset_desc_prompt_checkbox'):
+            self.dataset_desc_prompt_checkbox.blockSignals(True)
+            self.dataset_desc_prompt_checkbox.setChecked(False)
+            self.dataset_desc_prompt_checkbox.blockSignals(False)
+            self.dataset_desc_prompt_checkbox.setEnabled(False)
+        if hasattr(self, 'quick_ai_prompt_checkbox'):
+            self.quick_ai_prompt_checkbox.blockSignals(True)
+            self.quick_ai_prompt_checkbox.setChecked(False)
+            self.quick_ai_prompt_checkbox.blockSignals(False)
+            self.quick_ai_prompt_checkbox.setEnabled(False)
+        if hasattr(self, 'ai_check_prompt_checkbox'):
+            self.ai_check_prompt_checkbox.blockSignals(True)
+            self.ai_check_prompt_checkbox.setChecked(False)
+            self.ai_check_prompt_checkbox.blockSignals(False)
+            self.ai_check_prompt_checkbox.setEnabled(False)
 
     def _save_current_button(self) -> None:
         if self._current_index < 0 or self._current_index >= len(self._manager.buttons):
@@ -269,6 +352,95 @@ class AIExtensionConfigDialog(QDialog):
             button['allow_delete'] = self.allow_delete_checkbox.isChecked()
         else:
             button['allow_delete'] = False
+
+        # データセット説明AI提案のプロンプト指定は、選択されたボタンIDとして別キーで管理する
+        # （ボタン定義自体にフラグを埋め込まない: 1つのみ・最後指定優先を確実にするため）
+        try:
+            button_id = button.get('id', '')
+            if button_id and self.dataset_desc_prompt_checkbox.isChecked():
+                self._dataset_desc_prompt_button_id = button_id
+        except Exception:
+            pass
+
+        # QUICK AI のプロンプト指定
+        try:
+            button_id = button.get('id', '')
+            if button_id and self.quick_ai_prompt_checkbox.isChecked():
+                self._quick_ai_prompt_button_id = button_id
+        except Exception:
+            pass
+
+        # AI CHECK のプロンプト指定
+        try:
+            button_id = button.get('id', '')
+            if button_id and self.ai_check_prompt_checkbox.isChecked():
+                self._ai_check_prompt_button_id = button_id
+        except Exception:
+            pass
+
+    def _on_dataset_desc_prompt_toggled(self, checked: bool) -> None:
+        if self._is_loading_form:
+            return
+        if not (0 <= self._current_index < len(self._manager.buttons)):
+            return
+        button = self._manager.buttons[self._current_index]
+        button_id = (button.get('id') or '').strip()
+        if not button_id:
+            return
+        # dataset説明AI提案はJSON前提のため、json以外は弾く（誤設定防止）
+        fmt = (self.output_format_combo.currentText() or '').strip().lower()
+        if checked and fmt != 'json':
+            QMessageBox.warning(self, "警告", "データセット説明AI提案はJSON応答を前提とします。出力形式を 'json' にしてください。")
+            self.dataset_desc_prompt_checkbox.blockSignals(True)
+            self.dataset_desc_prompt_checkbox.setChecked(False)
+            self.dataset_desc_prompt_checkbox.blockSignals(False)
+            return
+
+        if checked:
+            # 最後に指定したものが優先（= これを選択）
+            self._dataset_desc_prompt_button_id = button_id
+        else:
+            if self._dataset_desc_prompt_button_id == button_id:
+                self._dataset_desc_prompt_button_id = ""
+
+        # リストの★表示を更新
+        self._refresh_button_list(select_index=self._current_index)
+
+    def _on_quick_ai_prompt_toggled(self, checked: bool) -> None:
+        if self._is_loading_form:
+            return
+        if not (0 <= self._current_index < len(self._manager.buttons)):
+            return
+        button = self._manager.buttons[self._current_index]
+        button_id = (button.get('id') or '').strip()
+        if not button_id:
+            return
+
+        if checked:
+            self._quick_ai_prompt_button_id = button_id
+        else:
+            if self._quick_ai_prompt_button_id == button_id:
+                self._quick_ai_prompt_button_id = ""
+
+        self._refresh_button_list(select_index=self._current_index)
+
+    def _on_ai_check_prompt_toggled(self, checked: bool) -> None:
+        if self._is_loading_form:
+            return
+        if not (0 <= self._current_index < len(self._manager.buttons)):
+            return
+        button = self._manager.buttons[self._current_index]
+        button_id = (button.get('id') or '').strip()
+        if not button_id:
+            return
+
+        if checked:
+            self._ai_check_prompt_button_id = button_id
+        else:
+            if self._ai_check_prompt_button_id == button_id:
+                self._ai_check_prompt_button_id = ""
+
+        self._refresh_button_list(select_index=self._current_index)
 
     def _update_button_controls(self) -> None:
         has_selection = 0 <= self._current_index < len(self._manager.buttons)
@@ -324,6 +496,15 @@ class AIExtensionConfigDialog(QDialog):
 
     def _on_save(self) -> None:
         self._save_current_button()
+        self._manager.set_dataset_description_ai_proposal_prompt_button_id(
+            self._dataset_desc_prompt_button_id or None
+        )
+        self._manager.set_dataset_quick_ai_prompt_button_id(
+            self._quick_ai_prompt_button_id or None
+        )
+        self._manager.set_dataset_ai_check_prompt_button_id(
+            self._ai_check_prompt_button_id or None
+        )
         success = self._manager.save()
         if success:
             QMessageBox.information(self, "保存完了", "AIサジェスト定義を保存しました。")

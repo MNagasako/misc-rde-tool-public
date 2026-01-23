@@ -501,7 +501,7 @@ class BasicUnifiedStatusWidget(QWidget):
             _StageDef("ユーザー情報", ("self.json",), fetch_meta_target_ids=("self",)),
             _StageDef(
                 "グループ関連情報",
-                ("group.json", "groupDetail.json", "subGroup.json"),
+                ("group.json", "groupDetail.json", "subGroup.json", "subGroups", "subGroupsAncestors"),
                 fetch_meta_target_ids=("group_pipeline",),
             ),
             _StageDef(
@@ -649,6 +649,8 @@ class BasicUnifiedStatusWidget(QWidget):
                 "group.json": ("group_pipeline",),
                 "groupDetail.json": ("group_pipeline",),
                 "subGroup.json": ("group_pipeline",),
+                "subGroups": ("group_pipeline",),
+                "subGroupsAncestors": ("group_pipeline",),
                 "organization.json": ("organization",),
                 "instrumentType.json": ("instrument_type",),
                 "samples": ("samples",),
@@ -780,7 +782,10 @@ class BasicUnifiedStatusWidget(QWidget):
                         {
                             "item": f"  - {item}",
                             "target": item,
-                            "kind": "個別" if item in {"datasets", "dataEntry", "samples", "invoiceSchemas", "invoice"} else "dir",
+                            "kind": "個別"
+                            if item
+                            in {"datasets", "dataEntry", "samples", "invoiceSchemas", "invoice", "subGroups", "subGroupsAncestors"}
+                            else "dir",
                             "ratio": exists,
                             "json_dt": _format_dt(json_dt_i),
                             "fetch_dt": "",
