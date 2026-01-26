@@ -786,6 +786,12 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
     grant_to_subgroup_info = _build_grant_number_to_subgroup_info(subgroup_payload)
     user_label_map = _build_user_label_map_best_effort(info_payload, subgroup_payload, subgroups_dir)
 
+    # Optional user cache (may have been populated by subgroup member editor / API fetchers).
+    try:
+        from classes.subgroup.core.user_cache_manager import get_cached_user  # type: ignore
+    except Exception:
+        get_cached_user = None  # type: ignore
+
     # template.json/instruments.json/licenses.json name resolution (best-effort)
     template_name_by_id = _build_name_map_by_id(template_payload, ("nameJa", "name", "title"))
     instrument_name_by_id = _build_name_map_by_id(instruments_payload, ("nameJa", "name", "title"))
@@ -1017,6 +1023,36 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
         data_owner_ids = _extract_rel_ids(item, "dataOwners")
         data_owner_names = [user_label_map.get(i, i) for i in data_owner_ids]
 
+        # Fallback: per-dataset detail JSON may contain included users with org/name.
+        detail_user_map: Dict[str, str] = {}
+        if dataset_id and any(uid and not user_label_map.get(uid, "") for uid in data_owner_ids):
+            detail_user_map = _load_dataset_detail_user_label_map(dataset_id)
+
+        resolved_owner_ids: List[str] = []
+        resolved_owner_labels: List[str] = []
+        for uid in data_owner_ids:
+            uid = _safe_str(uid).strip()
+            if not uid:
+                continue
+            label = user_label_map.get(uid, "") or detail_user_map.get(uid, "")
+            if not label and get_cached_user is not None:
+                try:
+                    cached = get_cached_user(uid)
+                    if isinstance(cached, dict):
+                        label = _format_user_label(
+                            _safe_str(cached.get("userName") or "").strip(),
+                            _safe_str(cached.get("organizationName") or "").strip(),
+                        )
+                except Exception:
+                    pass
+
+            # Do not expose raw UUID in UI.
+            resolved_owner_ids.append(uid)
+            resolved_owner_labels.append(label or "Unknown")
+
+        # Keep ids for profile links; keep labels for display (never raw UUID).
+        data_owner_names = resolved_owner_labels
+
         related_dataset_ids = _extract_rel_ids(item, "relatedDatasets")
         related_dataset_names = [dataset_name_by_id.get(i, i) for i in related_dataset_ids]
 
@@ -1082,6 +1118,8 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
             "_applicant_id": applicant_id,
             "_manager_resolved": manager_resolved,
             "_applicant_resolved": applicant_resolved,
+            "_data_owner_ids": resolved_owner_ids,
+            "_data_owner_labels": resolved_owner_labels,
             "_related_dataset_ids": related_dataset_ids,
         }
 

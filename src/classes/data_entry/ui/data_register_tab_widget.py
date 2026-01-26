@@ -48,6 +48,8 @@ class DataRegisterTabWidget(QWidget):
         self._batch_tab_alert_shown = False  # 警告表示フラグ
         self._normal_tab_index = None
         self._batch_tab_index = None
+        self._status_tab_index = None
+        self._listing_tab_index = None
         self._mail_tab_index = None
         # タブごとにウィンドウサイズを独立管理する（他タブと共通化しない）
         # key: tab index, value: QSize
@@ -121,6 +123,9 @@ class DataRegisterTabWidget(QWidget):
 
         # 登録状況タブ
         self.create_status_tab()
+
+        # 一覧タブ（全タイル集約）
+        self.create_tile_listing_tab()
 
         # メール通知タブ
         mail_index = self.create_mail_notification_tab()
@@ -289,7 +294,7 @@ class DataRegisterTabWidget(QWidget):
         except Exception:
             pass
 
-        if index == 0:  # 通常登録タブ
+        if self._normal_tab_index is not None and index == self._normal_tab_index:  # 通常登録タブ
             # アスペクト比・横幅制限解除
             if hasattr(top_level, '_fixed_aspect_ratio'):
                 top_level._fixed_aspect_ratio = None
@@ -346,7 +351,7 @@ class DataRegisterTabWidget(QWidget):
 
             self._last_tab_index_applied = index
                 
-        elif index == 1:  # 一括登録タブ
+        elif self._batch_tab_index is not None and index == self._batch_tab_index:  # 一括登録タブ
             # アスペクト比・横幅制限解除
             if hasattr(top_level, '_fixed_aspect_ratio'):
                 top_level._fixed_aspect_ratio = None
@@ -439,7 +444,7 @@ class DataRegisterTabWidget(QWidget):
                     pass
 
             self._last_tab_index_applied = index
-        elif index == 2:  # 登録状況タブ
+        elif self._status_tab_index is not None and index == self._status_tab_index:  # 登録状況タブ
             # 登録状況タブは横幅固定を行わず、ユーザーのリサイズ操作を妨げない。
             if hasattr(top_level, '_fixed_aspect_ratio'):
                 top_level._fixed_aspect_ratio = None
@@ -498,6 +503,53 @@ class DataRegisterTabWidget(QWidget):
             except Exception:
                 pass
 
+            self._last_tab_index_applied = index
+        elif self._listing_tab_index is not None and index == self._listing_tab_index:
+            # 一覧タブ：横幅固定は行わず、初回のみ画面幅の95%程度を目安に広めにする。
+            if hasattr(top_level, '_fixed_aspect_ratio'):
+                top_level._fixed_aspect_ratio = None
+            if hasattr(top_level, 'setMinimumWidth'):
+                top_level.setMinimumWidth(200)
+            if hasattr(top_level, 'setMaximumWidth'):
+                top_level.setMaximumWidth(16777215)
+            if hasattr(top_level, 'setMinimumSize'):
+                top_level.setMinimumSize(200, 200)
+            if hasattr(top_level, 'setMaximumSize'):
+                top_level.setMaximumSize(16777215, 16777215)
+            if hasattr(top_level, 'setSizePolicy'):
+                top_level.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
+            if hasattr(top_level, 'showNormal'):
+                top_level.showNormal()
+
+            try:
+                saved = self._tab_window_sizes.get(index)
+            except Exception:
+                saved = None
+
+            if saved is not None and hasattr(top_level, 'resize'):
+                try:
+                    if self._last_tab_index_applied != index:
+                        top_level.resize(saved)
+                except Exception:
+                    pass
+            else:
+                try:
+                    if index not in self._tab_window_initial_sizes_applied and screen and hasattr(top_level, 'resize'):
+                        screen_size = screen.availableGeometry().size()
+                        target_width = int(screen_size.width() * 0.95)
+                        target_height = int(screen_size.height() * 0.90)
+                        top_level.resize(int(target_width), int(target_height))
+                        self._tab_window_initial_sizes_applied.add(index)
+                except Exception:
+                    pass
+
+            if not os.environ.get("PYTEST_CURRENT_TEST"):
+                QApplication.processEvents()
+            try:
+                if top_level and top_level.size().isValid():
+                    self._tab_window_sizes[index] = top_level.size()
+            except Exception:
+                pass
             self._last_tab_index_applied = index
         elif self._mail_tab_index is not None and index == self._mail_tab_index:
             # メール通知タブ：初回は画面幅90%、以降は「その他」サイズを復元
@@ -627,9 +679,22 @@ class DataRegisterTabWidget(QWidget):
             status_widget = RegistrationStatusWidget(self)
             self.status_widget = status_widget
             # スクロールは不要なため直接追加（行数が多い場合は後でScrollArea化）
-            self.tab_widget.addTab(status_widget, "登録状況")
+            idx = self.tab_widget.addTab(status_widget, "登録状況")
+            self._status_tab_index = idx
         except Exception as e:
             logger.error(f"登録状況タブの作成に失敗: {e}")
+
+    def create_tile_listing_tab(self):
+        """一覧タブ（全タイル集約）を作成"""
+        try:
+            from .dataentry_tile_listing_widget import create_dataentry_tile_listing_widget
+
+            listing_widget = create_dataentry_tile_listing_widget(self)
+            self.tile_listing_widget = listing_widget
+            idx = self.tab_widget.addTab(listing_widget, "一覧")
+            self._listing_tab_index = idx
+        except Exception as e:
+            logger.error(f"一覧タブの作成に失敗: {e}")
 
     def create_mail_notification_tab(self):
         """メール通知タブを作成"""

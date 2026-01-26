@@ -64,6 +64,13 @@ _ACTIVE_DATASET_LISTING_PORTAL_THREADS: set[QThread] = set()
 _ACTIVE_DATASET_LISTING_PORTAL_CSV_THREADS: set[QThread] = set()
 
 
+def _build_user_profile_url(user_id: str) -> str:
+    uid = str(user_id or "").strip()
+    if not uid:
+        return ""
+    return f"https://rde-user.nims.go.jp/rde-user-profile/users/{uid}"
+
+
 class DatasetListTableModel(QAbstractTableModel):
     def __init__(self, columns: List[DatasetListColumn], rows: List[Dict[str, Any]], parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -187,6 +194,38 @@ class DatasetListTableModel(QAbstractTableModel):
                 dataset_id = row.get("dataset_id")
                 dataset_id = str(dataset_id).strip() if dataset_id is not None else ""
                 return dataset_id
+            if col.key == "manager_name":
+                manager_id = str(row.get("_manager_id") or "").strip()
+                return _build_user_profile_url(manager_id)
+            if col.key == "applicant_name":
+                applicant_id = str(row.get("_applicant_id") or "").strip()
+                return _build_user_profile_url(applicant_id)
+            if col.key == "data_owner_names":
+                owner_ids = row.get("_data_owner_ids")
+                owner_labels = row.get("_data_owner_labels")
+                if not isinstance(owner_ids, list) or not owner_ids:
+                    return ""
+                if not isinstance(owner_labels, list):
+                    owner_labels = []
+                items: List[Dict[str, str]] = []
+                for i, oid in enumerate(owner_ids):
+                    oid_str = str(oid or "").strip()
+                    if not oid_str:
+                        continue
+                    label = ""
+                    try:
+                        if i < len(owner_labels):
+                            label = str(owner_labels[i] or "").strip()
+                    except Exception:
+                        label = ""
+                    if not label or label == "Unknown":
+                        label = f"Unknown ({i + 1})"
+                    items.append({"label": label, "url": _build_user_profile_url(oid_str)})
+                if not items:
+                    return ""
+                if len(items) == 1:
+                    return items[0].get("url") or ""
+                return items
             return row.get(col.key)
 
         if role == Qt.ForegroundRole:
@@ -198,11 +237,17 @@ class DatasetListTableModel(QAbstractTableModel):
                 if subgroup_id:
                     return QBrush(get_color(ThemeKey.TEXT_LINK))
             if col.key == "manager_name":
-                if not bool(row.get("_manager_resolved")):
-                    return QBrush(get_color(ThemeKey.TEXT_DISABLED))
+                manager_id = str(row.get("_manager_id") or "").strip()
+                if manager_id:
+                    return QBrush(get_color(ThemeKey.TEXT_LINK))
             if col.key == "applicant_name":
-                if not bool(row.get("_applicant_resolved")):
-                    return QBrush(get_color(ThemeKey.TEXT_DISABLED))
+                applicant_id = str(row.get("_applicant_id") or "").strip()
+                if applicant_id:
+                    return QBrush(get_color(ThemeKey.TEXT_LINK))
+            if col.key == "data_owner_names":
+                owner_ids = row.get("_data_owner_ids")
+                if isinstance(owner_ids, list) and any(str(x or "").strip() for x in owner_ids):
+                    return QBrush(get_color(ThemeKey.TEXT_LINK))
 
         if role == Qt.FontRole:
             if col.key in {"dataset_name", "instrument_names", "tool_open", "portal_open"}:
@@ -213,6 +258,16 @@ class DatasetListTableModel(QAbstractTableModel):
                 subgroup_id = row.get("subgroup_id")
                 subgroup_id = str(subgroup_id).strip() if subgroup_id is not None else ""
                 if subgroup_id:
+                    f = QFont()
+                    f.setUnderline(True)
+                    return f
+            if col.key in {"manager_name", "applicant_name", "data_owner_names"}:
+                url = self.data(index, Qt.UserRole)
+                if isinstance(url, str) and url:
+                    f = QFont()
+                    f.setUnderline(True)
+                    return f
+                if isinstance(url, list) and url:
                     f = QFont()
                     f.setUnderline(True)
                     return f
@@ -4841,14 +4896,34 @@ class DatasetListingWidget(QWidget):
                     return
                 return
 
-            if col.key not in {"dataset_name", "instrument_names", "subgroup_name", "tool_open", "portal_open"}:
+            if col.key not in {
+                "dataset_name",
+                "instrument_names",
+                "subgroup_name",
+                "tool_open",
+                "portal_open",
+                "manager_name",
+                "applicant_name",
+                "data_owner_names",
+            }:
                 return
 
-            if col.key in {"dataset_name", "subgroup_name"}:
+            if col.key in {"dataset_name", "subgroup_name", "manager_name", "applicant_name", "data_owner_names"}:
                 url = self._model.data(idx2, Qt.UserRole)
-                if not isinstance(url, str) or not url:
+                if isinstance(url, str) and url:
+                    QDesktopServices.openUrl(QUrl(url))
                     return
-                QDesktopServices.openUrl(QUrl(url))
+                if isinstance(url, list) and url:
+                    # Multiple owners: let user choose.
+                    try:
+                        dlg = InstrumentLinkSelectorDialog(self, url)
+                        dlg.setWindowTitle("ユーザーを選択")
+                        if dlg.exec() == QDialog.Accepted:
+                            chosen = dlg.selected_url()
+                            if chosen:
+                                QDesktopServices.openUrl(QUrl(chosen))
+                    except Exception:
+                        return
                 return
 
             if col.key == "tool_open":

@@ -115,7 +115,7 @@ def _compute_signature(
         "samples_dir_mtime": samples_mtime,
         "subgroup_details_dir_mtime": details_mtime,
         "subgroup_rel_details_dir_mtime": rel_details_mtime,
-        "schema": 2,
+        "schema": 4,
     }
 
 
@@ -408,6 +408,17 @@ def build_subgroup_list_rows_from_files() -> Tuple[List[SubgroupListColumn], Lis
         SubgroupListColumn("fund_count", "研究資金数"),
         SubgroupListColumn("members", "メンバー"),
         SubgroupListColumn("member_count", "メンバー数"),
+        SubgroupListColumn("role_owner_names", "管理者"),
+        SubgroupListColumn("role_assistant_names", "管理者代理"),
+        SubgroupListColumn("role_member_names", "メンバー(ロール)"),
+        SubgroupListColumn("role_agent_names", "登録代行"),
+        SubgroupListColumn("role_viewer_names", "閲覧"),
+        SubgroupListColumn("role_assistant_count", "管理者代理人数"),
+        SubgroupListColumn("role_member_count", "メンバー人数"),
+        SubgroupListColumn("role_agent_count", "登録代行人数"),
+        SubgroupListColumn("role_viewer_count", "閲覧人数"),
+        SubgroupListColumn("role_entries_all_count", "管理者/管理者代理/メンバー/登録代行/閲覧人数"),
+        SubgroupListColumn("role_entries_without_owner_count", "管理者代理/メンバー/登録代行/閲覧人数"),
         SubgroupListColumn("related_datasets", "関連データセット"),
         SubgroupListColumn("related_datasets_count", "関連データセット数"),
         SubgroupListColumn("related_samples", "関連試料"),
@@ -435,13 +446,17 @@ def build_subgroup_list_rows_from_files() -> Tuple[List[SubgroupListColumn], Lis
         # members: prefer roles.userId (edit tab behavior), then relationships.members.data
         member_ids: List[str] = []
         roles = attrs.get("roles")
+        roles_by_user_id: Dict[str, set[str]] = {}
         if isinstance(roles, list) and roles:
             for role in roles:
                 if not isinstance(role, dict):
                     continue
                 mid = _safe_str(role.get("userId")).strip()
+                rtype = _safe_str(role.get("role")).strip().upper()
                 if mid:
                     member_ids.append(mid)
+                    if rtype:
+                        roles_by_user_id.setdefault(mid, set()).add(rtype)
 
         if not member_ids:
             members_rels = rels.get("members") if isinstance(rels.get("members"), dict) else {}
@@ -464,9 +479,12 @@ def build_subgroup_list_rows_from_files() -> Tuple[List[SubgroupListColumn], Lis
         #   メンバーIDが直接表示される不具合が再発する。
         # - そのため、ここでは「詳細ファイル -> subGroup.json included -> ユーザーキャッシュ」の順で解決する。
         #   （※ resolved できない場合でも、IDをUIに表示しない）
+        unique_member_ids = list(dict.fromkeys([mid for mid in member_ids if mid]))
+
         member_names: List[str] = []
+        resolved_name_by_id: Dict[str, str] = {}
         detail_attr_map = _load_detail_user_attributes_for_subgroup(subgroup_id)
-        for mid in member_ids:
+        for mid in unique_member_ids:
             if not mid:
                 continue
             resolved = ""
@@ -492,10 +510,58 @@ def build_subgroup_list_rows_from_files() -> Tuple[List[SubgroupListColumn], Lis
 
             # 再発防止: UIに member_id を直接出さない。
             # どうしても解決できない場合は "Unknown" とする（IDの露出は不可）。
-            member_names.append(resolved or "Unknown")
+            resolved_name_by_id[mid] = resolved or "Unknown"
+            member_names.append(resolved_name_by_id[mid])
 
         # De-dup while preserving order
         member_names = list(dict.fromkeys([n for n in member_names if n]))
+
+        role_entries_all_count = None
+        role_entries_without_owner_count = None
+        role_owner_names = ""
+        role_assistant_names = ""
+        role_member_names = ""
+        role_agent_names = ""
+        role_viewer_names = ""
+        role_assistant_count = None
+        role_member_count = None
+        role_agent_count = None
+        role_viewer_count = None
+        if roles_by_user_id:
+            allowed_all = {"OWNER", "ASSISTANT", "MEMBER", "AGENT", "VIEWER"}
+            allowed_without_owner = {"ASSISTANT", "MEMBER", "AGENT", "VIEWER"}
+
+            role_entries_all_count = sum(1 for mid, rs in roles_by_user_id.items() if mid and (rs & allowed_all))
+            role_entries_without_owner_count = sum(
+                1
+                for mid, rs in roles_by_user_id.items()
+                if mid and (rs & allowed_without_owner) and "OWNER" not in rs
+            )
+
+            def _names_for_role(role_key: str) -> List[str]:
+                names: List[str] = []
+                for mid in unique_member_ids:
+                    if role_key in (roles_by_user_id.get(mid) or set()):
+                        names.append(resolved_name_by_id.get(mid, "Unknown"))
+                # De-dup while preserving order
+                return list(dict.fromkeys([n for n in names if n]))
+
+            owner_list = _names_for_role("OWNER")
+            assistant_list = _names_for_role("ASSISTANT")
+            member_list = _names_for_role("MEMBER")
+            agent_list = _names_for_role("AGENT")
+            viewer_list = _names_for_role("VIEWER")
+
+            role_owner_names = "\n".join(owner_list)
+            role_assistant_names = "\n".join(assistant_list)
+            role_member_names = "\n".join(member_list)
+            role_agent_names = "\n".join(agent_list)
+            role_viewer_names = "\n".join(viewer_list)
+
+            role_assistant_count = len(assistant_list)
+            role_member_count = len(member_list)
+            role_agent_count = len(agent_list)
+            role_viewer_count = len(viewer_list)
 
         # related datasets: use dataset.json + grantNumbers from subjects (edit tab behavior)
         grant_numbers: List[str] = []
@@ -573,6 +639,17 @@ def build_subgroup_list_rows_from_files() -> Tuple[List[SubgroupListColumn], Lis
             "fund_count": len(funds_list),
             "members": "\n".join(member_names),
             "member_count": len(member_names),
+            "role_owner_names": role_owner_names,
+            "role_assistant_names": role_assistant_names,
+            "role_member_names": role_member_names,
+            "role_agent_names": role_agent_names,
+            "role_viewer_names": role_viewer_names,
+            "role_assistant_count": role_assistant_count,
+            "role_member_count": role_member_count,
+            "role_agent_count": role_agent_count,
+            "role_viewer_count": role_viewer_count,
+            "role_entries_all_count": role_entries_all_count,
+            "role_entries_without_owner_count": role_entries_without_owner_count,
             "related_datasets": "\n".join(dict.fromkeys(related_dataset_names)),
             "related_datasets_count": len(related_dataset_names),
             "related_samples": "\n".join(related_sample_names_unique),
