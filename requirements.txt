@@ -14,7 +14,7 @@ requests==2.32.5
 urllib3==2.5.0
 truststore==0.10.4
 certifi==2025.11.12
-wincertstore==0.2.1
+wincertstore==0.2.1; platform_system == "Windows"
 
 # Data Processing & Excel
 pandas==2.3.3
@@ -44,9 +44,10 @@ python-dotenv==1.2.1
 pycryptodomex==3.23.0
 
 # System Integration
+# OSキーチェーン連携（自動ログイン/メール設定の永続化で使用）
 keyring==25.7.0
-pywin32==311
-pywin32-ctypes==0.2.2
+pywin32==311; platform_system == "Windows"
+pywin32-ctypes==0.2.2; platform_system == "Windows"
 
 # Microsoft 365 OAuth (Device Code) + Graph
 msal==1.34.0
@@ -67,7 +68,7 @@ typing_extensions==4.15.0
 # PyInstaller (Binary Building)
 pyinstaller==6.16.0
 pyinstaller-hooks-contrib==2025.9
-pefile==2023.2.7
+pefile==2023.2.7; platform_system == "Windows"
 altgraph==0.17.4
 filelock==3.20.0
 setuptools==80.9.0

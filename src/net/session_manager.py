@@ -939,26 +939,11 @@ class ProxySessionManager:
             if system == "Windows":
                 # Windows証明書ストアから取得
                 try:
-                    import wincertstore
-                    import base64
-                    
-                    # ルート証明書ストアと中間証明書ストアから取得
-                    stores = ['ROOT', 'CA']
-                    
-                    for store_name in stores:
-                        store = wincertstore.CertSystemStore(store_name)
-                        
-                        for cert_der in store.itercerts(usage=wincertstore.SERVER_AUTH):
-                            try:
-                                # DERからPEM形式に変換
-                                cert_pem = ssl.DER_cert_to_PEM_cert(cert_der)
-                                certificates.append(cert_pem)
-                            except (ssl.SSLError, ValueError) as e:
-                                logger.debug(f"証明書変換スキップ: {e}")
-                                continue
-                                
-                except ImportError:
-                    logger.warning("wincertstore利用不可、Windows証明書スキップ")
+                    from classes.core.platform import get_windows_certificates_pem
+
+                    certificates.extend(get_windows_certificates_pem())
+                except Exception as e:
+                    logger.warning(f"Windows証明書取得エラー: {e}")
                     
             elif system == "Darwin":  # macOS
                 # macOSキーチェーンから証明書を取得

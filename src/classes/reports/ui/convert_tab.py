@@ -356,9 +356,12 @@ class ReportConvertTab(QWidget):
     
     def on_open_folder_clicked(self):
         """フォルダを開くボタンクリック"""
+        from classes.core.platform import open_path
+
         folder_path = get_reports_root_dir()
         if folder_path.exists():
-            os.startfile(str(folder_path))
+            if not open_path(str(folder_path)):
+                QMessageBox.warning(self, "エラー", "フォルダを開けませんでした。")
         else:
             QMessageBox.warning(self, "エラー", f"フォルダが存在しません:\n{folder_path}")
 

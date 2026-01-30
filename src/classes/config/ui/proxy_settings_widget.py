@@ -2016,59 +2016,19 @@ class ProxySettingsWidget(QWidget):
     def _detect_system_proxy(self) -> str:
         """システムプロキシ設定を検出"""
         try:
-            import platform
-            import winreg
-            
-            if platform.system() == 'Windows':
-                # Windowsレジストリからプロキシ設定を取得
-                try:
-                    key = winreg.OpenKey(
-                        winreg.HKEY_CURRENT_USER,
-                        r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
-                    )
-                    proxy_enable = winreg.QueryValueEx(key, "ProxyEnable")[0]
-                    
-                    if proxy_enable:
-                        proxy_server = winreg.QueryValueEx(key, "ProxyServer")[0]
-                        winreg.CloseKey(key)
-                        return f"{proxy_server}"
-                    else:
-                        winreg.CloseKey(key)
-                        return "プロキシなし（直接接続）"
-                except:
-                    return "不明（レジストリアクセスエラー）"
-            else:
-                # macOS/Linuxの場合は環境変数をチェック
-                import os
-                http_proxy = os.environ.get('http_proxy') or os.environ.get('HTTP_PROXY')
-                https_proxy = os.environ.get('https_proxy') or os.environ.get('HTTPS_PROXY')
-                
-                if https_proxy or http_proxy:
-                    return f"{https_proxy or http_proxy}"
-                else:
-                    return "プロキシなし（直接接続）"
+            from classes.core.platform import get_system_proxy_info
+
+            return get_system_proxy_info()
         except Exception as e:
             return f"検出失敗: {str(e)}"
     
     def _check_fiddler_ca_installed(self) -> bool:
         """FiddlerのCA証明書がインストールされているかチェック"""
         try:
-            import platform
-            import subprocess
-            
-            if platform.system() == 'Windows':
-                # Windows証明書ストアをチェック
-                # "DO_NOT_TRUST_FiddlerRoot" という名前の証明書を探す
-                result = subprocess.run(
-                    ['certutil', '-store', 'Root'],
-                    capture_output=True, text=True, timeout=5
-                )
-                return 'FiddlerRoot' in result.stdout or 'Fiddler' in result.stdout
-            else:
-                # macOS/Linuxの場合は簡易チェック
-                return False
-        except:
-            # エラーの場合は保守的に False を返す
+            from classes.core.platform import is_fiddler_ca_installed
+
+            return is_fiddler_ca_installed()
+        except Exception:
             return False
     
     def _format_webview_results(self, current_pattern: str, pattern_name: str, 
@@ -2327,9 +2287,11 @@ class ProxySettingsWidget(QWidget):
                 
             # wincertstore確認
             try:
-                import wincertstore
-                features.append("Windows証明書ストア")
-            except ImportError:
+                from classes.core.platform import get_windows_cert_store_counts
+
+                if get_windows_cert_store_counts():
+                    features.append("Windows証明書ストア")
+            except Exception:
                 pass
                 
             if features:
@@ -2409,18 +2371,16 @@ class ProxySettingsWidget(QWidget):
                 
             # Windows証明書ストア
             try:
-                import wincertstore
-                ca_store = wincertstore.CertSystemStore('CA')
-                root_store = wincertstore.CertSystemStore('ROOT')
-                
-                ca_count = len(list(ca_store.itercerts()))
-                root_count = len(list(root_store.itercerts()))
-                
-                info_lines.append(f"Windows証明書ストア:")
-                info_lines.append(f"  CA証明書: {ca_count}件")
-                info_lines.append(f"  ROOT証明書: {root_count}件")
-            except ImportError:
-                info_lines.append("Windows証明書ストア: 利用不可 (wincertstore未インストール)")
+                from classes.core.platform import get_windows_cert_store_counts
+
+                counts = get_windows_cert_store_counts()
+                if counts:
+                    ca_count, root_count = counts
+                    info_lines.append("Windows証明書ストア:")
+                    info_lines.append(f"  CA証明書: {ca_count}件")
+                    info_lines.append(f"  ROOT証明書: {root_count}件")
+                else:
+                    info_lines.append("Windows証明書ストア: 利用不可 (wincertstore未インストール)")
             except Exception as e:
                 info_lines.append(f"Windows証明書ストア: エラー - {e}")
                 

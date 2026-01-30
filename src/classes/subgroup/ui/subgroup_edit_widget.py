@@ -12,7 +12,8 @@ from typing import Iterable, List, Optional
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGridLayout, 
     QPushButton, QMessageBox, QScrollArea, QCheckBox, QRadioButton, 
-    QButtonGroup, QDialog, QTextEdit, QComboBox, QCompleter, QSizePolicy
+    QButtonGroup, QDialog, QTextEdit, QComboBox, QCompleter, QSizePolicy,
+    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
 )
 from config.common import (
     SUBGROUP_JSON_PATH,
@@ -339,18 +340,22 @@ class SubgroupSelector:
     既存サブグループ選択とフィルタリング専用クラス
     """
     
-    def __init__(self, combo_widget, filter_combo, on_selection_changed=None):
+    def __init__(self, combo_widget, filter_combo, on_selection_changed=None, pre_filter_input: Optional[QLineEdit] = None):
         self.combo_widget = combo_widget
         self.filter_combo = filter_combo
         self.on_selection_changed = on_selection_changed
+        self.pre_filter_input = pre_filter_input
         self.groups_data = []
         self.filtered_groups_data = []
         self.sample_count_cache = {}  # 試料数キャッシュ
         self._detail_user_cache: dict[str, dict] = {}
         self._last_focus_group_id: Optional[str] = None
+        self._combo_completer: Optional[QCompleter] = None
         
         # イベント接続
         self.filter_combo.currentTextChanged.connect(self.apply_filter)
+        if self.pre_filter_input is not None:
+            self.pre_filter_input.textChanged.connect(self.apply_filter)
         self.combo_widget.currentTextChanged.connect(self._on_combo_selection_changed)
     
     def load_existing_subgroups(self):
@@ -509,18 +514,81 @@ class SubgroupSelector:
         self.combo_widget.clear()
         self.combo_widget.addItem(message, None)
     
+    def _normalize_filter_text(self, text: str) -> str:
+        return (text or "").strip().lower()
+
+    def _matches_pre_filter(self, group: dict, filter_text: str) -> bool:
+        if not filter_text:
+            return True
+        name = str((group or {}).get("name", "") or "")
+        group_id = str((group or {}).get("id", "") or "")
+        desc = str((group or {}).get("description", "") or "")
+        haystack = f"{name} {group_id} {desc}".lower()
+        return filter_text in haystack
+
+    def _format_combo_display(self, group: dict, sample_count: int) -> tuple[str, str]:
+        name = str((group or {}).get("name", "") or "")
+        desc_raw = str((group or {}).get("description", "") or "")
+        desc_full = desc_raw if desc_raw else "説明なし"
+        group_id = str((group or {}).get("id", "") or "")
+        short_id = group_id[:10] if group_id else ""
+        sample_label = f"試料: {sample_count}件" if sample_count >= 0 else "試料: N/A"
+
+        tooltip = f"{name} ({desc_full}、{sample_label}、{group_id})"
+
+        try:
+            view = self.combo_widget.view()
+            view_width = int(view.viewport().width()) if view and view.viewport() else 0
+        except Exception:
+            view_width = 0
+
+        if view_width <= 0:
+            try:
+                view_width = int(self.combo_widget.width())
+            except Exception:
+                view_width = 0
+        if view_width <= 0:
+            view_width = 400
+
+        id_display = short_id if short_id else group_id
+        prefix = f"{name} ("
+        suffix = f"、{sample_label}、{id_display})"
+        try:
+            fm = self.combo_widget.fontMetrics()
+            available = max(20, int(view_width) - fm.horizontalAdvance(prefix + suffix) - 12)
+            desc_display = fm.elidedText(desc_full, Qt.ElideRight, available)
+        except Exception:
+            desc_display = desc_full
+
+        display_text = f"{name} ({desc_display}、{sample_label}、{id_display})"
+        return display_text, tooltip
+
     def apply_filter(self):
         """フィルター適用"""
         filter_value = self.filter_combo.currentData()
         current_user_id = self._get_current_user_id()
+        pre_filter_text = ""
+        if self.pre_filter_input is not None:
+            try:
+                pre_filter_text = self._normalize_filter_text(self.pre_filter_input.text())
+            except Exception:
+                pre_filter_text = ""
         
         if filter_value == "none":
-            self.filtered_groups_data = self.groups_data.copy()
+            base_groups = self.groups_data.copy()
         else:
-            self.filtered_groups_data = []
+            base_groups = []
             for group in self.groups_data:
                 if self._should_include_group(group, filter_value, current_user_id):
-                    self.filtered_groups_data.append(group)
+                    base_groups.append(group)
+
+        if pre_filter_text:
+            self.filtered_groups_data = [
+                group for group in base_groups
+                if self._matches_pre_filter(group, pre_filter_text)
+            ]
+        else:
+            self.filtered_groups_data = base_groups
         
         self._update_combo_items()
     
@@ -559,6 +627,14 @@ class SubgroupSelector:
     
     def _update_combo_items(self):
         """コンボボックスアイテムの更新"""
+        current_group_id = None
+        try:
+            current_data = self.combo_widget.currentData()
+            if isinstance(current_data, dict):
+                current_group_id = str(current_data.get("id", "") or "")
+        except Exception:
+            current_group_id = None
+
         self.combo_widget.clear()
         
         if not self.filtered_groups_data:
@@ -568,17 +644,41 @@ class SubgroupSelector:
         # グループ名でソート
         sorted_groups = sorted(self.filtered_groups_data, key=lambda g: g["name"])
         
+        display_texts = []
         for group in sorted_groups:
             # 関連試料数の取得
             sample_count = self._get_sample_count(group['id'])
             
-            # 表示テキストの作成（試料数付き）
-            if sample_count >= 0:
-                display_text = f"{group['name']} (ID: {group['id']}, 試料: {sample_count}件)"
-            else:
-                display_text = f"{group['name']} (ID: {group['id']}, 試料: N/A)"
-            
+            display_text, tooltip = self._format_combo_display(group, sample_count)
             self.combo_widget.addItem(display_text, group)
+            try:
+                self.combo_widget.setItemData(self.combo_widget.count() - 1, tooltip, Qt.ToolTipRole)
+            except Exception:
+                pass
+            display_texts.append(display_text)
+
+        # 部分一致検索のためのCompleter設定
+        try:
+            completer = QCompleter(display_texts, self.combo_widget)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchContains)
+            popup_view = completer.popup()
+            popup_view.setMinimumHeight(240)
+            popup_view.setMaximumHeight(240)
+            self.combo_widget.setCompleter(completer)
+            self._combo_completer = completer
+        except Exception:
+            pass
+
+        if current_group_id:
+            try:
+                for i in range(self.combo_widget.count()):
+                    data = self.combo_widget.itemData(i)
+                    if isinstance(data, dict) and str(data.get("id", "") or "") == current_group_id:
+                        self.combo_widget.setCurrentIndex(i)
+                        break
+            except Exception:
+                pass
 
     def _find_group_by_id(self, group_id: str) -> Optional[dict]:
         if not group_id:
@@ -805,25 +905,37 @@ class RelatedDatasetSection:
         )
         container.addWidget(self.message_label)
 
-        self.scroll_area = QScrollArea()
+        self.table = QTableWidget()
         if self._is_pytest:
-            self.scroll_area.setAttribute(Qt.WA_DontShowOnScreen, True)
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setFrameStyle(0)
-        self.scroll_area.setMinimumHeight(180)
-        self.scroll_area.setMaximumHeight(320)
-        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.scroll_area.hide()
-        container.addWidget(self.scroll_area)
-
-        self.scroll_body = QWidget()
-        self.scroll_layout = QVBoxLayout(self.scroll_body)
-        self.scroll_layout.setContentsMargins(0, 0, 0, 0)
-        self.scroll_layout.setSpacing(6)
-        self.scroll_layout.setAlignment(Qt.AlignTop)
-        self.scroll_area.setWidget(self.scroll_body)
-
-        self._row_widgets: List[QWidget] = []
+            self.table.setAttribute(Qt.WA_DontShowOnScreen, True)
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels([
+            "データセット",
+            "課題番号",
+            "作成日",
+            "更新日",
+            "タイル数",
+            "ブラウザ",
+        ])
+        self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.table.setAlternatingRowColors(True)
+        self.table.setWordWrap(True)
+        self.table.setMinimumHeight(180)
+        self.table.setMaximumHeight(360)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        for col in range(1, 6):
+            header.setSectionResizeMode(col, QHeaderView.ResizeToContents)
+        header.setStretchLastSection(False)
+        try:
+            self.table.horizontalHeader().setDefaultAlignment(Qt.AlignHCenter | Qt.AlignVCenter)
+        except Exception:
+            pass
+        self.table.hide()
+        self.scroll_area = self.table
+        container.addWidget(self.table)
 
     def update_for_group(self, group_data: Optional[dict]) -> None:
         """Render datasets associated with *group_data*."""
@@ -859,69 +971,129 @@ class RelatedDatasetSection:
         fallback = "サブグループを選択すると関連データセットを表示します。"
         self.message_label.setText(message or fallback)
         self.message_label.show()
-        self.scroll_area.hide()
+        self.table.hide()
         self._update_count_label(0, grant_total)
 
     def _render_rows(self, datasets: List[RelatedDataset], grant_total: int) -> None:
         self._clear_rows()
-        for dataset in datasets:
-            row = self._build_row_widget(dataset)
-            self.scroll_layout.addWidget(row)
-            self._row_widgets.append(row)
+        self.table.setRowCount(len(datasets))
+
+        for row_idx, dataset in enumerate(datasets):
+            dataset_id = str(dataset.get("id") or "")
+            title = dataset.get("name") or "名称未設定"
+            grant_number = dataset.get("grant_number") or "-"
+
+            created_raw = dataset.get("created") or dataset.get("created_at") or dataset.get("createdAt")
+            modified_raw = dataset.get("modified") or dataset.get("updated") or dataset.get("updatedAt")
+
+            created_text = self._format_datetime(created_raw)
+            modified_text = self._format_datetime(modified_raw)
+
+            tile_count = self._resolve_tile_count(dataset_id)
+            tile_text = "-" if tile_count is None else str(tile_count)
+
+            title_button = QPushButton(title)
+            title_button.setObjectName("relatedDatasetLinkButton")
+            title_button.setFlat(True)
+            title_button.setCursor(Qt.PointingHandCursor)
+            title_button.setStyleSheet(
+                f"color: {get_color(ThemeKey.TEXT_LINK)}; text-align: left; border: none;"
+            )
+            if dataset_id:
+                title_button.setToolTip(f"{title}\n{dataset_id}")
+                title_button.clicked.connect(
+                    lambda _checked=False, ds_id=dataset_id, ds_name=title: self._launch_dataset_edit(ds_id, ds_name)
+                )
+            else:
+                title_button.setEnabled(False)
+                title_button.setToolTip("データセットIDが見つかりません")
+            self.table.setCellWidget(row_idx, 0, title_button)
+
+            grant_item = QTableWidgetItem(grant_number)
+            grant_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(row_idx, 1, grant_item)
+
+            created_item = QTableWidgetItem(created_text)
+            created_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(row_idx, 2, created_item)
+
+            modified_item = QTableWidgetItem(modified_text)
+            modified_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(row_idx, 3, modified_item)
+
+            tile_item = QTableWidgetItem(tile_text)
+            tile_item.setTextAlignment(Qt.AlignCenter)
+            self.table.setItem(row_idx, 4, tile_item)
+
+            browser_btn = QPushButton("開く")
+            browser_btn.setObjectName("relatedDatasetOpenButton")
+            browser_btn.setFixedWidth(64)
+            browser_btn.setStyleSheet(
+                f"background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};"
+                f"color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; font-weight: bold; border-radius: 4px;"
+                f"border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BORDER)};"
+            )
+            if dataset_id:
+                browser_btn.clicked.connect(
+                    lambda _checked=False, ds_id=dataset_id: self._open_dataset_page(ds_id)
+                )
+            else:
+                browser_btn.setEnabled(False)
+                browser_btn.setToolTip("データセットIDが見つかりません")
+            self.table.setCellWidget(row_idx, 5, browser_btn)
+
+        try:
+            self.table.resizeRowsToContents()
+        except Exception:
+            pass
 
         self.message_label.hide()
-        self.scroll_area.show()
+        self.table.show()
         self._update_count_label(len(datasets), grant_total)
 
-    def _build_row_widget(self, dataset: RelatedDataset) -> QWidget:
-        row_widget = QWidget()
-        row_widget.setObjectName("relatedDatasetRow")
-        layout = QHBoxLayout(row_widget)
-        layout.setContentsMargins(8, 4, 8, 4)
-        layout.setSpacing(12)
+    def _format_datetime(self, value: Optional[str]) -> str:
+        if not value:
+            return "--"
+        try:
+            from classes.utils.dataset_datetime_display import format_iso_to_jst
 
-        title = dataset.get('name') or "名称未設定"
-        grant_number = dataset.get('grant_number') or "-"
+            return format_iso_to_jst(str(value), with_seconds=False) or str(value)
+        except Exception:
+            return str(value)
 
-        title_label = QLabel(title)
-        title_label.setWordWrap(True)
-        title_label.setStyleSheet(
-            f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-weight: bold;"
-        )
-        title_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
-        layout.addWidget(title_label, 3)
+    def _resolve_tile_count(self, dataset_id: str) -> Optional[int]:
+        if not dataset_id:
+            return None
+        try:
+            from config.common import get_dynamic_file_path
 
-        grant_label = QLabel(grant_number)
-        grant_label.setAlignment(Qt.AlignCenter)
-        grant_label.setMinimumWidth(150)
-        if self._is_pytest:
-            grant_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_INFO)};")
-        else:
-            grant_label.setStyleSheet(
-                f"color: {get_color(ThemeKey.TEXT_INFO)}; font-family: Consolas, 'Courier New', monospace;"
+            path = get_dynamic_file_path(f"output/rde/data/dataEntry/{dataset_id}.json")
+            if not path or not os.path.exists(path):
+                return None
+            with open(path, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+            items = payload.get("data") if isinstance(payload, dict) else None
+            if isinstance(items, list):
+                return len(items)
+        except Exception:
+            return None
+        return None
+
+    def _launch_dataset_edit(self, dataset_id: str, title: str) -> None:
+        if not dataset_id:
+            return
+        try:
+            from classes.utils.dataset_launch_manager import DatasetLaunchManager
+
+            DatasetLaunchManager.instance().request_launch(
+                target_key="dataset_edit",
+                dataset_id=str(dataset_id),
+                display_text=title or str(dataset_id),
+                raw_dataset=None,
+                source_name="subgroup_related_dataset",
             )
-        layout.addWidget(grant_label, 1)
-
-        open_button = QPushButton("開く")
-        open_button.setObjectName("relatedDatasetOpenButton")
-        open_button.setFixedWidth(64)
-        open_button.setStyleSheet(
-            f"background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};"
-            f"color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)}; font-weight: bold; border-radius: 4px;"
-            f"border: 1px solid {get_color(ThemeKey.BUTTON_PRIMARY_BORDER)};"
-        )
-
-        dataset_id = dataset.get('id', '')
-        if dataset_id:
-            open_button.clicked.connect(
-                lambda _checked=False, ds_id=dataset_id: self._open_dataset_page(ds_id)
-            )
-        else:
-            open_button.setEnabled(False)
-            open_button.setToolTip("データセットIDが見つかりません")
-
-        layout.addWidget(open_button)
-        return row_widget
+        except Exception:
+            logger.debug("related dataset: dataset_edit launch failed", exc_info=True)
 
     def _open_dataset_page(self, dataset_id: str) -> None:
         url = DATASET_PAGE_TEMPLATE.format(id=dataset_id)
@@ -935,12 +1107,10 @@ class RelatedDatasetSection:
         self.count_label.setText(f"{dataset_count}件 / 課題 {grant_total}件")
 
     def _clear_rows(self) -> None:
-        while self.scroll_layout.count():
-            item = self.scroll_layout.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.deleteLater()
-        self._row_widgets.clear()
+        try:
+            self.table.setRowCount(0)
+        except Exception:
+            pass
 
     @staticmethod
     def _extract_grant_numbers(subjects: Iterable) -> List[str]:
@@ -978,10 +1148,11 @@ def create_subgroup_edit_widget(parent, title, color, create_auto_resize_button)
     
     # === 1. 既存サブグループ選択UI ===
     selection_section = _create_selection_section(layout)
-    filter_combo, existing_group_combo, refresh_btn = (
+    filter_combo, existing_group_combo, refresh_btn, pre_filter_input = (
         selection_section['filter_combo'], 
         selection_section['combo'], 
-        selection_section['refresh_btn']
+        selection_section['refresh_btn'],
+        selection_section['pre_filter_input'],
     )
     
     # === 2. メンバー選択UI ===
@@ -1001,7 +1172,7 @@ def create_subgroup_edit_widget(parent, title, color, create_auto_resize_button)
     
     # === 6. 管理クラス初期化 ===
     managers = _initialize_managers(
-        existing_group_combo, filter_combo, scroll_area, 
+        existing_group_combo, filter_combo, pre_filter_input, scroll_area, 
         form_section['builder'], form_widgets, widget, related_dataset_section
     )
 
@@ -1057,6 +1228,16 @@ def _create_selection_section(layout):
     refresh_btn = QPushButton("サブグループリスト更新")
     filter_layout.addWidget(refresh_btn)
     filter_layout.addStretch()
+
+    # 事前フィルタ（部分一致検索）
+    pre_filter_layout = QHBoxLayout()
+    pre_filter_label = QLabel("部分一致フィルタ:")
+    pre_filter_input = QLineEdit()
+    pre_filter_input.setObjectName("subgroupEditPreFilterInput")
+    pre_filter_input.setPlaceholderText("サブグループ名・説明で絞り込み（部分一致）")
+    pre_filter_layout.addWidget(pre_filter_label)
+    pre_filter_layout.addWidget(pre_filter_input)
+    pre_filter_layout.addStretch()
     
     # 選択コンボボックス
     existing_group_label = QLabel("修正するサブグループを選択:")
@@ -1069,13 +1250,15 @@ def _create_selection_section(layout):
     
     selection_layout.addWidget(existing_group_label)
     selection_layout.addLayout(filter_layout)
+    selection_layout.addLayout(pre_filter_layout)
     selection_layout.addWidget(existing_group_combo)
     layout.addLayout(selection_layout)
     
     return {
         'filter_combo': filter_combo,
         'combo': existing_group_combo,
-        'refresh_btn': refresh_btn
+        'refresh_btn': refresh_btn,
+        'pre_filter_input': pre_filter_input,
     }
 
 
@@ -1192,7 +1375,7 @@ def _create_button_section(layout, button_style, create_auto_resize_button):
     }
 
 
-def _initialize_managers(combo, filter_combo, scroll_area, form_builder, form_widgets, widget, dataset_section):
+def _initialize_managers(combo, filter_combo, pre_filter_input, scroll_area, form_builder, form_widgets, widget, dataset_section):
     """管理クラスの初期化"""
     
     def on_group_selection_changed(group_data):
@@ -1224,7 +1407,7 @@ def _initialize_managers(combo, filter_combo, scroll_area, form_builder, form_wi
             edit_handler.set_selected_group(group_data)
     
     # 管理クラス初期化
-    selector = SubgroupSelector(combo, filter_combo, on_group_selection_changed)
+    selector = SubgroupSelector(combo, filter_combo, on_group_selection_changed, pre_filter_input=pre_filter_input)
     form_manager = EditFormManager(None, form_builder, form_widgets)
     member_manager = EditMemberManager(scroll_area, parent_widget=widget)  # parent_widgetを追加
     edit_handler = SubgroupEditHandler(None, None, member_manager.get_current_selector())

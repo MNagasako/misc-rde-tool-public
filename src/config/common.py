@@ -191,7 +191,7 @@ def _env_flag_true(var_name: str) -> bool:
 
 
 def _resolve_user_dir_root() -> str:
-    """Compute the default USERDIRROOTPATH for Windows."""
+    """Compute the default USERDIRROOTPATH for the current OS."""
     if sys.platform.startswith("win"):
         # {localappdata} ≒ 環境変数 %LOCALAPPDATA%
         base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or os.path.expanduser("~")

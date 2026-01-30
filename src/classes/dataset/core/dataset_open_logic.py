@@ -828,10 +828,15 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     team_groups = team_groups_raw
     group_names = []
     for g in team_groups_raw:
-        name = g.get('attributes', {}).get('name', '(no name)')
-        subjects = g.get('attributes', {}).get('subjects', [])
+        attrs = g.get("attributes", {}) if isinstance(g, dict) else {}
+        name = str(attrs.get("name") or "(no name)")
+        desc = str(attrs.get("description") or "").strip()
+        subjects = attrs.get("subjects", [])
         grant_count = len(subjects) if subjects else 0
-        group_names.append(f"{name} ({grant_count}件の課題)")
+        if desc:
+            group_names.append(f"{name}（{desc}、{grant_count}件の課題）")
+        else:
+            group_names.append(f"{name}（{grant_count}件の課題）")
     
     if not team_groups and not data_load_failed:
         error_widget = QWidget(parent)
@@ -912,43 +917,79 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         pass
     subgroup_desc_label.setVisible(False)
     
+    def _normalize_group_search(text: str) -> str:
+        return (text or "").strip().lower()
+
+    def _format_group_label(group: dict) -> str:
+        attrs = group.get("attributes", {}) if isinstance(group, dict) else {}
+        name = str(attrs.get("name") or "(no name)")
+        desc = str(attrs.get("description") or "").strip()
+        subjects = attrs.get("subjects", [])
+        grant_count = len(subjects) if subjects else 0
+        if desc:
+            return f"{name}（{desc}、{grant_count}件の課題）"
+        return f"{name}（{grant_count}件の課題）"
+
+    def _group_matches_search(group: dict, search_text: str) -> bool:
+        if not search_text:
+            return True
+        attrs = group.get("attributes", {}) if isinstance(group, dict) else {}
+        name = str(attrs.get("name", "") or "")
+        desc = str(attrs.get("description", "") or "")
+        return search_text in f"{name} {desc}".lower()
+
+    _suppress_group_search_update = False
+
     # グループ選択コンボボックス
-    def update_group_list(filter_type="member"):
-        """フィルタタイプに応じてグループリストを更新"""
+    def update_group_list(filter_type="member", search_text: str = "", preserve_text: str | None = None):
+        """フィルタタイプ/検索文字に応じてグループリストを更新"""
         nonlocal team_groups, group_names, group_completer  # group_completer も追加
-        
+
         filtered_groups = filter_groups_by_role(all_team_groups, filter_type, user_id)
-        
+        normalized_search = _normalize_group_search(search_text)
+        if normalized_search:
+            filtered_groups = [
+                g for g in filtered_groups if _group_matches_search(g, normalized_search)
+            ]
+
         # グループ名リスト作成
-        group_names_new = []
-        for g in filtered_groups:
-            name = g.get('attributes', {}).get('name', '(no name)')
-            subjects = g.get('attributes', {}).get('subjects', [])
-            grant_count = len(subjects) if subjects else 0
-            group_names_new.append(f"{name} ({grant_count}件の課題)")
-        
+        group_names_new = [_format_group_label(g) for g in filtered_groups]
+
         # コンボボックス更新
+        try:
+            combo.blockSignals(True)
+        except Exception:
+            pass
         combo.clear()
         if group_names_new:
             combo.addItems(group_names_new)
             combo.setCurrentIndex(-1)  # 選択なし状態
-            combo.lineEdit().setPlaceholderText("グループを選択してください")
+            if combo.lineEdit():
+                combo.lineEdit().setPlaceholderText("グループを選択してください")
             combo.setEnabled(True)
         else:
             combo.setEnabled(False)
-            combo.lineEdit().setPlaceholderText("該当するグループがありません")
-        
+            if combo.lineEdit():
+                combo.lineEdit().setPlaceholderText("該当するグループがありません")
+
+        if preserve_text is not None and combo.lineEdit():
+            combo.lineEdit().setText(preserve_text)
+        try:
+            combo.blockSignals(False)
+        except Exception:
+            pass
+
         # グループデータも更新
         team_groups = filtered_groups
         group_names = group_names_new
-        
+
         # Completer も更新（重要！）
         try:
             group_completer.setModel(group_completer.model().__class__(group_names_new, group_completer))
             logger.debug("Completer更新完了: %s件", len(group_names_new))
         except Exception as e:
             logger.warning("Completer更新に失敗: %s", e)
-        
+
         # 課題番号コンボボックスをクリア
         grant_combo.clear()
         grant_combo.setEnabled(False)
@@ -960,7 +1001,7 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
             subgroup_desc_label.setVisible(False)
         except Exception:
             pass
-        
+
         return group_names_new
 
     def _find_role_for_user(group: dict, target_user_id: str | None) -> str | None:
@@ -1131,7 +1172,13 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     def on_filter_changed():
         filter_type = filter_combo.currentData()
         logger.debug("Filter changed to: %s", filter_type)
-        update_group_list(filter_type)  # update_group_list内でCompleterも更新される
+        current_text = combo.lineEdit().text() if combo.lineEdit() else ""
+        search_text = current_text
+        preserve_text = current_text
+        if filter_type == "none":
+            search_text = ""
+            preserve_text = ""
+        update_group_list(filter_type, search_text=search_text, preserve_text=preserve_text)  # update_group_list内でCompleterも更新される
         logger.debug("Groups after filter: %s groups", len(team_groups))
         _populate_manager_combo(None)
         
@@ -1151,6 +1198,16 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         combo.showPopup()
         orig_mouse_press(event)
     combo.mousePressEvent = combo_mouse_press_event
+
+    def _on_group_search_text_changed(text: str) -> None:
+        nonlocal _suppress_group_search_update
+        if _suppress_group_search_update:
+            return
+        _suppress_group_search_update = True
+        try:
+            update_group_list(filter_combo.currentData(), search_text=text, preserve_text=text)
+        finally:
+            _suppress_group_search_update = False
 
     # グループ選択時に課題番号リストを更新
     def on_group_changed():
@@ -1243,6 +1300,10 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     
     # グループ選択の変更イベントを接続
     combo.lineEdit().textChanged.connect(on_group_changed)
+    try:
+        combo.lineEdit().textEdited.connect(_on_group_search_text_changed)
+    except Exception:
+        pass
     combo.currentTextChanged.connect(on_group_changed)
 
     # name入力欄

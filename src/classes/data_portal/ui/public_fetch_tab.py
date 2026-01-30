@@ -373,8 +373,10 @@ class PublicDataPortalFetchTab(QWidget):
         try:
             env = self.env_combo.currentData() or "production"
             out_dir = get_public_data_portal_root_dir(str(env))
-            import os
-            os.startfile(str(out_dir))  # noqa: S606
+            from classes.core.platform import open_path
+
+            if not open_path(str(out_dir)):
+                raise RuntimeError("open_path failed")
         except Exception as exc:
             QMessageBox.warning(self, "フォルダを開く", f"出力フォルダを開けませんでした\n{exc}")
 

@@ -40,9 +40,13 @@ def relax_dataset_dataentry_filters_for_launch(
     all_radio,
     other_radios: Optional[Iterable] = None,
     grant_filter_input=None,
+    subgroup_combo=None,
     reload_callback: Optional[Callable[[], None]] = None,
 ) -> bool:
     """Force the loosest filter selection before applying dataset handoff."""
+    if reload_callback is None and callable(subgroup_combo):
+        reload_callback = subgroup_combo
+        subgroup_combo = None
     controls = []
     for control in filter(None, [all_radio, grant_filter_input]):
         if hasattr(control, 'blockSignals'):
@@ -56,6 +60,10 @@ def relax_dataset_dataentry_filters_for_launch(
         if all_radio is not None and hasattr(all_radio, 'isChecked') and not all_radio.isChecked():
             all_radio.setChecked(True)
             changed = True
+        if subgroup_combo is not None and hasattr(subgroup_combo, 'currentIndex'):
+            if subgroup_combo.currentIndex() != 0:
+                subgroup_combo.setCurrentIndex(0)
+                changed = True
         if grant_filter_input is not None and hasattr(grant_filter_input, 'text'):
             if grant_filter_input.text().strip():
                 if hasattr(grant_filter_input, 'clear'):
@@ -113,6 +121,30 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     filter_type_widget.setLayout(filter_type_layout)
     filter_layout.addWidget(filter_type_widget)
 
+    subgroup_filter_widget = QWidget()
+    subgroup_filter_layout = QHBoxLayout()
+    subgroup_filter_layout.setContentsMargins(0, 0, 0, 0)
+
+    subgroup_filter_label = QLabel("サブグループフィルタ:")
+    subgroup_filter_label.setMinimumWidth(120)
+    subgroup_filter_label.setStyleSheet("font-weight: bold;")
+
+    subgroup_filter_combo = QComboBox()
+    subgroup_filter_combo.setObjectName("datasetDataEntrySubgroupCombo")
+    subgroup_filter_combo.setEditable(True)
+    subgroup_filter_combo.setInsertPolicy(QComboBox.NoInsert)
+    subgroup_filter_combo.setMaxVisibleItems(12)
+    try:
+        subgroup_filter_combo.view().setMinimumHeight(240)
+    except Exception:
+        pass
+
+    subgroup_filter_layout.addWidget(subgroup_filter_label)
+    subgroup_filter_layout.addWidget(subgroup_filter_combo)
+    subgroup_filter_layout.addStretch()
+    subgroup_filter_widget.setLayout(subgroup_filter_layout)
+    filter_layout.addWidget(subgroup_filter_widget)
+
     grant_filter_widget = QWidget()
     grant_filter_layout = QHBoxLayout()
     grant_filter_layout.setContentsMargins(0, 0, 0, 0)
@@ -141,7 +173,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     dataset_selection_layout = QHBoxLayout()
     dataset_selection_layout.setContentsMargins(0, 0, 0, 0)
 
-    dataset_label = QLabel("データエントリー対象データセット:")
+    dataset_label = QLabel("対象データセット:")
     dataset_label.setMinimumWidth(200)
 
     dataset_combo = QComboBox()
@@ -191,14 +223,8 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
 
     dataset_combo_completer.activated.connect(_on_dataset_combo_completer_activated)
 
-    show_all_btn = QPushButton("▼")
-    show_all_btn.setToolTip("全件リスト表示")
-    show_all_btn.setFixedWidth(28)
-    show_all_btn.clicked.connect(dataset_combo.showPopup)
-
     dataset_selection_layout.addWidget(dataset_label)
     dataset_selection_layout.addWidget(dataset_combo, 1)
-    dataset_selection_layout.addWidget(show_all_btn)
     dataset_selection_widget.setLayout(dataset_selection_layout)
     layout.addWidget(dataset_selection_widget)
     widget.dataset_combo = dataset_combo  # type: ignore[attr-defined]
@@ -713,7 +739,10 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
                 
                 # 正しいデータ構造から読み込み: {"data": {...}, "included": [...]}
                 subgroups = subgroup_data.get("included", [])
-                
+
+                subgroup_filter_combo.clear()
+                subgroup_filter_combo.addItem("全て", "")
+
                 for subgroup in subgroups:
                     # データ構造の検証
                     if not isinstance(subgroup, dict):
@@ -727,10 +756,11 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
                     
                     subgroup_id = subgroup.get("id", "")
                     subgroup_name = attrs.get("name", "")
-                    display_text = f"{subgroup_name} ({subgroup_id})"
-                    # サブグループフィルタ除去
-            
-            # サブグループフィルタ除去
+                    subjects = attrs.get("subjects", [])
+                    grant_count = len(subjects) if isinstance(subjects, list) else 0
+                    display_text = f"{subgroup_name} ({grant_count}件の課題)" if subgroup_name else subgroup_id
+                    if subgroup_id:
+                        subgroup_filter_combo.addItem(display_text, subgroup_id)
             
         except Exception as e:
             logger.error("サブグループ読み込みエラー: %s", e)
@@ -800,6 +830,18 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         
         return user_grant_numbers
 
+    def _extract_dataset_group_id(dataset: dict) -> str:
+        if not isinstance(dataset, dict):
+            return ""
+        rel = dataset.get("relationships", {}) if isinstance(dataset.get("relationships"), dict) else {}
+        try:
+            group_data = (rel.get("group") or {}).get("data") if isinstance(rel.get("group"), dict) else None
+            if isinstance(group_data, dict):
+                return str(group_data.get("id") or "")
+        except Exception:
+            return ""
+        return ""
+
     def populate_dataset_combo_with_filter(preserve_selection_id: str | None = None):
         """フィルタリングを適用してデータセットコンボボックスを更新"""
         dataset_path = get_dynamic_file_path("output/rde/data/dataset.json")
@@ -828,8 +870,11 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             elif filter_all_radio.isChecked():
                 filter_type = "all"
             
-            # サブグループフィルタ
-            # サブグループフィルタ除去
+            subgroup_filter_id = ""
+            try:
+                subgroup_filter_id = str(subgroup_filter_combo.currentData() or "")
+            except Exception:
+                subgroup_filter_id = ""
             
             # ユーザーのgrantNumber一覧を取得
             user_grant_numbers = get_user_grant_numbers()
@@ -847,6 +892,11 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
                 dataset_id = dataset.get("id", "")
                 name = attrs.get("name", "名前なし")
                 grant_number = attrs.get("grantNumber", "")
+
+                if subgroup_filter_id:
+                    dataset_group_id = _extract_dataset_group_id(dataset)
+                    if dataset_group_id != subgroup_filter_id:
+                        continue
                 
                 # グラント番号フィルタを先に適用
                 if grant_filter_text and grant_filter_text not in grant_number.lower():
@@ -1288,7 +1338,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     filter_user_only_radio.toggled.connect(on_filter_changed)
     filter_others_only_radio.toggled.connect(on_filter_changed)
     filter_all_radio.toggled.connect(on_filter_changed)
-    # サブグループフィルタ除去
+    subgroup_filter_combo.currentIndexChanged.connect(on_filter_changed)
     grant_filter_input.textChanged.connect(on_filter_changed)
     
     # 初期データ読み込みと表示時の自動更新をセット
@@ -1325,6 +1375,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             filter_all_radio,
             (filter_user_only_radio, filter_others_only_radio),
             grant_filter_input,
+            subgroup_filter_combo,
             lambda: populate_dataset_combo_with_filter(payload.id),
         )
         dataset_map = getattr(widget, 'dataset_map', {}) or {}

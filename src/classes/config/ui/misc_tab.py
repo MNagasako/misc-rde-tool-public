@@ -13,6 +13,7 @@ from pathlib import Path
 
 from config.common import REVISION
 from classes.managers.app_config_manager import get_config_manager
+from classes.core.platform import open_path, reveal_in_file_manager
 
 try:
     from qt_compat.widgets import (
@@ -752,10 +753,7 @@ class MiscTab(QWidget):
 
                 if box.clickedButton() == open_folder_btn:
                     try:
-                        if os.name == "nt":
-                            import subprocess
-
-                            subprocess.Popen(["explorer", "/select,", os.path.normpath(dst)], close_fds=True)
+                        reveal_in_file_manager(dst)
                     except Exception:
                         pass
                     QMessageBox.information(
@@ -1058,12 +1056,8 @@ class MiscTab(QWidget):
             logger.info(f"インストールディレクトリを開く: {app_dir}")
             
             # OSに応じてディレクトリを開く
-            if sys.platform == 'win32':
-                os.startfile(str(app_dir))
-            elif sys.platform == 'darwin':
-                os.system(f'open "{app_dir}"')
-            else:
-                os.system(f'xdg-open "{app_dir}"')
+            if not open_path(str(app_dir)):
+                raise RuntimeError("open_path failed")
                 
             logger.info("インストールディレクトリを開きました")
             

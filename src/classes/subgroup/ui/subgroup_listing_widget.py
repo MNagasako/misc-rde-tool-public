@@ -41,8 +41,8 @@ from PySide6.QtCore import (
     QAbstractProxyModel,
     QRect,
 )
-from PySide6.QtGui import QKeySequence, QBrush, QFont, QDesktopServices
-from PySide6.QtWidgets import QTableView, QStyledItemDelegate, QStyle
+from PySide6.QtGui import QKeySequence, QBrush, QFont, QDesktopServices, QPalette
+from PySide6.QtWidgets import QTableView, QStyledItemDelegate, QStyle, QStyleOptionHeader, QStyleOptionViewItem
 
 from classes.subgroup.util.subgroup_list_table_records import (
     SubgroupListColumn,
@@ -222,6 +222,106 @@ class PaginationProxyModel(QAbstractProxyModel):
             src.sort(column, order)
         except Exception:
             pass
+
+
+class WrapHeaderView(QHeaderView):
+    def __init__(self, orientation: Qt.Orientation, parent=None) -> None:
+        super().__init__(orientation, parent)
+        self.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.setSectionResizeMode(QHeaderView.Interactive)
+        self.setStretchLastSection(True)
+        self.setTextElideMode(Qt.ElideNone)
+        try:
+            self.sectionResized.connect(lambda *_args: self.updateGeometry())
+        except Exception:
+            pass
+
+    def sizeHint(self) -> QtCore.QSize:  # type: ignore[override]
+        base = super().sizeHint()
+        if self.orientation() != Qt.Horizontal:
+            return base
+        try:
+            fm = self.fontMetrics()
+            height = base.height()
+            for i in range(self.count()):
+                text = str(self.model().headerData(i, self.orientation(), Qt.DisplayRole) or "")
+                if not text:
+                    continue
+                width = max(20, int(self.sectionSize(i) or base.width()))
+                rect = fm.boundingRect(QRect(0, 0, width, 2000), Qt.TextWordWrap, text)
+                height = max(height, int(rect.height()) + 8)
+            base.setHeight(height)
+        except Exception:
+            pass
+        return base
+
+    def paintSection(self, painter, rect, logicalIndex: int) -> None:  # noqa: N802
+        if not rect.isValid():
+            return
+        try:
+            opt = QStyleOptionHeader()
+            self.initStyleOption(opt)
+            opt.rect = rect
+            opt.section = logicalIndex
+            opt.text = str(self.model().headerData(logicalIndex, self.orientation(), Qt.DisplayRole) or "")
+            style = self.style() if self.style() is not None else None
+            if style is None:
+                return
+            style.drawControl(QStyle.CE_HeaderSection, opt, painter, self)
+            text_rect = style.subElementRect(QStyle.SE_HeaderLabel, opt, self)
+            painter.save()
+            painter.setFont(opt.font)
+            painter.setPen(opt.palette.color(QPalette.Text))
+            painter.drawText(text_rect, Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignVCenter, opt.text)
+            painter.restore()
+        except Exception:
+            return
+
+
+class WrapTextDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index):  # noqa: N802
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        style = opt.widget.style() if opt.widget is not None else None
+        if style is None:
+            return super().paint(painter, option, index)
+
+        text = str(index.data(Qt.DisplayRole) or "")
+        opt.text = ""
+        style.drawControl(QStyle.CE_ItemViewItem, opt, painter, opt.widget)
+        if not text:
+            return
+
+        text_rect = style.subElementRect(QStyle.SE_ItemViewItemText, opt, opt.widget)
+        painter.save()
+        try:
+            if opt.state & QStyle.State_Selected:
+                painter.setPen(opt.palette.color(QPalette.HighlightedText))
+            else:
+                painter.setPen(opt.palette.color(QPalette.Text))
+            painter.setFont(opt.font)
+            painter.drawText(text_rect, Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignTop, text)
+        finally:
+            painter.restore()
+
+    def sizeHint(self, option, index):  # noqa: N802
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+        text = str(index.data(Qt.DisplayRole) or "")
+        if not text:
+            return super().sizeHint(option, index)
+        width = int(opt.rect.width()) if opt.rect.width() > 0 else 0
+        if width <= 0 and isinstance(opt.widget, QTableView):
+            try:
+                width = int(opt.widget.columnWidth(index.column()))
+            except Exception:
+                width = 0
+        width = max(20, width)
+        fm = opt.fontMetrics
+        rect = fm.boundingRect(QRect(0, 0, width, 2000), Qt.TextWordWrap, text)
+        size = super().sizeHint(option, index)
+        size.setHeight(max(size.height(), int(rect.height()) + 6))
+        return size
 
 
 class ColumnSelectorDialog(QDialog):
@@ -810,7 +910,7 @@ class SubgroupListingWidget(QWidget):
         self._table = QTableView(self)
         self._table.setSortingEnabled(True)
         try:
-            # Avoid word-wrap driven huge row heights; we control row heights explicitly.
+            # Avoid global word wrap; wrap only for specific columns via delegate.
             self._table.setWordWrap(False)
         except Exception:
             pass
@@ -821,9 +921,8 @@ class SubgroupListingWidget(QWidget):
             self._table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         except Exception:
             pass
-        header = self._table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.Interactive)
-        header.setStretchLastSection(True)
+        header = WrapHeaderView(Qt.Horizontal, self._table)
+        self._table.setHorizontalHeader(header)
         try:
             header.sectionResized.connect(lambda *_args: self._schedule_adjust_row_heights())
         except Exception:
@@ -1121,6 +1220,9 @@ class SubgroupListingWidget(QWidget):
             persist=False,
         )
 
+        self._apply_column_delegates()
+        self._apply_column_sizing()
+
         self._rebuild_text_filters_panel()
         self._apply_row_limit()
         self._apply_filters_now()
@@ -1133,6 +1235,60 @@ class SubgroupListingWidget(QWidget):
                 self._schedule_adjust_row_heights()
         except Exception:
             pass
+
+    def _apply_column_delegates(self) -> None:
+        if not hasattr(self, "_table") or self._table is None:
+            return
+        if not self._columns:
+            return
+        if not hasattr(self, "_wrap_delegate") or getattr(self, "_wrap_delegate") is None:
+            try:
+                self._wrap_delegate = WrapTextDelegate(self._table)  # type: ignore[attr-defined]
+            except Exception:
+                self._wrap_delegate = None  # type: ignore[attr-defined]
+        wrap_keys = {"subgroup_name", "description"}
+        for idx, col in enumerate(self._columns):
+            try:
+                if col.key in wrap_keys and getattr(self, "_wrap_delegate", None) is not None:
+                    self._table.setItemDelegateForColumn(idx, self._wrap_delegate)  # type: ignore[arg-type]
+                else:
+                    self._table.setItemDelegateForColumn(idx, None)
+            except Exception:
+                continue
+
+    def _apply_column_sizing(self) -> None:
+        if not hasattr(self, "_table") or self._table is None:
+            return
+        header = self._table.horizontalHeader() if self._table is not None else None
+        if header is None or not self._columns:
+            return
+        try:
+            header.setSectionResizeMode(QHeaderView.Interactive)
+        except Exception:
+            pass
+
+        try:
+            fm = self._table.fontMetrics()
+            char_w = max(6, int(fm.horizontalAdvance("0")))
+        except Exception:
+            char_w = 8
+
+        subjects_width = char_w * 15 + 16
+        numeric_width = char_w * 6 + 16
+        for idx, col in enumerate(self._columns):
+            try:
+                if self._table.isColumnHidden(idx):
+                    continue
+            except Exception:
+                pass
+            try:
+                header.setSectionResizeMode(idx, QHeaderView.Interactive)
+                if col.key == "subjects":
+                    self._table.setColumnWidth(idx, subjects_width)
+                elif col.key.endswith("_count"):
+                    self._table.setColumnWidth(idx, numeric_width)
+            except Exception:
+                continue
 
     def _on_reload_thread_finished(self) -> None:
         self._reload_thread = None
@@ -1254,13 +1410,30 @@ class SubgroupListingWidget(QWidget):
                 pass
             visible_cols.append(c)
 
+        wrap_keys = {"subgroup_name", "description"}
+
         for r in range(row_count):
             max_lines = 1
             for c in visible_cols:
                 try:
                     idx = model.index(r, c)
                     txt = str(model.data(idx, Qt.DisplayRole) or "")
-                    lines = max(1, len(txt.splitlines()))
+                    col_key = ""
+                    try:
+                        if 0 <= c < len(self._columns):
+                            col_key = self._columns[c].key
+                    except Exception:
+                        col_key = ""
+
+                    if col_key in wrap_keys:
+                        try:
+                            width = max(20, int(self._table.columnWidth(c)) - 12)
+                            rect = fm.boundingRect(QRect(0, 0, width, 2000), Qt.TextWordWrap, txt)
+                            lines = max(1, int((rect.height() + line_h - 1) // line_h))
+                        except Exception:
+                            lines = max(1, len(txt.splitlines()))
+                    else:
+                        lines = max(1, len(txt.splitlines()))
                     if lines > max_lines:
                         max_lines = lines
                 except Exception:

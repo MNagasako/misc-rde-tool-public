@@ -789,6 +789,8 @@ class PortalListingTab(QWidget):
             {
                 "managed:機関",
                 "managed:実施機関",
+                "managed:管理コード",
+                "managed:データセットID",
                 "managed:登録日",
                 "managed:エンバーゴ解除日",
                 "managed:エンバーゴ期間終了日",
@@ -801,6 +803,10 @@ class PortalListingTab(QWidget):
                 "managed:タイトル",
                 "managed:課題名",
                 "managed:要約",
+                "managed:このバージョンでの閲覧数",
+                "managed:ステータス",
+                "managed:状態",
+                "managed:公開状況",
             }
         )
 
@@ -808,8 +814,6 @@ class PortalListingTab(QWidget):
         fixed = [
             _ColumnDef("source", "範囲", preview_limit=16, default_visible=False),
             _ColumnDef("code", "code", preview_limit=64, default_visible=True),
-            _ColumnDef("dataset_id", "dataset_id", preview_limit=120, default_visible=True),
-            _ColumnDef("managed_status", "管理ステータス", preview_limit=64, default_visible=True),
             _ColumnDef("title", "タイトル", preview_limit=180, default_visible=True),
             _ColumnDef("url", "URL", preview_limit=220, default_visible=False),
             _ColumnDef("organization", "実施機関", preview_limit=120, default_visible=True),

@@ -95,6 +95,7 @@ class DataOwnerDebugDialog(QDialog):
         self._targets_text: str = ""
         self._trace_tree: QTreeWidget | None = None
         self._structure_text: QPlainTextEdit | None = None
+        self._last_copied_text: str = ""
 
         root = QVBoxLayout(self)
 
@@ -153,8 +154,11 @@ class DataOwnerDebugDialog(QDialog):
             logger.warning("DataOwnerDebugDialog size setup failed: %s", e)
 
     def _copy_to_clipboard(self, text: str) -> None:
+        payload = str(text or "")
+        self._last_copied_text = payload
         try:
-            QApplication.clipboard().setText(str(text or ""))
+            clipboard = QApplication.clipboard()
+            clipboard.setText(payload)
         except Exception:
             pass
 

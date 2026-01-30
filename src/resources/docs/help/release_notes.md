@@ -6,7 +6,14 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.6）。VERSION/README/配布物/ヘルプのバージョン表記を更新。 |
+| リリース/品質 | リビジョンアップ（v2.5.7）。VERSION/README/配布物/ヘルプのバージョン表記を更新。 |
+| テスト/品質 | pytest 段階ゲート → pre-build（Non-Widget/Widget + coverage）→ PyInstaller の段階ゲートを完走し、回帰を抑止。 |
+
+## v2.5.7 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.7）。VERSION/README/配布物/ヘルプのバージョン表記を更新。 |
 | テスト/品質 | pytest 段階ゲート → pre-build（Non-Widget/Widget + coverage）→ PyInstaller の段階ゲートを完走し、回帰を抑止。 |
 
 ## v2.5.6 の主な更新点

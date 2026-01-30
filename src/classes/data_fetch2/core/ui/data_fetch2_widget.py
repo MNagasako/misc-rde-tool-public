@@ -1441,8 +1441,9 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
                                             QDesktopServices.openUrl(QUrl.fromLocalFile(save_folder))
                                         except Exception:
                                             try:
-                                                import os
-                                                os.startfile(str(save_folder))
+                                                from classes.core.platform import open_path
+
+                                                open_path(str(save_folder))
                                             except Exception:
                                                 pass
                                 except Exception:

@@ -735,8 +735,8 @@ class MasterDataTab(QWidget):
         """保存先フォルダを開く"""
         try:
             from config.common import get_dynamic_file_path
+            from classes.core.platform import open_path
             import os
-            import subprocess
             
             master_dir = get_dynamic_file_path("input/master_data")
             
@@ -744,11 +744,8 @@ class MasterDataTab(QWidget):
             if not os.path.exists(master_dir):
                 os.makedirs(master_dir, exist_ok=True)
             
-            # エクスプローラーで開く
-            if os.name == 'nt':  # Windows
-                os.startfile(master_dir)
-            elif os.name == 'posix':  # macOS/Linux
-                subprocess.run(['open' if sys.platform == 'darwin' else 'xdg-open', master_dir])
+            if not open_path(master_dir):
+                raise RuntimeError("open_path failed")
             
             logger.info(f"マスタデータフォルダを開きました: {master_dir}")
             

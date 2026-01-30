@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional, Tuple, Union
 
 from config.common import ensure_directory_exists, get_dynamic_file_path
+from classes.core.platform import is_windows, launch_update_runner_cmd, launch_update_runner_ps
 
 logger = logging.getLogger(__name__)
 
@@ -410,7 +411,7 @@ def run_installer_and_exit(installer_path: str, log_path: Optional[str] = None) 
 
     NOTE: テストでは subprocess.Popen / os._exit を monkeypatch して使用すること。
     """
-    if sys.platform != "win32":
+    if not is_windows():
         raise RuntimeError("Windows以外ではインストーラ実行はサポートしていません")
 
     if not installer_path or not os.path.exists(installer_path):
@@ -457,7 +458,7 @@ def run_installer_and_restart(
 
     NOTE: テストでは subprocess.Popen / os._exit を monkeypatch して使用すること。
     """
-    if sys.platform != "win32":
+    if not is_windows():
         raise RuntimeError("Windows以外ではインストーラ実行はサポートしていません")
 
     if not installer_path or not os.path.exists(installer_path):
@@ -652,28 +653,6 @@ def run_installer_and_restart(
     except Exception as e:
         raise RuntimeError(f"更新ランナー(cmd)の作成に失敗しました: {e}")
 
-    # cmd.exe start でデタッチして実行（PowerShellより環境依存が少ない）
-    popen_args = [
-        "cmd.exe",
-        "/c",
-        "start",
-        "",
-        runner_cmd,
-    ]
-
-    creationflags = 0
-    try:
-        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
-        # VS Code のターミナル/タスク経由で起動したプロセスは Job Object に入っており、
-        # 親終了と同時に子プロセスがまとめて終了することがある。
-        # breakaway できる環境では、更新ランナーをジョブから切り離して生存させる。
-        try:
-            creationflags |= subprocess.CREATE_BREAKAWAY_FROM_JOB
-        except Exception:
-            pass
-    except Exception:
-        creationflags = 0
-
     try:
         logger.info("インストーラ起動(再起動付き): %s", installer_path)
         logger.info("再起動コマンド: %s %s", restart_exe, " ".join(restart_args or []))
@@ -682,8 +661,6 @@ def run_installer_and_restart(
         logger.info("更新ランナーログ: %s", runner_log)
         try:
             with open(runner_log, "a", encoding="utf-8") as lf:
-                lf.write(f"[launcher] ps={popen_args[0]} creationflags={creationflags}\n")
-                lf.write(f"[launcher] args={popen_args}\n")
                 lf.write(f"[launcher] runner_cmd={runner_cmd}\n")
                 lf.write(f"[launcher] runner_ps1={runner_ps1}\n")
         except Exception:
@@ -692,7 +669,13 @@ def run_installer_and_restart(
         logger.info("インストーラ起動(再起動付き): %s", installer_path)
 
     # まずはcmd runnerを起動
-    subprocess.Popen(popen_args, close_fds=True, creationflags=creationflags)
+    popen_args, creationflags = launch_update_runner_cmd(runner_cmd, runner_log)
+    try:
+        with open(runner_log, "a", encoding="utf-8") as lf:
+            lf.write(f"[launcher] ps={popen_args[0]} creationflags={creationflags}\n")
+            lf.write(f"[launcher] args={popen_args}\n")
+    except Exception:
+        pass
 
     # すぐに親が終了してしまうため、短時間だけ起動確認する（遅延起動もあるのでポーリング）
     if not bool(os.environ.get("PYTEST_CURRENT_TEST")):
@@ -704,20 +687,12 @@ def run_installer_and_restart(
                     lf.write("[launcher] cmd runner did not start; fallback to pwsh -File\n")
             except Exception:
                 pass
-            ps_exe = shutil.which("pwsh") or shutil.which("powershell") or "powershell"
-            fallback_args = [
-                "cmd.exe",
-                "/c",
-                "start",
-                "",
-                ps_exe,
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                runner_ps1,
-            ]
-            subprocess.Popen(fallback_args, close_fds=True)
+            fallback_args, _creationflags = launch_update_runner_ps(runner_ps1, runner_log)
+            try:
+                with open(runner_log, "a", encoding="utf-8") as lf:
+                    lf.write(f"[launcher] fallback_args={fallback_args}\n")
+            except Exception:
+                pass
             started = _wait_for_runner_start(runner_log=runner_log, timeout_sec=5.0)
 
         if not started:

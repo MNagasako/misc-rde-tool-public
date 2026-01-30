@@ -1842,7 +1842,10 @@ class FileSetTableWidget(QTableWidget):
             mapping_file_path = self._get_mapping_file_path(file_set)
             if mapping_file_path and os.path.exists(mapping_file_path):
                 # ファイルを外部プログラムで開く
-                os.startfile(mapping_file_path)
+                from classes.core.platform import open_path
+
+                if not open_path(mapping_file_path):
+                    raise RuntimeError("open_path failed")
             else:
                 QMessageBox.warning(self, "エラー", "マッピングファイルが見つかりません。")
         except Exception as e:

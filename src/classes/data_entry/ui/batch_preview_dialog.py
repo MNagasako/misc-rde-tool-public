@@ -963,15 +963,10 @@ class FileSetPreviewWidget(QWidget):
                 temp_folder = extended_config['temp_folder']
             
             if temp_folder and os.path.exists(temp_folder):
-                import subprocess
-                import platform
-                
-                if platform.system() == "Windows":
-                    subprocess.run(["explorer", temp_folder])
-                elif platform.system() == "Darwin":  # macOS
-                    subprocess.run(["open", temp_folder])
-                else:  # Linux
-                    subprocess.run(["xdg-open", temp_folder])
+                from classes.core.platform import open_path
+
+                if not open_path(temp_folder):
+                    raise RuntimeError("open_path failed")
             else:
                 QMessageBox.warning(self, "警告", "一時フォルダが存在しません。")
         except Exception as e:
@@ -991,15 +986,10 @@ class FileSetPreviewWidget(QWidget):
                 mapping_file = extended_config['mapping_file']
             
             if mapping_file and os.path.exists(mapping_file):
-                import subprocess
-                import platform
-                
-                if platform.system() == "Windows":
-                    subprocess.run(["start", mapping_file], shell=True)
-                elif platform.system() == "Darwin":  # macOS
-                    subprocess.run(["open", mapping_file])
-                else:  # Linux
-                    subprocess.run(["xdg-open", mapping_file])
+                from classes.core.platform import open_path
+
+                if not open_path(mapping_file):
+                    raise RuntimeError("open_path failed")
                     
                 logger.info("マッピングファイルを開きました: %s", mapping_file)
             else:

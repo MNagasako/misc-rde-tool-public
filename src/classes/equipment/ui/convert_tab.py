@@ -367,14 +367,20 @@ class ConvertTab(QWidget):
     
     def on_open_folder_clicked(self):
         """フォルダを開くボタンクリック"""
+        from classes.core.platform import open_path
+
         folder_path = get_equipment_root_dir()
         folder_path.mkdir(parents=True, exist_ok=True)
-        os.startfile(str(folder_path))
+        if not open_path(str(folder_path)):
+            QMessageBox.warning(self, "エラー", "フォルダを開けませんでした。")
     
     def on_open_latest_json_clicked(self):
         """最新JSONを開くボタンクリック"""
         if self.latest_json_path and os.path.exists(self.latest_json_path):
-            os.startfile(self.latest_json_path)
+            from classes.core.platform import open_path
+
+            if not open_path(self.latest_json_path):
+                QMessageBox.warning(self, "エラー", "JSONファイルを開けませんでした。")
 
     def refresh_from_disk(self):
         """ディスク上の出力状況を読み込む"""

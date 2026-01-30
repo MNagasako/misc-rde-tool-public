@@ -581,23 +581,32 @@ class ReportFetchTab(QWidget):
     
     def on_open_folder_clicked(self):
         """フォルダを開くボタンクリック"""
+        from classes.core.platform import open_path
+
         folder_path = get_reports_root_dir()
         folder_path.mkdir(parents=True, exist_ok=True)
-        os.startfile(str(folder_path))
+        if not open_path(str(folder_path)):
+            QMessageBox.warning(self, "エラー", "フォルダを開けませんでした。")
     
     def on_open_latest_excel_clicked(self):
         """最新Excelを開くボタンクリック"""
+        from classes.core.platform import open_path
+
         excel_path = self._path_if_exists(self.latest_excel_path)
         if excel_path:
-            os.startfile(str(excel_path))
+            if not open_path(str(excel_path)):
+                QMessageBox.warning(self, "エラー", "Excelファイルを開けませんでした。")
         else:
             QMessageBox.warning(self, "エラー", "Excelファイルが見つかりません。")
     
     def on_open_latest_json_clicked(self):
         """最新JSONを開くボタンクリック"""
+        from classes.core.platform import open_path
+
         json_path = self._path_if_exists(self.latest_json_path)
         if json_path:
-            os.startfile(str(json_path))
+            if not open_path(str(json_path)):
+                QMessageBox.warning(self, "エラー", "JSONファイルを開けませんでした。")
         else:
             QMessageBox.warning(self, "エラー", "JSONファイルが見つかりません。")
     

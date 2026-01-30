@@ -1737,13 +1737,15 @@ class UIController(UIControllerCore):
             def open_basic_info_data_dir():
                 import os
                 from config.common import ensure_directory_exists, get_dynamic_file_path
+                from classes.core.platform import open_path
 
                 directory = ensure_directory_exists(get_dynamic_file_path("output/rde/data"))
                 if not os.path.isdir(directory):
                     QMessageBox.warning(self.parent, "フォルダがありません", f"ディレクトリを作成できませんでした:\n{directory}")
                     return
                 try:
-                    os.startfile(directory)
+                    if not open_path(directory):
+                        raise RuntimeError("open_path failed")
                 except Exception as e:
                     QMessageBox.warning(self.parent, "フォルダを開けません", f"エクスプローラーで開けませんでした:\n{e}")
 
@@ -1789,7 +1791,7 @@ class UIController(UIControllerCore):
             open_summary_xlsx_btn = self.open_summary_xlsx_btn
 
             def open_summary_xlsx():
-                import os
+                from classes.core.platform import open_path
 
                 summary_files = list_summary_workbooks(OUTPUT_DIR, SUMMARY_XLSX_PATH)
                 if not summary_files:
@@ -1816,7 +1818,8 @@ class UIController(UIControllerCore):
                         return
 
                 try:
-                    os.startfile(str(target_path))
+                    if not open_path(str(target_path)):
+                        raise RuntimeError("open_path failed")
                 except Exception as e:
                     QMessageBox.warning(self.parent, "ファイルを開けません", f"Excelファイルを開けませんでした:\n{e}")
 
@@ -1828,13 +1831,15 @@ class UIController(UIControllerCore):
 
             def open_output_dir():
                 import os
+                from classes.core.platform import open_path
 
                 directory = ensure_directory_exists(OUTPUT_DIR)
                 if not os.path.isdir(directory):
                     QMessageBox.warning(self.parent, "フォルダがありません", f"ディレクトリを作成できませんでした:\n{directory}")
                     return
                 try:
-                    os.startfile(directory)
+                    if not open_path(directory):
+                        raise RuntimeError("open_path failed")
                 except Exception as e:
                     QMessageBox.warning(self.parent, "フォルダを開けません", f"エクスプローラーで開けませんでした:\n{e}")
 

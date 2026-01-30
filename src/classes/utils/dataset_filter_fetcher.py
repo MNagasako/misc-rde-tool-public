@@ -25,8 +25,10 @@ from qt_compat.widgets import (
 )
 
 from classes.dataset.util.dataset_dropdown_util import get_dataset_type_display_map
+from classes.dataset.util.dataset_list_table_records import _build_grant_number_to_subgroup_info
 from classes.theme import ThemeKey
 from classes.theme.theme_manager import get_color
+from config.common import get_dynamic_file_path
 
 try:
     from shiboken6 import isValid as qt_is_valid  # type: ignore
@@ -44,6 +46,7 @@ class DatasetFilterFetcher(QObject):
         self,
         dataset_json_path: str,
         info_json_path: Optional[str] = None,
+        subgroup_json_path: Optional[str] = None,
         combo: Optional[QComboBox] = None,
         *,
         show_text_search_field: bool = True,
@@ -53,11 +56,13 @@ class DatasetFilterFetcher(QObject):
         super().__init__(parent)
         self.dataset_json_path = dataset_json_path
         self.info_json_path = info_json_path
+        self.subgroup_json_path = subgroup_json_path
         self.combo = combo
         self._show_text_search_field = show_text_search_field
         self._clear_on_blank_click = clear_on_blank_click
         self._filter_widget: Optional[QWidget] = None
         self._program_combo: Optional[QComboBox] = None
+        self._subgroup_combo: Optional[QComboBox] = None
         self._grant_edit: Optional[QLineEdit] = None
         self._search_edit: Optional[QLineEdit] = None
         self._count_label: Optional[QLabel] = None
@@ -81,6 +86,7 @@ class DatasetFilterFetcher(QObject):
         self._logged_first_combo_input = False
         self._app_about_to_quit = False
         self._search_edit_authoritative = False
+        self._subgroup_map: Dict[str, Dict[str, str]] = {}
 
         # When running under pytest-qt (or any GUI app), Qt teardown order can be fragile.
         # Guard all deferred callbacks so they don't touch Qt objects during shutdown.
@@ -137,6 +143,14 @@ class DatasetFilterFetcher(QObject):
         self._populate_programs()
         self._program_combo.setCurrentIndex(0)
 
+        subgroup_label = QLabel("サブグループ:")
+        subgroup_label.setStyleSheet("font-weight: bold;")
+        subgroup_combo = QComboBox()
+        subgroup_combo.setObjectName("datasetFilterSubgroupCombo")
+        subgroup_combo.setMinimumWidth(200)
+        self._subgroup_combo = subgroup_combo
+        self._populate_subgroups()
+
         grant_label = QLabel("課題番号:")
         grant_label.setStyleSheet("font-weight: bold;")
         grant_edit = QLineEdit()
@@ -151,6 +165,8 @@ class DatasetFilterFetcher(QObject):
 
         filters_layout.addWidget(program_label)
         filters_layout.addWidget(program_combo)
+        filters_layout.addWidget(subgroup_label)
+        filters_layout.addWidget(subgroup_combo)
         filters_layout.addWidget(grant_label)
         filters_layout.addWidget(grant_edit)
         if self._show_text_search_field:
@@ -348,6 +364,19 @@ class DatasetFilterFetcher(QObject):
         if not view:
             return
 
+        if view is not None and view is not self._combo_popup_view:
+            try:
+                view.installEventFilter(self)
+                self._combo_popup_event_filter_installed = True
+            except Exception:
+                pass
+        if viewport is not None and viewport is not self._combo_popup_viewport:
+            try:
+                viewport.installEventFilter(self)
+                self._combo_popup_event_filter_installed = True
+            except Exception:
+                pass
+
         self._combo_popup_view = view
         self._combo_popup_viewport = viewport
 
@@ -417,6 +446,7 @@ class DatasetFilterFetcher(QObject):
 
         program_raw = self._program_combo.currentData() if self._program_combo else "all"
         program_filter = program_raw or "all"
+        subgroup_filter = self._subgroup_combo.currentData() if self._subgroup_combo else ""
         grant_filter = (self._grant_edit.text().strip() if self._grant_edit else "").lower()
         search_filter = (
             self._search_edit.text().strip() if self._search_edit else ""
@@ -428,8 +458,11 @@ class DatasetFilterFetcher(QObject):
             dataset_type = attr.get("datasetType", "")
             grant_number = attr.get("grantNumber", "")
             search_blob = dataset.get("_search_blob", "")
+            dataset_group_id = str(dataset.get("_group_id") or "")
 
             if program_filter != "all" and dataset_type != program_filter:
+                continue
+            if subgroup_filter and str(subgroup_filter) != dataset_group_id:
                 continue
             if grant_filter and grant_filter not in grant_number.lower():
                 continue
@@ -498,9 +531,11 @@ class DatasetFilterFetcher(QObject):
                 self._typing_popup_active = True
                 self._suppress_popup_focus_steal_for_typing()
                 self.combo.showPopup()
+                # Ensure we re-apply suppression in case the popup view is created lazily.
+                self._suppress_popup_focus_steal_for_typing()
                 # Ensure refocus happens after showPopup() side-effects.
                 QTimer.singleShot(0, self._restore_combo_line_edit_focus)
-                QTimer.singleShot(30, self._restore_combo_line_edit_focus)
+                QTimer.singleShot(50, self._restore_combo_line_edit_focus)
 
             QTimer.singleShot(0, _show_and_refocus)
         except Exception:
@@ -547,21 +582,125 @@ class DatasetFilterFetcher(QObject):
             items = []
 
         datasets: List[Dict] = []
+        subgroup_map = self._load_subgroup_map()
+        grant_to_subgroup: Dict[str, Dict[str, str]] = {}
+        try:
+            subgroup_path = self.subgroup_json_path or get_dynamic_file_path("output/rde/data/subGroup.json")
+            if subgroup_path and os.path.exists(subgroup_path):
+                with open(subgroup_path, "r", encoding="utf-8") as f:
+                    subgroup_payload = json.load(f)
+                grant_to_subgroup = _build_grant_number_to_subgroup_info(subgroup_payload)
+        except Exception:
+            grant_to_subgroup = {}
+        def _extract_group_id(entry_rel: dict, entry_attr: dict) -> str:
+            group_id_local = ""
+            rel = entry_rel if isinstance(entry_rel, dict) else {}
+            for key in ("group", "subgroup", "subGroup", "sub_group", "groups", "subGroups"):
+                try:
+                    group_data = (rel.get(key) or {}).get("data") if isinstance(rel.get(key), dict) else None
+                    if isinstance(group_data, dict):
+                        group_id_local = str(group_data.get("id") or "")
+                        if group_id_local:
+                            return group_id_local
+                    if isinstance(group_data, list) and group_data:
+                        for item in group_data:
+                            if isinstance(item, dict) and item.get("id"):
+                                return str(item.get("id"))
+                except Exception:
+                    continue
+            attr = entry_attr if isinstance(entry_attr, dict) else {}
+            for key in ("groupId", "subgroupId", "subGroupId", "sub_group_id"):
+                try:
+                    value = attr.get(key)
+                    if value:
+                        return str(value)
+                except Exception:
+                    continue
+            return group_id_local
+
         for entry in items:
             if not isinstance(entry, dict):
                 continue
             attr = entry.get("attributes", {})
+            rel = entry.get("relationships", {}) if isinstance(entry.get("relationships"), dict) else {}
+            group_id = _extract_group_id(rel, attr)
+            grant_number = str(attr.get("grantNumber") or "").strip()
+            subgroup_info = None
+            if not group_id and grant_number:
+                subgroup_info = grant_to_subgroup.get(grant_number)
+                if isinstance(subgroup_info, dict):
+                    group_id = str(subgroup_info.get("id") or "")
             search_parts = [
                 attr.get("name", ""),
                 attr.get("grantNumber", ""),
                 attr.get("subjectTitle", ""),
                 attr.get("description", ""),
             ]
+            if group_id and group_id in subgroup_map:
+                sg = subgroup_map[group_id]
+                search_parts.append(sg.get("name", ""))
+                search_parts.append(sg.get("description", ""))
+                entry["_subgroup_name"] = sg.get("name", "")
+                entry["_subgroup_description"] = sg.get("description", "")
+            elif isinstance(subgroup_info, dict):
+                search_parts.append(subgroup_info.get("name", ""))
+                search_parts.append(subgroup_info.get("description", ""))
+                entry["_subgroup_name"] = subgroup_info.get("name", "")
+                entry["_subgroup_description"] = subgroup_info.get("description", "")
             search_blob = " ".join(part for part in search_parts if part).lower()
             entry["_search_blob"] = search_blob
+            entry["_group_id"] = group_id
             datasets.append(entry)
 
         self._datasets = datasets
+
+    def _load_subgroup_map(self) -> Dict[str, Dict[str, str]]:
+        if self._subgroup_map:
+            return self._subgroup_map
+
+        path = self.subgroup_json_path
+        if not path:
+            path = get_dynamic_file_path("output/rde/data/subGroup.json")
+        if not path or not os.path.exists(path):
+            self._subgroup_map = {}
+            return self._subgroup_map
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except Exception:
+            self._subgroup_map = {}
+            return self._subgroup_map
+
+        included = []
+        if isinstance(payload, dict):
+            if isinstance(payload.get("included"), list):
+                included = payload.get("included") or []
+            elif isinstance(payload.get("data"), list):
+                included = payload.get("data") or []
+        elif isinstance(payload, list):
+            included = payload
+
+        subgroup_map: Dict[str, Dict[str, str]] = {}
+        for item in included:
+            if not isinstance(item, dict):
+                continue
+            if item.get("type") != "group":
+                continue
+            attrs = item.get("attributes", {}) if isinstance(item.get("attributes"), dict) else {}
+            if attrs.get("groupType") != "TEAM":
+                continue
+            gid = str(item.get("id") or "")
+            if not gid:
+                continue
+            subgroup_map[gid] = {
+                "name": str(attrs.get("name", "") or ""),
+                "description": str(attrs.get("description", "") or ""),
+                "subjects": attrs.get("subjects", []),
+            }
+
+        self._subgroup_map = subgroup_map
+        return self._subgroup_map
 
     def _populate_programs(self) -> None:
         if not self._program_combo:
@@ -581,9 +720,30 @@ class DatasetFilterFetcher(QObject):
             label = type_map.get(dtype, dtype)
             self._program_combo.addItem(label, dtype)
 
+    def _populate_subgroups(self) -> None:
+        if not self._subgroup_combo:
+            return
+
+        self._subgroup_combo.clear()
+        self._subgroup_combo.addItem("全て", "")
+
+        subgroup_map = self._load_subgroup_map()
+        items: List[tuple[str, str]] = []
+        for gid, info in subgroup_map.items():
+            name = str(info.get("name") or "")
+            subjects = info.get("subjects") if isinstance(info.get("subjects"), list) else []
+            grant_count = len(subjects) if subjects else 0
+            label = f"{name} ({grant_count}件の課題)" if name else gid
+            items.append((label, gid))
+
+        for label, gid in sorted(items, key=lambda x: x[0]):
+            self._subgroup_combo.addItem(label, gid)
+
     def _connect_filter_signals(self) -> None:
         if self._program_combo:
             self._program_combo.currentIndexChanged.connect(lambda _: self.apply_filters())
+        if self._subgroup_combo:
+            self._subgroup_combo.currentIndexChanged.connect(lambda _: self.apply_filters())
         if self._grant_edit:
             self._grant_edit.textChanged.connect(lambda _: self.apply_filters())
         if self._search_edit:

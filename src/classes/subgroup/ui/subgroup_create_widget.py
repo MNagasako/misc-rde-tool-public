@@ -3,7 +3,7 @@ import json
 import logging
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QLabel, QScrollArea, QPushButton, QHBoxLayout, 
-    QMessageBox, QTabWidget, QDialog, QApplication, QComboBox, QSizePolicy
+    QMessageBox, QTabWidget, QDialog, QApplication, QComboBox, QSizePolicy, QLineEdit
 )
 from ..core import subgroup_api_helper
 from ..util.subgroup_ui_helpers import (
@@ -233,6 +233,16 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     filter_row.addWidget(refresh_btn)
     filter_row.addStretch()
     existing_load_layout.addLayout(filter_row)
+
+    pre_filter_row = QHBoxLayout()
+    pre_filter_label = QLabel("部分一致フィルタ:")
+    pre_filter_input = QLineEdit()
+    pre_filter_input.setObjectName("existingSubgroupPreFilterInput")
+    pre_filter_input.setPlaceholderText("サブグループ名・説明で絞り込み（部分一致）")
+    pre_filter_row.addWidget(pre_filter_label)
+    pre_filter_row.addWidget(pre_filter_input)
+    pre_filter_row.addStretch()
+    existing_load_layout.addLayout(pre_filter_row)
 
     existing_group_combo = QComboBox()
     existing_group_combo.setObjectName("existingSubgroupCombo")
@@ -497,7 +507,12 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     try:
         from .subgroup_edit_widget import SubgroupSelector
 
-        selector = SubgroupSelector(existing_group_combo, filter_combo, on_selection_changed=None)
+        selector = SubgroupSelector(
+            existing_group_combo,
+            filter_combo,
+            on_selection_changed=None,
+            pre_filter_input=pre_filter_input,
+        )
         selector.load_existing_subgroups()
 
         # 新規作成タブでは「選択だけ」で外部チェック等を走らせないため、

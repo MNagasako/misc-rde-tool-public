@@ -1565,16 +1565,6 @@ class AISuggestionDialog(QDialog):
         self.extension_dataset_combo.setInsertPolicy(QComboBox.NoInsert)
         self.extension_dataset_combo.setMaxVisibleItems(12)
         self.extension_dataset_combo.lineEdit().setPlaceholderText("データセットを検索・選択してください")
-
-        # コンボボックス高さを2倍（フォントサイズは変更しない）
-        try:
-            base_h = self.extension_dataset_combo.sizeHint().height()
-            if base_h and base_h > 0:
-                self.extension_dataset_combo.setFixedHeight(base_h * 2)
-                if self.extension_dataset_combo.lineEdit():
-                    self.extension_dataset_combo.lineEdit().setMinimumHeight(base_h * 2 - 6)
-        except Exception:
-            pass
         dataset_combo_layout.addWidget(self.extension_dataset_combo)
         
         dataset_select_layout.addWidget(dataset_combo_container)
@@ -4611,7 +4601,10 @@ class AISuggestionDialog(QDialog):
                 except Exception:
                     pass
                 try:
-                    os.startfile(path)  # noqa: S606
+                    from classes.core.platform import open_path
+
+                    if not open_path(path):
+                        raise RuntimeError("open_path failed")
                 except Exception as e:
                     QMessageBox.warning(self, "警告", f"標準エディタで開けませんでした:\n{path}\n\n{e}")
             except Exception:
@@ -7936,12 +7929,14 @@ ARIMNO: {{ARIMNO}}
 
             dataset_json_path = get_dynamic_file_path('output/rde/data/dataset.json')
             info_json_path = get_dynamic_file_path('output/rde/data/info.json')
+            subgroup_json_path = get_dynamic_file_path('output/rde/data/subGroup.json')
 
             logger.debug("データセット選択初期化を開始: %s", dataset_json_path)
 
             self._dataset_filter_fetcher = DatasetFilterFetcher(
                 dataset_json_path=dataset_json_path,
                 info_json_path=info_json_path,
+                subgroup_json_path=subgroup_json_path,
                 combo=self.extension_dataset_combo,
                 show_text_search_field=False,
                 clear_on_blank_click=True,

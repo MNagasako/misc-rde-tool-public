@@ -263,9 +263,13 @@ def relax_dataset_edit_filters_for_launch(
     all_radio,
     other_radios: Optional[Iterable] = None,
     grant_filter_edit=None,
+    subgroup_combo=None,
     apply_filter_callback: Optional[Callable[[], None]] = None,
 ) -> bool:
     """Switch filter UI to the loosest mode prior to dataset handoff."""
+    if apply_filter_callback is None and callable(subgroup_combo):
+        apply_filter_callback = subgroup_combo
+        subgroup_combo = None
     controls = []
     for control in filter(None, [all_radio, grant_filter_edit]):
         if hasattr(control, 'blockSignals'):
@@ -279,6 +283,10 @@ def relax_dataset_edit_filters_for_launch(
         if all_radio is not None and hasattr(all_radio, 'isChecked') and not all_radio.isChecked():
             all_radio.setChecked(True)
             changed = True
+        if subgroup_combo is not None and hasattr(subgroup_combo, 'currentIndex'):
+            if subgroup_combo.currentIndex() != 0:
+                subgroup_combo.setCurrentIndex(0)
+                changed = True
         if grant_filter_edit is not None and hasattr(grant_filter_edit, 'text'):
             if grant_filter_edit.text().strip():
                 if hasattr(grant_filter_edit, 'clear'):
@@ -846,6 +854,32 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     
     filter_type_widget.setLayout(filter_type_layout)
     filter_layout.addWidget(filter_type_widget)
+
+    subgroup_filter_widget = QWidget()
+    subgroup_filter_layout = QHBoxLayout()
+    subgroup_filter_layout.setContentsMargins(0, 0, 0, 0)
+
+    subgroup_filter_label = QLabel("サブグループ絞り込み:")
+    subgroup_filter_label.setMinimumWidth(120)
+    subgroup_filter_label.setStyleSheet("font-weight: bold;")
+
+    subgroup_filter_combo = QComboBox()
+    subgroup_filter_combo.setObjectName("dataset_subgroup_filter_combo")
+    subgroup_filter_combo.setEditable(True)
+    subgroup_filter_combo.setInsertPolicy(QComboBox.NoInsert)
+    subgroup_filter_combo.setMaxVisibleItems(12)
+    if subgroup_filter_combo.lineEdit():
+        subgroup_filter_combo.lineEdit().setPlaceholderText("サブグループ名・説明で絞り込み（部分一致）")
+    try:
+        subgroup_filter_combo.view().setMinimumHeight(240)
+    except Exception:
+        pass
+
+    subgroup_filter_layout.addWidget(subgroup_filter_label)
+    subgroup_filter_layout.addWidget(subgroup_filter_combo)
+    subgroup_filter_layout.addStretch()
+    subgroup_filter_widget.setLayout(subgroup_filter_layout)
+    filter_layout.addWidget(subgroup_filter_widget)
     
     # 課題番号部分一致検索
     grant_number_filter_widget = QWidget()
@@ -1253,13 +1287,108 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         "raw_data": None,  # 元のJSONデータ
         "last_modified": None,  # ファイルの最終更新時刻
         "user_grant_numbers": None,  # ユーザーのgrantNumber一覧
-        "filtered_datasets": {},  # フィルタごとのキャッシュ: {(filter_type, grant_filter): datasets}
-        "display_data": {}  # 表示用データのキャッシュ: {(filter_type, grant_filter): display_names}
+        "filtered_datasets": {},  # フィルタごとのキャッシュ: {(filter_type, grant_filter, subgroup_id): datasets}
+        "display_data": {}  # 表示用データのキャッシュ: {(filter_type, grant_filter, subgroup_id): display_names}
     }
+
+    def _extract_dataset_group_id(dataset: dict) -> str:
+        if not isinstance(dataset, dict):
+            return ""
+        rel = dataset.get("relationships", {}) if isinstance(dataset.get("relationships"), dict) else {}
+        try:
+            group_data = (rel.get("group") or {}).get("data") if isinstance(rel.get("group"), dict) else None
+            if isinstance(group_data, dict):
+                return str(group_data.get("id") or "")
+        except Exception:
+            return ""
+        return ""
+
+    def _load_subgroup_filter_items() -> None:
+        try:
+            subgroup_filter_combo.blockSignals(True)
+        except Exception:
+            pass
+        try:
+            subgroup_filter_combo.clear()
+            subgroup_filter_combo.addItem("全て", "")
+            subgroup_path = get_dynamic_file_path("output/rde/data/subGroup.json")
+            if not subgroup_path or not os.path.exists(subgroup_path):
+                return
+            with open(subgroup_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            subgroups = data.get("included", []) if isinstance(data, dict) else []
+            items = []
+            for subgroup in subgroups:
+                if not isinstance(subgroup, dict):
+                    continue
+                attrs = subgroup.get("attributes", {})
+                if not isinstance(attrs, dict):
+                    continue
+                if attrs.get("groupType") != "TEAM":
+                    continue
+                subgroup_id = str(subgroup.get("id") or "")
+                if not subgroup_id:
+                    continue
+                name = str(attrs.get("name") or "")
+                subjects = attrs.get("subjects", [])
+                grant_count = len(subjects) if isinstance(subjects, list) else 0
+                label = f"{name} ({grant_count}件の課題)" if name else subgroup_id
+                items.append((label, subgroup_id, str(attrs.get("description") or "")))
+
+            for label, subgroup_id, desc in sorted(items, key=lambda x: x[0]):
+                subgroup_filter_combo.addItem(label, subgroup_id)
+                if desc:
+                    try:
+                        subgroup_filter_combo.setItemData(
+                            subgroup_filter_combo.count() - 1,
+                            desc,
+                            Qt.ToolTipRole,
+                        )
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.debug("サブグループフィルタ読み込み失敗: %s", e)
+        finally:
+            try:
+                subgroup_filter_combo.blockSignals(False)
+            except Exception:
+                pass
+
+    def _get_subgroup_filter_id() -> str:
+        try:
+            subgroup_id = str(subgroup_filter_combo.currentData() or "")
+        except Exception:
+            subgroup_id = ""
+        if subgroup_id:
+            return subgroup_id
+        text = ""
+        try:
+            text = subgroup_filter_combo.currentText().strip()
+        except Exception:
+            text = ""
+        if not text or text == "全て":
+            return ""
+        for i in range(subgroup_filter_combo.count()):
+            item_text = subgroup_filter_combo.itemText(i)
+            if text in item_text:
+                try:
+                    return str(subgroup_filter_combo.itemData(i) or "")
+                except Exception:
+                    return ""
+            try:
+                tooltip = subgroup_filter_combo.itemData(i, Qt.ToolTipRole) or ""
+            except Exception:
+                tooltip = ""
+            if tooltip and text in str(tooltip):
+                try:
+                    return str(subgroup_filter_combo.itemData(i) or "")
+                except Exception:
+                    return ""
+        return ""
     
-    def get_cache_key(filter_type, grant_number_filter):
+    def get_cache_key(filter_type, grant_number_filter, subgroup_filter_id=""):
         """キャッシュキーを生成"""
-        return (filter_type, grant_number_filter.lower().strip())
+        return (filter_type, grant_number_filter.lower().strip(), str(subgroup_filter_id or ""))
     
     def is_cache_valid():
         """キャッシュが有効かどうかを判定"""
@@ -1316,7 +1445,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         progress.setAutoReset(True)
         return progress
     
-    def process_datasets_with_progress(datasets, user_grant_numbers, filter_type, grant_number_filter):
+    def process_datasets_with_progress(datasets, user_grant_numbers, filter_type, grant_number_filter, subgroup_filter_id=""):
         """プログレス表示付きでデータセットを処理"""
         total_datasets = len(datasets)
         if total_datasets == 0:
@@ -1360,6 +1489,12 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                     if i < 10:
                         logger.debug("データセット%s: '%s' (課題番号: '%s')", i+1, dataset_name, dataset_grant_number)
                     
+                    # サブグループフィルタを適用
+                    if subgroup_filter_id:
+                        dataset_group_id = _extract_dataset_group_id(dataset)
+                        if dataset_group_id != subgroup_filter_id:
+                            continue
+
                     # 課題番号部分一致フィルタを適用
                     if grant_number_filter and grant_number_filter.lower() not in dataset_grant_number.lower():
                         continue
@@ -1664,6 +1799,17 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             # プレースホルダーテキストを設定
             if existing_dataset_combo.lineEdit():
                 filter_desc = f"フィルタ: {filter_type}"
+                subgroup_text = ""
+                try:
+                    subgroup_text = subgroup_filter_combo.currentText().strip()
+                except Exception:
+                    subgroup_text = ""
+                try:
+                    subgroup_id = str(subgroup_filter_combo.currentData() or "")
+                except Exception:
+                    subgroup_id = ""
+                if subgroup_id and subgroup_text and subgroup_text != "全て":
+                    filter_desc += f", サブグループ: '{subgroup_text}'"
                 if grant_number_filter:
                     filter_desc += f", 課題番号: '{grant_number_filter}'"
                 existing_dataset_combo.lineEdit().setPlaceholderText(f"データセット ({dataset_count}件) から検索... [{filter_desc}]")
@@ -1695,6 +1841,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     def load_existing_datasets(
         filter_type="user_only",
         grant_number_filter="",
+        subgroup_filter_id="",
         force_reload=False,
         preserve_selection_id: str | None = None,
     ):
@@ -1710,11 +1857,16 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         dataset_path = get_dynamic_file_path("output/rde/data/dataset.json")
         logger.debug("データセットファイルパス: %s", dataset_path)
         logger.debug("ファイル存在確認: %s", os.path.exists(dataset_path))
-        logger.debug("フィルタタイプ: %s, 課題番号フィルタ: '%s'", filter_type, grant_number_filter)
+        logger.debug(
+            "フィルタタイプ: %s, 課題番号フィルタ: '%s', サブグループ: '%s'",
+            filter_type,
+            grant_number_filter,
+            subgroup_filter_id,
+        )
         logger.debug("強制再読み込み: %s", force_reload)
         
         # キャッシュキーを生成
-        cache_key = get_cache_key(filter_type, grant_number_filter)
+        cache_key = get_cache_key(filter_type, grant_number_filter, subgroup_filter_id)
         
         # キャッシュが有効で、強制再読み込みでない場合はキャッシュを使用
         if not force_reload and is_cache_valid() and cache_key in dataset_cache["filtered_datasets"]:
@@ -1866,7 +2018,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             
             # フィルタリング処理（プログレス表示付き）
             datasets, grant_number_matches = process_datasets_with_progress(
-                all_datasets, user_grant_numbers, filter_type, grant_number_filter
+                all_datasets, user_grant_numbers, filter_type, grant_number_filter, subgroup_filter_id
             )
             
             # 課題番号ごとのマッチ結果を表示（ユーザー所属のみ）
@@ -1878,7 +2030,12 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             # セキュリティ情報をログ出力
             logger.info("データセット編集: 全データセット数=%s, 表示データセット数=%s", len(all_datasets), len(datasets))
             logger.info("ユーザーが属するgrantNumber: %s", sorted(user_grant_numbers))
-            logger.info("フィルタ設定: タイプ=%s, 課題番号='%s'", filter_type, grant_number_filter)
+            logger.info(
+                "フィルタ設定: タイプ=%s, 課題番号='%s', サブグループ='%s'",
+                filter_type,
+                grant_number_filter,
+                subgroup_filter_id,
+            )
             
             # 表示名リストを作成（プログレス表示付き）
             display_names = create_display_names_with_progress(datasets, user_grant_numbers)
@@ -4427,6 +4584,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             filter_all_radio,
             (filter_user_only_radio, filter_others_only_radio),
             grant_number_filter_edit,
+            subgroup_filter_combo,
             lambda: apply_filter(force_reload=False),
         )
 
@@ -4479,15 +4637,26 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         # 現在のフィルタ設定を取得
         filter_type = get_current_filter_type()
         grant_number_filter = grant_number_filter_edit.text().strip()
+        subgroup_filter_id = _get_subgroup_filter_id()
         reset_update_override("フィルタ変更", filter_type, grant_number_filter)
         
         if force_reload:
-            logger.info("キャッシュ更新: タイプ=%s, 課題番号='%s'", filter_type, grant_number_filter)
+            logger.info(
+                "キャッシュ更新: タイプ=%s, 課題番号='%s', サブグループ='%s'",
+                filter_type,
+                grant_number_filter,
+                subgroup_filter_id,
+            )
         else:
-            logger.info("フィルタ適用: タイプ=%s, 課題番号='%s'", filter_type, grant_number_filter)
+            logger.info(
+                "フィルタ適用: タイプ=%s, 課題番号='%s', サブグループ='%s'",
+                filter_type,
+                grant_number_filter,
+                subgroup_filter_id,
+            )
         
         # データセット一覧を再読み込み
-        load_existing_datasets(filter_type, grant_number_filter, force_reload)
+        load_existing_datasets(filter_type, grant_number_filter, subgroup_filter_id, force_reload)
         
         # 選択をクリア
         existing_dataset_combo.setCurrentIndex(-1)
@@ -4593,6 +4762,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     filter_user_only_radio.toggled.connect(lambda: apply_filter() if filter_user_only_radio.isChecked() else None)
     filter_others_only_radio.toggled.connect(lambda: apply_filter() if filter_others_only_radio.isChecked() else None)
     filter_all_radio.toggled.connect(lambda: apply_filter() if filter_all_radio.isChecked() else None)
+    subgroup_filter_combo.currentIndexChanged.connect(on_filter_text_changed)
+    if subgroup_filter_combo.lineEdit():
+        subgroup_filter_combo.lineEdit().textChanged.connect(on_filter_text_changed)
     grant_number_filter_edit.textChanged.connect(on_filter_text_changed)  # リアルタイム絞り込み
     enable_update_override_button.clicked.connect(on_enable_update_override)
     
@@ -4650,9 +4822,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 # 現在のフィルタ設定でデータセットリストを再読み込み（強制再読み込み）
                 filter_type = get_current_filter_type()
                 grant_number_filter = grant_number_filter_edit.text().strip()
+                subgroup_filter_id = _get_subgroup_filter_id()
                 # キャッシュをクリアして強制再読み込み
                 clear_cache()
-                load_existing_datasets(filter_type, grant_number_filter, force_reload=True)
+                load_existing_datasets(filter_type, grant_number_filter, subgroup_filter_id, force_reload=True)
                 
                 # 更新したデータセットを再選択
                 if current_dataset_id:
@@ -4751,7 +4924,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
 
     def _initial_load_and_register_receiver() -> None:
         try:
-            load_existing_datasets("user_only", "")
+            _load_subgroup_filter_items()
+            load_existing_datasets("user_only", "", "")
         finally:
             _register_dataset_launch_receiver_once()
 
@@ -4803,6 +4977,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         """現在のフィルタ設定でリフレッシュ"""
         filter_type = get_current_filter_type()
         grant_number_filter = grant_number_filter_edit.text().strip()
+        subgroup_filter_id = _get_subgroup_filter_id()
         selection_id = _get_current_dataset_id()
         
         if force_reload:
@@ -4812,6 +4987,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         load_existing_datasets(
             filter_type,
             grant_number_filter,
+            subgroup_filter_id,
             force_reload,
             preserve_selection_id=selection_id,
         )

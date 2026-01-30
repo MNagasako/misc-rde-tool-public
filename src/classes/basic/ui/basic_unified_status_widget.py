@@ -1215,7 +1215,10 @@ class BasicUnifiedStatusWidget(QWidget):
                 QMessageBox.warning(self, "ファイルがありません", f"対象が存在しません:\n{target_path}")
                 return
 
-            os.startfile(target_path)
+            from classes.core.platform import open_path
+
+            if not open_path(target_path):
+                raise RuntimeError("open_path failed")
         except Exception as e:
             QMessageBox.warning(self, "開けません", f"対象を開けませんでした:\n{e}")
 
