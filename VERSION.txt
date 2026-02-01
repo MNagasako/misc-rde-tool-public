@@ -1,4 +1,9 @@
-2.5.6
+2.5.7
+
+2026-02-02 v2.5.7 - 配布物整合（latest.json/checksum/README）
+	- 配布物（インストーラ）を v2.5.7 に更新。
+	- latest.json / checksums.sha256 を新配布物に整合。
+	- README の表記を v2.5.7 に更新。
 
 2026-01-26 v2.5.6 - 配布物整合（latest.json/checksum/README）
 	- 配布物（インストーラ）を v2.5.6 に更新。
