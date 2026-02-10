@@ -15,9 +15,13 @@ This module is UI-agnostic; it outputs merged row dicts suitable for tables.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import os
 import re
 from typing import Any, Iterable, Optional
 import unicodedata
+
+from config.common import get_dynamic_file_path
 
 
 def _to_str(value: Any) -> str:
@@ -43,6 +47,61 @@ def _normalize_cmp_text(text: str) -> str:
     return t
 
 
+def _format_user_label(user_name: str, organization_name: str) -> str:
+    name = (user_name or "").strip()
+    org = (organization_name or "").strip()
+    if name and org:
+        return f"{name} ({org})"
+    return name or org
+
+
+def _build_user_label_map_from_included_users(payload: Any) -> dict[str, str]:
+    if not isinstance(payload, dict):
+        return {}
+    included = payload.get("included")
+    if not isinstance(included, list):
+        return {}
+    result: dict[str, str] = {}
+    for inc in included:
+        if not isinstance(inc, dict):
+            continue
+        if _to_str(inc.get("type") or "").strip() != "user":
+            continue
+        user_id = _to_str(inc.get("id") or "").strip()
+        attrs = inc.get("attributes") if isinstance(inc.get("attributes"), dict) else {}
+        if not user_id or not isinstance(attrs, dict):
+            continue
+        user_name = _to_str(attrs.get("userName") or attrs.get("name") or "").strip()
+        org_name = _to_str(attrs.get("organizationName") or "").strip()
+        label = _format_user_label(user_name, org_name)
+        if label:
+            result[user_id] = label
+    return result
+
+
+def _resolve_dataset_manager_label(dataset_id: str) -> str:
+    dsid = _to_str(dataset_id or "").strip()
+    if not dsid:
+        return ""
+    detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dsid}.json")
+    if not detail_path or not os.path.exists(detail_path):
+        return ""
+    try:
+        with open(detail_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception:
+        return ""
+
+    relationships = ((payload.get("data") or {}).get("relationships") or {})
+    manager_data = ((relationships.get("manager") or {}).get("data") or {})
+    manager_id = _to_str(manager_data.get("id") or "").strip()
+    if not manager_id:
+        return ""
+
+    label_map = _build_user_label_map_from_included_users(payload)
+    return label_map.get(manager_id, "")
+
+
 def extract_public_code(record: dict) -> str:
     return _to_str(record.get("code") or "").strip()
 
@@ -57,6 +116,7 @@ def extract_public_dataset_id(record: dict) -> str:
 def normalize_public_record(record: dict) -> dict[str, Any]:
     """Flatten public cache record into a row dict for listing."""
 
+    fields = record.get("fields") if isinstance(record.get("fields"), dict) else {}
     fields_raw = record.get("fields_raw") if isinstance(record.get("fields_raw"), dict) else {}
     metrics_raw = record.get("data_metrics_raw") if isinstance(record.get("data_metrics_raw"), dict) else {}
 
@@ -66,6 +126,7 @@ def normalize_public_record(record: dict) -> dict[str, Any]:
         "key": _to_str(record.get("key") or "").strip(),
         "dataset_id": extract_public_dataset_id(record),
         "title": _to_str(record.get("title") or "").strip(),
+        "dataset_name": _to_str(record.get("title") or "").strip(),
         "summary": _to_str(record.get("summary") or "").strip(),
         "url": _to_str(record.get("url") or record.get("detail_url") or "").strip(),
     }
@@ -85,8 +146,11 @@ def normalize_public_record(record: dict) -> dict[str, Any]:
         "outcomes_publications_and_use",
         "material_index",
     ):
-        if k in fields_raw and fields_raw.get(k) not in (None, ""):
-            row[k] = fields_raw.get(k)
+        value = fields_raw.get(k) if isinstance(fields_raw, dict) else None
+        if value in (None, ""):
+            value = fields.get(k) if isinstance(fields, dict) else None
+        if value not in (None, ""):
+            row[k] = value
 
     for k in (
         "page_views",
@@ -111,8 +175,11 @@ def normalize_managed_record(record: dict[str, str], *, code: str, dataset_id: s
     # Best-effort mapping of common CSV headers to standard listing keys.
     # This allows managed values to override public values during merge.
     header_to_key = {
-        "タイトル": "title",
-        "課題名": "title",
+        "タイトル": "project_title",
+        "課題名": "project_title",
+        "課題番号": "project_number",
+        "サブタイトル": "dataset_name",
+        "データセット名": "dataset_name",
         "要約": "summary",
         "URL": "url",
         "リンク": "url",
@@ -121,19 +188,50 @@ def normalize_managed_record(record: dict[str, str], *, code: str, dataset_id: s
         "登録日": "registered_date",
         "エンバーゴ解除日": "embargo_release_date",
         "エンバーゴ期間終了日": "embargo_release_date",
+        "開設日時": "opened_date",
         "ライセンス": "license",
         "ライセンスレベル": "license_level",
         "キーワードタグ": "keyword_tags",
         "タグ": "keyword_tags",
+        "タグ (2)": "keyword_tags",
+        "タグ(2)": "keyword_tags",
+        "データ数": "data_tile_count",
+        "データタイル数": "data_tile_count",
+        "管理者": "dataset_manager",
+        "管理者名": "dataset_manager",
+        "管理者(所属)": "dataset_manager",
+        "管理者（所属）": "dataset_manager",
         "ステータス": "managed_status",
         "状態": "managed_status",
         "公開状況": "managed_status",
     }
 
+    def _merge_tag_values(current: str, incoming: str) -> str:
+        existing = [p.strip() for p in (current or "").split(",") if p.strip()]
+        extras = [p.strip() for p in (incoming or "").split(",") if p.strip()]
+        seen: list[str] = []
+        for part in existing + extras:
+            if part and part not in seen:
+                seen.append(part)
+        return ", ".join(seen)
+
     for header, key in header_to_key.items():
         value = str(record.get(header, "") or "").strip()
-        if value:
-            row[key] = value
+        if not value:
+            continue
+        if key == "keyword_tags":
+            current = str(row.get(key, "") or "").strip()
+            row[key] = _merge_tag_values(current, value) if current else value
+            continue
+        if str(row.get(key, "") or "").strip():
+            continue
+        row[key] = value
+
+    title_value = str(record.get("タイトル") or "").strip()
+    if title_value and not str(row.get("title") or "").strip():
+        row["title"] = title_value
+        if not str(row.get("dataset_name") or "").strip():
+            row["dataset_name"] = title_value
 
     # Some exports provide a placeholder for license (e.g. "（）") while the actual
     # license info is available via "ライセンスレベル". Prefer explicit "ライセンス"
@@ -221,6 +319,16 @@ def merge_public_and_managed(
                 return c
         return None
 
+    def _apply_dataset_manager(row: dict[str, Any]) -> None:
+        if not _to_str(row.get("dataset_manager") or "").strip():
+            label = _resolve_dataset_manager_label(_to_str(row.get("dataset_id") or ""))
+            if label:
+                row["dataset_manager"] = label
+        if not _to_str(row.get("dataset_registrant") or "").strip():
+            manager = _to_str(row.get("dataset_manager") or "").strip()
+            if manager:
+                row["dataset_registrant"] = manager
+
     for pub in public_rows:
         code = _to_str(pub.get("code") or "").strip()
         dataset_id = _to_str(pub.get("dataset_id") or "").strip()
@@ -231,6 +339,7 @@ def merge_public_and_managed(
             managed = None
 
         if managed is None:
+            _apply_dataset_manager(pub)
             merged_rows.append(pub)
             public_only += 1
             continue
@@ -239,13 +348,20 @@ def merge_public_and_managed(
         merged_count += 1
 
         unified_keys = (
-            "dataset_id",
             "title",
+            "dataset_id",
+            "dataset_name",
+            "project_number",
+            "project_title",
+            "dataset_registrant",
             "summary",
             "url",
             "organization",
+            "dataset_manager",
+            "opened_date",
             "registered_date",
             "embargo_release_date",
+            "data_tile_count",
             "license",
             "keyword_tags",
         )
@@ -269,6 +385,7 @@ def merge_public_and_managed(
         merged_row["source"] = "both"
         merged_row["_cell_origin"] = cell_origin
         merged_row["_cell_diff"] = cell_diff
+        _apply_dataset_manager(merged_row)
         merged_rows.append(merged_row)
 
     managed_only_rows: list[dict[str, Any]] = []
@@ -276,6 +393,8 @@ def merge_public_and_managed(
         for m in candidates:
             if id(m) in used_managed_ids:
                 continue
+            m = dict(m)
+            _apply_dataset_manager(m)
             managed_only_rows.append(m)
 
     managed_only_rows.extend(managed_without_code)

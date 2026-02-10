@@ -28,6 +28,8 @@ class DataPortalWidget(QWidget):
     1. ログイン設定タブ - 認証情報管理
     2. マスタタブ - マスタデータ管理
     3. データセットタブ - JSONアップロード
+    4. 一括タブ - 一覧から一括操作
+    5. 一覧タブ - 公開/管理CSV統合表示
     """
     
     # シグナル定義
@@ -47,6 +49,10 @@ class DataPortalWidget(QWidget):
 
         self.dataset_upload_tab: Optional["DatasetUploadTab"] = None
         self._upload_placeholder = None
+
+        # 一括タブ（初回表示時まで生成を遅延）
+        self.bulk_tab = None
+        self._bulk_placeholder = None
 
         # 一覧タブ（公開cache + 管理CSV）
         self.listing_tab = None
@@ -88,6 +94,14 @@ class DataPortalWidget(QWidget):
         upload_placeholder_layout.addWidget(QLabel("読み込み中..."))
         upload_placeholder_layout.addStretch()
         self.tab_widget.addTab(self._upload_placeholder, "📤 データカタログ")
+
+        # 一括タブ（初回表示時まで生成を遅延）
+        self._bulk_placeholder = QWidget(self)
+        bulk_placeholder_layout = QVBoxLayout(self._bulk_placeholder)
+        bulk_placeholder_layout.setContentsMargins(12, 12, 12, 12)
+        bulk_placeholder_layout.addWidget(QLabel("読み込み中..."))
+        bulk_placeholder_layout.addStretch()
+        self.tab_widget.addTab(self._bulk_placeholder, "📦 一括")
 
         # 一覧タブ（初回表示時まで生成を遅延）
         self._listing_placeholder = QWidget(self)
@@ -166,7 +180,7 @@ class DataPortalWidget(QWidget):
     def _on_tab_changed(self, index: int) -> None:
         """タブ切替時の遅延初期化"""
         try:
-            # 0: login, 1: master, 2: upload, 3: listing
+            # 0: login, 1: master, 2: upload, 3: bulk, 4: listing
             if index == 0:
                 try:
                     if hasattr(self, "login_settings_tab") and hasattr(self.login_settings_tab, "auto_test_connections"):
@@ -178,6 +192,8 @@ class DataPortalWidget(QWidget):
             elif index == 2:
                 self._ensure_upload_tab()
             elif index == 3:
+                self._ensure_bulk_tab()
+            elif index == 4:
                 self._ensure_listing_tab()
         except Exception as e:
             logger.error("DataPortalWidget: tab change handling failed: %s", e)
@@ -209,7 +225,7 @@ class DataPortalWidget(QWidget):
         # current tab を維持
         self.tab_widget.setCurrentIndex(idx)
 
-    def _ensure_upload_tab(self) -> None:
+    def _ensure_upload_tab(self, *, set_current: bool = True) -> None:
         if self.dataset_upload_tab is not None:
             return
         idx = self.tab_widget.indexOf(self._upload_placeholder)
@@ -225,6 +241,22 @@ class DataPortalWidget(QWidget):
         # 置換
         self.tab_widget.removeTab(idx)
         self.tab_widget.insertTab(idx, self.dataset_upload_tab, "📤 データカタログ")
+        if set_current:
+            self.tab_widget.setCurrentIndex(idx)
+
+    def _ensure_bulk_tab(self) -> None:
+        if self.bulk_tab is not None:
+            return
+        idx = self.tab_widget.indexOf(self._bulk_placeholder)
+        if idx < 0:
+            idx = 3
+
+        from .portal_bulk_tab import DataPortalBulkTab
+
+        self.bulk_tab = DataPortalBulkTab(self)
+
+        self.tab_widget.removeTab(idx)
+        self.tab_widget.insertTab(idx, self.bulk_tab, "📦 一括")
         self.tab_widget.setCurrentIndex(idx)
 
     def _ensure_listing_tab(self) -> None:
@@ -232,7 +264,7 @@ class DataPortalWidget(QWidget):
             return
         idx = self.tab_widget.indexOf(self._listing_placeholder)
         if idx < 0:
-            idx = 3
+            idx = 4
 
         from .portal_listing_tab import PortalListingTab
 
@@ -319,6 +351,8 @@ class DataPortalWidget(QWidget):
                 self.master_data_tab.refresh_theme()
             if self.dataset_upload_tab is not None and hasattr(self.dataset_upload_tab, 'refresh_theme'):
                 self.dataset_upload_tab.refresh_theme()
+            if self.bulk_tab is not None and hasattr(self.bulk_tab, 'refresh_theme'):
+                self.bulk_tab.refresh_theme()
             if self.listing_tab is not None and hasattr(self.listing_tab, 'refresh_theme'):
                 self.listing_tab.refresh_theme()
             
@@ -340,9 +374,13 @@ class DataPortalWidget(QWidget):
         """データセットタブに切り替え"""
         self.tab_widget.setCurrentIndex(2)
 
+    def switch_to_bulk_tab(self):
+        """一括タブに切り替え"""
+        self.tab_widget.setCurrentIndex(3)
+
     def switch_to_listing_tab(self):
         """一覧タブに切り替え"""
-        self.tab_widget.setCurrentIndex(3)
+        self.tab_widget.setCurrentIndex(4)
 
     def open_upload_and_select_dataset(self, dataset_id: str) -> bool:
         """データカタログ(アップロード)タブを開き、dataset_idを選択する。

@@ -35,6 +35,7 @@ from qt_compat.widgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QMenu,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -338,6 +339,7 @@ class PortalListingTab(QWidget):
 
         self._filter_mode: str = "all"  # all | group
         self._filter_group_kind: str = "fixed"  # fixed | managed_group | managed_raw
+        self._display_mode: str = "default"  # default | compact | equal
         self._did_apply_initial_width: bool = False
 
         self._setup_ui()
@@ -406,29 +408,14 @@ class PortalListingTab(QWidget):
 
         controls.addSpacing(12)
 
-        self.toggle_filters_btn = QPushButton("フィルタ最小化", self)
-        self.toggle_filters_btn.clicked.connect(self._toggle_filters_panel)
-        controls.addWidget(self.toggle_filters_btn)
-
-        self.filters_all_btn = QPushButton("全体表示", self)
-        self.filters_all_btn.setCheckable(True)
-        self.filters_all_btn.setChecked(True)
-        self.filters_all_btn.clicked.connect(lambda: self._set_filter_mode("all"))
-        controls.addWidget(self.filters_all_btn)
-
-        self.filters_group_btn = QPushButton("グル", self)
-        self.filters_group_btn.setCheckable(True)
-        self.filters_group_btn.setChecked(False)
-        self.filters_group_btn.clicked.connect(lambda: self._set_filter_mode("group"))
-        controls.addWidget(self.filters_group_btn)
-
-        self.filters_group_combo = QComboBox(self)
-        self.filters_group_combo.addItem("基本", "fixed")
-        self.filters_group_combo.addItem("管理(結合)", "managed_group")
-        self.filters_group_combo.addItem("管理(その他)", "managed_raw")
-        self.filters_group_combo.setVisible(False)
-        self.filters_group_combo.currentIndexChanged.connect(self._on_filter_group_changed)
-        controls.addWidget(self.filters_group_combo)
+        controls.addWidget(QLabel("列フィルタ表示:"))
+        self.filter_scope_combo = QComboBox(self)
+        self.filter_scope_combo.addItem("すべて", "all")
+        self.filter_scope_combo.addItem("基本", "fixed")
+        self.filter_scope_combo.addItem("管理（結合）", "managed_group")
+        self.filter_scope_combo.addItem("管理（その他）", "managed_raw")
+        self.filter_scope_combo.currentIndexChanged.connect(self._on_filter_scope_changed)
+        controls.addWidget(self.filter_scope_combo)
 
         self.reload_public = QPushButton("公開cache再読込")
         self.reload_public.clicked.connect(self.refresh_public_from_disk)
@@ -442,13 +429,26 @@ class PortalListingTab(QWidget):
         self.select_columns_btn.clicked.connect(self._on_select_columns)
         controls.addWidget(self.select_columns_btn)
 
-        self.export_csv_btn = QPushButton("CSV出力")
-        self.export_csv_btn.clicked.connect(lambda: self._export("csv"))
-        controls.addWidget(self.export_csv_btn)
+        controls.addSpacing(12)
 
-        self.export_xlsx_btn = QPushButton("XLSX出力")
-        self.export_xlsx_btn.clicked.connect(lambda: self._export("xlsx"))
-        controls.addWidget(self.export_xlsx_btn)
+        controls.addWidget(QLabel("表示切替:"))
+        self.compact_rows_btn = QPushButton("1行表示", self)
+        self.compact_rows_btn.clicked.connect(lambda: self._apply_display_mode("compact"))
+        controls.addWidget(self.compact_rows_btn)
+
+        self.equal_columns_btn = QPushButton("列幅そろえ", self)
+        self.equal_columns_btn.clicked.connect(lambda: self._apply_display_mode("equal"))
+        controls.addWidget(self.equal_columns_btn)
+
+        export_menu = QMenu(self)
+        export_csv = export_menu.addAction("CSV出力")
+        export_csv.triggered.connect(lambda: self._export("csv"))
+        export_xlsx = export_menu.addAction("XLSX出力")
+        export_xlsx.triggered.connect(lambda: self._export("xlsx"))
+
+        self.export_btn = QPushButton("エクスポート")
+        self.export_btn.setMenu(export_menu)
+        controls.addWidget(self.export_btn)
 
         self.count_label = QLabel("0件")
         controls.addWidget(self.count_label)
@@ -458,10 +458,12 @@ class PortalListingTab(QWidget):
         layout.addWidget(self.status_label)
 
         # Per-column filters (visible columns only)
-        self.filters_group_box = QGroupBox("列フィルタ", self)
+        self.filters_group_box = QGroupBox("列フィルタ（クリックで表示/非表示）", self)
+        self.filters_group_box.setObjectName("portalListingFilters")
         self.filters_group_box.setCheckable(True)
         self.filters_group_box.setChecked(True)
         self.filters_group_box.toggled.connect(self._on_filters_group_toggled)
+        self.filters_group_box.setToolTip("列フィルタの表示を切り替えます")
 
         filters_outer = QVBoxLayout(self.filters_group_box)
         filters_outer.setContentsMargins(8, 8, 8, 8)
@@ -485,6 +487,7 @@ class PortalListingTab(QWidget):
         filters_outer.addWidget(self._filters_scroll)
 
         layout.addWidget(self.filters_group_box)
+        self._apply_filters_theme()
 
         from qt_compat.widgets import QtWidgets
 
@@ -512,6 +515,12 @@ class PortalListingTab(QWidget):
         self.table_view.horizontalHeader().setSectionsMovable(True)
         self.table_view.horizontalHeader().setDefaultAlignment(Qt.AlignLeft)
         self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        try:
+            header = self.table_view.horizontalHeader()
+            header.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            header.customContextMenuRequested.connect(self._on_header_context_menu)
+        except Exception:
+            pass
         self.table_view.verticalHeader().setVisible(False)
         try:
             self.table_view.doubleClicked.connect(self._on_table_double_clicked)
@@ -626,9 +635,26 @@ class PortalListingTab(QWidget):
         except Exception:
             return
 
+    def _apply_filters_theme(self) -> None:
+        try:
+            bg = get_color(ThemeKey.PANEL_BACKGROUND)
+            border = get_color(ThemeKey.PANEL_BORDER)
+            text = get_color(ThemeKey.TEXT_PRIMARY)
+            self.filters_group_box.setStyleSheet(
+                ""
+                f"QGroupBox#portalListingFilters {{ background-color: {bg}; border: 1px solid {border}; "
+                "border-radius: 6px; margin-top: 10px; }}"
+                f"QGroupBox#portalListingFilters::title {{ subcontrol-origin: margin; left: 10px; "
+                f"padding: 0 4px; color: {text}; }}"
+                f"QWidget#portal_listing_filters_container {{ background-color: {bg}; }}"
+            )
+        except Exception:
+            pass
+
     def refresh_theme(self) -> None:
         # Theme integration for this tab is minimal; widgets inherit palette/QSS.
         try:
+            self._apply_filters_theme()
             self.update()
         except Exception:
             pass
@@ -680,6 +706,9 @@ class PortalListingTab(QWidget):
             # テスト環境ではネットワークアクセスを避け、保存済みCSVのみ読む
             self.refresh_managed_from_disk()
             return
+        if not self._confirm_managed_refresh():
+            self.status_label.setText("管理CSV更新をキャンセルしました")
+            return
         # PortalClient が無い/環境が違う場合は、保存済み認証情報から自動生成する。
         if self._portal_client is None or str(getattr(self._portal_client, "environment", "")) != self._environment:
             try:
@@ -721,6 +750,26 @@ class PortalListingTab(QWidget):
 
         self._thread = thread
         thread.start()
+
+    def _confirm_managed_refresh(self) -> bool:
+        try:
+            from qt_compat.widgets import QMessageBox
+
+            message = (
+                "管理CSVをポータルから取得し、保存済みCSVを更新します。\n"
+                "一覧タブの表示内容も更新されます。\n\n"
+                f"環境: {self._environment}"
+            )
+            result = QMessageBox.question(
+                self,
+                "管理CSV更新",
+                message,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            return result == QMessageBox.StandardButton.Yes
+        except Exception:
+            return True
 
     def _on_managed_records_ready(self, records: list) -> None:
         safe: list[dict[str, str]] = []
@@ -791,16 +840,24 @@ class PortalListingTab(QWidget):
                 "managed:実施機関",
                 "managed:管理コード",
                 "managed:データセットID",
+                "managed:課題番号",
                 "managed:登録日",
+                "managed:開設日時",
                 "managed:エンバーゴ解除日",
                 "managed:エンバーゴ期間終了日",
                 "managed:ライセンス",
                 "managed:ライセンスレベル",
                 "managed:キーワードタグ",
                 "managed:タグ",
+                "managed:タグ (2)",
+                "managed:タグ(2)",
+                "managed:データ数",
+                "managed:データタイル数",
                 "managed:URL",
                 "managed:リンク",
                 "managed:タイトル",
+                "managed:サブタイトル",
+                "managed:データセット名",
                 "managed:課題名",
                 "managed:要約",
                 "managed:このバージョンでの閲覧数",
@@ -814,11 +871,17 @@ class PortalListingTab(QWidget):
         fixed = [
             _ColumnDef("source", "範囲", preview_limit=16, default_visible=False),
             _ColumnDef("code", "code", preview_limit=64, default_visible=True),
-            _ColumnDef("title", "タイトル", preview_limit=180, default_visible=True),
-            _ColumnDef("url", "URL", preview_limit=220, default_visible=False),
+            _ColumnDef("dataset_name", "データセット名", preview_limit=180, default_visible=True),
+            _ColumnDef("project_number", "課題番号", preview_limit=120, default_visible=True),
+            _ColumnDef("project_title", "課題名", preview_limit=180, default_visible=True),
+            _ColumnDef("dataset_registrant", "登録者", preview_limit=160, default_visible=True),
             _ColumnDef("organization", "実施機関", preview_limit=120, default_visible=True),
+            _ColumnDef("dataset_manager", "データセットにおける管理者", preview_limit=160, default_visible=True),
+            _ColumnDef("opened_date", "開設日", preview_limit=64, default_visible=False),
             _ColumnDef("registered_date", "登録日", preview_limit=64, default_visible=True),
             _ColumnDef("embargo_release_date", "エンバーゴ解除日", preview_limit=64, default_visible=False),
+            _ColumnDef("data_tile_count", "データタイル数", preview_limit=80, default_visible=False),
+            _ColumnDef("url", "URL", preview_limit=220, default_visible=False),
             _ColumnDef("license", "ライセンス", preview_limit=120, default_visible=False),
             _ColumnDef("keyword_tags", "キーワードタグ", preview_limit=160, default_visible=False),
             _ColumnDef("summary", "概要", preview_limit=220, default_visible=False),
@@ -864,55 +927,24 @@ class PortalListingTab(QWidget):
 
         self._update_count()
 
-    def _toggle_filters_panel(self, *, force: Optional[bool] = None) -> None:
-        if force is None:
-            self._filters_collapsed = not self._filters_collapsed
-        else:
-            self._filters_collapsed = bool(force)
-
-        try:
-            if hasattr(self, "filters_group_box") and self.filters_group_box is not None:
-                self.filters_group_box.blockSignals(True)
-                self.filters_group_box.setChecked(not self._filters_collapsed)
-                self.filters_group_box.blockSignals(False)
-        except Exception:
-            pass
-
-        if self._filters_scroll is not None:
-            self._filters_scroll.setVisible(not self._filters_collapsed)
-        try:
-            self.toggle_filters_btn.setText("フィルタ表示" if self._filters_collapsed else "フィルタ最小化")
-        except Exception:
-            pass
-
     def _on_filters_group_toggled(self, checked: bool) -> None:
         # checked=True means expanded (not collapsed)
         self._filters_collapsed = not bool(checked)
         if self._filters_scroll is not None:
             self._filters_scroll.setVisible(not self._filters_collapsed)
-        try:
-            self.toggle_filters_btn.setText("フィルタ表示" if self._filters_collapsed else "フィルタ最小化")
-        except Exception:
-            pass
 
-    def _set_filter_mode(self, mode: str) -> None:
-        m = str(mode or "all")
-        if m not in ("all", "group"):
-            m = "all"
-        self._filter_mode = m
+    def _on_filter_scope_changed(self) -> None:
         try:
-            self.filters_all_btn.setChecked(m == "all")
-            self.filters_group_btn.setChecked(m == "group")
-            self.filters_group_combo.setVisible(m == "group")
+            scope = str(self.filter_scope_combo.currentData() or "all")
         except Exception:
-            pass
-        self._rebuild_filters_panel([c for c in self._columns if c.key in self._visible_columns or c.key == "source"])
+            scope = "all"
 
-    def _on_filter_group_changed(self) -> None:
-        try:
-            self._filter_group_kind = str(self.filters_group_combo.currentData() or "fixed")
-        except Exception:
+        if scope == "all":
+            self._filter_mode = "all"
             self._filter_group_kind = "fixed"
+        else:
+            self._filter_mode = "group"
+            self._filter_group_kind = scope
         self._rebuild_filters_panel([c for c in self._columns if c.key in self._visible_columns or c.key == "source"])
 
     @staticmethod
@@ -922,6 +954,41 @@ class PortalListingTab(QWidget):
             inner = text.replace("管理:", "", 1)
             return f"【{inner}】"
         return text
+
+    @staticmethod
+    def _base_label(label: str) -> str:
+        text = str(label or "")
+        if text.startswith("【") and text.endswith("】") and len(text) > 2:
+            return text[1:-1]
+        return text
+
+    def _should_format_date_column(self, cdef: _ColumnDef) -> bool:
+        base = self._base_label(cdef.label)
+        if cdef.key in ("registered_date", "embargo_release_date"):
+            return True
+        return base in {
+            "登録日",
+            "エンバーゴ解除日",
+            "開設日",
+            "開設日時",
+            "データ最終更新日",
+            "データ登録日",
+            "最終更新日",
+            "解説日時",
+        }
+
+    @staticmethod
+    def _split_date_display(value: Any) -> tuple[Any, Optional[str]]:
+        if not isinstance(value, str):
+            return value, None
+        text = value.strip()
+        if not text:
+            return value, None
+        normalized = text.replace("T", " ")
+        match = re.match(r"^(\d{4}[/-]\d{1,2}[/-]\d{1,2})\s+(\d{1,2}:\d{2}(:\d{2})?.*)$", normalized)
+        if match:
+            return match.group(1), text
+        return value, None
 
     def _relayout_filter_fields(self) -> None:
         if self._filters_layout is None or not self._filter_field_widgets:
@@ -1002,7 +1069,14 @@ class PortalListingTab(QWidget):
                 except Exception:
                     pass
 
-                display, tooltip = prepare_display_value(val, col.preview_limit)
+                display_val = val
+                time_tooltip = None
+                if self._should_format_date_column(col):
+                    display_val, time_tooltip = self._split_date_display(val)
+
+                display, tooltip = prepare_display_value(display_val, col.preview_limit)
+                if time_tooltip:
+                    tooltip = time_tooltip
                 item = QtGui.QStandardItem(display)
                 item.setEditable(False)
 
@@ -1012,8 +1086,8 @@ class PortalListingTab(QWidget):
                 except Exception:
                     pass
 
-                # Title behaves like a link (opens row URL) even when URL column is hidden.
-                if col.key == "title":
+                # Dataset name behaves like a link (opens row URL) even when URL column is hidden.
+                if col.key == "dataset_name":
                     try:
                         url = str(row.get("url") or "").strip()
                         if url:
@@ -1056,6 +1130,9 @@ class PortalListingTab(QWidget):
         if src_idx >= 0:
             self.table_view.setColumnHidden(src_idx, True)
             self.proxy_model.set_source_column(src_idx)
+
+        if self._display_mode != "default":
+            self._apply_display_mode(self._display_mode, force=True)
 
         # Apply current filters after model rebuild
         self._schedule_apply_filters()
@@ -1168,6 +1245,88 @@ class PortalListingTab(QWidget):
     # ------------------------------------------------------------------
     # Controls
     # ------------------------------------------------------------------
+    def _apply_display_mode(self, mode: str, *, force: bool = False) -> None:
+        mode = str(mode or "").strip().lower()
+        if mode not in {"compact", "equal", "default"}:
+            mode = "default"
+        if mode == self._display_mode and not force:
+            return
+        self._display_mode = mode
+
+        try:
+            if mode == "compact":
+                self.table_view.setWordWrap(False)
+                self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+                self.table_view.verticalHeader().setSectionResizeMode(QHeaderView.Interactive)
+                row_h = int(self.table_view.fontMetrics().height() * 1.6)
+                if row_h > 0:
+                    self.table_view.verticalHeader().setDefaultSectionSize(row_h)
+            elif mode == "equal":
+                self.table_view.setWordWrap(True)
+                self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+                self.table_view.verticalHeader().setSectionResizeMode(QHeaderView.Interactive)
+                self._apply_equal_column_widths()
+            else:
+                self.table_view.setWordWrap(True)
+                self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+                self.table_view.verticalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        except Exception:
+            pass
+
+        try:
+            self.table_view.resizeRowsToContents()
+        except Exception:
+            pass
+
+    def _apply_equal_column_widths(self) -> None:
+        try:
+            header = self.table_view.horizontalHeader()
+            count = int(self.proxy_model.columnCount())
+            if count <= 0:
+                return
+            available = int(self.table_view.viewport().width())
+            if available <= 0:
+                return
+            per_col = max(80, int(available // max(count, 1)))
+            for col in range(count):
+                header.resizeSection(col, per_col)
+        except Exception:
+            pass
+
+    def _on_header_context_menu(self, pos: QtCore.QPoint) -> None:
+        try:
+            header = self.table_view.horizontalHeader()
+            col = int(header.logicalIndexAt(pos))
+        except Exception:
+            return
+        if col < 0:
+            return
+
+        key = self._column_key_for_index(col)
+        if not key or key == "source":
+            return
+
+        menu = QMenu(self)
+        action_hide = menu.addAction("この列を非表示")
+        chosen = menu.exec(header.mapToGlobal(pos))
+        if chosen == action_hide:
+            self._hide_column_by_index(col)
+
+    def _column_key_for_index(self, index: int) -> Optional[str]:
+        for key, idx in (self._column_index or {}).items():
+            if int(idx) == int(index):
+                return key
+        return None
+
+    def _hide_column_by_index(self, index: int) -> None:
+        key = self._column_key_for_index(index)
+        if not key or key == "source":
+            return
+        if key in self._visible_columns:
+            self._visible_columns.discard(key)
+            public = self._load_public_cache_records()
+            self._rebuild_table(public_records=public, managed_records=self._managed_records)
+
     def _on_range_changed(self) -> None:
         mode = str(self.range_combo.currentData() or "all")
         self.proxy_model.set_range_mode(mode)
