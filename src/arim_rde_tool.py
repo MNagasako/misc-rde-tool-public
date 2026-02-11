@@ -1108,6 +1108,26 @@ def main():
         else:
             app = QApplication(sys.argv)
 
+        # バイナリ実行時のみ単一起動を保証する
+        try:
+            if getattr(sys, "_MEIPASS", None):
+                from qt_compat.core import QSharedMemory
+                from qt_compat.widgets import QMessageBox
+
+                shared_key = "ARIM_RDE_TOOL_SINGLE_INSTANCE"
+                shared = QSharedMemory(shared_key)
+                if not shared.create(1):
+                    msg = QMessageBox()
+                    msg.setIcon(QMessageBox.Information)
+                    msg.setWindowTitle("起動済み")
+                    msg.setText("アプリは既に起動されています。\n起動済みのアプリを終了してから再度お試しください。")
+                    msg.exec()
+                    return
+                # GC防止
+                app._single_instance_guard = shared
+        except Exception:
+            logger.debug("single instance guard init failed", exc_info=True)
+
         # 可能な限り全てのポップアップ（QMessageBox/QDialog/QProgressDialog等）を親ウィンドウ中央に寄せる
         # NOTE: pytest 実行中は既定で無効（teardown時のQt不安定化を避ける）
         try:

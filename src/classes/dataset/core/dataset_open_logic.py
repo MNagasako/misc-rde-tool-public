@@ -968,7 +968,8 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
                 combo.lineEdit().setPlaceholderText("グループを選択してください")
             combo.setEnabled(True)
         else:
-            combo.setEnabled(False)
+            combo.setEnabled(True)
+            combo.setCurrentIndex(-1)
             if combo.lineEdit():
                 combo.lineEdit().setPlaceholderText("該当するグループがありません")
 
@@ -1793,7 +1794,7 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
                     combo.lineEdit().setPlaceholderText("グループを選択してください")
                     combo.setEnabled(True)
                 else:
-                    combo.setEnabled(False)
+                    combo.setEnabled(True)
                     combo.lineEdit().setPlaceholderText("該当するグループがありません")
                 combo.blockSignals(False)
                 

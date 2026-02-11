@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
-from qt_compat.core import Qt, QTimer
+from qt_compat.core import Qt, QTimer, QThread, Signal
 from qt_compat.gui import QIcon, QPixmap
 from qt_compat.widgets import (
     QWidget,
@@ -36,8 +36,10 @@ from qt_compat.widgets import (
     QDialog,
     QDialogButtonBox,
     QScrollArea,
+    QProgressDialog,
     QFileDialog,
     QMenu,
+    QCompleter,
 )
 
 from classes.managers.log_manager import get_logger
@@ -60,6 +62,27 @@ def _get_current_user_id() -> str:
         with open(self_path, "r", encoding="utf-8") as handle:
             data = json.load(handle)
         return str(data.get("data", {}).get("id") or "").strip()
+    except Exception:
+        return ""
+
+
+def _get_current_user_org_name() -> str:
+    try:
+        self_path = get_dynamic_file_path("output/rde/data/self.json")
+        with open(self_path, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+
+        if isinstance(data, dict):
+            node = data.get("data")
+            if isinstance(node, dict):
+                attrs = node.get("attributes") if isinstance(node.get("attributes"), dict) else node
+                org = (
+                    attrs.get("organizationName")
+                    or attrs.get("organization")
+                    or attrs.get("organization_name")
+                )
+                return str(org or "").strip()
+        return ""
     except Exception:
         return ""
 
@@ -215,6 +238,60 @@ class _BulkColumnSelectDialog(QDialog):
         return selected
 
 
+class _BulkRegisterWorker(QThread):
+    progress = Signal(int, int, str)
+    finished = Signal(list, list)
+
+    def __init__(self, environment: str, credentials, tasks: list[dict[str, str]]):
+        super().__init__()
+        self._environment = environment
+        self._credentials = credentials
+        self._tasks = tasks
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def run(self) -> None:
+        success_ids: list[str] = []
+        failures: list[dict[str, str]] = []
+
+        try:
+            from classes.data_portal.core.portal_client import PortalClient
+            from classes.data_portal.core.uploader import Uploader
+
+            client = PortalClient(self._environment)
+            client.set_credentials(self._credentials)
+            uploader = Uploader(client)
+
+            total = len(self._tasks)
+            for idx, task in enumerate(self._tasks, start=1):
+                if self._cancelled:
+                    failures.append({
+                        "dataset_id": str(task.get("dataset_id") or ""),
+                        "message": "キャンセルされました",
+                    })
+                    continue
+
+                dataset_id = str(task.get("dataset_id") or "")
+                json_path = str(task.get("json_path") or "")
+                self.progress.emit(idx, total, dataset_id)
+
+                if not json_path:
+                    failures.append({"dataset_id": dataset_id, "message": "JSONパスが空です"})
+                    continue
+
+                ok, message = uploader.upload_json_file(json_path)
+                if ok:
+                    success_ids.append(dataset_id)
+                else:
+                    failures.append({"dataset_id": dataset_id, "message": str(message)})
+        except Exception as exc:
+            failures.append({"dataset_id": "", "message": str(exc)})
+
+        self.finished.emit(success_ids, failures)
+
+
 class DataPortalBulkTab(QWidget):
     """データポータル一括操作タブ。"""
 
@@ -244,6 +321,12 @@ class DataPortalBulkTab(QWidget):
         self._column_defs = self._build_column_defs()
         self._visible_columns = {c.key for c in self._column_defs if c.default_visible}
         self._display_mode = "default"
+        self._table_mode = "default"
+        self._column_index_by_key: Dict[str, int] = {}
+        self._bulk_register_selection: Dict[str, Dict[str, bool]] = {}
+        self._bulk_register_in_progress = False
+        self._bulk_register_worker: Optional[_BulkRegisterWorker] = None
+        self._did_apply_initial_layout = False
         self._report_institute_by_task: Dict[str, str] = {}
         self._report_institute_by_code: Dict[str, str] = {}
         self._json_status_options: list[str] = []
@@ -272,7 +355,6 @@ class DataPortalBulkTab(QWidget):
         layout.addLayout(controls_row)
 
         self.table = QTableWidget(0, len(self._column_defs), self)
-        self.table.setHorizontalHeaderLabels([col.label for col in self._column_defs])
         self.table.setSortingEnabled(True)
         if self._display_mode != "default":
             self._apply_display_mode(self._display_mode, force=True)
@@ -287,9 +369,8 @@ class DataPortalBulkTab(QWidget):
         header.setSectionResizeMode(QHeaderView.Interactive)
         header.setMinimumSectionSize(60)
 
-        self._apply_table_column_sizes()
         self._apply_table_style()
-        self._apply_column_visibility()
+        self._apply_table_mode(self._table_mode)
 
         layout.addWidget(self.table, 1)
 
@@ -307,10 +388,6 @@ class DataPortalBulkTab(QWidget):
         self.env_combo = QComboBox()
         self.env_combo.currentIndexChanged.connect(self._on_environment_changed)
         layout.addWidget(self.env_combo)
-
-        self.env_status_label = QLabel("")
-        self.env_status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
-        layout.addWidget(self.env_status_label)
         layout.addStretch()
 
         self._load_environments()
@@ -390,6 +467,8 @@ class DataPortalBulkTab(QWidget):
         self.org_combo = QComboBox()
         self.org_combo.addItem("全て", "all")
         self.org_combo.setMinimumWidth(320)
+        self.org_combo.setEditable(True)
+        self.org_combo.setInsertPolicy(QComboBox.NoInsert)
         org_row.addWidget(self.org_combo)
         org_row.addStretch()
         layout.addLayout(org_row)
@@ -476,20 +555,31 @@ class DataPortalBulkTab(QWidget):
 
     def _apply_table_column_sizes(self) -> None:
         try:
-            self.table.setColumnWidth(0, 140)
-            self.table.setColumnWidth(1, 100)
-            self.table.setColumnWidth(2, 110)
-            self.table.setColumnWidth(3, 220)
-            self.table.setColumnWidth(4, 220)
-            self.table.setColumnWidth(5, 160)
-            self.table.setColumnWidth(6, 220)
-            self.table.setColumnWidth(7, 140)
-            self.table.setColumnWidth(8, 160)
-            self.table.setColumnWidth(9, 170)
-            self.table.setColumnWidth(10, 120)
-            self.table.setColumnWidth(11, 120)
-            for col in range(12, 17):
-                self.table.setColumnWidth(col, 170)
+            widths = {
+                "bulk_register": 140,
+                "json_action": 140,
+                "json_status": 100,
+                "grant_number": 110,
+                "task_name": 220,
+                "dataset_name": 220,
+                "subgroup_name": 160,
+                "subgroup_description": 220,
+                "registrant_name": 140,
+                "registrant_org": 160,
+                "institution": 170,
+                "image_downloaded": 120,
+                "image_uploaded": 120,
+                "image_action": 170,
+                "zip_action": 170,
+                "edit_action": 170,
+                "open_action": 170,
+                "status_action": 170,
+            }
+            for key, width in widths.items():
+                idx = self._column_index_by_key.get(key)
+                if idx is None:
+                    continue
+                self.table.setColumnWidth(idx, width)
             self.table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         except Exception:
             pass
@@ -548,6 +638,69 @@ class DataPortalBulkTab(QWidget):
             _BulkColumnDef("status_action", "ステータス変更"),
         ]
 
+    def _build_bulk_register_column_defs(self) -> list[_BulkColumnDef]:
+        return [
+            _BulkColumnDef("bulk_register", "一括登録"),
+            _BulkColumnDef("json_status", "状態"),
+            _BulkColumnDef("grant_number", "課題番号"),
+            _BulkColumnDef("task_name", "課題名"),
+            _BulkColumnDef("dataset_name", "データセット名"),
+            _BulkColumnDef("subgroup_name", "サブグループ"),
+            _BulkColumnDef("registrant_name", "登録者"),
+            _BulkColumnDef("registrant_org", "登録者所属"),
+            _BulkColumnDef("institution", "実施機関"),
+        ]
+
+    def _apply_table_mode(self, mode: str) -> None:
+        mode = str(mode or "default").strip().lower()
+        if mode not in {"default", "bulk_register"}:
+            mode = "default"
+        self._table_mode = mode
+
+        try:
+            if hasattr(self, "table_mode_combo"):
+                self.table_mode_combo.blockSignals(True)
+                for idx in range(self.table_mode_combo.count()):
+                    if self.table_mode_combo.itemData(idx) == mode:
+                        self.table_mode_combo.setCurrentIndex(idx)
+                        break
+        finally:
+            try:
+                self.table_mode_combo.blockSignals(False)
+            except Exception:
+                pass
+
+        if mode == "bulk_register":
+            self._column_defs = self._build_bulk_register_column_defs()
+        else:
+            self._column_defs = self._build_column_defs()
+
+        self._visible_columns = {c.key for c in self._column_defs if c.default_visible}
+        if mode == "bulk_register":
+            self._visible_columns.add("bulk_register")
+
+        self._column_index_by_key = {c.key: idx for idx, c in enumerate(self._column_defs)}
+
+        try:
+            self.table.setColumnCount(len(self._column_defs))
+            self.table.setHorizontalHeaderLabels([col.label for col in self._column_defs])
+        except Exception:
+            pass
+
+        self._apply_table_column_sizes()
+        self._apply_column_visibility()
+
+        self._update_bulk_register_controls()
+        if hasattr(self, "page_spin"):
+            self._render_page()
+
+    def _on_table_mode_changed(self, _index: int) -> None:
+        try:
+            mode = self.table_mode_combo.currentData()
+        except Exception:
+            mode = "default"
+        self._apply_table_mode(str(mode or "default"))
+
     def _create_display_controls_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
 
@@ -556,6 +709,23 @@ class DataPortalBulkTab(QWidget):
         row.addWidget(self.select_columns_btn)
 
         row.addSpacing(12)
+
+        row.addWidget(QLabel("テーブルモード:"))
+        self.table_mode_combo = QComboBox(self)
+        self.table_mode_combo.addItem("通常", "default")
+        self.table_mode_combo.addItem("一括登録", "bulk_register")
+        self.table_mode_combo.currentIndexChanged.connect(self._on_table_mode_changed)
+        row.addWidget(self.table_mode_combo)
+
+        self.bulk_select_toggle_btn = QPushButton("登録 全選択", self)
+        self.bulk_select_toggle_btn.clicked.connect(self._toggle_bulk_register_selection)
+        self.bulk_select_toggle_btn.setVisible(False)
+        row.addWidget(self.bulk_select_toggle_btn)
+
+        self.bulk_register_execute_btn = QPushButton("一括登録実行", self)
+        self.bulk_register_execute_btn.clicked.connect(self._on_bulk_register_execute)
+        self.bulk_register_execute_btn.setVisible(False)
+        row.addWidget(self.bulk_register_execute_btn)
 
         row.addWidget(QLabel("表示切替:"))
         self.compact_rows_btn = QPushButton("1行表示", self)
@@ -606,18 +776,11 @@ class DataPortalBulkTab(QWidget):
 
         env = str(env or "production").strip() or "production"
         self._current_environment = env
-        self._apply_environment_label(env)
 
         for idx in range(self.env_combo.count()):
             if self.env_combo.itemData(idx) == env:
                 self.env_combo.setCurrentIndex(idx)
                 break
-
-    def _apply_environment_label(self, env: str) -> None:
-        if env == "test":
-            self.env_status_label.setText("🧪 テスト環境")
-        else:
-            self.env_status_label.setText("✅ 本番環境")
 
     def _on_environment_changed(self, _index: int) -> None:
         try:
@@ -626,7 +789,6 @@ class DataPortalBulkTab(QWidget):
             env = None
         env = str(env or "production").strip() or "production"
         self._current_environment = env
-        self._apply_environment_label(env)
 
         try:
             portal = self._portal_widget
@@ -671,13 +833,14 @@ class DataPortalBulkTab(QWidget):
     def refresh_theme(self) -> None:
         self._apply_table_style()
         self.count_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
-        self.env_status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
         self.page_total_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
         self.page_range_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
         self.refresh_btn.setStyleSheet(get_button_style("secondary"))
         self.prev_page_btn.setStyleSheet(get_button_style("secondary"))
         self.next_page_btn.setStyleSheet(get_button_style("secondary"))
         self.select_columns_btn.setStyleSheet(get_button_style("secondary"))
+        self.bulk_select_toggle_btn.setStyleSheet(get_button_style("secondary"))
+        self.bulk_register_execute_btn.setStyleSheet(get_button_style("warning"))
         self.compact_rows_btn.setStyleSheet(get_button_style("secondary"))
         self.equal_columns_btn.setStyleSheet(get_button_style("secondary"))
         self.export_btn.setStyleSheet(get_button_style("secondary"))
@@ -847,7 +1010,22 @@ class DataPortalBulkTab(QWidget):
                 if self.org_combo.itemData(idx) == current:
                     self.org_combo.setCurrentIndex(idx)
                     break
+        else:
+            default_org = _get_current_user_org_name()
+            if default_org:
+                for idx in range(self.org_combo.count()):
+                    if self.org_combo.itemData(idx) == default_org:
+                        self.org_combo.setCurrentIndex(idx)
+                        break
         self.org_combo.blockSignals(False)
+
+        try:
+            completer = QCompleter(orgs, self.org_combo)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchContains)
+            self.org_combo.setCompleter(completer)
+        except Exception:
+            pass
 
     def _refresh_json_status_options(self) -> None:
         labels: list[str] = []
@@ -1065,6 +1243,14 @@ class DataPortalBulkTab(QWidget):
         self.table.setSortingEnabled(False)
         self.table.setRowCount(len(page_ids))
 
+        col_idx = self._column_index_by_key
+
+        def _set_placeholder(col_key: str, text: str = "-") -> None:
+            idx = col_idx.get(col_key)
+            if idx is None:
+                return
+            self._set_item(row_index, idx, text)
+
         for row_index, dataset_id in enumerate(page_ids):
             row = self._rows_by_id.get(dataset_id, {})
             dataset_item = row.get("_raw")
@@ -1096,69 +1282,117 @@ class DataPortalBulkTab(QWidget):
 
             json_button_label, json_style_kind, json_icon = self._get_json_action_presentation(json_status_label)
 
-            self._set_action_cell(
-                row_index,
-                0,
-                dataset_id,
-                json_button_label,
-                json_style_kind,
-                "upload_json",
-                icon=json_icon,
-                tooltip=json_status_label,
-            )
-            self._set_item(row_index, 1, json_status_label)
-            self._set_item(row_index, 2, grant_number)
-            self._set_item(row_index, 3, task_name)
-            self._set_item(row_index, 4, dataset_name)
-            self._set_item(row_index, 5, subgroup_name)
-            self._set_item(row_index, 6, subgroup_description)
-            self._set_item(row_index, 7, registrant_name)
-            self._set_item(row_index, 8, registrant_org)
-            self._set_item(row_index, 9, org_name)
-            self._set_item(row_index, 10, downloaded_text)
-            self._set_item(row_index, 11, uploaded_text)
-            self._set_action_cell(
-                row_index,
-                12,
-                dataset_id,
-                "一括取得",
-                "info",
-                "bulk_download",
-            )
-            self._set_action_cell(
-                row_index,
-                13,
-                dataset_id,
-                "コンテンツZIP",
-                "info",
-                "upload_zip",
-            )
-            self._set_action_cell(
-                row_index,
-                14,
-                dataset_id,
-                "データカタログ修正",
-                "info",
-                "edit_portal",
-            )
-            self._set_action_cell(
-                row_index,
-                15,
-                dataset_id,
-                "ブラウザ表示",
-                "info",
-                "open_public_view",
-            )
-            self._set_action_cell(
-                row_index,
-                16,
-                dataset_id,
-                "ステータス変更",
-                "warning",
-                "toggle_status",
-            )
+            if "bulk_register" in col_idx:
+                self._set_bulk_register_cell(
+                    row_index,
+                    col_idx["bulk_register"],
+                    dataset_id,
+                    json_status_label,
+                )
+
+            if "json_action" in col_idx:
+                self._set_action_cell(
+                    row_index,
+                    col_idx["json_action"],
+                    dataset_id,
+                    json_button_label,
+                    json_style_kind,
+                    "upload_json",
+                    icon=json_icon,
+                    tooltip=json_status_label,
+                )
+
+            if "json_status" in col_idx:
+                self._set_item(row_index, col_idx["json_status"], json_status_label)
+            if "grant_number" in col_idx:
+                self._set_item(row_index, col_idx["grant_number"], grant_number)
+            if "task_name" in col_idx:
+                self._set_item(row_index, col_idx["task_name"], task_name)
+            if "dataset_name" in col_idx:
+                self._set_item(row_index, col_idx["dataset_name"], dataset_name)
+            if "subgroup_name" in col_idx:
+                self._set_item(row_index, col_idx["subgroup_name"], subgroup_name)
+            if "subgroup_description" in col_idx:
+                self._set_item(row_index, col_idx["subgroup_description"], subgroup_description)
+            if "registrant_name" in col_idx:
+                self._set_item(row_index, col_idx["registrant_name"], registrant_name)
+            if "registrant_org" in col_idx:
+                self._set_item(row_index, col_idx["registrant_org"], registrant_org)
+            if "institution" in col_idx:
+                self._set_item(row_index, col_idx["institution"], org_name)
+            if "image_downloaded" in col_idx:
+                self._set_item(row_index, col_idx["image_downloaded"], downloaded_text)
+            if "image_uploaded" in col_idx:
+                self._set_item(row_index, col_idx["image_uploaded"], uploaded_text)
+
+            if "image_action" in col_idx:
+                self._set_action_cell(
+                    row_index,
+                    col_idx["image_action"],
+                    dataset_id,
+                    "一括取得",
+                    "info",
+                    "bulk_download",
+                )
+
+            show_portal_actions = self._is_json_uploaded_label(json_status_label)
+
+            if "zip_action" in col_idx:
+                if show_portal_actions:
+                    self._set_action_cell(
+                        row_index,
+                        col_idx["zip_action"],
+                        dataset_id,
+                        "コンテンツZIP",
+                        "info",
+                        "upload_zip",
+                    )
+                else:
+                    _set_placeholder("zip_action")
+
+            if "edit_action" in col_idx:
+                if show_portal_actions:
+                    self._set_action_cell(
+                        row_index,
+                        col_idx["edit_action"],
+                        dataset_id,
+                        "データカタログ修正",
+                        "info",
+                        "edit_portal",
+                    )
+                else:
+                    _set_placeholder("edit_action")
+
+            if "open_action" in col_idx:
+                if show_portal_actions:
+                    self._set_action_cell(
+                        row_index,
+                        col_idx["open_action"],
+                        dataset_id,
+                        "ブラウザ表示",
+                        "info",
+                        "open_public_view",
+                    )
+                else:
+                    _set_placeholder("open_action")
+
+            if "status_action" in col_idx:
+                if show_portal_actions:
+                    self._set_action_cell(
+                        row_index,
+                        col_idx["status_action"],
+                        dataset_id,
+                        "ステータス変更",
+                        "warning",
+                        "toggle_status",
+                    )
+                else:
+                    _set_placeholder("status_action")
 
         self.table.setSortingEnabled(True)
+        if self._table_mode == "bulk_register":
+            self._refresh_bulk_select_toggle_label()
+        self._apply_initial_layout_once()
 
     def _set_item(self, row: int, col: int, text: str) -> None:
         item = QTableWidgetItem(text or "")
@@ -1201,6 +1435,251 @@ class DataPortalBulkTab(QWidget):
         layout.addStretch()
         self.table.setCellWidget(row, col, container)
 
+    def _set_bulk_register_cell(self, row: int, col: int, dataset_id: str, status_label: str) -> None:
+        container = QWidget(self.table)
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(4, 0, 4, 0)
+        layout.setSpacing(8)
+
+        is_uploaded = self._is_json_uploaded_label(status_label)
+        state = self._bulk_register_selection.get(dataset_id, {"register": False, "anonymize": False})
+        register_checked = bool(state.get("register")) and not is_uploaded
+        anonymize_checked = bool(state.get("anonymize")) and not is_uploaded
+
+        if is_uploaded:
+            self._bulk_register_selection[dataset_id] = {"register": False, "anonymize": False}
+
+        register_cb = QCheckBox("登録")
+        register_cb.setObjectName("bulk_register_checkbox")
+        register_cb.setChecked(register_checked)
+        register_cb.setEnabled(not is_uploaded)
+
+        anonymize_cb = QCheckBox("匿名化")
+        anonymize_cb.setObjectName("bulk_anonymize_checkbox")
+        anonymize_cb.setChecked(anonymize_checked)
+        anonymize_cb.setEnabled(not is_uploaded)
+
+        register_cb.stateChanged.connect(
+            lambda state, dsid=dataset_id: self._on_bulk_register_checked(dsid, state)
+        )
+        anonymize_cb.stateChanged.connect(
+            lambda state, dsid=dataset_id: self._on_bulk_anonymize_checked(dsid, state)
+        )
+
+        layout.addWidget(register_cb)
+        layout.addWidget(anonymize_cb)
+        layout.addStretch()
+        self.table.setCellWidget(row, col, container)
+
+    def _on_bulk_register_checked(self, dataset_id: str, state: int) -> None:
+        checked = state == Qt.Checked
+        current = self._bulk_register_selection.get(dataset_id, {"register": False, "anonymize": False})
+        self._bulk_register_selection[dataset_id] = {
+            "register": bool(checked),
+            "anonymize": bool(current.get("anonymize")),
+        }
+        self._refresh_bulk_select_toggle_label()
+
+    def _on_bulk_anonymize_checked(self, dataset_id: str, state: int) -> None:
+        checked = state == Qt.Checked
+        current = self._bulk_register_selection.get(dataset_id, {"register": False, "anonymize": False})
+        self._bulk_register_selection[dataset_id] = {
+            "register": bool(current.get("register")),
+            "anonymize": bool(checked),
+        }
+
+    def _on_bulk_register_execute(self) -> None:
+        if self._bulk_register_in_progress:
+            QMessageBox.information(self, "一括登録", "一括登録は実行中です。しばらくお待ちください。")
+            return
+
+        targets = [
+            (dsid, self._bulk_register_selection.get(dsid, {}).get("anonymize", False))
+            for dsid, state in self._bulk_register_selection.items()
+            if state.get("register")
+        ]
+        if not targets:
+            QMessageBox.information(self, "一括登録", "一括登録の対象がありません。")
+            return
+
+        filtered_targets: list[tuple[str, bool]] = []
+        skipped_ids: list[str] = []
+        for dsid, anonymize in targets:
+            status_label = str(self._get_json_upload_status_label(dsid) or "").strip()
+            if self._is_json_uploaded_label(status_label):
+                skipped_ids.append(dsid)
+                continue
+            filtered_targets.append((dsid, anonymize))
+
+        if not filtered_targets:
+            QMessageBox.information(self, "一括登録", "既にアップロード済みのため、登録対象がありません。")
+            return
+
+        preview_lines: list[str] = []
+        for dataset_id, _anonymize in filtered_targets:
+            row = self._rows_by_id.get(dataset_id, {})
+            dataset_item = row.get("_raw") if isinstance(row.get("_raw"), dict) else {}
+            attrs = dataset_item.get("attributes") if isinstance(dataset_item.get("attributes"), dict) else {}
+            grant_number = str(row.get("grant_number") or attrs.get("grantNumber") or "").strip()
+            dataset_name = str(row.get("dataset_name") or attrs.get("name") or "").strip()
+            preview_lines.append(f"{grant_number} / {dataset_name}")
+
+        anonymize_count = sum(1 for _dsid, anonymize in filtered_targets if anonymize)
+        message = (
+            "書誌情報JSONを一括登録します。\n\n"
+            f"対象件数: {len(filtered_targets)}件\n"
+            f"匿名化指定: {anonymize_count}件\n\n"
+            + (f"既にUP済み: {len(skipped_ids)}件（スキップ）\n\n" if skipped_ids else "")
+            + "登録予定エントリー:\n"
+            + "\n".join(preview_lines)
+            + "\n\n"
+            "実行しますか？"
+        )
+        reply = QMessageBox.question(
+            self,
+            "一括登録",
+            message,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        env = str(self._current_environment or "production").strip() or "production"
+        try:
+            from classes.data_portal.core.auth_manager import get_auth_manager
+
+            auth_manager = get_auth_manager()
+            credentials = auth_manager.get_credentials(env)
+        except Exception:
+            credentials = None
+
+        if credentials is None:
+            QMessageBox.warning(self, "一括登録", "認証情報が見つかりません。ログイン設定で保存してください。")
+            return
+
+        if env == "test":
+            if not getattr(credentials, "basic_username", "") or not getattr(credentials, "basic_password", ""):
+                QMessageBox.warning(self, "一括登録", "テスト環境ではBasic認証情報が必要です。")
+                return
+
+        upload_tab = self._get_upload_tab()
+        if upload_tab is None:
+            QMessageBox.warning(self, "一括登録", "データカタログタブを初期化できません。")
+            return
+
+        self._sync_environment(upload_tab)
+
+        tasks: list[dict[str, str]] = []
+        failures: list[dict[str, str]] = []
+        for dataset_id, anonymize in filtered_targets:
+            if not upload_tab.select_dataset_id(dataset_id):
+                failures.append({"dataset_id": dataset_id, "message": "データセット選択に失敗"})
+                continue
+            json_path = str(getattr(upload_tab, "selected_json_path", "") or "")
+            if not json_path:
+                failures.append({"dataset_id": dataset_id, "message": "JSONファイルが見つかりません"})
+                continue
+            if anonymize:
+                anonymize_fn = getattr(upload_tab, "_anonymize_json", None)
+                if callable(anonymize_fn):
+                    anon_path = anonymize_fn(json_path)
+                else:
+                    anon_path = None
+                if not anon_path:
+                    failures.append({"dataset_id": dataset_id, "message": "匿名化に失敗"})
+                    continue
+                json_path = str(anon_path)
+            tasks.append({"dataset_id": dataset_id, "json_path": json_path})
+
+        if not tasks:
+            QMessageBox.warning(self, "一括登録", "アップロード対象のJSONがありません。")
+            return
+
+        self._start_bulk_register_worker(env, credentials, tasks, failures)
+
+    def _start_bulk_register_worker(
+        self,
+        env: str,
+        credentials,
+        tasks: list[dict[str, str]],
+        failures: list[dict[str, str]],
+    ) -> None:
+        total = len(tasks)
+        progress = QProgressDialog("一括登録を実行中...", "キャンセル", 0, total, self)
+        progress.setWindowTitle("一括登録")
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        progress.setValue(0)
+        progress.show()
+
+        worker = _BulkRegisterWorker(env, credentials, tasks)
+        self._bulk_register_in_progress = True
+        self._bulk_register_worker = worker
+
+        def _on_progress(done: int, total_count: int, dataset_id: str) -> None:
+            progress.setMaximum(total_count)
+            progress.setValue(done - 1)
+            progress.setLabelText(f"一括登録中... ({done}/{total_count})\nID: {dataset_id}")
+
+        def _on_finished(success_ids: list[str], worker_failures: list[dict[str, str]]) -> None:
+            progress.setValue(total)
+            progress.close()
+            self._bulk_register_in_progress = False
+            self._bulk_register_worker = None
+
+            for dsid in success_ids:
+                self._bulk_register_selection[dsid] = {"register": False, "anonymize": False}
+
+            self._mark_json_uploaded(success_ids)
+
+            all_failures = failures + worker_failures
+            success_count = len(success_ids)
+            fail_count = len(all_failures)
+
+            if fail_count:
+                detail_lines = []
+                for item in all_failures[:5]:
+                    dsid = item.get("dataset_id") or "-"
+                    msg = item.get("message") or ""
+                    detail_lines.append(f"{dsid}: {msg}")
+                details = "\n".join(detail_lines)
+                QMessageBox.warning(
+                    self,
+                    "一括登録結果",
+                    f"成功: {success_count}件 / 失敗: {fail_count}件\n\n{details}",
+                )
+            else:
+                QMessageBox.information(self, "一括登録結果", f"成功: {success_count}件")
+
+            self._invalidate_cache()
+            self._refresh_bulk_select_toggle_label()
+
+        progress.canceled.connect(worker.cancel)
+        worker.progress.connect(_on_progress)
+        worker.finished.connect(_on_finished)
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _stop_bulk_register_worker(self) -> None:
+        worker = self._bulk_register_worker
+        if worker is None:
+            return
+        try:
+            worker.cancel()
+        except Exception:
+            pass
+        try:
+            worker.wait(3000)
+        except Exception:
+            pass
+        self._bulk_register_worker = None
+        self._bulk_register_in_progress = False
+
+    def closeEvent(self, event) -> None:
+        self._stop_bulk_register_worker()
+        super().closeEvent(event)
+
     def _build_status_icon(self, color_key: ThemeKey) -> Optional[QIcon]:
         try:
             pixmap = QPixmap(10, 10)
@@ -1218,6 +1697,12 @@ class DataPortalBulkTab(QWidget):
         return "↑ UPLOAD", "warning", self._build_status_icon(ThemeKey.BUTTON_WARNING_BACKGROUND)
 
     def _handle_action(self, dataset_id: str, action: str) -> None:
+        if action == "upload_json":
+            status_label = str(self._get_json_upload_status_label(dataset_id) or "").strip()
+            if self._is_json_uploaded_label(status_label):
+                QMessageBox.information(self, "書誌情報JSON", "既にアップロード済みのため、処理をスキップしました。")
+                return
+
         upload_tab = self._prepare_upload_tab(dataset_id)
         if upload_tab is None:
             return
@@ -1232,6 +1717,7 @@ class DataPortalBulkTab(QWidget):
                         upload_tab.anonymize_checkbox.setChecked(anonymize)
                     except Exception:
                         pass
+                self._bind_upload_completion(upload_tab, dataset_id)
                 upload_tab._on_upload()
             elif action == "upload_zip":
                 upload_tab._on_upload_zip()
@@ -1275,6 +1761,44 @@ class DataPortalBulkTab(QWidget):
         if clicked == cancel_btn or clicked is None:
             return None
         return clicked == anonymize_btn
+
+    def _bind_upload_completion(self, upload_tab, dataset_id: str) -> None:
+        signal = getattr(upload_tab, "upload_completed", None)
+        if signal is None:
+            return
+
+        def _on_completed(success: bool, _message: str, dsid: str = dataset_id) -> None:
+            try:
+                signal.disconnect(_on_completed)
+            except Exception:
+                pass
+            if not success:
+                return
+            self._mark_json_uploaded([dsid])
+            self._refresh_json_status_after_update()
+
+        try:
+            signal.connect(_on_completed)
+        except Exception:
+            pass
+
+    def _mark_json_uploaded(self, dataset_ids: list[str]) -> None:
+        ids = [str(dsid or "").strip() for dsid in (dataset_ids or []) if str(dsid or "").strip()]
+        if not ids:
+            return
+        try:
+            from classes.data_portal.core.portal_entry_status import get_portal_entry_status_cache
+
+            env = str(self._current_environment or "production").strip() or "production"
+            labels = {dsid: "UP済" for dsid in ids}
+            get_portal_entry_status_cache().set_labels_bulk(labels, env)
+        except Exception:
+            pass
+
+    def _refresh_json_status_after_update(self) -> None:
+        self._refresh_json_action_options()
+        self._refresh_json_status_options()
+        self._render_page()
 
     def _get_upload_tab(self):
         portal = self._portal_widget
@@ -1582,6 +2106,9 @@ class DataPortalBulkTab(QWidget):
     def _apply_column_visibility(self) -> None:
         if not hasattr(self, "table"):
             return
+        if self._table_mode == "bulk_register":
+            self._visible_columns.add("bulk_register")
+
         for idx, col in enumerate(self._column_defs):
             visible = col.key in self._visible_columns
             try:
@@ -1596,8 +2123,63 @@ class DataPortalBulkTab(QWidget):
         selected = dialog.get_selected_keys()
         if not selected:
             return
+        if self._table_mode == "bulk_register":
+            selected.add("bulk_register")
         self._visible_columns = selected
         self._apply_column_visibility()
+
+    def _update_bulk_register_controls(self) -> None:
+        is_bulk = self._table_mode == "bulk_register"
+        if hasattr(self, "bulk_select_toggle_btn"):
+            self.bulk_select_toggle_btn.setVisible(is_bulk)
+        if hasattr(self, "bulk_register_execute_btn"):
+            self.bulk_register_execute_btn.setVisible(is_bulk)
+        if is_bulk:
+            self._refresh_bulk_select_toggle_label()
+
+    def _refresh_bulk_select_toggle_label(self) -> None:
+        if self._table_mode != "bulk_register":
+            return
+        selectable = self._get_bulk_selectable_ids()
+        if not selectable:
+            self.bulk_select_toggle_btn.setText("登録 全選択")
+            return
+        all_selected = all(self._bulk_register_selection.get(dsid, {}).get("register") for dsid in selectable)
+        self.bulk_select_toggle_btn.setText("登録 全解除" if all_selected else "登録 全選択")
+
+    def _get_bulk_selectable_ids(self) -> list[str]:
+        selectable: list[str] = []
+        for dataset_id in self._filtered_ids:
+            status_label = str(self._get_json_upload_status_label(dataset_id) or "")
+            if not self._is_json_uploaded_label(status_label):
+                selectable.append(dataset_id)
+        return selectable
+
+    def _toggle_bulk_register_selection(self) -> None:
+        selectable = self._get_bulk_selectable_ids()
+        if not selectable:
+            return
+        all_selected = all(self._bulk_register_selection.get(dsid, {}).get("register") for dsid in selectable)
+        target_value = not all_selected
+        for dataset_id in selectable:
+            state = self._bulk_register_selection.get(dataset_id, {"register": False, "anonymize": False})
+            self._bulk_register_selection[dataset_id] = {
+                "register": target_value,
+                "anonymize": bool(state.get("anonymize")),
+            }
+        self._refresh_bulk_select_toggle_label()
+        self._render_page()
+
+    def _apply_initial_layout_once(self) -> None:
+        if self._did_apply_initial_layout:
+            return
+        if not hasattr(self, "table"):
+            return
+        if self.table.columnCount() <= 0:
+            return
+        self._did_apply_initial_layout = True
+        self._apply_display_mode("equal", force=True)
+        self._apply_display_mode("compact", force=True)
 
     def _apply_display_mode(self, mode: str, *, force: bool = False) -> None:
         mode = str(mode or "").strip().lower()

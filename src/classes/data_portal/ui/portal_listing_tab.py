@@ -36,6 +36,7 @@ from qt_compat.widgets import (
     QLabel,
     QLineEdit,
     QMenu,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QVBoxLayout,
@@ -325,6 +326,13 @@ class PortalListingTab(QWidget):
         self._managed_records: list[dict[str, str]] = []
         self._thread: Optional[QThread] = None
 
+        self._public_cache_records: list[dict] = []
+        self._public_cache_env: Optional[str] = None
+        self._public_cache_loaded: bool = False
+        self._auto_refresh_attempted_envs: set[str] = set()
+        self._syncing_env_combo: bool = False
+        self.env_combo: Optional[QComboBox] = None
+
         self._columns: list[_ColumnDef] = []
         self._visible_columns: set[str] = set()
         self._column_index: dict[str, int] = {}
@@ -337,28 +345,51 @@ class PortalListingTab(QWidget):
         self._filters_collapsed: bool = False
         self._filter_apply_timer: Optional[QtCore.QTimer] = None
 
+        self._ui_ready: bool = False
+
         self._filter_mode: str = "all"  # all | group
         self._filter_group_kind: str = "fixed"  # fixed | managed_group | managed_raw
         self._display_mode: str = "default"  # default | compact | equal
         self._did_apply_initial_width: bool = False
+        self._did_apply_initial_layout: bool = False
+        self._populate_token: int = 0
+        self._pending_rows: list[dict[str, Any]] = []
+        self._pending_visible_cols: list[_ColumnDef] = []
+        self._pending_row_index: int = 0
 
         self._setup_ui()
         self.refresh_public_from_disk()
         self.refresh_managed_from_disk()
-
-        # 認証情報が保存済みなら、初回表示から管理CSV取得まで自動で進める
-        # （接続テストや「保存」操作を必須にしない）
-        if not self._is_running_under_pytest():
-            try:
-                from qt_compat.core import QTimer
-
-                QTimer.singleShot(0, self.refresh_managed_from_portal)
-            except Exception:
-                pass
+        self._maybe_auto_refresh_managed()
 
     @staticmethod
     def _is_running_under_pytest() -> bool:
         return bool(os.environ.get("PYTEST_CURRENT_TEST"))
+
+    def _needs_managed_refresh(self) -> bool:
+        try:
+            info = find_latest_managed_csv(self._environment)
+        except Exception:
+            info = None
+        return info is None
+
+    def _maybe_auto_refresh_managed(self) -> None:
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return
+        if self._is_running_under_pytest():
+            return
+        env = str(self._environment or "production").strip() or "production"
+        if env in self._auto_refresh_attempted_envs:
+            return
+        self._auto_refresh_attempted_envs.add(env)
+        if not self._needs_managed_refresh():
+            return
+        try:
+            from qt_compat.core import QTimer
+
+            QTimer.singleShot(0, lambda: self.refresh_managed_from_portal(user_initiated=False, skip_confirm=True))
+        except Exception:
+            pass
 
     def set_portal_client(self, portal_client: Any) -> None:
         self._portal_client = portal_client
@@ -368,19 +399,14 @@ class PortalListingTab(QWidget):
         if env == self._environment:
             return
         self._environment = env
+        self._set_env_combo(env)
         # 環境が切り替わったら、管理側は取り直し（別環境の結果を混ぜない）
         self._managed_records = []
         self._portal_client = None
         self.status_label.setText(f"環境切替: {env}（管理CSVは未取得）")
         self.refresh_public_from_disk()
         self.refresh_managed_from_disk()
-        if not self._is_running_under_pytest():
-            try:
-                from qt_compat.core import QTimer
-
-                QTimer.singleShot(0, self.refresh_managed_from_portal)
-            except Exception:
-                pass
+        self._maybe_auto_refresh_managed()
 
     # ------------------------------------------------------------------
     # UI
@@ -393,6 +419,9 @@ class PortalListingTab(QWidget):
         title = QLabel("📋 データポータル 一覧（公開 + 管理）")
         title.setObjectName("portalListingTitle")
         layout.addWidget(title)
+
+        env_group = self._create_environment_group()
+        layout.addWidget(env_group)
 
         controls = QHBoxLayout()
         layout.addLayout(controls)
@@ -422,7 +451,7 @@ class PortalListingTab(QWidget):
         controls.addWidget(self.reload_public)
 
         self.reload_managed = QPushButton("管理CSV更新")
-        self.reload_managed.clicked.connect(self.refresh_managed_from_portal)
+        self.reload_managed.clicked.connect(lambda: self.refresh_managed_from_portal(user_initiated=True))
         controls.addWidget(self.reload_managed)
 
         self.select_columns_btn = QPushButton("表示列…")
@@ -533,6 +562,93 @@ class PortalListingTab(QWidget):
         self._filter_apply_timer.setSingleShot(True)
         self._filter_apply_timer.timeout.connect(self._apply_filters_now)
 
+        self._ui_ready = True
+
+    def _create_environment_group(self) -> QGroupBox:
+        group = QGroupBox("環境選択")
+        layout = QHBoxLayout(group)
+
+        layout.addWidget(QLabel("対象環境:"))
+
+        self.env_combo = QComboBox()
+        self.env_combo.currentIndexChanged.connect(self._on_environment_changed)
+        layout.addWidget(self.env_combo)
+        layout.addStretch()
+
+        self._load_environments()
+        self._sync_environment_from_parent()
+        return group
+
+    def _load_environments(self) -> None:
+        from ..conf.config import get_data_portal_config
+
+        config = get_data_portal_config()
+        environments = config.get_available_environments()
+
+        if self.env_combo is None:
+            return
+
+        self.env_combo.clear()
+        for env in environments:
+            if env == "production":
+                display_name = "本番環境"
+            elif env == "test":
+                display_name = "テスト環境"
+            else:
+                continue
+            self.env_combo.addItem(display_name, env)
+
+    def _sync_environment_from_parent(self) -> None:
+        try:
+            portal = self.parent()
+            login_tab = getattr(portal, "login_settings_tab", None) if portal else None
+            combo = getattr(login_tab, "env_combo", None) if login_tab else None
+            env = combo.currentData() if combo is not None else None
+        except Exception:
+            env = None
+
+        env = str(env or self._environment or "production").strip() or "production"
+        self._set_env_combo(env)
+
+    def _set_env_combo(self, env: str) -> None:
+        if self.env_combo is None:
+            return
+        env = str(env or "production").strip() or "production"
+        self._syncing_env_combo = True
+        try:
+            for idx in range(self.env_combo.count()):
+                if self.env_combo.itemData(idx) == env:
+                    self.env_combo.setCurrentIndex(idx)
+                    break
+        finally:
+            self._syncing_env_combo = False
+
+    def _on_environment_changed(self, _index: int) -> None:
+        if not self._ui_ready or not hasattr(self, "status_label"):
+            return
+        if self._syncing_env_combo:
+            return
+        try:
+            env = self.env_combo.currentData() if self.env_combo is not None else None
+        except Exception:
+            env = None
+        env = str(env or "production").strip() or "production"
+
+        # login設定タブにも反映
+        try:
+            portal = self.parent()
+            login_tab = getattr(portal, "login_settings_tab", None) if portal else None
+            combo = getattr(login_tab, "env_combo", None) if login_tab else None
+            if combo is not None:
+                for idx in range(combo.count()):
+                    if combo.itemData(idx) == env:
+                        combo.setCurrentIndex(idx)
+                        break
+        except Exception:
+            pass
+
+        self.set_environment(env)
+
     def _export(self, kind: str) -> None:
         kind = str(kind or "").strip().lower()
         if kind not in {"csv", "xlsx"}:
@@ -619,6 +735,7 @@ class PortalListingTab(QWidget):
                 win.resize(target_w, win.height())
         except Exception:
             pass
+        self._apply_initial_layout_once()
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # type: ignore[override]
         super().resizeEvent(event)
@@ -663,7 +780,7 @@ class PortalListingTab(QWidget):
     # Data
     # ------------------------------------------------------------------
     def refresh_public_from_disk(self) -> None:
-        public = self._load_public_cache_records()
+        public = self._load_public_cache_records(force=True)
         self._rebuild_table(public_records=public, managed_records=self._managed_records)
 
     def refresh_managed_from_disk(self) -> None:
@@ -701,14 +818,18 @@ class PortalListingTab(QWidget):
         except Exception:
             self.status_label.setText(f"管理CSV(保存済み): {len(self._managed_records)}件（{self._environment}）")
 
-    def refresh_managed_from_portal(self) -> None:
+    def refresh_managed_from_portal(self, *, user_initiated: bool = True, skip_confirm: bool = False) -> None:
         if self._is_running_under_pytest():
             # テスト環境ではネットワークアクセスを避け、保存済みCSVのみ読む
             self.refresh_managed_from_disk()
             return
-        if not self._confirm_managed_refresh():
-            self.status_label.setText("管理CSV更新をキャンセルしました")
+        if os.environ.get("PYTEST_CURRENT_TEST") and not user_initiated and skip_confirm:
+            self.status_label.setText(f"管理CSV更新をスキップしました（{self._environment}）")
             return
+        if user_initiated and not skip_confirm:
+            if not self._confirm_managed_refresh():
+                self.status_label.setText("管理CSV更新をキャンセルしました")
+                return
         # PortalClient が無い/環境が違う場合は、保存済み認証情報から自動生成する。
         if self._portal_client is None or str(getattr(self._portal_client, "environment", "")) != self._environment:
             try:
@@ -718,18 +839,33 @@ class PortalListingTab(QWidget):
                 auth = get_auth_manager()
                 cred = auth.get_credentials(self._environment)
                 if cred is None:
-                    self.status_label.setText(
-                        f"⚠️ 管理CSV更新: {self._environment} の認証情報が未登録です（ログイン設定で保存してください）"
-                    )
+                    message = f"⚠️ 管理CSV更新: {self._environment} の認証情報が未登録です（ログイン設定で保存してください）"
+                    self.status_label.setText(message)
+                    if user_initiated:
+                        try:
+                            QMessageBox.information(self, "管理CSV更新", message)
+                        except Exception:
+                            pass
                     return
                 client = PortalClient(self._environment)
                 client.set_credentials(cred)
                 self._portal_client = client
             except Exception as exc:
-                self.status_label.setText(f"⚠️ 管理CSV更新: PortalClient生成に失敗: {exc}")
+                message = f"⚠️ 管理CSV更新: PortalClient生成に失敗: {exc}"
+                self.status_label.setText(message)
+                if user_initiated:
+                    try:
+                        QMessageBox.warning(self, "管理CSV更新", message)
+                    except Exception:
+                        pass
                 return
         if self._thread is not None and self._thread.isRunning():
             self.status_label.setText("管理CSVを取得中...（処理中）")
+            if user_initiated:
+                try:
+                    QMessageBox.information(self, "管理CSV更新", "既に取得中です。しばらくお待ちください。")
+                except Exception:
+                    pass
             return
 
         self.reload_managed.setEnabled(False)
@@ -785,7 +921,15 @@ class PortalListingTab(QWidget):
     def _on_managed_records_failed(self, message: str) -> None:
         self.status_label.setText(f"⚠️ 管理CSV取得失敗（{self._environment}）: {message}")
 
-    def _load_public_cache_records(self) -> list[dict]:
+    def _load_public_cache_records(self, *, force: bool = False) -> list[dict]:
+        if (
+            not force
+            and self._public_cache_loaded
+            and self._public_cache_env == self._environment
+            and self._public_cache_records
+        ):
+            return list(self._public_cache_records)
+
         cache_dir = get_public_data_portal_cache_dir(self._environment)
         paths = sorted(cache_dir.glob("*.json"))
         records: list[dict] = []
@@ -815,6 +959,9 @@ class PortalListingTab(QWidget):
         # 管理側ステータスを上書きしないよう、公開cache件数は補助的に表示
         if not (self._thread is not None and self._thread.isRunning()):
             self.status_label.setText(f"公開cache: {len(records)}件（{self._environment} / {cache_dir}）")
+        self._public_cache_records = list(records)
+        self._public_cache_env = self._environment
+        self._public_cache_loaded = True
         return records
 
     def _rebuild_table(self, *, public_records: list[dict], managed_records: list[dict[str, str]]) -> None:
@@ -1038,7 +1185,13 @@ class PortalListingTab(QWidget):
             pass
 
     def _populate(self, rows: list[dict[str, Any]]) -> None:
-        from qt_compat import QtGui
+        try:
+            from shiboken6 import isValid as _qt_is_valid  # type: ignore
+
+            if not _qt_is_valid(self):
+                return
+        except Exception:
+            pass
 
         visible_cols = [c for c in self._columns if c.key in self._visible_columns or c.key == "source"]
         self._column_index = {c.key: idx for idx, c in enumerate(visible_cols)}
@@ -1049,93 +1202,143 @@ class PortalListingTab(QWidget):
         self.table_model.setColumnCount(len(visible_cols))
         self.table_model.setHorizontalHeaderLabels([c.label for c in visible_cols])
 
-        for row in rows:
-            items = []
-            for col in visible_cols:
-                val = row.get(col.key, "")
-
-                # Render grouped/CSV list-like values with line breaks to avoid horizontal scroll.
-                try:
-                    if isinstance(val, str):
-                        if str(col.key).startswith("managed_group:"):
-                            parts = [p.strip() for p in val.replace("\r\n", "\n").replace("\r", "\n").split(",")]
-                            parts = [p for p in parts if p]
-                            if len(parts) >= 2 and "\n" not in val:
-                                val = "\n".join([f"・{p}" for p in parts])
-                        if col.key in ("keyword_tags",) and "," in val and "\n" not in val:
-                            parts = [p.strip() for p in val.split(",") if p.strip()]
-                            if len(parts) >= 2:
-                                val = "\n".join([f"・{p}" for p in parts])
-                except Exception:
-                    pass
-
-                display_val = val
-                time_tooltip = None
-                if self._should_format_date_column(col):
-                    display_val, time_tooltip = self._split_date_display(val)
-
-                display, tooltip = prepare_display_value(display_val, col.preview_limit)
-                if time_tooltip:
-                    tooltip = time_tooltip
-                item = QtGui.QStandardItem(display)
-                item.setEditable(False)
-
-                # Keep raw value for exports (and other non-truncated uses).
-                try:
-                    item.setData(val, int(Qt.ItemDataRole.UserRole) + 1)
-                except Exception:
-                    pass
-
-                # Dataset name behaves like a link (opens row URL) even when URL column is hidden.
-                if col.key == "dataset_name":
-                    try:
-                        url = str(row.get("url") or "").strip()
-                        if url:
-                            item.setData(url, Qt.ItemDataRole.UserRole)
-                            f = item.font()
-                            f.setUnderline(True)
-                            item.setFont(f)
-                            item.setForeground(QtGui.QBrush(get_qcolor(ThemeKey.TEXT_LINK)))
-                            extra = f"URL: {url}"
-                            tooltip = (tooltip + "\n\n" if tooltip else "") + extra
-                    except Exception:
-                        pass
-
-                try:
-                    origin = (row.get("_cell_origin") or {}).get(col.key)
-                    diff = (row.get("_cell_diff") or {}).get(col.key)
-                    if diff:
-                        item.setBackground(QtGui.QBrush(get_qcolor(ThemeKey.PANEL_INFO_BACKGROUND)))
-                        note = f"公開: {diff.get('public','')}\n管理: {diff.get('managed','')}"
-                        tooltip = (tooltip + "\n\n" if tooltip else "") + note
-                    elif origin == "public":
-                        item.setBackground(QtGui.QBrush(get_qcolor(ThemeKey.PANEL_WARNING_BACKGROUND)))
-                        note = "管理CSVに値が無いため公開cache由来です"
-                        tooltip = (tooltip + "\n\n" if tooltip else "") + note
-                except Exception:
-                    pass
-
-                if tooltip and tooltip != display:
-                    item.setToolTip(tooltip)
-                items.append(item)
-            self.table_model.appendRow(items)
-
-        try:
-            self.table_view.resizeRowsToContents()
-        except Exception:
-            pass
-
         # Keep source hidden even after rebuild
         src_idx = self._column_index.get("source", -1)
         if src_idx >= 0:
             self.table_view.setColumnHidden(src_idx, True)
             self.proxy_model.set_source_column(src_idx)
 
+        self._pending_rows = list(rows)
+        self._pending_visible_cols = list(visible_cols)
+        self._pending_row_index = 0
+        self._populate_token += 1
+        token = self._populate_token
+
+        QtCore.QTimer.singleShot(0, lambda: self._append_rows_batch(token))
+
+    def _append_rows_batch(self, token: int) -> None:
+        try:
+            from shiboken6 import isValid as _qt_is_valid  # type: ignore
+
+            if not _qt_is_valid(self) or not _qt_is_valid(self.table_model):
+                return
+        except Exception:
+            pass
+
+        if token != self._populate_token:
+            return
+
+        if not self._pending_rows:
+            self._finalize_populate()
+            return
+
+        batch_size = 200
+        start = self._pending_row_index
+        end = min(start + batch_size, len(self._pending_rows))
+        for row in self._pending_rows[start:end]:
+            items = self._build_items_for_row(row, self._pending_visible_cols)
+            self.table_model.appendRow(items)
+
+        self._pending_row_index = end
+        if end < len(self._pending_rows):
+            QtCore.QTimer.singleShot(0, lambda: self._append_rows_batch(token))
+            return
+
+        self._finalize_populate()
+
+    def _finalize_populate(self) -> None:
+        try:
+            self.table_view.resizeRowsToContents()
+        except Exception:
+            pass
+
         if self._display_mode != "default":
             self._apply_display_mode(self._display_mode, force=True)
 
-        # Apply current filters after model rebuild
+        self._apply_initial_layout_once()
         self._schedule_apply_filters()
+
+    def _build_items_for_row(self, row: dict[str, Any], visible_cols: list[_ColumnDef]) -> list[QtGui.QStandardItem]:
+        items: list[QtGui.QStandardItem] = []
+
+        for col in visible_cols:
+            val = row.get(col.key, "")
+
+            # Render grouped/CSV list-like values with line breaks to avoid horizontal scroll.
+            try:
+                if isinstance(val, str):
+                    if str(col.key).startswith("managed_group:"):
+                        parts = [p.strip() for p in val.replace("\r\n", "\n").replace("\r", "\n").split(",")]
+                        parts = [p for p in parts if p]
+                        if len(parts) >= 2 and "\n" not in val:
+                            val = "\n".join([f"・{p}" for p in parts])
+                    if col.key in ("keyword_tags",) and "," in val and "\n" not in val:
+                        parts = [p.strip() for p in val.split(",") if p.strip()]
+                        if len(parts) >= 2:
+                            val = "\n".join([f"・{p}" for p in parts])
+            except Exception:
+                pass
+
+            display_val = val
+            time_tooltip = None
+            if self._should_format_date_column(col):
+                display_val, time_tooltip = self._split_date_display(val)
+
+            display, tooltip = prepare_display_value(display_val, col.preview_limit)
+            if time_tooltip:
+                tooltip = time_tooltip
+            item = QtGui.QStandardItem(display)
+            item.setEditable(False)
+
+            # Keep raw value for exports (and other non-truncated uses).
+            try:
+                item.setData(val, int(Qt.ItemDataRole.UserRole) + 1)
+            except Exception:
+                pass
+
+            # Dataset name behaves like a link (opens row URL) even when URL column is hidden.
+            if col.key == "dataset_name":
+                try:
+                    url = str(row.get("url") or "").strip()
+                    if url:
+                        item.setData(url, Qt.ItemDataRole.UserRole)
+                        f = item.font()
+                        f.setUnderline(True)
+                        item.setFont(f)
+                        item.setForeground(QtGui.QBrush(get_qcolor(ThemeKey.TEXT_LINK)))
+                        extra = f"URL: {url}"
+                        tooltip = (tooltip + "\n\n" if tooltip else "") + extra
+                except Exception:
+                    pass
+
+            try:
+                origin = (row.get("_cell_origin") or {}).get(col.key)
+                diff = (row.get("_cell_diff") or {}).get(col.key)
+                if diff:
+                    item.setBackground(QtGui.QBrush(get_qcolor(ThemeKey.PANEL_INFO_BACKGROUND)))
+                    note = f"公開: {diff.get('public','')}\n管理: {diff.get('managed','')}"
+                    tooltip = (tooltip + "\n\n" if tooltip else "") + note
+                elif origin == "public":
+                    item.setBackground(QtGui.QBrush(get_qcolor(ThemeKey.PANEL_WARNING_BACKGROUND)))
+                    note = "管理CSVに値が無いため公開cache由来です"
+                    tooltip = (tooltip + "\n\n" if tooltip else "") + note
+            except Exception:
+                pass
+
+            if tooltip and tooltip != display:
+                item.setToolTip(tooltip)
+            items.append(item)
+
+        return items
+
+    def _apply_initial_layout_once(self) -> None:
+        if self._did_apply_initial_layout:
+            return
+        if self.proxy_model.columnCount() <= 0:
+            return
+        self._did_apply_initial_layout = True
+        self._apply_display_mode("equal", force=True)
+        self._apply_display_mode("compact", force=True)
 
     def _rebuild_filters_panel(self, visible_cols: list[_ColumnDef]) -> None:
         if self._filters_container is None or self._filters_layout is None:
