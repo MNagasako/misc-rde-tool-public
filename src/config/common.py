@@ -361,6 +361,7 @@ INPUT_DIR = get_dynamic_file_path('input')
 OUTPUT_DIR = get_dynamic_file_path('output')
 OUTPUT_LOG_DIR = get_dynamic_file_path('output/log')
 HIDDEN_DIR = get_dynamic_file_path('output/.private')
+LOCKS_DIR = get_dynamic_file_path('output/.locks')
 CONFIG_DIR = get_dynamic_file_path('config')
 
 OUTPUT_RDE_DIR = get_dynamic_file_path('output/rde')
@@ -390,6 +391,7 @@ def initialize_directories():
         OUTPUT_DIR,
         OUTPUT_LOG_DIR,
         HIDDEN_DIR,
+        LOCKS_DIR,
         CONFIG_DIR,
         DATASET_JSON_CHUNKS_DIR,
         TEMPLATE_JSON_CHUNKS_DIR,

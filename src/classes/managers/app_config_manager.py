@@ -61,7 +61,8 @@ class AppConfigManager:
                 "auto_login_enabled": False,
                 "auto_close_enabled": False,
                 "enable_splash_screen": True,
-                "test_mode": False
+                "test_mode": False,
+                "allow_multi_instance_windows": False
             },
             
             # UI設定

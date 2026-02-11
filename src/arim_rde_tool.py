@@ -87,6 +87,7 @@ from classes.managers.event_handler_manager import EventHandlerManager
 from classes.utils.debug_log import debug_log
 from classes.managers.app_config_manager import get_config_manager
 from classes.managers.log_manager import get_log_manager, get_logger
+from classes.core.single_instance_guard import ensure_single_instance_guard
 # ログ管理の初期化
 log_manager = get_log_manager()
 logger = get_logger("RDE_WebView")
@@ -1108,23 +1109,30 @@ def main():
         else:
             app = QApplication(sys.argv)
 
-        # バイナリ実行時のみ単一起動を保証する
+        # Windows版は単一起動を基本とし、必要に応じて設定で二重起動を許可する。
         try:
-            if getattr(sys, "_MEIPASS", None):
-                from qt_compat.core import QSharedMemory
-                from qt_compat.widgets import QMessageBox
+            allow_multi = False
+            try:
+                cfg = get_config_manager()
+                allow_multi = bool(cfg.get("app.allow_multi_instance_windows", False))
+            except Exception:
+                allow_multi = False
 
-                shared_key = "ARIM_RDE_TOOL_SINGLE_INSTANCE"
-                shared = QSharedMemory(shared_key)
-                if not shared.create(1):
-                    msg = QMessageBox()
-                    msg.setIcon(QMessageBox.Information)
-                    msg.setWindowTitle("起動済み")
-                    msg.setText("アプリは既に起動されています。\n起動済みのアプリを終了してから再度お試しください。")
-                    msg.exec()
-                    return
-                # GC防止
-                app._single_instance_guard = shared
+            is_frozen = bool(getattr(sys, "frozen", False) or getattr(sys, "_MEIPASS", None))
+            logger.info(
+                "[SingleInstance] setup: frozen=%s prompt_on_conflict=%s allow_multi=%s",
+                is_frozen,
+                not is_frozen,
+                allow_multi,
+            )
+            result = ensure_single_instance_guard(
+                app,
+                allow_multi_instance=allow_multi,
+                prompt_on_conflict=not is_frozen,
+                logger=logger,
+            )
+            if not result.allowed:
+                return
         except Exception:
             logger.debug("single instance guard init failed", exc_info=True)
 

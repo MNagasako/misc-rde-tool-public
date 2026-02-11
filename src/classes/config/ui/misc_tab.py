@@ -13,7 +13,7 @@ from pathlib import Path
 
 from config.common import REVISION
 from classes.managers.app_config_manager import get_config_manager
-from classes.core.platform import open_path, reveal_in_file_manager
+from classes.core.platform import is_windows, open_path, reveal_in_file_manager
 
 try:
     from qt_compat.widgets import (
@@ -903,6 +903,16 @@ class MiscTab(QWidget):
         )
         layout.addWidget(self.update_prompt_checkbox)
 
+        self.allow_multi_instance_checkbox = QCheckBox("Windows版: 二重起動を許可する（既定: 許可しない）")
+        self.allow_multi_instance_checkbox.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-weight: normal;"
+        )
+        if not is_windows():
+            self.allow_multi_instance_checkbox.setChecked(False)
+            self.allow_multi_instance_checkbox.setEnabled(False)
+            self.allow_multi_instance_checkbox.setToolTip("Windows版のみ設定可能です")
+        layout.addWidget(self.allow_multi_instance_checkbox)
+
         info_label = QLabel(
             "この設定は次回起動時から有効になります。\n"
             "スプラッシュ画面はアプリ起動時に表示されるロゴ画面です。"
@@ -955,12 +965,19 @@ class MiscTab(QWidget):
 
             prompt_enabled = bool(cfg.get("app.update.startup_prompt_enabled", True))
             self.update_prompt_checkbox.setChecked(prompt_enabled)
+
+            allow_multi = bool(cfg.get("app.allow_multi_instance_windows", False))
+            if is_windows():
+                self.allow_multi_instance_checkbox.setChecked(allow_multi)
+            else:
+                self.allow_multi_instance_checkbox.setChecked(False)
         except Exception as e:
             logger.debug("スプラッシュ設定の読み込みに失敗: %s", e)
             try:
                 self.splash_checkbox.setChecked(True)
                 self.update_check_checkbox.setChecked(True)
                 self.update_prompt_checkbox.setChecked(True)
+                self.allow_multi_instance_checkbox.setChecked(False)
             except Exception:
                 pass
 
@@ -971,6 +988,10 @@ class MiscTab(QWidget):
             cfg.set("app.enable_splash_screen", bool(self.splash_checkbox.isChecked()))
             cfg.set("app.update.auto_check_enabled", bool(self.update_check_checkbox.isChecked()))
             cfg.set("app.update.startup_prompt_enabled", bool(self.update_prompt_checkbox.isChecked()))
+            cfg.set(
+                "app.allow_multi_instance_windows",
+                bool(self.allow_multi_instance_checkbox.isChecked()) if is_windows() else False,
+            )
             if not cfg.save():
                 raise RuntimeError("設定ファイルの保存に失敗しました")
 
