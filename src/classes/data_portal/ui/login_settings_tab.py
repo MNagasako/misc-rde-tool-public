@@ -17,6 +17,7 @@ from qt_compat.core import Qt, Signal, QTimer, QThread
 
 from classes.theme import get_color, ThemeKey
 from classes.theme.theme_manager import ThemeManager
+from classes.utils.button_styles import get_button_style
 
 from classes.managers.log_manager import get_logger
 from ..core.auth_manager import get_auth_manager, PortalCredentials, AuthManager
@@ -65,6 +66,32 @@ class _DownloadManagedCsvThread(QThread):
             self.failed.emit(str(exc))
 
 
+class _AutoConnectionTestThread(QThread):
+    progress = Signal(str, bool, str)
+
+    def __init__(self, targets: list[tuple[str, PortalCredentials]], parent=None):
+        super().__init__(parent)
+        self._targets = list(targets or [])
+        self._stop_requested = False
+
+    def stop(self) -> None:
+        self._stop_requested = True
+
+    def run(self) -> None:  # noqa: D401
+        from ..core.portal_client import PortalClient
+
+        for env, credentials in self._targets:
+            if self._stop_requested:
+                break
+            try:
+                client = PortalClient(str(env or "").strip() or "production")
+                client.set_credentials(credentials)
+                success, message = client.test_connection()
+                self.progress.emit(str(env), bool(success), str(message or ""))
+            except Exception as exc:
+                self.progress.emit(str(env), False, str(exc))
+
+
 class LoginSettingsTab(QWidget):
     """
     ログイン設定タブ
@@ -90,6 +117,7 @@ class LoginSettingsTab(QWidget):
         # Debounce/guard for auto-tests
         self._auto_test_inflight = False
         self._auto_test_done = False
+        self._auto_test_thread: _AutoConnectionTestThread | None = None
         
         self._init_ui()
         self._load_available_environments()
@@ -103,9 +131,9 @@ class LoginSettingsTab(QWidget):
             # super が無い/失敗しても自動テストは可能な限り実行
             pass
 
-        # 初回表示時にだけ実行（ネットワーク処理のためイベントループ後に遅延）
+        # 初回表示時にだけ実行（タブ描画完了後に遅延開始）
         try:
-            QTimer.singleShot(0, self.auto_test_connections)
+            QTimer.singleShot(200, self.auto_test_connections)
         except Exception:
             pass
     
@@ -185,6 +213,19 @@ class LoginSettingsTab(QWidget):
     def refresh_theme(self):
         """テーマ変更時のスタイル更新"""
         self._apply_status_style()
+        for button, kind in (
+            (getattr(self, "save_btn", None), "success"),
+            (getattr(self, "load_btn", None), "info"),
+            (getattr(self, "clear_btn", None), "danger"),
+            (getattr(self, "test_login_btn", None), "warning"),
+            (getattr(self, "fetch_csv_btn", None), "primary"),
+        ):
+            if button is None:
+                continue
+            try:
+                button.setStyleSheet(get_button_style(kind))
+            except Exception:
+                continue
         self.update()
     
     def _create_environment_selector(self) -> QGroupBox:
@@ -333,6 +374,15 @@ class LoginSettingsTab(QWidget):
             }}
         """)
         layout.addWidget(self.fetch_csv_btn)
+
+        try:
+            self.save_btn.setStyleSheet(get_button_style("success"))
+            self.load_btn.setStyleSheet(get_button_style("info"))
+            self.clear_btn.setStyleSheet(get_button_style("danger"))
+            self.test_login_btn.setStyleSheet(get_button_style("warning"))
+            self.fetch_csv_btn.setStyleSheet(get_button_style("primary"))
+        except Exception:
+            pass
         
         return layout
     
@@ -624,26 +674,56 @@ class LoginSettingsTab(QWidget):
             return
         if self._auto_test_inflight:
             return
-        self._auto_test_inflight = True
+        # 設定されている環境のみを対象にする（本番→テストの順）
+        config = get_data_portal_config()
+        available = list(config.get_available_environments())
+        target_envs = [env for env in ["production", "test"] if env in available]
 
-        try:
-            # 設定されている環境のみを対象にする（本番→テストの順）
-            config = get_data_portal_config()
-            available = list(config.get_available_environments())
-            targets = [env for env in ["production", "test"] if env in available]
+        targets: list[tuple[str, PortalCredentials]] = []
+        for env in target_envs:
+            if not self.auth_manager.has_credentials(env):
+                self._log_status(f"⚠️ 自動接続テスト: {env} は認証情報未登録")
+                continue
+            creds = self.auth_manager.get_credentials(env)
+            if not creds:
+                self._log_status(f"⚠️ 自動接続テスト: {env} の認証情報読込に失敗")
+                continue
+            targets.append((env, creds))
 
-            for env in targets:
-                if not self.auth_manager.has_credentials(env):
-                    self._log_status(f"⚠️ 自動接続テスト: {env} は認証情報未登録")
-                    continue
-                creds = self.auth_manager.get_credentials(env)
-                if not creds:
-                    self._log_status(f"⚠️ 自動接続テスト: {env} の認証情報読込に失敗")
-                    continue
-                self._run_connection_test(env, creds, interactive=False)
-        finally:
-            self._auto_test_inflight = False
+        if not targets:
             self._auto_test_done = True
+            return
+
+        self._auto_test_inflight = True
+        self._log_status("🔌 自動接続テストをバックグラウンド実行します")
+
+        thread = _AutoConnectionTestThread(targets, parent=self)
+        thread.progress.connect(self._on_auto_test_progress)
+        thread.finished.connect(self._on_auto_test_finished)
+        self._auto_test_thread = thread
+        thread.start()
+
+    def _on_auto_test_progress(self, environment: str, success: bool, message: str) -> None:
+        env = str(environment or "").strip() or "production"
+        if success:
+            try:
+                if self.env_combo.currentData() == env:
+                    self.portal_client = self.create_portal_client_for_environment(env)
+            except Exception:
+                pass
+            self._log_status(f"✅ 接続テスト成功({env}): {message}")
+        else:
+            self._log_status(f"❌ 接続テスト失敗({env}): {message}", error=True)
+
+    def _on_auto_test_finished(self) -> None:
+        self._auto_test_inflight = False
+        self._auto_test_done = True
+        if self._auto_test_thread is not None:
+            try:
+                self._auto_test_thread.deleteLater()
+            except Exception:
+                pass
+        self._auto_test_thread = None
 
     def _run_connection_test(self, environment: str, credentials: PortalCredentials, *, interactive: bool) -> None:
         """接続テスト実行（interactive=Falseの場合はポップアップなし）。"""

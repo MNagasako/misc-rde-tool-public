@@ -6,6 +6,7 @@ import datetime
 import json
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -36,8 +37,8 @@ from qt_compat.widgets import (
 )
 
 from PySide6.QtCore import QObject, QAbstractTableModel, QModelIndex, QSortFilterProxyModel, QTimer, QAbstractProxyModel
-from PySide6.QtGui import QKeySequence, QBrush, QFont, QDesktopServices
-from PySide6.QtWidgets import QMenu, QTableView
+from PySide6.QtGui import QKeySequence, QBrush, QFont, QDesktopServices, QCursor, QPainter, QPen
+from PySide6.QtWidgets import QMenu, QTableView, QStyledItemDelegate
 
 from classes.dataset.ui.spinner_overlay import SpinnerOverlay
 from classes.dataset.ui.portal_status_spinner_delegate import PortalStatusSpinnerDelegate
@@ -45,11 +46,14 @@ from classes.dataset.ui.portal_status_spinner_delegate import PortalStatusSpinne
 from classes.dataset.util.dataset_list_table_records import (
     DatasetListColumn,
     build_dataset_list_rows_from_files,
+    load_dataset_list_rows_fast_cache,
 )
 
 from classes.dataset.util.dataset_listing_export_filename import (
     build_dataset_listing_export_default_filename,
 )
+from classes.managers.log_manager import get_logger
+from classes.utils.button_styles import get_button_style
 
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import ThemeManager, get_color
@@ -64,6 +68,9 @@ _ACTIVE_DATASET_LISTING_PORTAL_THREADS: set[QThread] = set()
 _ACTIVE_DATASET_LISTING_PORTAL_CSV_THREADS: set[QThread] = set()
 
 
+logger = get_logger("Dataset.ListingWidget")
+
+
 def _build_user_profile_url(user_id: str) -> str:
     uid = str(user_id or "").strip()
     if not uid:
@@ -75,6 +82,7 @@ class _DatasetListingTableView(QTableView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.portal_status_click_callback = None
+        self.tool_link_click_callback = None
 
     def mousePressEvent(self, event):  # noqa: N802
         self._maybe_emit_portal_click(event)
@@ -108,8 +116,75 @@ class _DatasetListingTableView(QTableView):
             idx = self.indexAt(pos)
             if callable(self.portal_status_click_callback):
                 self.portal_status_click_callback(idx)
+            try:
+                from PySide6.QtCore import QEvent
+
+                is_release = bool(event.type() == QEvent.Type.MouseButtonRelease)
+            except Exception:
+                is_release = True
+            if is_release and callable(self.tool_link_click_callback):
+                self.tool_link_click_callback(idx, pos)
         except Exception:
             return
+
+
+class ToolLinkButtonsDelegate(QStyledItemDelegate):
+    def _button_rects(self, rect):
+        margin_x = 6
+        margin_y = 4
+        spacing = 6
+        total_w = max(40, rect.width() - (margin_x * 2))
+        btn_w = max(26, int((total_w - spacing) / 2))
+        btn_h = max(18, rect.height() - (margin_y * 2))
+        y = rect.top() + max(1, int((rect.height() - btn_h) / 2))
+        x1 = rect.left() + margin_x
+        x2 = x1 + btn_w + spacing
+        from PySide6.QtCore import QRect
+
+        return QRect(x1, y, btn_w, btn_h), QRect(x2, y, btn_w, btn_h)
+
+    def paint(self, painter: QPainter, option, index):
+        try:
+            value = str(index.data(Qt.DisplayRole) or "").strip()
+            if not value:
+                return super().paint(painter, option, index)
+
+            painter.save()
+
+            try:
+                if option.state & option.state.State_Selected:
+                    painter.fillRect(option.rect, QBrush(get_color(ThemeKey.TABLE_ROW_BACKGROUND_SELECTED)))
+                elif option.state & option.state.State_MouseOver:
+                    painter.fillRect(option.rect, QBrush(get_color(ThemeKey.TABLE_ROW_BACKGROUND_HOVER)))
+            except Exception:
+                pass
+
+            try:
+                bg = get_color(ThemeKey.BUTTON_DEFAULT_BACKGROUND)
+                border = get_color(ThemeKey.BUTTON_DEFAULT_BORDER)
+                text = get_color(ThemeKey.BUTTON_DEFAULT_TEXT)
+            except Exception:
+                bg = get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)
+                border = get_color(ThemeKey.PANEL_BORDER)
+                text = get_color(ThemeKey.TEXT_PRIMARY)
+
+            rde_rect, dp_rect = self._button_rects(option.rect)
+            painter.setRenderHint(QPainter.Antialiasing, True)
+            painter.setBrush(QBrush(bg))
+            painter.setPen(QPen(border))
+            painter.drawRoundedRect(rde_rect, 4, 4)
+            painter.drawRoundedRect(dp_rect, 4, 4)
+
+            painter.setPen(QPen(text))
+            painter.drawText(rde_rect, int(Qt.AlignCenter), "RDE")
+            painter.drawText(dp_rect, int(Qt.AlignCenter), "DP")
+        except Exception:
+            return super().paint(painter, option, index)
+        finally:
+            try:
+                painter.restore()
+            except Exception:
+                pass
 
 
 class DatasetListTableModel(QAbstractTableModel):
@@ -183,15 +258,27 @@ class DatasetListTableModel(QAbstractTableModel):
 
         if role == Qt.DisplayRole:
             value = row.get(col.key)
-            if col.key == "portal_open":
+            if col.key == "tool_open":
                 dataset_id = str(row.get("dataset_id") or "").strip()
-                return "カタログ" if dataset_id else ""
+                return "RDE / DP" if dataset_id else ""
             if col.key == "portal_status":
                 status = "" if value is None else str(value)
                 checked_at = str(row.get("portal_checked_at") or "").strip()
                 if status and checked_at:
                     return f"{status}（{checked_at}）"
                 return status
+            if col.key == "portal_checked_at":
+                txt = str(value or "").strip()
+                if txt:
+                    return txt
+                status = str(row.get("portal_status") or "").strip()
+                try:
+                    from classes.dataset.util.portal_status_resolver import UNCHECKED_LABEL
+                except Exception:
+                    UNCHECKED_LABEL = "未確認"
+                if (not status) or status == UNCHECKED_LABEL:
+                    return "確認前"
+                return ""
             if isinstance(value, bool):
                 return "True" if value else "False"
             if col.key == "file_size":
@@ -231,10 +318,6 @@ class DatasetListTableModel(QAbstractTableModel):
                 dataset_id = row.get("dataset_id")
                 dataset_id = str(dataset_id).strip() if dataset_id is not None else ""
                 return dataset_id
-            if col.key == "portal_open":
-                dataset_id = row.get("dataset_id")
-                dataset_id = str(dataset_id).strip() if dataset_id is not None else ""
-                return dataset_id
             if col.key == "manager_name":
                 manager_id = str(row.get("_manager_id") or "").strip()
                 return _build_user_profile_url(manager_id)
@@ -270,8 +353,17 @@ class DatasetListTableModel(QAbstractTableModel):
             return row.get(col.key)
 
         if role == Qt.ForegroundRole:
-            if col.key in {"dataset_name", "instrument_names", "tool_open", "portal_open"}:
+            if col.key in {"dataset_name", "instrument_names"}:
                 return QBrush(get_color(ThemeKey.TEXT_LINK))
+            if col.key == "portal_checked_at":
+                checked_at = str(row.get("portal_checked_at") or "").strip()
+                status = str(row.get("portal_status") or "").strip()
+                try:
+                    from classes.dataset.util.portal_status_resolver import UNCHECKED_LABEL
+                except Exception:
+                    UNCHECKED_LABEL = "未確認"
+                if (not checked_at) and ((not status) or status == UNCHECKED_LABEL):
+                    return QBrush(get_color(ThemeKey.TEXT_WARNING))
             if col.key == "subgroup_name":
                 subgroup_id = row.get("subgroup_id")
                 subgroup_id = str(subgroup_id).strip() if subgroup_id is not None else ""
@@ -291,10 +383,21 @@ class DatasetListTableModel(QAbstractTableModel):
                     return QBrush(get_color(ThemeKey.TEXT_LINK))
 
         if role == Qt.FontRole:
-            if col.key in {"dataset_name", "instrument_names", "tool_open", "portal_open"}:
+            if col.key in {"dataset_name", "instrument_names"}:
                 f = QFont()
                 f.setUnderline(True)
                 return f
+            if col.key == "portal_checked_at":
+                checked_at = str(row.get("portal_checked_at") or "").strip()
+                status = str(row.get("portal_status") or "").strip()
+                try:
+                    from classes.dataset.util.portal_status_resolver import UNCHECKED_LABEL
+                except Exception:
+                    UNCHECKED_LABEL = "未確認"
+                if (not checked_at) and ((not status) or status == UNCHECKED_LABEL):
+                    f = QFont()
+                    f.setBold(True)
+                    return f
             if col.key == "subgroup_name":
                 subgroup_id = row.get("subgroup_id")
                 subgroup_id = str(subgroup_id).strip() if subgroup_id is not None else ""
@@ -312,6 +415,17 @@ class DatasetListTableModel(QAbstractTableModel):
                     f = QFont()
                     f.setUnderline(True)
                     return f
+
+        if role == Qt.BackgroundRole:
+            if col.key == "portal_checked_at":
+                checked_at = str(row.get("portal_checked_at") or "").strip()
+                status = str(row.get("portal_status") or "").strip()
+                try:
+                    from classes.dataset.util.portal_status_resolver import UNCHECKED_LABEL
+                except Exception:
+                    UNCHECKED_LABEL = "未確認"
+                if (not checked_at) and ((not status) or status == UNCHECKED_LABEL):
+                    return QBrush(get_color(ThemeKey.PANEL_WARNING_BACKGROUND))
 
         if role == Qt.TextAlignmentRole:
             if col.key in {"description_len", "related_datasets_count", "tile_count", "file_count", "tag_count"}:
@@ -1214,6 +1328,24 @@ class DatasetListingWidget(QWidget):
         self._portal_worker: Optional[QObject] = None
         self._portal_fill_environment: Optional[str] = None
         self._portal_global_fill_cursor: int = 0
+        self._portal_auto_fetch_attempted_dataset_ids: set[str] = set()
+        self._portal_prefetch_thread: Optional[QThread] = None
+        self._portal_prefetch_worker: Optional[QObject] = None
+        self._portal_prefetch_mode: Optional[str] = None
+        self._portal_prefetched_listing_ids: Optional[set[str]] = None
+        self._portal_async_paused: bool = False
+        self._portal_async_progress_btn: Optional[QPushButton] = None
+        self._portal_error_timestamps: List[float] = []
+        self._portal_error_window_sec: int = 180
+        self._portal_error_suspend_threshold: int = 5
+        self._portal_error_suspended: bool = False
+        self._portal_error_suspend_reason: str = ""
+        self._portal_fill_last_row_ready_count: int = 0
+        self._portal_csv_mapping_received: bool = False
+        self._tool_link_last_action_at: float = 0.0
+        self._tool_link_last_action_key: str = ""
+
+        self._display_mode: str = "default"  # default | compact | equal
 
         self._portal_csv_thread: Optional[QThread] = None
         self._portal_csv_worker: Optional[QObject] = None
@@ -1227,6 +1359,7 @@ class DatasetListingWidget(QWidget):
         # Force refresh progress (spinner overlay)
         self._portal_force_refresh_progress_total: Optional[int] = None
         self._portal_force_refresh_progress_done: int = 0
+        self._portal_force_refresh_deferred_html_scope: Optional[str] = None
 
         # UI counters refresh (debounced)
         self._portal_ui_counts_refresh_timer = QTimer(self)
@@ -1253,6 +1386,7 @@ class DatasetListingWidget(QWidget):
         self._portal_status_refresh_inflight_dataset_ids: set[str] = set()
         self._portal_status_refresh_threads: set[QThread] = set()
         self._portal_status_delegate: Optional[PortalStatusSpinnerDelegate] = None
+        self._tool_link_delegate: Optional[ToolLinkButtonsDelegate] = None
         self._portal_status_retry_counts_by_dataset_id: Dict[str, int] = {}
         self._portal_status_pytest_timers: set[QTimer] = set()
         self._portal_status_pytest_click_timer: Optional[QTimer] = None
@@ -1322,13 +1456,21 @@ class DatasetListingWidget(QWidget):
         self._select_columns = QPushButton("列選択", self)
         buttons_row.addWidget(self._select_columns)
 
-        self._reset_columns = QPushButton("列リセット", self)
-        buttons_row.addWidget(self._reset_columns)
+        self._compact_rows_btn = QPushButton("1行表示", self)
+        buttons_row.addWidget(self._compact_rows_btn)
 
-        self._export_csv = QPushButton("CSV出力", self)
-        self._export_xlsx = QPushButton("XLSX出力", self)
-        buttons_row.addWidget(self._export_csv)
-        buttons_row.addWidget(self._export_xlsx)
+        self._equal_columns_btn = QPushButton("列幅そろえ", self)
+        buttons_row.addWidget(self._equal_columns_btn)
+
+        export_menu = QMenu(self)
+        export_csv = export_menu.addAction("CSV出力")
+        export_csv.triggered.connect(lambda: self._export("csv"))
+        export_xlsx = export_menu.addAction("XLSX出力")
+        export_xlsx.triggered.connect(lambda: self._export("xlsx"))
+
+        self._export_btn = QPushButton("エクスポート", self)
+        self._export_btn.setMenu(export_menu)
+        buttons_row.addWidget(self._export_btn)
 
         self._portal_force_refresh_btn = QPushButton("データカタログステータス強制更新", self)
         try:
@@ -1343,12 +1485,29 @@ class DatasetListingWidget(QWidget):
             pass
         buttons_row.addWidget(self._portal_force_refresh_btn)
 
+        self._portal_async_progress_btn = QPushButton("ポータル確認中… 中止", self)
+        self._portal_async_progress_btn.setVisible(False)
+        self._portal_async_progress_btn.clicked.connect(self._toggle_portal_async_pause_resume)
+        buttons_row.addWidget(self._portal_async_progress_btn)
+
         self._reload = QPushButton("更新", self)
         buttons_row.addWidget(self._reload)
 
         self._toggle_filters_button = QPushButton("フィルタ最小化", self)
         self._toggle_filters_button.setObjectName("dataset_listing_toggle_filters")
         buttons_row.addWidget(self._toggle_filters_button)
+
+        try:
+            self._select_columns.setStyleSheet(get_button_style("secondary"))
+            self._compact_rows_btn.setStyleSheet(get_button_style("primary"))
+            self._equal_columns_btn.setStyleSheet(get_button_style("secondary"))
+            self._export_btn.setStyleSheet(get_button_style("success"))
+            self._portal_force_refresh_btn.setStyleSheet(get_button_style("warning"))
+            self._portal_async_progress_btn.setStyleSheet(get_button_style("danger"))
+            self._reload.setStyleSheet(get_button_style("info"))
+            self._toggle_filters_button.setStyleSheet(get_button_style("secondary"))
+        except Exception:
+            pass
 
         root.addLayout(buttons_row)
 
@@ -1695,9 +1854,8 @@ class DatasetListingWidget(QWidget):
         self._file_cnt_max.valueChanged.connect(self._schedule_apply_filters)
         self._clear_filters.clicked.connect(self._clear_all_filters)
         self._select_columns.clicked.connect(self._open_column_selector)
-        self._reset_columns.clicked.connect(self._reset_column_visibility)
-        self._export_csv.clicked.connect(lambda: self._export("csv"))
-        self._export_xlsx.clicked.connect(lambda: self._export("xlsx"))
+        self._compact_rows_btn.clicked.connect(lambda: self._apply_display_mode("compact"))
+        self._equal_columns_btn.clicked.connect(lambda: self._apply_display_mode("equal"))
         self._reload.clicked.connect(self.reload_data)
 
         # NOTE: portal force refresh button uses an attached menu when available.
@@ -1715,6 +1873,11 @@ class DatasetListingWidget(QWidget):
         try:
             if hasattr(self._table, "portal_status_click_callback"):
                 self._table.portal_status_click_callback = self._on_portal_status_cell_clicked_from_table
+        except Exception:
+            pass
+        try:
+            if hasattr(self._table, "tool_link_click_callback"):
+                self._table.tool_link_click_callback = self._on_tool_link_cell_clicked_from_table
         except Exception:
             pass
         try:
@@ -1746,9 +1909,16 @@ class DatasetListingWidget(QWidget):
         # Initialize
         # 初回表示の体感を改善するため、ウィジェット描画後に読み込みを開始する。
         self._status.setText("読み込み中...")
-        # NOTE: reload_data() 呼び出し前でも、初回表示待ちが目立つためスピナーを即表示する。
-        # reload_data() 内でも _show_loading() するが、二重呼び出しは許容する。
-        self._show_loading()
+        initial_cache_applied = False
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            try:
+                initial_cache_applied = self._try_apply_initial_fast_cache()
+            except Exception:
+                initial_cache_applied = False
+
+        # NOTE: キャッシュ描画できた場合はブロッキング表示を避ける。
+        if not initial_cache_applied:
+            self._show_loading()
         if os.environ.get("PYTEST_CURRENT_TEST"):
             # テストは決定性を優先して同期で読み込む
             self.reload_data()
@@ -2180,6 +2350,7 @@ class DatasetListingWidget(QWidget):
 
         self._portal_thread = None
         self._portal_worker = None
+        self._refresh_portal_async_progress_button()
 
     def _cancel_portal_csv_fill(self) -> None:
         thread = self._portal_csv_thread
@@ -2190,6 +2361,174 @@ class DatasetListingWidget(QWidget):
                 pass
         self._portal_csv_thread = None
         self._portal_csv_worker = None
+        self._refresh_portal_async_progress_button()
+
+    def _cancel_portal_prefetch(self) -> None:
+        worker = self._portal_prefetch_worker
+        thread = self._portal_prefetch_thread
+
+        if worker is not None:
+            try:
+                getattr(worker, "cancel")()
+            except Exception:
+                pass
+
+        if thread is not None and thread.isRunning():
+            try:
+                thread.quit()
+            except Exception:
+                pass
+
+        self._portal_prefetch_thread = None
+        self._portal_prefetch_worker = None
+        self._portal_prefetch_mode = None
+        self._portal_prefetched_listing_ids = None
+        self._refresh_portal_async_progress_button()
+
+    def _is_portal_async_busy(self) -> bool:
+        try:
+            if self._portal_prefetch_thread is not None and self._portal_prefetch_thread.isRunning():
+                return True
+        except Exception:
+            pass
+        try:
+            if self._portal_thread is not None and self._portal_thread.isRunning():
+                return True
+        except Exception:
+            pass
+        try:
+            if self._portal_csv_thread is not None and self._portal_csv_thread.isRunning():
+                return True
+        except Exception:
+            pass
+        return False
+
+    def _refresh_portal_async_progress_button(self) -> None:
+        btn = self._portal_async_progress_btn
+        if btn is None:
+            return
+        busy = self._is_portal_async_busy()
+        paused = bool(self._portal_async_paused)
+        try:
+            if busy:
+                btn.setVisible(True)
+                btn.setEnabled(True)
+                btn.setText("ポータル確認中… 中止")
+            elif paused:
+                btn.setVisible(True)
+                btn.setEnabled(True)
+                btn.setText("ポータル確認を再開")
+            else:
+                btn.setVisible(False)
+        except Exception:
+            pass
+
+    def _portal_error_count_recent(self) -> int:
+        now = time.time()
+        window = max(10, int(self._portal_error_window_sec or 180))
+        self._portal_error_timestamps = [t for t in self._portal_error_timestamps if (now - float(t)) <= window]
+        return len(self._portal_error_timestamps)
+
+    def _record_portal_success(self, source: str) -> None:
+        try:
+            if self._portal_error_suspended:
+                return
+            self._portal_error_count_recent()
+            if self._portal_error_timestamps:
+                self._portal_error_timestamps = self._portal_error_timestamps[-2:]
+        except Exception:
+            pass
+
+    def _suspend_portal_processing_due_to_errors(self, reason: str) -> None:
+        if self._portal_error_suspended:
+            return
+        self._portal_error_suspended = True
+        self._portal_error_suspend_reason = str(reason or "データポータルエラーが頻発")
+        self._portal_async_paused = True
+
+        try:
+            self._portal_auto_fetch_timer.stop()
+        except Exception:
+            pass
+        self._cancel_portal_prefetch()
+        self._cancel_portal_fill()
+        self._cancel_portal_csv_fill()
+
+        try:
+            self._status.setText("ポータル処理を自動停止しました（エラー頻発）")
+        except Exception:
+            pass
+
+        if not self._is_running_under_pytest():
+            try:
+                QMessageBox.warning(
+                    self,
+                    "ポータル処理を停止",
+                    "データポータルのエラーが頻発したため、ポータル確認処理を停止しました。\n"
+                    "再開する場合は『ポータル確認を再開』を押してください。",
+                )
+            except Exception:
+                pass
+
+        self._refresh_portal_async_progress_button()
+
+    def _record_portal_error(self, source: str, detail: str = "") -> None:
+        try:
+            self._portal_error_timestamps.append(time.time())
+            count = self._portal_error_count_recent()
+            logger.warning("portal-error: source=%s count_recent=%s detail=%s", source, count, str(detail or "")[:240])
+            if count >= max(1, int(self._portal_error_suspend_threshold or 5)):
+                self._suspend_portal_processing_due_to_errors("データポータル通信エラーが頻発")
+        except Exception:
+            pass
+
+    def _toggle_portal_async_pause_resume(self) -> None:
+        busy = self._is_portal_async_busy()
+        if busy:
+            self._portal_async_paused = True
+            try:
+                self._status.setText("ポータル確認を中止しました（再開可能）")
+            except Exception:
+                pass
+            self._cancel_portal_prefetch()
+            self._cancel_portal_fill()
+            self._cancel_portal_csv_fill()
+            self._refresh_portal_async_progress_button()
+            return
+
+        if self._portal_async_paused:
+            should_resume = True
+            if not self._is_running_under_pytest():
+                try:
+                    msg = "ポータル確認処理を再開しますか？"
+                    if self._portal_error_suspended:
+                        msg += "\n\n直前に通信エラーが頻発して自動停止しています。"
+                    reply = QMessageBox.question(self, "確認", msg, QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                    should_resume = reply == QMessageBox.Yes
+                except Exception:
+                    should_resume = True
+
+            if not should_resume:
+                return
+
+            self._portal_async_paused = False
+            self._portal_error_suspended = False
+            self._portal_error_suspend_reason = ""
+            self._portal_error_timestamps = []
+            try:
+                self._status.setText("ポータル確認を再開します…")
+            except Exception:
+                pass
+            try:
+                if not self._is_running_under_pytest() and not self._portal_auto_fetch_timer.isActive():
+                    self._portal_auto_fetch_timer.start()
+            except Exception:
+                pass
+            self._refresh_portal_async_progress_button()
+            try:
+                QTimer.singleShot(0, self._auto_fetch_portal_statuses_if_needed)
+            except Exception:
+                self._auto_fetch_portal_statuses_if_needed()
 
     def _portal_checked_at_column_index(self) -> Optional[int]:
         try:
@@ -2376,7 +2715,7 @@ class DatasetListingWidget(QWidget):
 
             auth_manager = get_auth_manager()
             try:
-                credentials = auth_manager.get_credentials(env)
+                credentials = auth_manager.get_credentials(env, source="dataset_listing.portal_fill.worker")
             except Exception:
                 credentials = None
 
@@ -2487,6 +2826,47 @@ class DatasetListingWidget(QWidget):
             except Exception:
                 pass
 
+    class _PortalPublicListingIdsWorker(QObject):
+        result_ready = Signal(object)
+        finished = Signal()
+
+        def __init__(self, *, environment: str):
+            super().__init__()
+            self._environment = str(environment or "production").strip() or "production"
+            self._cancelled = False
+
+        def cancel(self) -> None:
+            self._cancelled = True
+
+        def run(self) -> None:
+            dataset_ids: set[str] = set()
+            if not self._cancelled:
+                try:
+                    from classes.utils.data_portal_public import get_public_listing_dataset_ids
+
+                    dataset_ids = get_public_listing_dataset_ids(
+                        environment=self._environment,
+                        timeout=20,
+                        display_result=0,
+                        display_order=0,
+                        max_age_sec=300,
+                        page_max_workers=4,
+                    )
+                except Exception:
+                    dataset_ids = set()
+
+            if self._cancelled:
+                dataset_ids = set()
+
+            try:
+                self.result_ready.emit(dataset_ids)
+            except Exception:
+                pass
+            try:
+                self.finished.emit()
+            except Exception:
+                pass
+
     class _PortalStatusRefreshWorker(QObject):
         """Refresh portal status for one dataset_id using both logged-in and public checks."""
 
@@ -2524,7 +2904,10 @@ class DatasetListingWidget(QWidget):
 
                 auth_manager = get_auth_manager()
                 try:
-                    credentials = auth_manager.get_credentials(self._worker_env)
+                    credentials = auth_manager.get_credentials(
+                        self._worker_env,
+                        source="dataset_listing.portal_status_refresh.worker",
+                    )
                 except Exception:
                     credentials = None
 
@@ -2609,7 +2992,28 @@ class DatasetListingWidget(QWidget):
             except Exception:
                 public_published = False
 
-            # If not found in output.json, best-effort live probe (production -> test)
+            # Fast path: scrape paginated public listing once (display_result=0 -> 20/page)
+            # and reuse cached IDs. This avoids per-dataset live probes.
+            if not public_published:
+                try:
+                    from classes.utils.data_portal_public import get_public_listing_dataset_ids
+
+                    for env in ("production", "test"):
+                        listing_ids = get_public_listing_dataset_ids(
+                            environment=env,
+                            timeout=20,
+                            display_result=0,
+                            display_order=0,
+                            max_age_sec=300,
+                            page_max_workers=4,
+                        )
+                        if dsid in listing_ids:
+                            public_published = True
+                            break
+                except Exception:
+                    public_published = False
+
+            # Misses only: fallback to per-item live probe (production -> test)
             if not public_published:
                 try:
                     from classes.utils.data_portal_public import search_public_arim_data, fetch_public_arim_data_details
@@ -2670,6 +3074,15 @@ class DatasetListingWidget(QWidget):
             return None
         return None
 
+    def _tool_open_column_index(self) -> Optional[int]:
+        try:
+            for i, c in enumerate(self._columns or []):
+                if getattr(c, "key", None) == "tool_open":
+                    return int(i)
+        except Exception:
+            return None
+        return None
+
     def _install_portal_status_delegate(self) -> None:
         col_idx = self._portal_status_column_index()
         if col_idx is None or self._table is None:
@@ -2685,6 +3098,18 @@ class DatasetListingWidget(QWidget):
             )
         try:
             self._table.setItemDelegateForColumn(int(col_idx), self._portal_status_delegate)
+        except Exception:
+            return
+
+    def _install_tool_link_delegate(self) -> None:
+        col_idx = self._tool_open_column_index()
+        if col_idx is None or self._table is None:
+            return
+
+        if self._tool_link_delegate is None:
+            self._tool_link_delegate = ToolLinkButtonsDelegate(self)
+        try:
+            self._table.setItemDelegateForColumn(int(col_idx), self._tool_link_delegate)
         except Exception:
             return
 
@@ -2729,7 +3154,7 @@ class DatasetListingWidget(QWidget):
                 return
 
             col = self._columns[idx2.column()] if 0 <= idx2.column() < len(self._columns) else None
-            if col is None or col.key != "portal_status":
+            if col is None or col.key not in {"portal_status", "portal_checked_at"}:
                 return
 
             rows = self._model.get_rows()
@@ -2744,7 +3169,11 @@ class DatasetListingWidget(QWidget):
                 UNCHECKED_LABEL = "未確認"
 
             current = str(row.get("portal_status") or "").strip()
+            should_refresh = bool(col.key == "portal_checked_at")
             if self._is_running_under_pytest() or (not current) or (current == UNCHECKED_LABEL):
+                should_refresh = True
+
+            if should_refresh:
                 self._start_portal_status_refresh_for_model_row(int(idx2.row()), dsid)
         except Exception:
             return
@@ -2790,7 +3219,10 @@ class DatasetListingWidget(QWidget):
             auth_manager = get_auth_manager()
             for candidate in env_candidates:
                 try:
-                    cred = auth_manager.get_credentials(str(candidate))
+                    cred = auth_manager.get_credentials(
+                        str(candidate),
+                        source="dataset_listing.pick_worker_env",
+                    )
                 except Exception:
                     cred = None
                 if cred is not None:
@@ -2802,6 +3234,13 @@ class DatasetListingWidget(QWidget):
 
     def _start_portal_status_refresh_for_model_row(self, model_row: int, dataset_id: str) -> None:
         if self._model is None:
+            return
+        if self._portal_error_suspended:
+            try:
+                self._status.setText("ポータル処理は停止中です（再開ボタンで復帰）")
+            except Exception:
+                pass
+            self._refresh_portal_async_progress_button()
             return
 
         dsid = str(dataset_id or "").strip()
@@ -2902,6 +3341,8 @@ class DatasetListingWidget(QWidget):
         public_ok = bool(public_published)
         checked = bool(logged_in_checked)
         err_text = str(error_message).strip() if error_message is not None else ""
+        if err_text:
+            self._record_portal_error("portal_status_refresh", err_text)
 
         # Click refresh should follow the same precedence rules as listing.
         dsid_for_resolve = ""
@@ -3001,6 +3442,9 @@ class DatasetListingWidget(QWidget):
         except Exception:
             pass
 
+        if not err_text and str(new_label or "").strip():
+            self._record_portal_success("portal_status_refresh")
+
     def _on_portal_status_refresh_finished(self, model_row: int, dataset_id: str) -> None:
         try:
             self._portal_status_loading_model_rows.discard(int(model_row))
@@ -3016,6 +3460,11 @@ class DatasetListingWidget(QWidget):
     def _on_portal_row_ready(self, row_index: int, label: object) -> None:
         if self._model is None:
             return
+
+        try:
+            self._portal_fill_last_row_ready_count = int(self._portal_fill_last_row_ready_count or 0) + 1
+        except Exception:
+            self._portal_fill_last_row_ready_count = 1
 
         # Force refresh progress update (best-effort)
         try:
@@ -3111,22 +3560,264 @@ class DatasetListingWidget(QWidget):
             self._schedule_refresh_portal_ui_counts()
         except Exception:
             pass
+        self._record_portal_success("portal_fill")
 
     def _on_portal_fill_finished(self) -> None:
+        if self._portal_fill_last_row_ready_count <= 0 and not self._portal_async_paused:
+            self._record_portal_error("portal_fill", "row_ready=0")
         self._portal_thread = None
         self._portal_worker = None
+        self._refresh_portal_async_progress_button()
         try:
             self._finalize_portal_force_refresh_part("html")
         except Exception:
             pass
 
-    def _start_portal_fill_async(self, *, mode: str = "visible") -> None:
+    def _start_force_refresh_html_worker(self, tasks: List[tuple[int, str]]) -> None:
+        if self._model is None:
+            return
+        if not tasks:
+            return
+
+        try:
+            env_candidates = self._collect_env_candidates_for_portal()
+            worker_env = self._pick_worker_env_with_credentials(env_candidates)
+            self._portal_fill_environment = str(worker_env or "production").strip() or "production"
+        except Exception:
+            self._portal_fill_environment = "production"
+
+        try:
+            self._portal_force_refresh_progress_total = int(len(tasks))
+            self._portal_force_refresh_progress_done = 0
+            if hasattr(self, "_spinner_overlay") and self._spinner_overlay is not None:
+                self._spinner_overlay.show_message("データポータル確認中…")
+                self._spinner_overlay.set_progress(0, int(self._portal_force_refresh_progress_total), prefix="処理済み")
+                self._spinner_overlay.start()
+        except Exception:
+            pass
+
+        thread = QThread()
+        worker = DatasetListingWidget._PortalFillWorker(tasks, self._portal_fill_environment)
+        worker.moveToThread(thread)
+
+        thread.started.connect(worker.run)
+        worker.row_ready.connect(self._on_portal_row_ready)
+        worker.finished.connect(self._on_portal_fill_finished)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(thread.deleteLater)
+
+        self._portal_worker = worker
+        self._portal_thread = thread
+
+        _ACTIVE_DATASET_LISTING_PORTAL_THREADS.add(thread)
+        try:
+            setattr(thread, "_portal_worker", worker)
+        except Exception:
+            pass
+        try:
+            thread.finished.connect(lambda: _ACTIVE_DATASET_LISTING_PORTAL_THREADS.discard(thread))
+        except Exception:
+            pass
+
+        try:
+            self._portal_force_refresh_pending_parts.add("html")
+        except Exception:
+            pass
+
+        thread.start()
+        self._refresh_portal_async_progress_button()
+
+    def _collect_force_refresh_html_tasks(self, *, scope: str) -> List[tuple[int, str]]:
+        if self._model is None:
+            return []
+
+        try:
+            from classes.dataset.util.portal_status_resolver import (
+                PUBLIC_MANAGED_LABEL,
+                PRIVATE_MANAGED_LABEL,
+                PUBLIC_PUBLISHED_LABEL,
+                UNCHECKED_LABEL,
+            )
+        except Exception:
+            PUBLIC_MANAGED_LABEL = "公開"
+            PRIVATE_MANAGED_LABEL = "非公開"
+            PUBLIC_PUBLISHED_LABEL = "公開2"
+            UNCHECKED_LABEL = "未確認"
+
+        rows = self._model.get_rows()
+        tasks: List[tuple[int, str]] = []
+
+        for idx, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+            dsid = str(row.get("dataset_id") or "").strip()
+            if not dsid:
+                continue
+
+            status = str(row.get("portal_status") or "").strip()
+
+            # CSV / public-list / output.json で判定済みは除外（取りこぼしのみ個別確認）
+            if status in {PUBLIC_MANAGED_LABEL, PRIVATE_MANAGED_LABEL, PUBLIC_PUBLISHED_LABEL}:
+                continue
+
+            # 過大アクセス抑止: 個別確認は「未判定」の取りこぼしに限定する。
+            # （scope=all/nonpublic どちらも同様）
+            if status in {"", UNCHECKED_LABEL}:
+                tasks.append((int(idx), dsid))
+                continue
+
+        return tasks
+
+    def _start_force_refresh_html_for_pending_scope(self) -> None:
+        scope = str(self._portal_force_refresh_deferred_html_scope or "").strip().lower()
+        self._portal_force_refresh_deferred_html_scope = None
+        if not scope:
+            return
+
+        tasks = self._collect_force_refresh_html_tasks(scope=scope)
+        max_individual_checks = 30
+        if len(tasks) > max_individual_checks and self._model is not None:
+            cache = None
+            cache_env = str(self._portal_fill_environment or "production").strip() or "production"
+            try:
+                from classes.data_portal.core.portal_entry_status import get_portal_entry_status_cache
+
+                cache = get_portal_entry_status_cache()
+            except Exception:
+                cache = None
+
+            try:
+                checked_at_txt = self._format_portal_checked_at(datetime.datetime.now(datetime.timezone.utc).timestamp())
+            except Exception:
+                checked_at_txt = ""
+
+            updated = 0
+            for idx, dsid in tasks:
+                try:
+                    self._model.update_row_fields(int(idx), {"portal_status": "管理外", "portal_checked_at": checked_at_txt})
+                    if cache is not None and dsid:
+                        try:
+                            cache.set_label(str(dsid), "管理外", cache_env)
+                        except Exception:
+                            pass
+                    updated += 1
+                except Exception:
+                    continue
+
+            try:
+                self._schedule_refresh_portal_ui_counts()
+            except Exception:
+                pass
+
+            logger.info(
+                "force-refresh: 個別確認を抑止しました unresolved=%s threshold=%s（ステータスを管理外に補完）",
+                len(tasks),
+                max_individual_checks,
+            )
+            try:
+                self._status.setText(f"強制更新: 個別確認を抑止（{len(tasks)}件→管理外補完）")
+            except Exception:
+                pass
+            return
+
+        if tasks:
+            self._start_force_refresh_html_worker(tasks)
+
+    def _start_public_listing_prefetch_async(self, *, mode: str) -> bool:
+        if self._portal_async_paused:
+            return False
+        if self._portal_prefetch_thread is not None and self._portal_prefetch_thread.isRunning():
+            return False
+
+        self._portal_prefetch_mode = str(mode or "global").strip().lower() or "global"
+        self._portal_prefetched_listing_ids = None
+
+        thread = QThread()
+        worker = DatasetListingWidget._PortalPublicListingIdsWorker(environment="production")
+        worker.moveToThread(thread)
+
+        thread.started.connect(worker.run)
+        worker.result_ready.connect(self._on_public_listing_prefetch_result)
+        worker.finished.connect(self._on_public_listing_prefetch_finished)
+        worker.finished.connect(worker.deleteLater)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(thread.deleteLater)
+
+        self._portal_prefetch_worker = worker
+        self._portal_prefetch_thread = thread
+
+        _ACTIVE_DATASET_LISTING_PORTAL_THREADS.add(thread)
+        try:
+            setattr(thread, "_portal_prefetch_worker", worker)
+        except Exception:
+            pass
+        try:
+            thread.finished.connect(lambda: _ACTIVE_DATASET_LISTING_PORTAL_THREADS.discard(thread))
+        except Exception:
+            pass
+
+        try:
+            self._status.setText("ポータル公開一覧を確認中…")
+        except Exception:
+            pass
+        self._refresh_portal_async_progress_button()
+        thread.start()
+        self._refresh_portal_async_progress_button()
+        return True
+
+    def _on_public_listing_prefetch_result(self, dataset_ids: object) -> None:
+        ids: set[str] = set()
+        try:
+            if isinstance(dataset_ids, set):
+                ids = {str(v).strip() for v in dataset_ids if str(v).strip()}
+            elif isinstance(dataset_ids, (list, tuple)):
+                ids = {str(v).strip() for v in dataset_ids if str(v).strip()}
+        except Exception:
+            ids = set()
+        self._portal_prefetched_listing_ids = ids
+
+    def _on_public_listing_prefetch_finished(self) -> None:
+        self._portal_prefetch_thread = None
+        self._portal_prefetch_worker = None
+
+        ids = self._portal_prefetched_listing_ids or set()
+        mode = str(self._portal_prefetch_mode or "global").strip().lower() or "global"
+        self._portal_prefetch_mode = None
+        self._portal_prefetched_listing_ids = None
+
+        if not self._portal_async_paused:
+            try:
+                self._start_portal_fill_async(
+                    mode=mode,
+                    preloaded_public_listing_dataset_ids=ids,
+                    skip_public_prefetch=True,
+                )
+            except Exception:
+                pass
+
+        self._refresh_portal_async_progress_button()
+
+    def _start_portal_fill_async(
+        self,
+        *,
+        mode: str = "visible",
+        preloaded_public_listing_dataset_ids: Optional[set[str]] = None,
+        skip_public_prefetch: bool = False,
+    ) -> None:
         if self._is_running_under_pytest():
+            return
+        if self._portal_error_suspended:
+            self._refresh_portal_async_progress_button()
+            return
+        if self._portal_async_paused:
             return
         if self._model is None:
             return
         if self._portal_thread is not None and self._portal_thread.isRunning():
             return
+
+        mode_text = str(mode or "visible").strip().lower()
 
         # Prefer production, but allow test env cache/credentials.
         env_candidates: List[str] = ["production", "test"]
@@ -3147,22 +3838,6 @@ class DatasetListingWidget(QWidget):
         except Exception:
             pass
 
-        worker_env = env_candidates[0] if env_candidates else "production"
-        try:
-            from classes.data_portal.core.auth_manager import get_auth_manager
-
-            auth_manager = get_auth_manager()
-            for candidate in env_candidates:
-                try:
-                    cred = auth_manager.get_credentials(str(candidate))
-                except Exception:
-                    cred = None
-                if cred is not None:
-                    worker_env = str(candidate)
-                    break
-        except Exception:
-            pass
-
         public_published_dataset_ids: set[str] = set()
         try:
             from classes.utils.data_portal_public import get_public_published_dataset_ids
@@ -3170,6 +3845,23 @@ class DatasetListingWidget(QWidget):
             public_published_dataset_ids = get_public_published_dataset_ids()
         except Exception:
             public_published_dataset_ids = set()
+
+        # Global fill optimization: fetch paginated public listing IDs asynchronously.
+        if mode_text == "global" and not skip_public_prefetch:
+            if self._portal_prefetch_thread is not None and self._portal_prefetch_thread.isRunning():
+                self._refresh_portal_async_progress_button()
+                return
+            started = self._start_public_listing_prefetch_async(mode=mode_text)
+            if started:
+                return
+
+        if mode_text == "global" and isinstance(preloaded_public_listing_dataset_ids, set):
+            try:
+                public_published_dataset_ids |= {
+                    str(v).strip() for v in preloaded_public_listing_dataset_ids if str(v).strip()
+                }
+            except Exception:
+                pass
 
         try:
             from classes.dataset.util.portal_status_resolver import resolve_portal_status_label
@@ -3199,7 +3891,6 @@ class DatasetListingWidget(QWidget):
         resolved_updates = 0
 
         # Choose target rows.
-        mode_text = str(mode or "visible").strip().lower()
         candidates: List[tuple[int, str]] = []
         if mode_text == "global":
             # Walk all rows, but only enqueue a limited number each cycle.
@@ -3312,11 +4003,46 @@ class DatasetListingWidget(QWidget):
         if not tasks:
             return
 
+        if mode_text == "global":
+            filtered_tasks: List[tuple[int, str]] = []
+            for model_row, dsid in tasks:
+                if dsid in self._portal_auto_fetch_attempted_dataset_ids:
+                    continue
+                filtered_tasks.append((model_row, dsid))
+            tasks = filtered_tasks
+
+        if not tasks:
+            return
+
+        worker_env = env_candidates[0] if env_candidates else "production"
+        try:
+            from classes.data_portal.core.auth_manager import get_auth_manager
+
+            auth_manager = get_auth_manager()
+            for candidate in env_candidates:
+                try:
+                    cred = auth_manager.get_credentials(
+                        str(candidate),
+                        source="dataset_listing.portal_fill.select_env",
+                    )
+                except Exception:
+                    cred = None
+                if cred is not None:
+                    worker_env = str(candidate)
+                    break
+        except Exception:
+            pass
+
+        if mode_text == "global":
+            for _model_row, dsid in tasks:
+                self._portal_auto_fetch_attempted_dataset_ids.add(str(dsid))
+
         self._portal_fill_environment = str(worker_env or "production").strip() or "production"
 
         thread = QThread()
         worker = DatasetListingWidget._PortalFillWorker(tasks, self._portal_fill_environment)
         worker.moveToThread(thread)
+        self._portal_fill_last_row_ready_count = 0
 
         thread.started.connect(worker.run)
         worker.row_ready.connect(self._on_portal_row_ready)
@@ -3339,6 +4065,7 @@ class DatasetListingWidget(QWidget):
             pass
 
         thread.start()
+        self._refresh_portal_async_progress_button()
 
     class _PortalCsvFillWorker(QObject):
         mapping_ready = Signal(object, object)  # (environment, mapping)
@@ -3355,7 +4082,7 @@ class DatasetListingWidget(QWidget):
             env = self._environment
             auth_manager = get_auth_manager()
             try:
-                credentials = auth_manager.get_credentials(env)
+                credentials = auth_manager.get_credentials(env, source="dataset_listing.portal_csv.worker")
             except Exception:
                 credentials = None
 
@@ -3420,6 +4147,9 @@ class DatasetListingWidget(QWidget):
     def _start_portal_csv_fill_async(self) -> None:
         if self._is_running_under_pytest():
             return
+        if self._portal_error_suspended:
+            self._refresh_portal_async_progress_button()
+            return
         if self._model is None:
             return
         if self._portal_csv_thread is not None and self._portal_csv_thread.isRunning():
@@ -3433,7 +4163,7 @@ class DatasetListingWidget(QWidget):
             from classes.data_portal.core.auth_manager import get_auth_manager
 
             auth_manager = get_auth_manager()
-            cred = auth_manager.get_credentials(worker_env)
+            cred = auth_manager.get_credentials(worker_env, source="dataset_listing.portal_csv.precheck")
             if cred is None:
                 return
         except Exception:
@@ -3442,6 +4172,7 @@ class DatasetListingWidget(QWidget):
         thread = QThread()
         worker = DatasetListingWidget._PortalCsvFillWorker(environment=worker_env)
         worker.moveToThread(thread)
+        self._portal_csv_mapping_received = False
 
         thread.started.connect(worker.run)
         worker.mapping_ready.connect(self._on_portal_csv_mapping_ready)
@@ -3472,7 +4203,10 @@ class DatasetListingWidget(QWidget):
         env = str(environment or "production").strip() or "production"
         mp = mapping if isinstance(mapping, dict) else {}
         if not mp:
+            self._record_portal_error("portal_csv_mapping", "empty mapping")
             return
+        self._portal_csv_mapping_received = True
+        self._record_portal_success("portal_csv_mapping")
 
         # Persist to portal status cache (once).
         try:
@@ -3533,8 +4267,16 @@ class DatasetListingWidget(QWidget):
             pass
 
     def _on_portal_csv_fill_finished(self) -> None:
+        if not self._portal_csv_mapping_received and not self._portal_async_paused:
+            self._record_portal_error("portal_csv_fill", "mapping not received")
         self._portal_csv_thread = None
         self._portal_csv_worker = None
+        self._refresh_portal_async_progress_button()
+        try:
+            if self._portal_force_refresh_inflight:
+                self._start_force_refresh_html_for_pending_scope()
+        except Exception:
+            pass
         try:
             self._finalize_portal_force_refresh_part("csv")
         except Exception:
@@ -3569,6 +4311,10 @@ class DatasetListingWidget(QWidget):
         except Exception:
             pass
         try:
+            self._cancel_portal_prefetch()
+        except Exception:
+            pass
+        try:
             self._cancel_portal_csv_fill()
         except Exception:
             pass
@@ -3584,6 +4330,7 @@ class DatasetListingWidget(QWidget):
             pass
 
         # Reset current table values to unchecked.
+        self._portal_auto_fetch_attempted_dataset_ids.clear()
         try:
             from classes.dataset.util.portal_status_resolver import UNCHECKED_LABEL
         except Exception:
@@ -3613,67 +4360,12 @@ class DatasetListingWidget(QWidget):
         except Exception:
             pass
 
-        # Then run portal fill for all rows (logged-in HTML check).
+        # Per-item HTML check is deferred until CSV bulk phase completes.
+        # This ensures "bulk first, misses second" ordering.
+        self._portal_force_refresh_deferred_html_scope = "all"
         try:
-            env_candidates = self._collect_env_candidates_for_portal()
-            worker_env = self._pick_worker_env_with_credentials(env_candidates)
-            self._portal_fill_environment = str(worker_env or "production").strip() or "production"
-
-            tasks: List[tuple[int, str]] = []
-            for idx, row in enumerate(rows):
-                if not isinstance(row, dict):
-                    continue
-                dsid = str(row.get("dataset_id") or "").strip()
-                if not dsid:
-                    continue
-                tasks.append((idx, dsid))
-
-            if not tasks:
-                self._portal_force_refresh_inflight = False
-                self._portal_force_refresh_pending_parts = set()
-                return
-
-            # Start overlay spinner with progress (planned total / processed count)
-            try:
-                self._portal_force_refresh_progress_total = int(len(tasks))
-                self._portal_force_refresh_progress_done = 0
-                if hasattr(self, "_spinner_overlay") and self._spinner_overlay is not None:
-                    self._spinner_overlay.show_message("データポータル確認中…")
-                    self._spinner_overlay.set_progress(0, int(self._portal_force_refresh_progress_total), prefix="処理済み")
-                    self._spinner_overlay.start()
-            except Exception:
-                pass
-
-            thread = QThread()
-            worker = DatasetListingWidget._PortalFillWorker(tasks, self._portal_fill_environment)
-            worker.moveToThread(thread)
-
-            thread.started.connect(worker.run)
-            worker.row_ready.connect(self._on_portal_row_ready)
-            worker.finished.connect(self._on_portal_fill_finished)
-            worker.finished.connect(worker.deleteLater)
-            worker.finished.connect(thread.quit)
-            thread.finished.connect(thread.deleteLater)
-
-            self._portal_worker = worker
-            self._portal_thread = thread
-
-            _ACTIVE_DATASET_LISTING_PORTAL_THREADS.add(thread)
-            try:
-                setattr(thread, "_portal_worker", worker)
-            except Exception:
-                pass
-            try:
-                thread.finished.connect(lambda: _ACTIVE_DATASET_LISTING_PORTAL_THREADS.discard(thread))
-            except Exception:
-                pass
-
-            try:
-                self._portal_force_refresh_pending_parts.add("html")
-            except Exception:
-                pass
-
-            thread.start()
+            if not (self._portal_csv_thread is not None and self._portal_csv_thread.isRunning()):
+                self._start_force_refresh_html_for_pending_scope()
         except Exception:
             pass
 
@@ -3850,8 +4542,19 @@ class DatasetListingWidget(QWidget):
             except Exception as exc:
                 self.finished.emit(None, None, str(exc))
 
-    def _update_table_data(self, columns, rows) -> None:
-        self._columns = columns
+    def _update_table_data(self, columns, rows, *, from_fast_cache: bool = False) -> None:
+        normalized_columns: List[DatasetListColumn] = []
+        for c in columns or []:
+            if getattr(c, "key", None) == "portal_open":
+                continue
+            normalized_columns.append(c)
+
+        for row in rows or []:
+            if isinstance(row, dict):
+                row.pop("portal_open", None)
+
+        self._columns = normalized_columns
+        self._portal_auto_fetch_attempted_dataset_ids.clear()
 
         # Ensure listing-specific fields exist (for new/old caches and tests).
         try:
@@ -3909,7 +4612,7 @@ class DatasetListingWidget(QWidget):
                         row["portal_checked_at"] = checked_at_txt
 
         if self._model is None:
-            self._model = DatasetListTableModel(columns, rows, parent=self)
+            self._model = DatasetListTableModel(self._columns, rows, parent=self)
             self._filter_proxy.setSourceModel(self._model)
             self._limit_proxy.setSourceModel(self._filter_proxy)
             self._table.setModel(self._limit_proxy)
@@ -3957,54 +4660,70 @@ class DatasetListingWidget(QWidget):
         except Exception:
             pass
 
-        self._update_top_counts_label(rows)
-        self._rebuild_filters_panel()
+        # Initial fast-cache paint should prioritize responsiveness.
+        if not from_fast_cache:
+            self._update_top_counts_label(rows)
+            self._rebuild_filters_panel()
 
-        # Initial counts for portal filter (includes per-status counts).
-        self._schedule_refresh_portal_ui_counts()
+            # Initial counts for portal filter (includes per-status counts).
+            self._schedule_refresh_portal_ui_counts()
+        else:
+            try:
+                self._status.setText(f"キャッシュ表示: {len(rows)}件（更新中）")
+            except Exception:
+                pass
 
         # Portal column: show in-cell spinner during per-row refresh.
         try:
             self._install_portal_status_delegate()
         except Exception:
             pass
+        try:
+            self._install_tool_link_delegate()
+        except Exception:
+            pass
 
         # Apply saved column visibility (fallback: defaults)
         if self._is_running_under_pytest():
-            visible_by_key = {c.key: c.default_visible for c in columns}
+            visible_by_key = {c.key: c.default_visible for c in self._columns}
         else:
-            visible_by_key = self._load_column_visibility() or {c.key: c.default_visible for c in columns}
+            visible_by_key = self._load_column_visibility() or {c.key: c.default_visible for c in self._columns}
         self._apply_column_visibility(visible_by_key, persist=False)
 
         self._apply_row_limit()
-        self._apply_filters_now()
+        if from_fast_cache:
+            self._schedule_apply_filters()
+        else:
+            self._schedule_apply_filters()
 
-        # Large workspaces may skip expensive stats during initial load.
-        # Fill tile/file stats in background to restore legacy behavior without blocking UI.
-        try:
-            self._start_stats_fill_async(rows)
-        except Exception:
-            pass
+        if not from_fast_cache:
+            # Large workspaces may skip expensive stats during initial load.
+            # Fill tile/file stats in background to restore legacy behavior without blocking UI.
+            try:
+                self._start_stats_fill_async(rows)
+            except Exception:
+                pass
 
-        # Fill portal status in background (visible page only).
-        try:
-            self._start_portal_fill_async()
-        except Exception:
-            pass
+            # Fill portal status in background (visible page only).
+            try:
+                self._start_portal_fill_async()
+            except Exception:
+                pass
 
-        # Bulk portal status via CSV (logged-in export)
-        try:
-            self._start_portal_csv_fill_async()
-        except Exception:
-            pass
+            # Bulk portal status via CSV (logged-in export)
+            try:
+                self._start_portal_csv_fill_async()
+            except Exception:
+                pass
 
         # 改行表示がある列のため、表示行数が少ない場合のみ行高を内容に合わせる
-        try:
-            limit = int(self._row_limit.value())
-            if limit <= 0 or limit <= 200:
-                self._adjust_row_heights_to_max_lines_visible_columns()
-        except Exception:
-            pass
+        if not from_fast_cache:
+            try:
+                limit = int(self._row_limit.value())
+                if limit <= 0 or limit <= 200:
+                    self._adjust_row_heights_to_max_lines_visible_columns()
+            except Exception:
+                pass
 
     def _row_max_height_px(self) -> int:
         try:
@@ -4080,7 +4799,27 @@ class DatasetListingWidget(QWidget):
             return
         if columns is None or rows is None:
             return
-        self._update_table_data(columns, rows)
+        self._update_table_data(columns, rows, from_fast_cache=False)
+
+    def _try_apply_initial_fast_cache(self) -> bool:
+        try:
+            cached = load_dataset_list_rows_fast_cache(max_age_sec=86400)
+        except Exception:
+            cached = None
+
+        if not cached:
+            return False
+
+        columns, rows = cached
+        if not isinstance(columns, list) or not isinstance(rows, list):
+            return False
+
+        try:
+            self._update_table_data(columns, rows, from_fast_cache=True)
+            self._status.setText(f"キャッシュ表示: {len(rows)}件（バックグラウンド更新中）")
+            return True
+        except Exception:
+            return False
 
     def _start_reload_async(self) -> None:
         if self._reload_thread is not None and self._reload_thread.isRunning():
@@ -4089,7 +4828,12 @@ class DatasetListingWidget(QWidget):
         self._cancel_stats_fill()
         self._cancel_portal_fill()
 
-        self._show_loading()
+        try:
+            has_rows = self._model is not None and self._model.rowCount() > 0
+        except Exception:
+            has_rows = False
+        if not has_rows:
+            self._show_loading()
 
         # ウィジェット破棄と同時にスレッドが破棄されると
         # "QThread: Destroyed while thread '' is still running" の原因になる。
@@ -4134,7 +4878,7 @@ class DatasetListingWidget(QWidget):
                 pass
             return
         self._hide_loading()
-        self._update_table_data(columns, rows)
+        self._update_table_data(columns, rows, from_fast_cache=False)
 
     def reload_data(self) -> None:
         if self._is_running_under_pytest():
@@ -4349,25 +5093,26 @@ class DatasetListingWidget(QWidget):
                 PUBLIC_MANAGED_LABEL as _PUBLIC_MANAGED_LABEL,
                 PRIVATE_MANAGED_LABEL as _PRIVATE_MANAGED_LABEL,
                 PUBLIC_PUBLISHED_LABEL as _PUBLIC_FALLBACK_LABEL,
+                NONPUBLIC_OR_UNREGISTERED_LABEL as _NONPUBLIC_LABEL,
                 UNCHECKED_LABEL as _UNCHECKED_LABEL,
                 pick_best_cached_label,
                 resolve_portal_status_label,
+                normalize_logged_in_portal_label,
             )
         except Exception:
             _PUBLIC_MANAGED_LABEL = "公開"
             _PRIVATE_MANAGED_LABEL = "非公開"
             _PUBLIC_FALLBACK_LABEL = "公開2"
+            _NONPUBLIC_LABEL = "管理外"
             _UNCHECKED_LABEL = "未確認"
             pick_best_cached_label = None
             resolve_portal_status_label = None
+            normalize_logged_in_portal_label = lambda v: str(v).strip() if v is not None else ""
 
         # Candidate environments for cache lookup
         env_candidates = self._collect_env_candidates_for_portal()
-        if self._is_running_under_pytest():
-            # Tests should not touch keyring/real credentials.
-            worker_env = env_candidates[0] if env_candidates else "production"
-        else:
-            worker_env = self._pick_worker_env_with_credentials(env_candidates)
+        # キャッシュ反映はローカルデータのみを扱うため、ここで keyring 参照は行わない。
+        worker_env = env_candidates[0] if env_candidates else "production"
 
         # Public output.json IDs (cheap local)
         try:
@@ -4404,9 +5149,60 @@ class DatasetListingWidget(QWidget):
 
             existing = row.get("portal_status")
             existing_text = str(existing).strip() if existing is not None else ""
+            existing_checked_at = str(row.get("portal_checked_at") or "").strip()
 
-            # Keep already-confirmed managed/public statuses.
-            if existing_text in {_PUBLIC_MANAGED_LABEL, _PRIVATE_MANAGED_LABEL, _PUBLIC_FALLBACK_LABEL}:
+            # Keep already-confirmed managed/public statuses, but fill missing checked_at when possible.
+            if existing_text in {_PUBLIC_MANAGED_LABEL, _PRIVATE_MANAGED_LABEL, _PUBLIC_FALLBACK_LABEL, _NONPUBLIC_LABEL}:
+                updates: Dict[str, Any] = {}
+                try:
+                    if existing_text == _NONPUBLIC_LABEL and cache is not None:
+                        has_cached_nonpublic = False
+                        for env in env_candidates:
+                            try:
+                                raw_cached = cache.get_label_any_age(dsid, env) if hasattr(cache, "get_label_any_age") else cache.get_label(dsid, env)
+                            except Exception:
+                                raw_cached = None
+                            cached_txt = normalize_logged_in_portal_label(raw_cached)
+                            if cached_txt == _NONPUBLIC_LABEL:
+                                has_cached_nonpublic = True
+                                break
+
+                        if not has_cached_nonpublic:
+                            try:
+                                cache.set_label(dsid, _NONPUBLIC_LABEL, worker_env)
+                            except Exception:
+                                pass
+
+                    if existing_text == _PUBLIC_FALLBACK_LABEL:
+                        txt = self._format_portal_checked_at(self._public_output_json_mtime_epoch())
+                        if txt:
+                            updates["portal_checked_at"] = txt
+                    else:
+                        if cache is not None and hasattr(cache, "get_checked_at_any_age"):
+                            best_txt = ""
+                            for env in env_candidates:
+                                try:
+                                    epoch = cache.get_checked_at_any_age(dsid, env)
+                                except Exception:
+                                    epoch = None
+                                txt = self._format_portal_checked_at(epoch)
+                                if txt:
+                                    best_txt = txt
+                                    break
+                            if best_txt:
+                                updates["portal_checked_at"] = best_txt
+                except Exception:
+                    updates = {}
+
+                if existing_checked_at and not updates:
+                    continue
+
+                if updates:
+                    try:
+                        self._model.update_row_fields(int(i), updates)
+                        updated += 1
+                    except Exception:
+                        pass
                 continue
 
             # Only fill when unchecked/blank.
@@ -4554,9 +5350,16 @@ class DatasetListingWidget(QWidget):
             return
         if self._model is None or not self.isVisible():
             return
+        if self._portal_error_suspended:
+            self._refresh_portal_async_progress_button()
+            return
+        if self._portal_async_paused:
+            self._refresh_portal_async_progress_button()
+            return
 
         # Avoid piling up workers.
         if self._portal_thread is not None and self._portal_thread.isRunning():
+            self._refresh_portal_async_progress_button()
             return
 
         try:
@@ -4583,6 +5386,9 @@ class DatasetListingWidget(QWidget):
         for row in rows or []:
             if not isinstance(row, dict):
                 continue
+            dsid = str(row.get("dataset_id") or "").strip()
+            if dsid and dsid in self._portal_auto_fetch_attempted_dataset_ids:
+                continue
             st = str(row.get("portal_status") or "").strip()
             if st in {"", UNCHECKED_LABEL}:
                 needs_fetch = True
@@ -4596,6 +5402,8 @@ class DatasetListingWidget(QWidget):
             self._start_portal_fill_async(mode="global")
         except Exception:
             pass
+        finally:
+            self._refresh_portal_async_progress_button()
 
     def _toggle_filters_collapsed(self) -> None:
         self._set_filters_collapsed(not self._filters_collapsed)
@@ -4878,6 +5686,62 @@ class DatasetListingWidget(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "出力エラー", str(e))
 
+    def _apply_display_mode(self, mode: str, *, force: bool = False) -> None:
+        mode = str(mode or "").strip().lower()
+        if mode not in {"compact", "equal", "default"}:
+            mode = "default"
+        if mode == self._display_mode and not force:
+            return
+        self._display_mode = mode
+
+        if self._table is None:
+            return
+
+        try:
+            if mode == "compact":
+                self._table.setWordWrap(False)
+                self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+                self._table.verticalHeader().setSectionResizeMode(QHeaderView.Interactive)
+                row_h = int(self._table.fontMetrics().height() * 1.6)
+                if row_h > 0:
+                    self._table.verticalHeader().setDefaultSectionSize(row_h)
+            elif mode == "equal":
+                self._table.setWordWrap(True)
+                self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+                self._table.verticalHeader().setSectionResizeMode(QHeaderView.Interactive)
+                self._apply_equal_column_widths()
+            else:
+                self._table.setWordWrap(True)
+                self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+                self._table.verticalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        except Exception:
+            pass
+
+        try:
+            self._table.resizeRowsToContents()
+        except Exception:
+            pass
+
+    def _apply_equal_column_widths(self) -> None:
+        if self._table is None:
+            return
+        try:
+            header = self._table.horizontalHeader()
+            model = self._table.model()
+            count = int(model.columnCount()) if model is not None else 0
+            if count <= 0:
+                return
+            available = int(self._table.viewport().width())
+            if available <= 0:
+                return
+            per_col = max(80, int(available // max(count, 1)))
+            for col in range(count):
+                if self._table.isColumnHidden(col):
+                    continue
+                header.resizeSection(col, per_col)
+        except Exception:
+            pass
+
     def _build_dataframe_from_view(self) -> pd.DataFrame:
         model = self._table.model()
         header = self._table.horizontalHeader()
@@ -5113,7 +5977,7 @@ class DatasetListingWidget(QWidget):
             if col is None:
                 return
 
-            if col.key == "portal_status":
+            if col.key in {"portal_status", "portal_checked_at"}:
                 # Single click: only refresh when unchecked/blank.
                 try:
                     rows = self._model.get_rows()
@@ -5126,7 +5990,10 @@ class DatasetListingWidget(QWidget):
                     except Exception:
                         UNCHECKED_LABEL = "未確認"
                     current = str(row.get("portal_status") or "").strip()
+                    should_refresh = bool(col.key == "portal_checked_at")
                     if self._is_running_under_pytest() or (not current) or (current == UNCHECKED_LABEL):
+                        should_refresh = True
+                    if should_refresh:
                         self._start_portal_status_refresh_for_model_row(int(idx2.row()), dsid)
                 except Exception:
                     return
@@ -5137,7 +6004,6 @@ class DatasetListingWidget(QWidget):
                 "instrument_names",
                 "subgroup_name",
                 "tool_open",
-                "portal_open",
                 "manager_name",
                 "applicant_name",
                 "data_owner_names",
@@ -5163,25 +6029,15 @@ class DatasetListingWidget(QWidget):
                 return
 
             if col.key == "tool_open":
-                dataset_id = self._model.data(idx2, Qt.UserRole)
-                dataset_id = dataset_id if isinstance(dataset_id, str) else ""
-                dataset_id = dataset_id.strip()
-                if dataset_id and callable(self._tool_open_callback):
-                    try:
-                        self._tool_open_callback(dataset_id)
-                    except Exception:
-                        return
-                return
-
-            if col.key == "portal_open":
-                dataset_id = self._model.data(idx2, Qt.UserRole)
-                dataset_id = dataset_id if isinstance(dataset_id, str) else ""
-                dataset_id = dataset_id.strip()
-                if dataset_id and callable(self._portal_open_callback):
-                    try:
-                        self._portal_open_callback(dataset_id)
-                    except Exception:
-                        return
+                # mouse release callback handles RDE/DP split by cell position.
+                # Fallback: clicked signal path
+                try:
+                    fallback_pos = None
+                    if self._table is not None and self._table.viewport() is not None:
+                        fallback_pos = self._table.viewport().mapFromGlobal(QCursor.pos())
+                    self._open_tool_link_action(idx2, fallback_pos)
+                except Exception:
+                    pass
                 return
 
             # instrument_names: selection when multiple
@@ -5221,6 +6077,65 @@ class DatasetListingWidget(QWidget):
                 url = dlg.selected_url()
                 if url:
                     QDesktopServices.openUrl(QUrl(url))
+        except Exception:
+            return
+
+    def _open_tool_link_action(self, model_index: QModelIndex, pos) -> None:
+        if self._model is None or self._table is None:
+            return
+
+        dataset_id = self._model.data(model_index, Qt.UserRole)
+        dataset_id = dataset_id if isinstance(dataset_id, str) else ""
+        dataset_id = dataset_id.strip()
+        if not dataset_id:
+            return
+
+        try:
+            view_index = self._filter_proxy.mapFromSource(model_index)
+            view_index = self._limit_proxy.mapFromSource(view_index)
+        except Exception:
+            view_index = None
+
+        if view_index is None or (not view_index.isValid()):
+            return
+
+        rect = self._table.visualRect(view_index)
+        if pos is None:
+            pos = self._table.viewport().mapFromGlobal(QCursor.pos())
+        click_x = int(pos.x()) if pos is not None else int(rect.center().x())
+
+        split_x = int(rect.left() + (rect.width() * 0.5))
+        action = "RDE" if click_x <= split_x else "DP"
+
+        now_mono = time.monotonic()
+        action_key = f"{dataset_id}:{action}:{int(model_index.row())}"
+        if action_key == self._tool_link_last_action_key and (now_mono - float(self._tool_link_last_action_at or 0.0)) <= 0.35:
+            return
+        self._tool_link_last_action_key = action_key
+        self._tool_link_last_action_at = now_mono
+
+        if action == "RDE":
+            if callable(self._tool_open_callback):
+                self._tool_open_callback(dataset_id)
+            return
+
+        if callable(self._portal_open_callback):
+            self._portal_open_callback(dataset_id)
+
+    def _on_tool_link_cell_clicked_from_table(self, index: QModelIndex, pos) -> None:
+        try:
+            if index is None or (not index.isValid()) or self._model is None or self._table is None:
+                return
+
+            idx2 = self._map_view_index_to_model_index(index)
+            if idx2 is None or (not idx2.isValid()):
+                return
+
+            col = self._columns[idx2.column()] if 0 <= idx2.column() < len(self._columns) else None
+            if col is None or col.key != "tool_open":
+                return
+
+            self._open_tool_link_action(idx2, pos)
         except Exception:
             return
 
@@ -5279,7 +6194,7 @@ class DatasetListingWidget(QWidget):
                 return
 
             col = self._columns[idx2.column()] if 0 <= idx2.column() < len(self._columns) else None
-            if col is None or col.key != "portal_status":
+            if col is None or col.key not in {"portal_status", "portal_checked_at"}:
                 return
 
             rows = self._model.get_rows()
@@ -5307,7 +6222,7 @@ class DatasetListingWidget(QWidget):
                 return
 
             col = self._columns[idx2.column()] if 0 <= idx2.column() < len(self._columns) else None
-            if col is None or col.key != "portal_status":
+            if col is None or col.key not in {"portal_status", "portal_checked_at"}:
                 return
 
             rows = self._model.get_rows()
@@ -5322,7 +6237,11 @@ class DatasetListingWidget(QWidget):
                 UNCHECKED_LABEL = "未確認"
 
             current = str(row.get("portal_status") or "").strip()
+            should_refresh = bool(col.key == "portal_checked_at")
             if self._is_running_under_pytest() or (not current) or (current == UNCHECKED_LABEL):
+                should_refresh = True
+
+            if should_refresh:
                 self._start_portal_status_refresh_for_model_row(int(idx2.row()), dsid)
         except Exception:
             return
@@ -5356,6 +6275,13 @@ class DatasetListingWidget(QWidget):
             - "all": reset all rows and clear entire cache
             - "nonpublic": reset only non-public rows and clear cache for those dataset IDs
         """
+        if self._portal_error_suspended:
+            try:
+                self._status.setText("ポータル処理は停止中です（再開後に実行してください）")
+            except Exception:
+                pass
+            self._refresh_portal_async_progress_button()
+            return
 
         if self._model is None:
             return
@@ -5431,6 +6357,7 @@ class DatasetListingWidget(QWidget):
             pass
 
         # Reset target rows to unchecked.
+        self._portal_auto_fetch_attempted_dataset_ids.clear()
         for i in target_rows:
             try:
                 self._model.update_row_fields(int(i), {"portal_status": UNCHECKED_LABEL, "portal_checked_at": ""})
@@ -5455,64 +6382,12 @@ class DatasetListingWidget(QWidget):
         except Exception:
             pass
 
-        # Then run portal fill for target rows (logged-in HTML check).
+        # Per-item HTML check is deferred until CSV bulk phase completes.
+        # This ensures "bulk first, misses second" ordering.
+        self._portal_force_refresh_deferred_html_scope = str(scope or "all").strip().lower() or "all"
         try:
-            env_candidates = self._collect_env_candidates_for_portal()
-            worker_env = self._pick_worker_env_with_credentials(env_candidates)
-            self._portal_fill_environment = str(worker_env or "production").strip() or "production"
-
-            tasks: List[tuple[int, str]] = []
-            for idx in target_rows:
-                try:
-                    row = rows[int(idx)]
-                except Exception:
-                    continue
-                if not isinstance(row, dict):
-                    continue
-                dsid = str(row.get("dataset_id") or "").strip()
-                if not dsid:
-                    continue
-                tasks.append((int(idx), dsid))
-
-            if tasks:
-                # Start overlay spinner with progress (planned total / processed count)
-                try:
-                    self._portal_force_refresh_progress_total = int(len(tasks))
-                    self._portal_force_refresh_progress_done = 0
-                    if hasattr(self, "_spinner_overlay") and self._spinner_overlay is not None:
-                        self._spinner_overlay.show_message("データポータル確認中…")
-                        self._spinner_overlay.set_progress(0, int(self._portal_force_refresh_progress_total), prefix="処理済み")
-                        self._spinner_overlay.start()
-                except Exception:
-                    pass
-
-            if tasks:
-                thread = QThread()
-                worker = DatasetListingWidget._PortalFillWorker(tasks, self._portal_fill_environment)
-                worker.moveToThread(thread)
-
-                thread.started.connect(worker.run)
-                worker.row_ready.connect(self._on_portal_row_ready)
-                worker.finished.connect(self._on_portal_fill_finished)
-                worker.finished.connect(worker.deleteLater)
-                worker.finished.connect(thread.quit)
-                thread.finished.connect(thread.deleteLater)
-
-                self._portal_worker = worker
-                self._portal_thread = thread
-
-                _ACTIVE_DATASET_LISTING_PORTAL_THREADS.add(thread)
-                try:
-                    setattr(thread, "_portal_worker", worker)
-                except Exception:
-                    pass
-                try:
-                    thread.finished.connect(lambda: _ACTIVE_DATASET_LISTING_PORTAL_THREADS.discard(thread))
-                except Exception:
-                    pass
-
-                self._portal_force_refresh_pending_parts.add("html")
-                thread.start()
+            if not (self._portal_csv_thread is not None and self._portal_csv_thread.isRunning()):
+                self._start_force_refresh_html_for_pending_scope()
         except Exception:
             pass
 

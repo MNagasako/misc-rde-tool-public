@@ -8,6 +8,8 @@ OS keyringを使用した安全な認証情報の保存・取得を提供
 import logging
 from typing import Optional, Tuple, Dict
 from dataclasses import dataclass
+import threading
+import time
 
 try:
     import keyring
@@ -47,6 +49,8 @@ class AuthManager:
     def __init__(self):
         """初期化"""
         self.keyring_available = KEYRING_AVAILABLE
+        self._credential_log_state: Dict[Tuple[str, str], Dict[str, float]] = {}
+        self._credential_log_lock = threading.Lock()
         
         if not self.keyring_available:
             logger.warning("keyring ライブラリが利用できません。認証情報は安全に保存されません。")
@@ -123,7 +127,41 @@ class AuthManager:
             logger.error(f"予期しないエラーが発生しました: {e}")
             return False
     
-    def get_credentials(self, environment: str) -> Optional[PortalCredentials]:
+    def _log_credentials_fetch(self, environment: str, *, source: str, success: bool) -> None:
+        """認証情報取得ログを集約して出力（ローカル処理であることを明示）。"""
+
+        env = str(environment or "").strip() or "production"
+        src = str(source or "unknown").strip() or "unknown"
+        key = (env, src)
+        now = time.time()
+
+        try:
+            with self._credential_log_lock:
+                state = self._credential_log_state.get(key)
+                if state is None:
+                    state = {"last_info": 0.0, "suppressed": 0.0}
+                    self._credential_log_state[key] = state
+
+                last_info = float(state.get("last_info", 0.0) or 0.0)
+                suppressed = int(state.get("suppressed", 0.0) or 0)
+
+                # 10秒以内の同種ログは集約し、次のINFO時に件数だけ開示する。
+                if (now - last_info) < 10.0:
+                    state["suppressed"] = float(suppressed + 1)
+                    return
+
+                status = "成功" if success else "未設定"
+                suffix = f"（同種ログ {suppressed} 件を集約）" if suppressed > 0 else ""
+                logger.info(
+                    f"認証情報参照 [{status}] env={env} source={src} - keyring読取のみ（ネットワークアクセスなし）{suffix}"
+                )
+                state["last_info"] = now
+                state["suppressed"] = 0.0
+        except Exception:
+            # Logging failure must never block credential retrieval.
+            return
+
+    def get_credentials(self, environment: str, *, source: str = "") -> Optional[PortalCredentials]:
         """
         保存された認証情報を取得
         
@@ -163,7 +201,7 @@ class AuthManager:
             login_pass_text = (login_pass or "").strip()
 
             if login_user_text and login_pass_text:
-                logger.info(f"認証情報を取得しました: {environment} 環境")
+                self._log_credentials_fetch(environment, source=source, success=True)
                 return PortalCredentials(
                     basic_username=(basic_user or ""),
                     basic_password=(basic_pass or ""),
@@ -171,6 +209,7 @@ class AuthManager:
                     login_password=login_pass_text,
                 )
 
+            self._log_credentials_fetch(environment, source=source, success=False)
             logger.debug(f"認証情報が不完全です: {environment} 環境")
             return None
             

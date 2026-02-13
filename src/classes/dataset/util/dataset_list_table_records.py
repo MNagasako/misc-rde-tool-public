@@ -294,6 +294,79 @@ def _try_write_persisted_cache(signature: Any, columns: List[DatasetListColumn],
         return
 
 
+def load_dataset_list_rows_fast_cache(*, max_age_sec: int = 86400) -> Optional[Tuple[List["DatasetListColumn"], List[Dict[str, Any]]]]:
+    """Load dataset listing rows from persisted cache without signature checks.
+
+    Intended for initial UI response improvement:
+    - Show cached rows immediately
+    - Refresh in background with full loader afterwards
+    """
+
+    now = time.time()
+
+    def _is_fresh(payload: Any) -> bool:
+        if max_age_sec <= 0:
+            return True
+        if not isinstance(payload, dict):
+            return False
+        created = payload.get("created_at")
+        if created in (None, ""):
+            # Backward compatible: old cache payloads may not have created_at.
+            return True
+        try:
+            created_f = float(created)
+        except Exception:
+            return True
+        return (now - created_f) <= float(max_age_sec)
+
+    def _load_from(path: str) -> Optional[Tuple[List["DatasetListColumn"], List[Dict[str, Any]]]]:
+        try:
+            if not path or not os.path.exists(path):
+                return None
+            with open(path, "r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            if not isinstance(payload, dict):
+                return None
+            if not _is_fresh(payload):
+                return None
+
+            cols = _deserialize_columns(payload.get("columns"))
+            rows = _deserialize_rows(payload.get("rows"))
+            if cols is not None and rows is not None:
+                return cols, rows
+
+            cols_raw = payload.get("columns")
+            rows_raw = payload.get("rows")
+            if isinstance(cols_raw, list) and isinstance(rows_raw, list):
+                columns: List[DatasetListColumn] = []
+                for c in cols_raw:
+                    if not isinstance(c, dict):
+                        continue
+                    key = str(c.get("key") or "").strip()
+                    label = str(c.get("label") or "").strip()
+                    if not key or not label:
+                        continue
+                    columns.append(
+                        DatasetListColumn(
+                            key=key,
+                            label=label,
+                            default_visible=bool(c.get("default_visible", True)),
+                        )
+                    )
+                rows = _deserialize_rows_from_cache(rows_raw)
+                if columns and isinstance(rows, list):
+                    return columns, rows
+            return None
+        except Exception:
+            return None
+
+    # Prefer compact cache first, then fallback cache.
+    cached = _load_from(_cache_file_path())
+    if cached is not None:
+        return cached
+    return _load_from(_persisted_cache_path())
+
+
 def clear_dataset_list_cache() -> None:
     """Clear the in-memory cache used by build_dataset_list_rows_from_files().
 
@@ -586,6 +659,52 @@ def _build_name_map_by_id(payload: Any, preferred_attr_keys: Tuple[str, ...]) ->
     return result
 
 
+def _build_instrument_display_map_by_id(payload: Any) -> Dict[str, str]:
+    """Build instrument display map by id.
+
+    Display format:
+    - localId + name (e.g. "HK-618 プラズマ原子層堆積装置") when localId exists
+    - name only when localId is not available
+    """
+
+    result: Dict[str, str] = {}
+    for item in _coerce_data_list(payload):
+        item_id = _safe_str(item.get("id")).strip()
+        attrs = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
+
+        name = ""
+        local_id = ""
+        if isinstance(attrs, dict):
+            for key in ("nameJa", "name", "title"):
+                candidate = _safe_str(attrs.get(key)).strip()
+                if candidate:
+                    name = candidate
+                    break
+
+            programs = attrs.get("programs")
+            if isinstance(programs, list):
+                for prog in programs:
+                    if not isinstance(prog, dict):
+                        continue
+                    candidate_local_id = _safe_str(prog.get("localId")).strip()
+                    if candidate_local_id:
+                        local_id = candidate_local_id
+                        break
+
+        display = ""
+        if local_id and name:
+            display = f"{local_id} {name}"
+        elif name:
+            display = name
+        elif local_id:
+            display = local_id
+
+        if item_id and display:
+            result[item_id] = display
+
+    return result
+
+
 def _build_grant_number_to_subgroup_info(subgroup_payload: Any) -> Dict[str, Dict[str, str]]:
     # subGroup.json often contains included groups of type TEAM.
     # We extract grantNumber -> {"name": team_name, "id": group_id, "description": desc}
@@ -677,7 +796,6 @@ def get_default_columns() -> List[DatasetListColumn]:
     # Labels are aligned to dataset_edit_widget.py where possible (without trailing colon).
     return [
         DatasetListColumn("portal_status", "ポータル", True),
-        DatasetListColumn("portal_open", "アプリ内リンク", True),
         # NOTE: ポータル確認時刻はポータル列へ統合表示するため、デフォルトでは非表示。
         DatasetListColumn("portal_checked_at", "ポータル確認時刻", False),
         DatasetListColumn("subgroup_name", "サブグループ名", True),
@@ -738,7 +856,7 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
     dataset_details_dir = get_dynamic_file_path("output/rde/data/datasets")
 
     signature = (
-        9,  # signature schema (bump when columns/row schema changes)
+        11,  # signature schema (bump when columns/row schema changes)
         _safe_mtime(dataset_json_path),
         _safe_mtime(subgroup_json_path),
         _safe_mtime(info_json_path),
@@ -794,7 +912,7 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
 
     # template.json/instruments.json/licenses.json name resolution (best-effort)
     template_name_by_id = _build_name_map_by_id(template_payload, ("nameJa", "name", "title"))
-    instrument_name_by_id = _build_name_map_by_id(instruments_payload, ("nameJa", "name", "title"))
+    instrument_name_by_id = _build_instrument_display_map_by_id(instruments_payload)
     license_name_by_id = _build_name_map_by_id(licenses_payload, ("nameJa", "name", "title"))
 
     dataset_name_by_id: Dict[str, str] = {}
@@ -1074,7 +1192,7 @@ def build_dataset_list_rows_from_files() -> Tuple[List[DatasetListColumn], List[
             "subgroup_id": subgroup_id,
             "grant_number": grant_number,
             "dataset_name": dataset_name,
-            "tool_open": "ツール内" if dataset_id else "",
+            "tool_open": "RDE / DP" if dataset_id else "",
             "tile_count": tile_count,
             "file_count": shared2_file_count,
             # NOTE: 値は「バイト数の数値」で保持する（表示用文字列はUI側で生成）。

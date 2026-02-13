@@ -15,11 +15,12 @@ from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
     QListWidget, QListWidgetItem, QTextEdit, QProgressBar,
     QMessageBox, QSplitter, QWidget, QTabWidget, QGroupBox,
-    QComboBox, QCheckBox, QSpinBox
+    QComboBox, QCheckBox, QSpinBox, QMenu
 )
 from qt_compat.core import Qt, QThread, Signal, QTimer
 from classes.theme import ThemeKey
 from classes.theme.theme_manager import get_color
+from classes.utils.button_styles import get_button_style
 from classes.utils.dataset_filter_fetcher import DatasetFilterFetcher
 from config.common import get_dynamic_file_path
 
@@ -4395,18 +4396,20 @@ class AISuggestionDialog(QDialog):
         self.results_refresh_button.setMaximumWidth(70)
         filters.addWidget(self.results_refresh_button)
 
-        filters.addSpacing(10)
-        filters.addWidget(QLabel("形式:"))
-        self.results_export_format_combo = QComboBox()
-        self.results_export_format_combo.addItem("CSV", 'csv')
-        self.results_export_format_combo.addItem("XLSX", 'xlsx')
-        self.results_export_format_combo.addItem("JSON", 'json')
-        self.results_export_format_combo.setMaximumWidth(90)
-        filters.addWidget(self.results_export_format_combo)
-
         self.results_export_button = QPushButton("エクスポート")
         self.results_export_button.setMaximumWidth(110)
+        export_menu = QMenu(self.results_export_button)
+        action_csv = export_menu.addAction("CSV出力")
+        action_csv.triggered.connect(lambda: self.export_results_table("csv"))
+        action_xlsx = export_menu.addAction("XLSX出力")
+        action_xlsx.triggered.connect(lambda: self.export_results_table("xlsx"))
+        self.results_export_button.setMenu(export_menu)
         filters.addWidget(self.results_export_button)
+        try:
+            self.results_refresh_button.setStyleSheet(get_button_style("info"))
+            self.results_export_button.setStyleSheet(get_button_style("success"))
+        except Exception:
+            pass
         filters.addStretch()
         layout.addLayout(filters)
 
@@ -4485,7 +4488,7 @@ class AISuggestionDialog(QDialog):
         self.results_view_mode_combo.currentIndexChanged.connect(self.refresh_results_list)
         self.results_filter_edit.textChanged.connect(self._apply_results_filter)
         self.results_refresh_button.clicked.connect(self.refresh_results_list)
-        self.results_export_button.clicked.connect(self.export_results_table)
+        self.results_export_button.clicked.connect(lambda: self.export_results_table("csv"))
 
         # 報告書向け追加フィルタ
         self.results_report_year_combo.currentIndexChanged.connect(self.refresh_results_list)
@@ -4866,21 +4869,16 @@ class AISuggestionDialog(QDialog):
             ws.append(list(row))
         wb.save(path)
 
-    def export_results_table(self):
-        """結果一覧タブのテーブル表示内容をエクスポート（CSV/XLSX/JSON）。"""
+    def export_results_table(self, fmt: Optional[str] = None):
+        """結果一覧タブのテーブル表示内容をエクスポート（CSV/XLSX）。"""
         try:
             from qt_compat.widgets import QFileDialog
             from config.common import get_dynamic_file_path
             from datetime import datetime
             import os
 
-            fmt = 'csv'
-            try:
-                fmt = self.results_export_format_combo.currentData() if hasattr(self, 'results_export_format_combo') else 'csv'
-            except Exception:
-                fmt = 'csv'
             fmt = (fmt or 'csv').strip().lower()
-            if fmt not in {'csv', 'xlsx', 'json'}:
+            if fmt not in {'csv', 'xlsx'}:
                 fmt = 'csv'
 
             kind = self.results_target_kind_combo.currentData() if hasattr(self, 'results_target_kind_combo') else 'report'
@@ -4900,10 +4898,8 @@ class AISuggestionDialog(QDialog):
 
             if fmt == 'csv':
                 file_filter = "CSV (*.csv)"
-            elif fmt == 'xlsx':
-                file_filter = "Excel (*.xlsx)"
             else:
-                file_filter = "JSON (*.json)"
+                file_filter = "Excel (*.xlsx)"
 
             path, _ = QFileDialog.getSaveFileName(self, "結果一覧をエクスポート", default_path, file_filter)
             if not path:
@@ -4916,10 +4912,8 @@ class AISuggestionDialog(QDialog):
 
             if fmt == 'csv':
                 self._write_results_export_csv(path, headers, rows)
-            elif fmt == 'xlsx':
-                self._write_results_export_xlsx(path, headers, rows)
             else:
-                self._write_results_export_json(path, headers, rows)
+                self._write_results_export_xlsx(path, headers, rows)
 
             QMessageBox.information(self, "エクスポート完了", f"保存しました:\n{path}")
         except Exception as e:

@@ -51,6 +51,7 @@ from classes.ui.utilities.listing_table import ListingFilterProxyModel
 
 from classes.theme import ThemeKey, get_color
 from classes.theme import get_qcolor
+from classes.utils.button_styles import get_button_style
 
 from classes.data_portal.core.portal_csv_full import (
     extract_code as extract_managed_code,
@@ -338,6 +339,7 @@ class PortalListingTab(QWidget):
         self._column_index: dict[str, int] = {}
 
         self._filters_container: Optional[QWidget] = None
+        self._filters_summary_label: Optional[QLabel] = None
         self._filters_layout: Optional[QGridLayout] = None
         self._filters_scroll: Optional[QScrollArea] = None
         self._filter_field_widgets: list[tuple[str, QWidget]] = []
@@ -424,6 +426,7 @@ class PortalListingTab(QWidget):
         layout.addWidget(env_group)
 
         controls = QHBoxLayout()
+        self._controls_layout = controls
         layout.addLayout(controls)
 
         controls.addWidget(QLabel("表示範囲:"))
@@ -436,15 +439,6 @@ class PortalListingTab(QWidget):
         controls.addWidget(self.range_combo)
 
         controls.addSpacing(12)
-
-        controls.addWidget(QLabel("列フィルタ表示:"))
-        self.filter_scope_combo = QComboBox(self)
-        self.filter_scope_combo.addItem("すべて", "all")
-        self.filter_scope_combo.addItem("基本", "fixed")
-        self.filter_scope_combo.addItem("管理（結合）", "managed_group")
-        self.filter_scope_combo.addItem("管理（その他）", "managed_raw")
-        self.filter_scope_combo.currentIndexChanged.connect(self._on_filter_scope_changed)
-        controls.addWidget(self.filter_scope_combo)
 
         self.reload_public = QPushButton("公開cache再読込")
         self.reload_public.clicked.connect(self.refresh_public_from_disk)
@@ -460,7 +454,6 @@ class PortalListingTab(QWidget):
 
         controls.addSpacing(12)
 
-        controls.addWidget(QLabel("表示切替:"))
         self.compact_rows_btn = QPushButton("1行表示", self)
         self.compact_rows_btn.clicked.connect(lambda: self._apply_display_mode("compact"))
         controls.addWidget(self.compact_rows_btn)
@@ -479,6 +472,19 @@ class PortalListingTab(QWidget):
         self.export_btn.setMenu(export_menu)
         controls.addWidget(self.export_btn)
 
+        controls.addWidget(QLabel("列フィルタ表示:"))
+        self.filter_scope_combo = QComboBox(self)
+        self.filter_scope_combo.addItem("すべて", "all")
+        self.filter_scope_combo.addItem("基本", "fixed")
+        self.filter_scope_combo.addItem("管理（結合）", "managed_group")
+        self.filter_scope_combo.addItem("管理（その他）", "managed_raw")
+        self.filter_scope_combo.currentIndexChanged.connect(self._on_filter_scope_changed)
+        controls.addWidget(self.filter_scope_combo)
+
+        self.toggle_filters_button = QPushButton("フィルタ最小化")
+        self.toggle_filters_button.clicked.connect(self._toggle_filters_collapsed)
+        controls.addWidget(self.toggle_filters_button)
+
         self.count_label = QLabel("0件")
         controls.addWidget(self.count_label)
 
@@ -487,36 +493,44 @@ class PortalListingTab(QWidget):
         layout.addWidget(self.status_label)
 
         # Per-column filters (visible columns only)
-        self.filters_group_box = QGroupBox("列フィルタ（クリックで表示/非表示）", self)
+        self.filters_group_box = QGroupBox("列フィルタ", self)
         self.filters_group_box.setObjectName("portalListingFilters")
-        self.filters_group_box.setCheckable(True)
-        self.filters_group_box.setChecked(True)
-        self.filters_group_box.toggled.connect(self._on_filters_group_toggled)
-        self.filters_group_box.setToolTip("列フィルタの表示を切り替えます")
 
         filters_outer = QVBoxLayout(self.filters_group_box)
         filters_outer.setContentsMargins(8, 8, 8, 8)
         filters_outer.setSpacing(6)
 
-        self._filters_scroll = QScrollArea(self.filters_group_box)
-        self._filters_scroll.setWidgetResizable(True)
-        self._filters_scroll.setFrameStyle(0)
+        self._filters_summary_label = QLabel("", self.filters_group_box)
+        self._filters_summary_label.setObjectName("portal_listing_filters_summary")
         try:
-            self._filters_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            self._filters_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self._filters_summary_label.setWordWrap(True)
         except Exception:
             pass
-        self._filters_container = QWidget(self._filters_scroll)
+        filters_outer.addWidget(self._filters_summary_label)
+
+        self._filters_scroll = None
+        self._filters_container = QWidget(self.filters_group_box)
         self._filters_container.setObjectName("portal_listing_filters_container")
         self._filters_layout = QGridLayout(self._filters_container)
         self._filters_layout.setContentsMargins(0, 0, 0, 0)
         self._filters_layout.setHorizontalSpacing(8)
         self._filters_layout.setVerticalSpacing(6)
-        self._filters_scroll.setWidget(self._filters_container)
-        filters_outer.addWidget(self._filters_scroll)
+        filters_outer.addWidget(self._filters_container)
 
         layout.addWidget(self.filters_group_box)
+        self._set_filters_collapsed(False)
         self._apply_filters_theme()
+
+        try:
+            self.reload_public.setStyleSheet(get_button_style("info"))
+            self.reload_managed.setStyleSheet(get_button_style("warning"))
+            self.select_columns_btn.setStyleSheet(get_button_style("secondary"))
+            self.compact_rows_btn.setStyleSheet(get_button_style("primary"))
+            self.equal_columns_btn.setStyleSheet(get_button_style("secondary"))
+            self.export_btn.setStyleSheet(get_button_style("success"))
+            self.toggle_filters_button.setStyleSheet(get_button_style("secondary"))
+        except Exception:
+            pass
 
         from qt_compat.widgets import QtWidgets
 
@@ -719,6 +733,11 @@ class PortalListingTab(QWidget):
 
     def showEvent(self, event: QtGui.QShowEvent) -> None:  # type: ignore[override]
         super().showEvent(event)
+        try:
+            QtCore.QTimer.singleShot(0, self._relayout_filter_fields)
+            QtCore.QTimer.singleShot(120, self._relayout_filter_fields)
+        except Exception:
+            pass
         if self._did_apply_initial_width or self._is_running_under_pytest():
             return
         self._did_apply_initial_width = True
@@ -754,9 +773,22 @@ class PortalListingTab(QWidget):
 
     def _apply_filters_theme(self) -> None:
         try:
-            bg = get_color(ThemeKey.PANEL_BACKGROUND)
-            border = get_color(ThemeKey.PANEL_BORDER)
-            text = get_color(ThemeKey.TEXT_PRIMARY)
+            bg_raw = get_color(ThemeKey.PANEL_BACKGROUND)
+            border_raw = get_color(ThemeKey.PANEL_BORDER)
+            text_raw = get_color(ThemeKey.TEXT_PRIMARY)
+
+            def _css_color(value: object) -> str:
+                try:
+                    name = value.name()  # type: ignore[attr-defined]
+                    if isinstance(name, str) and name:
+                        return name
+                except Exception:
+                    pass
+                return str(value or "")
+
+            bg = _css_color(bg_raw)
+            border = _css_color(border_raw)
+            text = _css_color(text_raw)
             self.filters_group_box.setStyleSheet(
                 ""
                 f"QGroupBox#portalListingFilters {{ background-color: {bg}; border: 1px solid {border}; "
@@ -772,6 +804,17 @@ class PortalListingTab(QWidget):
         # Theme integration for this tab is minimal; widgets inherit palette/QSS.
         try:
             self._apply_filters_theme()
+            for button, kind in (
+                (getattr(self, "reload_public", None), "info"),
+                (getattr(self, "reload_managed", None), "warning"),
+                (getattr(self, "select_columns_btn", None), "secondary"),
+                (getattr(self, "compact_rows_btn", None), "primary"),
+                (getattr(self, "equal_columns_btn", None), "secondary"),
+                (getattr(self, "export_btn", None), "success"),
+                (getattr(self, "toggle_filters_button", None), "secondary"),
+            ):
+                if button is not None:
+                    button.setStyleSheet(get_button_style(kind))
             self.update()
         except Exception:
             pass
@@ -1074,11 +1117,18 @@ class PortalListingTab(QWidget):
 
         self._update_count()
 
-    def _on_filters_group_toggled(self, checked: bool) -> None:
-        # checked=True means expanded (not collapsed)
-        self._filters_collapsed = not bool(checked)
-        if self._filters_scroll is not None:
-            self._filters_scroll.setVisible(not self._filters_collapsed)
+    def _set_filters_collapsed(self, collapsed: bool) -> None:
+        self._filters_collapsed = bool(collapsed)
+        if self._filters_container is not None:
+            self._filters_container.setVisible(not self._filters_collapsed)
+        if self._filters_summary_label is not None:
+            self._filters_summary_label.setVisible(self._filters_collapsed)
+        if getattr(self, "toggle_filters_button", None) is not None:
+            self.toggle_filters_button.setText("フィルタ表示" if self._filters_collapsed else "フィルタ最小化")
+        self._update_filters_summary()
+
+    def _toggle_filters_collapsed(self) -> None:
+        self._set_filters_collapsed(not self._filters_collapsed)
 
     def _on_filter_scope_changed(self) -> None:
         try:
@@ -1143,8 +1193,8 @@ class PortalListingTab(QWidget):
 
         available_w = 0
         try:
-            if self._filters_scroll is not None:
-                available_w = int(self._filters_scroll.viewport().width())
+            if self._filters_container is not None:
+                available_w = int(self._filters_container.width())
         except Exception:
             available_w = 0
         if available_w <= 0:
@@ -1152,9 +1202,15 @@ class PortalListingTab(QWidget):
                 available_w = int(self.width())
             except Exception:
                 available_w = 600
+        if available_w <= 1:
+            try:
+                QtCore.QTimer.singleShot(80, self._relayout_filter_fields)
+            except Exception:
+                pass
+            return
 
-        field_w = min(300, max(220, available_w))
-        per_row = max(1, int(max(available_w, 1) // max(field_w, 1)))
+        per_row = max(1, min(5, int(max(available_w, 1) // 260)))
+        field_w = max(220, int(max(available_w, 1) // per_row) - 12)
 
         # Clear layout items without deleting widgets.
         while self._filters_layout.count():
@@ -1174,15 +1230,27 @@ class PortalListingTab(QWidget):
             except Exception:
                 pass
 
-        # Auto-shrink filter area height when fewer filter fields are shown.
-        try:
-            hint_h = int(self._filters_container.sizeHint().height())
-            cap = 220
-            target = max(60, min(hint_h + 8, cap))
-            if self._filters_scroll is not None:
-                self._filters_scroll.setMaximumHeight(target)
-        except Exception:
-            pass
+    def _update_filters_summary(self) -> None:
+        if self._filters_summary_label is None:
+            return
+        if not self._filters_collapsed:
+            self._filters_summary_label.setText("")
+            return
+
+        parts: list[str] = []
+        for cdef in self._columns:
+            edit = self._filter_edits_by_key.get(cdef.key)
+            if edit is None:
+                continue
+            try:
+                text = str(edit.text() or "").strip()
+            except Exception:
+                text = ""
+            if not text:
+                continue
+            parts.append(f"{self._format_filter_label(cdef.label)}={text}")
+
+        self._filters_summary_label.setText(" / ".join(parts))
 
     def _populate(self, rows: list[dict[str, Any]]) -> None:
         try:
@@ -1443,6 +1511,7 @@ class PortalListingTab(QWidget):
             self.proxy_model.set_column_filters(filters_by_index)
         except Exception:
             pass
+        self._update_filters_summary()
         self._update_count()
 
     # ------------------------------------------------------------------

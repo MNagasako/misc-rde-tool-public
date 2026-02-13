@@ -67,6 +67,25 @@ def _persisted_cache_path() -> str:
     return get_dynamic_file_path("output/rde/cache/portal_entry_status_cache.json")
 
 
+def _durable_cache_path() -> str:
+    # output 配下がクリアされても残るように、設定配下にも保存する。
+    return get_dynamic_file_path("config/cache/portal_entry_status_cache.json")
+
+
+def _all_persisted_cache_paths() -> list[str]:
+    primary = _persisted_cache_path()
+    durable = _durable_cache_path()
+    paths: list[str] = []
+    for p in (primary, durable):
+        ps = str(p or "").strip()
+        if not ps:
+            continue
+        if ps in paths:
+            continue
+        paths.append(ps)
+    return paths
+
+
 def parse_portal_entry_search_html(
     html: str,
     dataset_id: str,
@@ -262,19 +281,30 @@ class PortalEntryStatusCache:
         with self._lock:
             if self._loaded:
                 return
-            path = _persisted_cache_path()
+            latest_items: Dict[str, Any] = {}
+            latest_saved_at = -1.0
             try:
-                if not path or not os.path.exists(path):
-                    self._loaded = True
-                    return
-                with open(path, "r", encoding="utf-8") as fh:
-                    payload = json.load(fh)
-                if not isinstance(payload, dict) or int(payload.get("version", 0) or 0) != _CACHE_VERSION:
-                    self._loaded = True
-                    return
-                items = payload.get("items")
-                if isinstance(items, dict):
-                    self._items = items
+                for path in _all_persisted_cache_paths():
+                    if not path or not os.path.exists(path):
+                        continue
+                    try:
+                        with open(path, "r", encoding="utf-8") as fh:
+                            payload = json.load(fh)
+                    except Exception:
+                        continue
+                    if not isinstance(payload, dict) or int(payload.get("version", 0) or 0) != _CACHE_VERSION:
+                        continue
+                    items = payload.get("items")
+                    if not isinstance(items, dict):
+                        continue
+                    try:
+                        saved_at = float(payload.get("saved_at") or 0.0)
+                    except Exception:
+                        saved_at = 0.0
+                    if saved_at >= latest_saved_at:
+                        latest_saved_at = saved_at
+                        latest_items = items
+                self._items = latest_items if isinstance(latest_items, dict) else {}
             except Exception:
                 self._items = {}
             self._loaded = True
@@ -405,12 +435,10 @@ class PortalEntryStatusCache:
         self._save_best_effort()
 
     def _save_best_effort(self) -> None:
-        path = _persisted_cache_path()
-        if not path:
+        paths = _all_persisted_cache_paths()
+        if not paths:
             return
         try:
-            os.makedirs(os.path.dirname(path), exist_ok=True)
-
             # Snapshot under lock so concurrent writers do not corrupt the persisted file.
             with self._lock:
                 items_snapshot = dict(self._items)
@@ -422,21 +450,27 @@ class PortalEntryStatusCache:
                 "items": items_snapshot,
             }
 
-            # Atomic write (best-effort) to avoid truncation/corruption on crash.
-            tmp_path = f"{path}.tmp"
-            with open(tmp_path, "w", encoding="utf-8") as fh:
-                json.dump(payload, fh, ensure_ascii=False)
-            try:
-                os.replace(tmp_path, path)
-            except Exception:
-                # Fallback to direct write if atomic replace fails.
-                with open(path, "w", encoding="utf-8") as fh:
-                    json.dump(payload, fh, ensure_ascii=False)
+            for path in paths:
                 try:
-                    if os.path.exists(tmp_path):
-                        os.remove(tmp_path)
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+
+                    # Atomic write (best-effort) to avoid truncation/corruption on crash.
+                    tmp_path = f"{path}.tmp"
+                    with open(tmp_path, "w", encoding="utf-8") as fh:
+                        json.dump(payload, fh, ensure_ascii=False)
+                    try:
+                        os.replace(tmp_path, path)
+                    except Exception:
+                        # Fallback to direct write if atomic replace fails.
+                        with open(path, "w", encoding="utf-8") as fh:
+                            json.dump(payload, fh, ensure_ascii=False)
+                        try:
+                            if os.path.exists(tmp_path):
+                                os.remove(tmp_path)
+                        except Exception:
+                            pass
                 except Exception:
-                    pass
+                    continue
         except Exception as exc:
             logger.debug(f"portal entry status cache save skipped: {exc}")
 

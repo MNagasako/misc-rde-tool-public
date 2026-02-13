@@ -22,6 +22,7 @@ from qt_compat.widgets import (
     QCompleter,
     QSpinBox,
     QHeaderView,
+    QMenu,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
@@ -64,6 +65,7 @@ from classes.subgroup.util.sample_dedup_table_records import (
 )
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import ThemeManager, get_color, get_qcolor
+from classes.utils.button_styles import get_button_style
 
 from classes.subgroup.ui.sample_entry_sample_relink_dialog import SampleEntrySampleRelinkDialog
 from classes.subgroup.ui.sample_edit_dialog import SampleEditDialog
@@ -1780,12 +1782,23 @@ class SampleDedupListingWidget(QWidget):
         self._reset_columns.clicked.connect(self._reset_columns_to_default)
         controls.addWidget(self._reset_columns)
 
-        self._export_csv = QPushButton("CSV出力", self)
-        self._export_xlsx = QPushButton("XLSX出力", self)
-        self._export_csv.clicked.connect(lambda: self._export("csv"))
-        self._export_xlsx.clicked.connect(lambda: self._export("xlsx"))
-        controls.addWidget(self._export_csv)
-        controls.addWidget(self._export_xlsx)
+        self._compact_rows_btn = QPushButton("1行表示", self)
+        self._compact_rows_btn.clicked.connect(self._apply_compact_rows)
+        controls.addWidget(self._compact_rows_btn)
+
+        self._equal_columns_btn = QPushButton("列幅そろえ", self)
+        self._equal_columns_btn.clicked.connect(self._apply_equal_columns)
+        controls.addWidget(self._equal_columns_btn)
+
+        export_menu = QMenu(self)
+        export_csv = export_menu.addAction("CSV出力")
+        export_csv.triggered.connect(lambda: self._export("csv"))
+        export_xlsx = export_menu.addAction("XLSX出力")
+        export_xlsx.triggered.connect(lambda: self._export("xlsx"))
+
+        self._export_btn = QPushButton("エクスポート", self)
+        self._export_btn.setMenu(export_menu)
+        controls.addWidget(self._export_btn)
 
         self.reload_button = QPushButton("更新", self)
         self.reload_button.clicked.connect(lambda: self._load_from_cache_and_refresh_if_needed(auto_fetch=True, force_refresh=True))
@@ -2065,11 +2078,40 @@ class SampleDedupListingWidget(QWidget):
             return
 
     def _apply_theme(self) -> None:
+        color = ""
         try:
-            color = get_color(ThemeKey.TEXT_PRIMARY).name()
+            raw = get_color(ThemeKey.TEXT_PRIMARY)
+            try:
+                color = raw.name()  # type: ignore[attr-defined]
+            except Exception:
+                color = str(raw or "")
+        except Exception:
+            color = ""
+
+        try:
             self.header_label.setStyleSheet(f"font-weight: bold; color: {color};")
         except Exception:
-            return
+            pass
+
+        self._apply_button_styles()
+
+    def _apply_button_styles(self) -> None:
+        for button, kind in (
+            (getattr(self, "_select_columns", None), "secondary"),
+            (getattr(self, "_reset_columns", None), "secondary"),
+            (getattr(self, "_compact_rows_btn", None), "primary"),
+            (getattr(self, "_equal_columns_btn", None), "secondary"),
+            (getattr(self, "_export_btn", None), "success"),
+            (getattr(self, "reload_button", None), "info"),
+            (getattr(self, "fetch_button", None), "warning"),
+            (getattr(self, "_toggle_filters_button", None), "secondary"),
+        ):
+            if button is None:
+                continue
+            try:
+                button.setStyleSheet(get_button_style(kind))
+            except Exception:
+                continue
 
     def _bind_theme_refresh(self) -> None:
         try:
@@ -2475,8 +2517,34 @@ class SampleDedupListingWidget(QWidget):
         except Exception:
             pass
         self._filters_summary_label.setVisible(self._filters_collapsed)
-        self._toggle_filters_button.setText("フィルタ展開" if self._filters_collapsed else "フィルタ最小化")
+        self._toggle_filters_button.setText("フィルタ表示" if self._filters_collapsed else "フィルタ最小化")
         self._refresh_filters_summary()
+
+    def _apply_compact_rows(self) -> None:
+        try:
+            self.table.setWordWrap(False)
+            self.table.verticalHeader().setSectionResizeMode(QHeaderView.Interactive)
+            row_h = int(self.table.fontMetrics().height() * 1.6)
+            if row_h > 0:
+                self.table.verticalHeader().setDefaultSectionSize(row_h)
+        except Exception:
+            pass
+
+    def _apply_equal_columns(self) -> None:
+        try:
+            header = self.table.horizontalHeader()
+            header.setSectionResizeMode(QHeaderView.Interactive)
+            visible_cols = [c for c in range(self.table.model().columnCount()) if not self.table.isColumnHidden(c)]
+            if not visible_cols:
+                return
+            viewport_w = int(self.table.viewport().width())
+            if viewport_w <= 0:
+                return
+            each_w = max(80, int(viewport_w / len(visible_cols)) - 2)
+            for col in visible_cols:
+                self.table.setColumnWidth(col, each_w)
+        except Exception:
+            pass
 
     def _refresh_filters_summary(self) -> None:
         if not self._filters_collapsed:

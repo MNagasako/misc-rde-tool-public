@@ -24,6 +24,7 @@ from qt_compat.widgets import (
     QHeaderView,
     QDialog,
     QDialogButtonBox,
+    QMenu,
     QScrollArea,
     QFileDialog,
     QMessageBox,
@@ -51,6 +52,7 @@ from classes.subgroup.util.subgroup_list_table_records import (
 from classes.dataset.ui.spinner_overlay import SpinnerOverlay
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import ThemeManager, get_color, get_qcolor
+from classes.utils.button_styles import get_button_style
 from config.common import get_dynamic_file_path
 
 
@@ -722,9 +724,7 @@ class SubgroupListingWidget(QWidget):
         self._page: Optional[QSpinBox] = None
         self._total_pages: Optional[QLabel] = None
         self._select_columns: Optional[QPushButton] = None
-        self._reset_columns: Optional[QPushButton] = None
-        self._export_csv: Optional[QPushButton] = None
-        self._export_xlsx: Optional[QPushButton] = None
+        self._export_btn: Optional[QPushButton] = None
 
         self._filters_collapsed = False
         self._filter_edits_by_key: Dict[str, QLineEdit] = {}
@@ -845,13 +845,14 @@ class SubgroupListingWidget(QWidget):
         self._select_columns = QPushButton("列選択", self)
         buttons_row.addWidget(self._select_columns)
 
-        self._reset_columns = QPushButton("列リセット", self)
-        buttons_row.addWidget(self._reset_columns)
-
-        self._export_csv = QPushButton("CSV出力", self)
-        self._export_xlsx = QPushButton("XLSX出力", self)
-        buttons_row.addWidget(self._export_csv)
-        buttons_row.addWidget(self._export_xlsx)
+        export_menu = QMenu(self)
+        export_csv = export_menu.addAction("CSV出力")
+        export_csv.triggered.connect(lambda: self._export("csv"))
+        export_xlsx = export_menu.addAction("XLSX出力")
+        export_xlsx.triggered.connect(lambda: self._export("xlsx"))
+        self._export_btn = QPushButton("エクスポート", self)
+        self._export_btn.setMenu(export_menu)
+        buttons_row.addWidget(self._export_btn)
 
         self._adjust_row_heights_btn = QPushButton("行高さ調整", self)
         self._adjust_row_heights_btn.setObjectName("subgroup_listing_adjust_row_heights")
@@ -973,12 +974,6 @@ class SubgroupListingWidget(QWidget):
         self._clear_filters.clicked.connect(self._clear_all_filters)
         if self._select_columns is not None:
             self._select_columns.clicked.connect(self._open_column_selector)
-        if self._reset_columns is not None:
-            self._reset_columns.clicked.connect(self._reset_column_visibility)
-        if self._export_csv is not None:
-            self._export_csv.clicked.connect(lambda: self._export("csv"))
-        if self._export_xlsx is not None:
-            self._export_xlsx.clicked.connect(lambda: self._export("xlsx"))
 
         try:
             self._adjust_row_heights_btn.clicked.connect(self._adjust_row_heights_to_max_lines)
@@ -1919,6 +1914,21 @@ class SubgroupListingWidget(QWidget):
         except Exception:
             pass
         self._table.setStyleSheet(table_qss)
+
+        for button, kind in (
+            (self._select_columns, "secondary"),
+            (self._export_btn, "success"),
+            (self._adjust_row_heights_btn, "primary"),
+            (self._reload, "info"),
+            (self._toggle_filters_button, "secondary"),
+            (self._clear_filters, "warning"),
+        ):
+            if button is None:
+                continue
+            try:
+                button.setStyleSheet(get_button_style(kind))
+            except Exception:
+                continue
 
     def resizeEvent(self, event) -> None:  # noqa: N802
         try:

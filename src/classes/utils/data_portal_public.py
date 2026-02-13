@@ -5,6 +5,7 @@ import math
 from dataclasses import dataclass
 import logging
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -29,6 +30,8 @@ _PUBLIC_OUTPUT_DATASET_ID_CACHE: dict[str, object] = {
     "mtime": None,
     "dataset_ids": set(),
 }
+
+_PUBLIC_LISTING_DATASET_ID_CACHE: dict[tuple[str, int, int], dict[str, object]] = {}
 
 
 def get_public_published_dataset_ids(*, environment: str = "production", use_cache: bool = True) -> set[str]:
@@ -105,10 +108,79 @@ def _with_display_params(search_url: str, *, display_result: int, display_order:
 
 
 def _page_size_from_display_result(display_result: int) -> int:
-    # サイト側の実装に依存するが、観測上 display_result=2/3 が 100件表示になる。
-    if display_result in (2, 3):
+    # 観測値: display_result=3 は 200件、display_result=2 は 100件。
+    if display_result == 3:
+        return 200
+    if display_result == 2:
         return 100
     return 20
+
+
+def get_public_listing_dataset_ids(
+    *,
+    environment: str = "production",
+    timeout: int = 30,
+    display_result: int = 3,
+    display_order: int = 0,
+    max_age_sec: int = 300,
+    force_refresh: bool = False,
+    page_max_workers: int = 1,
+    basic_auth: Optional[tuple[str, str]] = None,
+    progress_callback: Optional[ProgressCallback] = None,
+) -> set[str]:
+    """公開データセット一覧（ページネーション）を全件取得し、dataset_id集合を返す。
+
+    注意:
+    - 一覧ページから抽出できるIDは `code`（detail URL の `code`）を dataset_id として扱う。
+    - 取得結果は TTL キャッシュし、過剰アクセスを抑止する。
+    """
+
+    env = str(environment or "production").strip() or "production"
+    cache_key = (env, int(display_result), int(display_order))
+    now = time.time()
+
+    cache = _PUBLIC_LISTING_DATASET_ID_CACHE.get(cache_key)
+    if not force_refresh and isinstance(cache, dict):
+        fetched_at = float(cache.get("fetched_at", 0.0) or 0.0)
+        dataset_ids = cache.get("dataset_ids")
+        if isinstance(dataset_ids, set) and (now - fetched_at) < max(0, int(max_age_sec)):
+            return set(dataset_ids)
+
+    links = search_public_arim_data(
+        keyword="",
+        environment=env,
+        timeout=timeout,
+        display_result=display_result,
+        display_order=display_order,
+        max_pages=None,
+        start_page=1,
+        end_page=None,
+        page_max_workers=max(1, int(page_max_workers or 1)),
+        basic_auth=basic_auth,
+        progress_callback=progress_callback,
+    )
+
+    dataset_ids: set[str] = set()
+    for link in links:
+        code = str(getattr(link, "code", "") or "").strip()
+        if code:
+            dataset_ids.add(code)
+
+    _PUBLIC_LISTING_DATASET_ID_CACHE[cache_key] = {
+        "fetched_at": now,
+        "dataset_ids": set(dataset_ids),
+    }
+
+    logger.info(
+        "公開一覧ID取得: env=%s display_result=%s page_size=%s ids=%s (ttl=%ss)",
+        env,
+        display_result,
+        _page_size_from_display_result(display_result),
+        len(dataset_ids),
+        max(0, int(max_age_sec)),
+    )
+
+    return set(dataset_ids)
 
 
 def migrate_public_data_portal_cache_dir(
@@ -837,6 +909,7 @@ def search_public_arim_data(
     max_pages: Optional[int] = None,
     start_page: int = 1,
     end_page: Optional[int] = None,
+    page_max_workers: int = 1,
     basic_auth: Optional[tuple[str, str]] = None,
     progress_callback: Optional[ProgressCallback] = None,
 ) -> List[PublicArimDataLink]:
@@ -912,12 +985,9 @@ def search_public_arim_data(
         effective_max_page = min(effective_max_page, hard_max_pages)
 
         loop_start = max(2, start_page)
-        for page in range(loop_start, effective_max_page + 1):
-            if progress_callback is not None:
-                try:
-                    progress_callback(page, effective_max_page, f"検索ページ取得中: page={page}/{effective_max_page}")
-                except Exception:
-                    pass
+        pages = list(range(loop_start, effective_max_page + 1))
+
+        def _fetch_page(page: int) -> tuple[int, List[PublicArimDataLink]]:
             page_url = _build_page_url(search_url, page)
             page_resp = proxy_get(
                 page_url,
@@ -929,12 +999,45 @@ def search_public_arim_data(
             page_resp.encoding = "utf-8"
             if page_resp.status_code != 200:
                 logger.warning("公開データポータルページ取得失敗: page=%s HTTP %s", page, page_resp.status_code)
-                break
+                return page, []
+            return page, parse_public_arim_data_links(page_resp.text, base_url=page_url)
 
-            page_links = parse_public_arim_data_links(page_resp.text, base_url=page_url)
-            if not page_links:
-                break
-            _extend(page_links)
+        if pages:
+            workers = max(1, int(page_max_workers or 1))
+            if workers <= 1 or len(pages) == 1:
+                for page in pages:
+                    if progress_callback is not None:
+                        try:
+                            progress_callback(page, effective_max_page, f"検索ページ取得中: page={page}/{effective_max_page}")
+                        except Exception:
+                            pass
+                    _page, page_links = _fetch_page(page)
+                    if page_links:
+                        _extend(page_links)
+            else:
+                fetched: dict[int, List[PublicArimDataLink]] = {}
+                done = 0
+                total = len(pages)
+                with ThreadPoolExecutor(max_workers=workers) as executor:
+                    futures = {executor.submit(_fetch_page, p): p for p in pages}
+                    for future in as_completed(futures):
+                        page = futures[future]
+                        done += 1
+                        if progress_callback is not None:
+                            try:
+                                progress_callback(done, total, f"検索ページ取得中: page={page} ({done}/{total})")
+                            except Exception:
+                                pass
+                        try:
+                            page_no, page_links = future.result()
+                        except Exception:
+                            page_no, page_links = page, []
+                        fetched[int(page_no)] = page_links if isinstance(page_links, list) else []
+
+                for page in sorted(fetched.keys()):
+                    page_links = fetched.get(page) or []
+                    if page_links:
+                        _extend(page_links)
 
         return links
 
