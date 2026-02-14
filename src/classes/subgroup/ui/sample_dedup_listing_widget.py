@@ -1514,6 +1514,7 @@ class SampleDedupListingWidget(QWidget):
         self._multiline_link_column_key = str(multiline_link_column_key) if multiline_link_column_key else ""
         self._multiline_link_delegate: Optional[MultiLineCompositeLinkDelegate] = None
         self._multiline_uuid_delegate: Optional[MultiLineUuidLinkDelegate] = None
+        self._compact_rows_mode: bool = False
         self._columns: List[SampleDedupColumn] = []
         self._rows: List[Dict[str, Any]] = []
         self._filter_edits_by_col_index: Dict[int, QLineEdit] = {}
@@ -1783,7 +1784,7 @@ class SampleDedupListingWidget(QWidget):
         controls.addWidget(self._reset_columns)
 
         self._compact_rows_btn = QPushButton("1行表示", self)
-        self._compact_rows_btn.clicked.connect(self._apply_compact_rows)
+        self._compact_rows_btn.clicked.connect(self._toggle_compact_rows)
         controls.addWidget(self._compact_rows_btn)
 
         self._equal_columns_btn = QPushButton("列幅そろえ", self)
@@ -2183,12 +2184,18 @@ class SampleDedupListingWidget(QWidget):
             return
 
     def _schedule_row_resize(self) -> None:
+        if self._compact_rows_mode:
+            self._apply_compact_rows()
+            return
         try:
             self._ui_row_resize_timer.start()
         except Exception:
             self._resize_rows_to_contents()
 
     def _resize_rows_to_contents(self) -> None:
+        if self._compact_rows_mode:
+            self._apply_compact_rows()
+            return
         try:
             self.table.resizeRowsToContents()
         except Exception:
@@ -2527,8 +2534,30 @@ class SampleDedupListingWidget(QWidget):
             row_h = int(self.table.fontMetrics().height() * 1.6)
             if row_h > 0:
                 self.table.verticalHeader().setDefaultSectionSize(row_h)
+                try:
+                    model = self.table.model()
+                    if model is not None:
+                        for r in range(int(model.rowCount())):
+                            self.table.setRowHeight(r, row_h)
+                except Exception:
+                    pass
         except Exception:
             pass
+
+    def _apply_expanded_rows(self) -> None:
+        try:
+            self.table.setWordWrap(True)
+            self.table.verticalHeader().setSectionResizeMode(QHeaderView.Interactive)
+            self.table.resizeRowsToContents()
+        except Exception:
+            pass
+
+    def _toggle_compact_rows(self) -> None:
+        self._compact_rows_mode = not self._compact_rows_mode
+        if self._compact_rows_mode:
+            self._apply_compact_rows()
+        else:
+            self._apply_expanded_rows()
 
     def _apply_equal_columns(self) -> None:
         try:

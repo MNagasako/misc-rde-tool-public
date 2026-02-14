@@ -1619,9 +1619,12 @@ class UIController(UIControllerCore):
         basic_tab_layout = QVBoxLayout(basic_tab)
         xlsx_tab = QWidget()
         xlsx_tab_layout = QVBoxLayout(xlsx_tab)
+        index_tab = QWidget()
+        index_tab_layout = QVBoxLayout(index_tab)
 
         self.basic_info_tabs.addTab(basic_tab, "基本情報")
         self.basic_info_tabs.addTab(xlsx_tab, "XLSX")
+        self.basic_info_tabs.addTab(index_tab, "検索インデックス")
         layout.addWidget(self.basic_info_tabs, 1)
         
         try:
@@ -1869,6 +1872,15 @@ class UIController(UIControllerCore):
         except Exception as e:
             self.show_error(f"基本情報ステータスウィジェットの作成でエラーが発生しました: {e}")
             basic_tab_layout.addWidget(QLabel("ステータス表示機能にエラーが発生しました"))
+
+        try:
+            from classes.basic.ui.search_index_tab_widget import create_rde_search_index_tab
+
+            self.basic_search_index_widget = create_rde_search_index_tab(self.parent)
+            index_tab_layout.addWidget(self.basic_search_index_widget)
+        except Exception as e:
+            self.show_error(f"検索インデックスタブの作成でエラーが発生しました: {e}")
+            index_tab_layout.addWidget(QLabel("検索インデックス機能が利用できません"))
 
         # 初回のみ: ウィンドウ幅をディスプレイ幅90%上限で横スクロール不要な幅へ寄せる（可変のまま）
         try:

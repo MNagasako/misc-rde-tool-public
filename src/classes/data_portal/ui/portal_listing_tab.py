@@ -455,7 +455,7 @@ class PortalListingTab(QWidget):
         controls.addSpacing(12)
 
         self.compact_rows_btn = QPushButton("1行表示", self)
-        self.compact_rows_btn.clicked.connect(lambda: self._apply_display_mode("compact"))
+        self.compact_rows_btn.clicked.connect(self._toggle_compact_rows)
         controls.addWidget(self.compact_rows_btn)
 
         self.equal_columns_btn = QPushButton("列幅そろえ", self)
@@ -1533,6 +1533,13 @@ class PortalListingTab(QWidget):
                 row_h = int(self.table_view.fontMetrics().height() * 1.6)
                 if row_h > 0:
                     self.table_view.verticalHeader().setDefaultSectionSize(row_h)
+                    try:
+                        model = self.table_view.model()
+                        if model is not None:
+                            for r in range(int(model.rowCount())):
+                                self.table_view.setRowHeight(r, row_h)
+                    except Exception:
+                        pass
             elif mode == "equal":
                 self.table_view.setWordWrap(True)
                 self.table_view.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
@@ -1546,9 +1553,16 @@ class PortalListingTab(QWidget):
             pass
 
         try:
+            if mode == "compact":
+                return
             self.table_view.resizeRowsToContents()
         except Exception:
             pass
+
+    def _toggle_compact_rows(self) -> None:
+        current = str(getattr(self, "_display_mode", "default")).strip().lower()
+        target = "default" if current == "compact" else "compact"
+        self._apply_display_mode(target)
 
     def _apply_equal_column_widths(self) -> None:
         try:

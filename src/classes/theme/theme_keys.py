@@ -101,6 +101,13 @@ class ThemeKey(str, Enum):
     MENU_GROUP6_ACTIVE_BACKGROUND = "menu.group6.active.background"
     MENU_GROUP6_ACTIVE_TEXT = "menu.group6.active.text"
     MENU_GROUP6_ACTIVE_HOVER_BACKGROUND = "menu.group6.active.hover.background"
+
+    MENU_GROUP7_INACTIVE_BACKGROUND = "menu.group7.inactive.background"
+    MENU_GROUP7_INACTIVE_TEXT = "menu.group7.inactive.text"
+    MENU_GROUP7_HOVER_BACKGROUND = "menu.group7.hover.background"
+    MENU_GROUP7_ACTIVE_BACKGROUND = "menu.group7.active.background"
+    MENU_GROUP7_ACTIVE_TEXT = "menu.group7.active.text"
+    MENU_GROUP7_ACTIVE_HOVER_BACKGROUND = "menu.group7.active.hover.background"
     
     # Main menu (left pane): warm selection background (shared across groups)
     MENU_ACTIVE_WARM_BACKGROUND = "menu.active.warm.background"

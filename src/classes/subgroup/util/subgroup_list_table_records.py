@@ -115,7 +115,7 @@ def _compute_signature(
         "samples_dir_mtime": samples_mtime,
         "subgroup_details_dir_mtime": details_mtime,
         "subgroup_rel_details_dir_mtime": rel_details_mtime,
-        "schema": 4,
+        "schema": 5,
     }
 
 
@@ -417,8 +417,8 @@ def build_subgroup_list_rows_from_files() -> Tuple[List[SubgroupListColumn], Lis
         SubgroupListColumn("role_member_count", "メンバー人数"),
         SubgroupListColumn("role_agent_count", "登録代行人数"),
         SubgroupListColumn("role_viewer_count", "閲覧人数"),
-        SubgroupListColumn("role_entries_all_count", "管理者/管理者代理/メンバー/登録代行/閲覧人数"),
-        SubgroupListColumn("role_entries_without_owner_count", "管理者代理/メンバー/登録代行/閲覧人数"),
+        SubgroupListColumn("role_entries_all_count", "管理者/代理/メンバー/代行/閲覧人数"),
+        SubgroupListColumn("role_entries_without_owner_count", "代理/メンバー/代行/閲覧人数"),
         SubgroupListColumn("related_datasets", "関連データセット"),
         SubgroupListColumn("related_datasets_count", "関連データセット数"),
         SubgroupListColumn("related_samples", "関連試料"),

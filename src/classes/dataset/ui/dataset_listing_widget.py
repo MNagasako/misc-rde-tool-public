@@ -1854,7 +1854,7 @@ class DatasetListingWidget(QWidget):
         self._file_cnt_max.valueChanged.connect(self._schedule_apply_filters)
         self._clear_filters.clicked.connect(self._clear_all_filters)
         self._select_columns.clicked.connect(self._open_column_selector)
-        self._compact_rows_btn.clicked.connect(lambda: self._apply_display_mode("compact"))
+        self._compact_rows_btn.clicked.connect(self._toggle_compact_rows)
         self._equal_columns_btn.clicked.connect(lambda: self._apply_display_mode("equal"))
         self._reload.clicked.connect(self.reload_data)
 
@@ -4739,6 +4739,8 @@ class DatasetListingWidget(QWidget):
         return 600
 
     def _adjust_row_heights_to_max_lines_visible_columns(self) -> None:
+        if str(getattr(self, "_display_mode", "default")).strip().lower() == "compact":
+            return
         if not hasattr(self, "_table") or self._table is None:
             return
         model = self._table.model()
@@ -5705,6 +5707,13 @@ class DatasetListingWidget(QWidget):
                 row_h = int(self._table.fontMetrics().height() * 1.6)
                 if row_h > 0:
                     self._table.verticalHeader().setDefaultSectionSize(row_h)
+                    try:
+                        model = self._table.model()
+                        if model is not None:
+                            for r in range(int(model.rowCount())):
+                                self._table.setRowHeight(r, row_h)
+                    except Exception:
+                        pass
             elif mode == "equal":
                 self._table.setWordWrap(True)
                 self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
@@ -5718,9 +5727,17 @@ class DatasetListingWidget(QWidget):
             pass
 
         try:
+            if mode == "compact":
+                return
             self._table.resizeRowsToContents()
+            self._adjust_row_heights_to_max_lines_visible_columns()
         except Exception:
             pass
+
+    def _toggle_compact_rows(self) -> None:
+        current = str(getattr(self, "_display_mode", "default")).strip().lower()
+        target = "default" if current == "compact" else "compact"
+        self._apply_display_mode(target)
 
     def _apply_equal_column_widths(self) -> None:
         if self._table is None:

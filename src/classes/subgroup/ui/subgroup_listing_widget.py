@@ -261,20 +261,34 @@ class WrapHeaderView(QHeaderView):
         if not rect.isValid():
             return
         try:
-            opt = QStyleOptionHeader()
-            self.initStyleOption(opt)
-            opt.rect = rect
-            opt.section = logicalIndex
-            opt.text = str(self.model().headerData(logicalIndex, self.orientation(), Qt.DisplayRole) or "")
-            style = self.style() if self.style() is not None else None
-            if style is None:
-                return
-            style.drawControl(QStyle.CE_HeaderSection, opt, painter, self)
-            text_rect = style.subElementRect(QStyle.SE_HeaderLabel, opt, self)
+            header_text = str(self.model().headerData(logicalIndex, self.orientation(), Qt.DisplayRole) or "")
+            header_bg_color = get_qcolor(ThemeKey.TABLE_HEADER_BACKGROUND)
+            header_border_color = get_qcolor(ThemeKey.TABLE_HEADER_BORDER)
+            try:
+                header_text_color = get_qcolor(ThemeKey.TABLE_HEADER_TEXT)
+            except Exception:
+                header_text_color = get_qcolor(ThemeKey.TEXT_PRIMARY)
+            try:
+                same_rgb = (
+                    header_text_color.red() == header_bg_color.red()
+                    and header_text_color.green() == header_bg_color.green()
+                    and header_text_color.blue() == header_bg_color.blue()
+                )
+                transparent_text = header_text_color.alpha() <= 0
+            except Exception:
+                same_rgb = False
+                transparent_text = False
+            if same_rgb or transparent_text:
+                header_text_color = get_qcolor(ThemeKey.TEXT_PRIMARY)
+
             painter.save()
-            painter.setFont(opt.font)
-            painter.setPen(opt.palette.color(QPalette.Text))
-            painter.drawText(text_rect, Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignVCenter, opt.text)
+            painter.fillRect(rect, header_bg_color)
+            painter.setPen(header_border_color)
+            painter.drawRect(rect.adjusted(0, 0, -1, -1))
+
+            text_rect = rect.adjusted(6, 2, -4, -2)
+            painter.setPen(header_text_color)
+            painter.drawText(text_rect, Qt.TextWordWrap | Qt.AlignLeft | Qt.AlignVCenter, header_text)
             painter.restore()
         except Exception:
             return
@@ -708,6 +722,25 @@ class SubgroupFilterProxyModel(QSortFilterProxyModel):
                 return i
         return -1
 
+    def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:  # noqa: N802
+        model = self.sourceModel()
+        if model is None:
+            return super().lessThan(left, right)
+
+        left_user = model.data(left, Qt.UserRole)
+        right_user = model.data(right, Qt.UserRole)
+
+        if isinstance(left_user, (int, float)) and isinstance(right_user, (int, float)):
+            return float(left_user) < float(right_user)
+
+        left_raw = model.data(left, SubgroupListTableModel.RAW_TEXT_ROLE)
+        right_raw = model.data(right, SubgroupListTableModel.RAW_TEXT_ROLE)
+
+        left_text = "" if left_raw is None else str(left_raw)
+        right_text = "" if right_raw is None else str(right_raw)
+
+        return left_text.casefold() < right_text.casefold()
+
 
 class SubgroupListingWidget(QWidget):
     def __init__(self, parent=None):
@@ -741,6 +774,7 @@ class SubgroupListingWidget(QWidget):
         self._text_filters_layout: Optional[QGridLayout] = None
         self._toggle_filters_button: Optional[QPushButton] = None
         self._reload: Optional[QPushButton] = None
+        self._compact_rows_mode: bool = False
 
         self._apply_timer = QTimer(self)
         self._apply_timer.setSingleShot(True)
@@ -854,7 +888,7 @@ class SubgroupListingWidget(QWidget):
         self._export_btn.setMenu(export_menu)
         buttons_row.addWidget(self._export_btn)
 
-        self._adjust_row_heights_btn = QPushButton("行高さ調整", self)
+        self._adjust_row_heights_btn = QPushButton("1行表示", self)
         self._adjust_row_heights_btn.setObjectName("subgroup_listing_adjust_row_heights")
         buttons_row.addWidget(self._adjust_row_heights_btn)
 
@@ -925,6 +959,11 @@ class SubgroupListingWidget(QWidget):
         header = WrapHeaderView(Qt.Horizontal, self._table)
         self._table.setHorizontalHeader(header)
         try:
+            header.setSectionsClickable(True)
+            header.setSortIndicatorShown(True)
+        except Exception:
+            pass
+        try:
             header.sectionResized.connect(lambda *_args: self._schedule_adjust_row_heights())
         except Exception:
             pass
@@ -976,7 +1015,7 @@ class SubgroupListingWidget(QWidget):
             self._select_columns.clicked.connect(self._open_column_selector)
 
         try:
-            self._adjust_row_heights_btn.clicked.connect(self._adjust_row_heights_to_max_lines)
+            self._adjust_row_heights_btn.clicked.connect(self._toggle_row_height_mode)
         except Exception:
             pass
 
@@ -1353,6 +1392,9 @@ class SubgroupListingWidget(QWidget):
         self._update_table_data(columns, rows)
 
     def _schedule_adjust_row_heights(self) -> None:
+        if self._compact_rows_mode:
+            self._apply_single_line_row_heights()
+            return
         try:
             self._row_height_timer.start()
         except Exception:
@@ -1360,6 +1402,33 @@ class SubgroupListingWidget(QWidget):
                 self._adjust_row_heights_to_max_lines()
             except Exception:
                 return
+
+    def _toggle_row_height_mode(self) -> None:
+        self._compact_rows_mode = not self._compact_rows_mode
+        if self._compact_rows_mode:
+            self._apply_single_line_row_heights()
+        else:
+            self._adjust_row_heights_to_max_lines()
+
+    def _apply_single_line_row_heights(self) -> None:
+        if not hasattr(self, "_table") or self._table is None:
+            return
+        model = self._table.model()
+        if model is None:
+            return
+        try:
+            self._table.verticalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        except Exception:
+            pass
+        try:
+            row_h = int(self._table.fontMetrics().height() * 1.6)
+            if row_h <= 0:
+                return
+            self._table.verticalHeader().setDefaultSectionSize(row_h)
+            for r in range(int(model.rowCount())):
+                self._table.setRowHeight(r, row_h)
+        except Exception:
+            return
 
     def _row_max_height_px(self) -> int:
         try:
@@ -1375,6 +1444,9 @@ class SubgroupListingWidget(QWidget):
         return 600
 
     def _adjust_row_heights_to_max_lines(self) -> None:
+        if self._compact_rows_mode:
+            self._apply_single_line_row_heights()
+            return
         if not hasattr(self, "_table") or self._table is None:
             return
         model = self._table.model()

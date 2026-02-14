@@ -69,6 +69,10 @@ class DataFetch2TabWidget(QTabWidget):
         self.setup_responsive_layout()
         # データセット取得タブを追加
         self.create_dataset_tab()
+        # 一括取得（RDE）タブを追加
+        self.create_bulk_rde_tab()
+        # 一括取得（DP）タブを追加
+        self.create_bulk_dp_tab()
         # フィルタタブ作成
         self.create_filter_tab()
         # 初期フィルタ状態の伝播（フィルタタブのデフォルトをデータ取得タブへ反映）
@@ -243,6 +247,47 @@ class DataFetch2TabWidget(QTabWidget):
 
     def create_mail_notification_tab(self):
         pass  # メール通知タブの作成を削除
+
+    def create_bulk_rde_tab(self):
+        """一括取得（RDE）タブ"""
+        try:
+            from classes.data_fetch2.ui.bulk_rde_tab import create_bulk_rde_tab
+
+            tab_widget = create_bulk_rde_tab(self)
+            self.bulk_rde_widget = tab_widget
+            self.addTab(tab_widget, "📦 一括取得（RDE）")
+            try:
+                if hasattr(tab_widget, "set_filter_config"):
+                    tab_widget.set_filter_config(self.current_filter_config)
+            except Exception:
+                pass
+        except Exception as e:
+            logger.error(f"一括取得（RDE）タブ作成エラー: {e}")
+            fallback_widget = QWidget()
+            fallback_layout = QVBoxLayout(fallback_widget)
+            fallback_label = QLabel("一括取得（RDE）機能は利用できません")
+            fallback_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;")
+            fallback_layout.addWidget(fallback_label)
+            self.bulk_rde_widget = None
+            self.addTab(fallback_widget, "📦 一括取得（RDE）")
+
+    def create_bulk_dp_tab(self):
+        """一括取得（DP）タブ"""
+        try:
+            from classes.data_fetch2.ui.bulk_dp_tab import create_bulk_dp_tab
+
+            tab_widget = create_bulk_dp_tab(self)
+            self.bulk_dp_widget = tab_widget
+            self.addTab(tab_widget, "🌐 一括取得（DP）")
+        except Exception as e:
+            logger.error(f"一括取得（DP）タブ作成エラー: {e}")
+            fallback_widget = QWidget()
+            fallback_layout = QVBoxLayout(fallback_widget)
+            fallback_label = QLabel("一括取得（DP）機能は利用できません")
+            fallback_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;")
+            fallback_layout.addWidget(fallback_label)
+            self.bulk_dp_widget = None
+            self.addTab(fallback_widget, "🌐 一括取得（DP）")
             
     def on_file_filter_changed(self, filter_config):
         """ファイルフィルタ変更時のハンドラー"""
@@ -268,6 +313,12 @@ class DataFetch2TabWidget(QTabWidget):
         except Exception as e:
             logger.debug(f"直接反映エラー: {e}")
             self.update_data_fetch_filter_status()
+
+        try:
+            if hasattr(self, 'bulk_rde_widget') and self.bulk_rde_widget and hasattr(self.bulk_rde_widget, 'set_filter_config'):
+                self.bulk_rde_widget.set_filter_config(filter_config)
+        except Exception as e:
+            logger.debug(f"RDE一括取得タブへのフィルタ伝播エラー: {e}")
     
     def update_data_fetch_filter_status(self):
         """データ取得タブのフィルタ状態表示を更新"""

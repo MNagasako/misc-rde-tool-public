@@ -113,6 +113,14 @@ class LightTheme:
         ThemeKey.MENU_GROUP6_ACTIVE_BACKGROUND: "#455a64",  # Blue Grey 700
         ThemeKey.MENU_GROUP6_ACTIVE_TEXT: "#ffffff",
         ThemeKey.MENU_GROUP6_ACTIVE_HOVER_BACKGROUND: "#37474f",  # Blue Grey 800
+
+        # Group7: データ取得2専用
+        ThemeKey.MENU_GROUP7_INACTIVE_BACKGROUND: "#ef6c00",  # Orange 800
+        ThemeKey.MENU_GROUP7_INACTIVE_TEXT: "#ffffff",
+        ThemeKey.MENU_GROUP7_HOVER_BACKGROUND: "#e65100",  # Orange 900
+        ThemeKey.MENU_GROUP7_ACTIVE_BACKGROUND: "#ff8f00",  # Amber 800
+        ThemeKey.MENU_GROUP7_ACTIVE_TEXT: "#ffffff",
+        ThemeKey.MENU_GROUP7_ACTIVE_HOVER_BACKGROUND: "#ffb300",  # Amber 700
         
         # ========================================
         # Button - ボタン全般

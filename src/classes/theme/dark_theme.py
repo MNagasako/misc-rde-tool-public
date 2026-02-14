@@ -113,6 +113,14 @@ class DarkTheme:
         ThemeKey.MENU_GROUP6_ACTIVE_BACKGROUND: "#455a64",  # Blue Grey 700
         ThemeKey.MENU_GROUP6_ACTIVE_TEXT: "#e0e0e0",
         ThemeKey.MENU_GROUP6_ACTIVE_HOVER_BACKGROUND: "#546e7a",  # Blue Grey 600
+
+        # Group7: データ取得2専用
+        ThemeKey.MENU_GROUP7_INACTIVE_BACKGROUND: "#bf360c",  # Deep Orange 900
+        ThemeKey.MENU_GROUP7_INACTIVE_TEXT: "#e0e0e0",
+        ThemeKey.MENU_GROUP7_HOVER_BACKGROUND: "#d84315",  # Deep Orange 700
+        ThemeKey.MENU_GROUP7_ACTIVE_BACKGROUND: "#ff8f00",  # Amber 800
+        ThemeKey.MENU_GROUP7_ACTIVE_TEXT: "#000000",
+        ThemeKey.MENU_GROUP7_ACTIVE_HOVER_BACKGROUND: "#ffb300",  # Amber 700
         
         # ========================================
         # Button - ボタン全般（明度を上げる）

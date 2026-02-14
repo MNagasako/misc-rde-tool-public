@@ -177,8 +177,9 @@ _MENU_GROUP_BY_MODE: dict[str, int] = {
     "dataset_open": 2,
     "data_register": 2,
     "sample_dedup": 2,
-    "data_fetch2": 2,
     "data_fetch": 2,  # optional/hidden by default
+    # Group 7 (Data Fetch2 dedicated)
+    "data_fetch2": 7,
     # Group 3 (RDE prep)
     "basic_info": 3,
     # Group 4 (Data portal)
@@ -253,6 +254,18 @@ def _group_keys(group: int, is_active: bool) -> tuple[ThemeKey, ThemeKey, ThemeK
             ThemeKey.MENU_GROUP5_INACTIVE_BACKGROUND,
             ThemeKey.MENU_GROUP5_INACTIVE_TEXT,
             ThemeKey.MENU_GROUP5_HOVER_BACKGROUND,
+        )
+    if group == 7:
+        if is_active:
+            return (
+                ThemeKey.MENU_ACTIVE_WARM_BACKGROUND,
+                ThemeKey.MENU_GROUP7_ACTIVE_TEXT,
+                ThemeKey.MENU_ACTIVE_WARM_HOVER_BACKGROUND,
+            )
+        return (
+            ThemeKey.MENU_GROUP2_INACTIVE_BACKGROUND,
+            ThemeKey.MENU_GROUP7_INACTIVE_TEXT,
+            ThemeKey.MENU_GROUP7_HOVER_BACKGROUND,
         )
     # group 6 (default)
     if is_active:
