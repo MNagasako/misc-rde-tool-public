@@ -6,6 +6,7 @@ import csv
 import json
 import logging
 import os
+import time
 from typing import Any
 
 from qt_compat.widgets import (
@@ -35,6 +36,7 @@ from classes.utils.button_styles import get_button_style
 from classes.utils.data_portal_public import search_public_arim_data, fetch_public_arim_data_details
 from classes.core.rde_search_index import ensure_rde_search_index, search_dataset_ids
 from classes.data_portal.util.public_output_paths import get_public_data_portal_root_dir
+from classes.data_fetch2.util.parallel_search import resolve_parallel_workers, suggest_parallel_workers, parallel_filter
 
 
 logger = logging.getLogger(__name__)
@@ -175,6 +177,7 @@ class _BulkDpSearchThread(QThread):
         environment: str,
         candidate_dataset_ids: set[str] | None,
         use_details: bool,
+        detail_workers: int,
         parent: QWidget | None = None,
     ):
         super().__init__(parent)
@@ -182,10 +185,33 @@ class _BulkDpSearchThread(QThread):
         self._environment = str(environment or "production")
         self._candidate_dataset_ids = set(candidate_dataset_ids) if isinstance(candidate_dataset_ids, set) else None
         self._use_details = bool(use_details)
+        self._detail_workers = max(1, int(detail_workers or 1))
+        self._cancel_requested = False
+
+    def request_cancel(self):
+        self._cancel_requested = True
+
+    def _is_cancelled(self) -> bool:
+        return bool(self._cancel_requested)
 
     def run(self):
         try:
-            links = search_public_arim_data(keyword=self._keyword, environment=self._environment)
+            started = time.perf_counter()
+            if self._is_cancelled():
+                self.finished_fetch.emit([], "__CANCELLED__")
+                return
+            try:
+                links = search_public_arim_data(
+                    keyword=self._keyword,
+                    environment=self._environment,
+                    page_max_workers=self._detail_workers,
+                )
+            except TypeError:
+                links = search_public_arim_data(keyword=self._keyword, environment=self._environment)
+            link_fetch_sec = max(0.0, time.perf_counter() - started)
+            if self._is_cancelled():
+                self.finished_fetch.emit([], "__CANCELLED__")
+                return
             if self._candidate_dataset_ids is not None:
                 filtered_links = [
                     link
@@ -204,20 +230,47 @@ class _BulkDpSearchThread(QThread):
                     break
 
             if self._use_details or not can_build_from_links:
+                details_started = time.perf_counter()
                 details = fetch_public_arim_data_details(
                     links,
                     environment=self._environment,
-                    max_workers=4,
+                    max_workers=self._detail_workers,
                     cache_enabled=True,
                 )
-                self.finished_fetch.emit(details, "")
+                detail_fetch_sec = max(0.0, time.perf_counter() - details_started)
+                if self._is_cancelled():
+                    self.finished_fetch.emit([], "__CANCELLED__")
+                    return
+                self.finished_fetch.emit(
+                    {
+                        "details": details,
+                        "_meta": {
+                            "link_fetch_sec": link_fetch_sec,
+                            "detail_fetch_sec": detail_fetch_sec,
+                            "workers": self._detail_workers,
+                        },
+                    },
+                    "",
+                )
             else:
-                self.finished_fetch.emit({"links": links}, "")
+                self.finished_fetch.emit(
+                    {
+                        "links": links,
+                        "_meta": {
+                            "link_fetch_sec": link_fetch_sec,
+                            "detail_fetch_sec": 0.0,
+                            "workers": self._detail_workers,
+                        },
+                    },
+                    "",
+                )
         except Exception as exc:
             self.finished_fetch.emit([], str(exc))
 
 
 class DataFetch2BulkDpTab(QWidget):
+    PAGE_SIZE_OPTIONS = [50, 100, 200, 500, 1000, 2000, 5000, 10000]
+
     COLUMNS = [
         "タイトル",
         "課題番号",
@@ -239,6 +292,7 @@ class DataFetch2BulkDpTab(QWidget):
         super().__init__(parent)
         self._all_records: list[dict] = []
         self._records: list[dict] = []
+        self._current_page = 1
         self._record_exact_indexes: dict[str, dict[str, set[int]]] = {}
         self._rde_index_payload: dict[str, Any] | None = None
         self._dataset_inference_map: dict[str, dict[str, str]] = {}
@@ -250,8 +304,57 @@ class DataFetch2BulkDpTab(QWidget):
         self._sample_name_by_id: dict[str, str] = {}
         self._search_thread: _BulkDpSearchThread | None = None
         self._compact_rows_mode = False
+        self._search_started_at: float | None = None
+        self._cancel_requested = False
         self._build_ui()
         self._bootstrap_filter_candidates()
+
+    def _elapsed_search_seconds(self) -> float:
+        if self._search_started_at is None:
+            return 0.0
+        return max(0.0, time.perf_counter() - self._search_started_at)
+
+    def _format_elapsed(self) -> str:
+        return f"{self._elapsed_search_seconds():.2f}秒"
+
+    def _default_search_workers(self) -> int:
+        return suggest_parallel_workers()
+
+    def _effective_search_workers(self) -> int:
+        value = self.search_workers_combo.currentData()
+        return resolve_parallel_workers(int(value or 0))
+
+    def _effective_page_size(self) -> int | None:
+        value = self.page_size_combo.currentData()
+        if value is None:
+            return None
+        try:
+            parsed = int(value)
+        except Exception:
+            return 500
+        if parsed <= 0:
+            return None
+        return parsed
+
+    def _total_pages(self) -> int:
+        if not self._records:
+            return 1
+        page_size = self._effective_page_size()
+        if page_size is None:
+            return 1
+        return max(1, (len(self._records) + page_size - 1) // page_size)
+
+    def _current_page_records(self) -> list[dict]:
+        if not self._records:
+            return []
+        page_size = self._effective_page_size()
+        if page_size is None:
+            return self._records
+        total_pages = self._total_pages()
+        self._current_page = max(1, min(self._current_page, total_pages))
+        start = (self._current_page - 1) * page_size
+        end = start + page_size
+        return self._records[start:end]
 
     def _create_filter_combo(self, placeholder: str, object_name: str) -> QComboBox:
         combo = QComboBox(self)
@@ -346,11 +449,23 @@ class DataFetch2BulkDpTab(QWidget):
         self.export_btn = QPushButton("エクスポート")
         self.export_btn.setMenu(export_menu)
         self.compact_rows_btn = QPushButton("1行表示")
+        self.cancel_btn = QPushButton("検索キャンセル")
+        self.cancel_btn.setEnabled(False)
+        self.search_workers_combo = QComboBox(self)
+        self.search_workers_combo.setObjectName("bulkDpSearchWorkersCombo")
+        self.search_workers_combo.addItem("検索並列数: 自動", 0)
+        for value in [1, 2, 4, 8, 12, 16]:
+            self.search_workers_combo.addItem(f"検索並列数: {value}", value)
+        default_workers = self._default_search_workers()
+        worker_index = self.search_workers_combo.findData(default_workers)
+        self.search_workers_combo.setCurrentIndex(worker_index if worker_index >= 0 else 0)
         op_row.addWidget(self.search_btn)
         op_row.addWidget(self.open_detail_btn)
         op_row.addWidget(self.open_content_btn)
         op_row.addWidget(self.export_btn)
         op_row.addWidget(self.compact_rows_btn)
+        op_row.addWidget(self.cancel_btn)
+        op_row.addWidget(self.search_workers_combo)
         op_row.addStretch()
         root.addLayout(op_row)
 
@@ -359,6 +474,7 @@ class DataFetch2BulkDpTab(QWidget):
         self.open_content_btn.setStyleSheet(get_button_style("info"))
         self.export_btn.setStyleSheet(get_button_style("success"))
         self.compact_rows_btn.setStyleSheet(get_button_style("info"))
+        self.cancel_btn.setStyleSheet(get_button_style("warning"))
 
         self.status = QLabel("待機中")
         root.addWidget(self.status)
@@ -367,6 +483,24 @@ class DataFetch2BulkDpTab(QWidget):
         self.search_spinner.setRange(0, 0)
         self.search_spinner.setVisible(False)
         root.addWidget(self.search_spinner)
+
+        paging_row = QHBoxLayout()
+        paging_row.addWidget(QLabel("表示件数:"))
+        self.page_size_combo = QComboBox(self)
+        self.page_size_combo.setObjectName("bulkDpPageSizeCombo")
+        for size in self.PAGE_SIZE_OPTIONS:
+            self.page_size_combo.addItem(str(size), size)
+        self.page_size_combo.addItem("全件", None)
+        self.page_size_combo.setCurrentText("500")
+        paging_row.addWidget(self.page_size_combo)
+        self.page_prev_btn = QPushButton("前へ")
+        self.page_next_btn = QPushButton("次へ")
+        self.page_info_label = QLabel("ページ 1/1")
+        paging_row.addWidget(self.page_prev_btn)
+        paging_row.addWidget(self.page_next_btn)
+        paging_row.addWidget(self.page_info_label)
+        paging_row.addStretch()
+        root.addLayout(paging_row)
 
         self.table = QTableWidget(0, len(self.COLUMNS), self)
         self.table.setHorizontalHeaderLabels(self.COLUMNS)
@@ -384,6 +518,31 @@ class DataFetch2BulkDpTab(QWidget):
         self.open_detail_btn.clicked.connect(lambda: self._open_selected_url("detail_url"))
         self.open_content_btn.clicked.connect(lambda: self._open_selected_url("content_url"))
         self.compact_rows_btn.clicked.connect(self._toggle_row_height_mode)
+        self.cancel_btn.clicked.connect(self._cancel_search)
+        self.page_size_combo.currentIndexChanged.connect(self._on_page_size_changed)
+        self.page_prev_btn.clicked.connect(lambda: self._move_page(-1))
+        self.page_next_btn.clicked.connect(lambda: self._move_page(1))
+        self._update_pagination_controls()
+
+    def _on_page_size_changed(self):
+        self._current_page = 1
+        self._render_page()
+
+    def _move_page(self, delta: int):
+        total_pages = self._total_pages()
+        self._current_page = max(1, min(self._current_page + int(delta), total_pages))
+        self._render_page()
+
+    def _update_pagination_controls(self):
+        total_pages = self._total_pages()
+        self._current_page = max(1, min(self._current_page, total_pages))
+        page_size = self._effective_page_size()
+        if page_size is None:
+            self.page_info_label.setText(f"ページ 1/1 ({len(self._records)}件)")
+        else:
+            self.page_info_label.setText(f"ページ {self._current_page}/{total_pages} ({len(self._records)}件)")
+        self.page_prev_btn.setEnabled(total_pages > 1 and self._current_page > 1)
+        self.page_next_btn.setEnabled(total_pages > 1 and self._current_page < total_pages)
 
     def _on_search_button_clicked(self):
         logger.debug("bulk_dp: search button clicked")
@@ -393,10 +552,25 @@ class DataFetch2BulkDpTab(QWidget):
         logger.debug("bulk_dp: set search busy=%s", busy)
         self.search_spinner.setVisible(busy)
         self.search_btn.setEnabled(not busy)
+        self.cancel_btn.setEnabled(busy)
         self.open_detail_btn.setEnabled(not busy)
         self.open_content_btn.setEnabled(not busy)
         self.export_btn.setEnabled(not busy)
         self.compact_rows_btn.setEnabled(not busy)
+        self.search_workers_combo.setEnabled(not busy)
+        self.page_size_combo.setEnabled(not busy)
+        if busy:
+            self.page_prev_btn.setEnabled(False)
+            self.page_next_btn.setEnabled(False)
+        else:
+            self._update_pagination_controls()
+
+    def _cancel_search(self):
+        if self._search_thread is None or not self._search_thread.isRunning():
+            return
+        self._cancel_requested = True
+        self._search_thread.request_cancel()
+        self.status.setText(f"キャンセル要求を送信中... ({self._format_elapsed()})")
 
     def _log_record_quality(self, records: list[dict]):
         if not records:
@@ -691,29 +865,58 @@ class DataFetch2BulkDpTab(QWidget):
             self.table.verticalHeader().setDefaultSectionSize(int(self.table.fontMetrics().height() * 1.8))
             self.compact_rows_btn.setText("1行表示")
 
-    def _matches(self, rec: dict) -> bool:
+    def _current_filter_criteria(self) -> dict[str, str]:
+        return {
+            "project_number": self._combo_match_value(self.f_project_number),
+            "subgroup": self._combo_match_value(self.f_subgroup),
+            "registrant": self._combo_match_value(self.f_registrant),
+            "organization": self.f_org.text().strip(),
+            "template": self._combo_match_value(self.f_template),
+            "sample_name": self.f_sample_name.text().strip(),
+            "sample_uuid": self.f_sample_uuid.text().strip(),
+            "equipment_name": self._combo_match_value(self.f_equip_name),
+            "equipment_local": self._combo_match_value(self.f_equip_local),
+            "tags": self.f_tags.text().strip(),
+            "related": self._combo_match_value(self.f_related),
+        }
+
+    @staticmethod
+    def _matches_criteria(rec: dict, criteria: dict[str, str]) -> bool:
         subgroup_text = _join_non_empty([
             _to_text(rec.get("subgroup", "")),
             _to_text(rec.get("subgroup_id", "")),
         ], sep=" | ")
         return (
-            _contains(rec.get("project_number", ""), self._combo_match_value(self.f_project_number))
-            and _contains(subgroup_text, self._combo_match_value(self.f_subgroup))
-            and _contains(rec.get("registrant", ""), self._combo_match_value(self.f_registrant))
-            and _contains(rec.get("organization", ""), self.f_org.text().strip())
-            and _contains(rec.get("template", ""), self._combo_match_value(self.f_template))
-            and _contains(rec.get("sample_name", ""), self.f_sample_name.text().strip())
-            and _contains(rec.get("sample_uuid", ""), self.f_sample_uuid.text().strip())
-            and _contains(rec.get("equipment_name", ""), self._combo_match_value(self.f_equip_name))
+            _contains(rec.get("project_number", ""), criteria.get("project_number", ""))
+            and _contains(subgroup_text, criteria.get("subgroup", ""))
+            and _contains(rec.get("registrant", ""), criteria.get("registrant", ""))
+            and _contains(rec.get("organization", ""), criteria.get("organization", ""))
+            and _contains(rec.get("template", ""), criteria.get("template", ""))
+            and _contains(rec.get("sample_name", ""), criteria.get("sample_name", ""))
+            and _contains(rec.get("sample_uuid", ""), criteria.get("sample_uuid", ""))
+            and _contains(rec.get("equipment_name", ""), criteria.get("equipment_name", ""))
             and _contains(
                 _join_non_empty([
                     rec.get("equipment_local_id", ""),
                     rec.get("equipment_name", ""),
                 ], sep=" | "),
-                self._combo_match_value(self.f_equip_local),
+                criteria.get("equipment_local", ""),
             )
-            and _contains(rec.get("tags", ""), self.f_tags.text().strip())
-            and _contains(rec.get("related_datasets", ""), self._combo_match_value(self.f_related))
+            and _contains(rec.get("tags", ""), criteria.get("tags", ""))
+            and _contains(rec.get("related_datasets", ""), criteria.get("related", ""))
+        )
+
+    def _matches(self, rec: dict) -> bool:
+        return self._matches_criteria(rec, self._current_filter_criteria())
+
+    def _parallel_filter_records(self, candidates: list[dict]) -> list[dict]:
+        criteria = self._current_filter_criteria()
+        workers = self._effective_search_workers()
+        return parallel_filter(
+            candidates,
+            lambda rec: self._matches_criteria(rec, criteria),
+            max_workers=workers,
+            cancel_checker=lambda: self._cancel_requested,
         )
 
     def _build_record_exact_indexes(self, records: list[dict]):
@@ -1184,7 +1387,10 @@ class DataFetch2BulkDpTab(QWidget):
         keyword = self.f_keyword.text().strip()
 
         logger.debug("bulk_dp: start async search env=%s keyword_len=%s", env, len(keyword))
-        self.status.setText("検索中...")
+        self._search_started_at = time.perf_counter()
+        self._cancel_requested = False
+        workers = self._effective_search_workers()
+        self.status.setText(f"検索中... (並列: {workers})")
         self._set_search_busy(True)
         candidate_dataset_ids = self._candidate_dataset_ids_from_rde_index()
         use_details = not bool(self._dataset_inference_map)
@@ -1194,7 +1400,7 @@ class DataFetch2BulkDpTab(QWidget):
             use_details,
         )
 
-        self._search_thread = _BulkDpSearchThread(keyword, env, candidate_dataset_ids, use_details, self)
+        self._search_thread = _BulkDpSearchThread(keyword, env, candidate_dataset_ids, use_details, workers, self)
         self._search_thread.finished_fetch.connect(self._on_search_fetch_finished)
         self._search_thread.finished.connect(self._on_search_thread_stopped)
         self._search_thread.start()
@@ -1207,12 +1413,29 @@ class DataFetch2BulkDpTab(QWidget):
 
     def _on_search_fetch_finished(self, details: Any, error_text: str):
         logger.debug("bulk_dp: search thread finished error=%s details_type=%s", bool(error_text), type(details).__name__)
+        elapsed = self._format_elapsed()
+        meta: dict[str, Any] = details.get("_meta", {}) if isinstance(details, dict) else {}
+        phase_suffix = ""
+        if isinstance(meta, dict):
+            link_fetch_sec = float(meta.get("link_fetch_sec") or 0.0)
+            detail_fetch_sec = float(meta.get("detail_fetch_sec") or 0.0)
+            workers = int(meta.get("workers") or 0)
+            if link_fetch_sec > 0.0 or detail_fetch_sec > 0.0:
+                phase_suffix = (
+                    f" / page取得:{link_fetch_sec:.2f}秒"
+                    f" / detail取得:{detail_fetch_sec:.2f}秒"
+                    f" / 並列:{workers}"
+                )
+        if error_text == "__CANCELLED__" or self._cancel_requested:
+            self.status.setText(f"検索をキャンセルしました。({elapsed}{phase_suffix})")
+            self._set_search_busy(False)
+            return
         if error_text:
             self._all_records = []
             self._records = []
             self._record_exact_indexes = {}
             self._populate([])
-            self.status.setText(f"検索失敗: {error_text}")
+            self.status.setText(f"検索失敗: {error_text} ({elapsed}{phase_suffix})")
             self._set_search_busy(False)
             return
 
@@ -1224,20 +1447,24 @@ class DataFetch2BulkDpTab(QWidget):
             self._update_filter_options(self._all_records)
 
             candidates = self._candidate_records_from_indexes()
-            self._records = [r for r in candidates if self._matches(r)]
+            self._records = self._parallel_filter_records(candidates)
+            self._current_page = 1
             self._populate(self._records)
             self._log_record_quality(self._records)
-            self.status.setText(f"検索結果: {len(self._records)}件")
+            self.status.setText(f"検索結果: {len(self._records)}件 ({elapsed}{phase_suffix})")
             self._set_search_busy(False)
             return
 
-        details_list = details if isinstance(details, list) else []
+        if isinstance(details, dict) and isinstance(details.get("details"), list):
+            details_list = details.get("details") or []
+        else:
+            details_list = details if isinstance(details, list) else []
         if not details_list:
             self._all_records = []
             self._records = []
             self._record_exact_indexes = {}
             self._populate([])
-            self.status.setText("検索結果: 0件")
+            self.status.setText(f"検索結果: 0件 ({elapsed}{phase_suffix})")
             self._set_search_busy(False)
             return
         records: list[dict] = []
@@ -1269,13 +1496,19 @@ class DataFetch2BulkDpTab(QWidget):
         self._update_filter_options(self._all_records)
 
         candidates = self._candidate_records_from_indexes()
-        self._records = [r for r in candidates if self._matches(r)]
+        self._records = self._parallel_filter_records(candidates)
+        self._current_page = 1
         self._populate(self._records)
         self._log_record_quality(self._records)
-        self.status.setText(f"検索結果: {len(self._records)}件")
+        self.status.setText(f"検索結果: {len(self._records)}件 ({elapsed}{phase_suffix})")
         self._set_search_busy(False)
 
     def _populate(self, records: list[dict]):
+        self._records = list(records)
+        self._render_page()
+
+    def _render_page(self):
+        records = self._current_page_records()
         self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
         for rec in records:
@@ -1303,6 +1536,7 @@ class DataFetch2BulkDpTab(QWidget):
                 it.setFlags(it.flags() ^ Qt.ItemIsEditable)
                 self.table.setItem(r, c, it)
         self.table.setSortingEnabled(True)
+        self._update_pagination_controls()
 
     def _selected_record(self) -> dict | None:
         row = self.table.currentRow()

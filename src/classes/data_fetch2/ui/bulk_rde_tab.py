@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import csv
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import glob
 import json
 import os
 import shutil
+import time
+from threading import Lock
 import zipfile
 from typing import Any
 
@@ -42,6 +45,7 @@ from classes.utils.facility_link_helper import (
     load_instrument_local_id_map_from_instruments_json,
 )
 from classes.core.rde_search_index import ensure_rde_search_index, search_dataset_ids
+from classes.data_fetch2.util.parallel_search import resolve_parallel_workers, suggest_parallel_workers, parallel_filter
 
 
 def _to_text(value: Any) -> str:
@@ -336,6 +340,8 @@ class BulkSaveOptionDialog(QDialog):
 
 
 class DataFetch2BulkRdeTab(QWidget):
+    PAGE_SIZE_OPTIONS = [50, 100, 200, 500, 1000, 2000, 5000, 10000]
+
     COLUMNS = [
         "取得",
         "サブグループ",
@@ -360,6 +366,8 @@ class DataFetch2BulkRdeTab(QWidget):
         self._source_dataset_count = 0
         self._last_source_signature: tuple[str, str, str, str] | None = None
         self._record_exact_indexes: dict[str, dict[str, set[int]]] = {}
+        self._entry_items_cache: dict[str, tuple[float, list[dict]]] = {}
+        self._entry_cache_lock = Lock()
         self._subgroup_info_cache: dict[str, dict[str, str]] | None = None
         self._sample_info_cache: dict[str, dict[str, str]] | None = None
         self._instrument_info_cache: dict[str, dict[str, str]] | None = None
@@ -367,11 +375,92 @@ class DataFetch2BulkRdeTab(QWidget):
         self._records_dirty = True
         self._compact_rows_mode = False
         self._suppress_filter_dirty = False
+        self._selection_state: dict[str, bool] = {}
+        self._current_page = 1
+        self._search_started_at: float | None = None
+        self._cancel_search_requested = False
+        self._build_cancelled = False
         self._auto_rebuild_timer = QTimer(self)
         self._auto_rebuild_timer.setSingleShot(True)
         self._auto_rebuild_timer.setInterval(250)
         self._auto_rebuild_timer.timeout.connect(self._auto_rebuild_if_needed)
         self._build_ui()
+
+    def _elapsed_search_seconds(self) -> float:
+        if self._search_started_at is None:
+            return 0.0
+        return max(0.0, time.perf_counter() - self._search_started_at)
+
+    def _format_elapsed(self) -> str:
+        return f"{self._elapsed_search_seconds():.2f}秒"
+
+    def _default_search_workers(self) -> int:
+        return suggest_parallel_workers()
+
+    def _effective_search_workers(self) -> int:
+        value = self.search_workers_combo.currentData()
+        return resolve_parallel_workers(int(value or 0))
+
+    def _effective_page_size(self) -> int | None:
+        value = self.page_size_combo.currentData()
+        if value is None:
+            return None
+        try:
+            parsed = int(value)
+        except Exception:
+            return 500
+        if parsed <= 0:
+            return None
+        return parsed
+
+    def _total_pages(self) -> int:
+        if not self._records:
+            return 1
+        page_size = self._effective_page_size()
+        if page_size is None:
+            return 1
+        return max(1, (len(self._records) + page_size - 1) // page_size)
+
+    def _record_key(self, rec: dict) -> str:
+        return "|".join(
+            [
+                _to_text(rec.get("dataset_id")),
+                _to_text(rec.get("tile_id")),
+                _to_text(rec.get("tile_number")),
+            ]
+        )
+
+    def _current_page_records(self) -> list[dict]:
+        if not self._records:
+            return []
+        page_size = self._effective_page_size()
+        if page_size is None:
+            return self._records
+        total_pages = self._total_pages()
+        self._current_page = max(1, min(self._current_page, total_pages))
+        start = (self._current_page - 1) * page_size
+        end = start + page_size
+        return self._records[start:end]
+
+    def _update_pagination_controls(self):
+        total_pages = self._total_pages()
+        self._current_page = max(1, min(self._current_page, total_pages))
+        page_size = self._effective_page_size()
+        if page_size is None:
+            self.page_info_label.setText(f"ページ 1/1 ({len(self._records)}件)")
+        else:
+            self.page_info_label.setText(f"ページ {self._current_page}/{total_pages} ({len(self._records)}件)")
+        self.page_prev_btn.setEnabled(total_pages > 1 and self._current_page > 1)
+        self.page_next_btn.setEnabled(total_pages > 1 and self._current_page < total_pages)
+
+    def _move_page(self, delta: int):
+        total_pages = self._total_pages()
+        self._current_page = max(1, min(self._current_page + int(delta), total_pages))
+        self._populate_table(self._records)
+
+    def _on_page_size_changed(self):
+        self._current_page = 1
+        self._populate_table(self._records)
 
     def set_filter_config(self, filter_config: dict):
         self.current_filter_config = dict(filter_config or get_default_filter())
@@ -457,6 +546,17 @@ class DataFetch2BulkRdeTab(QWidget):
         self.sel_invert_btn = QPushButton("選択反転")
         self.sel_exclude_btn = QPushButton("選択除外")
         self.exec_btn = QPushButton("選択タイルを一括取得")
+        self.cancel_btn = QPushButton("検索キャンセル")
+        self.cancel_btn.setEnabled(False)
+        self.search_workers_combo = QComboBox(self)
+        self.search_workers_combo.setObjectName("bulkRdeSearchWorkersCombo")
+        self.search_workers_combo.addItem("検索並列数: 自動", 0)
+        for value in [1, 2, 4, 8, 12, 16]:
+            self.search_workers_combo.addItem(f"検索並列数: {value}", value)
+
+        default_workers = self._default_search_workers()
+        worker_index = self.search_workers_combo.findData(default_workers)
+        self.search_workers_combo.setCurrentIndex(worker_index if worker_index >= 0 else 0)
 
         for b in [
             self.search_btn,
@@ -467,6 +567,8 @@ class DataFetch2BulkRdeTab(QWidget):
             self.sel_invert_btn,
             self.sel_exclude_btn,
             self.exec_btn,
+            self.cancel_btn,
+            self.search_workers_combo,
         ]:
             op_row.addWidget(b)
         op_row.addStretch()
@@ -483,6 +585,24 @@ class DataFetch2BulkRdeTab(QWidget):
         self.rebuild_progress.setVisible(False)
         root.addWidget(self.rebuild_progress)
 
+        paging_row = QHBoxLayout()
+        paging_row.addWidget(QLabel("表示件数:"))
+        self.page_size_combo = QComboBox(self)
+        self.page_size_combo.setObjectName("bulkRdePageSizeCombo")
+        for size in self.PAGE_SIZE_OPTIONS:
+            self.page_size_combo.addItem(str(size), size)
+        self.page_size_combo.addItem("全件", None)
+        self.page_size_combo.setCurrentText("500")
+        paging_row.addWidget(self.page_size_combo)
+        self.page_prev_btn = QPushButton("前へ")
+        self.page_next_btn = QPushButton("次へ")
+        self.page_info_label = QLabel("ページ 1/1")
+        paging_row.addWidget(self.page_prev_btn)
+        paging_row.addWidget(self.page_next_btn)
+        paging_row.addWidget(self.page_info_label)
+        paging_row.addStretch()
+        root.addLayout(paging_row)
+
         self.table = QTableWidget(0, len(self.COLUMNS), self)
         self.table.setHorizontalHeaderLabels(self.COLUMNS)
         self.table.setSortingEnabled(True)
@@ -494,18 +614,23 @@ class DataFetch2BulkRdeTab(QWidget):
         self.table.verticalHeader().setDefaultSectionSize(int(self.table.fontMetrics().height() * 1.8))
         root.addWidget(self.table, 1)
 
-        self.search_btn.clicked.connect(lambda: self.rebuild_tiles(force_source_refresh=True))
+        self.search_btn.clicked.connect(self.rebuild_tiles)
         self.compact_rows_btn.clicked.connect(self._toggle_row_height_mode)
         self.sel_all_btn.clicked.connect(lambda: self._set_checked_all(True, ensure_current=True))
         self.sel_clear_btn.clicked.connect(lambda: self._set_checked_all(False, ensure_current=True))
         self.sel_invert_btn.clicked.connect(lambda: self._invert_checks(ensure_current=True))
         self.sel_exclude_btn.clicked.connect(lambda: self._exclude_checked(ensure_current=True))
         self.exec_btn.clicked.connect(self.execute_bulk_download)
+        self.cancel_btn.clicked.connect(self._request_cancel_rebuild)
         self.table.itemChanged.connect(self._on_item_changed)
+        self.page_size_combo.currentIndexChanged.connect(self._on_page_size_changed)
+        self.page_prev_btn.clicked.connect(lambda: self._move_page(-1))
+        self.page_next_btn.clicked.connect(lambda: self._move_page(1))
 
         self._connect_filter_change_signals()
 
         self._update_filter_options([])
+        self._update_pagination_controls()
 
     def _apply_button_group_styles(self):
         self.search_btn.setStyleSheet(get_button_style("primary"))
@@ -518,6 +643,7 @@ class DataFetch2BulkRdeTab(QWidget):
         self.sel_exclude_btn.setStyleSheet(get_button_style("danger"))
 
         self.exec_btn.setStyleSheet(get_button_style("api"))
+        self.cancel_btn.setStyleSheet(get_button_style("warning"))
 
     def _connect_filter_change_signals(self):
         editors: list[Any] = [
@@ -598,6 +724,18 @@ class DataFetch2BulkRdeTab(QWidget):
             QApplication.processEvents()
         except Exception:
             pass
+
+    def _set_search_busy(self, busy: bool):
+        self.search_btn.setEnabled(not busy)
+        self.cancel_btn.setEnabled(busy)
+        self.search_workers_combo.setEnabled(not busy)
+        self.page_size_combo.setEnabled(not busy)
+        self.auto_rebuild_check.setEnabled(not busy)
+
+    def _request_cancel_rebuild(self):
+        if not self.search_btn.isEnabled():
+            self._cancel_search_requested = True
+            self.status.setText(f"キャンセル要求を送信中... ({self._format_elapsed()})")
 
     def _ensure_records_ready(self) -> bool:
         if self._records and not self._records_dirty:
@@ -812,41 +950,76 @@ class DataFetch2BulkRdeTab(QWidget):
         if not os.path.exists(path):
             return []
         try:
+            mtime = float(os.path.getmtime(path))
+        except Exception:
+            mtime = -1.0
+
+        with self._entry_cache_lock:
+            cached = self._entry_items_cache.get(dataset_id)
+            if cached is not None:
+                cached_mtime, cached_items = cached
+                if cached_mtime == mtime:
+                    return list(cached_items)
+
+        try:
             with open(path, "r", encoding="utf-8") as f:
                 payload = json.load(f)
             items = payload.get("data") if isinstance(payload, dict) else []
-            return list(items or [])
+            parsed_items = list(items or [])
+            with self._entry_cache_lock:
+                self._entry_items_cache[dataset_id] = (mtime, parsed_items)
+            return list(parsed_items)
         except Exception:
             return []
 
+    def _current_filter_criteria(self) -> dict[str, str]:
+        return {
+            "subgroup": self._combo_match_value(self.f_subgroup),
+            "grant": self._combo_match_value(self.f_grant),
+            "sample_name": self.f_sample_name.text().strip(),
+            "sample_uuid": self.f_sample_uuid.text().strip(),
+            "template": self._combo_match_value(self.f_template),
+            "equip_name": self._combo_match_value(self.f_equip_name),
+            "equip_local": self._combo_match_value(self.f_equip_local),
+            "tags": self.f_tags.text().strip(),
+            "related": self._combo_match_value(self.f_related),
+        }
+
     def _matches_record(self, rec: dict) -> bool:
-        subgroup_value = self._combo_match_value(self.f_subgroup)
-        grant_value = self._combo_match_value(self.f_grant)
-        template_value = self._combo_match_value(self.f_template)
-        equip_name_value = self._combo_match_value(self.f_equip_name)
-        equip_local_value = self._combo_match_value(self.f_equip_local)
-        related_value = self._combo_match_value(self.f_related)
+        return self._matches_record_with_criteria(rec, self._current_filter_criteria())
+
+    def _matches_record_with_criteria(self, rec: dict, criteria: dict[str, str]) -> bool:
         subgroup_record_text = _join_non_empty([
             _to_text(rec.get("subgroup")),
             _to_text(rec.get("subgroup_display")),
             self._resolve_subgroup_display(rec.get("subgroup", "")),
         ])
         return (
-            _contains(subgroup_record_text, subgroup_value)
-            and _contains(_to_text(rec.get("grant_number")), grant_value)
-            and _contains(_to_text(rec.get("sample_name")), self.f_sample_name.text().strip())
-            and _contains(_to_text(rec.get("sample_uuid")), self.f_sample_uuid.text().strip())
-            and _contains(_to_text(rec.get("template")), template_value)
-            and _contains(_to_text(rec.get("equipment_name")), equip_name_value)
+            _contains(subgroup_record_text, criteria.get("subgroup", ""))
+            and _contains(_to_text(rec.get("grant_number")), criteria.get("grant", ""))
+            and _contains(_to_text(rec.get("sample_name")), criteria.get("sample_name", ""))
+            and _contains(_to_text(rec.get("sample_uuid")), criteria.get("sample_uuid", ""))
+            and _contains(_to_text(rec.get("template")), criteria.get("template", ""))
+            and _contains(_to_text(rec.get("equipment_name")), criteria.get("equip_name", ""))
             and _contains(
                 _join_non_empty([
                     _to_text(rec.get("equipment_local_id")),
                     _to_text(rec.get("equipment_name")),
                 ]),
-                equip_local_value,
+                criteria.get("equip_local", ""),
             )
-            and _contains(_to_text(rec.get("tags")), self.f_tags.text().strip())
-            and _contains(_to_text(rec.get("related_datasets")), related_value)
+            and _contains(_to_text(rec.get("tags")), criteria.get("tags", ""))
+            and _contains(_to_text(rec.get("related_datasets")), criteria.get("related", ""))
+        )
+
+    def _parallel_filter_records(self, candidates: list[dict]) -> list[dict]:
+        criteria = self._current_filter_criteria()
+        workers = self._effective_search_workers()
+        return parallel_filter(
+            candidates,
+            lambda rec: self._matches_record_with_criteria(rec, criteria),
+            max_workers=workers,
+            cancel_checker=lambda: self._cancel_search_requested,
         )
 
     def _combo_match_value(self, combo: QComboBox) -> str:
@@ -934,6 +1107,7 @@ class DataFetch2BulkRdeTab(QWidget):
         return [self._all_records[idx] for idx in sorted(candidate_rows)]
 
     def _build_all_records_from_sources(self) -> list[dict]:
+        self._build_cancelled = False
         self._set_rebuild_progress(0, 100, "対象タイル一覧を作成中...")
         datasets = self._load_dataset_items()
         self._dataset_items_cache = list(datasets)
@@ -1006,50 +1180,89 @@ class DataFetch2BulkRdeTab(QWidget):
                 if isinstance(ds, dict) and self._matches_dataset_prefilter(ds, grant_to_subgroup_map)
             ]
         self._source_dataset_count = len(prefiltered_datasets)
-        total = len(prefiltered_datasets) if prefiltered_datasets else 1
-        for idx, ds in enumerate(prefiltered_datasets, start=1):
-            if not isinstance(ds, dict):
-                self._set_rebuild_progress(idx, total, f"対象タイル一覧を作成中... {idx}/{total}")
-                continue
-            dsid = str(ds.get("id") or "")
+        total = len(prefiltered_datasets)
+        if total <= 0:
+            self._set_rebuild_progress(1, 1, "対象タイル一覧を作成中... 0/0")
+            return records
+
+        workers = self._effective_search_workers()
+
+        def _build_for_dataset(dataset_obj: dict) -> list[dict]:
+            if self._cancel_search_requested:
+                return []
+            if not isinstance(dataset_obj, dict):
+                return []
+            dsid = str(dataset_obj.get("id") or "")
             if not dsid:
-                self._set_rebuild_progress(idx, total, f"対象タイル一覧を作成中... {idx}/{total}")
-                continue
+                return []
             entries = self._read_entry_items(dsid)
             if not entries:
-                self._set_rebuild_progress(idx, total, f"対象タイル一覧を作成中... {idx}/{total}")
-                continue
-            records.extend(
-                _build_tile_records(
-                    ds,
-                    entries,
-                    grant_to_subgroup_map,
-                    sample_info_map,
-                    instrument_info_map,
-                )
+                return []
+            return _build_tile_records(
+                dataset_obj,
+                entries,
+                grant_to_subgroup_map,
+                sample_info_map,
+                instrument_info_map,
             )
-            self._set_rebuild_progress(idx, total, f"対象タイル一覧を作成中... {idx}/{total}")
+
+        if workers <= 1 or total < 2:
+            for idx, ds in enumerate(prefiltered_datasets, start=1):
+                if self._cancel_search_requested:
+                    self._build_cancelled = True
+                    break
+                records.extend(_build_for_dataset(ds))
+                self._set_rebuild_progress(idx, total, f"対象タイル一覧を作成中... {idx}/{total} (並列:{workers})")
+            return records
+
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [executor.submit(_build_for_dataset, ds) for ds in prefiltered_datasets]
+            done = 0
+            for future in as_completed(futures):
+                done += 1
+                if self._cancel_search_requested:
+                    self._build_cancelled = True
+                    for pending in futures:
+                        pending.cancel()
+                    break
+                try:
+                    records.extend(future.result())
+                except Exception:
+                    pass
+                self._set_rebuild_progress(done, total, f"対象タイル一覧を作成中... {done}/{total} (並列:{workers})")
 
         return records
 
     def _apply_filters_to_cached_records(self, auto_trigger: bool = False):
         if not self._all_records:
             self._records = []
+            self._selection_state = {}
+            self._current_page = 1
             self._populate_table(self._records)
             self._records_dirty = False
             self.status.setText("検索結果: 0 タイル")
             return
 
         candidates = self._candidate_records_from_exact_indexes()
-        filtered_records = [rec for rec in candidates if self._matches_record(rec)]
+        filtered_records = self._parallel_filter_records(candidates)
         self._records = filtered_records
+        self._current_page = 1
+        current_keys = {self._record_key(rec) for rec in self._records}
+        self._selection_state = {k: v for k, v in self._selection_state.items() if k in current_keys}
+        for rec in self._records:
+            key = self._record_key(rec)
+            self._selection_state.setdefault(key, True)
         self._populate_table(self._records)
         self._records_dirty = False
 
         matched_dataset_count = len({str(rec.get("dataset_id") or "") for rec in self._records if str(rec.get("dataset_id") or "").strip()})
+        if self._cancel_search_requested:
+            self.status.setText(f"検索をキャンセルしました。({self._format_elapsed()})")
+            self.rebuild_progress.setVisible(False)
+            return
         prefix = "自動更新" if auto_trigger else "検索結果"
         self.status.setText(
-            f"{prefix}: {len(self._records)} タイル / 対象データセット {matched_dataset_count} / 全データセット {self._source_dataset_count}"
+            f"{prefix}: {len(self._records)} タイル / 対象データセット {matched_dataset_count} / 全データセット {self._source_dataset_count} ({self._format_elapsed()})"
         )
         self.rebuild_progress.setVisible(False)
 
@@ -1062,11 +1275,22 @@ class DataFetch2BulkRdeTab(QWidget):
             self.status.setText("有効な絞込みフィルタを設定してください。")
             return
 
+        self._search_started_at = time.perf_counter()
+        self._cancel_search_requested = False
+        workers = self._effective_search_workers()
+        self.status.setText(f"検索中... (並列: {workers})")
+        self._set_search_busy(True)
+
         signature = self._dataset_prefilter_signature()
         need_source_refresh = force_source_refresh or not self._all_records or (self._last_source_signature != signature)
 
         if need_source_refresh:
             records = self._build_all_records_from_sources()
+            if self._cancel_search_requested or self._build_cancelled:
+                self._set_search_busy(False)
+                self.rebuild_progress.setVisible(False)
+                self.status.setText(f"検索をキャンセルしました。({self._format_elapsed()})")
+                return
             self._suppress_filter_dirty = True
             try:
                 self._update_filter_options(records)
@@ -1079,6 +1303,15 @@ class DataFetch2BulkRdeTab(QWidget):
             self.rebuild_progress.setVisible(False)
 
         self._apply_filters_to_cached_records(auto_trigger=auto_trigger)
+        if self._cancel_search_requested:
+            self.status.setText(f"検索をキャンセルしました。({self._format_elapsed()})")
+        else:
+            prefix = "自動更新" if auto_trigger else "検索結果"
+            matched_dataset_count = len({str(rec.get("dataset_id") or "") for rec in self._records if str(rec.get("dataset_id") or "").strip()})
+            self.status.setText(
+                f"{prefix}: {len(self._records)} タイル / 対象データセット {matched_dataset_count} / 全データセット {self._source_dataset_count} ({self._format_elapsed()})"
+            )
+        self._set_search_busy(False)
 
     def _create_filter_combo(self, placeholder: str, object_name: str) -> QComboBox:
         combo = QComboBox(self)
@@ -1532,16 +1765,19 @@ class DataFetch2BulkRdeTab(QWidget):
         self._set_combo_items(self.f_equip_local, equip_local_items, current_equip_local)
 
     def _populate_table(self, records: list[dict]):
+        self._records = list(records)
+        paged_records = self._current_page_records()
         self.table.blockSignals(True)
         self.table.setSortingEnabled(False)
         self.table.setRowCount(0)
-        for rec in records:
+        for rec in paged_records:
             r = self.table.rowCount()
             self.table.insertRow(r)
 
             checked_item = QTableWidgetItem()
             checked_item.setFlags(checked_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
-            checked_item.setCheckState(Qt.Checked)
+            checked = bool(self._selection_state.get(self._record_key(rec), True))
+            checked_item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
             checked_item.setText("✓")
             checked_item.setTextAlignment(Qt.AlignCenter)
             checked_item.setData(Qt.UserRole, rec)
@@ -1569,6 +1805,7 @@ class DataFetch2BulkRdeTab(QWidget):
 
         self.table.setSortingEnabled(True)
         self.table.blockSignals(False)
+        self._update_pagination_controls()
 
     def _resolve_subgroup_display(self, subgroup_id: str) -> str:
         subgroup_id = str(subgroup_id or "").strip()
@@ -1582,6 +1819,9 @@ class DataFetch2BulkRdeTab(QWidget):
             return
         if item.column() != 0:
             return
+        rec = item.data(Qt.UserRole)
+        if isinstance(rec, dict):
+            self._selection_state[self._record_key(rec)] = item.checkState() == Qt.Checked
         self._apply_row_visual_state(item.row())
 
     def _apply_row_visual_state(self, row: int):
@@ -1602,33 +1842,26 @@ class DataFetch2BulkRdeTab(QWidget):
     def _set_checked_all(self, checked: bool, ensure_current: bool = False):
         if ensure_current:
             self._ensure_records_ready()
-        state = Qt.Checked if checked else Qt.Unchecked
-        for r in range(self.table.rowCount()):
-            it = self.table.item(r, 0)
-            if it is not None:
-                it.setCheckState(state)
+        for rec in self._records:
+            self._selection_state[self._record_key(rec)] = bool(checked)
+        self._populate_table(self._records)
 
     def _invert_checks(self, ensure_current: bool = False):
         if ensure_current:
             self._ensure_records_ready()
-        for r in range(self.table.rowCount()):
-            it = self.table.item(r, 0)
-            if it is None:
-                continue
-            it.setCheckState(Qt.Unchecked if it.checkState() == Qt.Checked else Qt.Checked)
+        for rec in self._records:
+            key = self._record_key(rec)
+            current = bool(self._selection_state.get(key, True))
+            self._selection_state[key] = not current
+        self._populate_table(self._records)
 
     def _exclude_checked(self, ensure_current: bool = False):
         if ensure_current:
             self._ensure_records_ready()
-        kept: list[dict] = []
-        for r in range(self.table.rowCount()):
-            it = self.table.item(r, 0)
-            rec = it.data(Qt.UserRole) if it else None
-            if rec is None:
-                continue
-            if it.checkState() != Qt.Checked:
-                kept.append(rec)
+        kept = [rec for rec in self._records if not self._selection_state.get(self._record_key(rec), True)]
         self._records = kept
+        self._selection_state = {self._record_key(rec): self._selection_state.get(self._record_key(rec), True) for rec in kept}
+        self._current_page = 1
         self._populate_table(self._records)
         self._records_dirty = False
         self.status.setText(f"選択除外後: {len(self._records)} タイル")
@@ -1702,15 +1935,7 @@ class DataFetch2BulkRdeTab(QWidget):
             self.table.setRowHeight(r, row_h)
 
     def _selected_records(self) -> list[dict]:
-        selected: list[dict] = []
-        for r in range(self.table.rowCount()):
-            it = self.table.item(r, 0)
-            if it is None or it.checkState() != Qt.Checked:
-                continue
-            rec = it.data(Qt.UserRole)
-            if isinstance(rec, dict):
-                selected.append(rec)
-        return selected
+        return [rec for rec in self._records if self._selection_state.get(self._record_key(rec), True)]
 
     def _ask_filter_usage(self) -> dict | None:
         ans = QMessageBox.question(
