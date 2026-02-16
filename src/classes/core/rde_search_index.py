@@ -9,6 +9,13 @@ from config.common import get_dynamic_file_path, ensure_directory_exists
 
 
 INDEX_VERSION = 1
+QUERY_CACHE_MAX_ENTRIES = 3000
+
+_INDEX_MEMORY_CACHE: dict[str, Any] | None = None
+_INDEX_MEMORY_PATH: str = ""
+_INDEX_MEMORY_MTIME: float = -1.0
+_QUERY_CACHE_LOADED = False
+_QUERY_CACHE_PAYLOAD: dict[str, Any] = {"signature": "", "entries": {}}
 
 
 def _now_iso() -> str:
@@ -59,6 +66,123 @@ def _get_sources() -> dict[str, str]:
 
 def get_index_path() -> str:
     return get_dynamic_file_path("output/rde/data/search_index/rde_search_index.json")
+
+
+def get_query_cache_path() -> str:
+    return get_dynamic_file_path("output/rde/data/search_index/rde_search_query_cache.json")
+
+
+def _source_signature_from_meta(meta: dict[str, Any]) -> str:
+    source_mtimes = meta.get("source_mtimes") if isinstance(meta.get("source_mtimes"), dict) else {}
+    return json.dumps(
+        {
+            "version": int(meta.get("version") or 0),
+            "dataset_count": int(meta.get("dataset_count") or 0),
+            "source_mtimes": {k: float(v or 0.0) for k, v in sorted(source_mtimes.items())},
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _index_signature(index_payload: dict[str, Any]) -> str:
+    meta = index_payload.get("meta") if isinstance(index_payload.get("meta"), dict) else {}
+    return _source_signature_from_meta(meta)
+
+
+def _criteria_cache_key(criteria: dict[str, str]) -> str:
+    normalized: list[tuple[str, str]] = []
+    for field, value in sorted(criteria.items(), key=lambda x: str(x[0])):
+        key = _safe_str(field)
+        token = _safe_str(value)
+        if not key or not token:
+            continue
+        normalized.append((key, token.casefold()))
+    if not normalized:
+        return ""
+    return json.dumps(normalized, ensure_ascii=False, separators=(",", ":"))
+
+
+def _load_query_cache_payload() -> dict[str, Any]:
+    global _QUERY_CACHE_LOADED, _QUERY_CACHE_PAYLOAD
+    if _QUERY_CACHE_LOADED:
+        return _QUERY_CACHE_PAYLOAD
+
+    payload = _load_json(get_query_cache_path())
+    if isinstance(payload, dict):
+        signature = _safe_str(payload.get("signature"))
+        entries = payload.get("entries") if isinstance(payload.get("entries"), dict) else {}
+        normalized_entries: dict[str, list[str]] = {}
+        for key, ids in entries.items():
+            if not isinstance(ids, list):
+                continue
+            normalized_ids = sorted(set([_safe_str(x) for x in ids if _safe_str(x)]))
+            normalized_entries[_safe_str(key)] = normalized_ids
+        _QUERY_CACHE_PAYLOAD = {"signature": signature, "entries": normalized_entries}
+    else:
+        _QUERY_CACHE_PAYLOAD = {"signature": "", "entries": {}}
+
+    _QUERY_CACHE_LOADED = True
+    return _QUERY_CACHE_PAYLOAD
+
+
+def _save_query_cache_payload(payload: dict[str, Any]) -> None:
+    global _QUERY_CACHE_LOADED, _QUERY_CACHE_PAYLOAD
+    path = get_query_cache_path()
+    ensure_directory_exists(os.path.dirname(path))
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    _QUERY_CACHE_PAYLOAD = payload
+    _QUERY_CACHE_LOADED = True
+
+
+def _clear_query_cache_for_index(index_payload: dict[str, Any]) -> None:
+    signature = _index_signature(index_payload)
+    _save_query_cache_payload({"signature": signature, "entries": {}})
+
+
+def _query_cache_lookup(index_payload: dict[str, Any], criteria: dict[str, str]) -> set[str] | None:
+    cache_key = _criteria_cache_key(criteria)
+    if not cache_key:
+        return None
+
+    payload = _load_query_cache_payload()
+    if _safe_str(payload.get("signature")) != _index_signature(index_payload):
+        return None
+
+    raw_entries = payload.get("entries")
+    entries: dict[str, list[str]] = raw_entries if isinstance(raw_entries, dict) else {}
+    ids = entries.get(cache_key)
+    if isinstance(ids, list):
+        return set([_safe_str(x) for x in ids if _safe_str(x)])
+    return None
+
+
+def _query_cache_store(index_payload: dict[str, Any], criteria: dict[str, str], result: set[str]) -> None:
+    cache_key = _criteria_cache_key(criteria)
+    if not cache_key:
+        return
+
+    payload = _load_query_cache_payload()
+    signature = _index_signature(index_payload)
+    if _safe_str(payload.get("signature")) != signature:
+        payload = {"signature": signature, "entries": {}}
+
+    raw_entries = payload.get("entries")
+    entries: dict[str, list[str]] = raw_entries if isinstance(raw_entries, dict) else {}
+    result_ids = sorted(set([_safe_str(x) for x in result if _safe_str(x)]))
+    if entries.get(cache_key) == result_ids:
+        return
+
+    entries[cache_key] = result_ids
+    while len(entries) > QUERY_CACHE_MAX_ENTRIES:
+        oldest_key = next(iter(entries.keys()), None)
+        if not oldest_key:
+            break
+        entries.pop(oldest_key, None)
+
+    payload = {"signature": signature, "entries": entries}
+    _save_query_cache_payload(payload)
 
 
 def _source_mtimes(sources: dict[str, str]) -> dict[str, float]:
@@ -259,12 +383,39 @@ def rebuild_rde_search_index() -> dict[str, Any]:
     with open(index_path, "w", encoding="utf-8") as f:
         json.dump(index_payload, f, ensure_ascii=False, indent=2)
 
+    global _INDEX_MEMORY_CACHE, _INDEX_MEMORY_PATH, _INDEX_MEMORY_MTIME
+    _INDEX_MEMORY_CACHE = index_payload
+    _INDEX_MEMORY_PATH = index_path
+    try:
+        _INDEX_MEMORY_MTIME = os.path.getmtime(index_path)
+    except Exception:
+        _INDEX_MEMORY_MTIME = -1.0
+
+    _clear_query_cache_for_index(index_payload)
+
     return index_payload
 
 
 def load_rde_search_index() -> dict[str, Any] | None:
-    payload = _load_json(get_index_path())
+    global _INDEX_MEMORY_CACHE, _INDEX_MEMORY_PATH, _INDEX_MEMORY_MTIME
+    index_path = get_index_path()
+    try:
+        current_mtime = os.path.getmtime(index_path) if index_path and os.path.exists(index_path) else -1.0
+    except Exception:
+        current_mtime = -1.0
+
+    if (
+        _INDEX_MEMORY_CACHE is not None
+        and _INDEX_MEMORY_PATH == index_path
+        and abs(_INDEX_MEMORY_MTIME - current_mtime) <= 0.0001
+    ):
+        return _INDEX_MEMORY_CACHE
+
+    payload = _load_json(index_path)
     if isinstance(payload, dict):
+        _INDEX_MEMORY_CACHE = payload
+        _INDEX_MEMORY_PATH = index_path
+        _INDEX_MEMORY_MTIME = current_mtime
         return payload
     return None
 
@@ -289,6 +440,10 @@ def ensure_rde_search_index(force_rebuild: bool = False) -> dict[str, Any]:
 
 
 def search_dataset_ids(index_payload: dict[str, Any], criteria: dict[str, str]) -> set[str] | None:
+    cached = _query_cache_lookup(index_payload, criteria)
+    if cached is not None:
+        return cached
+
     reverse = index_payload.get("reverse") if isinstance(index_payload.get("reverse"), dict) else {}
     if not isinstance(reverse, dict):
         return None
@@ -317,8 +472,12 @@ def search_dataset_ids(index_payload: dict[str, Any], criteria: dict[str, str]) 
             result &= matched_ids
 
         if result is not None and not result:
-            return set()
+            result = set()
+            _query_cache_store(index_payload, criteria, result)
+            return result
 
+    if result is not None:
+        _query_cache_store(index_payload, criteria, result)
     return result
 
 

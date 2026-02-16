@@ -263,7 +263,7 @@ def _group_keys(group: int, is_active: bool) -> tuple[ThemeKey, ThemeKey, ThemeK
                 ThemeKey.MENU_ACTIVE_WARM_HOVER_BACKGROUND,
             )
         return (
-            ThemeKey.MENU_GROUP2_INACTIVE_BACKGROUND,
+            ThemeKey.MENU_GROUP7_INACTIVE_BACKGROUND,
             ThemeKey.MENU_GROUP7_INACTIVE_TEXT,
             ThemeKey.MENU_GROUP7_HOVER_BACKGROUND,
         )

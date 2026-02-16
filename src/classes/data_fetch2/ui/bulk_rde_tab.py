@@ -259,6 +259,9 @@ class BulkSaveOptionDialog(QDialog):
         self.setWindowTitle("一括取得の追加保存オプション")
         self.resize(720, 200)
 
+        default_flat_dir = get_dynamic_file_path("output/downloads")
+        default_zip_path = get_dynamic_file_path("output/downloads/bulk_downloads.zip")
+
         root = QVBoxLayout(self)
 
         self.flat_check = QCheckBox("階層フォルダに保存")
@@ -267,6 +270,7 @@ class BulkSaveOptionDialog(QDialog):
 
         self.flat_path_edit = QLineEdit(self)
         self.flat_path_edit.setPlaceholderText("保存先フォルダ（サブグループ/課題番号/データセット/タイル）")
+        self.flat_path_edit.setText(default_flat_dir)
         flat_row = QHBoxLayout()
         flat_row.addWidget(self.flat_path_edit)
         self.flat_btn = QPushButton("参照")
@@ -277,6 +281,7 @@ class BulkSaveOptionDialog(QDialog):
         root.addWidget(self.zip_check)
         self.zip_path_edit = QLineEdit(self)
         self.zip_path_edit.setPlaceholderText("ZIP出力パス (.zip)")
+        self.zip_path_edit.setText(default_zip_path)
         zip_row = QHBoxLayout()
         zip_row.addWidget(self.zip_path_edit)
         self.zip_btn = QPushButton("参照")
@@ -319,12 +324,14 @@ class BulkSaveOptionDialog(QDialog):
         self.ok_btn.setEnabled(at_least_one and flat_ok and zip_ok)
 
     def _pick_flat_dir(self):
-        path = QFileDialog.getExistingDirectory(self, "保存先フォルダを選択")
+        current = self.flat_path_edit.text().strip()
+        path = QFileDialog.getExistingDirectory(self, "保存先フォルダを選択", current or "")
         if path:
             self.flat_path_edit.setText(path)
 
     def _pick_zip_path(self):
-        path, _ = QFileDialog.getSaveFileName(self, "ZIP保存先を選択", "", "ZIP (*.zip)")
+        current = self.zip_path_edit.text().strip()
+        path, _ = QFileDialog.getSaveFileName(self, "ZIP保存先を選択", current or "", "ZIP (*.zip)")
         if path:
             if not path.lower().endswith(".zip"):
                 path += ".zip"
@@ -1778,7 +1785,6 @@ class DataFetch2BulkRdeTab(QWidget):
             checked_item.setFlags(checked_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
             checked = bool(self._selection_state.get(self._record_key(rec), True))
             checked_item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
-            checked_item.setText("✓")
             checked_item.setTextAlignment(Qt.AlignCenter)
             checked_item.setData(Qt.UserRole, rec)
             self.table.setItem(r, 0, checked_item)
@@ -1829,7 +1835,6 @@ class DataFetch2BulkRdeTab(QWidget):
         if check_item is None:
             return
         checked = check_item.checkState() == Qt.Checked
-        check_item.setText("✓" if checked else "")
         bg = get_qcolor(ThemeKey.BUTTON_SUCCESS_BACKGROUND if checked else ThemeKey.TABLE_ROW_BACKGROUND)
         fg = get_qcolor(ThemeKey.BUTTON_SUCCESS_TEXT if checked else ThemeKey.TABLE_ROW_TEXT)
         for col in range(self.table.columnCount()):
@@ -1955,6 +1960,9 @@ class DataFetch2BulkRdeTab(QWidget):
         subgroup_label = str(rec.get("subgroup_display") or "").strip()
         if not subgroup_label:
             subgroup_label = self._resolve_subgroup_display(rec.get("subgroup", ""))
+        subgroup_part = _safe_path_component(subgroup_label)
+        if subgroup_part in {"", "_"}:
+            subgroup_part = "empty"
         grant = str(rec.get("grant_number") or "").strip()
         dataset_name = str(rec.get("dataset_name") or "").strip()
         tile_number = str(rec.get("tile_number") or "").strip()
@@ -1964,13 +1972,81 @@ class DataFetch2BulkRdeTab(QWidget):
             tile_label = str(rec.get("tile_id") or "").strip()
 
         parts = [
-            _safe_path_component(subgroup_label),
+            subgroup_part,
             _safe_path_component(grant),
             _safe_path_component(dataset_name),
             _safe_path_component(tile_label),
             _safe_path_component(file_name),
         ]
         return os.path.join(*parts)
+
+    def _build_hierarchy_relpath_safe(self, rec: dict, file_name: str) -> str:
+        safe_file_name = _safe_path_component(file_name)
+        if safe_file_name in {"", "_"}:
+            safe_file_name = "file"
+
+        try:
+            relpath = self._build_hierarchy_relpath(rec, safe_file_name)
+        except Exception:
+            relpath = os.path.join("empty", safe_file_name)
+
+        normalized = os.path.normpath(relpath)
+        if os.path.isabs(normalized) or normalized.startswith(".."):
+            return os.path.join("empty", safe_file_name)
+        return normalized
+
+    def _format_seconds(self, seconds: float | None) -> str:
+        if seconds is None:
+            return "--"
+        sec = max(0, int(round(float(seconds))))
+        m, s = divmod(sec, 60)
+        h, m = divmod(m, 60)
+        if h > 0:
+            return f"{h:02d}:{m:02d}:{s:02d}"
+        return f"{m:02d}:{s:02d}"
+
+    def _bulk_progress_text(self, done: int, total: int, elapsed_seconds: float) -> str:
+        total_safe = max(1, int(total))
+        done_safe = max(0, min(int(done), total_safe))
+        remaining_seconds: float | None = None
+        if done_safe > 0:
+            avg = float(elapsed_seconds) / float(done_safe)
+            remaining_seconds = max(0.0, avg * float(total_safe - done_safe))
+        return (
+            f"一括取得中... {done_safe}/{total_safe} "
+            f"(経過 {self._format_seconds(elapsed_seconds)} / 残り予測 {self._format_seconds(remaining_seconds)})"
+        )
+
+    def _set_bulk_progress(self, done: int, total: int, elapsed_seconds: float):
+        total_safe = max(1, int(total))
+        done_safe = max(0, min(int(done), total_safe))
+        self.rebuild_progress.setVisible(True)
+        self.rebuild_progress.setRange(0, total_safe)
+        self.rebuild_progress.setValue(done_safe)
+        self.status.setText(self._bulk_progress_text(done_safe, total_safe, elapsed_seconds))
+        try:
+            QApplication.processEvents()
+        except Exception:
+            pass
+
+    def _open_additional_save_target(self, options: dict):
+        target_path = ""
+        if bool(options.get("flat_enabled")):
+            target_path = str(options.get("flat_dir") or "").strip()
+        if not target_path and bool(options.get("zip_enabled")):
+            zip_path = str(options.get("zip_path") or "").strip()
+            target_path = os.path.dirname(zip_path) if zip_path else ""
+
+        target_path = os.path.abspath(target_path) if target_path else ""
+        if not target_path or not os.path.exists(target_path):
+            return
+
+        try:
+            from classes.core.platform import open_path
+
+            open_path(target_path)
+        except Exception:
+            pass
 
     def _copy_outputs(self, saved_items: list[tuple[str, dict]], options: dict):
         flat_enabled = bool(options.get("flat_enabled"))
@@ -1984,10 +2060,21 @@ class DataFetch2BulkRdeTab(QWidget):
                 if not os.path.isfile(src):
                     continue
                 base = os.path.basename(src)
-                relpath = self._build_hierarchy_relpath(rec, base)
+                relpath = self._build_hierarchy_relpath_safe(rec, base)
                 dst = os.path.join(flat_dir, relpath)
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                shutil.copy2(src, dst)
+                try:
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copy2(src, dst)
+                except Exception:
+                    fallback_name = _safe_path_component(base)
+                    if fallback_name in {"", "_"}:
+                        fallback_name = "file"
+                    fallback_dst = os.path.join(flat_dir, "empty", fallback_name)
+                    try:
+                        os.makedirs(os.path.dirname(fallback_dst), exist_ok=True)
+                        shutil.copy2(src, fallback_dst)
+                    except Exception:
+                        continue
 
         if zip_enabled and zip_path:
             os.makedirs(os.path.dirname(zip_path) or ".", exist_ok=True)
@@ -1995,8 +2082,18 @@ class DataFetch2BulkRdeTab(QWidget):
                 for src, rec in saved_items:
                     if not os.path.isfile(src):
                         continue
-                    relpath = self._build_hierarchy_relpath(rec, os.path.basename(src))
-                    zf.write(src, arcname=relpath.replace("\\", "/"))
+                    relpath = self._build_hierarchy_relpath_safe(rec, os.path.basename(src))
+                    try:
+                        zf.write(src, arcname=relpath.replace("\\", "/"))
+                    except Exception:
+                        fallback_name = _safe_path_component(os.path.basename(src))
+                        if fallback_name in {"", "_"}:
+                            fallback_name = "file"
+                        fallback_relpath = os.path.join("empty", fallback_name).replace("\\", "/")
+                        try:
+                            zf.write(src, arcname=fallback_relpath)
+                        except Exception:
+                            continue
 
     def execute_bulk_download(self):
         self._ensure_records_ready()
@@ -2032,8 +2129,12 @@ class DataFetch2BulkRdeTab(QWidget):
         saved_items: list[tuple[str, dict]] = []
         ok = 0
         ng = 0
+        total = len(selected)
+        started_at = time.perf_counter()
+        self._set_bulk_progress(0, total, 0.0)
+
         for idx, rec in enumerate(selected, start=1):
-            self.status.setText(f"取得中... {idx}/{len(selected)} : {rec.get('dataset_name', '')} / {rec.get('tile_name', '')}")
+            self._set_bulk_progress(idx - 1, total, time.perf_counter() - started_at)
             dataset_obj = rec.get("dataset_obj") or {}
             dataset_attrs = dataset_obj.get("attributes", {}) if isinstance(dataset_obj, dict) else {}
             grant = str(dataset_attrs.get("grantNumber") or "")
@@ -2071,12 +2172,20 @@ class DataFetch2BulkRdeTab(QWidget):
                     if os.path.isfile(src):
                         saved_items.append((src, rec))
 
+            self._set_bulk_progress(idx, total, time.perf_counter() - started_at)
+
         self._copy_outputs(saved_items, options)
+        self._open_additional_save_target(options)
+        elapsed = time.perf_counter() - started_at
+        self.rebuild_progress.setVisible(False)
         self.status.setText(f"完了: 成功 {ok} / 失敗 {ng} / 追加保存対象ファイル {len(saved_items)}")
         QMessageBox.information(
             self,
             "一括取得完了",
-            f"通常保存（データ取得タブと同一フォルダ）に加えて追加保存処理を実施しました。\n成功: {ok}\n失敗: {ng}",
+            (
+                "通常保存（データ取得タブと同一フォルダ）に加えて追加保存処理を実施しました。\n"
+                f"成功: {ok}\n失敗: {ng}\n経過時間: {self._format_seconds(elapsed)}"
+            ),
         )
 
 

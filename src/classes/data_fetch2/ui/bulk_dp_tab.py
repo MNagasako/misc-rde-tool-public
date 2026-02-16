@@ -507,9 +507,6 @@ class DataFetch2BulkDpTab(QWidget):
         self.table.setSortingEnabled(True)
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Interactive)
-        hh.setSectionResizeMode(0, QHeaderView.Stretch)
-        hh.setSectionResizeMode(13, QHeaderView.Stretch)
-        hh.setSectionResizeMode(14, QHeaderView.Stretch)
         self.table.verticalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.table.verticalHeader().setDefaultSectionSize(int(self.table.fontMetrics().height() * 1.8))
         root.addWidget(self.table, 1)
@@ -1013,6 +1010,11 @@ class DataFetch2BulkDpTab(QWidget):
         return [self._all_records[i] for i in sorted(candidate_rows)]
 
     def _load_dataset_inference_map(self) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
+        bootstrap_started_at = time.perf_counter()
+        entry_read_limit = 200
+        entry_read_count = 0
+        entry_read_time_budget_sec = 3.0
+
         dataset_path = get_dynamic_file_path("output/rde/data/dataset.json")
         subgroup_path = get_dynamic_file_path("output/rde/data/subGroup.json")
         template_path = get_dynamic_file_path("output/rde/data/template.json")
@@ -1243,8 +1245,21 @@ class DataFetch2BulkDpTab(QWidget):
                 "related_datasets_display": "",
             }
 
-            entry_path = os.path.join(entry_dir, f"{dataset_id}.json")
-            entry_items = _load_data_items(entry_path)
+            needs_entry_lookup = not (
+                info["registrant"]
+                and info["sample_name"]
+                and info["sample_uuid"]
+                and info["equipment_name"]
+                and info["equipment_local_id"]
+            )
+            entry_items: list[dict] = []
+            if needs_entry_lookup and os.path.isdir(entry_dir):
+                within_time_budget = (time.perf_counter() - bootstrap_started_at) < entry_read_time_budget_sec
+                within_read_limit = entry_read_count < entry_read_limit
+                if within_time_budget and within_read_limit:
+                    entry_path = os.path.join(entry_dir, f"{dataset_id}.json")
+                    entry_items = _load_data_items(entry_path)
+                    entry_read_count += 1
             for entry in entry_items:
                 eattrs = entry.get("attributes") if isinstance(entry.get("attributes"), dict) else {}
                 erels = entry.get("relationships") if isinstance(entry.get("relationships"), dict) else {}
@@ -1324,6 +1339,13 @@ class DataFetch2BulkDpTab(QWidget):
             title_key = str(info.get("dataset_name") or "").strip().casefold()
             if title_key:
                 by_title[title_key] = info
+
+        if entry_read_count >= entry_read_limit or (time.perf_counter() - bootstrap_started_at) >= entry_read_time_budget_sec:
+            logger.debug(
+                "bulk_dp: dataset inference bootstrap limited entry reads count=%s elapsed=%.3fs",
+                entry_read_count,
+                max(0.0, time.perf_counter() - bootstrap_started_at),
+            )
 
         for dataset_id, info in result.items():
             related_ids = [x.strip() for x in _to_text(info.get("related_datasets")).split(",") if x.strip()]
