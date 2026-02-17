@@ -168,6 +168,102 @@ def _load_public_output_registrant_map() -> dict[str, str]:
     return result
 
 
+def _normalize_public_payload_to_records(payload: Any) -> list[dict]:
+    if isinstance(payload, list):
+        return [item for item in payload if isinstance(item, dict)]
+    if isinstance(payload, dict):
+        data = payload.get("items") or payload.get("data")
+        if isinstance(data, list):
+            return [item for item in data if isinstance(item, dict)]
+    return []
+
+
+def _record_dataset_id(record: dict) -> str:
+    if not isinstance(record, dict):
+        return ""
+    fields = record.get("fields") if isinstance(record.get("fields"), dict) else {}
+    fields_raw = record.get("fields_raw") if isinstance(record.get("fields_raw"), dict) else {}
+    dataset_id = _to_text(fields_raw.get("dataset_id") or fields.get("dataset_id") or record.get("dataset_id")).strip()
+    if dataset_id:
+        return dataset_id
+    return _to_text(record.get("id") or "").strip()
+
+
+def _public_field(record: dict, *keys: str) -> str:
+    fields = record.get("fields") if isinstance(record.get("fields"), dict) else {}
+    fields_raw = record.get("fields_raw") if isinstance(record.get("fields_raw"), dict) else {}
+    for key in keys:
+        value = _to_text(fields_raw.get(key) or fields.get(key) or record.get(key)).strip()
+        if value:
+            return value
+    return ""
+
+
+def _public_content_url(record: dict) -> str:
+    links = record.get("download_links")
+    if isinstance(links, list):
+        for link in links:
+            text = _to_text(link).strip()
+            if text and "mode=free" in text:
+                return text
+        for link in links:
+            text = _to_text(link).strip()
+            if text:
+                return text
+    return ""
+
+
+def _record_matches_keyword(record: dict, keyword: str) -> bool:
+    needle = _to_text(keyword).strip()
+    if not needle:
+        return True
+    haystacks = [
+        _to_text(record.get("title")),
+        _record_dataset_id(record),
+        _public_field(record, "project_number"),
+        _public_field(record, "dataset_registrant"),
+        _public_field(record, "organization"),
+        _public_field(record, "dataset_template"),
+        _public_field(record, "keyword_tags"),
+    ]
+    return any(_contains(h, needle) for h in haystacks)
+
+
+def _build_record_from_public_record(record: dict) -> dict:
+    dataset_id = _record_dataset_id(record)
+    detail_url = _to_text(record.get("detail_url") or record.get("url")).strip()
+    return {
+        "title": _to_text(record.get("title")).strip(),
+        "project_number": _public_field(record, "project_number"),
+        "subgroup": _public_field(record, "subgroup", "sub_group"),
+        "subgroup_id": _public_field(record, "subgroup_id", "group_id"),
+        "registrant": _public_field(record, "dataset_registrant", "registrant"),
+        "organization": _public_field(record, "organization"),
+        "dataset_id": dataset_id,
+        "template": _public_field(record, "dataset_template", "template", "template_id"),
+        "sample_name": _public_field(record, "sample_name"),
+        "sample_uuid": _public_field(record, "sample_uuid"),
+        "equipment_name": _public_field(record, "equipment_name"),
+        "equipment_local_id": _public_field(record, "equipment_local_id"),
+        "tags": _public_field(record, "keyword_tags", "tags"),
+        "related_datasets": _public_field(record, "related_datasets"),
+        "related_datasets_display": "",
+        "detail_url": detail_url,
+        "content_url": _public_content_url(record),
+    }
+
+
+def _load_public_output_records(environment: str) -> tuple[list[dict], bool]:
+    try:
+        output_path = get_public_data_portal_root_dir(environment) / "output.json"
+    except Exception:
+        return [], False
+    if not output_path.exists():
+        return [], False
+    payload = _load_json(str(output_path))
+    return _normalize_public_payload_to_records(payload), True
+
+
 class _BulkDpSearchThread(QThread):
     finished_fetch = Signal(object, str)
 
@@ -200,6 +296,37 @@ class _BulkDpSearchThread(QThread):
             if self._is_cancelled():
                 self.finished_fetch.emit([], "__CANCELLED__")
                 return
+
+            # まずローカルのpublic output.jsonを利用（不要なDPアクセスを避ける）
+            local_records_raw, local_source_exists = _load_public_output_records(self._environment)
+            local_filter_started = time.perf_counter()
+            if local_records_raw:
+                if self._candidate_dataset_ids is not None:
+                    local_records_raw = [
+                        rec for rec in local_records_raw
+                        if _record_dataset_id(rec) in self._candidate_dataset_ids
+                    ]
+                if self._keyword:
+                    local_records_raw = [rec for rec in local_records_raw if _record_matches_keyword(rec, self._keyword)]
+
+            if local_source_exists:
+                local_filter_sec = max(0.0, time.perf_counter() - local_filter_started)
+                records = [_build_record_from_public_record(rec) for rec in local_records_raw]
+                self.finished_fetch.emit(
+                    {
+                        "records": records,
+                        "_meta": {
+                            "link_fetch_sec": 0.0,
+                            "detail_fetch_sec": 0.0,
+                            "local_filter_sec": local_filter_sec,
+                            "workers": self._detail_workers,
+                            "source": "local_output",
+                        },
+                    },
+                    "",
+                )
+                return
+
             try:
                 links = search_public_arim_data(
                     keyword=self._keyword,
@@ -247,7 +374,9 @@ class _BulkDpSearchThread(QThread):
                         "_meta": {
                             "link_fetch_sec": link_fetch_sec,
                             "detail_fetch_sec": detail_fetch_sec,
+                            "local_filter_sec": 0.0,
                             "workers": self._detail_workers,
+                            "source": "remote_detail",
                         },
                     },
                     "",
@@ -259,7 +388,9 @@ class _BulkDpSearchThread(QThread):
                         "_meta": {
                             "link_fetch_sec": link_fetch_sec,
                             "detail_fetch_sec": 0.0,
+                            "local_filter_sec": 0.0,
                             "workers": self._detail_workers,
+                            "source": "remote_links",
                         },
                     },
                     "",
@@ -302,6 +433,7 @@ class DataFetch2BulkDpTab(QWidget):
         self._dataset_uuid_by_title: dict[str, str] = {}
         self._subgroup_name_by_id: dict[str, str] = {}
         self._sample_name_by_id: dict[str, str] = {}
+        self._entry_enrichment_cache: dict[str, dict[str, str]] = {}
         self._search_thread: _BulkDpSearchThread | None = None
         self._compact_rows_mode = False
         self._search_started_at: float | None = None
@@ -1366,39 +1498,214 @@ class DataFetch2BulkDpTab(QWidget):
             title_key = _to_text(rec.get("title")).strip().casefold()
             if title_key:
                 inferred = self._dataset_inference_by_title.get(title_key, {})
-        if not inferred:
-            return rec
+        if inferred:
+            for key in [
+                "project_number",
+                "subgroup",
+                "subgroup_id",
+                "registrant",
+                "template",
+                "sample_name",
+                "sample_uuid",
+                "equipment_name",
+                "equipment_local_id",
+                "tags",
+                "related_datasets",
+                "related_datasets_display",
+            ]:
+                if not _to_text(rec.get(key)).strip():
+                    rec[key] = _to_text(inferred.get(key)).strip()
 
-        for key in [
-            "project_number",
-            "subgroup",
-            "subgroup_id",
-            "registrant",
-            "template",
-            "sample_name",
-            "sample_uuid",
-            "equipment_name",
-            "equipment_local_id",
-            "tags",
-            "related_datasets",
-            "related_datasets_display",
-        ]:
-            if not _to_text(rec.get(key)).strip():
-                rec[key] = _to_text(inferred.get(key)).strip()
+            current_dataset_id = _to_text(rec.get("dataset_id")).strip()
+            inferred_dataset_uuid = _to_text(inferred.get("dataset_uuid")).strip()
+            if not inferred_dataset_uuid:
+                title_key = _to_text(rec.get("title")).strip().casefold()
+                inferred_dataset_uuid = _to_text(self._dataset_uuid_by_title.get(title_key)).strip()
+            if inferred_dataset_uuid and (not current_dataset_id or not _looks_like_uuid(current_dataset_id)):
+                rec["dataset_id"] = inferred_dataset_uuid
 
-        current_dataset_id = _to_text(rec.get("dataset_id")).strip()
-        inferred_dataset_uuid = _to_text(inferred.get("dataset_uuid")).strip()
-        if not inferred_dataset_uuid:
-            title_key = _to_text(rec.get("title")).strip().casefold()
-            inferred_dataset_uuid = _to_text(self._dataset_uuid_by_title.get(title_key)).strip()
-        if inferred_dataset_uuid and (not current_dataset_id or not _looks_like_uuid(current_dataset_id)):
-            rec["dataset_id"] = inferred_dataset_uuid
+        if not _to_text(rec.get("sample_name")).strip():
+            sample_uuid = _to_text(rec.get("sample_uuid")).strip()
+            if sample_uuid:
+                rec["sample_name"] = _to_text(self._sample_name_by_id.get(sample_uuid)).strip()
+
+        dataset_id_for_entry = _to_text(rec.get("dataset_id")).strip()
+        if dataset_id_for_entry:
+            needs_entry_enrichment = not (
+                _to_text(rec.get("subgroup")).strip()
+                and _to_text(rec.get("registrant")).strip()
+                and _to_text(rec.get("sample_name")).strip()
+                and _to_text(rec.get("sample_uuid")).strip()
+            )
+            if needs_entry_enrichment:
+                extra = self._load_entry_derived_info_for_dataset(dataset_id_for_entry)
+                if isinstance(extra, dict):
+                    if not _to_text(rec.get("subgroup")).strip() and _to_text(extra.get("subgroup")).strip():
+                        rec["subgroup"] = _to_text(extra.get("subgroup")).strip()
+                    if not _to_text(rec.get("subgroup_id")).strip() and _to_text(extra.get("subgroup_id")).strip():
+                        rec["subgroup_id"] = _to_text(extra.get("subgroup_id")).strip()
+                    if not _to_text(rec.get("registrant")).strip() and _to_text(extra.get("registrant")).strip():
+                        rec["registrant"] = _to_text(extra.get("registrant")).strip()
+                    if not _to_text(rec.get("sample_uuid")).strip() and _to_text(extra.get("sample_uuid")).strip():
+                        rec["sample_uuid"] = _to_text(extra.get("sample_uuid")).strip()
+                    if not _to_text(rec.get("sample_name")).strip() and _to_text(extra.get("sample_name")).strip():
+                        rec["sample_name"] = _to_text(extra.get("sample_name")).strip()
 
         if not _to_text(rec.get("sample_name")).strip():
             sample_uuid = _to_text(rec.get("sample_uuid")).strip()
             if sample_uuid:
                 rec["sample_name"] = _to_text(self._sample_name_by_id.get(sample_uuid)).strip()
         return rec
+
+    def _load_entry_derived_info_for_dataset(self, dataset_id: str) -> dict[str, str]:
+        dsid = _to_text(dataset_id).strip()
+        if not dsid:
+            return {}
+        cached = self._entry_enrichment_cache.get(dsid)
+        if isinstance(cached, dict):
+            return cached
+
+        info: dict[str, str] = {
+            "subgroup": "",
+            "subgroup_id": "",
+            "registrant": "",
+            "sample_name": "",
+            "sample_uuid": "",
+        }
+
+        try:
+            dataset_items = _load_data_items(get_dynamic_file_path("output/rde/data/dataset.json"))
+            for ds in dataset_items:
+                if not isinstance(ds, dict):
+                    continue
+                if _to_text(ds.get("id")).strip() != dsid:
+                    continue
+                attrs = ds.get("attributes") if isinstance(ds.get("attributes"), dict) else {}
+                rels = ds.get("relationships") if isinstance(ds.get("relationships"), dict) else {}
+                group_data = (rels.get("group") or {}).get("data") if isinstance(rels, dict) else None
+                subgroup_id = ""
+                if isinstance(group_data, dict):
+                    subgroup_id = _to_text(group_data.get("id")).strip()
+                subgroup_id = subgroup_id or _to_text(attrs.get("groupId")).strip()
+                info["subgroup_id"] = subgroup_id
+                info["subgroup"] = _to_text(self._subgroup_name_by_id.get(subgroup_id) or subgroup_id).strip()
+                break
+        except Exception:
+            pass
+
+        try:
+            entry_path = get_dynamic_file_path(f"output/rde/data/dataEntry/{dsid}.json")
+            entry_payload = _load_json(entry_path)
+        except Exception:
+            entry_payload = None
+
+        entries: list[dict] = []
+        included_items: list[dict] = []
+        if isinstance(entry_payload, dict):
+            raw_data = entry_payload.get("data")
+            if isinstance(raw_data, list):
+                entries.extend([x for x in raw_data if isinstance(x, dict)])
+            elif isinstance(raw_data, dict):
+                entries.append(raw_data)
+            raw_included = entry_payload.get("included")
+            if isinstance(raw_included, list):
+                included_items.extend([x for x in raw_included if isinstance(x, dict)])
+
+        user_label_by_id: dict[str, str] = {}
+        sample_name_by_id_from_included: dict[str, str] = {}
+        for item in included_items:
+            item_type = _to_text(item.get("type")).strip()
+            item_id = _to_text(item.get("id")).strip()
+            attrs = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
+            if item_type == "user" and item_id:
+                user_name = _to_text(attrs.get("userName") or attrs.get("name")).strip()
+                org_name = _to_text(attrs.get("organizationName") or attrs.get("organization")).strip()
+                if user_name and org_name:
+                    user_label_by_id[item_id] = f"{user_name}（{org_name}）"
+                elif user_name:
+                    user_label_by_id[item_id] = user_name
+                elif org_name:
+                    user_label_by_id[item_id] = f"所属:{org_name}"
+            elif item_type == "sample" and item_id:
+                names = attrs.get("names")
+                sample_name = ""
+                if isinstance(names, list):
+                    sample_name = ", ".join([_to_text(x).strip() for x in names if _to_text(x).strip()])
+                if not sample_name:
+                    sample_name = _to_text(attrs.get("primaryName") or attrs.get("name") or attrs.get("displayName")).strip()
+                if sample_name:
+                    sample_name_by_id_from_included[item_id] = sample_name
+
+        def _metadata_value(metadata: dict[str, Any], key: str) -> str:
+            node = metadata.get(key)
+            if isinstance(node, dict):
+                value = node.get("value")
+                if isinstance(value, list):
+                    return _first_non_empty(value)
+                return _to_text(value).strip()
+            return ""
+
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            eattrs = entry.get("attributes") if isinstance(entry.get("attributes"), dict) else {}
+            erels = entry.get("relationships") if isinstance(entry.get("relationships"), dict) else {}
+            metadata = eattrs.get("metadata") if isinstance(eattrs.get("metadata"), dict) else {}
+
+            if not info["registrant"]:
+                info["registrant"] = _first_non_empty(
+                    [
+                        eattrs.get("registrant"),
+                        eattrs.get("registeredBy"),
+                        eattrs.get("registrationUserName"),
+                        eattrs.get("creatorName"),
+                        eattrs.get("createdBy"),
+                        _metadata_value(metadata, "invoice.basic.data_owner"),
+                    ]
+                )
+
+            if not info["registrant"]:
+                owner_rel = (erels.get("owner") or {}).get("data") if isinstance(erels, dict) else None
+                if isinstance(owner_rel, dict):
+                    owner_id = _to_text(owner_rel.get("id")).strip()
+                    if owner_id:
+                        info["registrant"] = _to_text(user_label_by_id.get(owner_id)).strip()
+
+            if not info["sample_name"]:
+                info["sample_name"] = _first_non_empty(
+                    [
+                        eattrs.get("sampleNames"),
+                        eattrs.get("sampleName"),
+                        eattrs.get("displayName"),
+                        _metadata_value(metadata, "sample.name"),
+                    ]
+                )
+
+            if not info["sample_uuid"]:
+                info["sample_uuid"] = _first_non_empty(
+                    [
+                        eattrs.get("sampleUuid"),
+                        eattrs.get("sampleUUID"),
+                        eattrs.get("sampleId"),
+                        eattrs.get("sample_id"),
+                    ]
+                )
+
+            if not info["sample_uuid"]:
+                sample_rel = (erels.get("sample") or {}).get("data") if isinstance(erels, dict) else None
+                if isinstance(sample_rel, dict):
+                    info["sample_uuid"] = _to_text(sample_rel.get("id")).strip()
+
+            if info["sample_uuid"] and not info["sample_name"]:
+                info["sample_name"] = _to_text(self._sample_name_by_id.get(info["sample_uuid"]) or "").strip()
+            if info["sample_uuid"] and not info["sample_name"]:
+                info["sample_name"] = _to_text(sample_name_by_id_from_included.get(info["sample_uuid"]) or "").strip()
+
+            if info["registrant"] and info["sample_name"] and info["sample_uuid"]:
+                break
+
+        self._entry_enrichment_cache[dsid] = dict(info)
+        return self._entry_enrichment_cache[dsid]
 
     def search_and_build(self):
         if self._search_thread is not None and self._search_thread.isRunning():
@@ -1441,13 +1748,19 @@ class DataFetch2BulkDpTab(QWidget):
         if isinstance(meta, dict):
             link_fetch_sec = float(meta.get("link_fetch_sec") or 0.0)
             detail_fetch_sec = float(meta.get("detail_fetch_sec") or 0.0)
+            local_filter_sec = float(meta.get("local_filter_sec") or 0.0)
             workers = int(meta.get("workers") or 0)
-            if link_fetch_sec > 0.0 or detail_fetch_sec > 0.0:
+            source = _to_text(meta.get("source")).strip()
+            if local_filter_sec > 0.0:
+                phase_suffix = f" / ローカル抽出:{local_filter_sec:.2f}秒 / 並列:{workers}"
+            elif link_fetch_sec > 0.0 or detail_fetch_sec > 0.0:
                 phase_suffix = (
                     f" / page取得:{link_fetch_sec:.2f}秒"
                     f" / detail取得:{detail_fetch_sec:.2f}秒"
                     f" / 並列:{workers}"
                 )
+            if source:
+                phase_suffix += f" / source:{source}"
         if error_text == "__CANCELLED__" or self._cancel_requested:
             self.status.setText(f"検索をキャンセルしました。({elapsed}{phase_suffix})")
             self._set_search_busy(False)
@@ -1464,6 +1777,22 @@ class DataFetch2BulkDpTab(QWidget):
         if isinstance(details, dict) and isinstance(details.get("links"), list):
             links = details.get("links") or []
             records = self._build_records_from_links(links)
+            self._all_records = records
+            self._build_record_exact_indexes(self._all_records)
+            self._update_filter_options(self._all_records)
+
+            candidates = self._candidate_records_from_indexes()
+            self._records = self._parallel_filter_records(candidates)
+            self._current_page = 1
+            self._populate(self._records)
+            self._log_record_quality(self._records)
+            self.status.setText(f"検索結果: {len(self._records)}件 ({elapsed}{phase_suffix})")
+            self._set_search_busy(False)
+            return
+
+        if isinstance(details, dict) and isinstance(details.get("records"), list):
+            raw_records = details.get("records") or []
+            records = [self._enrich_record(dict(rec)) for rec in raw_records if isinstance(rec, dict)]
             self._all_records = records
             self._build_record_exact_indexes(self._all_records)
             self._update_filter_options(self._all_records)
