@@ -5804,7 +5804,8 @@ class BatchRegisterWidget(QWidget):
                 if isinstance(template, dict):
                     template_id = template.get('id', '')
                 
-                self.batch_current_template_id = template_id
+                resolved = self.batch_validator.resolve_template(template_id)
+                self.batch_current_template_id = resolved.resolved_template_id or template_id
                 if not self.batch_validator.is_formats_json_available():
                     self.batch_template_format_label.setText(
                         "⚠ 対応ファイル形式情報が読み込まれていません。\n"
@@ -5817,7 +5818,11 @@ class BatchRegisterWidget(QWidget):
                     )
                 else:
                     format_text = self.batch_validator.get_format_display_text(template_id)
-                    self.batch_template_format_label.setText(f"📋 対応ファイル形式: {format_text}")
+                    ref_text = self.batch_validator.get_template_reference_text(template_id)
+                    self.batch_template_format_label.setText(
+                        f"📋 対応ファイル形式: {format_text}\n"
+                        f"🧩 {ref_text}"
+                    )
                     self.batch_template_format_label.setStyleSheet(
                         f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
                         f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; "
@@ -5825,7 +5830,7 @@ class BatchRegisterWidget(QWidget):
                     )
                     # 対応拡張子をファイルセットテーブルへ反映し対象ファイル数を更新
                     try:
-                        required_exts = self.batch_validator.get_extensions_for_template(template_id)
+                        required_exts = self.batch_validator.get_extensions_for_template(self.batch_current_template_id)
                         if hasattr(self, 'fileset_table') and self.fileset_table:
                             self.fileset_table.set_required_extensions(required_exts)
                     except Exception as ext_e:

@@ -879,7 +879,8 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
                     setattr(parent_controller, safe_name, child)
         
         # --- テンプレート対応拡張子表示を更新 ---
-        parent_controller.current_template_id = template_id
+        resolved = validator.resolve_template(template_id)
+        parent_controller.current_template_id = resolved.resolved_template_id or template_id
         if not validator.is_formats_json_available():
             template_format_label.setText(
                 "⚠ 対応ファイル形式情報が読み込まれていません。\n"
@@ -892,7 +893,11 @@ def create_data_register_widget(parent_controller, title="データ登録", butt
             )
         else:
             format_text = validator.get_format_display_text(template_id)
-            template_format_label.setText(f"📋 対応ファイル形式: {format_text}")
+            ref_text = validator.get_template_reference_text(template_id)
+            template_format_label.setText(
+                f"📋 対応ファイル形式: {format_text}\n"
+                f"🧩 {ref_text}"
+            )
             template_format_label.setStyleSheet(
                 f"padding: 8px; background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)}; "
                 f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; "
