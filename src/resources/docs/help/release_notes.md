@@ -6,10 +6,20 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.16）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| オフラインモード | 設定タブにサイト別オフライン制御（RDE/データポータル/テストサイト/AI API）を追加。 |
-| オフラインモード | 起動時確認・RDE接続異常時のオフライン移行提案・メイン画面のオフライン対象表示を追加。 |
-| UI方針 | 左メニュー遷移は維持し、タブ内の通信処理を実行時に制限する方式へ統一。 |
+| リリース/品質 | リビジョンアップ（v2.5.17）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| データポータル修正 | dataset_id に対する `t_code` 解決を一覧1ページ依存から `keyword` 検索方式へ変更。 |
+| データポータル修正 | ポータル検索結果解析に `t_code` 抽出を追加し、現在選択datasetの `t_code` 再利用を強化。 |
+| テスト/品質 | `portal_entry_status` / `dataset_upload_tab` の回帰テストを追加し、本番相当の取りこぼしを抑止。 |
+
+## v2.5.17 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.17）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| データポータル修正 | `dataset_upload_tab` の `t_code` 取得経路を `keyword=dataset_id` 検索方式へ変更。 |
+| データポータル修正 | `portal_entry_status` の解析結果に `t_code` を追加し、hidden input から抽出。 |
+| データポータル修正 | 現在選択dataset一致時は抽出済み `current_t_code` を優先再利用、未検出時は安全にクリア。 |
+| テスト/品質 | `tests/unit/data_portal/test_portal_entry_status_parser.py` / `tests/unit/test_dataset_upload_tab.py` を更新。 |
 
 ## v2.5.16 の主な更新点
 

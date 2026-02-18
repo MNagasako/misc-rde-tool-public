@@ -3624,29 +3624,67 @@ class DatasetUploadTab(QWidget):
         """
         try:
             import re
+
+            dsid = str(dataset_id or "").strip()
+            if not dsid:
+                return ""
+
+            current_id = str(self.current_dataset_id or "").strip()
+            cached_t_code = str(self.current_t_code or "").strip()
+            if cached_t_code and current_id and current_id == dsid:
+                logger.info(f"[GET_T_CODE] キャッシュ済みt_codeを使用: {cached_t_code} (データセットID: {dsid})")
+                return cached_t_code
+
+            if not self.portal_client:
+                logger.error("[GET_T_CODE] portal_client が未初期化です")
+                return ""
             
             # 書誌情報一覧ページを取得
-            logger.info(f"[GET_T_CODE] データセットID {dataset_id} のt_codeを検索中...")
-            success, response = self.portal_client.post("main.php", data={'mode': 'theme', 'page': '1'})
+            logger.info(f"[GET_T_CODE] データセットID {dsid} のt_codeを検索中...")
+            data = {
+                'mode': 'theme',
+                'keyword': dsid,
+                'search_inst': '',
+                'search_license_level': '',
+                'search_status': '',
+                'page': '1',
+            }
+            success, response = self.portal_client.post("main.php", data=data)
             
             if not success or not hasattr(response, 'text'):
                 logger.error("[GET_T_CODE] 書誌情報一覧ページの取得に失敗")
                 return ""
             
             # デバッグ保存
-            self._save_debug_response("get_t_code_bibliography_list", response.text)
+            self._save_debug_response("get_t_code_bibliography_search", response.text)
+
+            try:
+                from classes.data_portal.core.portal_entry_status import parse_portal_entry_search_html
+
+                env = self.current_environment or self.env_combo.currentData() or 'production'
+                parsed = parse_portal_entry_search_html(response.text, dsid, environment=str(env))
+                parsed_t_code = str(parsed.t_code or '').strip()
+                if parsed_t_code:
+                    if current_id and current_id == dsid:
+                        self.current_t_code = parsed_t_code
+                    logger.info(f"[GET_T_CODE] パーサーでt_code取得成功: {parsed_t_code} (データセットID: {dsid})")
+                    return parsed_t_code
+            except Exception:
+                pass
             
             # データセットIDとt_codeの対応を抽出
             # パターン: <td class="l">データセットID</td> の後に <input type="hidden" name="t_code" value="272">
-            pattern = rf'<td class="l">{re.escape(dataset_id)}</td>.*?name="t_code" value="(\d+)"'
+            pattern = rf'<td class="l">{re.escape(dsid)}</td>.*?name="t_code" value="([^"\']+)"'
             match = re.search(pattern, response.text, re.DOTALL)
             
             if match:
-                t_code = match.group(1)
-                logger.info(f"[GET_T_CODE] t_code取得成功: {t_code} (データセットID: {dataset_id})")
+                t_code = str(match.group(1) or "").strip()
+                if current_id and current_id == dsid and t_code:
+                    self.current_t_code = t_code
+                logger.info(f"[GET_T_CODE] t_code取得成功: {t_code} (データセットID: {dsid})")
                 return t_code
             
-            logger.warning(f"[GET_T_CODE] データセットID {dataset_id} に対応するt_codeが見つかりません")
+            logger.warning(f"[GET_T_CODE] データセットID {dsid} に対応するt_codeが見つかりません")
             return ""
             
         except Exception as e:
@@ -4053,6 +4091,7 @@ class DatasetUploadTab(QWidget):
 
             # パース結果をウィジェット状態へ反映
             self.current_status = parsed.current_status
+            self.current_t_code = parsed.t_code
             self.current_public_code = parsed.public_code
             self.current_public_key = parsed.public_key
             self.current_public_url = parsed.public_url
@@ -4088,6 +4127,7 @@ class DatasetUploadTab(QWidget):
                 self.edit_portal_btn.setEnabled(False)
                 self.edit_portal_btn.setToolTip("エントリが登録されていません")
                 self.toggle_status_btn.setEnabled(False)
+                self.current_t_code = None
                 self.current_status = None
                 self.public_view_btn.setEnabled(False)
             
@@ -4099,6 +4139,7 @@ class DatasetUploadTab(QWidget):
                 
         except Exception as e:
             logger.error(f"[CHECK_ENTRY] ❌ エラー発生: {e}", exc_info=True)
+            self.current_t_code = None
             self.edit_portal_btn.setEnabled(False)
             self.toggle_status_btn.setEnabled(False)
             self._update_image_upload_button_state()

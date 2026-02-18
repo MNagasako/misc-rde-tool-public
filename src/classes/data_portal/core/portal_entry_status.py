@@ -34,6 +34,7 @@ _CACHE_VERSION = 1
 class PortalEntryCheckResult:
     dataset_id: str
     dataset_id_found: bool
+    t_code: Optional[str]
     can_edit: bool
     can_toggle_status: bool
     can_public_view: bool
@@ -109,6 +110,7 @@ def parse_portal_entry_search_html(
 
     dataset_id_found = bool(dsid) and (dsid in text)
 
+    t_code: Optional[str] = None
     can_edit = False
     current_status: Optional[str] = None
     public_code: Optional[str] = None
@@ -127,6 +129,48 @@ def parse_portal_entry_search_html(
             from bs4 import BeautifulSoup
 
             soup = BeautifulSoup(text, "html.parser")
+
+            try:
+                dataset_row = None
+                for td in soup.find_all("td", {"class": "l"}):
+                    if td is None:
+                        continue
+                    if td.get_text(strip=True) != dsid:
+                        continue
+                    dataset_row = td.find_parent("tr")
+                    if dataset_row is not None:
+                        break
+
+                if dataset_row is not None:
+                    candidate_rows = [dataset_row]
+                    try:
+                        next_row = dataset_row.find_next_sibling("tr")
+                    except Exception:
+                        next_row = None
+                    if next_row is not None:
+                        candidate_rows.append(next_row)
+
+                    for row in candidate_rows:
+                        if row is None:
+                            continue
+                        hidden = row.find("input", {"name": "t_code"})
+                        if hidden is None:
+                            continue
+                        value = (hidden.get("value") or "").strip()
+                        if value:
+                            t_code = value
+                            break
+
+                    if not t_code:
+                        form = dataset_row.find_parent("form")
+                        if form is not None:
+                            hidden = form.find("input", {"name": "t_code"})
+                            if hidden is not None:
+                                value = (hidden.get("value") or "").strip()
+                                if value:
+                                    t_code = value
+            except Exception:
+                t_code = None
 
             status_cell = None
             for td in soup.find_all("td", {"rowspan": "2"}):
@@ -184,6 +228,22 @@ def parse_portal_entry_search_html(
         except Exception:
             current_status = None
 
+        if not t_code:
+            try:
+                import re
+
+                m = re.search(
+                    rf"<td[^>]*class=['\"]l['\"][^>]*>\s*{re.escape(dsid)}\s*</td>.*?name=['\"]t_code['\"][^>]*value=['\"]([^'\"]+)['\"]",
+                    text,
+                    re.DOTALL | re.IGNORECASE,
+                )
+                if m:
+                    value = (m.group(1) or "").strip()
+                    if value:
+                        t_code = value
+            except Exception:
+                t_code = None
+
     # DatasetUploadTab only enables the public view button when edit link is available.
     can_public_view = bool(can_edit and public_code and public_key)
     can_toggle_status = bool(can_edit and current_status)
@@ -191,6 +251,7 @@ def parse_portal_entry_search_html(
     return PortalEntryCheckResult(
         dataset_id=dsid,
         dataset_id_found=dataset_id_found,
+        t_code=t_code,
         can_edit=can_edit,
         can_toggle_status=can_toggle_status,
         can_public_view=can_public_view,
