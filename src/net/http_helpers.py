@@ -49,6 +49,9 @@ def _log_and_execute(method: str, url: str, session: requests.Session, **kwargs)
     response = None
     
     try:
+        from classes.core.offline_mode import validate_online_access_or_raise
+        validate_online_access_or_raise(url)
+
         response = session.request(method, url, **kwargs)
         success = True
         

@@ -156,6 +156,20 @@ class AIManager:
         """プロンプトをAIに送信して応答を取得"""
         import datetime as _dt
 
+        try:
+            from classes.core.offline_mode import (
+                validate_ai_access_or_raise,
+                OfflineAccessBlockedError,
+            )
+            validate_ai_access_or_raise()
+        except OfflineAccessBlockedError as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "provider": provider,
+                "model": model,
+            }
+
         # プロンプト長の制限チェック（文字数ベース）
         max_prompt_length = 50000  # 約12,500トークン相当（4文字=1トークン想定）
         if len(prompt) > max_prompt_length:

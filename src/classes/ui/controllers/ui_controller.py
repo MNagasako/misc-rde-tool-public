@@ -30,6 +30,19 @@ from classes.ui.dialogs.ui_dialogs import TextAreaExpandDialog, PopupDialog
 
 logger = logging.getLogger(__name__)
 
+_MENU_MODE_SITE_MAP = {
+    'subgroup_create': 'rde',
+    'dataset_open': 'rde',
+    'data_register': 'rde',
+    'sample_dedup': 'rde',
+    'data_fetch2': 'rde',
+    'data_fetch': 'rde',
+    'basic_info': 'rde',
+    'data_portal': 'data_portal',
+    'ai_test': 'ai_api',
+    'ai_test2': 'ai_api',
+}
+
 class UIController(UIControllerCore):
     """
     v1.9.8: ARIM拡張結合ロジック強化・デバッグ強化
@@ -306,12 +319,8 @@ class UIController(UIControllerCore):
         except Exception:
             pass
         
-        # 全ボタンを有効化
-        if hasattr(self, 'menu_buttons'):
-            for mode, button in self.menu_buttons.items():
-                if button and hasattr(button, 'setEnabled'):
-                    button.setEnabled(True)
-                    logger.debug(f"[UI] {mode}ボタンを有効化")
+        # 全ボタンを有効化（オフラインサイト制御を考慮）
+        self.set_buttons_enabled_except_login_settings(True)
         
         # 待機メッセージを3秒後に非表示（成功メッセージを見せるため）
         if hasattr(self.parent, 'autologin_msg_label'):
@@ -353,13 +362,59 @@ class UIController(UIControllerCore):
         
         if not hasattr(self, 'menu_buttons'):
             return
+
+        offline_state = self._get_offline_runtime_state()
         
         # ログイン、設定、ヘルプは常に有効
         exclude_modes = {'login', 'settings', 'help'}
         for mode, button in self.menu_buttons.items():
-            if mode not in exclude_modes and button and hasattr(button, 'setEnabled'):
-                button.setEnabled(enabled)
-                logger.debug(f"[UI] {mode}ボタンを{'有効' if enabled else '無効'}化")
+            if not button or not hasattr(button, 'setEnabled'):
+                continue
+
+            if mode in exclude_modes:
+                button.setEnabled(True)
+                continue
+
+            site_blocked = self._is_mode_blocked_by_offline(mode, offline_state)
+            if enabled and getattr(offline_state, 'enabled', False):
+                target_enabled = True
+            else:
+                target_enabled = bool(enabled and not site_blocked)
+            button.setEnabled(target_enabled)
+
+            if site_blocked and hasattr(button, 'setToolTip'):
+                button.setToolTip("オフラインモード: この画面のオンライン操作は一部利用できません。")
+            elif hasattr(button, 'setToolTip'):
+                button.setToolTip("")
+
+            logger.debug(
+                "[UI] %sボタンを%s化 (offline_blocked=%s)",
+                mode,
+                '有効' if target_enabled else '無効',
+                site_blocked,
+            )
+
+    def _get_offline_runtime_state(self):
+        try:
+            from classes.core.offline_mode import get_offline_runtime_state
+            return get_offline_runtime_state()
+        except Exception:
+            class _FallbackState:
+                enabled = False
+                sites = {}
+
+            return _FallbackState()
+
+    def _is_mode_blocked_by_offline(self, mode: str, offline_state) -> bool:
+        try:
+            if not getattr(offline_state, 'enabled', False):
+                return False
+            site_key = _MENU_MODE_SITE_MAP.get(mode)
+            if not site_key:
+                return False
+            return bool(getattr(offline_state, 'sites', {}).get(site_key, False))
+        except Exception:
+            return False
 
     def on_attachment_file_select_clicked(self):
         """
@@ -1056,6 +1111,7 @@ class UIController(UIControllerCore):
         _t0 = time.perf_counter()
 
         is_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
+        offline_state = self._get_offline_runtime_state()
 
         # --- 機能切替時のサイズ制約 ---
         # WebView(ログイン/データ取得)用途のみ横幅固定・アスペクト比固定。
@@ -1110,7 +1166,10 @@ class UIController(UIControllerCore):
         # pytest中はWindows上で不安定化することがあるため、可視状態の強制切替を避ける
         if not is_pytest:
             if hasattr(self.parent, 'autologin_msg_label'):
-                self.parent.autologin_msg_label.setVisible(False)
+                if not getattr(offline_state, 'enabled', False):
+                    self.parent.autologin_msg_label.setVisible(False)
+                else:
+                    self._update_offline_status_banner(offline_state)
             if hasattr(self.parent, 'webview_msg_label'):
                 self.parent.webview_msg_label.setVisible(False)
         
@@ -1472,6 +1531,7 @@ class UIController(UIControllerCore):
 
         # メッセージラベルの位置を動的に調整
         self.update_message_labels_position(mode)
+        self._update_offline_status_banner(offline_state)
         # ウィンドウ高さを内容に合わせて詰める（95%ルールを維持するため無効化）
         # QTimer.singleShot(0, self.adjust_window_height_to_contents)
 
@@ -1496,6 +1556,23 @@ class UIController(UIControllerCore):
                 mode=mode,
                 elapsed_sec=round(time.perf_counter() - _t0, 6),
             )
+
+    def _update_offline_status_banner(self, offline_state=None) -> None:
+        state = offline_state or self._get_offline_runtime_state()
+        if not hasattr(self, 'parent') or not hasattr(self.parent, 'autologin_msg_label'):
+            return
+
+        label = self.parent.autologin_msg_label
+        if not getattr(state, 'enabled', False):
+            return
+
+        try:
+            from classes.core.offline_mode import build_offline_status_message
+
+            label.setText(build_offline_status_message(state))
+            label.setVisible(True)
+        except Exception:
+            pass
 
     def _refresh_webview_after_show(self):
         """WebViewの背景色と再描画を強制して黒化を緩和する（実行はdata_fetch復帰直後）。"""

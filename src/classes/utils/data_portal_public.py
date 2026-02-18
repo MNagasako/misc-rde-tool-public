@@ -14,10 +14,10 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 from bs4 import BeautifulSoup
 
 from classes.data_portal.util.public_output_paths import get_public_data_portal_cache_dir, get_public_data_portal_root_dir
+from classes.managers.app_config_manager import get_config_manager
 from net.http_helpers import proxy_get, proxy_post
 
 PROD_BASE = "https://nanonet.go.jp/data_service/arim_data.php"
-TEST_BASE = "https://dq5rggbsr2dkt.cloudfront.net/test.nanonet.go.jp/data_service/arim_data.php"
 
 logger = logging.getLogger(__name__)
 
@@ -243,10 +243,10 @@ def migrate_public_data_portal_cache_dir(
 def build_public_detail_url(environment: str, code: str, key: str) -> str:
     """Build ARIM Data Portal public detail URL for given environment.
     - production -> nanonet.go.jp
-    - test -> CloudFront base with test.nanonet.go.jp path
+    - test -> 設定された公開テストURL
     Fallback to production pattern if unknown environment.
     """
-    base = PROD_BASE if environment == "production" else TEST_BASE if environment == "test" else PROD_BASE
+    base = _get_public_search_url(environment)
     join = "?mode=detail&code={code}&key={key}"
     return f"{base}{join.format(code=code, key=key)}"
 
@@ -330,7 +330,22 @@ class PublicArimDataDetail:
 
 
 def _get_public_search_url(environment: str) -> str:
-    return PROD_BASE if environment == "production" else TEST_BASE if environment == "test" else PROD_BASE
+    env = str(environment or "production").strip().lower()
+    if env == "production":
+        return PROD_BASE
+    if env == "test":
+        test_base = _get_data_portal_test_base_url()
+        return test_base or PROD_BASE
+    return PROD_BASE
+
+
+def _get_data_portal_test_base_url() -> str:
+    try:
+        cfg = get_config_manager()
+        value = str(cfg.get("data_portal.test_base_url", "") or "").strip()
+        return value
+    except Exception:
+        return ""
 
 
 def _get_data_service_root_url(search_url: str) -> str:

@@ -249,6 +249,8 @@ class Browser(QWidget):
         self.grant_btn = None
         # 設定管理から自動ログイン設定を取得
         self.auto_login_enabled = self.config_manager.get("app.auto_login_enabled", False)
+        self._offline_startup_prompted = False
+        self._offline_outage_prompted = False
 
     def _connect_webengine_diagnostics(self, page=None):
         """QtWebEngineの異常検知シグナルを接続する。
@@ -492,6 +494,10 @@ class Browser(QWidget):
         """
         try:
             logger.info("[TOKEN-CHECK] 起動時トークン確認開始")
+
+            # オフラインモードが有効な場合は、ログインチェック前に方針確認
+            if self._handle_startup_offline_mode_prompt():
+                return
             
             # デバッグモード確認
             debug_skip = os.environ.get('DEBUG_SKIP_LOGIN_CHECK', '').lower() in ('1', 'true', 'yes')
@@ -538,6 +544,10 @@ class Browser(QWidget):
                 
                 self.autologin_msg_label.setText(f"⚠️ {msg}")
                 self.autologin_msg_label.setVisible(True)
+
+                # サイト停止等の異常時はオフライン移行を提案
+                if self._offer_offline_mode_for_rde_outage():
+                    return
                 
                 # UI無効化（ログインと設定以外）
                 if hasattr(self, 'ui_controller'):
@@ -554,6 +564,92 @@ class Browser(QWidget):
                     
         except Exception as e:
             logger.error(f"[TOKEN-CHECK] 起動時トークン確認エラー: {e}", exc_info=True)
+
+    def _handle_startup_offline_mode_prompt(self) -> bool:
+        """オフライン起動時にオンラインへ戻すか確認し、必要なら初期処理を打ち切る。"""
+        try:
+            from classes.core.offline_mode import (
+                build_offline_status_message,
+                get_offline_runtime_state,
+                set_offline_mode,
+            )
+            from qt_compat.widgets import QMessageBox
+
+            state = get_offline_runtime_state()
+            if not state.enabled:
+                return False
+
+            if (not self._offline_startup_prompted) and (not os.environ.get("PYTEST_CURRENT_TEST")):
+                self._offline_startup_prompted = True
+                answer = QMessageBox.question(
+                    self,
+                    "オフラインモード起動",
+                    "現在、オフラインモードが有効です。\n"
+                    "オンラインモードへ戻しますか？",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No,
+                )
+                if answer == QMessageBox.StandardButton.Yes:
+                    set_offline_mode(False, persist=True)
+                    self.autologin_msg_label.setText("🌐 オンラインモードへ切り替えました。ログイン状態を確認します。")
+                    self.autologin_msg_label.setVisible(True)
+                    return False
+
+            self.autologin_msg_label.setText(build_offline_status_message(state))
+            self.autologin_msg_label.setVisible(True)
+
+            if hasattr(self, 'ui_controller'):
+                self.ui_controller.set_buttons_enabled_except_login_settings(True)
+            return True
+        except Exception as e:
+            logger.warning("オフライン起動確認処理エラー: %s", e)
+            return False
+
+    def _offer_offline_mode_for_rde_outage(self) -> bool:
+        """RDE停止検知時にオフライン移行を確認する。"""
+        if self._offline_outage_prompted:
+            return False
+
+        self._offline_outage_prompted = True
+
+        try:
+            from classes.core.offline_mode import (
+                check_rde_service_health,
+                enable_offline_mode_for_sites,
+            )
+            from qt_compat.widgets import QMessageBox
+
+            healthy, reason = check_rde_service_health(timeout=8)
+            if healthy:
+                return False
+
+            if os.environ.get("PYTEST_CURRENT_TEST"):
+                return False
+
+            answer = QMessageBox.question(
+                self,
+                "RDE接続異常",
+                "RDEサイトが停止中または想定外の応答です。\n"
+                f"詳細: {reason}\n\n"
+                "RDE向け機能をオフラインモードに移行しますか？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+
+            if answer != QMessageBox.StandardButton.Yes:
+                return False
+
+            if not enable_offline_mode_for_sites(['rde'], persist=True):
+                return False
+
+            self.autologin_msg_label.setText("📴 RDE停止を検知したため、オフラインモードへ移行しました。")
+            self.autologin_msg_label.setVisible(True)
+            if hasattr(self, 'ui_controller'):
+                self.ui_controller.set_buttons_enabled_except_login_settings(True)
+            return True
+        except Exception as e:
+            logger.warning("RDE障害時オフライン移行確認エラー: %s", e)
+            return False
 
 
     def switch_mode(self, mode):

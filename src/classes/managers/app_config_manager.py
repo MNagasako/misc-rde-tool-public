@@ -105,6 +105,12 @@ class AppConfigManager:
                 "compression_enabled": True,
                 "backup_enabled": True
             },
+
+            # データポータル設定
+            "data_portal": {
+                # テスト環境URLは固定値をコードに持たず設定から供給する
+                "test_base_url": ""
+            },
             
             # 自動ログイン設定（v1.16追加）
             "autologin": {
@@ -112,6 +118,17 @@ class AppConfigManager:
                 "credential_storage": "auto",  # auto | os_keychain | encrypted_file | legacy_file | none
                 "warn_on_legacy_file": True,
                 "remember_credentials": True
+            },
+
+            # オフラインモード設定
+            "offline": {
+                "enabled": False,
+                "sites": {
+                    "rde": True,
+                    "data_portal": True,
+                    "data_portal_test": True,
+                    "ai_api": True
+                }
             },
 
             # メール設定（Gmailを先行実装）

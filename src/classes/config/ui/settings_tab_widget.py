@@ -98,6 +98,9 @@ class SettingsTabWidget(QWidget):
         # トークン状態タブ
         self.setup_token_status_tab()
 
+        # オフライン設定タブ
+        self.setup_offline_tab()
+
         # データ構造化タブ（アップロード + 解析結果表示）
         self.setup_data_structuring_tab()
 
@@ -792,6 +795,11 @@ class SettingsTabWidget(QWidget):
                 self.ai_widget.save_settings()
                 applied_settings.append("AI設定")
 
+            # オフライン設定の適用
+            if hasattr(self, 'offline_widget') and hasattr(self.offline_widget, 'apply_settings'):
+                self.offline_widget.apply_settings()
+                applied_settings.append("オフライン")
+
             # メール設定の適用
             if hasattr(self, 'mail_widget') and hasattr(self.mail_widget, 'save_settings'):
                 self.mail_widget.save_settings()
@@ -829,6 +837,11 @@ class SettingsTabWidget(QWidget):
             if hasattr(self, 'ai_widget') and hasattr(self.ai_widget, 'load_current_settings'):
                 self.ai_widget.load_current_settings()
                 reloaded_settings.append("AI設定")
+
+            # オフライン設定の再読み込み
+            if hasattr(self, 'offline_widget') and hasattr(self.offline_widget, '_load_settings'):
+                self.offline_widget._load_settings()
+                reloaded_settings.append("オフライン")
 
             # メール設定の再読み込み
             if hasattr(self, 'mail_widget') and hasattr(self.mail_widget, 'load_current_settings'):
@@ -872,6 +885,23 @@ class SettingsTabWidget(QWidget):
             l.addWidget(QLabel(str(e)))
             l.addStretch(1)
             self._add_scroll_tab(fallback, "MISC")
+
+    def setup_offline_tab(self):
+        """オフラインタブ"""
+        try:
+            from classes.config.ui.offline_mode_tab import OfflineModeTab
+
+            self.offline_widget = OfflineModeTab(self)
+            self._add_scroll_tab(self.offline_widget, "オフライン")
+        except Exception as e:
+            logger.warning("オフラインタブのロードに失敗: %s", e)
+            fallback = QWidget()
+            l = QVBoxLayout(fallback)
+            l.setContentsMargins(20, 20, 20, 20)
+            l.addWidget(QLabel("オフラインタブの読み込みに失敗しました。"))
+            l.addWidget(QLabel(str(e)))
+            l.addStretch(1)
+            self._add_scroll_tab(fallback, "オフライン")
 
     def setup_autologin_tab(self):
         """自動ログインタブを設定"""

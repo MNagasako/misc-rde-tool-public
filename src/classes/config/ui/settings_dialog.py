@@ -98,6 +98,11 @@ class SettingsDialog(QDialog):
         logger.info("setup_ui: アプリケーション設定タブ作成開始")
         self.setup_application_tab()
         logger.info("setup_ui: アプリケーション設定タブ作成完了")
+
+        # オフラインモード設定タブ
+        logger.info("setup_ui: オフラインモード設定タブ作成開始")
+        self.setup_offline_tab()
+        logger.info("setup_ui: オフラインモード設定タブ作成完了")
         
         # AI設定タブ
         logger.info("setup_ui: AI設定タブ作成開始")
@@ -387,6 +392,44 @@ class SettingsDialog(QDialog):
             self.autologin_widget = autologin_widget
             self.tab_widget.addTab(autologin_scroll, "自動ログイン")
             logger.info("setup_autologin_tab: フォールバック自動ログインタブ追加成功")
+
+    def setup_offline_tab(self):
+        """オフラインモード設定タブ"""
+        logger.info("setup_offline_tab: 開始")
+        try:
+            from classes.config.ui.offline_mode_tab import OfflineModeTab
+
+            offline_widget = OfflineModeTab(self)
+            offline_scroll = QScrollArea()
+            offline_scroll.setWidgetResizable(True)
+            offline_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            offline_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            offline_scroll.setWidget(offline_widget)
+
+            self.offline_widget = offline_widget
+            self.tab_widget.addTab(offline_scroll, "オフライン")
+            logger.info("setup_offline_tab: オフラインタブ追加成功")
+        except Exception as e:
+            logger.warning(f"オフラインタブの作成に失敗: {e}")
+            offline_widget = QWidget()
+            layout = QVBoxLayout(offline_widget)
+            info = QLabel(
+                "オフラインモード設定タブの読み込みに失敗しました。\n"
+                "依存関係や環境を確認してください。"
+            )
+            info.setWordWrap(True)
+            layout.addWidget(info)
+            layout.addStretch()
+
+            offline_scroll = QScrollArea()
+            offline_scroll.setWidgetResizable(True)
+            offline_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            offline_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            offline_scroll.setWidget(offline_widget)
+
+            self.offline_widget = offline_widget
+            self.tab_widget.addTab(offline_scroll, "オフライン")
+            logger.info("setup_offline_tab: フォールバックオフラインタブ追加成功")
     
     def setup_misc_tab(self):
         """MISC（その他）タブ"""
@@ -821,6 +864,10 @@ class SettingsDialog(QDialog):
             # 自動ログイン設定の適用
             if hasattr(self.autologin_widget, 'apply_settings'):
                 self.autologin_widget.apply_settings()
+
+            # オフライン設定の適用
+            if hasattr(self, 'offline_widget') and hasattr(self.offline_widget, 'apply_settings'):
+                self.offline_widget.apply_settings()
                 
             QMessageBox.information(self, "設定適用", "設定が適用されました。")
             
