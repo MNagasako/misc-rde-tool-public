@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-**ARIM事業 RDE→ARIMデータポータル支援ツール v2.5.15** のバイナリ配布およびドキュメント公開用リポジトリです。
+**ARIM事業 RDE→ARIMデータポータル支援ツール v2.5.16** のバイナリ配布およびドキュメント公開用リポジトリです。
 本ツールは、文部科学省ARIM事業の研究データ共有サイト「RDE」の操作補助とデータポータルへの登録支援を目的とした Windows デスクトップアプリケーションです。Web操作の煩雑さを軽減し、データの一括取得・登録・AI支援機能を提供します。
 
 > [!NOTE]
@@ -22,18 +22,18 @@
 
 ## 🚀 最新情報
 
-**2026-02-17 最新リリース**: バージョン2.5.15
+**2026-02-18 最新リリース**: バージョン2.5.16
 
-### v2.5.15 の主な変更点
+### v2.5.16 の主な変更点
 
-- **更新配布**: `arim_rde_tool_setup.2.5.15.exe` を公開し、`latest.json` / `checksums.sha256` を同版に整合。
+- **更新配布**: `arim_rde_tool_setup.2.5.16.exe` を公開し、`latest.json` / `checksums.sha256` を同版に整合。
 - **データ取得2（DP）改善**: 一括取得のローカル優先検索を強化し、再検索時の遅延を低減。
 - **列補完改善**: サブグループ/登録者/試料（表示名）/試料（UUID）の空欄発生を低減。
 
 ## ✅ 最短利用ガイド
 
 1. **できること**: RDE操作補助、データポータル連携、AI支援を1つのWindowsアプリで実行できます。
-2. **インストール**: Releases から `arim_rde_tool_setup.2.5.15.exe` を実行するだけで導入できます。
+2. **インストール**: Releases から `arim_rde_tool_setup.2.5.16.exe` を実行するだけで導入できます。
 3. **更新**: Releases の最新版を取得し上書きインストールします（`latest.json` と `checksums.sha256` で整合確認）。
 4. **注意点**: 非公式ツールのため、サイト仕様変更時は動作影響が出る可能性があります。
 
@@ -52,7 +52,7 @@
 3. デスクトップに作成されたショートカットからアプリを起動します。
 4. 初回起動時、必要なフォルダ（`input/`, `output/`）が自動的に作成されます。
 
-> ✅ 現在のファイル名は `arim_rde_tool_setup.2.5.15.exe` です（改変チェックは `latest.json` の `sha256` または `checksums.sha256` を参照）。
+> ✅ 現在のファイル名は `arim_rde_tool_setup.2.5.16.exe` です（改変チェックは `latest.json` の `sha256` または `checksums.sha256` を参照）。
 #### 最新版バイナリへの直接リンク
 
 最新版: https://github.com/MNagasako/misc-rde-tool-public/releases/latest
@@ -144,7 +144,7 @@
 
 ## 🔢 バージョン情報
 
-現在配布バージョン: `v2.5.15` （`VERSION.txt` に基づく）
+現在配布バージョン: `v2.5.16`
 
 更新履歴の詳細は `docs/CHANGELOG.md` を参照してください。
 
