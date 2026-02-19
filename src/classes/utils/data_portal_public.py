@@ -257,6 +257,7 @@ _PUBLIC_FIELD_LABEL_TO_KEY: dict[str, str] = {
     "課題番号": "project_number",
     "データセット登録者": "dataset_registrant",
     "登録者": "dataset_registrant",
+    "データセット登録者（所属機関）": "dataset_registrant",
     "実施機関": "organization",
     "登録日": "registered_date",
     "エンバーゴ解除日": "embargo_release_date",
@@ -270,6 +271,7 @@ _PUBLIC_FIELD_LABEL_TO_KEY: dict[str, str] = {
     "ファイルサイズ": "total_file_size",
     # ライセンス
     "ライセンス": "license",
+    "DOI": "doi",
     # 技術領域
     "重要技術領域（主）": "key_technology_area_primary",
     "重要技術領域（副）": "key_technology_area_secondary",
@@ -503,6 +505,94 @@ def _extract_dataset_title(soup: BeautifulSoup) -> str:
     return ""
 
 
+def _extract_project_title(soup: BeautifulSoup) -> str:
+    for tag_name in ("h2", "h3", "h4"):
+        for header in soup.find_all(tag_name):
+            txt = header.get_text(" ", strip=True)
+            if txt.startswith("課題名"):
+                parts = re.split(r"[：:]", txt, maxsplit=1)
+                if len(parts) == 2 and parts[1].strip():
+                    return parts[1].strip()
+    return ""
+
+
+def _extract_dataset_registrant(soup: BeautifulSoup) -> str:
+    node = soup.find(id="mainSetPerson")
+    if node is None:
+        return ""
+    txt = node.get_text(" ", strip=True)
+    if not txt:
+        return ""
+    parts = re.split(r"[：:]", txt, maxsplit=1)
+    if len(parts) == 2 and parts[1].strip():
+        return parts[1].strip()
+    return txt
+
+
+def _extract_input_submit_values(node: BeautifulSoup) -> list[str]:
+    values: list[str] = []
+    for inp in node.find_all("input"):
+        typ = str(inp.get("type") or "").strip().lower()
+        if typ != "submit":
+            continue
+        value = str(inp.get("value") or "").strip()
+        if value:
+            values.append(value)
+    return values
+
+
+def _extract_node_value(node: BeautifulSoup) -> str:
+    text = node.get_text(" ", strip=True).strip()
+    if text:
+        return text
+
+    submit_values = _extract_input_submit_values(node)
+    if submit_values:
+        return ", ".join(submit_values)
+
+    hrefs: list[str] = []
+    for a in node.find_all("a", href=True):
+        href = str(a.get("href") or "").strip()
+        if href:
+            hrefs.append(href)
+    if hrefs:
+        return ", ".join(hrefs)
+
+    return ""
+
+
+def _extract_dt_label(dt: BeautifulSoup) -> str:
+    label = dt.get_text(" ", strip=True).strip().strip("：:")
+    if label:
+        return label
+    submit_values = _extract_input_submit_values(dt)
+    if submit_values:
+        return str(submit_values[0]).strip().strip("：:")
+    return ""
+
+
+def _extract_dl_values_for_label(soup: BeautifulSoup, *, label_name: str) -> list[str]:
+    target = str(label_name or "").strip().strip("：:")
+    if not target:
+        return []
+    values: list[str] = []
+    for dt in soup.find_all("dt"):
+        label = _extract_dt_label(dt)
+        if label != target:
+            continue
+        sib = dt.find_next_sibling()
+        while sib is not None and getattr(sib, "name", None) == "dd":
+            value = _extract_node_value(sib)
+            if value:
+                values.append(value)
+            sib = sib.find_next_sibling()
+    deduped: list[str] = []
+    for value in values:
+        if value not in deduped:
+            deduped.append(value)
+    return deduped
+
+
 def _extract_key_value_list(soup: BeautifulSoup, *, section_title: str) -> dict[str, str]:
     # 見出し直下のli/strong形式を収集
     header = soup.find(lambda t: t.name in {"h2", "h3", "h4", "h5"} and t.get_text(strip=True) == section_title)
@@ -531,6 +621,24 @@ def _extract_key_value_list(soup: BeautifulSoup, *, section_title: str) -> dict[
             if value and label not in out:
                 out[label] = value
 
+        for dl in current.find_all("dl"):
+            dts = dl.find_all("dt")
+            for dt in dts:
+                label = _extract_dt_label(dt)
+                if not label:
+                    continue
+                if label in out:
+                    continue
+                values: list[str] = []
+                sib = dt.find_next_sibling()
+                while sib is not None and getattr(sib, "name", None) == "dd":
+                    value = _extract_node_value(sib)
+                    if value:
+                        values.append(value)
+                    sib = sib.find_next_sibling()
+                if values:
+                    out[label] = ", ".join(values)
+
     return out
 
 
@@ -543,10 +651,10 @@ def _extract_dl_key_values(soup: BeautifulSoup) -> dict[str, str]:
             dd = dt.find_next_sibling("dd")
             if dd is None:
                 continue
-            label = dt.get_text(" ", strip=True).strip().strip("：:")
+            label = _extract_dt_label(dt)
             if not label or label in out:
                 continue
-            value = dd.get_text(" ", strip=True).strip()
+            value = _extract_node_value(dd)
             if value:
                 out[label] = value
     return out
@@ -590,6 +698,9 @@ def _extract_section_text(soup: BeautifulSoup, *, section_title: str) -> str:
         txt = current.get_text(" ", strip=True)
         if txt:
             chunks.append(txt)
+        submit_values = _extract_input_submit_values(current)
+        if submit_values:
+            chunks.extend(submit_values)
     return "\n".join(chunks).strip()
 
 
@@ -612,6 +723,22 @@ def _extract_summary(soup: BeautifulSoup) -> str:
             break
         if getattr(current, "name", None) in {"h2", "h3", "h4", "h5"}:
             break
+        try:
+            current_id = str(current.get("id") or "").strip()
+            current_classes = [str(c) for c in (current.get("class") or [])]
+        except Exception:
+            current_id = ""
+            current_classes = []
+        if current_id == "mainSetVisual" or "mainSetTag" in current_classes:
+            break
+        try:
+            dt = current.find("dt")
+            if dt is not None:
+                dt_text = dt.get_text(" ", strip=True)
+                if dt_text.startswith(("重要技術領域", "横断技術領域", "マテリアルインデックス", "キーワードタグ")):
+                    break
+        except Exception:
+            pass
         txt = current.get_text(" ", strip=True)
         if txt:
             chunks.append(txt)
@@ -621,6 +748,8 @@ def _extract_summary(soup: BeautifulSoup) -> str:
 def parse_public_arim_data_detail(html: str, *, page_url: str) -> PublicArimDataDetail:
     soup = BeautifulSoup(html, "html.parser")
     title = _extract_dataset_title(soup)
+    project_title = _extract_project_title(soup)
+    dataset_registrant = _extract_dataset_registrant(soup)
 
     # ページ全体のli/strongからも拾える分を raw_fields に入れる（網羅的）
     raw_fields: dict[str, str] = {}
@@ -640,6 +769,35 @@ def parse_public_arim_data_detail(html: str, *, page_url: str) -> PublicArimData
     # <dl> と <table> 由来の項目も拾う（ページによってはli/strongが無い）
     _merge_missing(raw_fields, _extract_dl_key_values(soup))
     _merge_missing(raw_fields, _extract_table_key_values(soup))
+
+    if project_title and "課題名" not in raw_fields:
+        raw_fields["課題名"] = project_title
+    if dataset_registrant and "データセット登録者（所属機関）" not in raw_fields:
+        raw_fields["データセット登録者（所属機関）"] = dataset_registrant
+
+    for label in (
+        "重要技術領域（主）",
+        "重要技術領域（副）",
+        "横断技術領域",
+        "マテリアルインデックス",
+        "キーワードタグ",
+        "ライセンス",
+        "DOI",
+    ):
+        values = _extract_dl_values_for_label(soup, label_name=label)
+        if not values:
+            continue
+        existing = str(raw_fields.get(label) or "").strip()
+        merged: list[str] = []
+        if existing:
+            merged.extend([p.strip() for p in existing.split(",") if p.strip()])
+        merged.extend(values)
+        deduped: list[str] = []
+        for part in merged:
+            if part and part not in deduped:
+                deduped.append(part)
+        if deduped:
+            raw_fields[label] = ", ".join(deduped)
 
     raw_data_metrics = _extract_key_value_list(soup, section_title="データメトリックス")
     raw_data_index = _extract_key_value_list(soup, section_title="データインデックス")

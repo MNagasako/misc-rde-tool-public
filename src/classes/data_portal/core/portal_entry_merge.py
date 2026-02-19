@@ -24,6 +24,9 @@ import unicodedata
 from config.common import get_dynamic_file_path
 
 
+_DATASET_DETAIL_CACHE: dict[str, Optional[dict[str, Any]]] = {}
+
+
 def _to_str(value: Any) -> str:
     if value is None:
         return ""
@@ -79,17 +82,72 @@ def _build_user_label_map_from_included_users(payload: Any) -> dict[str, str]:
     return result
 
 
+def _load_dataset_detail_payload(dataset_id: str) -> Optional[dict[str, Any]]:
+    dsid = _to_str(dataset_id or "").strip()
+    if not dsid:
+        return None
+    if dsid in _DATASET_DETAIL_CACHE:
+        return _DATASET_DETAIL_CACHE.get(dsid)
+
+    detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dsid}.json")
+    if not detail_path or not os.path.exists(detail_path):
+        _DATASET_DETAIL_CACHE[dsid] = None
+        return None
+    try:
+        with open(detail_path, "r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+        if not isinstance(payload, dict):
+            payload = None
+    except Exception:
+        payload = None
+
+    _DATASET_DETAIL_CACHE[dsid] = payload
+    return payload
+
+
+def _compact_date_text(value: Any) -> str:
+    text = _to_str(value).strip()
+    if not text:
+        return ""
+    normalized = text.replace("T", " ")
+    normalized = normalized.replace(".", "-").replace("/", "-")
+    match = re.match(r"^(\d{4}-\d{1,2}-\d{1,2})", normalized)
+    if match:
+        parts = match.group(1).split("-")
+        if len(parts) == 3:
+            y, m, d = parts
+            try:
+                return f"{int(y):04d}-{int(m):02d}-{int(d):02d}"
+            except Exception:
+                return match.group(1)
+    return text
+
+
+def _normalize_date_columns(row: dict[str, Any]) -> None:
+    for key in ("opened_date", "registered_date", "embargo_release_date", "updated_date"):
+        value = _to_str(row.get(key) or "").strip()
+        if not value:
+            continue
+        normalized = _compact_date_text(value)
+        if normalized:
+            row[key] = normalized
+
+
+def _set_if_missing(row: dict[str, Any], key: str, value: Any) -> None:
+    current = _to_str(row.get(key) or "").strip()
+    if current:
+        return
+    incoming = _to_str(value).strip()
+    if incoming:
+        row[key] = incoming
+
+
 def _resolve_dataset_manager_label(dataset_id: str) -> str:
     dsid = _to_str(dataset_id or "").strip()
     if not dsid:
         return ""
-    detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dsid}.json")
-    if not detail_path or not os.path.exists(detail_path):
-        return ""
-    try:
-        with open(detail_path, "r", encoding="utf-8") as handle:
-            payload = json.load(handle)
-    except Exception:
+    payload = _load_dataset_detail_payload(dsid)
+    if not isinstance(payload, dict):
         return ""
 
     relationships = ((payload.get("data") or {}).get("relationships") or {})
@@ -129,16 +187,34 @@ def normalize_public_record(record: dict) -> dict[str, Any]:
         "dataset_name": _to_str(record.get("title") or "").strip(),
         "summary": _to_str(record.get("summary") or "").strip(),
         "url": _to_str(record.get("url") or record.get("detail_url") or "").strip(),
+        "outcomes_publications_and_use": "",
+        "equipment_links": [],
+        "thumbnails": [],
     }
+
+    try:
+        equip = record.get("equipment_links")
+        if isinstance(equip, list):
+            row["equipment_links"] = [e for e in equip if isinstance(e, dict)]
+    except Exception:
+        pass
+    try:
+        thumbs = record.get("thumbnails")
+        if isinstance(thumbs, list):
+            row["thumbnails"] = [str(v) for v in thumbs if str(v or "").strip()]
+    except Exception:
+        pass
 
     for k in (
         "project_title",
         "project_number",
         "dataset_registrant",
         "organization",
+        "updated_date",
         "registered_date",
         "embargo_release_date",
         "license",
+        "doi",
         "key_technology_area_primary",
         "key_technology_area_secondary",
         "crosscutting_technology_area",
@@ -159,8 +235,13 @@ def normalize_public_record(record: dict) -> dict[str, Any]:
         "total_file_size",
         "data_tile_count",
     ):
-        if k in metrics_raw and metrics_raw.get(k) not in (None, ""):
-            row[k] = metrics_raw.get(k)
+        value = metrics_raw.get(k) if isinstance(metrics_raw, dict) else None
+        if value in (None, ""):
+            value = fields_raw.get(k) if isinstance(fields_raw, dict) else None
+        if value in (None, ""):
+            value = fields.get(k) if isinstance(fields, dict) else None
+        if value not in (None, ""):
+            row[k] = value
 
     return row
 
@@ -320,6 +401,73 @@ def merge_public_and_managed(
         return None
 
     def _apply_dataset_manager(row: dict[str, Any]) -> None:
+        dataset_id = _to_str(row.get("dataset_id") or "").strip()
+        payload = _load_dataset_detail_payload(dataset_id)
+        row["_has_rde_detail"] = bool(isinstance(payload, dict))
+
+        attrs = ((payload.get("data") or {}).get("attributes") or {}) if isinstance(payload, dict) else {}
+        meta = ((payload.get("data") or {}).get("meta") or {}) if isinstance(payload, dict) else {}
+        relationships = ((payload.get("data") or {}).get("relationships") or {}) if isinstance(payload, dict) else {}
+        user_labels = _build_user_label_map_from_included_users(payload) if isinstance(payload, dict) else {}
+
+        _set_if_missing(row, "project_number", attrs.get("grantNumber"))
+        _set_if_missing(row, "project_title", attrs.get("subjectTitle"))
+        _set_if_missing(row, "dataset_name", attrs.get("name"))
+        _set_if_missing(row, "summary", attrs.get("description"))
+        _set_if_missing(row, "opened_date", _compact_date_text(attrs.get("openAt") or attrs.get("created")))
+        _set_if_missing(row, "embargo_release_date", _compact_date_text(attrs.get("embargoDate")))
+        _set_if_missing(row, "data_tile_count", meta.get("dataCount"))
+
+        manager_id = _to_str((((relationships.get("manager") or {}).get("data") or {}).get("id") or "")).strip()
+        applicant_id = _to_str((((relationships.get("applicant") or {}).get("data") or {}).get("id") or "")).strip()
+        manager_label = _to_str(user_labels.get(manager_id) or "").strip() if manager_id else ""
+        applicant_label = _to_str(user_labels.get(applicant_id) or "").strip() if applicant_id else ""
+        applicant_org = ""
+        manager_org = ""
+        if applicant_label:
+            m = re.search(r"\(([^()]+)\)\s*$", applicant_label)
+            if m:
+                applicant_org = _to_str(m.group(1) or "").strip()
+        if manager_label:
+            m = re.search(r"\(([^()]+)\)\s*$", manager_label)
+            if m:
+                manager_org = _to_str(m.group(1) or "").strip()
+
+        # 優先順位: RDE > CSV > スクレイピング
+        # RDE側で取得できた値は既存値を上書きする。
+        rde_priority_values = {
+            "project_number": _to_str(attrs.get("grantNumber") or "").strip(),
+            "project_title": _to_str(attrs.get("subjectTitle") or "").strip(),
+            "dataset_name": _to_str(attrs.get("name") or "").strip(),
+            "summary": _to_str(attrs.get("description") or "").strip(),
+            "opened_date": _compact_date_text(attrs.get("openAt") or attrs.get("created")),
+            "updated_date": _compact_date_text(attrs.get("modified")),
+            "embargo_release_date": _compact_date_text(attrs.get("embargoDate")),
+            "data_tile_count": _to_str(meta.get("dataCount") or "").strip(),
+            "dataset_manager": manager_label or applicant_label,
+            "dataset_registrant": applicant_label or manager_label,
+            "organization": applicant_org or manager_org,
+        }
+        for key, value in rde_priority_values.items():
+            if _to_str(value).strip():
+                row[key] = value
+
+        if not _to_str(row.get("organization") or "").strip():
+            org = ""
+            for uid in (applicant_id, manager_id):
+                if not uid:
+                    continue
+                label = _to_str(user_labels.get(uid) or "").strip()
+                if not label:
+                    continue
+                m = re.search(r"\(([^()]+)\)\s*$", label)
+                if m:
+                    org = _to_str(m.group(1) or "").strip()
+                    if org:
+                        break
+            if org:
+                row["organization"] = org
+
         if not _to_str(row.get("dataset_manager") or "").strip():
             label = _resolve_dataset_manager_label(_to_str(row.get("dataset_id") or ""))
             if label:
@@ -328,6 +476,8 @@ def merge_public_and_managed(
             manager = _to_str(row.get("dataset_manager") or "").strip()
             if manager:
                 row["dataset_registrant"] = manager
+
+        _normalize_date_columns(row)
 
     for pub in public_rows:
         code = _to_str(pub.get("code") or "").strip()
@@ -359,10 +509,12 @@ def merge_public_and_managed(
             "organization",
             "dataset_manager",
             "opened_date",
+            "updated_date",
             "registered_date",
             "embargo_release_date",
             "data_tile_count",
             "license",
+            "doi",
             "keyword_tags",
         )
 

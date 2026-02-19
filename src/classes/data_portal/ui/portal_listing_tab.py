@@ -17,7 +17,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -64,6 +64,25 @@ LOGGER = logging.getLogger(__name__)
 
 
 class _SourceAwareProxyModel(ListingFilterProxyModel):
+    _RANGE_DATE_LABELS: set[str] = {
+        "開始日",
+        "開設日",
+        "登録日",
+        "エンバーゴ解除日",
+        "データ最終更新日",
+        "データ登録日",
+        "最終更新日",
+    }
+    _RANGE_NUMERIC_LABELS: set[str] = {
+        "データタイル数",
+        "DL数",
+        "ダウンロード数",
+        "ファイルサイズ",
+        "ファイル数",
+        "ページビュー",
+        "閲覧数",
+    }
+
     def __init__(self, parent: Optional[QtCore.QObject] = None):
         super().__init__(parent)
         # all: 全て（公開+管理）
@@ -75,6 +94,149 @@ class _SourceAwareProxyModel(ListingFilterProxyModel):
 
         self._column_filters: dict[int, str] = {}
         self._column_filter_patterns: dict[int, list[re.Pattern]] = {}
+
+    @classmethod
+    def _normalize_header_label(cls, label: str) -> str:
+        text = str(label or "").strip()
+        if text.startswith("【") and text.endswith("】") and len(text) > 2:
+            text = text[1:-1]
+        text = text.replace(" ", "").replace("　", "")
+        return text
+
+    @classmethod
+    def _is_date_range_label(cls, label: str) -> bool:
+        return cls._normalize_header_label(label) in cls._RANGE_DATE_LABELS
+
+    @classmethod
+    def _is_numeric_range_label(cls, label: str) -> bool:
+        return cls._normalize_header_label(label) in cls._RANGE_NUMERIC_LABELS
+
+    @staticmethod
+    def _is_structured_range_query(text: str) -> bool:
+        raw = str(text or "")
+        return any(token in raw for token in (">=", "<=", "..", "〜", "～", "~")) or raw.strip().startswith((">", "<", "="))
+
+    @staticmethod
+    def _parse_date_value(value: str) -> Optional[date]:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        matched = re.search(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})", text)
+        if not matched:
+            return None
+        try:
+            return date(int(matched.group(1)), int(matched.group(2)), int(matched.group(3)))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _parse_numeric_value(value: str) -> Optional[float]:
+        text = str(value or "").strip()
+        if not text:
+            return None
+
+        bytes_match = re.search(r"([\d,]+)\s*bytes", text, flags=re.IGNORECASE)
+        if bytes_match:
+            try:
+                return float(bytes_match.group(1).replace(",", ""))
+            except Exception:
+                pass
+
+        matched = re.search(r"[-+]?\d[\d,]*(?:\.\d+)?", text)
+        if not matched:
+            return None
+        try:
+            return float(matched.group(0).replace(",", ""))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _split_range_query(text: str) -> Optional[tuple[str, str]]:
+        raw = str(text or "").strip()
+        if ".." in raw:
+            lhs, rhs = raw.split("..", 1)
+            return lhs.strip(), rhs.strip()
+        for sep in ("〜", "～", "~"):
+            if sep in raw:
+                lhs, rhs = raw.split(sep, 1)
+                return lhs.strip(), rhs.strip()
+        return None
+
+    def _matches_date_range(self, cell_value: str, query: str) -> Optional[bool]:
+        if not self._is_structured_range_query(query):
+            return None
+        current = self._parse_date_value(cell_value)
+        if current is None:
+            return False
+
+        range_parts = self._split_range_query(query)
+        if range_parts is not None:
+            from_s, to_s = range_parts
+            from_d = self._parse_date_value(from_s)
+            to_d = self._parse_date_value(to_s)
+            if from_d is None and to_d is None:
+                return None
+            if from_d is not None and current < from_d:
+                return False
+            if to_d is not None and current > to_d:
+                return False
+            return True
+
+        expr = str(query or "").strip()
+        for op in (">=", "<=", ">", "<", "="):
+            if not expr.startswith(op):
+                continue
+            target = self._parse_date_value(expr[len(op) :].strip())
+            if target is None:
+                return None
+            if op == ">=":
+                return current >= target
+            if op == "<=":
+                return current <= target
+            if op == ">":
+                return current > target
+            if op == "<":
+                return current < target
+            return current == target
+        return None
+
+    def _matches_numeric_range(self, cell_value: str, query: str) -> Optional[bool]:
+        if not self._is_structured_range_query(query):
+            return None
+        current = self._parse_numeric_value(cell_value)
+        if current is None:
+            return False
+
+        range_parts = self._split_range_query(query)
+        if range_parts is not None:
+            from_s, to_s = range_parts
+            from_n = self._parse_numeric_value(from_s)
+            to_n = self._parse_numeric_value(to_s)
+            if from_n is None and to_n is None:
+                return None
+            if from_n is not None and current < from_n:
+                return False
+            if to_n is not None and current > to_n:
+                return False
+            return True
+
+        expr = str(query or "").strip()
+        for op in (">=", "<=", ">", "<", "="):
+            if not expr.startswith(op):
+                continue
+            target = self._parse_numeric_value(expr[len(op) :].strip())
+            if target is None:
+                return None
+            if op == ">=":
+                return current >= target
+            if op == "<=":
+                return current <= target
+            if op == ">":
+                return current > target
+            if op == "<":
+                return current < target
+            return current == target
+        return None
 
     def set_source_column(self, column: int) -> None:
         self._source_column = int(column)
@@ -163,6 +325,20 @@ class _SourceAwareProxyModel(ListingFilterProxyModel):
                 continue
             idx = model.index(source_row, int(col_idx), source_parent)
             hay = str(model.data(idx, Qt.DisplayRole) or "")
+            raw_filter = str((self._column_filters or {}).get(int(col_idx), "") or "").strip()
+
+            header = str(model.headerData(int(col_idx), Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) or "")
+            range_result: Optional[bool] = None
+            if self._is_date_range_label(header):
+                range_result = self._matches_date_range(hay, raw_filter)
+            elif self._is_numeric_range_label(header):
+                range_result = self._matches_numeric_range(hay, raw_filter)
+
+            if range_result is not None:
+                if not range_result:
+                    return False
+                continue
+
             if not any(p.search(hay) for p in (patterns or [])):
                 return False
         return True
@@ -1007,6 +1183,210 @@ class PortalListingTab(QWidget):
         self._public_cache_loaded = True
         return records
 
+    @staticmethod
+    def _join_non_empty(parts: list[str], *, sep: str = ", ") -> str:
+        out: list[str] = []
+        for part in parts:
+            p = str(part or "").strip()
+            if p and p not in out:
+                out.append(p)
+        return sep.join(out)
+
+    @staticmethod
+    def _normalize_list_text(value: Any, *, output_sep: str = "、") -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+        normalized = normalized.replace(";", ",").replace("，", ",")
+        parts: list[str] = []
+        for block in normalized.split("\n"):
+            for part in block.split(","):
+                p = str(part or "").strip()
+                if p:
+                    parts.append(p)
+        deduped: list[str] = []
+        for p in parts:
+            if p not in deduped:
+                deduped.append(p)
+        return output_sep.join(deduped)
+
+    @staticmethod
+    def _canonical_managed_label(label: str) -> str:
+        text = str(label or "").strip()
+        if text.startswith("【") and text.endswith("】") and len(text) > 2:
+            text = text[1:-1]
+        text = text.replace("（", "(").replace("）", ")")
+        text = text.replace(" ", "")
+        return text.lower()
+
+    @classmethod
+    def _equipment_links_to_text(cls, row: dict[str, Any]) -> str:
+        links = row.get("equipment_links")
+        if not isinstance(links, list):
+            return ""
+        chunks: list[str] = []
+        for item in links:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            url = str(item.get("url") or "").strip()
+            if title and url:
+                chunks.append(f"{title} ({url})")
+            elif title:
+                chunks.append(title)
+            elif url:
+                chunks.append(url)
+        return cls._join_non_empty(chunks)
+
+    @classmethod
+    def _equipment_classification_text(cls, row: dict[str, Any]) -> str:
+        links = row.get("equipment_links")
+        if not isinstance(links, list):
+            return ""
+        classes: list[str] = []
+        for item in links:
+            if not isinstance(item, dict):
+                continue
+            title = str(item.get("title") or "").strip()
+            if not title:
+                continue
+            # 例: "NR-304：高性能単結晶X線自動解析装置" -> "NR-304"
+            if "：" in title:
+                cls_name = title.split("：", 1)[0].strip()
+            elif ":" in title:
+                cls_name = title.split(":", 1)[0].strip()
+            else:
+                cls_name = title
+            if cls_name and cls_name not in classes:
+                classes.append(cls_name)
+        return "、".join(classes)
+
+    @classmethod
+    def _thumbnails_to_text(cls, row: dict[str, Any]) -> str:
+        values = row.get("thumbnails")
+        if not isinstance(values, list):
+            return ""
+        urls = [str(v or "").strip() for v in values if str(v or "").strip()]
+        return cls._join_non_empty(urls)
+
+    @staticmethod
+    def _infer_type_for_row(row: dict[str, Any]) -> str:
+        has_rde = bool(row.get("_has_rde_detail"))
+        if has_rde:
+            return "RDE"
+        source = str(row.get("source") or "").strip().lower()
+        if source in {"managed", "both"}:
+            return "CSV"
+        return "スクレイピング"
+
+    @classmethod
+    def _managed_fallback_value_for_label(cls, label: str, row: dict[str, Any]) -> str:
+        raw = str(label or "").strip()
+        if not raw:
+            return ""
+
+        by_label_key: dict[str, str] = {
+            "論文等": "outcomes_publications_and_use",
+            "成果発表・成果利用": "outcomes_publications_and_use",
+            "関連論文": "outcomes_publications_and_use",
+            "論文": "outcomes_publications_and_use",
+            "dl数": "download_count",
+            "ダウンロード数": "download_count",
+            "データセットdoi": "doi",
+            "doi": "doi",
+            "データ最終更新日": "updated_date",
+            "最終更新日": "updated_date",
+            "データ登録日": "registered_date",
+            "登録日": "registered_date",
+            "ファイルサイズ": "total_file_size",
+            "ファイル数": "file_count",
+            "ページビュー": "page_views",
+            "閲覧数": "page_views",
+            "マテリアルインデックス": "material_index",
+            "横断技術領域": "crosscutting_technology_area",
+            "重要技術領域(主)": "key_technology_area_primary",
+            "重要技術領域（主）": "key_technology_area_primary",
+            "重要技術領域(副)": "key_technology_area_secondary",
+            "重要技術領域（副）": "key_technology_area_secondary",
+            "重要技術領域主": "key_technology_area_primary",
+            "重要技術領域副": "key_technology_area_secondary",
+            "キーワードタグ": "keyword_tags",
+        }
+
+        normalized = cls._canonical_managed_label(raw)
+        key = by_label_key.get(normalized)
+        if key:
+            value = str(row.get(key) or "").strip()
+            if key == "keyword_tags":
+                return cls._normalize_list_text(value, output_sep="、")
+            return value
+
+        if normalized.startswith("重要技術領域"):
+            if "主" in normalized:
+                return str(row.get("key_technology_area_primary") or "").strip()
+            if "副" in normalized:
+                return str(row.get("key_technology_area_secondary") or "").strip()
+
+        if normalized in {"装置・プロセス", "装置", "プロセス"}:
+            return cls._equipment_links_to_text(row)
+        if normalized in {"設備分類", "装置分類"}:
+            return cls._equipment_classification_text(row)
+        if normalized in {"画像", "サムネイル", "thumbnail", "thumbnails"}:
+            return cls._thumbnails_to_text(row)
+        if normalized in {"画像url", "画像リンク", "サムネイルurl", "画像ｕｒｌ"}:
+            return cls._thumbnails_to_text(row)
+        if normalized in {"タイプ"}:
+            return cls._infer_type_for_row(row)
+
+        return ""
+
+    def _apply_managed_fallback_values(self, row: dict[str, Any]) -> None:
+        if not isinstance(row, dict):
+            return
+        for key in list(row.keys()):
+            if not str(key).startswith("managed:"):
+                continue
+            current = str(row.get(key) or "").strip()
+            if current and current.lower() not in {"-", "―", "nan", "none", "null"}:
+                # キーワードタグのみ表示形式を統一（「、」区切り）
+                label = str(key).replace("managed:", "", 1).strip()
+                if self._canonical_managed_label(label) in {"キーワードタグ"}:
+                    normalized_tags = self._normalize_list_text(current, output_sep="、")
+                    if normalized_tags:
+                        row[key] = normalized_tags
+                continue
+            label = str(key).replace("managed:", "", 1).strip()
+            fallback = self._managed_fallback_value_for_label(label, row)
+            if fallback:
+                row[key] = fallback
+
+    @classmethod
+    def _hydrate_managed_fallback_columns(cls, rows: list[dict[str, Any]], managed_cols: list[_ColumnDef]) -> None:
+        if not rows or not managed_cols:
+            return
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            for cdef in managed_cols:
+                key = str(getattr(cdef, "key", "") or "").strip()
+                if not key.startswith("managed:"):
+                    continue
+                current = str(row.get(key) or "").strip()
+                if current and current.lower() not in {"-", "―", "nan", "none", "null"}:
+                    # 既存値がある場合はキーワードタグの表記のみ整える
+                    label = str(key).replace("managed:", "", 1).strip()
+                    if cls._canonical_managed_label(label) == "キーワードタグ":
+                        normalized_tags = cls._normalize_list_text(current, output_sep="、")
+                        if normalized_tags:
+                            row[key] = normalized_tags
+                    continue
+
+                label = str(getattr(cdef, "label", "") or "").strip()
+                fallback = cls._managed_fallback_value_for_label(label, row)
+                if fallback:
+                    row[key] = fallback
+
     def _rebuild_table(self, *, public_records: list[dict], managed_records: list[dict[str, str]]) -> None:
         result = merge_public_and_managed(
             public_records,
@@ -1020,6 +1400,13 @@ class PortalListingTab(QWidget):
         # Collapse managed suffix columns (e.g. 管理:装置1..5, 管理:プロセス1..5) into a single column.
         # This mutates rows in-place and returns the member keys to suppress.
         suppressed_managed_keys = add_grouped_suffix_columns(rows)
+
+        # managed:* 列でCSV値が空の場合、スクレイピング/RDE由来の正規化済み値で補完する。
+        try:
+            for row in rows:
+                self._apply_managed_fallback_values(row)
+        except Exception:
+            pass
 
         # Columns already mapped into fixed keys should not be shown as redundant managed:* columns.
         # (These are the most common overlaps between managed CSV and public cache.)
@@ -1092,6 +1479,13 @@ class PortalListingTab(QWidget):
             for k in sorted(managed_keys)
             if k not in (suppressed_managed_keys or set())
         ]
+
+        # 公開-only行でも managed:* 列（【】列）が表示される場合、
+        # キー欠落時にスクレイピング/RDE由来の正規化値を注入して空欄を減らす。
+        try:
+            self._hydrate_managed_fallback_columns(rows, managed_cols)
+        except Exception:
+            pass
 
         # Add grouped columns (created by add_grouped_suffix_columns)
         grouped_cols: list[_ColumnDef] = []
@@ -1340,10 +1734,13 @@ class PortalListingTab(QWidget):
                         parts = [p for p in parts if p]
                         if len(parts) >= 2 and "\n" not in val:
                             val = "\n".join([f"・{p}" for p in parts])
-                    if col.key in ("keyword_tags",) and "," in val and "\n" not in val:
-                        parts = [p.strip() for p in val.split(",") if p.strip()]
-                        if len(parts) >= 2:
-                            val = "\n".join([f"・{p}" for p in parts])
+                    managed_label = ""
+                    if str(col.key).startswith("managed:"):
+                        managed_label = str(col.key).replace("managed:", "", 1).strip()
+                    if col.key in ("keyword_tags",) or self._canonical_managed_label(managed_label) == "キーワードタグ":
+                        normalized_tags = self._normalize_list_text(val, output_sep="、")
+                        if normalized_tags:
+                            val = normalized_tags
             except Exception:
                 pass
 
