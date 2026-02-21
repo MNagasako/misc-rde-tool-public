@@ -498,16 +498,10 @@ def load_unified_member_list(subgroup_id=None, dynamic_users=None, bearer_token=
         import traceback
         logger.debug("詳細エラー: %s", traceback.format_exc())
 
-    # 3. 動的追加ユーザーを組み込み（一時ファイル + パラメータ）（修正タブモードではスキップ）
+    # 3. 動的追加ユーザーを組み込み（パラメータ指定時のみ）（修正タブモードではスキップ）
     dynamic_members = {}
     if subgroup_id is None:  # 新規作成時のみ動的ユーザーを読み込む
-        # 一時ファイルから動的ユーザーを読み込み
-        temp_dynamic_users = load_dynamic_users_from_temp()
-        all_dynamic_users = temp_dynamic_users.copy()
-        
-        # パラメータで渡された動的ユーザーも追加
-        if dynamic_users:
-            all_dynamic_users.extend(dynamic_users)
+        all_dynamic_users = list(dynamic_users or [])
         
         # 重複排除しながら動的メンバー辞書を作成
         for user in all_dynamic_users:

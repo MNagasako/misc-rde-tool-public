@@ -472,9 +472,13 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     button_row = QHBoxLayout()
     
     def on_show_selected():
-        # 共通セレクターから直接user_rowsとuser_entriesを取得
-        current_user_rows = member_selector.user_rows
-        current_user_entries = member_selector.user_entries
+        # 現在有効なセレクターを参照（既存サブグループ読込で差し替わるため）
+        current_selector = getattr(widget, "member_selector", member_selector)
+        if hasattr(current_selector, "get_effective_user_rows"):
+            current_user_rows = current_selector.get_effective_user_rows()
+        else:
+            current_user_rows = current_selector.user_rows
+        current_user_entries = current_selector.user_entries
         show_selected_user_ids(widget, current_user_rows, current_user_entries)
     exec_button = QPushButton("選択ユーザー/ロールを表示")
     exec_button.clicked.connect(on_show_selected)
@@ -572,19 +576,9 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
         # 研究資金番号を新ウィジェットから取得
         funds = form_widgets['funds_widget'].get_funding_numbers() if 'funds_widget' in form_widgets else []
         
-        # ユーザーロール情報の抽出とバリデーション
-        selected_user_ids, roles, owner_id, owner_count = create_handler.extract_user_roles()
-        
-        if not create_handler.validate_owner_selection(owner_count):
-            return
-            
-        if owner_id:
-            selected_user_ids = [owner_id] + selected_user_ids
-        if not group_name:
-            QMessageBox.warning(widget, "入力エラー", "グループ名を入力してください。")
-            return
-        if not selected_user_ids:
-            QMessageBox.warning(widget, "ユーザー未選択", "追加するユーザーを1人以上選択してください。")
+        # 必須条件を一括検証
+        valid, selected_user_ids, roles, owner_id = create_handler.validate_create_requirements(group_name)
+        if not valid:
             return
             
         # API呼び出し用のペイロード作成
@@ -667,7 +661,12 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
             return
     
     def on_create_subgroup_bulk():
-        prepare_subgroup_create_request(widget, parent, member_selector.user_rows)
+        current_selector = getattr(widget, "member_selector", member_selector)
+        if hasattr(current_selector, "get_effective_user_rows"):
+            prepare_rows = current_selector.get_effective_user_rows()
+        else:
+            prepare_rows = current_selector.user_rows
+        prepare_subgroup_create_request(widget, parent, prepare_rows)
     
     # ボタン作成
     button_bulk, button_manual = form_builder.build_button_row({

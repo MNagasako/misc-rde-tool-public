@@ -115,17 +115,8 @@ class CommonSubgroupMemberSelector(QWidget):
             except Exception as cache_init_err:
                 logger.warning(f"キャッシュ初期化エラー: {cache_init_err}")
             
-            # 一時ファイルから動的ユーザーを読み込み
-            temp_dynamic_users = subgroup_api_helper.load_dynamic_users_from_temp()
-            
-            # メモリ上の動的ユーザーと統合
-            all_dynamic_users = list(self.dynamic_users)  # コピー
-            
-            # 一時ファイルのユーザーを追加（重複回避）
-            existing_ids = {user.get('id', '') for user in all_dynamic_users}
-            for temp_user in temp_dynamic_users:
-                if temp_user.get('id', '') not in existing_ids:
-                    all_dynamic_users.append(temp_user)
+            # 動的ユーザーは、現在画面で明示的に追加したもののみを対象とする
+            all_dynamic_users = list(self.dynamic_users)
             
             unified_users, member_info = subgroup_api_helper.load_unified_member_list(
                 subgroup_id=self.subgroup_id,
@@ -1082,15 +1073,16 @@ class CommonSubgroupMemberSelector(QWidget):
         if not email:
             QMessageBox.warning(self, "入力エラー", "メールアドレスを入力してください。")
             return
+        normalized_input_email = email.lower()
         
         # 重複チェック
         for row in range(self.table.rowCount()):
-            name_item = self.table.item(row, 0)
-            if name_item:
-                current_email = name_item.data(Qt.UserRole + 1)  # メールアドレスを格納
-                if current_email == email:
-                    QMessageBox.information(self, "重複エラー", f"メールアドレス '{email}' は既に追加されています。")
-                    return
+            if self.table.isRowHidden(row):
+                continue
+            email_item = self.table.item(row, 1)
+            if email_item and str(email_item.text() or "").strip().lower() == normalized_input_email:
+                QMessageBox.information(self, "重複エラー", f"メールアドレス '{email}' は既に登録済みです。")
+                return
         
         try:
             # Bearer Token統一管理システムで取得
@@ -1129,6 +1121,15 @@ class CommonSubgroupMemberSelector(QWidget):
             user_name = user.get('attributes', {}).get('userName', 'Unknown')
             user_email = user.get('attributes', {}).get('emailAddress', email)
             user_id = user.get('id', '')
+
+            normalized_user_email = str(user_email or '').strip().lower()
+            for row in range(self.table.rowCount()):
+                if self.table.isRowHidden(row):
+                    continue
+                email_item = self.table.item(row, 1)
+                if email_item and str(email_item.text() or '').strip().lower() == normalized_user_email:
+                    QMessageBox.information(self, "重複エラー", f"ユーザー '{user_name}' ({user_email}) は既に登録済みです。")
+                    return
             
             # 動的ユーザーデータを作成
             user_data = {
@@ -1210,8 +1211,30 @@ class CommonSubgroupMemberSelector(QWidget):
         self.table.setCellWidget(row_count, 6, viewer_cb)
         
         # 除外ボタン
-        remove_btn = QPushButton("除外")
-        remove_btn.setMaximumWidth(60)
+        remove_btn = QPushButton("×")
+        remove_btn.setMaximumWidth(40)
+        if hasattr(self.table, "_apply_remove_button_style"):
+            self.table._apply_remove_button_style(remove_btn)
+        else:
+            remove_btn.setStyleSheet(
+                f"""
+                    QPushButton {{
+                        background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                        color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
+                        font-weight: bold;
+                        font-size: 14px;
+                        border: none;
+                        border-radius: 3px;
+                        padding: 2px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+                    }}
+                    QPushButton:pressed {{
+                        background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_PRESSED)};
+                    }}
+                """
+            )
         remove_btn.clicked.connect(lambda checked, r=row_count, uid=user_id: self._on_remove_member(r, uid))
         self.table.setCellWidget(row_count, 7, remove_btn)
         
@@ -1265,14 +1288,19 @@ class CommonSubgroupMemberSelector(QWidget):
         dynamic_count = 0
         unknown_count = 0
         
+        row_candidates = []
+
         for row in range(self.table.rowCount()):
             # 各行のuser_idを取得（owner_radioのuser_id属性から）
             owner_radio = self.table.cellWidget(row, 2)
             if not owner_radio or not hasattr(owner_radio, 'user_id'):
-                # user_idがない場合は表示
-                self.table.setRowHidden(row, False)
-                visible_count += 1
-                unknown_count += 1
+                row_candidates.append({
+                    'row': row,
+                    'should_show': True,
+                    'category': 'unknown',
+                    'priority': 3,
+                    'email': ''
+                })
                 continue
             
             user_id = owner_radio.user_id
@@ -1291,6 +1319,7 @@ class CommonSubgroupMemberSelector(QWidget):
             # フィルタ判定
             should_show = False
             category = "unknown"
+            is_dynamic_user = any((u.get('id', '') == user_id) for u in (self.dynamic_users or []))
             
             # source_formatが優先（より具体的）
             if source_format in ['csv', 'json']:
@@ -1308,7 +1337,7 @@ class CommonSubgroupMemberSelector(QWidget):
                 should_show = show_institution
                 category = "institution"
                 institution_count += 1
-            elif source == 'dynamic':
+            elif source == 'dynamic' or is_dynamic_user:
                 # メール追加は常に表示
                 should_show = True
                 category = "dynamic"
@@ -1322,8 +1351,47 @@ class CommonSubgroupMemberSelector(QWidget):
                 user_name = name_item.text() if name_item else "Unknown"
                 logger.debug("未知のソース: source='%s', source_format='%s', user=%s, user_id=%s...", source, source_format, user_name, user_id[:20] if user_id else 'None')
             
-            # 行の表示/非表示を設定
-            self.table.setRowHidden(row, not should_show)
+            email_item = self.table.item(row, 1)
+            normalized_email = str(email_item.text() if email_item else '').strip().lower()
+
+            priority_map = {
+                'dynamic': 0,
+                'custom': 1,
+                'institution': 2,
+                'unknown': 3,
+            }
+
+            row_candidates.append({
+                'row': row,
+                'should_show': should_show,
+                'category': category,
+                'priority': priority_map.get(category, 3),
+                'email': normalized_email,
+            })
+
+        # 表示対象の重複メールをマージ（同一メールは1行のみ表示）
+        keep_row_by_email = {}
+        for candidate in row_candidates:
+            if not candidate['should_show']:
+                continue
+            email = candidate['email']
+            if not email:
+                continue
+
+            keep = keep_row_by_email.get(email)
+            if keep is None or candidate['priority'] < keep['priority']:
+                keep_row_by_email[email] = candidate
+
+        # 最終的な表示/非表示を適用
+        for candidate in row_candidates:
+            should_show = candidate['should_show']
+            email = candidate['email']
+            if should_show and email:
+                keep = keep_row_by_email.get(email)
+                if keep is not None and keep['row'] != candidate['row']:
+                    should_show = False
+
+            self.table.setRowHidden(candidate['row'], not should_show)
             if should_show:
                 visible_count += 1
         
@@ -1336,7 +1404,7 @@ class CommonSubgroupMemberSelector(QWidget):
         roles = []
         owner_id = None
 
-        for user_id, owner_radio, assistant_cb, member_cb, agent_cb, viewer_cb in self.user_rows:
+        for user_id, owner_radio, assistant_cb, member_cb, agent_cb, viewer_cb in self.get_effective_user_rows():
             if owner_radio.isChecked():
                 selected_user_ids.append(user_id)
                 roles.append({"userId": user_id, "role": "OWNER", "canCreateDatasets": True, "canEditMembers": True})
@@ -1355,6 +1423,51 @@ class CommonSubgroupMemberSelector(QWidget):
                 roles.append({"userId": user_id, "role": "VIEWER", "canCreateDatasets": False, "canEditMembers": False})
 
         return selected_user_ids, roles, owner_id
+
+    def get_effective_user_rows(self):
+        """現在有効な対象行を取得（新規作成タブでは表示行のみ）。"""
+        effective_rows = []
+        for row in range(self.table.rowCount()):
+            if self.show_filter and self.table.isRowHidden(row):
+                continue
+
+            owner_radio = self.table.cellWidget(row, 2)
+            assistant_cb = self.table.cellWidget(row, 3)
+            member_cb = self.table.cellWidget(row, 4)
+            agent_cb = self.table.cellWidget(row, 5)
+            viewer_cb = self.table.cellWidget(row, 6)
+
+            if not owner_radio or not assistant_cb or not member_cb or not agent_cb or not viewer_cb:
+                continue
+
+            user_id = getattr(owner_radio, 'user_id', None)
+            if not user_id:
+                continue
+
+            effective_rows.append((user_id, owner_radio, assistant_cb, member_cb, agent_cb, viewer_cb))
+
+        return effective_rows
+
+    def get_effective_user_email_map(self):
+        """現在有効な対象行の user_id -> email マップを返す。"""
+        email_map = {}
+        for row in range(self.table.rowCount()):
+            if self.show_filter and self.table.isRowHidden(row):
+                continue
+
+            owner_radio = self.table.cellWidget(row, 2)
+            if not owner_radio:
+                continue
+
+            user_id = getattr(owner_radio, 'user_id', None)
+            if not user_id:
+                continue
+
+            email_item = self.table.item(row, 1)
+            email_text = str(email_item.text() if email_item else '').strip().lower()
+            email_map[user_id] = email_text
+
+        return email_map
     
     def _apply_table_style(self):
         """テーブルスタイル適用（テーマ切替対応）- 初回とリフレッシュで同じスタイル"""

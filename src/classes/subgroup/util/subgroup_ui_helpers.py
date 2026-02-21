@@ -195,6 +195,155 @@ class SubgroupCreateHandler:
     def extract_subjects_from_text(self, text):
         """テキストから課題情報を抽出（後方互換性用）"""
         return parse_subjects_from_text(text)
+
+    def _get_effective_user_rows(self):
+        rows = self.member_selector.user_rows or []
+        if hasattr(self.member_selector, "get_effective_user_rows"):
+            try:
+                rows = self.member_selector.get_effective_user_rows()
+            except Exception:
+                rows = self.member_selector.user_rows or []
+        return rows
+
+    @staticmethod
+    def _resolve_role_name(owner_checked, assistant_checked, member_checked, agent_checked, viewer_checked):
+        if owner_checked:
+            return "OWNER"
+        if assistant_checked:
+            return "ASSISTANT"
+        if member_checked:
+            return "MEMBER"
+        if agent_checked:
+            return "AGENT"
+        if viewer_checked:
+            return "VIEWER"
+        return None
+
+    def validate_create_requirements(self, group_name):
+        """サブグループ作成前の必須条件を一括検証し、満たさない条件をまとめて表示する。"""
+        errors = []
+        effective_rows = self._get_effective_user_rows()
+
+        if not str(group_name or "").strip():
+            errors.append("グループ名を指定してください。")
+
+        if not effective_rows:
+            errors.append("メンバーが追加されていません。サブグループ作成にはメンバー追加が必要です。")
+            errors.append("表示されているメンバー全員にロールを指定してください。")
+
+        selected_user_ids = []
+        roles = []
+        owner_id = None
+        owner_count = 0
+        missing_role_users = []
+
+        email_map = {}
+        if hasattr(self.member_selector, "get_effective_user_email_map"):
+            try:
+                email_map = self.member_selector.get_effective_user_email_map()
+            except Exception:
+                email_map = {}
+
+        selected_email_to_user = {}
+        duplicate_emails = set()
+
+        for user_entry in effective_rows:
+            try:
+                user_id, owner_radio, assistant_cb, member_cb, agent_cb, viewer_cb = user_entry
+            except Exception:
+                continue
+
+            owner_checked = _is_widget_checked_safe(owner_radio)
+            assistant_checked = _is_widget_checked_safe(assistant_cb)
+            member_checked = _is_widget_checked_safe(member_cb)
+            agent_checked = _is_widget_checked_safe(agent_cb)
+            viewer_checked = _is_widget_checked_safe(viewer_cb)
+
+            role_name = self._resolve_role_name(
+                owner_checked,
+                assistant_checked,
+                member_checked,
+                agent_checked,
+                viewer_checked,
+            )
+
+            if role_name is None:
+                missing_role_users.append(user_id)
+                continue
+
+            if role_name == "OWNER":
+                owner_count += 1
+                owner_id = user_id
+                role_payload = {
+                    "userId": user_id,
+                    "role": "OWNER",
+                    "canCreateDatasets": True,
+                    "canEditMembers": True,
+                }
+            elif role_name == "ASSISTANT":
+                selected_user_ids.append(user_id)
+                role_payload = {
+                    "userId": user_id,
+                    "role": "ASSISTANT",
+                    "canCreateDatasets": True,
+                    "canEditMembers": True,
+                }
+            elif role_name == "MEMBER":
+                selected_user_ids.append(user_id)
+                role_payload = {
+                    "userId": user_id,
+                    "role": "MEMBER",
+                    "canCreateDatasets": False,
+                    "canEditMembers": False,
+                }
+            elif role_name == "AGENT":
+                selected_user_ids.append(user_id)
+                role_payload = {
+                    "userId": user_id,
+                    "role": "AGENT",
+                    "canCreateDatasets": False,
+                    "canEditMembers": False,
+                }
+            else:
+                selected_user_ids.append(user_id)
+                role_payload = {
+                    "userId": user_id,
+                    "role": "VIEWER",
+                    "canCreateDatasets": False,
+                    "canEditMembers": False,
+                }
+
+            roles.append(role_payload)
+
+            normalized_email = str(email_map.get(user_id, "") or "").strip().lower()
+            if normalized_email:
+                existed_user = selected_email_to_user.get(normalized_email)
+                if existed_user is None:
+                    selected_email_to_user[normalized_email] = user_id
+                elif existed_user != user_id:
+                    duplicate_emails.add(normalized_email)
+
+        if missing_role_users:
+            errors.append("表示されているメンバー全員にロールを指定してください。")
+
+        if owner_count == 0:
+            errors.append("表示されているメンバーのうち1名を管理者（OWNER）に指定してください。")
+        elif owner_count > 1:
+            errors.append("管理者（OWNER）は1名のみ指定してください。")
+
+        if duplicate_emails:
+            duplicate_list = ", ".join(sorted(duplicate_emails))
+            errors.append(f"同一メールアドレスのメンバーが重複しています: {duplicate_list}")
+
+        if errors:
+            message = "サブグループ作成条件を満たしていません。\n\n" + "\n".join([f"・{e}" for e in errors])
+            QMessageBox.warning(self.widget, "入力エラー", message)
+            return False, [], [], None
+
+        if owner_id:
+            selected_user_ids = [owner_id] + [uid for uid in selected_user_ids if uid != owner_id]
+
+        return True, selected_user_ids, roles, owner_id
     
     def extract_user_roles(self):
         """メンバーセレクターからユーザーロール情報を抽出（安全版）"""
@@ -202,8 +351,19 @@ class SubgroupCreateHandler:
         roles = []
         owner_id = None
         owner_count = 0
+        selected_email_to_user = {}
+        duplicate_emails = set()
 
-        for user_entry in self.member_selector.user_rows or []:
+        user_rows = self._get_effective_user_rows()
+
+        email_map = {}
+        if hasattr(self.member_selector, "get_effective_user_email_map"):
+            try:
+                email_map = self.member_selector.get_effective_user_email_map()
+            except Exception:
+                email_map = {}
+
+        for user_entry in user_rows:
             # 破損したタプルがあっても続行できるように安全に展開
             try:
                 user_id, owner_radio, assistant_cb, member_cb, agent_cb, viewer_cb = user_entry
@@ -252,9 +412,28 @@ class SubgroupCreateHandler:
                         "canCreateDatasets": False,
                         "canEditMembers": False
                     })
+
+                if roles and roles[-1].get("userId") == user_id:
+                    normalized_email = str(email_map.get(user_id, "") or "").strip().lower()
+                    if normalized_email:
+                        existed_user = selected_email_to_user.get(normalized_email)
+                        if existed_user is None:
+                            selected_email_to_user[normalized_email] = user_id
+                        elif existed_user != user_id:
+                            duplicate_emails.add(normalized_email)
             except Exception:
                 # ここでは個別行の問題を無視して続行
                 continue
+
+        if duplicate_emails:
+            duplicate_list = ", ".join(sorted(duplicate_emails))
+            QMessageBox.warning(
+                self.widget,
+                "重複メールエラー",
+                f"同一メールアドレスのメンバーが複数選択されています: {duplicate_list}\n"
+                "同じメールアドレスを複数含む状態ではサブグループ作成できません。"
+            )
+            return [], [], None, 0
 
         return selected_user_ids, roles, owner_id, owner_count
     
@@ -511,7 +690,14 @@ def prepare_subgroup_create_request(widget, parent, user_rows=None):
     """
     # user_rowsがNoneならwidget.user_rowsを参照
     if user_rows is None:
-        user_rows = getattr(widget, 'user_rows', None)
+        member_selector = getattr(widget, 'member_selector', None)
+        if member_selector is not None and hasattr(member_selector, 'get_effective_user_rows'):
+            try:
+                user_rows = member_selector.get_effective_user_rows()
+            except Exception:
+                user_rows = getattr(widget, 'user_rows', None)
+        else:
+            user_rows = getattr(widget, 'user_rows', None)
     # セーフガード（構文破損回避）
     if not user_rows:
         return
