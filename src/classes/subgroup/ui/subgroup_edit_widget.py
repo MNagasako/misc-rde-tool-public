@@ -356,7 +356,8 @@ class SubgroupSelector:
         self.filter_combo.currentTextChanged.connect(self.apply_filter)
         if self.pre_filter_input is not None:
             self.pre_filter_input.textChanged.connect(self.apply_filter)
-        self.combo_widget.currentTextChanged.connect(self._on_combo_selection_changed)
+        self.combo_widget.currentIndexChanged.connect(self._on_combo_selection_changed)
+        self.combo_widget.activated.connect(self._on_combo_selection_changed)
     
     def load_existing_subgroups(self):
         """既存サブグループの読み込み"""
@@ -513,6 +514,29 @@ class SubgroupSelector:
         self.filtered_groups_data = []
         self.combo_widget.clear()
         self.combo_widget.addItem(message, None)
+
+    def _sync_combo_index_from_text(self, display_text: str) -> bool:
+        """表示テキストに一致するコンボ項目へ選択を同期する。"""
+        target = str(display_text or "")
+        if not target:
+            return False
+        for i in range(self.combo_widget.count()):
+            try:
+                if self.combo_widget.itemText(i) == target:
+                    self.combo_widget.setCurrentIndex(i)
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _on_completer_activated(self, completion_text: str) -> None:
+        """Completer候補選択時にコンボボックスの選択インデックスを同期する。"""
+        if not self._sync_combo_index_from_text(completion_text):
+            # 一致候補が無い場合でも表示テキストだけは反映しておく
+            try:
+                self.combo_widget.setEditText(str(completion_text or ""))
+            except Exception:
+                pass
     
     def _normalize_filter_text(self, text: str) -> str:
         return (text or "").strip().lower()
@@ -665,6 +689,7 @@ class SubgroupSelector:
             popup_view = completer.popup()
             popup_view.setMinimumHeight(240)
             popup_view.setMaximumHeight(240)
+            completer.activated[str].connect(self._on_completer_activated)
             self.combo_widget.setCompleter(completer)
             self._combo_completer = completer
         except Exception:
@@ -810,7 +835,7 @@ class SubgroupSelector:
         except Exception as e:
             logger.debug("試料数事前読み込みエラー: %s", e)
     
-    def _on_combo_selection_changed(self, text):
+    def _on_combo_selection_changed(self, _value):
         """コンボボックス選択変更時の処理"""
         current_data = self.combo_widget.currentData()
 
