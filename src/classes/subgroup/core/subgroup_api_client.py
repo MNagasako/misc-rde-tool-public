@@ -124,7 +124,7 @@ class SubgroupApiClient:
         if isinstance(browser_token, str) and browser_token and self._looks_like_material_token(browser_token):
             try:
                 # Persist for subsequent API calls; common.py will alias-save across UI/API hosts.
-                save_bearer_token("rde-material.nims.go.jp", browser_token)
+                save_bearer_token(browser_token, "rde-material.nims.go.jp")
             except Exception:
                 pass
             return browser_token

@@ -320,15 +320,20 @@ class TokenStatusTab(QWidget):
         """全トークンリフレッシュ"""
         try:
             tokens = self.token_manager._load_all_tokens()
-            
-            if not tokens:
+
+            refresh_targets = [
+                host for host in self.token_manager.ACTIVE_HOSTS
+                if host in tokens
+            ]
+
+            if not refresh_targets:
                 QMessageBox.information(self, "情報", "リフレッシュ対象のトークンがありません")
                 return
             
             # 確認ダイアログ
             reply = QMessageBox.question(
                 self, "確認",
-                f"{len(tokens)}個のトークンをリフレッシュしますか？",
+                f"{len(refresh_targets)}個のトークンをリフレッシュしますか？",
                 QMessageBox.Yes | QMessageBox.No
             )
             
@@ -339,7 +344,7 @@ class TokenStatusTab(QWidget):
             success_count = 0
             fail_count = 0
             
-            for host in tokens.keys():
+            for host in refresh_targets:
                 try:
                     if self.token_manager.refresh_access_token(host):
                         success_count += 1

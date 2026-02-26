@@ -6,11 +6,21 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.22）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| データポータル一覧 | `_SourceAwareProxyModel.lessThan` を実装し、数値格納列を数値比較でソートするよう改善。 |
-| データポータル一覧 | `code` 列を自然順（例: `RDE-2` < `RDE-10`）でソートするよう改善。 |
-| データポータル一覧 | `ファイルサイズ` の `bytes/KB/MB/GB...` をバイト換算して比較し、単位混在時の並び順を自然化。 |
-| テスト/品質 | `test_portal_listing_proxy_column_filters` に数値ソート/単位付きサイズソート/自然順ソートの回帰テストを追加。 |
+| リリース/品質 | リビジョンアップ（v2.5.23）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| サブグループ（閲覧・修正） | 関連試料のMaterialトークン保存で引数順不整合を修正し、トークン破損を防止。 |
+| 設定（トークン状態） | 全トークンリフレッシュの対象を表示中2ホスト（`TokenManager.ACTIVE_HOSTS`）に限定。 |
+| 設定（トークン状態） | 確認ダイアログ件数を対象ホスト数に一致させ、非表示エイリアスの失敗通知を抑止。 |
+| テスト/品質 | `test_token_status_tab_refresh_all_targets` / `test_subgroup_api_client_material_token_save_order` を追加。 |
+
+## v2.5.23 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.23）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| サブグループ（閲覧・修正） | `subgroup_api_client` で Materialトークン保存呼び出しの引数順を修正（`save_bearer_token(token, host)`）。 |
+| 設定（トークン状態） | `token_status_tab` の全トークンリフレッシュ対象を `ACTIVE_HOSTS` のみへ変更。 |
+| 設定（トークン状態） | 全トークン確認ダイアログの件数表示を表示対象（2ホスト）に一致させるよう改善。 |
+| テスト/品質 | `tests/unit/test_token_status_tab_refresh_all_targets.py` と `tests/unit/subgroup/test_subgroup_api_client_material_token_save_order.py` を追加。 |
 
 ## v2.5.22 の主な更新点
 
