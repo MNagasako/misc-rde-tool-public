@@ -82,6 +82,18 @@ class _SourceAwareProxyModel(ListingFilterProxyModel):
         "ページビュー",
         "閲覧数",
     }
+    _SORT_NUMERIC_LABELS: set[str] = {
+        "データタイル数",
+        "DL数",
+        "ダウンロード数",
+        "ファイルサイズ",
+        "ファイル数",
+        "ページビュー",
+        "閲覧数",
+    }
+    _SORT_NATURAL_LABELS: set[str] = {
+        "code",
+    }
 
     def __init__(self, parent: Optional[QtCore.QObject] = None):
         super().__init__(parent)
@@ -142,6 +154,33 @@ class _SourceAwareProxyModel(ListingFilterProxyModel):
             except Exception:
                 pass
 
+        size_match = re.search(r"([-+]?\d[\d,]*(?:\.\d+)?)\s*([kmgtpe]?i?b|bytes?)\b", text, flags=re.IGNORECASE)
+        if size_match:
+            try:
+                num = float(size_match.group(1).replace(",", ""))
+                unit = str(size_match.group(2) or "").strip().lower()
+                multipliers = {
+                    "b": 1.0,
+                    "byte": 1.0,
+                    "bytes": 1.0,
+                    "kb": 1024.0,
+                    "kib": 1024.0,
+                    "mb": 1024.0 ** 2,
+                    "mib": 1024.0 ** 2,
+                    "gb": 1024.0 ** 3,
+                    "gib": 1024.0 ** 3,
+                    "tb": 1024.0 ** 4,
+                    "tib": 1024.0 ** 4,
+                    "pb": 1024.0 ** 5,
+                    "pib": 1024.0 ** 5,
+                    "eb": 1024.0 ** 6,
+                    "eib": 1024.0 ** 6,
+                }
+                factor = float(multipliers.get(unit, 1.0))
+                return num * factor
+            except Exception:
+                pass
+
         matched = re.search(r"[-+]?\d[\d,]*(?:\.\d+)?", text)
         if not matched:
             return None
@@ -149,6 +188,59 @@ class _SourceAwareProxyModel(ListingFilterProxyModel):
             return float(matched.group(0).replace(",", ""))
         except Exception:
             return None
+
+    @classmethod
+    def _is_numeric_sort_label(cls, label: str) -> bool:
+        return cls._normalize_header_label(label) in cls._SORT_NUMERIC_LABELS
+
+    @classmethod
+    def _is_natural_sort_label(cls, label: str) -> bool:
+        return cls._normalize_header_label(label).lower() in {s.lower() for s in cls._SORT_NATURAL_LABELS}
+
+    @staticmethod
+    def _natural_sort_key(value: Any) -> list[Any]:
+        text = str(value or "")
+        parts = re.split(r"(\d+)", text)
+        key: list[Any] = []
+        for part in parts:
+            if part.isdigit():
+                key.append((0, int(part)))
+            else:
+                key.append((1, part.lower()))
+        return key
+
+    def lessThan(self, left: QtCore.QModelIndex, right: QtCore.QModelIndex) -> bool:  # type: ignore[override] # noqa: N802
+        model = self.sourceModel()
+        if model is None:
+            return super().lessThan(left, right)
+
+        column = int(left.column())
+        header = str(model.headerData(column, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole) or "")
+        raw_role = int(Qt.ItemDataRole.UserRole) + 1
+        left_raw = model.data(left, raw_role)
+        right_raw = model.data(right, raw_role)
+        if left_raw is None:
+            left_raw = model.data(left, Qt.ItemDataRole.DisplayRole)
+        if right_raw is None:
+            right_raw = model.data(right, Qt.ItemDataRole.DisplayRole)
+
+        if self._is_numeric_sort_label(header):
+            left_num = self._parse_numeric_value(str(left_raw or ""))
+            right_num = self._parse_numeric_value(str(right_raw or ""))
+            if left_num is None and right_num is None:
+                return self._natural_sort_key(left_raw) < self._natural_sort_key(right_raw)
+            if left_num is None:
+                return False
+            if right_num is None:
+                return True
+            if left_num == right_num:
+                return self._natural_sort_key(left_raw) < self._natural_sort_key(right_raw)
+            return left_num < right_num
+
+        if self._is_natural_sort_label(header):
+            return self._natural_sort_key(left_raw) < self._natural_sort_key(right_raw)
+
+        return super().lessThan(left, right)
 
     @staticmethod
     def _split_range_query(text: str) -> Optional[tuple[str, str]]:
