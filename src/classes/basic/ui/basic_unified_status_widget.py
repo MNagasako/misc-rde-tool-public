@@ -260,7 +260,7 @@ class BasicUnifiedStatusWidget(QWidget):
         self._auth_label = QLabel("")
         self._auth_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
 
-        # 右寄せヘッダ（個別取得 + 更新 + API Debug）
+        # 旧UI互換のため部品は保持（表示はしない）
         self._stage_label = QLabel("個別取得")
         self._stage_combo = QComboBox()
         self._stage_execute_button = QPushButton("実行")
@@ -274,14 +274,6 @@ class BasicUnifiedStatusWidget(QWidget):
         self.debug_button.clicked.connect(self._show_api_debug)
 
         self._stage_execute_button.clicked.connect(self._on_stage_execute_clicked)
-
-        header = QHBoxLayout()
-        header.addStretch(1)
-        header.addWidget(self._stage_label)
-        header.addWidget(self._stage_combo)
-        header.addWidget(self._stage_execute_button)
-        header.addWidget(self.refresh_button)
-        header.addWidget(self.debug_button)
 
         self.table = QTableWidget()
         self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -308,7 +300,6 @@ class BasicUnifiedStatusWidget(QWidget):
         self.table.cellClicked.connect(self._on_table_cell_clicked)
 
         root = QVBoxLayout(self)
-        root.addLayout(header)
         root.addWidget(self._auth_label)
         root.addWidget(self.table, 1)
 

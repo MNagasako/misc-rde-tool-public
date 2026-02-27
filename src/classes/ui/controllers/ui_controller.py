@@ -1836,6 +1836,9 @@ class UIController(UIControllerCore):
             parallel_row.addStretch(1)
             parallel_row.addWidget(self.open_basic_info_data_dir_btn)
 
+            # 後段で「状況更新」「API Debug」ボタンを同一行へ移設するため保持
+            self._basic_info_parallel_row = parallel_row
+
             basic_tab_layout.addLayout(parallel_row)
         except Exception as e:
             logger.debug("basic_info parallel UI init failed: %s", e)
@@ -1938,6 +1941,19 @@ class UIController(UIControllerCore):
                 self.basic_unified_status_widget.set_controller(self)
             except Exception:
                 pass
+
+            # 「状況更新」「API Debug」を「保存フォルダを開く」と同じ行の左側に配置
+            try:
+                parallel_row = getattr(self, '_basic_info_parallel_row', None)
+                open_btn = getattr(self, 'open_basic_info_data_dir_btn', None)
+                if parallel_row is not None and open_btn is not None:
+                    open_index = parallel_row.indexOf(open_btn)
+                    if open_index >= 0:
+                        parallel_row.insertWidget(open_index, self.basic_unified_status_widget.refresh_button)
+                        parallel_row.insertWidget(open_index + 1, self.basic_unified_status_widget.debug_button)
+            except Exception:
+                logger.debug("basic_info control buttons relocation failed", exc_info=True)
+
             basic_tab_layout.addWidget(self.basic_unified_status_widget, 1)
 
             # 基本情報タブバリデータを初期化

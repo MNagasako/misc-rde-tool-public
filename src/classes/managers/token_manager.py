@@ -311,6 +311,12 @@ class TokenManager(QObject):
             
             # 更新
             tokens_dict[host] = token_data.to_dict()
+
+            # Material UI/API は同一AccessTokenを使用するため、相互に同期保存
+            if host == 'rde-material.nims.go.jp':
+                tokens_dict['rde-material-api.nims.go.jp'] = token_data.to_dict()
+            elif host == 'rde-material-api.nims.go.jp':
+                tokens_dict['rde-material.nims.go.jp'] = token_data.to_dict()
             
             # ファイル書き込み
             tokens_file.parent.mkdir(parents=True, exist_ok=True)

@@ -5,6 +5,7 @@ HTTP通信、認証、ペイロード構築を統一管理
 import json
 import logging
 import base64
+from datetime import datetime, timezone
 from qt_compat.widgets import QMessageBox
 from qt_compat.core import QTimer
 from core.bearer_token_manager import BearerTokenManager
@@ -111,25 +112,91 @@ class SubgroupApiClient:
         """
         from config.common import load_bearer_token, save_bearer_token
 
-        # Prefer API host key; fall back to UI host key for backward compatibility.
-        token = load_bearer_token("rde-material-api.nims.go.jp")
-        if token:
-            return token
+        # 1) TokenManager管理トークンを最優先（必要時は期限前リフレッシュ）
+        material_token = self._get_material_token_from_manager(refresh_if_expired=True)
+        if material_token:
+            return material_token
+
+        # 2) 永続化トークン（UIホスト優先、APIホストは後方互換）
         token = load_bearer_token("rde-material.nims.go.jp")
-        if token:
+        if token and self._looks_like_material_token(token):
             return token
 
-        # Fallback: use the currently held browser token if it looks like a Material token.
+        token = load_bearer_token("rde-material-api.nims.go.jp")
+        if token and self._looks_like_material_token(token):
+            return token
+
+        # 3) WebView保持トークン（後方互換）
         browser_token = getattr(self.browser, "bearer_token", None)
         if isinstance(browser_token, str) and browser_token and self._looks_like_material_token(browser_token):
             try:
-                # Persist for subsequent API calls; common.py will alias-save across UI/API hosts.
+                # Persist for subsequent API calls.
                 save_bearer_token(browser_token, "rde-material.nims.go.jp")
             except Exception:
                 pass
             return browser_token
 
         return None
+
+    def _get_material_token_from_manager(self, refresh_if_expired: bool = True):
+        """TokenManagerからMaterialトークンを取得（必要時リフレッシュ）。"""
+        try:
+            from classes.managers.token_manager import TokenManager
+
+            host = "rde-material.nims.go.jp"
+            manager = TokenManager.get_instance()
+            token_data = manager.load_tokens(host)
+            if not token_data:
+                return None
+
+            # 期限切れ直前/期限切れ時は先に更新
+            if refresh_if_expired and token_data.is_expired(margin_seconds=60):
+                logger.info("[TOKEN] Material token is near expiry. Refreshing before API call.")
+                manager.refresh_access_token(host)
+
+            token = manager.get_access_token(host)
+            if token and self._looks_like_material_token(token):
+                return token
+            return None
+        except Exception as e:
+            logger.debug("TokenManager経由Materialトークン取得エラー: %s", e)
+            return None
+
+    def get_material_token_status(self) -> dict:
+        """Materialトークン状態を返す（関連試料ダイアログ表示用）。"""
+        status = {
+            "exists": False,
+            "source": "none",
+            "is_expired": True,
+            "remaining_seconds": None,
+            "updated_at": None,
+        }
+        try:
+            from classes.managers.token_manager import TokenManager
+
+            token_data = TokenManager.get_instance().load_tokens("rde-material.nims.go.jp")
+            if token_data:
+                now = datetime.now(timezone.utc)
+                expires_dt = datetime.fromisoformat(token_data.expires_at.replace('Z', '+00:00'))
+                status["exists"] = True
+                status["source"] = "token_manager"
+                status["is_expired"] = token_data.is_expired(margin_seconds=0)
+                status["remaining_seconds"] = int((expires_dt - now).total_seconds())
+                status["updated_at"] = token_data.updated_at
+                return status
+        except Exception as e:
+            logger.debug("Materialトークン状態取得（TokenManager）エラー: %s", e)
+
+        try:
+            token = self._load_material_token()
+            if token:
+                status["exists"] = True
+                status["source"] = "fallback"
+                status["is_expired"] = False
+        except Exception:
+            pass
+
+        return status
 
     def _decode_jwt_payload_no_verify(self, token: str) -> dict:
         try:
@@ -582,14 +649,16 @@ class SubgroupApiClient:
         
         logger.debug("Material トークン取得成功: %s...", material_token[:20])
         
-        # トークン検証
-        logger.debug("Material トークン検証中...")
-        is_valid = BearerTokenManager.validate_token(material_token)
-        logger.debug("Material トークン検証結果: %s", '有効' if is_valid else '無効')
-        
-        if not is_valid:
-            logger.error("Material APIトークンが無効です")
-            return False, "Material APIトークンが無効です"
+        # Material専用トークンはself API検証で偽陰性になりうるため、
+        # Materialらしくないトークンのみ既存検証を適用する。
+        if not self._looks_like_material_token(material_token):
+            logger.debug("Material トークン検証中...")
+            is_valid = BearerTokenManager.validate_token(material_token)
+            logger.debug("Material トークン検証結果: %s", '有効' if is_valid else '無効')
+
+            if not is_valid:
+                logger.error("Material APIトークンが無効です")
+                return False, "Material APIトークンが無効です"
         
         # v2.1.0: WebViewのCookieを取得してリクエストに含める
         logger.debug("WebViewのCookieを取得中...")

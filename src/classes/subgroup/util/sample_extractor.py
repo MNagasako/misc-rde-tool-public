@@ -6,6 +6,7 @@ import os
 import json
 import webbrowser
 import logging
+from datetime import datetime
 from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, 
     QListWidgetItem, QPushButton, QMessageBox, QTextEdit, QComboBox, QCompleter,
@@ -31,6 +32,7 @@ class RelatedSamplesDialog(QDialog):
         self.init_ui()
         self.load_samples()
         self.load_subgroups()
+        self.update_material_token_status()
     
     def init_ui(self):
         """UI初期化"""
@@ -103,6 +105,9 @@ class RelatedSamplesDialog(QDialog):
         filter_layout.addWidget(self.filter_combo)
         filter_layout.addStretch()
         group_layout.addLayout(filter_layout)
+
+        self.token_status_label = QLabel("Materialトークン状態: 確認中...")
+        group_layout.addWidget(self.token_status_label)
         
         # === 共有グループ設定用 ===
         set_label = QLabel("共有グループを追加:")
@@ -199,6 +204,7 @@ class RelatedSamplesDialog(QDialog):
     
     def on_selection_changed(self):
         """リスト選択変更時の処理"""
+        self.update_material_token_status()
         current_item = self.sample_list.currentItem()
         
         if not current_item:
@@ -514,6 +520,7 @@ class RelatedSamplesDialog(QDialog):
     
     def set_sharing_group(self):
         """試料に共有グループを設定"""
+        self.update_material_token_status()
         # 選択された試料を取得
         current_item = self.sample_list.currentItem()
         if not current_item:
@@ -566,9 +573,11 @@ class RelatedSamplesDialog(QDialog):
             self.load_sample_sharing_groups(sample_id)
         else:
             QMessageBox.warning(self, "エラー", message)
+        self.update_material_token_status()
     
     def delete_sharing_group(self):
         """試料から共有グループを削除"""
+        self.update_material_token_status()
         # 選択された試料を取得
         current_item = self.sample_list.currentItem()
         if not current_item:
@@ -621,6 +630,51 @@ class RelatedSamplesDialog(QDialog):
             self.load_sample_sharing_groups(sample_id)
         else:
             QMessageBox.warning(self, "エラー", message)
+        self.update_material_token_status()
+
+    def update_material_token_status(self):
+        """Materialトークン状態を表示更新"""
+        try:
+            from ..core.subgroup_api_client import SubgroupApiClient
+
+            api_client = SubgroupApiClient(self)
+            status = api_client.get_material_token_status()
+
+            if not status.get("exists"):
+                self.token_status_label.setText("Materialトークン状態: 未取得")
+                return
+
+            source = status.get("source")
+            if source == "token_manager":
+                remaining = int(status.get("remaining_seconds") or 0)
+                is_expired = bool(status.get("is_expired")) or remaining <= 0
+                if is_expired:
+                    remaining_text = "期限切れ"
+                else:
+                    hours = remaining // 3600
+                    minutes = (remaining % 3600) // 60
+                    remaining_text = f"残り{hours}時間{minutes}分"
+
+                updated_text = "-"
+                updated_raw = status.get("updated_at")
+                if updated_raw:
+                    try:
+                        updated_dt = datetime.fromisoformat(str(updated_raw).replace('Z', '+00:00')).astimezone()
+                        tz_name = updated_dt.strftime('%Z')
+                        updated_text = updated_dt.strftime(f'%Y-%m-%d %H:%M:%S {tz_name}')
+                    except Exception:
+                        updated_text = str(updated_raw)
+
+                state_text = "期限切れ" if is_expired else "有効"
+                self.token_status_label.setText(
+                    f"Materialトークン状態: {state_text} / {remaining_text} / 更新: {updated_text}"
+                )
+                return
+
+            self.token_status_label.setText("Materialトークン状態: 有効（fallback）")
+        except Exception as e:
+            logger.debug("Materialトークン状態の更新エラー: %s", e)
+            self.token_status_label.setText("Materialトークン状態: 取得エラー")
 
 
 def show_related_samples_dialog(subgroup_id, parent=None):

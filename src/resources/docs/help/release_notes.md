@@ -6,11 +6,23 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.23）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| サブグループ（閲覧・修正） | 関連試料のMaterialトークン保存で引数順不整合を修正し、トークン破損を防止。 |
-| 設定（トークン状態） | 全トークンリフレッシュの対象を表示中2ホスト（`TokenManager.ACTIVE_HOSTS`）に限定。 |
-| 設定（トークン状態） | 確認ダイアログ件数を対象ホスト数に一致させ、非表示エイリアスの失敗通知を抑止。 |
-| テスト/品質 | `test_token_status_tab_refresh_all_targets` / `test_subgroup_api_client_material_token_save_order` を追加。 |
+| リリース/品質 | リビジョンアップ（v2.5.24）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| サブグループ（閲覧・修正） | 関連試料のMaterialトークン取得で `TokenManager` 優先 + 期限近接時の事前リフレッシュを追加。 |
+| サブグループ（閲覧・修正） | 関連試料ダイアログに Materialトークン状態（有効/期限切れ、残り時間、更新時刻）表示を追加。 |
+| 設定（トークン状態） | Material UI/APIホストのトークン同期保存（alias同期）を強化。 |
+| 基本情報 | 「個別取得（選択+実行）」UIを除去し、「状況更新」「API Debug」を保存フォルダ行へ移設。 |
+| テスト/品質 | Materialトークン更新経路・関連試料状態表示・基本情報UI配置の回帰テストを追加/更新。 |
+
+## v2.5.24 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.24）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| サブグループ（閲覧・修正） | `subgroup_api_client` で Materialトークンを `TokenManager` 優先取得し、期限近接時の事前リフレッシュを追加。 |
+| サブグループ（閲覧・修正） | `sample_extractor` の関連試料ダイアログにトークン状態ラベル（有効/期限切れ、残り時間、更新時刻）を追加。 |
+| 設定（トークン状態） | `token_manager` の保存時に `rde-material.nims.go.jp` / `rde-material-api.nims.go.jp` を同期保存。 |
+| 基本情報 | `basic_unified_status_widget` の個別取得UIを非表示化し、`ui_controller` で `状況更新` / `API Debug` を保存フォルダ行へ移設。 |
+| テスト/品質 | `test_subgroup_material_token_refresh_status` / `test_related_samples_dialog_token_status` / `test_basic_info_ui` などを追加・更新。 |
 
 ## v2.5.23 の主な更新点
 
