@@ -281,9 +281,10 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
 
     _all_dataset_ids_ref: dict[str, set[str]] = {"ids": set()}
 
-    def _resolve_group_label(group_id: str) -> str | None:
+    def _resolve_group_label_candidates(group_id: str) -> list[str]:
+        labels: list[str] = []
         if not group_id:
-            return None
+            return labels
         candidate_paths = [
             os.path.join(SUBGROUP_DETAILS_DIR, f"{group_id}.json"),
             os.path.join(SUBGROUP_REL_DETAILS_DIR, f"{group_id}.json"),
@@ -293,14 +294,25 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
             group = (data or {}).get("data", {}) or {}
             attr = (group or {}).get("attributes", {}) or {}
             name = str(attr.get("name") or "").strip()
+            desc = str(attr.get("description") or "").strip()
             subjects = attr.get("subjects", []) or []
             try:
                 grant_count = len(subjects)
             except Exception:
                 grant_count = 0
             if name:
-                return f"{name} ({grant_count}件の課題)"
-        return None
+                if desc:
+                    labels.append(f"{name}（{desc}、{grant_count}件の課題）")
+                labels.append(f"{name}（{grant_count}件の課題）")
+                labels.append(f"{name} ({grant_count}件の課題)")
+                labels.append(name)
+                break
+        # remove duplicates while keeping order
+        uniq: list[str] = []
+        for lbl in labels:
+            if lbl and lbl not in uniq:
+                uniq.append(lbl)
+        return uniq
 
     def _extract_dataset_prefill_fields(dataset_id: str) -> dict:
         if not dataset_id:
@@ -436,18 +448,21 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     display_filter_layout.setSpacing(8)
 
     display_label = QLabel("表示対象:", display_filter_widget)
-    display_user_only_radio = QRadioButton("所属のみ", display_filter_widget)
-    display_others_only_radio = QRadioButton("その他のみ", display_filter_widget)
-    display_all_radio = QRadioButton("すべて", display_filter_widget)
+    display_managed_only_radio = QRadioButton("管理（自身が開設・所有）", display_filter_widget)
+    display_org_subjects_radio = QRadioButton("所属機関の課題", display_filter_widget)
+    display_others_only_radio = QRadioButton("その他", display_filter_widget)
+    display_all_radio = QRadioButton("全て", display_filter_widget)
     display_all_radio.setChecked(True)
 
     display_group = QButtonGroup(display_filter_widget)
-    display_group.addButton(display_user_only_radio)
+    display_group.addButton(display_managed_only_radio)
+    display_group.addButton(display_org_subjects_radio)
     display_group.addButton(display_others_only_radio)
     display_group.addButton(display_all_radio)
 
     display_filter_layout.addWidget(display_label)
-    display_filter_layout.addWidget(display_user_only_radio)
+    display_filter_layout.addWidget(display_managed_only_radio)
+    display_filter_layout.addWidget(display_org_subjects_radio)
     display_filter_layout.addWidget(display_others_only_radio)
     display_filter_layout.addWidget(display_all_radio)
     display_filter_layout.addStretch(1)
@@ -506,8 +521,10 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
         except Exception:
             preserve_id = ""
 
-        if display_user_only_radio.isChecked():
-            filter_mode = "user_only"
+        if display_managed_only_radio.isChecked():
+            filter_mode = "managed_only"
+        elif display_org_subjects_radio.isChecked():
+            filter_mode = "org_subjects"
         elif display_others_only_radio.isChecked():
             filter_mode = "others_only"
         else:
@@ -533,8 +550,49 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
             except Exception:
                 _all_dataset_ids_ref["ids"] = set()
 
-            user_items: list[tuple[str, str]] = []
+            managed_items: list[tuple[str, str]] = []
+            org_items: list[tuple[str, str]] = []
             other_items: list[tuple[str, str]] = []
+
+            def _read_self_info() -> tuple[str, str]:
+                try:
+                    self_path = get_dynamic_file_path("output/rde/data/self.json")
+                    with open(self_path, encoding="utf-8") as f:
+                        self_data = json.load(f)
+                    attrs = ((self_data or {}).get("data", {}) or {}).get("attributes", {}) or {}
+                    uid = str(((self_data or {}).get("data", {}) or {}).get("id") or "").strip()
+                    org = str(attrs.get("organizationName") or attrs.get("organization") or "").strip()
+                    return uid, org
+                except Exception:
+                    return "", ""
+
+            def _resolve_dataset_manager_org(dataset_id: str, manager_id_hint: str) -> str:
+                try:
+                    detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dataset_id}.json")
+                    detail = _read_json(detail_path)
+                    rel = (((detail or {}).get("data", {}) or {}).get("relationships", {}) or {})
+                    manager_rel = ((rel.get("manager", {}) or {}).get("data", {}) or {})
+                    applicant_rel = ((rel.get("applicant", {}) or {}).get("data", {}) or {})
+                    manager_id = str(manager_rel.get("id") or manager_id_hint or "")
+                    applicant_id = str(applicant_rel.get("id") or "")
+                    target_ids = {x for x in [manager_id, applicant_id] if x}
+                    included = (detail or {}).get("included", []) or []
+                    for inc in included:
+                        if not isinstance(inc, dict):
+                            continue
+                        if inc.get("type") != "user":
+                            continue
+                        uid = str(inc.get("id") or "")
+                        if uid and uid in target_ids:
+                            attrs = inc.get("attributes", {}) or {}
+                            org_name = str(attrs.get("organizationName") or attrs.get("organization") or "").strip()
+                            if org_name:
+                                return org_name
+                except Exception:
+                    pass
+                return ""
+
+            self_user_id, self_org_name = _read_self_info()
 
             for item in datasets:
                 if not isinstance(item, dict):
@@ -554,21 +612,43 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
                     label_parts.append(f"[{grant}]")
                 label = " ".join(label_parts) if label_parts else str(ds_id)
 
-                if user_grants and grant and grant in user_grants:
-                    user_items.append((label, str(ds_id)))
+                rel = item.get("relationships", {}) or {}
+                manager_data = ((rel.get("manager", {}) or {}).get("data", {}) or {})
+                applicant_data = ((rel.get("applicant", {}) or {}).get("data", {}) or {})
+                manager_id = str(manager_data.get("id") or "").strip()
+                applicant_id = str(applicant_data.get("id") or "").strip()
+
+                is_managed = bool(self_user_id and (manager_id == self_user_id or applicant_id == self_user_id))
+
+                is_org_subject = False
+                if self_org_name:
+                    manager_org = _resolve_dataset_manager_org(str(ds_id), manager_id)
+                    if manager_org:
+                        is_org_subject = (manager_org == self_org_name)
+
+                # fallback: detail不在などで機関判定不可なら、従来の課題所属判定を補助的に使う
+                if not is_org_subject and user_grants and grant and grant in user_grants:
+                    is_org_subject = True
+
+                if is_managed:
+                    managed_items.append((label, str(ds_id)))
+                elif is_org_subject:
+                    org_items.append((label, str(ds_id)))
                 else:
                     other_items.append((label, str(ds_id)))
 
-            # safety: user_grants が空の時は user_only でも全件扱い
-            if filter_mode == "user_only" and not user_grants:
+            # safety: 分類情報が取れない場合は全件表示にフォールバック
+            if filter_mode in ("managed_only", "org_subjects") and not (managed_items or org_items):
                 filter_mode = "all"
 
-            if filter_mode == "user_only":
-                items = user_items
+            if filter_mode == "managed_only":
+                items = managed_items
+            elif filter_mode == "org_subjects":
+                items = org_items
             elif filter_mode == "others_only":
                 items = other_items
             else:
-                items = user_items + other_items
+                items = managed_items + org_items + other_items
 
             for label, dsid in items:
                 existing_combo.addItem(label, dsid)
@@ -608,16 +688,63 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
         template_filter_combo = getattr(container, "template_filter_combo", None)
         _safe_set_combo_by_data(template_filter_combo, "all")
 
+        def _clear_subgroup_and_manager_selection() -> None:
+            try:
+                if group_combo is not None:
+                    group_combo.setCurrentIndex(-1)
+                    if group_combo.lineEdit():
+                        group_combo.lineEdit().clear()
+            except Exception:
+                pass
+            try:
+                if grant_combo is not None:
+                    grant_combo.setCurrentIndex(-1)
+                    if grant_combo.lineEdit():
+                        grant_combo.lineEdit().clear()
+            except Exception:
+                pass
+            try:
+                if manager_combo is not None:
+                    manager_combo.setCurrentIndex(-1)
+                    if manager_combo.lineEdit():
+                        manager_combo.lineEdit().clear()
+                    manager_combo.setEnabled(False)
+            except Exception:
+                pass
+
         try:
+            group_selected = False
             # サブグループ/課題番号
             if group_id:
-                label = _resolve_group_label(str(group_id))
-                if label:
-                    if not _safe_set_combo_by_text(group_combo, label):
-                        if group_combo and group_combo.lineEdit():
-                            group_combo.lineEdit().setText(label)
+                labels = _resolve_group_label_candidates(str(group_id))
+                selected = False
+                for label in labels:
+                    if _safe_set_combo_by_text(group_combo, label):
+                        selected = True
+                        break
+                if not selected and group_combo is not None:
+                    # fallback: pick first combo item whose label starts with subgroup name
+                    name_hint = labels[-1] if labels else ""
+                    if name_hint:
+                        try:
+                            for i in range(group_combo.count()):
+                                txt = str(group_combo.itemText(i) or "")
+                                if txt.startswith(name_hint):
+                                    group_combo.setCurrentIndex(i)
+                                    selected = True
+                                    break
+                        except Exception:
+                            pass
+                if not selected and labels:
+                    if group_combo and group_combo.lineEdit():
+                        group_combo.lineEdit().setText(labels[0])
+                group_selected = selected
+                if not group_selected:
+                    _clear_subgroup_and_manager_selection()
+            else:
+                _clear_subgroup_and_manager_selection()
 
-            if grant_number:
+            if grant_number and group_selected:
                 try:
                     idx = grant_combo.findData(grant_number) if grant_combo is not None else -1
                 except Exception:
@@ -711,7 +838,8 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
 
     _populate_existing_dataset_combo()
     reload_btn.clicked.connect(_populate_existing_dataset_combo)
-    display_user_only_radio.toggled.connect(lambda *_: _populate_existing_dataset_combo())
+    display_managed_only_radio.toggled.connect(lambda *_: _populate_existing_dataset_combo())
+    display_org_subjects_radio.toggled.connect(lambda *_: _populate_existing_dataset_combo())
     display_others_only_radio.toggled.connect(lambda *_: _populate_existing_dataset_combo())
     display_all_radio.toggled.connect(lambda *_: _populate_existing_dataset_combo())
     grant_filter_input.textChanged.connect(lambda *_: _populate_existing_dataset_combo())
@@ -777,18 +905,6 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     open_mode_layout.addWidget(open_mode_bulk_radio)
     open_mode_layout.addStretch(1)
 
-    # Insert after template combo row for better UX
-    try:
-        template_row = _find_row_for_widget(template_combo)
-        if template_row >= 0:
-            form_layout.insertRow(template_row + 1, QLabel("開設タイプ:"), open_mode_widget)
-        else:
-            form_layout.insertRow(insert_row, QLabel("開設タイプ:"), open_mode_widget)
-            insert_row += 1
-    except Exception:
-        form_layout.insertRow(insert_row, QLabel("開設タイプ:"), open_mode_widget)
-        insert_row += 1
-
     # --- Bulk template table & presets ---
     bulk_panel = QWidget(container)
     bulk_panel.setObjectName("dataset_create2_bulk_panel")
@@ -796,11 +912,25 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     bulk_layout.setContentsMargins(0, 0, 0, 0)
     bulk_layout.setSpacing(6)
 
-    bulk_help = QLabel("複数設備まとめて: テンプレートを複数追加し、テンプレごとにデータセット名を設定して開設します。", bulk_panel)
-    bulk_help.setWordWrap(True)
-    bulk_layout.addWidget(bulk_help)
+    bulk_mode_row = QWidget(bulk_panel)
+    bulk_mode_layout = QHBoxLayout(bulk_mode_row)
+    bulk_mode_layout.setContentsMargins(0, 0, 0, 0)
+    bulk_mode_layout.setSpacing(8)
+    bulk_mode_layout.addWidget(QLabel("開設タイプ:", bulk_mode_row))
+    bulk_mode_layout.addWidget(open_mode_widget, 1)
+    bulk_layout.addWidget(bulk_mode_row)
 
-    bulk_controls = QWidget(bulk_panel)
+    bulk_content = QWidget(bulk_panel)
+    bulk_content.setObjectName("dataset_create2_bulk_content")
+    bulk_content_layout = QVBoxLayout(bulk_content)
+    bulk_content_layout.setContentsMargins(0, 0, 0, 0)
+    bulk_content_layout.setSpacing(6)
+
+    bulk_help = QLabel("複数設備まとめて: テンプレートを複数追加し、テンプレごとにデータセット名を設定して開設します。", bulk_content)
+    bulk_help.setWordWrap(True)
+    bulk_content_layout.addWidget(bulk_help)
+
+    bulk_controls = QWidget(bulk_content)
     bulk_controls_layout = QHBoxLayout(bulk_controls)
     bulk_controls_layout.setContentsMargins(0, 0, 0, 0)
     bulk_controls_layout.setSpacing(8)
@@ -814,14 +944,16 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     bulk_controls_layout.addWidget(select_from_list_btn)
     bulk_controls_layout.addWidget(clear_btn)
     bulk_controls_layout.addStretch(1)
-    bulk_layout.addWidget(bulk_controls)
+    bulk_content_layout.addWidget(bulk_controls)
 
-    bulk_table = QTableWidget(0, 3, bulk_panel)
+    bulk_table = QTableWidget(0, 3, bulk_content)
     bulk_table.setObjectName("dataset_create2_bulk_table")
     bulk_table.setHorizontalHeaderLabels(["テンプレート名", "データセット名", "除外"])
     bulk_table.setSelectionBehavior(QAbstractItemView.SelectRows)
     bulk_table.setSelectionMode(QAbstractItemView.SingleSelection)
     bulk_table.setEditTriggers(QAbstractItemView.DoubleClicked | QAbstractItemView.SelectedClicked | QAbstractItemView.EditKeyPressed)
+    bulk_table.setMinimumHeight(240)
+    bulk_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     try:
         header = bulk_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.Stretch)
@@ -830,9 +962,9 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     except Exception:
         pass
     bulk_table.setAlternatingRowColors(True)
-    bulk_layout.addWidget(bulk_table)
+    bulk_content_layout.addWidget(bulk_table)
 
-    preset_row = QWidget(bulk_panel)
+    preset_row = QWidget(bulk_content)
     preset_row.setObjectName("dataset_create2_bulk_presets")
     preset_layout = QHBoxLayout(preset_row)
     preset_layout.setContentsMargins(0, 0, 0, 0)
@@ -853,7 +985,8 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     for b in [preset_btn_eq, preset_btn_reg, preset_btn_ind, preset_btn_eq_reg, preset_btn_eq_ind]:
         preset_layout.addWidget(b)
     preset_layout.addStretch(1)
-    bulk_layout.addWidget(preset_row)
+    bulk_content_layout.addWidget(preset_row)
+    bulk_layout.addWidget(bulk_content)
 
     def _bulk_table_template_ids() -> set[str]:
         ids: set[str] = set()
@@ -1276,7 +1409,8 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
 
     def _refresh_open_mode_visibility() -> None:
         try:
-            bulk_panel.setVisible(bool(open_mode_bulk_radio.isChecked()))
+            bulk_panel.setVisible(True)
+            bulk_content.setVisible(bool(open_mode_bulk_radio.isChecked()))
         except Exception:
             pass
 
@@ -2123,18 +2257,28 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
 
     # 新規開設2タブ（遅延ロード：初回表示を軽くする）
     create2_tab = None
+    create2_scroll = None
     create2_idx = -1
     try:
+        create2_scroll = QScrollArea()
+        create2_scroll.setWidgetResizable(True)
+        create2_scroll.setFrameStyle(0)
+        create2_scroll.setContentsMargins(0, 0, 0, 0)
+        create2_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        create2_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
         create2_placeholder = QWidget()
         create2_layout = QVBoxLayout(create2_placeholder)
         create2_layout.addWidget(QLabel("新規開設2を読み込み中..."))
         create2_layout.addStretch(1)
-        create2_idx = tab_widget.addTab(create2_placeholder, "新規開設2")
-        main_widget._dataset_create2_tab = create2_placeholder  # type: ignore[attr-defined]
+        create2_scroll.setWidget(create2_placeholder)
+
+        create2_idx = tab_widget.addTab(create2_scroll, "新規開設2")
+        main_widget._dataset_create2_tab = create2_scroll  # type: ignore[attr-defined]
     except Exception as e:
         logger.warning("データセット開設2タブのプレースホルダ作成に失敗: %s", e)
 
-    create2_tab_ref = {"tab": getattr(main_widget, '_dataset_create2_tab', None)}
+    create2_tab_ref = {"tab": None}
 
     # サブグループ更新通知は dataset_open 全体で1回だけ登録し、両タブを更新する
     try:
@@ -2184,14 +2328,21 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     
     # データエントリータブ（遅延ロード：初回表示を軽くする）
     dataentry_tab = None
+    dataentry_scroll = None
     dataentry_built = False
     try:
+        dataentry_scroll = QScrollArea()
+        dataentry_scroll.setWidgetResizable(True)
+        dataentry_scroll.setFrameStyle(0)
+        dataentry_scroll.setContentsMargins(0, 0, 0, 0)
+
         dataentry_placeholder = QWidget()
         dataentry_layout = QVBoxLayout(dataentry_placeholder)
         dataentry_layout.addWidget(QLabel("タイル（データエントリー）を読み込み中..."))
         dataentry_layout.addStretch(1)
-        tab_widget.addTab(dataentry_placeholder, "タイル（データエントリー）")
-        main_widget._dataset_dataentry_tab = dataentry_placeholder  # type: ignore[attr-defined]
+        dataentry_scroll.setWidget(dataentry_placeholder)
+        tab_widget.addTab(dataentry_scroll, "タイル（データエントリー）")
+        main_widget._dataset_dataentry_tab = dataentry_scroll  # type: ignore[attr-defined]
     except Exception as e:
         logger.warning("データエントリータブのプレースホルダ作成に失敗: %s", e)
 
@@ -2222,18 +2373,11 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
                 create2_tab_ref["tab"] = built
             except Exception:
                 pass
-
-            tab_widget.blockSignals(True)
-            tab_widget.removeTab(create2_idx)
-            tab_widget.insertTab(create2_idx, built, "新規開設2")
+            if create2_scroll is not None:
+                create2_scroll.setWidget(built)
             tab_widget.setCurrentIndex(create2_idx)
         except Exception as e:
             logger.warning("データセット開設2タブの作成に失敗: %s", e)
-        finally:
-            try:
-                tab_widget.blockSignals(False)
-            except Exception:
-                pass
 
     def _ensure_edit_built() -> None:
         nonlocal edit_tab, edit_built
@@ -2261,20 +2405,21 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
         nonlocal dataentry_tab, dataentry_built
         if dataentry_built:
             return
+        if dataentry_scroll is None:
+            dataentry_built = True
+            return
         try:
             from classes.dataset.ui.dataset_dataentry_widget_minimal import create_dataset_dataentry_widget
 
             built = create_dataset_dataentry_widget(parent, "データエントリー", create_auto_resize_button)
             dataentry_tab = built
 
-            # 末尾に追加したプレースホルダを差し替え（同名タブを探して置換）
+            dataentry_scroll.setWidget(built)
+
             idx = next((i for i in range(tab_widget.count()) if tab_widget.tabText(i) == "タイル（データエントリー）"), -1)
             if idx >= 0:
-                tab_widget.blockSignals(True)
-                tab_widget.removeTab(idx)
-                tab_widget.insertTab(idx, built, "タイル（データエントリー）")
                 tab_widget.setCurrentIndex(idx)
-            main_widget._dataset_dataentry_tab = built  # type: ignore[attr-defined]
+            main_widget._dataset_dataentry_tab = dataentry_scroll  # type: ignore[attr-defined]
         except Exception as e:
             logger.warning("データエントリータブの作成に失敗: %s", e)
         finally:

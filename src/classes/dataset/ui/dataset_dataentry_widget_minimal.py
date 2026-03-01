@@ -102,18 +102,21 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     filter_type_label.setMinimumWidth(120)
     filter_type_label.setStyleSheet("font-weight: bold;")
 
-    filter_user_only_radio = QRadioButton("所属のみ")
-    filter_others_only_radio = QRadioButton("その他のみ")
-    filter_all_radio = QRadioButton("すべて")
+    filter_user_only_radio = QRadioButton("管理（自身が開設・所有）")
+    filter_org_subjects_radio = QRadioButton("所属機関の課題")
+    filter_others_only_radio = QRadioButton("その他")
+    filter_all_radio = QRadioButton("全て")
     filter_user_only_radio.setChecked(True)
 
     filter_button_group = QButtonGroup(widget)
     filter_button_group.addButton(filter_user_only_radio)
+    filter_button_group.addButton(filter_org_subjects_radio)
     filter_button_group.addButton(filter_others_only_radio)
     filter_button_group.addButton(filter_all_radio)
 
     filter_type_layout.addWidget(filter_type_label)
     filter_type_layout.addWidget(filter_user_only_radio)
+    filter_type_layout.addWidget(filter_org_subjects_radio)
     filter_type_layout.addWidget(filter_others_only_radio)
     filter_type_layout.addWidget(filter_all_radio)
     filter_type_layout.addStretch()
@@ -842,6 +845,122 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             return ""
         return ""
 
+    def _get_current_filter_type() -> str:
+        if filter_org_subjects_radio.isChecked():
+            return "org_subjects"
+        if filter_others_only_radio.isChecked():
+            return "others_only"
+        if filter_all_radio.isChecked():
+            return "all"
+        return "managed_only"
+
+    def _is_subgroup_filter_mode_enabled(filter_type: str | None = None) -> bool:
+        current_filter_type = filter_type if filter_type is not None else _get_current_filter_type()
+        return current_filter_type in ("org_subjects", "all")
+
+    def _update_subgroup_filter_enabled_state(filter_type: str | None = None) -> None:
+        enabled = _is_subgroup_filter_mode_enabled(filter_type)
+        try:
+            subgroup_filter_combo.setEnabled(enabled)
+        except Exception:
+            return
+
+        if enabled:
+            return
+
+        was_blocked = False
+        try:
+            was_blocked = subgroup_filter_combo.blockSignals(True)
+            if subgroup_filter_combo.currentIndex() != 0:
+                subgroup_filter_combo.setCurrentIndex(0)
+            if subgroup_filter_combo.lineEdit():
+                subgroup_filter_combo.lineEdit().clear()
+        except Exception:
+            pass
+        finally:
+            try:
+                subgroup_filter_combo.blockSignals(was_blocked)
+            except Exception:
+                pass
+
+    def _read_self_info() -> tuple[str, str]:
+        try:
+            self_path = get_dynamic_file_path("output/rde/data/self.json")
+            with open(self_path, encoding="utf-8") as f:
+                self_data = json.load(f)
+            attrs = ((self_data or {}).get("data", {}) or {}).get("attributes", {}) or {}
+            uid = str(((self_data or {}).get("data", {}) or {}).get("id") or "").strip()
+            org = str(attrs.get("organizationName") or attrs.get("organization") or "").strip()
+            return uid, org
+        except Exception:
+            return "", ""
+
+    dataset_org_cache: dict[str, str] = {}
+    dataset_group_cache: dict[str, str] = {}
+
+    def _resolve_dataset_manager_org(dataset_id: str, manager_id_hint: str) -> str:
+        if not dataset_id:
+            return ""
+        if dataset_id in dataset_org_cache:
+            return dataset_org_cache[dataset_id]
+
+        resolved = ""
+        try:
+            detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dataset_id}.json")
+            if os.path.exists(detail_path):
+                with open(detail_path, encoding="utf-8") as f:
+                    detail = json.load(f)
+                rel = (((detail or {}).get("data", {}) or {}).get("relationships", {}) or {})
+                manager_rel = ((rel.get("manager", {}) or {}).get("data", {}) or {})
+                applicant_rel = ((rel.get("applicant", {}) or {}).get("data", {}) or {})
+                manager_id = str(manager_rel.get("id") or manager_id_hint or "")
+                applicant_id = str(applicant_rel.get("id") or "")
+                target_ids = {x for x in [manager_id, applicant_id] if x}
+                for inc in (detail or {}).get("included", []) or []:
+                    if not isinstance(inc, dict) or inc.get("type") != "user":
+                        continue
+                    uid = str(inc.get("id") or "")
+                    if uid and uid in target_ids:
+                        attrs = inc.get("attributes", {}) or {}
+                        org_name = str(attrs.get("organizationName") or attrs.get("organization") or "").strip()
+                        if org_name:
+                            resolved = org_name
+                            break
+        except Exception:
+            resolved = ""
+
+        dataset_org_cache[dataset_id] = resolved
+        return resolved
+
+    def _resolve_dataset_group_id(dataset: dict) -> str:
+        if not isinstance(dataset, dict):
+            return ""
+
+        from_summary = _extract_dataset_group_id(dataset)
+        if from_summary:
+            return from_summary
+
+        dataset_id = str(dataset.get("id") or "")
+        if not dataset_id:
+            return ""
+        if dataset_id in dataset_group_cache:
+            return dataset_group_cache[dataset_id]
+
+        resolved = ""
+        try:
+            detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dataset_id}.json")
+            if os.path.exists(detail_path):
+                with open(detail_path, encoding="utf-8") as f:
+                    detail = json.load(f)
+                rel = (((detail or {}).get("data", {}) or {}).get("relationships", {}) or {})
+                group_rel = ((rel.get("group", {}) or {}).get("data", {}) or {})
+                resolved = str(group_rel.get("id") or "")
+        except Exception:
+            resolved = ""
+
+        dataset_group_cache[dataset_id] = resolved
+        return resolved
+
     def populate_dataset_combo_with_filter(preserve_selection_id: str | None = None):
         """フィルタリングを適用してデータセットコンボボックスを更新"""
         dataset_path = get_dynamic_file_path("output/rde/data/dataset.json")
@@ -863,18 +982,23 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             # フィルタリング適用
             filtered_datasets = []
             
-            # ユーザー所属・その他・すべてのフィルタ
-            filter_type = "user_only"
-            if filter_others_only_radio.isChecked():
+            # 管理・所属機関の課題・その他・全て のフィルタ
+            filter_type = "managed_only"
+            if filter_org_subjects_radio.isChecked():
+                filter_type = "org_subjects"
+            elif filter_others_only_radio.isChecked():
                 filter_type = "others_only"
             elif filter_all_radio.isChecked():
                 filter_type = "all"
             
+            _update_subgroup_filter_enabled_state(filter_type)
+
             subgroup_filter_id = ""
-            try:
-                subgroup_filter_id = str(subgroup_filter_combo.currentData() or "")
-            except Exception:
-                subgroup_filter_id = ""
+            if _is_subgroup_filter_mode_enabled(filter_type):
+                try:
+                    subgroup_filter_id = str(subgroup_filter_combo.currentData() or "")
+                except Exception:
+                    subgroup_filter_id = ""
             
             # ユーザーのgrantNumber一覧を取得
             user_grant_numbers = get_user_grant_numbers()
@@ -882,9 +1006,12 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             # グラント番号フィルタ
             grant_filter_text = grant_filter_input.text().strip().lower()
             
+            self_user_id, self_org_name = _read_self_info()
+
             # フィルタリング処理
             filtered_datasets = []
-            user_datasets = []
+            managed_datasets = []
+            org_subject_datasets = []
             other_datasets = []
             
             for dataset in datasets:
@@ -894,7 +1021,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
                 grant_number = attrs.get("grantNumber", "")
 
                 if subgroup_filter_id:
-                    dataset_group_id = _extract_dataset_group_id(dataset)
+                    dataset_group_id = _resolve_dataset_group_id(dataset)
                     if dataset_group_id != subgroup_filter_id:
                         continue
                 
@@ -902,22 +1029,62 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
                 if grant_filter_text and grant_filter_text not in grant_number.lower():
                     continue
                 
-                # ユーザー所属かどうかで分類
-                if grant_number in user_grant_numbers:
-                    user_datasets.append(dataset)
+                rel = dataset.get("relationships", {}) or {}
+                manager_data = ((rel.get("manager", {}) or {}).get("data", {}) or {})
+                applicant_data = ((rel.get("applicant", {}) or {}).get("data", {}) or {})
+                manager_id = str(manager_data.get("id") or "").strip()
+                applicant_id = str(applicant_data.get("id") or "").strip()
+
+                is_managed = bool(self_user_id and (manager_id == self_user_id or applicant_id == self_user_id))
+
+                is_org_subject = False
+                if self_org_name:
+                    manager_org = _resolve_dataset_manager_org(dataset_id, manager_id)
+                    if manager_org:
+                        is_org_subject = (manager_org == self_org_name)
+
+                if not is_org_subject and user_grant_numbers and grant_number and grant_number in user_grant_numbers:
+                    is_org_subject = True
+
+                if is_managed:
+                    managed_datasets.append(dataset)
+                elif is_org_subject:
+                    org_subject_datasets.append(dataset)
                 else:
                     other_datasets.append(dataset)
-            
-            # フィルタタイプに基づいて表示対象を決定
-            if filter_type == "user_only":
-                filtered_datasets = user_datasets
-                logger.debug("フィルタ適用: ユーザー所属のみ (%s件)", len(filtered_datasets))
-            elif filter_type == "others_only":
-                filtered_datasets = other_datasets
-                logger.debug("フィルタ適用: その他のみ (%s件)", len(filtered_datasets))
-            elif filter_type == "all":
-                filtered_datasets = user_datasets + other_datasets
-                logger.debug("フィルタ適用: すべて (ユーザー所属: %s件, その他: %s件, 合計: %s件)", len(user_datasets), len(other_datasets), len(filtered_datasets))
+
+            should_fallback_to_all = (
+                filter_type in ("managed_only", "org_subjects")
+                and not managed_datasets
+                and not org_subject_datasets
+                and (other_datasets or datasets)
+            )
+            if should_fallback_to_all:
+                logger.info(
+                    "管理/所属機関の分類情報が不足しているため、表示は全件にフォールバックします (filter_type=%s)",
+                    filter_type,
+                )
+                filtered_datasets = managed_datasets + org_subject_datasets + other_datasets
+            else:
+                # フィルタタイプに基づいて表示対象を決定
+                if filter_type == "managed_only":
+                    filtered_datasets = managed_datasets
+                    logger.debug("フィルタ適用: 管理（自身が開設・所有） (%s件)", len(filtered_datasets))
+                elif filter_type == "org_subjects":
+                    filtered_datasets = org_subject_datasets
+                    logger.debug("フィルタ適用: 所属機関の課題 (%s件)", len(filtered_datasets))
+                elif filter_type == "others_only":
+                    filtered_datasets = other_datasets
+                    logger.debug("フィルタ適用: その他 (%s件)", len(filtered_datasets))
+                elif filter_type == "all":
+                    filtered_datasets = managed_datasets + org_subject_datasets + other_datasets
+                    logger.debug(
+                        "フィルタ適用: 全て (管理: %s件, 所属機関の課題: %s件, その他: %s件, 合計: %s件)",
+                        len(managed_datasets),
+                        len(org_subject_datasets),
+                        len(other_datasets),
+                        len(filtered_datasets),
+                    )
             
             try:
                 widget.dataset_map = {
@@ -1336,10 +1503,12 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     
     # フィルタ変更時のイベント接続
     filter_user_only_radio.toggled.connect(on_filter_changed)
+    filter_org_subjects_radio.toggled.connect(on_filter_changed)
     filter_others_only_radio.toggled.connect(on_filter_changed)
     filter_all_radio.toggled.connect(on_filter_changed)
     subgroup_filter_combo.currentIndexChanged.connect(on_filter_changed)
     grant_filter_input.textChanged.connect(on_filter_changed)
+    _update_subgroup_filter_enabled_state(_get_current_filter_type())
     
     # 初期データ読み込みと表示時の自動更新をセット
     def schedule_initial_refresh():
@@ -1373,7 +1542,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             return False
         relax_dataset_dataentry_filters_for_launch(
             filter_all_radio,
-            (filter_user_only_radio, filter_others_only_radio),
+            (filter_user_only_radio, filter_org_subjects_radio, filter_others_only_radio),
             grant_filter_input,
             subgroup_filter_combo,
             lambda: populate_dataset_combo_with_filter(payload.id),

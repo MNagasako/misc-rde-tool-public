@@ -817,16 +817,19 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     filter_type_label.setMinimumWidth(120)
     filter_type_label.setStyleSheet("font-weight: bold;")
     
-    filter_user_only_radio = QRadioButton("ユーザー所属のみ")
+    filter_user_only_radio = QRadioButton("管理（自身が開設・所有）")
     filter_user_only_radio.setObjectName("dataset_filter_user_only_radio")
-    filter_others_only_radio = QRadioButton("その他のみ")
+    filter_org_subjects_radio = QRadioButton("所属機関の課題")
+    filter_org_subjects_radio.setObjectName("dataset_filter_org_subjects_radio")
+    filter_others_only_radio = QRadioButton("その他")
     filter_others_only_radio.setObjectName("dataset_filter_others_radio")
-    filter_all_radio = QRadioButton("すべて")
+    filter_all_radio = QRadioButton("全て")
     filter_all_radio.setObjectName("dataset_filter_all_radio")
-    filter_user_only_radio.setChecked(True)  # デフォルトは「ユーザー所属のみ」
+    filter_user_only_radio.setChecked(True)  # デフォルトは「管理（自身が開設・所有）」
     
     filter_type_layout.addWidget(filter_type_label)
     filter_type_layout.addWidget(filter_user_only_radio)
+    filter_type_layout.addWidget(filter_org_subjects_radio)
     filter_type_layout.addWidget(filter_others_only_radio)
     filter_type_layout.addWidget(filter_all_radio)
     enable_update_override_button = QPushButton("更新有効化")
@@ -848,7 +851,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
         }}
     """)
-    enable_update_override_button.setToolTip("ユーザー所属のみ、課題番号フィルタなしの状態では常に更新できます")
+    enable_update_override_button.setToolTip("管理（自身が開設・所有）、課題番号フィルタなしの状態では常に更新できます")
     filter_type_layout.addWidget(enable_update_override_button)
     filter_type_layout.addStretch()  # 右側にスペースを追加
     
@@ -859,7 +862,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     subgroup_filter_layout = QHBoxLayout()
     subgroup_filter_layout.setContentsMargins(0, 0, 0, 0)
 
-    subgroup_filter_label = QLabel("サブグループ絞り込み:")
+    subgroup_filter_label = QLabel("サブグループフィルタ:")
     subgroup_filter_label.setMinimumWidth(120)
     subgroup_filter_label.setStyleSheet("font-weight: bold;")
 
@@ -886,7 +889,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     grant_number_filter_layout = QHBoxLayout()
     grant_number_filter_layout.setContentsMargins(0, 0, 0, 0)
     
-    grant_number_filter_label = QLabel("課題番号絞り込み:")
+    grant_number_filter_label = QLabel("課題番号フィルタ:")
     grant_number_filter_label.setMinimumWidth(120)
     grant_number_filter_label.setStyleSheet("font-weight: bold;")
     
@@ -1166,10 +1169,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     def _find_dataset_index(dataset_id: str) -> int:
         if not dataset_id:
             return -1
-        for idx in range(existing_dataset_combo.count()):
-            data = existing_dataset_combo.itemData(idx)
-            if isinstance(data, dict) and data.get("id") == dataset_id:
-                return idx
+        try:
+            for idx in range(existing_dataset_combo.count()):
+                data = existing_dataset_combo.itemData(idx)
+                if isinstance(data, dict) and data.get("id") == dataset_id:
+                    return idx
+        except RuntimeError:
+            return -1
         return -1
 
     def _get_current_dataset_id() -> str | None:
@@ -1181,7 +1187,16 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     def _restore_dataset_selection(dataset_id: str | None) -> None:
         attempts = {"count": 0, "expanded": False}
 
+        def _combo_is_alive() -> bool:
+            try:
+                existing_dataset_combo.count()
+                return True
+            except RuntimeError:
+                return False
+
         def _apply_restore():
+            if not _combo_is_alive():
+                return
             if not dataset_id:
                 logger.debug("dataset_edit: restore skipped (no dataset)")
                 existing_dataset_combo.setCurrentIndex(-1)
@@ -1223,10 +1238,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                     return
                 logger.debug("dataset_edit: restore target not found id=%s", dataset_id)
                 available_ids = []
-                for idx in range(existing_dataset_combo.count()):
-                    data = existing_dataset_combo.itemData(idx)
-                    if isinstance(data, dict):
-                        available_ids.append(data.get("id"))
+                try:
+                    for idx in range(existing_dataset_combo.count()):
+                        data = existing_dataset_combo.itemData(idx)
+                        if isinstance(data, dict):
+                            available_ids.append(data.get("id"))
+                except RuntimeError:
+                    return
                 logger.debug("dataset_edit: available ids=%s", available_ids)
                 existing_dataset_combo.setCurrentIndex(-1)
                 return
@@ -1356,6 +1374,11 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
 
     def _get_subgroup_filter_id() -> str:
         try:
+            if not subgroup_filter_combo.isEnabled():
+                return ""
+        except Exception:
+            return ""
+        try:
             subgroup_id = str(subgroup_filter_combo.currentData() or "")
         except Exception:
             subgroup_id = ""
@@ -1385,6 +1408,35 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 except Exception:
                     return ""
         return ""
+
+    def _is_subgroup_filter_mode_enabled(filter_type: str | None = None) -> bool:
+        current_filter_type = filter_type if filter_type is not None else get_current_filter_type()
+        return current_filter_type in ("org_subjects", "all")
+
+    def _update_subgroup_filter_enabled_state(filter_type: str | None = None) -> None:
+        enabled = _is_subgroup_filter_mode_enabled(filter_type)
+        try:
+            subgroup_filter_combo.setEnabled(enabled)
+        except Exception:
+            return
+
+        if enabled:
+            return
+
+        was_blocked = False
+        try:
+            was_blocked = subgroup_filter_combo.blockSignals(True)
+            if subgroup_filter_combo.currentIndex() != 0:
+                subgroup_filter_combo.setCurrentIndex(0)
+            if subgroup_filter_combo.lineEdit():
+                subgroup_filter_combo.lineEdit().clear()
+        except Exception:
+            pass
+        finally:
+            try:
+                subgroup_filter_combo.blockSignals(was_blocked)
+            except Exception:
+                pass
     
     def get_cache_key(filter_type, grant_number_filter, subgroup_filter_id=""):
         """キャッシュキーを生成"""
@@ -1459,9 +1511,89 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         )
         
         filtered_datasets = []
+        managed_datasets = []
+        org_subject_datasets = []
         other_datasets = []
-        user_datasets = []
         grant_number_matches = {}
+
+        def _read_self_info() -> tuple[str, str]:
+            try:
+                self_path = get_dynamic_file_path("output/rde/data/self.json")
+                with open(self_path, encoding="utf-8") as f:
+                    self_data = json.load(f)
+                attrs = ((self_data or {}).get("data", {}) or {}).get("attributes", {}) or {}
+                uid = str(((self_data or {}).get("data", {}) or {}).get("id") or "").strip()
+                org = str(attrs.get("organizationName") or attrs.get("organization") or "").strip()
+                return uid, org
+            except Exception:
+                return "", ""
+
+        dataset_org_cache: dict[str, str] = {}
+        dataset_group_cache: dict[str, str] = {}
+
+        def _resolve_dataset_manager_org(dataset_id: str, manager_id_hint: str) -> str:
+            if not dataset_id:
+                return ""
+            if dataset_id in dataset_org_cache:
+                return dataset_org_cache[dataset_id]
+            resolved = ""
+            try:
+                detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dataset_id}.json")
+                if os.path.exists(detail_path):
+                    with open(detail_path, encoding="utf-8") as f:
+                        detail = json.load(f)
+                    rel = (((detail or {}).get("data", {}) or {}).get("relationships", {}) or {})
+                    manager_rel = ((rel.get("manager", {}) or {}).get("data", {}) or {})
+                    applicant_rel = ((rel.get("applicant", {}) or {}).get("data", {}) or {})
+                    manager_id = str(manager_rel.get("id") or manager_id_hint or "")
+                    applicant_id = str(applicant_rel.get("id") or "")
+                    target_ids = {x for x in [manager_id, applicant_id] if x}
+                    included = (detail or {}).get("included", []) or []
+                    for inc in included:
+                        if not isinstance(inc, dict) or inc.get("type") != "user":
+                            continue
+                        uid = str(inc.get("id") or "")
+                        if uid and uid in target_ids:
+                            attrs = inc.get("attributes", {}) or {}
+                            org_name = str(attrs.get("organizationName") or attrs.get("organization") or "").strip()
+                            if org_name:
+                                resolved = org_name
+                                break
+            except Exception:
+                resolved = ""
+            dataset_org_cache[dataset_id] = resolved
+            return resolved
+
+        def _resolve_dataset_group_id(dataset: dict) -> str:
+            if not isinstance(dataset, dict):
+                return ""
+
+            from_summary = _extract_dataset_group_id(dataset)
+            if from_summary:
+                return from_summary
+
+            dataset_id = str(dataset.get("id") or "")
+            if not dataset_id:
+                return ""
+            if dataset_id in dataset_group_cache:
+                return dataset_group_cache[dataset_id]
+
+            resolved = ""
+            try:
+                detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dataset_id}.json")
+                if os.path.exists(detail_path):
+                    with open(detail_path, encoding="utf-8") as f:
+                        detail = json.load(f)
+                    rel = (((detail or {}).get("data", {}) or {}).get("relationships", {}) or {})
+                    group_rel = ((rel.get("group", {}) or {}).get("data", {}) or {})
+                    resolved = str(group_rel.get("id") or "")
+            except Exception:
+                resolved = ""
+
+            dataset_group_cache[dataset_id] = resolved
+            return resolved
+
+        self_user_id, self_org_name = _read_self_info()
         
         try:
             for i, dataset in enumerate(datasets):
@@ -1491,7 +1623,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                     
                     # サブグループフィルタを適用
                     if subgroup_filter_id:
-                        dataset_group_id = _extract_dataset_group_id(dataset)
+                        dataset_group_id = _resolve_dataset_group_id(dataset)
                         if dataset_group_id != subgroup_filter_id:
                             continue
 
@@ -1499,9 +1631,27 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                     if grant_number_filter and grant_number_filter.lower() not in dataset_grant_number.lower():
                         continue
                     
-                    # ユーザー所属かどうかで分類
-                    if dataset_grant_number in user_grant_numbers:
-                        user_datasets.append(dataset)
+                    rel = dataset.get("relationships", {}) or {}
+                    manager_data = ((rel.get("manager", {}) or {}).get("data", {}) or {})
+                    applicant_data = ((rel.get("applicant", {}) or {}).get("data", {}) or {})
+                    manager_id = str(manager_data.get("id") or "").strip()
+                    applicant_id = str(applicant_data.get("id") or "").strip()
+
+                    is_managed = bool(self_user_id and (manager_id == self_user_id or applicant_id == self_user_id))
+
+                    is_org_subject = False
+                    if self_org_name:
+                        manager_org = _resolve_dataset_manager_org(str(dataset.get("id") or ""), manager_id)
+                        if manager_org:
+                            is_org_subject = (manager_org == self_org_name)
+
+                    if not is_org_subject and user_grant_numbers and dataset_grant_number and dataset_grant_number in user_grant_numbers:
+                        is_org_subject = True
+
+                    if is_managed:
+                        managed_datasets.append(dataset)
+                    elif is_org_subject:
+                        org_subject_datasets.append(dataset)
                         if dataset_grant_number not in grant_number_matches:
                             grant_number_matches[dataset_grant_number] = 0
                         grant_number_matches[dataset_grant_number] += 1
@@ -1519,17 +1669,40 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             
         finally:
             progress.close()
+
+        should_fallback_to_all = (
+            filter_type in ("managed_only", "org_subjects")
+            and not managed_datasets
+            and not org_subject_datasets
+            and (other_datasets or datasets)
+        )
+        if should_fallback_to_all:
+            logger.info(
+                "管理/所属機関の分類情報が不足しているため、表示は全件にフォールバックします (filter_type=%s)",
+                filter_type,
+            )
+            filtered_datasets = managed_datasets + org_subject_datasets + other_datasets
+            return filtered_datasets, grant_number_matches
         
         # フィルタタイプに基づいて表示対象を決定
-        if filter_type == "user_only":
-            filtered_datasets = user_datasets
-            logger.debug("フィルタ適用: ユーザー所属のみ (%s件)", len(filtered_datasets))
+        if filter_type == "managed_only":
+            filtered_datasets = managed_datasets
+            logger.debug("フィルタ適用: 管理（自身が開設・所有） (%s件)", len(filtered_datasets))
+        elif filter_type == "org_subjects":
+            filtered_datasets = org_subject_datasets
+            logger.debug("フィルタ適用: 所属機関の課題 (%s件)", len(filtered_datasets))
         elif filter_type == "others_only":
             filtered_datasets = other_datasets
-            logger.debug("フィルタ適用: その他のみ (%s件)", len(filtered_datasets))
+            logger.debug("フィルタ適用: その他 (%s件)", len(filtered_datasets))
         elif filter_type == "all":
-            filtered_datasets = user_datasets + other_datasets
-            logger.debug("フィルタ適用: すべて (ユーザー所属: %s件, その他: %s件, 合計: %s件)", len(user_datasets), len(other_datasets), len(filtered_datasets))
+            filtered_datasets = managed_datasets + org_subject_datasets + other_datasets
+            logger.debug(
+                "フィルタ適用: 全て (管理: %s件, 所属機関の課題: %s件, その他: %s件, 合計: %s件)",
+                len(managed_datasets),
+                len(org_subject_datasets),
+                len(other_datasets),
+                len(filtered_datasets),
+            )
         
         return filtered_datasets, grant_number_matches
     
@@ -1683,16 +1856,18 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
 
     def get_current_filter_type():
         if filter_user_only_radio.isChecked():
-            return "user_only"
+            return "managed_only"
+        if filter_org_subjects_radio.isChecked():
+            return "org_subjects"
         if filter_others_only_radio.isChecked():
             return "others_only"
         if filter_all_radio.isChecked():
             return "all"
-        return "user_only"
+        return "managed_only"
 
     def _is_default_filter_state(filter_type, grant_number_filter):
         normalized_filter = grant_number_filter or ""
-        return filter_type == "user_only" and not normalized_filter
+        return filter_type == "managed_only" and not normalized_filter
 
     def apply_update_button_state(filter_type, grant_number_filter):
         is_default_filter = _is_default_filter_state(filter_type, grant_number_filter)
@@ -1723,13 +1898,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             else:
                 update_button.setToolTip("手動で更新制限を解除しています。権限がないデータセットはRDE側で拒否されます")
         else:
-            update_button.setToolTip("デフォルト設定（ユーザー所属のみ、課題番号フィルタなし）でのみ更新可能です")
+            update_button.setToolTip("デフォルト設定（管理（自身が開設・所有）、課題番号フィルタなし）でのみ更新可能です")
             update_button.setStyleSheet(UPDATE_BUTTON_DISABLED_STYLE)
 
         if is_default_filter:
             enable_update_override_button.setEnabled(False)
             enable_update_override_button.setText("更新有効化")
-            enable_update_override_button.setToolTip("ユーザー所属のみ、課題番号フィルタなしの状態では常に更新できます")
+            enable_update_override_button.setToolTip("管理（自身が開設・所有）、課題番号フィルタなしの状態では常に更新できます")
         else:
             if update_override_state["enabled"]:
                 enable_update_override_button.setEnabled(False)
@@ -1839,7 +2014,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
 
     # データセット情報を読み込んでドロップダウンに追加
     def load_existing_datasets(
-        filter_type="user_only",
+        filter_type="managed_only",
         grant_number_filter="",
         subgroup_filter_id="",
         force_reload=False,
@@ -1849,7 +2024,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         データセット一覧を読み込み、フィルタ条件に基づいて表示
         
         Args:
-            filter_type: "user_only", "others_only", "all"
+            filter_type: "managed_only", "org_subjects", "others_only", "all"
             grant_number_filter: 課題番号の部分一致検索文字列
             force_reload: キャッシュを無視して強制再読み込み
             preserve_selection_id: 再読み込み後に再選択したいデータセットID
@@ -2021,7 +2196,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 all_datasets, user_grant_numbers, filter_type, grant_number_filter, subgroup_filter_id
             )
             
-            # 課題番号ごとのマッチ結果を表示（ユーザー所属のみ）
+            # 課題番号ごとのマッチ結果を表示（所属機関の課題）
             if grant_number_matches:
                 logger.debug("課題番号別マッチ結果（ユーザー所属）:")
                 for grant_number, count in grant_number_matches.items():
@@ -2029,7 +2204,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             
             # セキュリティ情報をログ出力
             logger.info("データセット編集: 全データセット数=%s, 表示データセット数=%s", len(all_datasets), len(datasets))
-            logger.info("ユーザーが属するgrantNumber: %s", sorted(user_grant_numbers))
+            logger.info("所属grantNumber（所属機関判定フォールバック）: %s", sorted(user_grant_numbers))
             logger.info(
                 "フィルタ設定: タイプ=%s, 課題番号='%s', サブグループ='%s'",
                 filter_type,
@@ -4582,7 +4757,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         )
         relax_dataset_edit_filters_for_launch(
             filter_all_radio,
-            (filter_user_only_radio, filter_others_only_radio),
+            (filter_user_only_radio, filter_org_subjects_radio, filter_others_only_radio),
             grant_number_filter_edit,
             subgroup_filter_combo,
             lambda: apply_filter(force_reload=False),
@@ -4636,6 +4811,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         """フィルタを適用してデータセット一覧を更新"""
         # 現在のフィルタ設定を取得
         filter_type = get_current_filter_type()
+        _update_subgroup_filter_enabled_state(filter_type)
         grant_number_filter = grant_number_filter_edit.text().strip()
         subgroup_filter_id = _get_subgroup_filter_id()
         reset_update_override("フィルタ変更", filter_type, grant_number_filter)
@@ -4739,7 +4915,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
 
         message = (
             "データセット更新ボタンを一時的に有効化します。\n"
-            "ユーザー所属以外や課題番号で絞り込んだ状態でも更新できます。\n"
+            "管理（自身が開設・所有）以外や課題番号で絞り込んだ状態でも更新できます。\n"
             "権限がない場合はRDE側で拒否されます。\n"
             "※ データセットを切り替えると自動で無効化されます。"
         )
@@ -4760,6 +4936,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     cache_refresh_button.clicked.connect(refresh_cache)
     dataset_refetch_button.clicked.connect(on_refetch_current_dataset)
     filter_user_only_radio.toggled.connect(lambda: apply_filter() if filter_user_only_radio.isChecked() else None)
+    filter_org_subjects_radio.toggled.connect(lambda: apply_filter() if filter_org_subjects_radio.isChecked() else None)
     filter_others_only_radio.toggled.connect(lambda: apply_filter() if filter_others_only_radio.isChecked() else None)
     filter_all_radio.toggled.connect(lambda: apply_filter() if filter_all_radio.isChecked() else None)
     subgroup_filter_combo.currentIndexChanged.connect(on_filter_text_changed)
@@ -4767,6 +4944,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         subgroup_filter_combo.lineEdit().textChanged.connect(on_filter_text_changed)
     grant_number_filter_edit.textChanged.connect(on_filter_text_changed)  # リアルタイム絞り込み
     enable_update_override_button.clicked.connect(on_enable_update_override)
+    _update_subgroup_filter_enabled_state(get_current_filter_type())
     
     def on_open_dataset_page():
         """データセットページをブラウザで開く"""
@@ -4925,7 +5103,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     def _initial_load_and_register_receiver() -> None:
         try:
             _load_subgroup_filter_items()
-            load_existing_datasets("user_only", "", "")
+            load_existing_datasets("managed_only", "", "")
         finally:
             _register_dataset_launch_receiver_once()
 
