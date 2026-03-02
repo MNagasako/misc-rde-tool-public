@@ -26,7 +26,7 @@ from qt_compat.widgets import QWidget, QVBoxLayout, QLabel, QTabWidget, QScrollA
 from qt_compat.widgets import QHBoxLayout, QFormLayout, QLineEdit, QTextEdit, QPushButton
 from qt_compat.widgets import QButtonGroup, QComboBox, QRadioButton, QSizePolicy
 from qt_compat.widgets import QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
-from qt_compat.core import QDate, Qt
+from qt_compat.core import QDate, Qt, QTimer
 from classes.dataset.core.dataset_open_logic import create_group_select_widget
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
@@ -476,7 +476,7 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     grant_filter_input = QLineEdit(grant_filter_widget)
     grant_filter_input.setObjectName("dataset_create2_existing_dataset_grant_filter")
     grant_filter_input.setPlaceholderText("課題番号 (例: 22XXXXXX)")
-    grant_filter_input.setMinimumWidth(200)
+    grant_filter_input.setMinimumWidth(140)
     grant_filter_layout.addWidget(grant_filter_label)
     grant_filter_layout.addWidget(grant_filter_input)
     grant_filter_layout.addStretch(1)
@@ -489,6 +489,9 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
 
     existing_combo = QComboBox(existing_row)
     existing_combo.setObjectName("dataset_create2_existing_dataset_combo")
+    existing_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    existing_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+    existing_combo.setMinimumContentsLength(24)
     existing_combo.setEditable(True)
     existing_combo.setInsertPolicy(QComboBox.NoInsert)
     existing_combo.setMaxVisibleItems(12)
@@ -2228,6 +2231,79 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     # タブウィジェット
     tab_widget = QTabWidget()
     main_widget._dataset_tab_widget = tab_widget  # type: ignore[attr-defined]
+
+    # タブごとのウィンドウサイズを独立管理
+    tab_window_state: dict[str, object] = {
+        "last_index": -1,
+        "saved_sizes": {},
+    }
+
+    def _login_mode_like_width(window) -> int:
+        try:
+            webview_width = int(getattr(window, '_webview_fixed_width', 900) or 900)
+        except Exception:
+            webview_width = 900
+        menu_width = 120
+        margin = 40
+        return max(200, webview_width + menu_width + margin)
+
+    def _tab_key(index: int) -> str:
+        try:
+            return str(tab_widget.tabText(index) or f"tab_{index}")
+        except Exception:
+            return f"tab_{index}"
+
+    def _save_window_size_for_tab(index: int) -> None:
+        if index < 0:
+            return
+        try:
+            window = main_widget.window()
+            if window is None:
+                return
+            tab_key = _tab_key(index)
+            saved_sizes = tab_window_state.get("saved_sizes")
+            if isinstance(saved_sizes, dict):
+                saved_sizes[tab_key] = (int(window.width()), int(window.height()))
+        except Exception:
+            logger.debug("dataset_open: save window size failed", exc_info=True)
+
+    def _apply_window_size_for_tab(index: int) -> None:
+        if index < 0:
+            return
+        try:
+            window = main_widget.window()
+            if window is None:
+                return
+            tab_key = _tab_key(index)
+            saved_sizes = tab_window_state.get("saved_sizes")
+            saved = saved_sizes.get(tab_key) if isinstance(saved_sizes, dict) else None
+            if isinstance(saved, tuple) and len(saved) == 2:
+                window.resize(int(saved[0]), int(saved[1]))
+                return
+
+            tab_text = tab_widget.tabText(index)
+            if tab_text in ("新規開設", "新規開設2"):
+                target_w = _login_mode_like_width(window)
+                window.resize(target_w, window.height())
+                return
+            if tab_text == "一覧":
+                screen = window.screen() if hasattr(window, 'screen') else None
+                if screen is None:
+                    screen = QApplication.primaryScreen()
+                if screen is not None:
+                    available = screen.availableGeometry()
+                    window.resize(int(available.width() * 0.90), int(available.height() * 0.90))
+                return
+            if tab_text == "閲覧・修正":
+                screen = window.screen() if hasattr(window, 'screen') else None
+                if screen is None:
+                    screen = QApplication.primaryScreen()
+                if screen is not None:
+                    available = screen.availableGeometry()
+                    window.resize(window.width(), available.height())
+                return
+        except Exception:
+            logger.debug("dataset_open: apply window size failed", exc_info=True)
     
     # 新規開設タブ
     try:
@@ -2367,6 +2443,38 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
             return
         try:
             built = _create_dataset_create2_tab(parent)
+
+            # 初回表示時に横スクロールが出にくいよう、過大な最小幅を抑制
+            try:
+                from qt_compat.widgets import QLineEdit, QComboBox, QTextEdit, QDateEdit
+
+                for line_edit in built.findChildren(QLineEdit):
+                    try:
+                        if line_edit.minimumWidth() > 320:
+                            line_edit.setMinimumWidth(320)
+                    except Exception:
+                        pass
+                for combo in built.findChildren(QComboBox):
+                    try:
+                        if combo.minimumWidth() > 300:
+                            combo.setMinimumWidth(300)
+                    except Exception:
+                        pass
+                for date_edit in built.findChildren(QDateEdit):
+                    try:
+                        if date_edit.minimumWidth() > 180:
+                            date_edit.setMinimumWidth(180)
+                    except Exception:
+                        pass
+                for text_edit in built.findChildren(QTextEdit):
+                    try:
+                        if text_edit.minimumWidth() > 420:
+                            text_edit.setMinimumWidth(420)
+                    except Exception:
+                        pass
+            except Exception:
+                logger.debug("dataset_open: create2 width clamp skipped", exc_info=True)
+
             create2_tab = built
             # notifier refresh 対象も差し替える
             try:
@@ -2538,31 +2646,28 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     def on_tab_changed(index):
         """タブ切り替え時の処理"""
         try:
+            previous_index = int(tab_window_state.get("last_index", -1) or -1)
+            if previous_index >= 0 and previous_index != index:
+                _save_window_size_for_tab(previous_index)
+
             current_tab = tab_widget.widget(index)
             if create2_idx >= 0 and index == create2_idx:
                 _ensure_create2_built()
+                _apply_window_size_for_tab(index)
+                tab_window_state["last_index"] = index
                 return
 
             if current_tab is main_widget._dataset_edit_tab:
                 _ensure_edit_built()
                 logger.info("修正タブが選択されました - データセットリストをリフレッシュします")
                 if edit_tab is not None and hasattr(edit_tab, '_refresh_dataset_list'):
-                    edit_tab._refresh_dataset_list()
+                    try:
+                        edit_tab._refresh_dataset_list(show_progress=False)
+                    except TypeError:
+                        edit_tab._refresh_dataset_list()
                     logger.info("データセットリストのリフレッシュが完了しました")
                 else:
                     logger.debug("データセットリフレッシュ機能がスキップされました (edit_tab=%s)", edit_tab is not None)
-
-                # 表示タイミングで縦サイズをディスプレイに合わせる（再表示のたびにリセット）
-                try:
-                    window = main_widget.window()
-                    screen = window.screen() if hasattr(window, 'screen') else None
-                    if screen is None:
-                        screen = QApplication.primaryScreen()
-                    if screen is not None:
-                        available = screen.availableGeometry()
-                        window.resize(window.width(), available.height())
-                except Exception:
-                    logger.debug("dataset_open: window height reset failed", exc_info=True)
             elif current_tab is main_widget._dataset_dataentry_tab:
                 _ensure_dataentry_built()
                 logger.info("データエントリータブが選択されました")
@@ -2570,41 +2675,26 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
                 _ensure_listing_built()
                 logger.info("一覧タブが選択されました")
 
-                # 一覧タブは横幅を十分確保して表示（ユーザーが自由にリサイズ可能）
-                try:
-                    window = main_widget.window()
-
-                    # UIController/EventHandler による横幅固定を解除
-                    try:
-                        if hasattr(window, '_fixed_aspect_ratio'):
-                            window._fixed_aspect_ratio = None
-                        if hasattr(window, 'setMinimumSize'):
-                            window.setMinimumSize(200, 200)
-                        if hasattr(window, 'setMaximumSize'):
-                            window.setMaximumSize(16777215, 16777215)
-                        if hasattr(window, 'setMinimumWidth'):
-                            window.setMinimumWidth(200)
-                        if hasattr(window, 'setMaximumWidth'):
-                            window.setMaximumWidth(16777215)
-                        if hasattr(window, 'showNormal'):
-                            window.showNormal()
-                    except Exception:
-                        pass
-
-                    screen = window.screen() if hasattr(window, 'screen') else None
-                    if screen is None:
-                        screen = QApplication.primaryScreen()
-                    if screen is not None:
-                        available = screen.availableGeometry()
-                        target_w = int(available.width() * 0.90)
-                        target_h = int(available.height() * 0.90)
-                        window.resize(target_w, target_h)
-                except Exception:
-                    logger.debug("dataset_open: listing window resize failed", exc_info=True)
+            _apply_window_size_for_tab(index)
+            tab_window_state["last_index"] = index
         except Exception as e:
             logger.error("タブ切り替え時のリフレッシュ処理でエラー: %s", e)
     
     tab_widget.currentChanged.connect(on_tab_changed)
+
+    # 初期表示タブにもサイズポリシーを適用（親ウィンドウ確定後に遅延実行）
+    def _apply_initial_tab_window_size() -> None:
+        try:
+            initial_idx = tab_widget.currentIndex()
+            tab_window_state["last_index"] = initial_idx
+            _apply_window_size_for_tab(initial_idx)
+        except Exception:
+            logger.debug("dataset_open: initial tab size apply failed", exc_info=True)
+
+    try:
+        QTimer.singleShot(0, _apply_initial_tab_window_size)
+    except Exception:
+        _apply_initial_tab_window_size()
     
     main_layout.addWidget(tab_widget)
     main_widget.setLayout(main_layout)

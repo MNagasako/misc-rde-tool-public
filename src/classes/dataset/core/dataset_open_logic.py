@@ -859,6 +859,8 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         pass
     combo.setMinimumWidth(200)
     combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+    combo.setMinimumContentsLength(20)
     combo.setEditable(True)
     combo.setInsertPolicy(QComboBox.NoInsert)
     combo.setMaxVisibleItems(12)
@@ -875,6 +877,8 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         pass
     grant_combo.setMinimumWidth(200)
     grant_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    grant_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+    grant_combo.setMinimumContentsLength(20)
     grant_combo.setEditable(True)
     grant_combo.setInsertPolicy(QComboBox.NoInsert)
     grant_combo.setMaxVisibleItems(12)
@@ -897,6 +901,8 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     manager_combo.view().setMinimumHeight(240)
     manager_combo.setEnabled(False)
     manager_combo.setMinimumWidth(220)
+    manager_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+    manager_combo.setMinimumContentsLength(18)
     manager_combo.lineEdit().setPlaceholderText("先にグループを選択してください")
     manager_entries: list[tuple[str, str]] = []
     manager_completer = QCompleter([], manager_combo)
@@ -1332,6 +1338,8 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     except Exception:
         pass
     template_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+    template_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+    template_combo.setMinimumContentsLength(24)
     template_combo.setEditable(True)
     template_combo.setInsertPolicy(QComboBox.NoInsert)
     template_combo.setMaxVisibleItems(12)

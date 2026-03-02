@@ -729,9 +729,30 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         "display_data": {}
     }
     
-    def load_subgroups():
-        """サブグループ情報を読み込んでコンボボックスに設定"""
+    def _read_self_user_id_for_subgroup_filter() -> str:
         try:
+            self_path = get_dynamic_file_path("output/rde/data/self.json")
+            with open(self_path, encoding="utf-8") as f:
+                self_data = json.load(f)
+            return str(((self_data or {}).get("data", {}) or {}).get("id") or "").strip()
+        except Exception:
+            return ""
+
+    def load_subgroups(filter_type: str | None = None):
+        """サブグループ情報を読み込んでコンボボックスに設定"""
+        was_blocked = False
+        try:
+            was_blocked = subgroup_filter_combo.blockSignals(True)
+            current_filter_type = filter_type if filter_type is not None else _get_current_filter_type()
+            current_user_id = _read_self_user_id_for_subgroup_filter()
+            restrict_to_my_subgroups = current_filter_type == "managed_only" and bool(current_user_id)
+
+            previous_subgroup_id = ""
+            try:
+                previous_subgroup_id = str(subgroup_filter_combo.currentData() or "")
+            except Exception:
+                previous_subgroup_id = ""
+
             # サブグループフィルタ除去
             
             # subGroup.jsonから読み込み
@@ -756,6 +777,20 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
                     if not isinstance(attrs, dict):
                         logger.warning("サブグループのattributesが辞書でない - スキップ")
                         continue
+
+                    if attrs.get("groupType") != "TEAM":
+                        continue
+
+                    if restrict_to_my_subgroups:
+                        roles = attrs.get("roles", [])
+                        if not isinstance(roles, list):
+                            continue
+                        if not any(
+                            isinstance(role_item, dict)
+                            and str(role_item.get("userId") or "").strip() == current_user_id
+                            for role_item in roles
+                        ):
+                            continue
                     
                     subgroup_id = subgroup.get("id", "")
                     subgroup_name = attrs.get("name", "")
@@ -764,11 +799,22 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
                     display_text = f"{subgroup_name} ({grant_count}件の課題)" if subgroup_name else subgroup_id
                     if subgroup_id:
                         subgroup_filter_combo.addItem(display_text, subgroup_id)
+
+                if previous_subgroup_id:
+                    for index in range(subgroup_filter_combo.count()):
+                        if str(subgroup_filter_combo.itemData(index) or "") == previous_subgroup_id:
+                            subgroup_filter_combo.setCurrentIndex(index)
+                            break
             
         except Exception as e:
             logger.error("サブグループ読み込みエラー: %s", e)
             import traceback
             traceback.print_exc()
+        finally:
+            try:
+                subgroup_filter_combo.blockSignals(was_blocked)
+            except Exception:
+                pass
     
     def get_user_grant_numbers():
         """
@@ -856,10 +902,12 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
 
     def _is_subgroup_filter_mode_enabled(filter_type: str | None = None) -> bool:
         current_filter_type = filter_type if filter_type is not None else _get_current_filter_type()
-        return current_filter_type in ("org_subjects", "all")
+        return current_filter_type in ("managed_only", "org_subjects", "all")
 
     def _update_subgroup_filter_enabled_state(filter_type: str | None = None) -> None:
-        enabled = _is_subgroup_filter_mode_enabled(filter_type)
+        current_filter_type = filter_type if filter_type is not None else _get_current_filter_type()
+        load_subgroups(current_filter_type)
+        enabled = _is_subgroup_filter_mode_enabled(current_filter_type)
         try:
             subgroup_filter_combo.setEnabled(enabled)
         except Exception:
@@ -1171,7 +1219,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         """サブグループとデータセット一覧をまとめて再読み込みする"""
         logger.debug("データエントリータブ: refresh_dataset_sources reason=%s", reason)
         selection_id = get_selected_dataset_id() if preserve_selection else None
-        load_subgroups()
+        load_subgroups(_get_current_filter_type())
         populate_dataset_combo_with_filter(selection_id)
     
     def get_selected_dataset_id():

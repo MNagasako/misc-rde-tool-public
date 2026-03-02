@@ -1306,7 +1306,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         "last_modified": None,  # ファイルの最終更新時刻
         "user_grant_numbers": None,  # ユーザーのgrantNumber一覧
         "filtered_datasets": {},  # フィルタごとのキャッシュ: {(filter_type, grant_filter, subgroup_id): datasets}
-        "display_data": {}  # 表示用データのキャッシュ: {(filter_type, grant_filter, subgroup_id): display_names}
+        "display_data": {},  # 表示用データのキャッシュ: {(filter_type, grant_filter, subgroup_id): display_names}
+        "dataset_org_cache": {},  # dataset_id -> manager/applicant organization
+        "dataset_group_cache": {},  # dataset_id -> group_id
+        "last_applied_filter": None,  # (filter_type, grant_filter, subgroup_id)
     }
 
     def _extract_dataset_group_id(dataset: dict) -> str:
@@ -1321,7 +1324,26 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             return ""
         return ""
 
-    def _load_subgroup_filter_items() -> None:
+    def _get_current_user_id_for_subgroup_filter() -> str:
+        try:
+            self_path = get_dynamic_file_path("output/rde/data/self.json")
+            with open(self_path, "r", encoding="utf-8") as f:
+                self_data = json.load(f)
+            return str(((self_data or {}).get("data", {}) or {}).get("id") or "").strip()
+        except Exception:
+            return ""
+
+    def _load_subgroup_filter_items(filter_type: str | None = None) -> None:
+        current_filter_type = filter_type if filter_type is not None else get_current_filter_type()
+        current_user_id = _get_current_user_id_for_subgroup_filter()
+        restrict_to_my_subgroups = current_filter_type == "managed_only" and bool(current_user_id)
+
+        previous_subgroup_id = ""
+        try:
+            previous_subgroup_id = str(subgroup_filter_combo.currentData() or "")
+        except Exception:
+            previous_subgroup_id = ""
+
         try:
             subgroup_filter_combo.blockSignals(True)
         except Exception:
@@ -1347,6 +1369,16 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 subgroup_id = str(subgroup.get("id") or "")
                 if not subgroup_id:
                     continue
+                if restrict_to_my_subgroups:
+                    roles = attrs.get("roles", [])
+                    if not isinstance(roles, list):
+                        continue
+                    if not any(
+                        isinstance(role_item, dict)
+                        and str(role_item.get("userId") or "").strip() == current_user_id
+                        for role_item in roles
+                    ):
+                        continue
                 name = str(attrs.get("name") or "")
                 subjects = attrs.get("subjects", [])
                 grant_count = len(subjects) if isinstance(subjects, list) else 0
@@ -1364,6 +1396,15 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                         )
                     except Exception:
                         pass
+
+            if previous_subgroup_id:
+                for index in range(subgroup_filter_combo.count()):
+                    try:
+                        if str(subgroup_filter_combo.itemData(index) or "") == previous_subgroup_id:
+                            subgroup_filter_combo.setCurrentIndex(index)
+                            break
+                    except Exception:
+                        continue
         except Exception as e:
             logger.debug("サブグループフィルタ読み込み失敗: %s", e)
         finally:
@@ -1411,10 +1452,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
 
     def _is_subgroup_filter_mode_enabled(filter_type: str | None = None) -> bool:
         current_filter_type = filter_type if filter_type is not None else get_current_filter_type()
-        return current_filter_type in ("org_subjects", "all")
+        return current_filter_type in ("managed_only", "org_subjects", "all")
 
     def _update_subgroup_filter_enabled_state(filter_type: str | None = None) -> None:
-        enabled = _is_subgroup_filter_mode_enabled(filter_type)
+        current_filter_type = filter_type if filter_type is not None else get_current_filter_type()
+        enabled = _is_subgroup_filter_mode_enabled(current_filter_type)
+
+        _load_subgroup_filter_items(current_filter_type)
         try:
             subgroup_filter_combo.setEnabled(enabled)
         except Exception:
@@ -1460,6 +1504,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         dataset_cache["user_grant_numbers"] = None
         dataset_cache["filtered_datasets"].clear()
         dataset_cache["display_data"].clear()
+        dataset_cache["dataset_org_cache"].clear()
+        dataset_cache["dataset_group_cache"].clear()
+        dataset_cache["last_applied_filter"] = None
         logger.info("データセットキャッシュをクリアしました")
     
     is_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
@@ -1491,23 +1538,35 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         progress = QProgressDialog(text, "キャンセル", 0, maximum, widget)
         progress.setWindowTitle(title)
         progress.setWindowModality(Qt.WindowModal)
-        progress.setMinimumDuration(500)  # 500ms後に表示
+        progress.setMinimumDuration(1200)  # 短時間処理でのチラつき抑制
         progress.setCancelButton(None)  # キャンセルボタンを無効化
         progress.setAutoClose(True)
         progress.setAutoReset(True)
         return progress
     
-    def process_datasets_with_progress(datasets, user_grant_numbers, filter_type, grant_number_filter, subgroup_filter_id=""):
+    def process_datasets_with_progress(
+        datasets,
+        user_grant_numbers,
+        filter_type,
+        grant_number_filter,
+        subgroup_filter_id="",
+        *,
+        show_progress=True,
+    ):
         """プログレス表示付きでデータセットを処理"""
         total_datasets = len(datasets)
         if total_datasets == 0:
             return [], []
         
         # プログレスダイアログを作成
-        progress = create_progress_dialog(
-            "データ処理中", 
-            f"データセットを処理しています... (0/{total_datasets})",
-            total_datasets
+        progress = (
+            create_progress_dialog(
+                "データ処理中",
+                f"データセットを処理しています... (0/{total_datasets})",
+                total_datasets,
+            )
+            if show_progress
+            else _NullProgress()
         )
         
         filtered_datasets = []
@@ -1528,8 +1587,14 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             except Exception:
                 return "", ""
 
-        dataset_org_cache: dict[str, str] = {}
-        dataset_group_cache: dict[str, str] = {}
+        dataset_org_cache = dataset_cache.get("dataset_org_cache")
+        if not isinstance(dataset_org_cache, dict):
+            dataset_org_cache = {}
+            dataset_cache["dataset_org_cache"] = dataset_org_cache
+        dataset_group_cache = dataset_cache.get("dataset_group_cache")
+        if not isinstance(dataset_group_cache, dict):
+            dataset_group_cache = {}
+            dataset_cache["dataset_group_cache"] = dataset_group_cache
 
         def _resolve_dataset_manager_org(dataset_id: str, manager_id_hint: str) -> str:
             if not dataset_id:
@@ -1706,17 +1771,21 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         
         return filtered_datasets, grant_number_matches
     
-    def create_display_names_with_progress(datasets, user_grant_numbers):
+    def create_display_names_with_progress(datasets, user_grant_numbers, *, show_progress=True):
         """プログレス表示付きで表示名リストを作成"""
         total_datasets = len(datasets)
         if total_datasets == 0:
             return []
         
         # 表示名作成のプログレスダイアログ
-        progress = create_progress_dialog(
-            "表示データ作成中",
-            f"表示用データを作成しています... (0/{total_datasets})",
-            total_datasets
+        progress = (
+            create_progress_dialog(
+                "表示データ作成中",
+                f"表示用データを作成しています... (0/{total_datasets})",
+                total_datasets,
+            )
+            if show_progress
+            else _NullProgress()
         )
         
         display_names = []
@@ -2019,6 +2088,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         subgroup_filter_id="",
         force_reload=False,
         preserve_selection_id: str | None = None,
+        show_progress=True,
     ):
         """
         データセット一覧を読み込み、フィルタ条件に基づいて表示
@@ -2193,7 +2263,12 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             
             # フィルタリング処理（プログレス表示付き）
             datasets, grant_number_matches = process_datasets_with_progress(
-                all_datasets, user_grant_numbers, filter_type, grant_number_filter, subgroup_filter_id
+                all_datasets,
+                user_grant_numbers,
+                filter_type,
+                grant_number_filter,
+                subgroup_filter_id,
+                show_progress=show_progress,
             )
             
             # 課題番号ごとのマッチ結果を表示（所属機関の課題）
@@ -2213,7 +2288,11 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             )
             
             # 表示名リストを作成（プログレス表示付き）
-            display_names = create_display_names_with_progress(datasets, user_grant_numbers)
+            display_names = create_display_names_with_progress(
+                datasets,
+                user_grant_numbers,
+                show_progress=show_progress,
+            )
             
             # キャッシュに保存
             dataset_cache["filtered_datasets"][cache_key] = datasets
@@ -4814,6 +4893,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         _update_subgroup_filter_enabled_state(filter_type)
         grant_number_filter = grant_number_filter_edit.text().strip()
         subgroup_filter_id = _get_subgroup_filter_id()
+        filter_key = (filter_type, grant_number_filter.lower().strip(), str(subgroup_filter_id or ""))
+
+        if not force_reload and dataset_cache.get("last_applied_filter") == filter_key:
+            logger.debug("同一フィルタの再適用をスキップ: %s", filter_key)
+            return
+
+        dataset_cache["last_applied_filter"] = filter_key
         reset_update_override("フィルタ変更", filter_type, grant_number_filter)
         
         if force_reload:
@@ -4832,7 +4918,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             )
         
         # データセット一覧を再読み込み
-        load_existing_datasets(filter_type, grant_number_filter, subgroup_filter_id, force_reload)
+        load_existing_datasets(
+            filter_type,
+            grant_number_filter,
+            subgroup_filter_id,
+            force_reload,
+            show_progress=bool(force_reload),
+        )
         
         # 選択をクリア
         existing_dataset_combo.setCurrentIndex(-1)
@@ -4935,10 +5027,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     # フィルタイベントを接続
     cache_refresh_button.clicked.connect(refresh_cache)
     dataset_refetch_button.clicked.connect(on_refetch_current_dataset)
-    filter_user_only_radio.toggled.connect(lambda: apply_filter() if filter_user_only_radio.isChecked() else None)
-    filter_org_subjects_radio.toggled.connect(lambda: apply_filter() if filter_org_subjects_radio.isChecked() else None)
-    filter_others_only_radio.toggled.connect(lambda: apply_filter() if filter_others_only_radio.isChecked() else None)
-    filter_all_radio.toggled.connect(lambda: apply_filter() if filter_all_radio.isChecked() else None)
+    filter_user_only_radio.toggled.connect(lambda: on_filter_text_changed() if filter_user_only_radio.isChecked() else None)
+    filter_org_subjects_radio.toggled.connect(lambda: on_filter_text_changed() if filter_org_subjects_radio.isChecked() else None)
+    filter_others_only_radio.toggled.connect(lambda: on_filter_text_changed() if filter_others_only_radio.isChecked() else None)
+    filter_all_radio.toggled.connect(lambda: on_filter_text_changed() if filter_all_radio.isChecked() else None)
     subgroup_filter_combo.currentIndexChanged.connect(on_filter_text_changed)
     if subgroup_filter_combo.lineEdit():
         subgroup_filter_combo.lineEdit().textChanged.connect(on_filter_text_changed)
@@ -5103,7 +5195,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     def _initial_load_and_register_receiver() -> None:
         try:
             _load_subgroup_filter_items()
-            load_existing_datasets("managed_only", "", "")
+            load_existing_datasets("managed_only", "", "", show_progress=False)
         finally:
             _register_dataset_launch_receiver_once()
 
@@ -5151,7 +5243,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     # ※ receiver 登録は初期ロード後に行う（上の _initial_load_and_register_receiver を参照）
     
     # 外部からリフレッシュできるように関数を属性として追加
-    def refresh_with_current_filter(force_reload=False):
+    def refresh_with_current_filter(force_reload=False, show_progress=False):
         """現在のフィルタ設定でリフレッシュ"""
         filter_type = get_current_filter_type()
         grant_number_filter = grant_number_filter_edit.text().strip()
@@ -5168,15 +5260,16 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             subgroup_filter_id,
             force_reload,
             preserve_selection_id=selection_id,
+            show_progress=bool(show_progress or force_reload),
         )
     
     def refresh_cache_from_external():
         """外部からキャッシュを強制更新"""
-        refresh_with_current_filter(force_reload=True)
+        refresh_with_current_filter(force_reload=True, show_progress=True)
     
     widget._refresh_dataset_list = refresh_with_current_filter
     widget._refresh_cache = refresh_cache_from_external
-    widget.add_show_refresh_callback(lambda: refresh_with_current_filter())
+    widget.add_show_refresh_callback(lambda: refresh_with_current_filter(show_progress=False))
     widget._restore_dataset_selection = _restore_dataset_selection
     
     # グローバル通知システムに登録
