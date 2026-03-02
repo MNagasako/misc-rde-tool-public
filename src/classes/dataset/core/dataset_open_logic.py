@@ -1057,7 +1057,7 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
                 logger.debug("グループメンバー情報の読み込みに失敗: %s", e)
         return users
 
-    def _populate_manager_combo(selected_group: dict | None):
+    def _populate_manager_combo(selected_group: dict | None, preferred_manager_id: str | None = None):
         nonlocal manager_entries
         if not manager_combo:
             return
@@ -1115,6 +1115,20 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
                 manager_completer.setModel(manager_completer.model().__class__([lbl for lbl, _ in manager_entries], manager_completer))
             except Exception:
                 pass
+
+            if preferred_manager_id:
+                preferred_idx = -1
+                for idx, (_lbl, uid) in enumerate(manager_entries):
+                    if uid == preferred_manager_id:
+                        preferred_idx = idx
+                        break
+                if 0 <= preferred_idx < manager_combo.count():
+                    manager_combo.setCurrentIndex(preferred_idx)
+                else:
+                    manager_combo.setCurrentIndex(-1)
+                    if manager_combo.lineEdit():
+                        manager_combo.lineEdit().clear()
+                return
 
             preferred_ids = []
             if user_id:
@@ -1180,12 +1194,27 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         filter_type = filter_combo.currentData()
         logger.debug("Filter changed to: %s", filter_type)
         current_text = combo.lineEdit().text() if combo.lineEdit() else ""
-        search_text = current_text
-        preserve_text = current_text
-        if filter_type == "none":
-            search_text = ""
-            preserve_text = ""
-        update_group_list(filter_type, search_text=search_text, preserve_text=preserve_text)  # update_group_list内でCompleterも更新される
+        selected_group_text = current_text.strip()
+        selected_before = bool(selected_group_text) and selected_group_text in group_names
+
+        if selected_before:
+            group_names_new = update_group_list(filter_type, search_text="", preserve_text="")
+            if selected_group_text in group_names_new:
+                new_idx = group_names_new.index(selected_group_text)
+                if 0 <= new_idx < combo.count():
+                    combo.setCurrentIndex(new_idx)
+            else:
+                combo.setCurrentIndex(-1)
+                if combo.lineEdit():
+                    combo.lineEdit().clear()
+        else:
+            search_text = current_text
+            preserve_text = current_text
+            if filter_type == "none":
+                search_text = ""
+                preserve_text = ""
+            update_group_list(filter_type, search_text=search_text, preserve_text=preserve_text)  # update_group_list内でCompleterも更新される
+
         logger.debug("Groups after filter: %s groups", len(team_groups))
         _populate_manager_combo(None)
         
@@ -1220,6 +1249,14 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     def on_group_changed():
         current_text = combo.lineEdit().text()
         logger.debug("Group selection changed: %s", current_text)
+
+        previous_grant = None
+        try:
+            previous_grant = grant_combo.currentData()
+        except Exception:
+            previous_grant = None
+
+        previous_manager_id = _resolve_selected_manager_id()
         
         # 課題番号コンボボックスをクリア
         grant_combo.clear()
@@ -1286,16 +1323,21 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
                         orig_grant_mouse_press(event)
                     grant_combo.mousePressEvent = grant_combo_mouse_press_event
                     
-                    # デフォルトで最初の課題番号を選択
-                    if len(grant_items) == 1:
-                        grant_combo.setCurrentIndex(0)
+                    selected_grant_idx = -1
+                    if previous_grant:
+                        try:
+                            selected_grant_idx = grant_combo.findData(previous_grant)
+                        except Exception:
+                            selected_grant_idx = -1
+                    if selected_grant_idx is not None and selected_grant_idx >= 0:
+                        grant_combo.setCurrentIndex(int(selected_grant_idx))
                     else:
                         grant_combo.setCurrentIndex(-1)
                         
                 logger.debug("Added %s grant numbers to combo", len(grant_items))
             else:
                 grant_combo.lineEdit().setPlaceholderText("このグループには課題が登録されていません")
-            _populate_manager_combo(selected_group)
+            _populate_manager_combo(selected_group, preferred_manager_id=previous_manager_id)
         else:
             _populate_manager_combo(None)
             grant_combo.lineEdit().setPlaceholderText("先にグループを選択してください")
