@@ -5,6 +5,10 @@
 
 Windows向け配布版 **v2.5.26** のインストーラと利用者向けドキュメントを公開しています。
 
+> [!NOTE]
+> **[ARIM-RDE-TOOL 置き場](https://cuddly-stinger-40d.notion.site/ARIM-RDE-TOOL-2befc2cb5fc380f09d0dd4595b767f4d)**
+> （こちらのほうが人力なので間違いが少ないです。更新頻度も高いです）
+
 > [!IMPORTANT]
 > 本ツールは個人開発の非公式ツールです。ARIM事業 / RDE / ARIMデータポータルの公式サポート対象ではありません。
 
