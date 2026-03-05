@@ -631,6 +631,32 @@ def _template_payload_is_preferred(payload: Dict) -> bool:
     return isinstance(total_counts, int) and total_counts > 0
 
 
+def _classify_template_fetch_error(error: Exception) -> str:
+    """テンプレート取得時の失敗種別を判定する。"""
+    response = getattr(error, "response", None)
+    status_code = getattr(response, "status_code", None)
+
+    if status_code in (400, 401):
+        # リクエスト不正/認証不正は teamId を変えても改善しない
+        return "fatal_http"
+    if status_code in (403, 404):
+        # 権限・存在差分は teamId 依存の可能性があるため継続対象
+        return "team_specific_http"
+    if isinstance(status_code, int):
+        return "http"
+
+    message = str(error or "")
+    lower_message = message.lower()
+    if "noneを返しました" in lower_message:
+        return "request_none"
+    if "timeout" in lower_message:
+        return "timeout"
+    if "connection" in lower_message or "proxy" in lower_message or "ssl" in lower_message:
+        return "connection"
+
+    return "unknown"
+
+
 def _build_dataset_list_query_params(page_size: int, offset: int, search_words: Optional[str]) -> Dict[str, str]:
     params = {
         "sort": "-modified",
@@ -1873,6 +1899,8 @@ def fetch_template_info_from_api(bearer_token, output_dir=None, progress_callbac
         selected_payload: Optional[Dict] = None
         selected_team_id: Optional[str] = None
         last_payload: Optional[Dict] = None
+        stop_error: Optional[Exception] = None
+        consecutive_transport_failures = 0
 
         for idx, team_id in enumerate(team_candidates, 1):
             logger.info("テンプレート取得: teamId候補(%d/%d)=%s を試行します", idx, len(team_candidates), team_id)
@@ -1921,11 +1949,29 @@ def fetch_template_info_from_api(bearer_token, output_dir=None, progress_callbac
             except GroupFetchCancelled:
                 raise
             except Exception as per_team_error:
+                error_kind = _classify_template_fetch_error(per_team_error)
+                if error_kind in ("request_none", "timeout", "connection"):
+                    consecutive_transport_failures += 1
+                else:
+                    consecutive_transport_failures = 0
+
                 logger.warning(
-                    "テンプレート取得: teamId=%s の取得に失敗しました。次の候補を試行します: %s",
+                    "テンプレート取得: teamId=%s の取得に失敗しました(kind=%s)。次の候補を試行します: %s",
                     team_id,
+                    error_kind,
                     per_team_error,
                 )
+
+                if error_kind == "fatal_http":
+                    stop_error = per_team_error
+                    logger.error("テンプレート取得: 復旧不能エラーのため残り候補をスキップします: %s", per_team_error)
+                    break
+
+                if consecutive_transport_failures >= 2:
+                    stop_error = RuntimeError("接続系エラーが連続したため残り候補をスキップしました")
+                    logger.error("テンプレート取得: 接続系エラーが連続したため残り候補をスキップします")
+                    break
+
                 if progress_callback:
                     _progress_ok(
                         progress_callback,
@@ -1946,6 +1992,8 @@ def fetch_template_info_from_api(bearer_token, output_dir=None, progress_callbac
 
         if selected_payload is None:
             if last_payload is None:
+                if stop_error is not None:
+                    raise RuntimeError(f"テンプレート情報: {stop_error}")
                 raise RuntimeError("テンプレート情報: 全teamId候補で取得に失敗しました")
 
             selected_payload = last_payload
