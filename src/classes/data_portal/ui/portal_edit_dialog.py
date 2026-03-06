@@ -71,7 +71,16 @@ class PortalEditDialog(QDialog):
         't_meta_totalfilesizeinthisversion',
     }
     
-    def __init__(self, form_data: Dict[str, Any], t_code: str, dataset_id: str, portal_client, parent=None, metadata: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self,
+        form_data: Dict[str, Any],
+        t_code: str,
+        dataset_id: str,
+        portal_client,
+        parent=None,
+        metadata: Optional[Dict[str, Any]] = None,
+        environment: str = "production",
+    ):
         """
         初期化
         
@@ -90,10 +99,11 @@ class PortalEditDialog(QDialog):
         self.dataset_id = dataset_id
         self.portal_client = portal_client
         self.metadata = metadata or {}
+        self.environment = str(environment or "production").strip() or "production"
         self.field_widgets = {}
         self.file_stats_auto_button = None
         
-        self.setWindowTitle(f"データカタログ修正 - {dataset_id[:8]}...")
+        self.setWindowTitle(f"データカタログ修正 [{self._get_environment_display_name()}] - {dataset_id[:8]}...")
         self.setMinimumWidth(800)
         
         # 初期ウィンドウ高さを画面高さ - 100px に設定
@@ -103,6 +113,24 @@ class PortalEditDialog(QDialog):
         
         self._init_ui()
         logger.info(f"修正ダイアログ初期化: t_code={t_code}, dataset_id={dataset_id}, metadata={len(self.metadata)}項目")
+
+    def _get_environment_display_name(self) -> str:
+        return "テスト環境" if self.environment == "test" else "本番環境"
+
+    def _get_environment_site_url(self) -> str:
+        try:
+            from classes.data_portal.conf.config import get_data_portal_config
+
+            return str(get_data_portal_config().get_url(self.environment) or "").strip()
+        except Exception:
+            return ""
+
+    def _build_environment_message(self) -> str:
+        lines = [f"操作対象: {self._get_environment_display_name()}"]
+        site_url = self._get_environment_site_url()
+        if site_url:
+            lines.append(f"対象サイト: {site_url}")
+        return "\n".join(lines)
     
     def _init_ui(self):
         """UI初期化"""
@@ -1142,8 +1170,10 @@ class PortalEditDialog(QDialog):
             reply = QMessageBox.question(
                 self,
                 "修正確認",
+                f"{self._build_environment_message()}\n\n"
                 "データポータルのエントリを修正しますか?",
-                QMessageBox.Yes | QMessageBox.No
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
             )
             
             if reply != QMessageBox.Yes:

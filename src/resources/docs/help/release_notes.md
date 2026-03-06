@@ -6,11 +6,21 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.28）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| 基本情報（テンプレート再取得） | `fetch_template_info_from_api` に失敗分類を追加し、致命的HTTPエラー時は teamId 候補の残り試行を即停止。 |
-| 基本情報（テンプレート再取得） | 接続系エラーが連続した場合に候補巡回を打ち切り、無駄な再試行による待ち時間増大を抑制。 |
-| 基本情報（テンプレート再取得） | 有効payload未取得時に停止理由を保持して失敗結果を明示し、トラブルシュート性を向上。 |
-| テスト/品質 | `test_fetch_template_info_from_api_stops_on_fatal_http_error` と `test_fetch_template_info_from_api_stops_after_consecutive_transport_failures` を追加。 |
+| リリース/品質 | リビジョンアップ（v2.5.29）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| データポータル（操作確認） | JSONアップロード/ZIPアップロード/修正/ブラウザ表示/公開切替の各確認で、操作対象の本番環境・テスト環境と対象サイトURLを明示。 |
+| データポータル（ブラウザ表示） | テスト環境選択時は `input/data_portal_config.json` の test URL を基準に公開側URLを再構築し、本番URLへの誤遷移を防止。 |
+| データポータル（修正ダイアログ） | `portal_edit_dialog` のタイトルと保存確認に対象環境を表示し、誤編集を抑制。 |
+| テスト/品質 | `test_dataset_upload_tab.py` と `test_data_portal_public.py` に環境表示/公開URL生成の回帰テストを追加。 |
+
+## v2.5.29 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.29）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| データポータル（操作対象表示） | `dataset_upload_tab.py` に環境名・対象サイトURLの共通確認メッセージ生成を追加し、主要操作の確認内容を統一。 |
+| データポータル（公開URL） | `data_portal_public.py` で test 環境の公開URL生成時にポータル設定URLを優先し、`system_arim_data` 系URLを公開側URLへ正規化。 |
+| データポータル（修正UI） | `portal_edit_dialog.py` に environment 引数を追加し、タイトル・保存確認へ反映。 |
+| テスト/品質 | `tests/unit/test_dataset_upload_tab.py` に環境表示の確認を追加し、`tests/unit/utils/test_data_portal_public.py` に test URL導出の回帰テストを追加。 |
 
 ## v2.5.28 の主な更新点
 

@@ -1937,17 +1937,14 @@ class DatasetUploadTab(QWidget):
                 return
         
         # アップロード確認
-        reply = QMessageBox.question(
-            self,
+        if not self._confirm_targeted_action(
             "アップロード確認",
-            f"以下の内容でアップロードを実行しますか?\n\n"
-            f"環境: {self.env_combo.currentText()}\n"
-            f"ファイル: {Path(upload_json_path).name}\n"
-            f"匿名化: {'あり' if self.anonymize_checkbox.isChecked() else 'なし'}",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        
-        if reply != QMessageBox.Yes:
+            "書誌情報JSONアップロードを実行しますか?",
+            [
+                f"ファイル: {Path(upload_json_path).name}",
+                f"匿名化: {'あり' if self.anonymize_checkbox.isChecked() else 'なし'}",
+            ],
+        ):
             self._log_status("アップロードをキャンセルしました")
             return
         
@@ -2184,18 +2181,16 @@ class DatasetUploadTab(QWidget):
 
         self.selected_zip_path = zip_path
 
-        reply = QMessageBox.question(
-            self,
+        if not self._confirm_targeted_action(
             "ZIPアップロード確認",
-            "以下の内容でコンテンツZIPをアップロードしますか?\n\n"
-            f"環境: {self.env_combo.currentText()}\n"
-            f"データセットID: {self.current_dataset_id}\n"
-            f"t_code: {t_code}\n"
-            f"ファイル: {Path(zip_path).name}\n\n"
-            "※既存ファイルがある場合、上書きされる可能性があります",
-            QMessageBox.Yes | QMessageBox.No,
-        )
-        if reply != QMessageBox.Yes:
+            "コンテンツZIPアップロードを実行しますか?",
+            [
+                f"データセットID: {self.current_dataset_id}",
+                f"t_code: {t_code}",
+                f"ファイル: {Path(zip_path).name}",
+                "※既存ファイルがある場合、上書きされる可能性があります",
+            ],
+        ):
             self._log_status("ZIPアップロードをキャンセルしました")
             return
 
@@ -2431,6 +2426,7 @@ class DatasetUploadTab(QWidget):
             msg_box.setWindowTitle("ZIP自動作成 確認")
             msg_box.setIcon(QMessageBox.Question)
             msg_box.setText(
+                f"{self._build_target_environment_message()}\n\n"
                 "選択ファイルをダウンロードしてZIP化し、アップロードします。\n\n"
                 f"データセットID: {self.current_dataset_id}\n"
                 f"t_code: {t_code}\n"
@@ -2629,6 +2625,54 @@ class DatasetUploadTab(QWidget):
     def _show_error(self, message: str):
         """エラーメッセージ"""
         QMessageBox.critical(self, "エラー", message)
+
+    def _get_target_environment(self) -> str:
+        env = str(self.current_environment or self.env_combo.currentData() or "production").strip()
+        return env or "production"
+
+    @staticmethod
+    def _get_environment_display_name(environment: str) -> str:
+        env = str(environment or "production").strip().lower()
+        return "テスト環境" if env == "test" else "本番環境"
+
+    def _get_target_site_url(self) -> str:
+        try:
+            from ..conf.config import get_data_portal_config
+
+            return str(get_data_portal_config().get_url(self._get_target_environment()) or "").strip()
+        except Exception:
+            return ""
+
+    def _build_target_environment_message(self) -> str:
+        lines = [f"操作対象: {self._get_environment_display_name(self._get_target_environment())}"]
+        site_url = self._get_target_site_url()
+        if site_url:
+            lines.append(f"対象サイト: {site_url}")
+        return "\n".join(lines)
+
+    def _confirm_targeted_action(
+        self,
+        title: str,
+        action_text: str,
+        details: Optional[list[str]] = None,
+        *,
+        default_no: bool = True,
+    ) -> bool:
+        sections = [self._build_target_environment_message()]
+        detail_lines = [str(line or "").strip() for line in (details or []) if str(line or "").strip()]
+        if detail_lines:
+            sections.append("\n".join(detail_lines))
+        sections.append(action_text)
+
+        default_button = QMessageBox.No if default_no else QMessageBox.Yes
+        reply = QMessageBox.question(
+            self,
+            title,
+            "\n\n".join(sections),
+            QMessageBox.Yes | QMessageBox.No,
+            default_button,
+        )
+        return reply == QMessageBox.Yes
     
     def _on_bulk_download(self):
         """画像ファイル一括取得（データ取得2と同じフォルダ構造）"""
@@ -4152,9 +4196,18 @@ class DatasetUploadTab(QWidget):
             return
         try:
             # current_public_url が過去の環境（本番）を指している可能性があるため、常に選択環境で組み立て直す
-            env = self.current_environment or self.env_combo.currentData() or "production"
+            env = self._get_target_environment()
             from classes.utils.data_portal_public import build_public_detail_url
             url = build_public_detail_url(env, self.current_public_code, self.current_public_key)
+
+            if not self._confirm_targeted_action(
+                "ブラウザで表示確認",
+                "公開ページを既定ブラウザで開きますか?",
+                [f"公開URL: {url}"],
+            ):
+                self._log_status("ブラウザ表示をキャンセルしました")
+                return
+
             import webbrowser
             webbrowser.open(url)
             self._log_status(f"🌐 公開ページを開きました: {url}")
@@ -4166,6 +4219,14 @@ class DatasetUploadTab(QWidget):
         """データポータル修正処理"""
         if not self.current_dataset_id:
             self._show_warning("データセットが選択されていません")
+            return
+
+        if not self._confirm_targeted_action(
+            "データカタログ修正確認",
+            "データカタログ修正画面を開きますか?",
+            [f"データセットID: {self.current_dataset_id}"],
+        ):
+            self._log_status("データカタログ修正をキャンセルしました")
             return
         
         try:
@@ -4202,7 +4263,15 @@ class DatasetUploadTab(QWidget):
             from qt_compat.widgets import QDialog
             from .portal_edit_dialog import PortalEditDialog
             
-            dialog = PortalEditDialog(form_data, t_code, self.current_dataset_id, self.portal_client, self, metadata)
+            dialog = PortalEditDialog(
+                form_data,
+                t_code,
+                self.current_dataset_id,
+                self.portal_client,
+                self,
+                metadata,
+                environment=self._get_target_environment(),
+            )
             
             if dialog.exec() == QDialog.Accepted:
                 self._log_status("✅ データポータル修正が完了しました")
@@ -4253,14 +4322,14 @@ class DatasetUploadTab(QWidget):
                 action_text = "公開し"
                 new_status_text = "公開済"
             
-            reply = QMessageBox.question(
-                self,
+            if not self._confirm_targeted_action(
                 "ステータス変更確認",
                 f"データセット {self.current_dataset_id[:16]}... を{action_text}ますか？",
-                QMessageBox.Yes | QMessageBox.No
-            )
-            
-            if reply != QMessageBox.Yes:
+                [
+                    f"現在ステータス: {self.current_status}",
+                    f"変更後ステータス: {new_status_text}",
+                ],
+            ):
                 return
             
             # ステータス変更実行

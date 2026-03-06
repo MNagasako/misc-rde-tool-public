@@ -13,6 +13,7 @@ from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 from bs4 import BeautifulSoup
 
+from classes.data_portal.conf.config import get_data_portal_config
 from classes.data_portal.util.public_output_paths import get_public_data_portal_cache_dir, get_public_data_portal_root_dir
 from classes.managers.app_config_manager import get_config_manager
 from net.http_helpers import proxy_get, proxy_post
@@ -333,19 +334,58 @@ class PublicArimDataDetail:
 
 def _get_public_search_url(environment: str) -> str:
     env = str(environment or "production").strip().lower()
-    if env == "production":
+    configured_base = _get_configured_public_base_url(env)
+    if configured_base:
+        return configured_base
+    if env in {"production", "test"}:
         return PROD_BASE
-    if env == "test":
-        test_base = _get_data_portal_test_base_url()
-        return test_base or PROD_BASE
     return PROD_BASE
+
+
+def _normalize_public_search_url(url: str) -> str:
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+
+    parsed = urlparse(raw)
+    path = parsed.path or ""
+
+    if path.endswith("/arim_data.php"):
+        normalized_path = path
+    elif path.endswith("/system_arim_data/"):
+        normalized_path = path[: -len("system_arim_data/")] + "arim_data.php"
+    elif path.endswith("/system_arim_data"):
+        normalized_path = path[: -len("system_arim_data")] + "arim_data.php"
+    elif path.endswith("/"):
+        normalized_path = path + "arim_data.php"
+    else:
+        normalized_path = path.rsplit("/", 1)[0] + "/arim_data.php"
+
+    return urlunparse(parsed._replace(path=normalized_path, query="", params="", fragment=""))
+
+
+def _get_configured_public_base_url(environment: str) -> str:
+    env = str(environment or "production").strip().lower()
+
+    try:
+        portal_url = str(get_data_portal_config().get_url(env) or "").strip()
+        normalized = _normalize_public_search_url(portal_url)
+        if normalized:
+            return normalized
+    except Exception:
+        pass
+
+    if env == "test":
+        return _get_data_portal_test_base_url()
+
+    return ""
 
 
 def _get_data_portal_test_base_url() -> str:
     try:
         cfg = get_config_manager()
         value = str(cfg.get("data_portal.test_base_url", "") or "").strip()
-        return value
+        return _normalize_public_search_url(value)
     except Exception:
         return ""
 
