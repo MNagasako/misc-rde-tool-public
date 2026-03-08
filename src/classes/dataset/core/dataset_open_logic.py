@@ -945,6 +945,8 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         return search_text in f"{name} {desc}".lower()
 
     _suppress_group_search_update = False
+    _last_selected_group_id: str | None = None
+    _force_reset_lower_filters = False
 
     # グループ選択コンボボックス
     def update_group_list(filter_type="member", search_text: str = "", preserve_text: str | None = None):
@@ -1191,18 +1193,23 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     
     # フィルタ変更時のイベントハンドラ
     def on_filter_changed():
+        nonlocal _force_reset_lower_filters
         filter_type = filter_combo.currentData()
         logger.debug("Filter changed to: %s", filter_type)
         current_text = combo.lineEdit().text() if combo.lineEdit() else ""
         selected_group_text = current_text.strip()
         selected_before = bool(selected_group_text) and selected_group_text in group_names
+        keep_selection = False
 
         if selected_before:
             group_names_new = update_group_list(filter_type, search_text="", preserve_text="")
             if selected_group_text in group_names_new:
                 new_idx = group_names_new.index(selected_group_text)
                 if 0 <= new_idx < combo.count():
+                    # 上位フィルタ変更時は、下位フィルタ（課題番号/管理者）を必ず再初期化する
+                    _force_reset_lower_filters = True
                     combo.setCurrentIndex(new_idx)
+                    keep_selection = True
             else:
                 combo.setCurrentIndex(-1)
                 if combo.lineEdit():
@@ -1216,21 +1223,18 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
             update_group_list(filter_type, search_text=search_text, preserve_text=preserve_text)  # update_group_list内でCompleterも更新される
 
         logger.debug("Groups after filter: %s groups", len(team_groups))
-        _populate_manager_combo(None)
+        if not keep_selection:
+            _populate_manager_combo(None)
         
     filter_combo.currentTextChanged.connect(on_filter_changed)
     
     # QComboBox自体のmousePressEventをラップして全リスト表示＋popup
     orig_mouse_press = combo.mousePressEvent
     def combo_mouse_press_event(event):
-        print("[DEBUG] group combo (QComboBox) click: text=", combo.lineEdit().text())
-        print("[DEBUG] group_names=", len(group_names))
-        print("[DEBUG] combo.count before=", combo.count())
         if not combo.lineEdit().text():
             combo.clear()
             combo.addItems(group_names)
             logger.debug("group combo: added all items")
-        print("[DEBUG] combo.count after=", combo.count())
         combo.showPopup()
         orig_mouse_press(event)
     combo.mousePressEvent = combo_mouse_press_event
@@ -1247,6 +1251,7 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
 
     # グループ選択時に課題番号リストを更新
     def on_group_changed():
+        nonlocal _last_selected_group_id, _force_reset_lower_filters
         current_text = combo.lineEdit().text()
         logger.debug("Group selection changed: %s", current_text)
 
@@ -1270,6 +1275,15 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
                 selected_group = team_groups[i]
                 break
         
+        selected_group_id = None
+        if isinstance(selected_group, dict):
+            selected_group_id = str(selected_group.get("id") or "") or None
+
+        reset_lower_filters = bool(_force_reset_lower_filters)
+        _force_reset_lower_filters = False
+        if selected_group_id != _last_selected_group_id:
+            reset_lower_filters = True
+
         if selected_group:
             # 説明（description）
             try:
@@ -1324,7 +1338,7 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
                     grant_combo.mousePressEvent = grant_combo_mouse_press_event
                     
                     selected_grant_idx = -1
-                    if previous_grant:
+                    if (not reset_lower_filters) and previous_grant:
                         try:
                             selected_grant_idx = grant_combo.findData(previous_grant)
                         except Exception:
@@ -1332,12 +1346,14 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
                     if selected_grant_idx is not None and selected_grant_idx >= 0:
                         grant_combo.setCurrentIndex(int(selected_grant_idx))
                     else:
-                        grant_combo.setCurrentIndex(-1)
+                        grant_combo.setCurrentIndex(0)
                         
                 logger.debug("Added %s grant numbers to combo", len(grant_items))
             else:
                 grant_combo.lineEdit().setPlaceholderText("このグループには課題が登録されていません")
-            _populate_manager_combo(selected_group, preferred_manager_id=previous_manager_id)
+            preferred_manager_id = None if reset_lower_filters else previous_manager_id
+            _populate_manager_combo(selected_group, preferred_manager_id=preferred_manager_id)
+            _last_selected_group_id = selected_group_id
         else:
             _populate_manager_combo(None)
             grant_combo.lineEdit().setPlaceholderText("先にグループを選択してください")
@@ -1346,6 +1362,7 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
                 subgroup_desc_label.setVisible(False)
             except Exception:
                 pass
+            _last_selected_group_id = None
     
     # グループ選択の変更イベントを接続
     combo.lineEdit().textChanged.connect(on_group_changed)
