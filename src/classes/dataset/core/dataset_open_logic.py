@@ -754,7 +754,7 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     anonymize_checkbox.setChecked(False)
 
     from qt_compat.widgets import QWidget, QPushButton, QLineEdit, QDateEdit, QComboBox
-    from qt_compat.core import QDate, Qt
+    from qt_compat.core import QDate, Qt, QStringListModel
     import datetime
     from config.common import (
         SUBGROUP_JSON_PATH,
@@ -886,6 +886,15 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
     grant_combo.clear()
     grant_combo.lineEdit().setPlaceholderText("先にグループを選択してください")
     grant_combo.setEnabled(False)  # 初期状態では無効
+    grant_combo._cached_item_pairs = []  # type: ignore[attr-defined]
+    grant_completer_model = QStringListModel([], grant_combo)
+    grant_completer = QCompleter(grant_completer_model, grant_combo)
+    grant_completer.setCaseSensitivity(Qt.CaseInsensitive)
+    grant_completer.setFilterMode(Qt.MatchContains)
+    grant_popup_view = grant_completer.popup()
+    grant_popup_view.setMinimumHeight(240)
+    grant_popup_view.setMaximumHeight(240)
+    grant_combo.setCompleter(grant_completer)
 
     # データセット管理者選択欄（グループ決定後に有効化）
     manager_combo = QComboBox(parent)
@@ -1003,6 +1012,14 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         grant_combo.clear()
         grant_combo.setEnabled(False)
         grant_combo.lineEdit().setPlaceholderText("先にグループを選択してください")
+        try:
+            grant_combo._cached_item_pairs = []  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        try:
+            grant_completer_model.setStringList([])
+        except Exception:
+            pass
 
         # サブグループ説明もクリア
         try:
@@ -1174,6 +1191,42 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
                 if label == text:
                     return uid
         return None
+
+    def _set_grant_combo_items(
+        item_pairs: list[tuple[str, str]],
+        *,
+        preferred_grant: str | None = None,
+        select_first: bool = False,
+    ) -> None:
+        try:
+            grant_combo._cached_item_pairs = list(item_pairs)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+
+        was_blocked = grant_combo.blockSignals(True)
+        try:
+            grant_combo.clear()
+            for display_text, grant_number in item_pairs:
+                grant_combo.addItem(display_text, grant_number)
+
+            selected_grant_idx = -1
+            if preferred_grant:
+                try:
+                    selected_grant_idx = grant_combo.findData(preferred_grant)
+                except Exception:
+                    selected_grant_idx = -1
+
+            if selected_grant_idx >= 0:
+                grant_combo.setCurrentIndex(int(selected_grant_idx))
+            elif select_first and grant_combo.count() > 0:
+                grant_combo.setCurrentIndex(0)
+        finally:
+            grant_combo.blockSignals(was_blocked)
+
+        try:
+            grant_completer_model.setStringList([display for display, _ in item_pairs])
+        except Exception:
+            pass
     
     # グループ選択コンボボックスの設定
     combo.lineEdit().setPlaceholderText("グループ名で検索")
@@ -1249,6 +1302,14 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         finally:
             _suppress_group_search_update = False
 
+    orig_grant_mouse_press = grant_combo.mousePressEvent
+    def grant_combo_mouse_press_event(event):
+        cached_item_pairs = getattr(grant_combo, '_cached_item_pairs', []) or []
+        if grant_combo.count() == 0 and cached_item_pairs:
+            _set_grant_combo_items(list(cached_item_pairs), select_first=False)
+        orig_grant_mouse_press(event)
+    grant_combo.mousePressEvent = grant_combo_mouse_press_event
+
     # グループ選択時に課題番号リストを更新
     def on_group_changed():
         nonlocal _last_selected_group_id, _force_reset_lower_filters
@@ -1267,6 +1328,14 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
         grant_combo.clear()
         grant_combo.setEnabled(False)
         grant_combo.lineEdit().setPlaceholderText("先にグループを選択してください")
+        try:
+            grant_combo._cached_item_pairs = []  # type: ignore[attr-defined]
+        except Exception:
+            pass
+        try:
+            grant_completer_model.setStringList([])
+        except Exception:
+            pass
         
         # 現在選択されているグループのインデックスを探す
         selected_group = None
@@ -1302,51 +1371,21 @@ def create_group_select_widget(parent=None, *, register_subgroup_notifier: bool 
                 grant_combo.setEnabled(True)
                 grant_combo.lineEdit().setPlaceholderText("課題番号を選択")
                 
-                grant_items = []
+                grant_items: list[tuple[str, str]] = []
                 for subject in subjects:
                     grant_number = subject.get('grantNumber', '')
                     title = subject.get('title', '')
                     if grant_number:
                         display_text = f"{grant_number} - {title}" if title else grant_number
-                        grant_items.append(display_text)
-                        grant_combo.addItem(display_text, grant_number)
+                        grant_items.append((display_text, grant_number))
                 
                 if grant_items:
-                    # 課題番号コンボボックス用のコンプリーター設定
-                    grant_completer = QCompleter(grant_items, grant_combo)
-                    grant_completer.setCaseSensitivity(Qt.CaseInsensitive)  # PySide6: 列挙型が必要
-                    grant_completer.setFilterMode(Qt.MatchContains)
-                    grant_popup_view = grant_completer.popup()
-                    grant_popup_view.setMinimumHeight(240)
-                    grant_popup_view.setMaximumHeight(240)
-                    grant_combo.setCompleter(grant_completer)
-                    
-                    # 課題番号コンボボックスのクリックイベント
-                    orig_grant_mouse_press = grant_combo.mousePressEvent
-                    def grant_combo_mouse_press_event(event):
-                        logger.debug("grant combo click")
-                        if not grant_combo.lineEdit().text():
-                            grant_combo.clear()
-                            for subject in subjects:
-                                grant_number = subject.get('grantNumber', '')
-                                title = subject.get('title', '')
-                                if grant_number:
-                                    display_text = f"{grant_number} - {title}" if title else grant_number
-                                    grant_combo.addItem(display_text, grant_number)
-                        grant_combo.showPopup()
-                        orig_grant_mouse_press(event)
-                    grant_combo.mousePressEvent = grant_combo_mouse_press_event
-                    
-                    selected_grant_idx = -1
-                    if (not reset_lower_filters) and previous_grant:
-                        try:
-                            selected_grant_idx = grant_combo.findData(previous_grant)
-                        except Exception:
-                            selected_grant_idx = -1
-                    if selected_grant_idx is not None and selected_grant_idx >= 0:
-                        grant_combo.setCurrentIndex(int(selected_grant_idx))
-                    else:
-                        grant_combo.setCurrentIndex(0)
+                    selected_grant = previous_grant if (not reset_lower_filters) else None
+                    _set_grant_combo_items(
+                        grant_items,
+                        preferred_grant=selected_grant,
+                        select_first=True,
+                    )
                         
                 logger.debug("Added %s grant numbers to combo", len(grant_items))
             else:

@@ -8,6 +8,7 @@
 
 import json
 import logging
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -26,11 +27,6 @@ logger = logging.getLogger(__name__)
 
 
 _SELECTION_HISTORY_PATH = Path(GROUP_SELECTION_HISTORY_FILE)
-
-# worker thread -> UI thread 委譲中の invoker をGCから保護するための強参照。
-# Qt QObject はスレッドをまたいだPython側GCのタイミングで不安定になり得る。
-_ACTIVE_DIALOG_INVOKERS: list[object] = []
-
 
 def _exec_dialog_on_ui_thread(groups, parent, context_name, force_dialog, default_group_id, remember_context):
     """Run the selection dialog on the UI thread.
@@ -64,77 +60,32 @@ def _exec_dialog_on_ui_thread(groups, parent, context_name, force_dialog, defaul
         )
 
     # Called from worker thread -> queue to UI thread and block until completion.
-    # NOTE: PySide6 QMetaObject.invokeMethod does NOT accept Python callables, so we
-    # use a QObject + Signal/Slot to guarantee UI-thread execution.
+    # NOTE:
+    # - 以前は QObject を worker で生成→UI thread へ moveToThread()→worker 側 QEventLoop で待機
+    #   という経路だったが、PySide6/Windows 環境ではまれに queued signal の完了待ちが解放されず、
+    #   widget テストが応答停止することがあった。
+    # - ここでは app コンテキストに紐づく QTimer.singleShot() で UI thread へ直接委譲し、
+    #   worker 側は Python の Event で待機するだけに簡素化する。
     result_holder: Dict[str, Optional[Dict[str, str]]] = {"result": None}
-    loop = QEventLoop()
+    result_ready = threading.Event()
 
-    class _WorkerReceiver(QtCore.QObject):
-        @QtCore.Slot(object)
-        def on_finished(self, res):
-            result_holder["result"] = res
-            # This slot runs on the worker thread (QueuedConnection), so quitting
-            # the worker-thread event loop is safe.
-            try:
-                loop.quit()
-            except Exception:
-                pass
-
-    class _DialogInvoker(QtCore.QObject):
-        requested = QtCore.Signal(object, object, object, object, object, object)
-        finished = QtCore.Signal(object)
-
-        def __init__(self):
-            super().__init__()
-            self.requested.connect(self._run, QtCore.Qt.ConnectionType.QueuedConnection)
-            self.finished.connect(self.deleteLater)
-
-        @QtCore.Slot(object, object, object, object, object, object)
-        def _run(self, _groups, _parent, _context_name, _force_dialog, _default_group_id, _remember_context):
-            try:
-                res = show_group_selection_dialog(
-                    _groups,
-                    _parent,
-                    _context_name,
-                    force_dialog=bool(_force_dialog),
-                    default_group_id=_default_group_id,
-                    remember_context=_remember_context,
-                )
-            except Exception:
-                res = None
-            self.finished.emit(res)
-
-    invoker = _DialogInvoker()
-
-    # invoker を完了まで強参照で保持（setParentが何らかの理由で失敗しても安全にする）
-    _ACTIVE_DIALOG_INVOKERS.append(invoker)
-
-    def _cleanup_invoker(_res=None, inv=invoker):
+    def _run_dialog_on_ui_thread():
         try:
-            _ACTIVE_DIALOG_INVOKERS.remove(inv)
-        except ValueError:
-            pass
+            result_holder["result"] = show_group_selection_dialog(
+                groups,
+                parent,
+                context_name,
+                force_dialog=force_dialog,
+                default_group_id=default_group_id,
+                remember_context=remember_context,
+            )
         except Exception:
-            pass
+            result_holder["result"] = None
+        finally:
+            result_ready.set()
 
-    try:
-        invoker.finished.connect(_cleanup_invoker, QtCore.Qt.ConnectionType.QueuedConnection)
-    except Exception:
-        pass
-    # Create in current (worker) thread, then move to UI thread.
-    # IMPORTANT: After moving, ensure the object is Qt-owned (parented on UI thread),
-    # otherwise Python GC may delete the underlying QObject from the worker thread.
-    invoker.moveToThread(app.thread())
-    try:
-        QTimer.singleShot(0, app, lambda inv=invoker: inv.setParent(app))
-    except Exception:
-        # If parenting fails, we still proceed; worst case is additional GC pressure.
-        pass
-
-    worker_receiver = _WorkerReceiver()
-    invoker.finished.connect(worker_receiver.on_finished, QtCore.Qt.ConnectionType.QueuedConnection)
-    invoker.requested.emit(groups, parent, context_name, force_dialog, default_group_id, remember_context)
-    loop.exec()
+    QTimer.singleShot(0, app, _run_dialog_on_ui_thread)
+    result_ready.wait()
     return result_holder.get("result")
 
 
