@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/MNagasako/misc-rde-tool-public)](https://github.com/MNagasako/misc-rde-tool-public/releases)
 [![License: LGPL v3](https://img.shields.io/badge/License-LGPL_v3-blue.svg)](https://www.gnu.org/licenses/lgpl-3.0)
 
-Windows向け配布版 **v2.5.31** のインストーラと利用者向けドキュメントを公開しています。
+Windows向け配布版 **v2.5.32** のインストーラと利用者向けドキュメントを公開しています。
 
 > [!NOTE]
 > **[ARIM-RDE-TOOL 置き場](https://cuddly-stinger-40d.notion.site/ARIM-RDE-TOOL-2befc2cb5fc380f09d0dd4595b767f4d)**
@@ -18,11 +18,12 @@ Windows向け配布版 **v2.5.31** のインストーラと利用者向けドキ
 - データポータル連携（登録作業の支援）
 - AI支援（説明文作成・補助）
 - 一括処理（複数データセット/画像の処理）
+- ウィンドウサイズやテーマ反映の安定化、各画面の表示状態保持
 
 ## 2) インストール方法
 
 1. [Releases](https://github.com/MNagasako/misc-rde-tool-public/releases) から最新版インストーラを取得
-2. `arim_rde_tool_setup.2.5.31.exe` を実行
+2. `arim_rde_tool_setup.2.5.32.exe` を実行
 3. 画面の案内に従ってインストール
 
 初回起動時に `input/` と `output/` が自動作成されます。
