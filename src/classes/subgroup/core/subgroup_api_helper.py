@@ -835,7 +835,6 @@ def save_dynamic_users_backup(new_users):
             user_id = user.get('id', '')
             if user_id and user_id not in existing_backup_ids:
                 # タイムスタンプを追加
-                import datetime
                 user_with_timestamp = user.copy()
                 user_with_timestamp['backed_up_at'] = datetime.datetime.now().isoformat()
                 

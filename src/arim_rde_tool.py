@@ -88,6 +88,7 @@ from classes.utils.debug_log import debug_log
 from classes.managers.app_config_manager import get_config_manager
 from classes.managers.log_manager import get_log_manager, get_logger
 from classes.core.single_instance_guard import ensure_single_instance_guard
+from classes.utils.window_sizing import get_main_window_min_height
 # ログ管理の初期化
 log_manager = get_log_manager()
 logger = get_logger("RDE_WebView")
@@ -120,6 +121,17 @@ class Browser(QWidget):
     def __init__(self, auto_close=False, test_mode=False):
         """Browserクラス初期化（WebView設定・ログイン情報読み込み）"""
         super().__init__()
+        try:
+            self.setWindowFlags(
+                self.windowFlags()
+                | Qt.Window
+                | Qt.WindowMinimizeButtonHint
+                | Qt.WindowMaximizeButtonHint
+                | Qt.WindowCloseButtonHint
+            )
+            self.setMinimumHeight(get_main_window_min_height())
+        except Exception:
+            pass
         
         # テーマ管理の初期化（最優先）
         theme_manager = ThemeManager.instance()
@@ -1411,6 +1423,7 @@ def main():
                                 from classes.core.app_updater import (
                                     download,
                                     get_default_download_path,
+                                    is_download_cancelled_error,
                                     verify_sha256,
                                 )
 
@@ -1546,6 +1559,22 @@ def main():
                                         dl.finish_success("ダウンロード完了")
                                         QTimer.singleShot(0, browser, _prompt_and_start_update_on_ui_thread)
                                     except Exception as e:
+                                        if dl.is_cancelled() or is_download_cancelled_error(e):
+                                            logger.info("Update download cancelled by user")
+
+                                            def _on_cancel() -> None:
+                                                try:
+                                                    dl.append_log("キャンセルしました")
+                                                except Exception:
+                                                    pass
+                                                try:
+                                                    dl.close()
+                                                except Exception:
+                                                    pass
+
+                                            QTimer.singleShot(0, browser, _on_cancel)
+                                            return
+
                                         logger.error("Update download/verify failed: %s", e, exc_info=True)
 
                                         def _on_err() -> None:

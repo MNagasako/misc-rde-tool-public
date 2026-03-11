@@ -77,6 +77,22 @@ class DataFetch2TabWidget(QTabWidget):
         self.create_filter_tab()
         # 初期フィルタ状態の伝播（フィルタタブのデフォルトをデータ取得タブへ反映）
         self.init_filter_state()
+
+    def _wrap_tab_widget(self, content_widget: QWidget, object_name: str) -> QScrollArea:
+        scroll = QScrollArea(self)
+        scroll.setObjectName(object_name)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        container = QWidget(scroll)
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+        container_layout.addWidget(content_widget)
+        container_layout.addStretch(1)
+        scroll.setWidget(container)
+        return scroll
         
 
         
@@ -219,7 +235,7 @@ class DataFetch2TabWidget(QTabWidget):
             tab_widget = create_data_fetch2_widget(self, self.bearer_token)
             if tab_widget:
                 self.data_fetch_widget = tab_widget  # ウィジェットへの参照を保存
-                self.addTab(tab_widget, "📊 データ取得")
+                self.addTab(self._wrap_tab_widget(tab_widget, "dataFetch2DatasetScrollArea"), "📊 データ取得")
                 # 初期フィルタの表示を即時反映
                 try:
                     if hasattr(self, 'current_filter_config') and hasattr(self.data_fetch_widget, 'set_filter_config_for_display'):
@@ -255,7 +271,7 @@ class DataFetch2TabWidget(QTabWidget):
 
             tab_widget = create_bulk_rde_tab(self)
             self.bulk_rde_widget = tab_widget
-            self.addTab(tab_widget, "📦 一括取得（RDE）")
+            self.addTab(self._wrap_tab_widget(tab_widget, "dataFetch2BulkRdeScrollArea"), "📦 一括取得（RDE）")
             try:
                 if hasattr(tab_widget, "set_filter_config"):
                     tab_widget.set_filter_config(self.current_filter_config)
@@ -278,7 +294,7 @@ class DataFetch2TabWidget(QTabWidget):
 
             tab_widget = create_bulk_dp_tab(self)
             self.bulk_dp_widget = tab_widget
-            self.addTab(tab_widget, "🌐 一括取得（DP）")
+            self.addTab(self._wrap_tab_widget(tab_widget, "dataFetch2BulkDpScrollArea"), "🌐 一括取得（DP）")
         except Exception as e:
             logger.error(f"一括取得（DP）タブ作成エラー: {e}")
             fallback_widget = QWidget()

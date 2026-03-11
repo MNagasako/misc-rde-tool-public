@@ -8,6 +8,7 @@ from qt_compat.core import QTimer
 from qt_compat.gui import QFontMetrics
 from classes.theme import get_color, ThemeKey, ThemeManager, ThemeMode
 from classes.theme.global_styles import get_global_base_style
+from classes.utils.window_sizing import resize_main_window, set_main_window_minimum_size
 
 logger = logging.getLogger("RDE_WebView")
 
@@ -237,6 +238,11 @@ class UIControllerCore:
             try:
                 # テーマモード変更（ThemeManager内で詳細計測）
                 # 2状態トグル (AUTO廃止)
+                if getattr(self.parent, 'current_mode', None) == 'data_portal':
+                    try:
+                        theme_manager.defer_global_stylesheet_once()
+                    except Exception:
+                        pass
                 theme_manager.toggle_mode()
                 
                 # ボタン更新（軽量）
@@ -311,16 +317,43 @@ class UIControllerCore:
             
             # menu_area_widgetのスタイルを更新
             area_start = time.perf_counter_ns()
-            if hasattr(self.parent, 'menu_area_widget'):
-                self.parent.menu_area_widget.setStyleSheet(f"""
-                    #menu_area_widget {{
-                        background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
-                        color: {get_color(ThemeKey.WINDOW_FOREGROUND)};
-                    }}
-                    #menu_area_widget QLabel {{
-                        color: {get_color(ThemeKey.WINDOW_FOREGROUND)};
-                    }}
-                """)
+            try:
+                from classes.theme import get_qcolor
+
+                def _apply_widget_palette(widget, bg_key, fg_key=None, clear_style=False):
+                    if widget is None:
+                        return
+                    if clear_style:
+                        try:
+                            widget.setStyleSheet("")
+                        except Exception:
+                            pass
+                    palette = widget.palette()
+                    palette.setColor(widget.backgroundRole(), get_qcolor(bg_key))
+                    if fg_key is not None:
+                        palette.setColor(widget.foregroundRole(), get_qcolor(fg_key))
+                    widget.setAutoFillBackground(True)
+                    widget.setPalette(palette)
+
+                if hasattr(self.parent, 'menu_area_widget'):
+                    _apply_widget_palette(
+                        self.parent.menu_area_widget,
+                        ThemeKey.WINDOW_BACKGROUND,
+                        ThemeKey.WINDOW_FOREGROUND,
+                        clear_style=True,
+                    )
+
+                if hasattr(self, 'menu_scroll_area'):
+                    _apply_widget_palette(
+                        self.menu_scroll_area,
+                        ThemeKey.MENU_BACKGROUND,
+                        ThemeKey.TEXT_PRIMARY,
+                        clear_style=True,
+                    )
+                    viewport = self.menu_scroll_area.viewport() if hasattr(self.menu_scroll_area, 'viewport') else None
+                    _apply_widget_palette(viewport, ThemeKey.MENU_BACKGROUND, ThemeKey.TEXT_PRIMARY, clear_style=True)
+            except Exception:
+                pass
             area_elapsed = (time.perf_counter_ns() - area_start) / 1_000_000
             
             # メニューボタンの再構築
@@ -339,24 +372,14 @@ class UIControllerCore:
 
                 self.parent.close_btn.setStyleSheet(get_button_style('danger'))
             
-            # メインウィンドウ背景色の更新
-            if hasattr(self.parent, 'setStyleSheet'):
-                self.parent.setStyleSheet(f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};")
-
             # WebView周辺の背景色も更新（透過/未描画領域が黒にならないように）
             try:
                 right_widget = self.parent.findChild(QWidget, 'right_widget')
                 if right_widget is not None:
-                    right_widget.setStyleSheet(
-                        f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)}; "
-                        f"color: {get_color(ThemeKey.WINDOW_FOREGROUND)};"
-                    )
+                    right_widget.setStyleSheet(f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};")
                 webview_widget = self.parent.findChild(QWidget, 'webview_widget')
                 if webview_widget is not None:
-                    webview_widget.setStyleSheet(
-                        f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)}; "
-                        f"color: {get_color(ThemeKey.WINDOW_FOREGROUND)};"
-                    )
+                    webview_widget.setStyleSheet(f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};")
                 if hasattr(self.parent, 'webview'):
                     self.parent.webview.setStyleSheet(
                         f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};"
@@ -527,7 +550,7 @@ class UIControllerCore:
                     total_height = content_height + 100
                     
                     # ウィンドウサイズを設定
-                    self.parent.resize(self.parent.width(), total_height)
+                    resize_main_window(self.parent, height=total_height)
         except (AttributeError, RuntimeError) as e:
             # エラーが発生した場合はログ出力のみ
             self.logger.warning(f"ウィンドウ高さ調整エラー: {e}")
@@ -668,13 +691,18 @@ class UIControllerCore:
         メインレイアウトの設定
         """
         try:
-            from qt_compat.widgets import QGridLayout, QHBoxLayout, QWidget, QVBoxLayout
+            from qt_compat.widgets import QGridLayout, QHBoxLayout, QScrollArea, QSizePolicy, QWidget, QVBoxLayout
+            from qt_compat.core import Qt
             
             root_layout = QHBoxLayout()
+            root_layout.setContentsMargins(0, 0, 0, 0)
+            root_layout.setSpacing(0)
 
             # 左側メニュー用ウィジェット
             self.menu_widget = QWidget()
+            self.menu_widget.setObjectName('left_menu_widget')
             self.menu_widget.setStyleSheet(f'background-color: {get_color(ThemeKey.MENU_BACKGROUND)}; padding: 5px;')
+            self.menu_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             menu_layout = QVBoxLayout()
             menu_layout.setSpacing(8)
             menu_layout.setContentsMargins(5, 10, 5, 10)
@@ -715,9 +743,31 @@ class UIControllerCore:
             self.menu_widget.setLayout(menu_layout)
             self.menu_widget.setFixedWidth(140)
 
+            self.menu_scroll_area = QScrollArea()
+            self.menu_scroll_area.setObjectName('left_menu_scroll_area')
+            self.menu_scroll_area.setWidgetResizable(True)
+            self.menu_scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self.menu_scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            self.menu_scroll_area.setFrameStyle(0)
+            self.menu_scroll_area.setFixedWidth(156)
+            self.menu_scroll_area.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+            self.menu_scroll_area.setStyleSheet(
+                f"QScrollArea {{ background-color: {get_color(ThemeKey.MENU_BACKGROUND)}; border: none; }}"
+            )
+            self.menu_scroll_area.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            try:
+                self.menu_scroll_area.viewport().setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+                self.menu_scroll_area.viewport().setStyleSheet(
+                    f"background-color: {get_color(ThemeKey.MENU_BACKGROUND)};"
+                )
+            except Exception:
+                pass
+            self.menu_scroll_area.setWidget(self.menu_widget)
+
             # 右側：上（WebView）・下（個別メニュー）に分割
             right_widget = QWidget()
             right_widget.setObjectName('right_widget')
+            right_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             right_widget.setStyleSheet(
                 f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)}; "
                 f"color: {get_color(ThemeKey.WINDOW_FOREGROUND)};"
@@ -729,6 +779,7 @@ class UIControllerCore:
             # 上部：WebView + 待機メッセージ専用エリア
             webview_widget = QWidget()
             webview_widget.setObjectName('webview_widget')
+            webview_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             webview_widget.setStyleSheet(
                 f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)}; "
                 f"color: {get_color(ThemeKey.WINDOW_FOREGROUND)};"
@@ -831,6 +882,7 @@ class UIControllerCore:
             # 下部：個別メニュー（切り替え可能エリア）
             self.parent.menu_area_widget = QWidget()
             self.parent.menu_area_widget.setObjectName('menu_area_widget')
+            self.parent.menu_area_widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
             self.parent.menu_area_widget.setStyleSheet(f"""
                 #menu_area_widget {{
                     background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
@@ -850,9 +902,10 @@ class UIControllerCore:
             right_widget.setLayout(right_main_layout)
 
             # ルートレイアウトに左右追加
-            root_layout.addWidget(self.menu_widget)
+            root_layout.addWidget(self.menu_scroll_area)
             root_layout.addWidget(right_widget, 1)
             self.parent.setLayout(root_layout)
+            set_main_window_minimum_size(self.parent)
 
             # 現象解析用: 起動直後の背景/geometryを一度だけダンプ
             try:
@@ -959,15 +1012,13 @@ class UIControllerCore:
             
             self.parent.show()
             self.center_window()
-            
-            # アスペクト比固定用
-            self.parent._fixed_aspect_ratio = self.parent.width() / self.parent.height() if self.parent.height() != 0 else 1.0
-            
-            # ウインドウ横幅を自動調整
-            menu_width = 120
-            margin = 40
-            webview_width = getattr(self.parent, '_webview_fixed_width', 900)
-            self.parent.setMinimumWidth(webview_width + menu_width + margin)
+
+            current_min_width = 200
+            try:
+                current_min_width = max(200, int(self.parent.minimumWidth()))
+            except Exception:
+                pass
+            set_main_window_minimum_size(self.parent, min_width=current_min_width)
 
             # login.txtのパス情報をinfo.txtに出力（ユーザーディレクトリ配下）
             info_path = DEBUG_INFO_FILE

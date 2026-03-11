@@ -7,6 +7,7 @@ from qt_compat.widgets import QApplication, QSizePolicy, QTabWidget, QVBoxLayout
 
 from classes.subgroup.ui.sample_dedup_listing_widget import SampleDedupListingWidget
 from classes.subgroup.util.sample_dedup_table_records import build_sample_listing2_rows_from_files, get_default_columns_list2
+from classes.utils.window_sizing import is_window_maximized, resize_main_window
 
 
 class SampleDedupTabWidget(QWidget):
@@ -73,12 +74,21 @@ class SampleDedupTabWidget(QWidget):
 
         # Save previous tab size.
         try:
-            if self._current_tab_index is not None and top_level and top_level.size().isValid():
+            if (
+                self._current_tab_index is not None
+                and top_level
+                and not is_window_maximized(top_level)
+                and top_level.size().isValid()
+            ):
                 self._tab_window_sizes[self._current_tab_index] = top_level.size()
         except Exception:
             pass
 
         self._current_tab_index = index
+
+        if top_level and is_window_maximized(top_level):
+            self._last_tab_index_applied = index
+            return
 
         # Avoid re-applying resize for the same tab unless we actually switch tabs.
         if self._last_tab_index_applied == index:
@@ -91,7 +101,7 @@ class SampleDedupTabWidget(QWidget):
         try:
             saved = self._tab_window_sizes.get(index)
             if saved is not None and getattr(saved, "isValid", lambda: False)():
-                top_level.resize(saved)
+                resize_main_window(top_level, saved.width(), saved.height())
                 self._last_tab_index_applied = index
                 return
         except Exception:
@@ -101,7 +111,7 @@ class SampleDedupTabWidget(QWidget):
         target = self._target_size_90pct()
         if target:
             try:
-                top_level.resize(target[0], target[1])
+                resize_main_window(top_level, target[0], target[1])
             except Exception:
                 pass
             try:

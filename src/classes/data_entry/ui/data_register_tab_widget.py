@@ -22,6 +22,11 @@ from classes.data_entry.conf.ui_constants import (
     get_scroll_area_style,
     TAB_HEIGHT_RATIO,
 )
+from classes.utils.window_sizing import (
+    clear_main_window_size_constraints,
+    is_window_maximized,
+    resize_main_window,
+)
 
 
 def create_data_register_widget(*args, **kwargs):
@@ -144,6 +149,23 @@ class DataRegisterTabWidget(QWidget):
         # タブ切り替え時のアスペクト比固定解除処理＆一括登録タブ警告
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
         self.tab_widget.currentChanged.connect(self._on_tab_alert)
+
+    def _wrap_tab_in_scroll(self, content_widget: QWidget, object_name: str) -> QScrollArea:
+        scroll_area = QScrollArea()
+        scroll_area.setObjectName(object_name)
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+        container_layout.addWidget(content_widget)
+        container_layout.addStretch(1)
+        scroll_area.setWidget(container)
+        return scroll_area
     
     def refresh_theme(self):
         """テーマ変更時のスタイル更新"""
@@ -249,11 +271,20 @@ class DataRegisterTabWidget(QWidget):
 
         # 直前タブのサイズを保存（タブ間でサイズが混ざらないようにする）
         try:
-            if self._current_tab_index is not None and top_level and top_level.size().isValid():
+            if (
+                self._current_tab_index is not None
+                and top_level
+                and not is_window_maximized(top_level)
+                and top_level.size().isValid()
+            ):
                 self._tab_window_sizes[self._current_tab_index] = top_level.size()
         except Exception:
             pass
         self._current_tab_index = index
+
+        if top_level and is_window_maximized(top_level):
+            self._last_tab_index_applied = index
+            return
 
         # --- ログイン・データ取得・データ取得2モードはウインドウサイズ調整をスキップ ---
         if top_level:
@@ -286,7 +317,7 @@ class DataRegisterTabWidget(QWidget):
         try:
             saved = self._tab_window_sizes.get(index)
             if saved is not None and top_level and hasattr(top_level, 'resize'):
-                top_level.resize(saved)
+                resize_main_window(top_level, saved.width(), saved.height())
                 if not os.environ.get("PYTEST_CURRENT_TEST"):
                     QApplication.processEvents()
                 self._last_tab_index_applied = index
@@ -314,23 +345,16 @@ class DataRegisterTabWidget(QWidget):
                 logger.debug("通常登録ターゲットサイズ: %sx%s (幅=標準, 高さ=95%%)", standard_width, target_height)
                 
                 # サイズ制約をクリア
-                if hasattr(top_level, 'setMinimumSize'):
-                    top_level.setMinimumSize(200, 200)
-                    logger.debug("最小サイズを200x200に設定")
-                if hasattr(top_level, 'setMaximumSize'):
-                    top_level.setMaximumSize(16777215, 16777215)
-                    logger.debug("最大サイズを制限解除")
+                clear_main_window_size_constraints(top_level)
+                logger.debug("メインウィンドウ制約を解除")
                 
                 # サイズポリシーを設定
                 if hasattr(top_level, 'setSizePolicy'):
                     top_level.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
                     logger.debug("サイズポリシーをPreferredに設定")
                 
-                if hasattr(top_level, 'showNormal'):
-                    top_level.showNormal()
-                    logger.debug("showNormal()実行")
                 if hasattr(top_level, 'resize'):
-                    top_level.resize(standard_width, target_height)
+                    resize_main_window(top_level, standard_width, target_height)
                     logger.debug("resize(%sx%s)実行", standard_width, target_height)
                     # リサイズ直後のサイズを確認
                     actual_size = top_level.size()
@@ -370,21 +394,14 @@ class DataRegisterTabWidget(QWidget):
                 logger.debug("ターゲットサイズ(95%%): %sx%s", target_width, target_height)
                 
                 # サイズ制約をクリア
-                if hasattr(top_level, 'setMinimumSize'):
-                    top_level.setMinimumSize(200, 200)
-                    logger.debug("最小サイズを200x200に設定")
-                if hasattr(top_level, 'setMaximumSize'):
-                    top_level.setMaximumSize(16777215, 16777215)
-                    logger.debug("最大サイズを制限解除")
+                clear_main_window_size_constraints(top_level)
+                logger.debug("メインウィンドウ制約を解除")
                 
                 # サイズポリシーを設定
                 if hasattr(top_level, 'setSizePolicy'):
                     top_level.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
                     logger.debug("サイズポリシーをPreferredに設定")
                 
-                if hasattr(top_level, 'showNormal'):
-                    top_level.showNormal()
-                    logger.debug("showNormal()実行")
                 if hasattr(top_level, 'resize'):
                     try:
                         current_size = top_level.size()
@@ -396,7 +413,7 @@ class DataRegisterTabWidget(QWidget):
 
                     final_width = max(int(current_width), int(target_width))
                     final_height = max(int(current_height), int(target_height)) if current_height else int(target_height)
-                    top_level.resize(final_width, final_height)
+                    resize_main_window(top_level, final_width, final_height)
                     logger.debug("resize(%sx%s)実行", target_width, target_height)
                     # リサイズ直後のサイズを確認
                     actual_size = top_level.size()
@@ -452,14 +469,9 @@ class DataRegisterTabWidget(QWidget):
                 top_level.setMinimumWidth(200)
             if hasattr(top_level, 'setMaximumWidth'):
                 top_level.setMaximumWidth(16777215)
-            if hasattr(top_level, 'setMinimumSize'):
-                top_level.setMinimumSize(200, 200)
-            if hasattr(top_level, 'setMaximumSize'):
-                top_level.setMaximumSize(16777215, 16777215)
+            clear_main_window_size_constraints(top_level)
             if hasattr(top_level, 'setSizePolicy'):
                 top_level.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-            if hasattr(top_level, 'showNormal'):
-                top_level.showNormal()
 
             # タブごとのサイズを独立管理（初回だけ幅を広めにし、以後は保存サイズを復元）
             try:
@@ -471,7 +483,7 @@ class DataRegisterTabWidget(QWidget):
                 try:
                     # 同一タブでの再実行ではユーザー調整を尊重する
                     if self._last_tab_index_applied != index:
-                        top_level.resize(saved)
+                        resize_main_window(top_level, saved.width(), saved.height())
                 except Exception:
                     pass
             else:
@@ -488,7 +500,8 @@ class DataRegisterTabWidget(QWidget):
                         desired_by_chars = int(char_w * 140)
                         desired_by_screen = int(screen_size.width() * 0.95)
                         target_width = min(max(top_level.width(), desired_by_chars), desired_by_screen)
-                        top_level.resize(int(target_width), int(top_level.height()))
+                        target_height = max(540, int(screen_size.height() * 0.65))
+                        resize_main_window(top_level, int(target_width), int(target_height))
                         self._tab_window_initial_sizes_applied.add(index)
                 except Exception:
                     pass
@@ -512,14 +525,9 @@ class DataRegisterTabWidget(QWidget):
                 top_level.setMinimumWidth(200)
             if hasattr(top_level, 'setMaximumWidth'):
                 top_level.setMaximumWidth(16777215)
-            if hasattr(top_level, 'setMinimumSize'):
-                top_level.setMinimumSize(200, 200)
-            if hasattr(top_level, 'setMaximumSize'):
-                top_level.setMaximumSize(16777215, 16777215)
+            clear_main_window_size_constraints(top_level)
             if hasattr(top_level, 'setSizePolicy'):
                 top_level.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-            if hasattr(top_level, 'showNormal'):
-                top_level.showNormal()
 
             try:
                 saved = self._tab_window_sizes.get(index)
@@ -529,7 +537,7 @@ class DataRegisterTabWidget(QWidget):
             if saved is not None and hasattr(top_level, 'resize'):
                 try:
                     if self._last_tab_index_applied != index:
-                        top_level.resize(saved)
+                        resize_main_window(top_level, saved.width(), saved.height())
                 except Exception:
                     pass
             else:
@@ -538,7 +546,7 @@ class DataRegisterTabWidget(QWidget):
                         screen_size = screen.availableGeometry().size()
                         target_width = int(screen_size.width() * 0.95)
                         target_height = int(screen_size.height() * 0.90)
-                        top_level.resize(int(target_width), int(target_height))
+                        resize_main_window(top_level, int(target_width), int(target_height))
                         self._tab_window_initial_sizes_applied.add(index)
                 except Exception:
                     pass
@@ -559,25 +567,24 @@ class DataRegisterTabWidget(QWidget):
                 top_level.setMinimumWidth(200)
             if hasattr(top_level, 'setMaximumWidth'):
                 top_level.setMaximumWidth(16777215)
-            if hasattr(top_level, 'setMinimumSize'):
-                top_level.setMinimumSize(200, 200)
-            if hasattr(top_level, 'setMaximumSize'):
-                top_level.setMaximumSize(16777215, 16777215)
+            clear_main_window_size_constraints(top_level)
             if hasattr(top_level, 'setSizePolicy'):
                 top_level.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)
-            if hasattr(top_level, 'showNormal'):
-                top_level.showNormal()
 
             if screen:
                 screen_size = screen.size()
                 target_width = int(screen_size.width() * 0.90)
-                target_height = int(screen_size.height() * 0.90)
+                target_height = max(540, int(screen_size.height() * 0.65))
 
                 if hasattr(top_level, 'resize'):
                     if self._last_other_window_size is not None:
-                        top_level.resize(self._last_other_window_size)
+                        resize_main_window(
+                            top_level,
+                            self._last_other_window_size.width(),
+                            self._last_other_window_size.height(),
+                        )
                     else:
-                        top_level.resize(target_width, target_height)
+                        resize_main_window(top_level, target_width, target_height)
 
                 if not os.environ.get("PYTEST_CURRENT_TEST"):
                     QApplication.processEvents()
@@ -678,8 +685,8 @@ class DataRegisterTabWidget(QWidget):
             from .registration_status_widget import RegistrationStatusWidget
             status_widget = RegistrationStatusWidget(self)
             self.status_widget = status_widget
-            # スクロールは不要なため直接追加（行数が多い場合は後でScrollArea化）
-            idx = self.tab_widget.addTab(status_widget, "登録状況")
+            wrapped = self._wrap_tab_in_scroll(status_widget, "dataRegisterStatusScrollArea")
+            idx = self.tab_widget.addTab(wrapped, "登録状況")
             self._status_tab_index = idx
         except Exception as e:
             logger.error(f"登録状況タブの作成に失敗: {e}")
@@ -702,7 +709,8 @@ class DataRegisterTabWidget(QWidget):
             from classes.data_entry.ui.mail_notification_tab import MailNotificationTab
 
             tab = MailNotificationTab(self)
-            idx = self.tab_widget.addTab(tab, "✉️ メール通知")
+            wrapped = self._wrap_tab_in_scroll(tab, "dataRegisterMailNotificationScrollArea")
+            idx = self.tab_widget.addTab(wrapped, "✉️ メール通知")
             return idx
         except Exception as e:
             logger.error(f"メール通知タブの作成に失敗: {e}")

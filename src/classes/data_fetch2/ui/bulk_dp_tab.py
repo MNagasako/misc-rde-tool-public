@@ -25,6 +25,7 @@ from qt_compat.widgets import (
     QCompleter,
     QMenu,
     QProgressBar,
+    QSizePolicy,
 )
 from qt_compat.core import Qt, QUrl, QThread, Signal
 from qt_compat.gui import QDesktopServices
@@ -637,6 +638,8 @@ class DataFetch2BulkDpTab(QWidget):
         self.table = QTableWidget(0, len(self.COLUMNS), self)
         self.table.setHorizontalHeaderLabels(self.COLUMNS)
         self.table.setSortingEnabled(True)
+        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+        self.table.setMinimumHeight(240)
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Interactive)
         self.table.verticalHeader().setSectionResizeMode(QHeaderView.Interactive)

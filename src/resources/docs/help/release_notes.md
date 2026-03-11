@@ -6,11 +6,22 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.31）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| データセット（新規開設） | 課題番号コンボの一覧表示ボタン押下時に、popup 直前の毎回再構築をやめてキャッシュ済み候補を即時表示。 |
-| データセット（新規開設2） | 新規開設と同一の共通ロジックで、空テキスト状態の矢印クリック後も現在の課題番号選択を保持。 |
-| 応答性/安定性 | `QStringListModel` + `QCompleter` を再利用し、一覧展開待ちと選択ずれを抑止。 |
-| テスト/品質 | `test_dataset_open_filter_cascade_resets_to_first_defaults.py` に popup 表示時の選択保持回帰を追加。 |
+| リリース/品質 | リビジョンアップ（v2.5.32）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| 共通UI基盤 | `window_sizing.py` を追加し、最大化中のリサイズ抑止、サイズ制約解除、横方向センタリングを共通化。 |
+| データポータル | タブごとのウィンドウサイズ/位置保持、現在タブのみのテーマ更新、一覧/一括/データカタログの表示安定化を反映。 |
+| AI/サブグループ | AIサジェストダイアログの位置/タブ別サイズ保存と、サブグループ新規作成の既存サブグループ読込セクション再整備を実施。 |
+| テスト/品質 | `test_window_sizing.py`、`test_data_portal_tab_window_state.py`、`test_ai_suggestion_dialog_geometry_persistence.py` などを追加・更新。 |
+
+## v2.5.32 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.32）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| 共通UI基盤 | `window_sizing.py` を追加し、最大化中はサイズ変更を抑止したうえで、通常時のメインウィンドウ再サイズ/横方向位置補正を共通化。 |
+| データポータル | `data_portal_widget.py` でタブごとのウィンドウサイズ/位置を保存し、現在表示中タブだけをテーマ更新するよう改善。 |
+| データポータル詳細 | `portal_listing_tab.py` / `dataset_upload_tab.py` / `portal_bulk_tab.py` の初期表示幅、背景スタイル、配色再適用を整理し、一覧/一括/データカタログの表示安定性を改善。 |
+| AI/サブグループ/設定 | `ai_suggestion_dialog.py` の位置/タブ別サイズ保存、`subgroup_create_widget.py` の既存サブグループ読込セクション、設定タブのオフライン/起動時更新UIを整備。 |
+| テスト/品質 | `test_window_sizing.py`、`test_data_portal_tab_window_state.py`、`test_data_portal_listing_tab_added.py`、`test_subgroup_create_tab_has_existing_load_section.py` などを追加・更新。 |
 
 ## v2.5.31 の主な更新点
 

@@ -39,6 +39,8 @@ from qt_compat.widgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QStyledItemDelegate,
+    QtWidgets,
     QVBoxLayout,
     QWidget,
 )
@@ -52,6 +54,7 @@ from classes.ui.utilities.listing_table import ListingFilterProxyModel
 from classes.theme import ThemeKey, get_color
 from classes.theme import get_qcolor
 from classes.utils.button_styles import get_button_style
+from classes.utils.window_sizing import resize_main_window
 
 from classes.data_portal.core.portal_csv_full import (
     extract_code as extract_managed_code,
@@ -61,6 +64,31 @@ from classes.data_portal.core.portal_csv_full import (
 from classes.data_portal.core.portal_entry_merge import merge_public_and_managed
 
 LOGGER = logging.getLogger(__name__)
+
+_ITEM_THEME_FOREGROUND_ROLE = int(Qt.ItemDataRole.UserRole) + 20
+_ITEM_THEME_BACKGROUND_ROLE = int(Qt.ItemDataRole.UserRole) + 21
+
+
+class _SemanticColorDelegate(QStyledItemDelegate):
+    def initStyleOption(self, option, index) -> None:  # type: ignore[override]
+        super().initStyleOption(option, index)
+
+        if bool(option.state & QtWidgets.QStyle.StateFlag.State_Selected):
+            return
+
+        foreground_kind = str(index.data(_ITEM_THEME_FOREGROUND_ROLE) or "").strip()
+        if foreground_kind == "link":
+            option.palette.setColor(QtGui.QPalette.ColorRole.Text, get_qcolor(ThemeKey.TEXT_LINK))
+            option.palette.setColor(QtGui.QPalette.ColorRole.WindowText, get_qcolor(ThemeKey.TEXT_LINK))
+        elif foreground_kind == "primary":
+            option.palette.setColor(QtGui.QPalette.ColorRole.Text, get_qcolor(ThemeKey.TEXT_PRIMARY))
+            option.palette.setColor(QtGui.QPalette.ColorRole.WindowText, get_qcolor(ThemeKey.TEXT_PRIMARY))
+
+        background_kind = str(index.data(_ITEM_THEME_BACKGROUND_ROLE) or "").strip()
+        if background_kind == "info":
+            option.backgroundBrush = QtGui.QBrush(get_qcolor(ThemeKey.PANEL_INFO_BACKGROUND))
+        elif background_kind == "warning":
+            option.backgroundBrush = QtGui.QBrush(get_qcolor(ThemeKey.PANEL_WARNING_BACKGROUND))
 
 
 class _SourceAwareProxyModel(ListingFilterProxyModel):
@@ -632,6 +660,33 @@ class PortalListingTab(QWidget):
         self.refresh_managed_from_disk()
         self._maybe_auto_refresh_managed()
 
+    def _build_base_stylesheet(self) -> str:
+        return f"""
+            QWidget#portalListingTabRoot QTableView#dataPortalListingTable {{
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                alternate-background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                gridline-color: {get_color(ThemeKey.BORDER_DEFAULT)};
+                selection-background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                selection-color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+            }}
+            QWidget#portalListingTabRoot QTableView#dataPortalListingTable::item {{
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+            }}
+            QWidget#portalListingTabRoot QTableView#dataPortalListingTable QHeaderView::section {{
+                background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_SECONDARY)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                padding: 4px 6px;
+                font-weight: bold;
+            }}
+            QWidget#portalListingTabRoot QTableView#dataPortalListingTable QTableCornerButton::section {{
+                background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+            }}
+        """
+
     @staticmethod
     def _is_running_under_pytest() -> bool:
         return bool(os.environ.get("PYTEST_CURRENT_TEST"))
@@ -682,6 +737,7 @@ class PortalListingTab(QWidget):
     # UI
     # ------------------------------------------------------------------
     def _setup_ui(self) -> None:
+        self.setObjectName("portalListingTabRoot")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
@@ -800,8 +856,6 @@ class PortalListingTab(QWidget):
         except Exception:
             pass
 
-        from qt_compat.widgets import QtWidgets
-
         self.table_model = QtGui.QStandardItemModel(0, 0, self)
 
         self.proxy_model = _SourceAwareProxyModel(self)
@@ -812,7 +866,9 @@ class PortalListingTab(QWidget):
         self.proxy_model.rowsRemoved.connect(self._update_count)
 
         self.table_view = QtWidgets.QTableView()
+        self.table_view.setObjectName("dataPortalListingTable")
         self.table_view.setModel(self.proxy_model)
+        self.table_view.setItemDelegate(_SemanticColorDelegate(self.table_view))
         self.table_view.setSortingEnabled(True)
         self.table_view.setAlternatingRowColors(True)
         self.table_view.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -838,6 +894,7 @@ class PortalListingTab(QWidget):
         except Exception:
             pass
         layout.addWidget(self.table_view, stretch=1)
+        self.setStyleSheet(self._build_base_stylesheet())
 
         # Debounce filter application to keep the table responsive.
         self._filter_apply_timer = QtCore.QTimer(self)
@@ -1019,7 +1076,7 @@ class PortalListingTab(QWidget):
             avail = screen.availableGeometry()
             target_w = int(avail.width() * 0.9)
             if target_w > 0 and win is not None:
-                win.resize(target_w, win.height())
+                resize_main_window(win, target_w, win.height())
         except Exception:
             pass
         self._apply_initial_layout_once()
@@ -1057,20 +1114,20 @@ class PortalListingTab(QWidget):
             bg = _css_color(bg_raw)
             border = _css_color(border_raw)
             text = _css_color(text_raw)
+            if not bg or not border or not text:
+                return
             self.filters_group_box.setStyleSheet(
-                ""
-                f"QGroupBox#portalListingFilters {{ background-color: {bg}; border: 1px solid {border}; "
-                "border-radius: 6px; margin-top: 10px; }}"
-                f"QGroupBox#portalListingFilters::title {{ subcontrol-origin: margin; left: 10px; "
-                f"padding: 0 4px; color: {text}; }}"
-                f"QWidget#portal_listing_filters_container {{ background-color: {bg}; }}"
+                f"background-color: {bg}; border: 1px solid {border}; border-radius: 6px; margin-top: 10px; color: {text};"
             )
+            if self._filters_container is not None:
+                self._filters_container.setStyleSheet(f"background-color: {bg}; color: {text};")
         except Exception:
             pass
 
     def refresh_theme(self) -> None:
         # Theme integration for this tab is minimal; widgets inherit palette/QSS.
         try:
+            self.setStyleSheet(self._build_base_stylesheet())
             self._apply_filters_theme()
             for button, kind in (
                 (getattr(self, "reload_public", None), "info"),
@@ -1083,6 +1140,9 @@ class PortalListingTab(QWidget):
             ):
                 if button is not None:
                     button.setStyleSheet(get_button_style(kind))
+            if getattr(self, "table_view", None) is not None:
+                self.table_view.viewport().update()
+                self.table_view.update()
             self.update()
         except Exception:
             pass
@@ -1862,7 +1922,7 @@ class PortalListingTab(QWidget):
                         f = item.font()
                         f.setUnderline(True)
                         item.setFont(f)
-                        item.setForeground(QtGui.QBrush(get_qcolor(ThemeKey.TEXT_LINK)))
+                        item.setData("link", _ITEM_THEME_FOREGROUND_ROLE)
                         extra = f"URL: {url}"
                         tooltip = (tooltip + "\n\n" if tooltip else "") + extra
                 except Exception:
@@ -1872,11 +1932,11 @@ class PortalListingTab(QWidget):
                 origin = (row.get("_cell_origin") or {}).get(col.key)
                 diff = (row.get("_cell_diff") or {}).get(col.key)
                 if diff:
-                    item.setBackground(QtGui.QBrush(get_qcolor(ThemeKey.PANEL_INFO_BACKGROUND)))
+                    item.setData("info", _ITEM_THEME_BACKGROUND_ROLE)
                     note = f"公開: {diff.get('public','')}\n管理: {diff.get('managed','')}"
                     tooltip = (tooltip + "\n\n" if tooltip else "") + note
                 elif origin == "public":
-                    item.setBackground(QtGui.QBrush(get_qcolor(ThemeKey.PANEL_WARNING_BACKGROUND)))
+                    item.setData("warning", _ITEM_THEME_BACKGROUND_ROLE)
                     note = "管理CSVに値が無いため公開cache由来です"
                     tooltip = (tooltip + "\n\n" if tooltip else "") + note
             except Exception:

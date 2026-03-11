@@ -31,6 +31,7 @@ from classes.dataset.core.dataset_open_logic import create_group_select_widget
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
 from config.common import DATASET_JSON_PATH, SUBGROUP_DETAILS_DIR, SUBGROUP_REL_DETAILS_DIR, get_dynamic_file_path
+from classes.utils.window_sizing import is_window_maximized, resize_main_window
 
 import logging
 
@@ -2258,7 +2259,7 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
             return
         try:
             window = main_widget.window()
-            if window is None:
+            if window is None or is_window_maximized(window):
                 return
             tab_key = _tab_key(index)
             saved_sizes = tab_window_state.get("saved_sizes")
@@ -2272,19 +2273,19 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
             return
         try:
             window = main_widget.window()
-            if window is None:
+            if window is None or is_window_maximized(window):
                 return
             tab_key = _tab_key(index)
             saved_sizes = tab_window_state.get("saved_sizes")
             saved = saved_sizes.get(tab_key) if isinstance(saved_sizes, dict) else None
             if isinstance(saved, tuple) and len(saved) == 2:
-                window.resize(int(saved[0]), int(saved[1]))
+                resize_main_window(window, int(saved[0]), int(saved[1]))
                 return
 
             tab_text = tab_widget.tabText(index)
             if tab_text in ("新規開設", "新規開設2"):
                 target_w = _login_mode_like_width(window)
-                window.resize(target_w, window.height())
+                resize_main_window(window, target_w, window.height())
                 return
             if tab_text == "一覧":
                 screen = window.screen() if hasattr(window, 'screen') else None
@@ -2292,7 +2293,7 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
                     screen = QApplication.primaryScreen()
                 if screen is not None:
                     available = screen.availableGeometry()
-                    window.resize(int(available.width() * 0.90), int(available.height() * 0.90))
+                    resize_main_window(window, int(available.width() * 0.90), int(available.height() * 0.90))
                 return
             if tab_text == "閲覧・修正":
                 screen = window.screen() if hasattr(window, 'screen') else None
@@ -2300,7 +2301,7 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
                     screen = QApplication.primaryScreen()
                 if screen is not None:
                     available = screen.availableGeometry()
-                    window.resize(window.width(), available.height())
+                    resize_main_window(window, window.width(), available.height())
                 return
         except Exception:
             logger.debug("dataset_open: apply window size failed", exc_info=True)

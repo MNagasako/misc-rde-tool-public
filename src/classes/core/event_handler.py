@@ -46,15 +46,6 @@ class EventHandler:
         Args:
             event: リサイズイベント
         """
-        # アスペクト比固定処理
-        ratio = getattr(self.parent, '_fixed_aspect_ratio', None)
-        if ratio is not None and ratio > 0:
-            w = getattr(self.parent, '_webview_fixed_width', 900) + 120 + 40  # webview幅＋メニュー＋余白
-            h = event.size().height()
-            if event.size().width() != w:
-                self.parent.setFixedWidth(w)
-            # 高さのみユーザー操作可
-        
         # オーバーレイマネージャーがある場合、位置を更新
         if hasattr(self.parent, 'overlay_manager') and self.parent.overlay_manager:
             self.parent.overlay_manager.resize_overlay()

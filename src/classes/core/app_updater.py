@@ -28,6 +28,11 @@ logger = logging.getLogger(__name__)
 
 
 _SHA256_HEX64_RE = re.compile(r"(?i)(?<![0-9a-f])[0-9a-f]{64}(?![0-9a-f])")
+UPDATE_DOWNLOAD_CANCELLED_MESSAGE = "更新ダウンロードがキャンセルされました"
+
+
+class UpdateDownloadCancelled(RuntimeError):
+    """Raised when the user cancels the updater download."""
 
 
 def _normalize_sha256_hex(value: str) -> str:
@@ -100,6 +105,19 @@ def is_same_version(version_a: str, version_b: str) -> bool:
     "2.4.5" と "v2.4.5" のような表記ゆれも同一として扱う。
     """
     return _parse_version_to_tuple(version_a) == _parse_version_to_tuple(version_b)
+
+
+def is_download_cancelled_error(exc: BaseException | None) -> bool:
+    """Return True when the exception represents a user-cancelled update download."""
+
+    if exc is None:
+        return False
+    if isinstance(exc, UpdateDownloadCancelled):
+        return True
+    try:
+        return str(exc) == UPDATE_DOWNLOAD_CANCELLED_MESSAGE
+    except Exception:
+        return False
 
 
 def _load_latest_json(url: str, timeout: Union[int, Tuple[float, float]] = 15, use_new_session: bool = False) -> dict:
@@ -214,12 +232,12 @@ def download(
                         if total_bytes > 0:
                             message = f"ダウンロード中... ({written}/{total_bytes} bytes)"
                             if not progress_callback(written, total_bytes, message):
-                                raise RuntimeError("更新ダウンロードがキャンセルされました")
+                                raise UpdateDownloadCancelled(UPDATE_DOWNLOAD_CANCELLED_MESSAGE)
                         else:
                             # total不明: 進捗率は出せないがキャンセル判定だけは行う
                             message = f"ダウンロード中... ({written} bytes)"
                             if not progress_callback(written, 0, message):
-                                raise RuntimeError("更新ダウンロードがキャンセルされました")
+                                raise UpdateDownloadCancelled(UPDATE_DOWNLOAD_CANCELLED_MESSAGE)
                     else:
                         # percent（既存互換）
                         if total_bytes > 0:
@@ -227,12 +245,12 @@ def download(
                             pct = max(0, min(pct, 100))
                             message = f"ダウンロード中... ({written}/{total_bytes} bytes)"
                             if not progress_callback(pct, 100, message):
-                                raise RuntimeError("更新ダウンロードがキャンセルされました")
+                                raise UpdateDownloadCancelled(UPDATE_DOWNLOAD_CANCELLED_MESSAGE)
                         else:
                             # total不明: percent は出せない。キャンセル判定だけ行う。
                             message = f"ダウンロード中... ({written} bytes)"
                             if not progress_callback(0, 0, message):
-                                raise RuntimeError("更新ダウンロードがキャンセルされました")
+                                raise UpdateDownloadCancelled(UPDATE_DOWNLOAD_CANCELLED_MESSAGE)
 
         # 最後に100%を通知
         if progress_callback:

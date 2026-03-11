@@ -16,6 +16,12 @@ from classes.basic.util.summary_file_utils import list_summary_workbooks
 from classes.theme import get_color, ThemeKey
 from classes.utils.button_styles import get_grouped_menu_button_style, get_menu_button_style
 from classes.utils.dataset_launch_manager import DatasetLaunchManager
+from classes.utils.window_sizing import (
+    clear_main_window_size_constraints,
+    is_window_maximized,
+    resize_main_window,
+    set_main_window_minimum_size,
+)
 
 # UIControllerCore をインポート
 from .ui_controller_core import UIControllerCore
@@ -219,11 +225,10 @@ class UIController(UIControllerCore):
         new_width = max(min_width, min(hint.width(), max_screen_width))
         
         # サイズ制約をクリアして動的リサイズを可能にする
-        parent.setMinimumSize(200, 200)
-        parent.setMaximumSize(16777215, 16777215)
+        clear_main_window_size_constraints(parent)
         
         # ウィンドウをリサイズ
-        parent.resize(new_width, new_height)
+        resize_main_window(parent, new_width, new_height)
         
         logger.debug("ウィンドウ高さ自動調整: %sx%s (画面比率: %.1f%%)", new_width, new_height, new_height/screen_geometry.height()*100)
         
@@ -1124,27 +1129,10 @@ class UIController(UIControllerCore):
                     menu_width = 120
                     margin = 40
                     fixed_width = webview_width + menu_width + margin
-                    if hasattr(top_level, 'setFixedWidth'):
-                        top_level.setFixedWidth(fixed_width)
-                    if hasattr(top_level, '_fixed_aspect_ratio'):
-                        if hasattr(top_level, 'height') and top_level.height() != 0:
-                            top_level._fixed_aspect_ratio = fixed_width / top_level.height()
-                        else:
-                            top_level._fixed_aspect_ratio = 1.0
+                    clear_main_window_size_constraints(top_level, min_width=fixed_width)
                 else:
                     # 横幅固定・アスペクト比固定を解除（幅が「元に戻る」症状の根本対策）
-                    if hasattr(top_level, '_fixed_aspect_ratio'):
-                        top_level._fixed_aspect_ratio = None
-                    if hasattr(top_level, 'setMinimumSize'):
-                        top_level.setMinimumSize(200, 200)
-                    if hasattr(top_level, 'setMaximumSize'):
-                        top_level.setMaximumSize(16777215, 16777215)
-                    if hasattr(top_level, 'setMinimumWidth'):
-                        top_level.setMinimumWidth(200)
-                    if hasattr(top_level, 'setMaximumWidth'):
-                        top_level.setMaximumWidth(16777215)
-                    if hasattr(top_level, 'showNormal'):
-                        top_level.showNormal()
+                    clear_main_window_size_constraints(top_level)
             except Exception:
                 pass
 
@@ -1215,6 +1203,15 @@ class UIController(UIControllerCore):
                 self.parent.current_mode = mode
         except Exception:
             pass
+
+        try:
+            if mode != "data_portal":
+                from classes.theme.theme_manager import ThemeManager
+
+                ThemeManager.instance().apply_deferred_global_stylesheet_if_needed()
+        except Exception:
+            pass
+
         self.update_menu_button_styles(mode)
 
         # タブ統合機能がある場合はタブの状態も更新
@@ -1294,12 +1291,10 @@ class UIController(UIControllerCore):
                 menu_width = 120
                 margin = 40
                 fixed_width = webview_width + menu_width + margin
-                if hasattr(top_level, 'setFixedWidth'):
-                    top_level.setFixedWidth(fixed_width)
-                if hasattr(top_level, 'setMinimumSize'):
-                    top_level.setMinimumSize(fixed_width, 200)
-                if hasattr(top_level, 'setMaximumSize'):
-                    top_level.setMaximumSize(fixed_width, 16777215)
+                clear_main_window_size_constraints(top_level, min_width=fixed_width)
+                if not is_window_maximized(top_level):
+                    if top_level.width() < fixed_width:
+                        resize_main_window(top_level, width=fixed_width)
             
             if hasattr(self.parent, 'webview'):
                 self.parent.webview.setVisible(True)
@@ -1379,33 +1374,21 @@ class UIController(UIControllerCore):
 
             # Ensure window is resizable (login/data_fetch may have fixed width).
             if top_level:
-                try:
-                    top_level.setMinimumSize(200, 200)
-                except Exception:
-                    pass
-                try:
-                    top_level.setMaximumSize(16777215, 16777215)
-                except Exception:
-                    pass
-                try:
-                    top_level.setMinimumWidth(200)
-                    top_level.setMaximumWidth(16777215)
-                except Exception:
-                    pass
+                clear_main_window_size_constraints(top_level)
 
             # サブグループ・データセット・基本情報・設定モードは初期高さをディスプレイの90%に設定（後から変更可）
             if mode in ["subgroup_create", "basic_info", "dataset_open", "data_register", "settings", "ai_test", "data_fetch2", "data_portal", "help"]:
                 import os
 
-                if not os.environ.get("PYTEST_CURRENT_TEST"):
+                if not os.environ.get("PYTEST_CURRENT_TEST") and not is_window_maximized(top_level):
                     try:
                         from qt_compat.widgets import QApplication
                         screen = QApplication.primaryScreen()
                         if screen:
                             screen_geometry = screen.geometry()
                             max_height = int(screen_geometry.height() * 0.90)
-                            if top_level and hasattr(top_level, 'resize'):
-                                top_level.resize(top_level.width(), max_height)
+                            if top_level:
+                                resize_main_window(top_level, height=max_height)
                     except Exception as e:
                         logger.debug("初期高さ90%リサイズ失敗: %s", e)
 
@@ -1413,15 +1396,15 @@ class UIController(UIControllerCore):
             if mode in [ "dataset_open" ]:
                 import os
 
-                if not os.environ.get("PYTEST_CURRENT_TEST"):
+                if not os.environ.get("PYTEST_CURRENT_TEST") and not is_window_maximized(top_level):
                     try:
                         from qt_compat.widgets import QApplication
                         screen = QApplication.primaryScreen()
                         if screen:
                             screen_geometry = screen.geometry()
                             max_width = int(screen_geometry.width() * 0.75)
-                            if top_level and hasattr(top_level, 'resize'):
-                                top_level.resize(max_width, top_level.height())
+                            if top_level:
+                                resize_main_window(top_level, width=max_width)
                     except Exception as e:
                         logger.debug("初期幅75%リサイズ失敗: %s", e)
 
@@ -1433,15 +1416,10 @@ class UIController(UIControllerCore):
                 menu_width = 120
                 margin = 40
                 fixed_width = webview_width + menu_width + margin
-                if hasattr(top_level, 'setFixedWidth'):
-                    top_level.setFixedWidth(fixed_width)
-                if hasattr(top_level, 'setMinimumSize'):
-                    top_level.setMinimumSize(fixed_width, 200)
-                if hasattr(top_level, 'setMaximumSize'):
-                    top_level.setMaximumSize(fixed_width, 16777215)
-                # 初期高さ800pxでリサイズ（最大・最小制約はかけない）
-                if hasattr(top_level, 'resize'):
-                    top_level.resize(fixed_width, 800)
+                clear_main_window_size_constraints(top_level, min_width=fixed_width)
+                if not is_window_maximized(top_level):
+                    target_width = max(fixed_width, int(top_level.width()))
+                    resize_main_window(top_level, target_width, 800)
             
             if hasattr(self.parent, 'webview'):
                 self.parent.webview.setVisible(True)
@@ -1492,17 +1470,8 @@ class UIController(UIControllerCore):
             
             # データ取得2専用の初期高さ600pxでリサイズ（最大・最小制約はかけない）
             if top_level:
-                if hasattr(top_level, 'setFixedWidth'):
-                    # 幅の固定を解除
-                    top_level.setMinimumWidth(200)
-                    top_level.setMaximumWidth(16777215)
-                if hasattr(top_level, 'setMinimumSize'):
-                    top_level.setMinimumSize(200, 200)
-                if hasattr(top_level, 'setMaximumSize'):
-                    top_level.setMaximumSize(16777215, 16777215)
-                if hasattr(top_level, 'resize'):
-                    # 初期高さ600px
-                    top_level.resize(top_level.width(), 600)
+                clear_main_window_size_constraints(top_level)
+                resize_main_window(top_level, height=600)
             
         elif mode == "request_analyzer":
             # リクエスト解析モード：WebViewは使用しないため常に非表示

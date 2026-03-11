@@ -85,6 +85,7 @@ class DatasetUploadTab(QWidget):
     def __init__(self, parent=None):
         """初期化"""
         super().__init__(parent)
+        self._theme_refresh_managed_by_parent = self._is_theme_managed_by_parent()
         
         self.auth_manager = get_auth_manager()
         self.portal_client = None
@@ -111,15 +112,200 @@ class DatasetUploadTab(QWidget):
         self._init_ui()
         logger.info("データセットアップロードタブ初期化完了")
         # テーマ変更時に再適用
-        try:
-            from classes.theme.theme_manager import ThemeManager
-            ThemeManager.instance().theme_changed.connect(self.refresh_theme)
-        except Exception as e:
-            logger.debug(f"DatasetUploadTab theme signal connect failed: {e}")
+        if not self._theme_refresh_managed_by_parent:
+            try:
+                from classes.theme.theme_manager import ThemeManager
+                ThemeManager.instance().theme_changed.connect(self.refresh_theme)
+            except Exception as e:
+                logger.debug(f"DatasetUploadTab theme signal connect failed: {e}")
         self.refresh_theme()
-    
+
+    def _is_theme_managed_by_parent(self) -> bool:
+        parent = self.parentWidget()
+        return parent is not None and parent.__class__.__name__ == "DataPortalWidget"
+
+    def _build_base_stylesheet(self) -> str:
+        pressed_bg_key = getattr(
+            ThemeKey,
+            "BUTTON_SECONDARY_BACKGROUND_PRESSED",
+            ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER,
+        )
+        return f"""
+            QWidget#datasetUploadTabRoot {{
+                background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
+            }}
+            QWidget#datasetUploadTabRoot QLineEdit {{
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                color: {get_color(ThemeKey.INPUT_TEXT)};
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                border-radius: 4px;
+                padding: 4px 6px;
+            }}
+            QWidget#datasetUploadTabRoot QComboBox {{
+                background-color: {get_color(ThemeKey.COMBO_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                border: 1px solid {get_color(ThemeKey.COMBO_BORDER)};
+                border-radius: 4px;
+                padding: 6px 8px;
+                min-height: 28px;
+                font-size: 10pt;
+            }}
+            QWidget#datasetUploadTabRoot QComboBox::drop-down {{
+                border: none;
+                width: 20px;
+            }}
+            QWidget#datasetUploadTabRoot QComboBox::down-arrow {{
+                width: 12px;
+                height: 12px;
+            }}
+            QWidget#datasetUploadTabRoot QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)};
+                border-radius: 4px;
+                padding: 6px 10px;
+                font-weight: bold;
+            }}
+            QWidget#datasetUploadTabRoot QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)};
+            }}
+            QWidget#datasetUploadTabRoot QPushButton:pressed {{
+                background-color: {get_color(pressed_bg_key)};
+            }}
+            QWidget#datasetUploadTabRoot QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+            }}
+            QWidget#datasetUploadTabRoot QGroupBox {{
+                border: 1px solid {get_color(ThemeKey.PANEL_BORDER)};
+                border-radius: 6px;
+                margin-top: 8px;
+                background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+            }}
+            QWidget#datasetUploadTabRoot QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 2px 4px;
+                color: {get_color(ThemeKey.TEXT_SECONDARY)};
+                font-weight: bold;
+            }}
+            QWidget#datasetUploadTabRoot QLabel {{
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+            }}
+            QWidget#datasetUploadTabRoot QRadioButton,
+            QWidget#datasetUploadTabRoot QCheckBox {{
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+            }}
+            QWidget#datasetUploadTabRoot QRadioButton::indicator {{
+                width: 16px;
+                height: 16px;
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                background: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                border-radius: 8px;
+            }}
+            QWidget#datasetUploadTabRoot QRadioButton::indicator:checked {{
+                background: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+            }}
+            QWidget#datasetUploadTabRoot QCheckBox::indicator {{
+                width: 16px;
+                height: 16px;
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                background: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                border-radius: 3px;
+            }}
+            QWidget#datasetUploadTabRoot QCheckBox::indicator:checked {{
+                background: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+            }}
+            QWidget#datasetUploadTabRoot QTextEdit#datasetUploadStatusText {{
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                color: {get_color(ThemeKey.INPUT_TEXT)};
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                border-radius: 4px;
+                padding: 8px;
+            }}
+            QWidget#datasetUploadTabRoot QLabel#datasetUploadInfoLabel {{
+                color: {get_color(ThemeKey.TEXT_MUTED)};
+                font-size: 10px;
+            }}
+            QWidget#datasetUploadTabRoot QLabel#datasetUploadThumbnailTitleLabel,
+            QWidget#datasetUploadTabRoot QLabel#datasetUploadContentsZipStatusLabel {{
+                color: {get_color(ThemeKey.TEXT_MUTED)};
+            }}
+            QWidget#datasetUploadTabRoot QLabel#datasetUploadContentsZipStatusLabel[zipStatus="success"] {{
+                color: {get_color(ThemeKey.TEXT_SUCCESS)};
+            }}
+            QWidget#datasetUploadTabRoot QTableWidget#datasetUploadFileListWidget {{
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                gridline-color: {get_color(ThemeKey.BORDER_DEFAULT)};
+                alternate-background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+            }}
+            QWidget#datasetUploadTabRoot QTableWidget#datasetUploadFileListWidget QHeaderView::section {{
+                background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_SECONDARY)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                padding: 4px 6px;
+                font-weight: bold;
+            }}
+            QWidget#datasetUploadTabRoot QTableWidget#datasetUploadFileListWidget::item:selected {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+            }}
+            QWidget#datasetUploadTabRoot QLabel#datasetUploadThumbnailLabel {{
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                background: {get_color(ThemeKey.PANEL_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+            }}
+            QWidget#datasetUploadTabRoot QPushButton#datasetUploadBulkDownloadButton,
+            QWidget#datasetUploadTabRoot QPushButton#datasetUploadEditPortalButton,
+            QWidget#datasetUploadTabRoot QPushButton#datasetUploadZipButton,
+            QWidget#datasetUploadTabRoot QPushButton#datasetUploadPublicViewButton {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                padding: 10px 20px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QWidget#datasetUploadTabRoot QPushButton#datasetUploadBulkDownloadButton:hover,
+            QWidget#datasetUploadTabRoot QPushButton#datasetUploadEditPortalButton:hover,
+            QWidget#datasetUploadTabRoot QPushButton#datasetUploadZipButton:hover,
+            QWidget#datasetUploadTabRoot QPushButton#datasetUploadPublicViewButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+            }}
+            QWidget#datasetUploadTabRoot QPushButton#datasetUploadImageUploadButton,
+            QWidget#datasetUploadTabRoot QPushButton#datasetUploadToggleStatusButton {{
+                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
+                padding: 10px 20px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QWidget#datasetUploadTabRoot QPushButton#datasetUploadImageUploadButton:hover,
+            QWidget#datasetUploadTabRoot QPushButton#datasetUploadToggleStatusButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
+            }}
+            QWidget#datasetUploadTabRoot QPushButton#datasetUploadJsonUploadButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
+                padding: 10px 20px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+                font-size: 14px;
+            }}
+            QWidget#datasetUploadTabRoot QPushButton#datasetUploadJsonUploadButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
+        """
+
     def _init_ui(self):
         """UI初期化"""
+        self.setObjectName("datasetUploadTabRoot")
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -137,6 +323,7 @@ class DatasetUploadTab(QWidget):
 
         # ステータス表示エリアを先に作成（他のUIコンポーネントがログ出力に使用するため）
         self.status_text = QTextEdit()
+        self.status_text.setObjectName("datasetUploadStatusText")
         self.status_text.setReadOnly(True)
         self.status_text.setMaximumHeight(200)
         self.status_text.setPlaceholderText("アップロードログがここに表示されます...")
@@ -174,291 +361,27 @@ class DatasetUploadTab(QWidget):
     
     def _apply_status_style(self):
         """ステータステキストスタイルを適用"""
-        self.status_text.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
-                color: {get_color(ThemeKey.INPUT_TEXT)};
-                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
-                border-radius: 4px;
-                padding: 8px;
-            }}
-        """)
+        self.status_text.setObjectName("datasetUploadStatusText")
+        self.status_text.setStyleSheet(
+            f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};"
+            f"color: {get_color(ThemeKey.INPUT_TEXT)};"
+            f"border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};"
+            "border-radius: 4px;"
+            "padding: 8px;"
+        )
     
     def refresh_theme(self):
         """テーマ変更時のスタイル更新"""
         try:
-            # ルート背景
-            self.setStyleSheet(f"background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};")
+            self.setStyleSheet(self._build_base_stylesheet())
             self._apply_status_style()
-            # 入力系
-            from qt_compat.widgets import QLineEdit, QComboBox, QPushButton, QGroupBox, QRadioButton, QCheckBox, QTextEdit
-            # QLineEdit
-            for w in self.findChildren(QLineEdit):
-                w.setStyleSheet(f"QLineEdit {{ background-color: {get_color(ThemeKey.INPUT_BACKGROUND)}; color: {get_color(ThemeKey.INPUT_TEXT)}; border: 1px solid {get_color(ThemeKey.INPUT_BORDER)}; border-radius: 4px; padding: 4px 6px; }}")
-            # QComboBox - フォントが隠れないように高さとパディング調整
-            combo_style = f"""QComboBox {{
-                background-color: {get_color(ThemeKey.COMBO_BACKGROUND)};
-                color: {get_color(ThemeKey.TEXT_PRIMARY)};
-                border: 1px solid {get_color(ThemeKey.COMBO_BORDER)};
-                border-radius: 4px;
-                padding: 6px 8px;
-                min-height: 28px;
-                font-size: 10pt;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-                width: 20px;
-            }}
-            QComboBox::down-arrow {{
-                width: 12px;
-                height: 12px;
-            }}"""
-            for w in self.findChildren(QComboBox):
-                w.setStyleSheet(combo_style)
-            # Buttons (簡易共通適用 - variant未設定のみ)
-            pressed_bg_key = getattr(
-                ThemeKey,
-                "BUTTON_SECONDARY_BACKGROUND_PRESSED",
-                ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER,
-            )
-            btn_style_default = (
-                f"QPushButton {{ background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)}; border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)}; border-radius: 4px; padding: 6px 10px; font-weight: bold; }} "
-                f"QPushButton:hover {{ background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)}; }} "
-                f"QPushButton:pressed {{ background-color: {get_color(pressed_bg_key)}; }} "
-                f"QPushButton:disabled {{ background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)}; color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)}; border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)}; }}"
-            )
-            for b in self.findChildren(QPushButton):
-                if not b.property("variant"):
-                    b.setStyleSheet(btn_style_default)
-
-            # DatasetUploadTab 内の主要アクションボタンは個別スタイルを持つため、
-            # refresh_theme で上書きされた後に再適用してテーマ追従させる。
-            self._apply_action_button_styles()
-            # GroupBox
-            gb_style = f"QGroupBox {{ border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; border-radius: 6px; margin-top: 8px; background-color: {get_color(ThemeKey.PANEL_BACKGROUND)}; }} QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 2px 4px; color: {get_color(ThemeKey.TEXT_SECONDARY)}; font-weight: bold; }}"
-            for g in self.findChildren(QGroupBox):
-                g.setStyleSheet(gb_style)
-            # Radio / Checkbox
-            indicator_style = (
-                f"QRadioButton {{ color: {get_color(ThemeKey.TEXT_PRIMARY)}; }} QRadioButton::indicator {{ width:16px; height:16px; border:1px solid {get_color(ThemeKey.INPUT_BORDER)}; background:{get_color(ThemeKey.INPUT_BACKGROUND)}; border-radius:8px; }} QRadioButton::indicator:checked {{ background:{get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; }}"
-                f" QCheckBox {{ color: {get_color(ThemeKey.TEXT_PRIMARY)}; }} QCheckBox::indicator {{ width:16px; height:16px; border:1px solid {get_color(ThemeKey.INPUT_BORDER)}; background:{get_color(ThemeKey.INPUT_BACKGROUND)}; border-radius:3px; }} QCheckBox::indicator:checked {{ background:{get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; border-color:{get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; }}"
-            )
-            for r in self.findChildren(QRadioButton):
-                r.setStyleSheet(indicator_style)
-            for c in self.findChildren(QCheckBox):
-                c.setStyleSheet(indicator_style)
-            # Status text already handled
-            self._apply_file_list_theme()
             self.update()
         except Exception as e:
             logger.debug(f"DatasetUploadTab refresh_theme failed: {e}")
 
-    def _apply_action_button_styles(self) -> None:
-        """主要アクションボタンのスタイルをテーマに合わせて再適用"""
-        try:
-            # 画像ファイル一括取得
-            if hasattr(self, "bulk_download_btn") and self.bulk_download_btn is not None:
-                self.bulk_download_btn.setStyleSheet(
-                    f"""
-                    QPushButton {{
-                        background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                        color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                        padding: 8px 16px;
-                        border: none;
-                        border-radius: 4px;
-                        font-weight: bold;
-                    }}
-                    QPushButton:hover {{
-                        background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
-                    }}
-                    QPushButton:disabled {{
-                        background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-                        color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
-                        border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
-                    }}
-                    """
-                )
-
-            # 画像アップロード
-            if hasattr(self, "upload_images_btn") and self.upload_images_btn is not None:
-                self.upload_images_btn.setStyleSheet(
-                    f"""
-                    QPushButton {{
-                        background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
-                        color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
-                        padding: 8px 16px;
-                        border: none;
-                        border-radius: 4px;
-                        font-weight: bold;
-                    }}
-                    QPushButton:hover {{
-                        background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
-                    }}
-                    QPushButton:disabled {{
-                        background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-                        color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
-                        border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
-                    }}
-                    """
-                )
-
-            # 書誌情報JSONアップロード
-            if hasattr(self, "upload_btn") and self.upload_btn is not None:
-                self.upload_btn.setStyleSheet(
-                    f"""
-                    QPushButton {{
-                        background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
-                        color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
-                        padding: 10px 20px;
-                        border: none;
-                        border-radius: 4px;
-                        font-weight: bold;
-                        font-size: 14px;
-                    }}
-                    QPushButton:hover {{
-                        background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
-                    }}
-                    QPushButton:disabled {{
-                        background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-                        color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
-                        border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
-                    }}
-                    """
-                )
-
-            # データカタログ修正
-            if hasattr(self, "edit_portal_btn") and self.edit_portal_btn is not None:
-                self.edit_portal_btn.setStyleSheet(
-                    f"""
-                    QPushButton {{
-                        background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                        color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                        padding: 10px 20px;
-                        border: none;
-                        border-radius: 4px;
-                        font-weight: bold;
-                        font-size: 14px;
-                    }}
-                    QPushButton:hover {{
-                        background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
-                    }}
-                    QPushButton:disabled {{
-                        background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-                        color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
-                        border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
-                    }}
-                    """
-                )
-
-            # コンテンツZIPアップロード
-            if hasattr(self, "upload_zip_btn") and self.upload_zip_btn is not None:
-                self.upload_zip_btn.setStyleSheet(
-                    f"""
-                    QPushButton {{
-                        background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                        color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                        padding: 10px 20px;
-                        border: none;
-                        border-radius: 4px;
-                        font-weight: bold;
-                        font-size: 14px;
-                    }}
-                    QPushButton:hover {{
-                        background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
-                    }}
-                    QPushButton:disabled {{
-                        background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-                        color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
-                        border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
-                    }}
-                    """
-                )
-
-            # 公開ページ表示
-            if hasattr(self, "public_view_btn") and self.public_view_btn is not None:
-                self.public_view_btn.setStyleSheet(
-                    f"""
-                    QPushButton {{
-                        background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                        color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                        padding: 10px 20px;
-                        border: none;
-                        border-radius: 4px;
-                        font-weight: bold;
-                        font-size: 14px;
-                    }}
-                    QPushButton:hover {{
-                        background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
-                    }}
-                    QPushButton:disabled {{
-                        background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-                        color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
-                        border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
-                    }}
-                    """
-                )
-
-            # ステータス変更
-            if hasattr(self, "toggle_status_btn") and self.toggle_status_btn is not None:
-                self.toggle_status_btn.setStyleSheet(
-                    f"""
-                    QPushButton {{
-                        background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
-                        color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
-                        padding: 10px 20px;
-                        border: none;
-                        border-radius: 4px;
-                        font-weight: bold;
-                        font-size: 14px;
-                    }}
-                    QPushButton:hover {{
-                        background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
-                    }}
-                    QPushButton:disabled {{
-                        background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-                        color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
-                        border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
-                    }}
-                    """
-                )
-        except Exception as e:
-            logger.debug(f"DatasetUploadTab _apply_action_button_styles failed: {e}")
-
     def _apply_file_list_theme(self) -> None:
-        """取得済みファイル一覧テーブルとプレビュー領域のテーマ追従を保証"""
-        try:
-            if hasattr(self, 'file_list_widget') and self.file_list_widget is not None:
-                self.file_list_widget.setStyleSheet(f"""
-                    QTableWidget {{
-                        background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
-                        color: {get_color(ThemeKey.TEXT_PRIMARY)};
-                        border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
-                        gridline-color: {get_color(ThemeKey.BORDER_DEFAULT)};
-                        alternate-background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
-                    }}
-                    QHeaderView::section {{
-                        background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
-                        color: {get_color(ThemeKey.TEXT_SECONDARY)};
-                        border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
-                        padding: 4px 6px;
-                        font-weight: bold;
-                    }}
-                    QTableWidget::item:selected {{
-                        background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
-                        color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
-                    }}
-                """)
-
-            if hasattr(self, 'thumbnail_title_label') and self.thumbnail_title_label is not None:
-                self.thumbnail_title_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_MUTED)};")
-            if hasattr(self, 'thumbnail_label') and self.thumbnail_label is not None:
-                self.thumbnail_label.setStyleSheet(
-                    f"border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)}; "
-                    f"background: {get_color(ThemeKey.PANEL_BACKGROUND)}; "
-                    f"color: {get_color(ThemeKey.TEXT_PRIMARY)};"
-                )
-        except Exception as exc:
-            logger.debug(f"DatasetUploadTab _apply_file_list_theme failed: {exc}")
+        """互換用。主要な配色は root QSS で管理する。"""
+        return
     
     def _create_environment_selector(self) -> QGroupBox:
         """環境選択セクション"""
@@ -466,6 +389,7 @@ class DatasetUploadTab(QWidget):
         layout = QFormLayout()
         
         self.env_combo = QComboBox()
+        self.env_combo.setMinimumHeight(28)
         self.env_combo.currentTextChanged.connect(self._on_environment_changed)
         layout.addRow("環境:", self.env_combo)
         
@@ -529,7 +453,7 @@ class DatasetUploadTab(QWidget):
         
         # 選択されたデータセット情報表示
         self.dataset_info_label = QLabel("")
-        self.dataset_info_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 10px;")
+        self.dataset_info_label.setObjectName("datasetUploadInfoLabel")
         self.dataset_info_label.setWordWrap(True)
         dataset_layout.addWidget(self.dataset_info_label)
         
@@ -537,24 +461,9 @@ class DatasetUploadTab(QWidget):
         file_download_row = QHBoxLayout()
         
         self.bulk_download_btn = QPushButton("📥 画像ファイル一括取得")
+        self.bulk_download_btn.setObjectName("datasetUploadBulkDownloadButton")
         self.bulk_download_btn.setEnabled(False)
         self.bulk_download_btn.clicked.connect(self._on_bulk_download)
-        self.bulk_download_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                padding: 8px 16px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
-            }}
-            QPushButton:disabled {{
-                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-            }}
-        """)
         file_download_row.addWidget(self.bulk_download_btn)
         
         self.open_files_folder_btn = QPushButton("📂 フォルダを開く")
@@ -596,6 +505,7 @@ class DatasetUploadTab(QWidget):
         from qt_compat.core import Qt
 
         self.file_list_widget = QTableWidget()
+        self.file_list_widget.setObjectName("datasetUploadFileListWidget")
         self.file_list_widget.setColumnCount(4)
         self.file_list_widget.setHorizontalHeaderLabels(["選択", "ファイル名", "キャプション", "アップロード"])
         self.file_list_widget.setSortingEnabled(True)
@@ -621,26 +531,6 @@ class DatasetUploadTab(QWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)
 
         self.file_list_widget.setMaximumHeight(300)
-        self.file_list_widget.setStyleSheet(f"""
-            QTableWidget {{
-                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
-                color: {get_color(ThemeKey.TEXT_PRIMARY)};
-                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
-                gridline-color: {get_color(ThemeKey.BORDER_DEFAULT)};
-            }}
-            QHeaderView::section {{
-                background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
-                color: {get_color(ThemeKey.TEXT_SECONDARY)};
-                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
-                padding: 4px 6px;
-                font-weight: bold;
-            }}
-            QTableWidget::item:selected {{
-                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
-            }}
-        """)
-
         file_list_left_layout.addWidget(self.file_list_widget)
         
         file_list_main_layout.addWidget(file_list_left_container)
@@ -651,17 +541,13 @@ class DatasetUploadTab(QWidget):
         thumbnail_layout.setContentsMargins(10, 0, 0, 0)
         
         self.thumbnail_title_label = QLabel("プレビュー")
-        self.thumbnail_title_label.setStyleSheet(f"font-weight: bold; color: {get_color(ThemeKey.TEXT_MUTED)};")
+        self.thumbnail_title_label.setObjectName("datasetUploadThumbnailTitleLabel")
         thumbnail_layout.addWidget(self.thumbnail_title_label)
         
         self.thumbnail_label = QLabel()
+        self.thumbnail_label.setObjectName("datasetUploadThumbnailLabel")
         self.thumbnail_label.setFixedSize(200, 200)
         self.thumbnail_label.setAlignment(Qt.AlignCenter)
-        self.thumbnail_label.setStyleSheet(
-            f"border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)}; "
-            f"background: {get_color(ThemeKey.PANEL_BACKGROUND)}; "
-            f"color: {get_color(ThemeKey.TEXT_PRIMARY)};"
-        )
         self.thumbnail_label.setText("ファイルにマウスオーバーで\nプレビューを表示")
         thumbnail_layout.addWidget(self.thumbnail_label)
         thumbnail_layout.addStretch()
@@ -675,25 +561,10 @@ class DatasetUploadTab(QWidget):
         image_upload_row = QHBoxLayout()
         
         self.upload_images_btn = QPushButton("📤 画像アップロード")
+        self.upload_images_btn.setObjectName("datasetUploadImageUploadButton")
         self.upload_images_btn.setEnabled(False)
         self.upload_images_btn.clicked.connect(self._on_upload_images)
         self.upload_images_btn.setToolTip("書誌情報JSONをアップロード後に使用可能になります")
-        self.upload_images_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
-                padding: 8px 16px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
-            }}
-            QPushButton:disabled {{
-                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-            }}
-        """)
         image_upload_row.addWidget(self.upload_images_btn)
         image_upload_row.addStretch()
         
@@ -766,6 +637,7 @@ class DatasetUploadTab(QWidget):
         self.dataset_combo.setEditable(True)
         self.dataset_combo.setInsertPolicy(QComboBox.NoInsert)
         self.dataset_combo.setPlaceholderText("データセットを検索...")
+        self.dataset_combo.setMinimumHeight(28)
         self.dataset_combo.setMinimumWidth(500)
         self.dataset_combo.currentIndexChanged.connect(self._on_dataset_selected)
         search_row.addWidget(self.dataset_combo)
@@ -927,117 +799,37 @@ class DatasetUploadTab(QWidget):
 
         # 書誌情報JSONアップロードボタン
         self.upload_btn = QPushButton("📤 書誌情報JSONアップロード")
+        self.upload_btn.setObjectName("datasetUploadJsonUploadButton")
         self.upload_btn.setEnabled(False)
         self.upload_btn.clicked.connect(self._on_upload)
-        self.upload_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
-                padding: 10px 20px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-                font-size: 14px;
-            }}
-            QPushButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
-            }}
-            QPushButton:disabled {{
-                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-            }}
-        """)
 
         # コンテンツZIPアップロードボタン（データカタログ修正が有効な場合のみ）
         self.upload_zip_btn = QPushButton("📦 コンテンツZIPアップロード")
+        self.upload_zip_btn.setObjectName("datasetUploadZipButton")
         self.upload_zip_btn.setEnabled(False)
         self.upload_zip_btn.clicked.connect(self._on_upload_zip)
         self.upload_zip_btn.setToolTip("ローカルZIPアップロード、またはRDEから自動取得してZIP化→アップロードを選択できます")
-        self.upload_zip_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                padding: 10px 20px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-                font-size: 14px;
-            }}
-            QPushButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
-            }}
-            QPushButton:disabled {{
-                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-            }}
-        """)
 
         # データポータル修正ボタン
         self.edit_portal_btn = QPushButton("✏️ データカタログ修正")
+        self.edit_portal_btn.setObjectName("datasetUploadEditPortalButton")
         self.edit_portal_btn.setEnabled(False)
         self.edit_portal_btn.clicked.connect(self._on_edit_portal)
         self.edit_portal_btn.setToolTip("データポータルに登録済みのエントリを修正します")
-        self.edit_portal_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                padding: 10px 20px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-                font-size: 14px;
-            }}
-            QPushButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
-            }}
-            QPushButton:disabled {{
-                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-            }}
-        """)
 
         # ブラウザ表示ボタン（公開ページ）
         self.public_view_btn = QPushButton("🌐 ブラウザで表示")
+        self.public_view_btn.setObjectName("datasetUploadPublicViewButton")
         self.public_view_btn.setEnabled(False)
         self.public_view_btn.clicked.connect(self._on_open_public_view)
         self.public_view_btn.setToolTip("データポータル公開ページを既定ブラウザで開きます")
-        self.public_view_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                padding: 10px 20px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-                font-size: 14px;
-            }}
-            QPushButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
-            }}
-            QPushButton:disabled {{
-                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-            }}
-        """)
 
         # ステータス変更ボタン
         self.toggle_status_btn = QPushButton("🔄 ステータス変更")
+        self.toggle_status_btn.setObjectName("datasetUploadToggleStatusButton")
         self.toggle_status_btn.setEnabled(False)
         self.toggle_status_btn.clicked.connect(self._on_toggle_status)
         self.toggle_status_btn.setToolTip("データポータルの公開/非公開ステータスを切り替えます")
-        self.toggle_status_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
-                padding: 10px 20px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-                font-size: 14px;
-            }}
-            QPushButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
-            }}
-            QPushButton:disabled {{
-                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-            }}
-        """)
 
         # 配置（3列×2行）
         action_grid.addWidget(self.upload_btn, 0, 0)
@@ -1050,7 +842,7 @@ class DatasetUploadTab(QWidget):
 
         # コンテンツZIPアップ済み表示（コンテンツリンク有無で判定）
         self.contents_zip_status_label = QLabel("")
-        self.contents_zip_status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 11px;")
+        self.contents_zip_status_label.setObjectName("datasetUploadContentsZipStatusLabel")
         self.contents_zip_status_label.setText("📦 コンテンツZIP: 未確認")
         layout.addWidget(self.contents_zip_status_label)
 
@@ -1064,19 +856,21 @@ class DatasetUploadTab(QWidget):
 
             if has_contents_link is True:
                 self.contents_zip_status_label.setText("✅ コンテンツZIPアップ済み")
-                self.contents_zip_status_label.setStyleSheet(
-                    f"color: {get_color(ThemeKey.TEXT_SUCCESS)}; font-size: 11px;"
-                )
+                self.contents_zip_status_label.setProperty("zipStatus", "success")
+                self.contents_zip_status_label.style().unpolish(self.contents_zip_status_label)
+                self.contents_zip_status_label.style().polish(self.contents_zip_status_label)
                 return
             if has_contents_link is False:
                 self.contents_zip_status_label.setText("📦 コンテンツZIP未アップロード")
-                self.contents_zip_status_label.setStyleSheet(
-                    f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 11px;"
-                )
+                self.contents_zip_status_label.setProperty("zipStatus", "muted")
+                self.contents_zip_status_label.style().unpolish(self.contents_zip_status_label)
+                self.contents_zip_status_label.style().polish(self.contents_zip_status_label)
                 return
 
             self.contents_zip_status_label.setText("📦 コンテンツZIP: 未確認")
-            self.contents_zip_status_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 11px;")
+            self.contents_zip_status_label.setProperty("zipStatus", "muted")
+            self.contents_zip_status_label.style().unpolish(self.contents_zip_status_label)
+            self.contents_zip_status_label.style().polish(self.contents_zip_status_label)
         except Exception:
             pass
     

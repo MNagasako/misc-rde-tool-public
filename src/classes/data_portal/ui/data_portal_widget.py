@@ -6,12 +6,15 @@
 
 from typing import Optional, TYPE_CHECKING
 
+from qt_compat import QtGui, QtWidgets
 from qt_compat.widgets import (
-    QWidget, QVBoxLayout, QTabWidget, QLabel
+    QApplication, QWidget, QVBoxLayout, QTabWidget, QLabel
 )
-from qt_compat.core import Signal
+from qt_compat.core import Signal, QTimer
 
 from classes.managers.log_manager import get_logger
+from classes.theme import ThemeKey, get_color
+from classes.utils.window_sizing import is_window_maximized, resize_main_window
 from .login_settings_tab import LoginSettingsTab
 if TYPE_CHECKING:
     from .master_data_tab import MasterDataTab
@@ -40,6 +43,7 @@ class DataPortalWidget(QWidget):
     def __init__(self, parent=None):
         """初期化"""
         super().__init__(parent)
+        self.setObjectName("dataPortalWidgetRoot")
 
         # 遅延生成用
         self.master_data_tab: Optional["MasterDataTab"] = None
@@ -58,14 +62,98 @@ class DataPortalWidget(QWidget):
         self.listing_tab = None
         self._listing_placeholder = None
 
+        self._tab_window_sizes: dict[int, object] = {}
+        self._tab_window_positions: dict[int, tuple[int, int]] = {}
+        self._current_tab_index: int | None = None
+        self._applying_tab_window_state = False
+        self._last_theme_refresh_mode: str | None = None
+
         self._init_ui()
         self._connect_signals()
+        try:
+            self._current_tab_index = self.tab_widget.currentIndex()
+        except Exception:
+            self._current_tab_index = 0
         
         # テーマ変更シグナルに接続
         from classes.theme import ThemeManager
         ThemeManager.instance().theme_changed.connect(self.refresh_theme)
         
         logger.info("データポータルウィジェット初期化完了")
+
+    def _build_base_stylesheet(self) -> str:
+        return f"""
+            QWidget#dataPortalWidgetRoot {{
+                background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+            }}
+            QWidget#dataPortalWidgetRoot QLabel {{
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+            }}
+            QWidget#dataPortalWidgetRoot QGroupBox {{
+                background-color: {get_color(ThemeKey.GROUPBOX_BACKGROUND)};
+                border: 1px solid {get_color(ThemeKey.GROUPBOX_BORDER)};
+                border-radius: 5px;
+                margin-top: 6px;
+                padding-top: 10px;
+            }}
+            QWidget#dataPortalWidgetRoot QGroupBox::title {{
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                left: 8px;
+                padding: 0 4px;
+                background-color: {get_color(ThemeKey.GROUPBOX_BACKGROUND)};
+                color: {get_color(ThemeKey.GROUPBOX_TITLE_TEXT)};
+                font-weight: bold;
+            }}
+            QWidget#dataPortalWidgetRoot QLineEdit,
+            QWidget#dataPortalWidgetRoot QPlainTextEdit,
+            QWidget#dataPortalWidgetRoot QTextEdit {{
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                color: {get_color(ThemeKey.INPUT_TEXT)};
+                border: {get_color(ThemeKey.INPUT_BORDER_WIDTH)} solid {get_color(ThemeKey.INPUT_BORDER)};
+                border-radius: 4px;
+                padding: 4px;
+            }}
+            QWidget#dataPortalWidgetRoot QComboBox {{
+                background-color: {get_color(ThemeKey.COMBO_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                border: 1px solid {get_color(ThemeKey.COMBO_BORDER)};
+                border-radius: 4px;
+                padding: 2px 6px;
+            }}
+            QWidget#dataPortalWidgetRoot QComboBox::drop-down {{
+                width: 18px;
+                background-color: {get_color(ThemeKey.COMBO_ARROW_BACKGROUND)};
+                border-left: 1px solid {get_color(ThemeKey.COMBO_BORDER)};
+            }}
+            QWidget#dataPortalWidgetRoot QCheckBox,
+            QWidget#dataPortalWidgetRoot QRadioButton {{
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+            }}
+            QWidget#dataPortalWidgetRoot QTabWidget::pane {{
+                border: 1px solid {get_color(ThemeKey.TAB_BORDER)};
+                background: {get_color(ThemeKey.TAB_BACKGROUND)};
+                border-radius: 4px;
+            }}
+            QWidget#dataPortalWidgetRoot QTabBar::tab {{
+                background: {get_color(ThemeKey.TAB_INACTIVE_BACKGROUND)};
+                color: {get_color(ThemeKey.TAB_INACTIVE_TEXT)};
+                padding: 6px 12px;
+                border: 1px solid {get_color(ThemeKey.TAB_BORDER)};
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                margin-right: 2px;
+            }}
+            QWidget#dataPortalWidgetRoot QTabBar::tab:selected {{
+                background: {get_color(ThemeKey.TAB_ACTIVE_BACKGROUND)};
+                color: {get_color(ThemeKey.TAB_ACTIVE_TEXT)};
+                border: 1px solid {get_color(ThemeKey.TAB_ACTIVE_BORDER)};
+            }}
+            QWidget#dataPortalWidgetRoot QTabBar::tab:hover {{
+                background: {get_color(ThemeKey.TABLE_ROW_BACKGROUND_HOVER)};
+            }}
+        """
     
     def _init_ui(self):
         """UI初期化"""
@@ -112,6 +200,7 @@ class DataPortalWidget(QWidget):
         self.tab_widget.addTab(self._listing_placeholder, "📋 一覧")
         
         layout.addWidget(self.tab_widget)
+        self.setStyleSheet(self._build_base_stylesheet())
 
         # タブ切替で遅延生成
         self.tab_widget.currentChanged.connect(self._on_tab_changed)
@@ -180,6 +269,8 @@ class DataPortalWidget(QWidget):
     def _on_tab_changed(self, index: int) -> None:
         """タブ切替時の遅延初期化"""
         try:
+            self._save_current_window_state()
+
             # 0: login, 1: master, 2: upload, 3: bulk, 4: listing
             if index == 0:
                 try:
@@ -195,8 +286,56 @@ class DataPortalWidget(QWidget):
                 self._ensure_bulk_tab()
             elif index == 4:
                 self._ensure_listing_tab()
+
+            self._current_tab_index = index
+            try:
+                QTimer.singleShot(0, lambda idx=index: self._finalize_tab_change(idx))
+            except Exception:
+                self._finalize_tab_change(index)
         except Exception as e:
             logger.error("DataPortalWidget: tab change handling failed: %s", e)
+
+    def _finalize_tab_change(self, index: int) -> None:
+        self._restore_window_state(index)
+        self._refresh_tab_theme(index)
+
+    def _save_current_window_state(self) -> None:
+        try:
+            if self._applying_tab_window_state:
+                return
+            index = self._current_tab_index
+            top_level = self.window()
+            if index is None or top_level is None or is_window_maximized(top_level):
+                return
+            size = top_level.size() if hasattr(top_level, "size") else None
+            pos = top_level.pos() if hasattr(top_level, "pos") else None
+            if size is not None and getattr(size, "isValid", lambda: False)():
+                self._tab_window_sizes[int(index)] = size
+            if pos is not None:
+                self._tab_window_positions[int(index)] = (int(pos.x()), int(pos.y()))
+        except Exception:
+            logger.debug("DataPortalWidget: save window state failed", exc_info=True)
+
+    def _restore_window_state(self, index: int) -> None:
+        try:
+            top_level = self.window()
+            if top_level is None or is_window_maximized(top_level):
+                return
+            saved_size = self._tab_window_sizes.get(int(index))
+            saved_pos = self._tab_window_positions.get(int(index))
+            if saved_size is None and saved_pos is None:
+                return
+
+            self._applying_tab_window_state = True
+            try:
+                if saved_size is not None:
+                    resize_main_window(top_level, int(saved_size.width()), int(saved_size.height()))
+                if saved_pos is not None and hasattr(top_level, "move"):
+                    top_level.move(int(saved_pos[0]), int(saved_pos[1]))
+            finally:
+                self._applying_tab_window_state = False
+        except Exception:
+            logger.debug("DataPortalWidget: restore window state failed", exc_info=True)
 
     def _ensure_master_tab(self) -> None:
         if self.master_data_tab is not None:
@@ -340,21 +479,99 @@ class DataPortalWidget(QWidget):
                     set_client(portal_client)
             except Exception as e:
                 logger.error("一覧タブへのPortalClient設定に失敗: %s", e)
+
+    def _get_tab_widget_for_index(self, index: int):
+        if index == 0:
+            return getattr(self, "login_settings_tab", None)
+        if index == 1:
+            return getattr(self, "master_data_tab", None)
+        if index == 2:
+            return getattr(self, "dataset_upload_tab", None)
+        if index == 3:
+            return getattr(self, "bulk_tab", None)
+        if index == 4:
+            return getattr(self, "listing_tab", None)
+        return None
+
+    def _refresh_tab_theme(self, index: int) -> None:
+        child = self._get_tab_widget_for_index(index)
+        if child is not None and hasattr(child, 'refresh_theme'):
+            child.refresh_theme()
+
+    @staticmethod
+    def _repolish_widget(widget: QWidget) -> None:
+        try:
+            style = widget.style()
+            if style is not None:
+                style.unpolish(widget)
+                style.polish(widget)
+        except Exception:
+            pass
+
+        try:
+            if isinstance(widget, QtWidgets.QAbstractScrollArea):
+                viewport = widget.viewport()
+                if viewport is not None:
+                    style = viewport.style()
+                    if style is not None:
+                        style.unpolish(viewport)
+                        style.polish(viewport)
+                    viewport.update()
+        except Exception:
+            pass
+
+        try:
+            widget.update()
+        except Exception:
+            pass
+
+    def _refresh_hover_styles_for_widget(self, hovered_widget: Optional[QWidget] = None) -> None:
+        try:
+            hovered = hovered_widget
+            if hovered is None:
+                hovered = QApplication.widgetAt(QtGui.QCursor.pos())
+            if hovered is None:
+                return
+            if hovered is not self and not self.isAncestorOf(hovered):
+                return
+
+            chain: list[QWidget] = []
+            current = hovered
+            while current is not None:
+                chain.append(current)
+                if current is self:
+                    break
+                current = current.parentWidget()
+
+            for widget in reversed(chain):
+                self._repolish_widget(widget)
+
+            if hovered is not self:
+                self._repolish_widget(hovered)
+        except Exception:
+            pass
     
     def refresh_theme(self):
         """テーマ変更時のスタイル更新"""
         try:
-            # 各タブのrefresh_theme()を呼び出し
-            if hasattr(self, 'login_settings_tab') and hasattr(self.login_settings_tab, 'refresh_theme'):
-                self.login_settings_tab.refresh_theme()
-            if hasattr(self, 'master_data_tab') and hasattr(self.master_data_tab, 'refresh_theme'):
-                self.master_data_tab.refresh_theme()
-            if self.dataset_upload_tab is not None and hasattr(self.dataset_upload_tab, 'refresh_theme'):
-                self.dataset_upload_tab.refresh_theme()
-            if self.bulk_tab is not None and hasattr(self.bulk_tab, 'refresh_theme'):
-                self.bulk_tab.refresh_theme()
-            if self.listing_tab is not None and hasattr(self.listing_tab, 'refresh_theme'):
-                self.listing_tab.refresh_theme()
+            try:
+                from classes.theme import ThemeManager
+
+                current_mode = ThemeManager.instance().get_mode().value
+            except Exception:
+                current_mode = None
+
+            if current_mode is not None and self._last_theme_refresh_mode == current_mode:
+                return
+
+            self.setStyleSheet(self._build_base_stylesheet())
+
+            current_index = self.tab_widget.currentIndex() if hasattr(self, "tab_widget") else 0
+            self._refresh_tab_theme(current_index)
+            self._refresh_hover_styles_for_widget()
+
+            if current_mode is not None:
+                self._last_theme_refresh_mode = current_mode
             
             # ウィジェット全体を再描画
             self.update()

@@ -32,6 +32,7 @@ from qt_compat.widgets import (
     QProgressBar,
     QMenu,
     QApplication,
+    QSizePolicy,
 )
 from qt_compat.core import Qt, QTimer
 
@@ -613,6 +614,8 @@ class DataFetch2BulkRdeTab(QWidget):
         self.table = QTableWidget(0, len(self.COLUMNS), self)
         self.table.setHorizontalHeaderLabels(self.COLUMNS)
         self.table.setSortingEnabled(True)
+        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+        self.table.setMinimumHeight(240)
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Interactive)
         hh.setSectionResizeMode(3, QHeaderView.Stretch)

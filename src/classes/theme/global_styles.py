@@ -34,7 +34,6 @@ QComboBox:disabled {{ background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DIS
 QGroupBox {{ background-color: {get_color(ThemeKey.GROUPBOX_BACKGROUND)}; border: 1px solid {get_color(ThemeKey.GROUPBOX_BORDER)}; border-radius: 5px; margin-top: 6px; padding-top: 10px; }}
 QGroupBox::title {{ subcontrol-origin: margin; subcontrol-position: top left; left: 8px; padding: 0 4px; background-color: {get_color(ThemeKey.GROUPBOX_BACKGROUND)}; color: {get_color(ThemeKey.GROUPBOX_TITLE_TEXT)}; font-weight: bold; }}
 QScrollArea {{ background-color: {get_color(ThemeKey.PANEL_BACKGROUND)}; border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; }}
-QScrollArea > QWidget > QWidget {{ background-color: {get_color(ThemeKey.PANEL_BACKGROUND)}; }}
 QScrollBar:vertical {{ background-color: {get_color(ThemeKey.SCROLLBAR_BACKGROUND)}; width: 10px; border-radius: 5px; }}
 QScrollBar::handle:vertical {{ background-color: {get_color(ThemeKey.SCROLLBAR_HANDLE)}; border-radius: 5px; min-height: 16px; }}
 QScrollBar::handle:vertical:hover {{ background-color: {get_color(ThemeKey.SCROLLBAR_HANDLE_HOVER)}; }}
@@ -51,39 +50,19 @@ QLineEdit, QPlainTextEdit {{ background-color: {get_color(ThemeKey.INPUT_BACKGRO
 QLineEdit:focus, QPlainTextEdit:focus {{ background-color: {get_color(ThemeKey.INPUT_BACKGROUND_FOCUS)}; border: {get_color(ThemeKey.INPUT_BORDER_FOCUS_WIDTH)} solid {get_color(ThemeKey.INPUT_BORDER_FOCUS)}; }}
 QLineEdit:disabled, QPlainTextEdit:disabled {{ background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)}; color: {get_color(ThemeKey.INPUT_TEXT_DISABLED)}; border: 1px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)}; }}
 
-/* QAbstractScrollArea系(QTextEdit/QTextBrowser)の枠線方針: docs/STYLING_AND_THEME_GUIDE.md */
+/* QAbstractScrollArea系の viewport 背景/枠線は ThemeManager 側の direct styling に寄せる */
     QTextEdit, QTextBrowser {{
-        /* viewport側のborderが効かない環境向けフォールバック（見た目はviewport側が優先される想定） */
         background-color: {get_color(ThemeKey.TEXT_AREA_BACKGROUND)};
         color: {get_color(ThemeKey.INPUT_TEXT)};
         border: {get_color(ThemeKey.INPUT_BORDER_WIDTH)} solid {get_color(ThemeKey.INPUT_BORDER)};
         border-radius: 4px;
         padding: 0px;
     }}
-    QTextEdit::viewport, QTextBrowser::viewport,
-    QTextEdit QWidget#qt_scrollarea_viewport, QTextBrowser QWidget#qt_scrollarea_viewport {{
-        background-color: {get_color(ThemeKey.TEXT_AREA_BACKGROUND)};
-        color: {get_color(ThemeKey.INPUT_TEXT)};
-        border: {get_color(ThemeKey.INPUT_BORDER_WIDTH)} solid {get_color(ThemeKey.INPUT_BORDER)};
-        border-radius: 4px;
-        padding: 4px;
-    }}
     QTextEdit:focus, QTextBrowser:focus {{
         background-color: {get_color(ThemeKey.TEXT_AREA_BACKGROUND_FOCUS)};
         border: {get_color(ThemeKey.INPUT_BORDER_FOCUS_WIDTH)} solid {get_color(ThemeKey.INPUT_BORDER_FOCUS)};
     }}
-    QTextEdit::viewport:focus, QTextBrowser::viewport:focus,
-    QTextEdit:focus QWidget#qt_scrollarea_viewport, QTextBrowser:focus QWidget#qt_scrollarea_viewport {{
-        background-color: {get_color(ThemeKey.TEXT_AREA_BACKGROUND_FOCUS)};
-        border: {get_color(ThemeKey.INPUT_BORDER_FOCUS_WIDTH)} solid {get_color(ThemeKey.INPUT_BORDER_FOCUS)};
-    }}
     QTextEdit:disabled, QTextBrowser:disabled {{
-        background-color: {get_color(ThemeKey.TEXT_AREA_BACKGROUND_DISABLED)};
-        color: {get_color(ThemeKey.TEXT_AREA_TEXT_DISABLED)};
-        border: 1px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)};
-    }}
-    QTextEdit:disabled::viewport, QTextBrowser:disabled::viewport,
-    QTextEdit:disabled QWidget#qt_scrollarea_viewport, QTextBrowser:disabled QWidget#qt_scrollarea_viewport {{
         background-color: {get_color(ThemeKey.TEXT_AREA_BACKGROUND_DISABLED)};
         color: {get_color(ThemeKey.TEXT_AREA_TEXT_DISABLED)};
         border: 1px solid {get_color(ThemeKey.INPUT_BORDER_DISABLED)};

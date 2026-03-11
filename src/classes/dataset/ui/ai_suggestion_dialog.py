@@ -20,6 +20,7 @@ from qt_compat.widgets import (
 from qt_compat.core import Qt, QThread, Signal, QTimer
 from classes.theme import ThemeKey
 from classes.theme.theme_manager import get_color
+from classes.managers.app_config_manager import get_config_manager
 from classes.utils.button_styles import get_button_style
 from classes.utils.dataset_filter_fetcher import DatasetFilterFetcher
 from config.common import get_dynamic_file_path
@@ -163,7 +164,10 @@ class AISuggestionDialog(QDialog):
         self._dataset_combo_connected = False
         self._dataset_dropdown_initialized = False
         self._dataset_dropdown_initializing = False
-        self._did_initial_top_align = False
+        self._geometry_restored = False
+        self._applying_saved_geometry = False
+        self._current_tab_geometry_index = 0
+        self.config_manager = get_config_manager()
         
         # AI拡張機能を取得
         from classes.ai.extensions import AIExtensionRegistry, DatasetDescriptionExtension
@@ -174,6 +178,10 @@ class AISuggestionDialog(QDialog):
         
         self.setup_ui()
         self.setup_connections()
+        try:
+            self._current_tab_geometry_index = self.tab_widget.currentIndex()
+        except Exception:
+            self._current_tab_geometry_index = 0
         
         # 自動生成が有効な場合、ダイアログ表示後に自動でAI提案を生成
         if self.auto_generate:
@@ -186,6 +194,21 @@ class AISuggestionDialog(QDialog):
             self.setAttribute(Qt.WA_DontShowOnScreen, True)
         else:
             self.setModal(True)
+        try:
+            self.setWindowModality(Qt.ApplicationModal)
+        except Exception:
+            pass
+        try:
+            self.setWindowFlags(
+                Qt.Dialog
+                | Qt.CustomizeWindowHint
+                | Qt.WindowTitleHint
+                | Qt.WindowSystemMenuHint
+                | Qt.WindowCloseButtonHint
+                | Qt.WindowMaximizeButtonHint
+            )
+        except Exception:
+            pass
         try:
             # ユーザーが自由にサイズ変更できるようにする（右下グリップ表示）
             self.setSizeGripEnabled(True)
@@ -594,52 +617,157 @@ class AISuggestionDialog(QDialog):
         except Exception:
             pass
 
-    def showEvent(self, event):  # noqa: N802 - Qt互換
-        super().showEvent(event)
-        if self._did_initial_top_align:
+    def _geometry_config_prefix(self) -> str:
+        return f"ui.ai_suggestion_dialog.{self.mode}"
+
+    def _position_config_key(self) -> str:
+        return f"{self._geometry_config_prefix()}.position"
+
+    def _tab_size_config_key(self, index: Optional[int] = None) -> str:
+        tab_index = self.tab_widget.currentIndex() if index is None else int(index)
+        return f"{self._geometry_config_prefix()}.tabs.tab_{tab_index}.size"
+
+    def _available_screen_geometry(self):
+        screen = self.screen() if hasattr(self, 'screen') else None
+        if screen is None:
+            from qt_compat.widgets import QApplication
+
+            screen = QApplication.primaryScreen()
+        return screen.availableGeometry() if screen is not None else None
+
+    def _clamp_geometry(self, width: int, height: int, x: int, y: int):
+        geo = self._available_screen_geometry()
+        if geo is None:
+            return width, height, x, y
+
+        clamped_width = max(480, min(int(width), int(geo.width())))
+        clamped_height = max(max(320, self.minimumHeight()), min(int(height), int(geo.height())))
+        min_x = int(geo.x())
+        min_y = int(geo.y())
+        max_x = int(geo.x() + geo.width() - clamped_width)
+        max_y = int(geo.y() + geo.height() - clamped_height)
+        clamped_x = min(max(int(x), min_x), max_x if max_x >= min_x else min_x)
+        clamped_y = min(max(int(y), min_y), max_y if max_y >= min_y else min_y)
+        return clamped_width, clamped_height, clamped_x, clamped_y
+
+    def _center_dialog_frame_on_screen(self) -> None:
+        geo = self._available_screen_geometry()
+        if geo is None:
             return
 
         try:
-            screen = self.screen() if hasattr(self, 'screen') else None
-            if screen is None:
-                from qt_compat.widgets import QApplication
-                screen = QApplication.primaryScreen()
-            if screen is None:
-                return
-            geo = screen.availableGeometry()
+            frame = self.frameGeometry()
+            frame.moveCenter(geo.center())
 
-            # 縦方向はできるだけ高く（スクロール軽減）。ただし画面外には出さない。
-            # 幅は既定(900)を基本に、画面に収まる範囲で調整。
-            margin_px = 24
-            max_w = max(400, int(geo.width() - margin_px))
-            max_h = max(300, int(geo.height() - margin_px))
-            desired_w = min(max(self.width(), 900), int(max_w))
-            # 最大は画面サイズまで（要件）
-            desired_h = min(max(self.height(), int(max_h * 0.95)), int(max_h))
-            if desired_w != self.width() or desired_h != self.height():
-                self.resize(int(desired_w), int(desired_h))
-
-            target_x = geo.x() + (geo.width() - self.width()) // 2
-            target_y = geo.y()
-            if target_x < geo.x():
-                target_x = geo.x()
-            if target_x + self.width() > geo.x() + geo.width():
-                target_x = geo.x() + geo.width() - self.width()
-            self.move(int(target_x), int(target_y))
+            max_x = int(geo.right() - frame.width() + 1)
+            max_y = int(geo.bottom() - frame.height() + 1)
+            target_x = max(int(geo.left()), min(int(frame.x()), max_x))
+            target_y = max(int(geo.top()), min(int(frame.y()), max_y))
+            self.move(target_x, target_y)
         except Exception:
-            logger.debug("AISuggestionDialog: top align failed", exc_info=True)
+            logger.debug("AISuggestionDialog: center frame failed", exc_info=True)
+
+    def _save_dialog_position(self):
+        try:
+            if not getattr(self, 'config_manager', None):
+                return
+            self.config_manager.set(self._position_config_key(), {'x': int(self.x()), 'y': int(self.y())})
+            self.config_manager.save()
+        except Exception:
+            logger.debug("AISuggestionDialog: save position failed", exc_info=True)
+
+    def _save_current_tab_size(self, index: Optional[int] = None):
+        try:
+            if not getattr(self, 'config_manager', None):
+                return
+            key = self._tab_size_config_key(index)
+            self.config_manager.set(key, {'width': int(self.width()), 'height': int(self.height())})
+            self.config_manager.save()
+        except Exception:
+            logger.debug("AISuggestionDialog: save tab size failed", exc_info=True)
+
+    def _restore_tab_size(self, index: int) -> bool:
+        try:
+            saved = self.config_manager.get(self._tab_size_config_key(index), None)
+            if not isinstance(saved, dict):
+                return False
+            width = int(saved.get('width', self.width()))
+            height = int(saved.get('height', self.height()))
+            clamped_width, clamped_height, _, _ = self._clamp_geometry(width, height, self.x(), self.y())
+            self.resize(clamped_width, clamped_height)
+            return True
+        except Exception:
+            logger.debug("AISuggestionDialog: restore tab size failed", exc_info=True)
+            return False
+
+    def _restore_or_center_dialog(self):
+        geo = self._available_screen_geometry()
+        if geo is None:
+            return
+
+        saved_size = self.config_manager.get(self._tab_size_config_key(self.tab_widget.currentIndex()), None)
+        width = int(saved_size.get('width', self.width())) if isinstance(saved_size, dict) else int(self.width())
+        height = int(saved_size.get('height', self.height())) if isinstance(saved_size, dict) else int(self.height())
+
+        clamped_width, clamped_height, _, _ = self._clamp_geometry(width, height, self.x(), self.y())
+        self._applying_saved_geometry = True
+        try:
+            self.resize(clamped_width, clamped_height)
+            self._center_dialog_frame_on_screen()
         finally:
-            self._did_initial_top_align = True
+            self._applying_saved_geometry = False
+
+    def _handle_tab_geometry_change(self, index: int):
+        try:
+            previous_index = getattr(self, '_current_tab_geometry_index', index)
+            if previous_index != index:
+                self._save_current_tab_size(previous_index)
+
+            self._applying_saved_geometry = True
             try:
-                # 画面サイズに基づく最大高さを再適用（screenが確定してから反映される環境向け）
-                self._apply_window_height_policy()
-            except Exception:
-                pass
-            try:
-                # タブ分割の初期比率
-                QTimer.singleShot(0, self._apply_registered_tab_splitter_sizes)
-            except Exception:
-                pass
+                self._restore_tab_size(index)
+            finally:
+                self._applying_saved_geometry = False
+            self._current_tab_geometry_index = index
+            QTimer.singleShot(0, self._apply_registered_tab_splitter_sizes)
+        except Exception:
+            logger.debug("AISuggestionDialog: tab geometry change handling failed", exc_info=True)
+
+    def showEvent(self, event):  # noqa: N802 - Qt互換
+        super().showEvent(event)
+        try:
+            self._apply_window_height_policy()
+            if not self._geometry_restored:
+                self._restore_or_center_dialog()
+                self._geometry_restored = True
+            else:
+                width, height, _, _ = self._clamp_geometry(self.width(), self.height(), self.x(), self.y())
+                self._applying_saved_geometry = True
+                try:
+                    self.resize(width, height)
+                    self._center_dialog_frame_on_screen()
+                finally:
+                    self._applying_saved_geometry = False
+        except Exception:
+            logger.debug("AISuggestionDialog: show geometry handling failed", exc_info=True)
+        try:
+            QTimer.singleShot(0, self._apply_registered_tab_splitter_sizes)
+        except Exception:
+            pass
+
+    def moveEvent(self, event):  # noqa: N802 - Qt互換
+        super().moveEvent(event)
+        if getattr(self, '_applying_saved_geometry', False):
+            return
+        if self.isVisible():
+            self._save_dialog_position()
+
+    def resizeEvent(self, event):  # noqa: N802 - Qt互換
+        super().resizeEvent(event)
+        if getattr(self, '_applying_saved_geometry', False):
+            return
+        if self.isVisible():
+            self._save_current_tab_size()
         
     def setup_main_tab(self, tab_widget):
         """メインタブのセットアップ"""
@@ -769,6 +897,7 @@ class AISuggestionDialog(QDialog):
         self.cancel_ai_button.clicked.connect(self.cancel_ai_request)
         self.apply_button.clicked.connect(self.accept)
         self.cancel_button.clicked.connect(self.reject)
+        self.tab_widget.currentChanged.connect(self._handle_tab_geometry_change)
         
         # データセット提案モードのみsuggestion_listが存在
         if self.mode == "dataset_suggestion" and hasattr(self, 'suggestion_list'):
@@ -7877,6 +8006,8 @@ ARIMNO: {{ARIMNO}}
         """ダイアログクローズ時の処理"""
         try:
             logger.debug("AISuggestionDialog終了処理開始")
+            self._save_current_tab_size()
+            self._save_dialog_position()
             self.cleanup_threads()
             event.accept()
         except Exception as e:
@@ -7887,6 +8018,8 @@ ARIMNO: {{ARIMNO}}
         """キャンセル時の処理"""
         try:
             logger.debug("AISuggestionDialogキャンセル処理開始")
+            self._save_current_tab_size()
+            self._save_dialog_position()
             self.cleanup_threads()
             super().reject()
         except Exception as e:
@@ -7897,6 +8030,8 @@ ARIMNO: {{ARIMNO}}
         """OK時の処理"""
         try:
             logger.debug("AISuggestionDialog完了処理開始")
+            self._save_current_tab_size()
+            self._save_dialog_position()
             self.cleanup_threads()
             super().accept()
         except Exception as e:

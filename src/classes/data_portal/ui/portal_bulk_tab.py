@@ -297,6 +297,7 @@ class DataPortalBulkTab(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._theme_refresh_managed_by_parent = self._is_theme_managed_by_parent()
         self._portal_widget = parent
         self._rows_by_id: Dict[str, Dict[str, Any]] = {}
         self._rows_list: list[Dict[str, Any]] = []
@@ -334,14 +335,147 @@ class DataPortalBulkTab(QWidget):
         self._init_ui()
         self._schedule_refresh()
 
-        try:
-            from classes.theme.theme_manager import ThemeManager
+        if not self._theme_refresh_managed_by_parent:
+            try:
+                from classes.theme.theme_manager import ThemeManager
 
-            ThemeManager.instance().theme_changed.connect(self.refresh_theme)
-        except Exception:
-            pass
+                ThemeManager.instance().theme_changed.connect(self.refresh_theme)
+            except Exception:
+                pass
+
+    def _is_theme_managed_by_parent(self) -> bool:
+        parent = self.parentWidget()
+        return parent is not None and parent.__class__.__name__ == "DataPortalWidget"
+
+    def _build_base_stylesheet(self) -> str:
+        return f"""
+            QWidget#dataPortalBulkTabRoot {{
+                background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+            }}
+            QWidget#dataPortalBulkTabRoot QGroupBox {{
+                border: 1px solid {get_color(ThemeKey.PANEL_BORDER)};
+                border-radius: 6px;
+                margin-top: 8px;
+                background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+            }}
+            QWidget#dataPortalBulkTabRoot QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 2px 4px;
+                color: {get_color(ThemeKey.TEXT_SECONDARY)};
+                font-weight: bold;
+            }}
+            QWidget#dataPortalBulkTabRoot QLabel {{
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+            }}
+            QWidget#dataPortalBulkTabRoot QLabel[muted="true"] {{
+                color: {get_color(ThemeKey.TEXT_MUTED)};
+            }}
+            QWidget#dataPortalBulkTabRoot QLineEdit {{
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                color: {get_color(ThemeKey.INPUT_TEXT)};
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                border-radius: 4px;
+                padding: 4px 6px;
+            }}
+            QWidget#dataPortalBulkTabRoot QComboBox,
+            QWidget#dataPortalBulkTabRoot QSpinBox {{
+                background-color: {get_color(ThemeKey.COMBO_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                border: 1px solid {get_color(ThemeKey.COMBO_BORDER)};
+                border-radius: 4px;
+                padding: 4px 6px;
+            }}
+            QWidget#dataPortalBulkTabRoot QRadioButton,
+            QWidget#dataPortalBulkTabRoot QCheckBox {{
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+            }}
+            QWidget#dataPortalBulkTabRoot QRadioButton::indicator {{
+                width: 16px;
+                height: 16px;
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                background: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                border-radius: 8px;
+            }}
+            QWidget#dataPortalBulkTabRoot QRadioButton::indicator:checked {{
+                background: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                border-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+            }}
+            QWidget#dataPortalBulkTabRoot QTableWidget#dataPortalBulkTable {{
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                alternate-background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                gridline-color: {get_color(ThemeKey.BORDER_DEFAULT)};
+            }}
+            QWidget#dataPortalBulkTabRoot QTableWidget#dataPortalBulkTable::item {{
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+            }}
+            QWidget#dataPortalBulkTabRoot QTableWidget#dataPortalBulkTable QHeaderView::section {{
+                background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_SECONDARY)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                padding: 4px 6px;
+                font-weight: bold;
+            }}
+            QWidget#dataPortalBulkTabRoot QTableWidget#dataPortalBulkTable QTableCornerButton::section {{
+                background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+            }}
+            QWidget#dataPortalBulkTabRoot QTableWidget#dataPortalBulkTable::item:selected {{
+                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
+            }}
+            QWidget#dataPortalBulkTabRoot QPushButton[buttonKind="secondary"],
+            QWidget#dataPortalBulkTabRoot QPushButton[bulkStyleKind="secondary"] {{
+                background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)};
+                border-radius: 6px;
+                margin: 2px;
+                padding: 4px 8px;
+                font-weight: bold;
+            }}
+            QWidget#dataPortalBulkTabRoot QPushButton[buttonKind="secondary"]:hover,
+            QWidget#dataPortalBulkTabRoot QPushButton[bulkStyleKind="secondary"]:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)};
+            }}
+            QWidget#dataPortalBulkTabRoot QPushButton[buttonKind="warning"],
+            QWidget#dataPortalBulkTabRoot QPushButton[bulkStyleKind="warning"] {{
+                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
+                border-radius: 6px;
+                margin: 2px;
+                padding: 4px 8px;
+                font-weight: bold;
+            }}
+            QWidget#dataPortalBulkTabRoot QPushButton[buttonKind="warning"]:hover,
+            QWidget#dataPortalBulkTabRoot QPushButton[bulkStyleKind="warning"]:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
+            }}
+            QWidget#dataPortalBulkTabRoot QPushButton[bulkStyleKind="info"] {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                border-radius: 6px;
+                margin: 2px;
+                padding: 4px 8px;
+                font-weight: bold;
+            }}
+            QWidget#dataPortalBulkTabRoot QPushButton[bulkStyleKind="info"]:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+            }}
+            QWidget#dataPortalBulkTabRoot QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+            }}
+        """
 
     def _init_ui(self) -> None:
+        self.setObjectName("dataPortalBulkTabRoot")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 8, 8, 8)
 
@@ -355,6 +489,7 @@ class DataPortalBulkTab(QWidget):
         layout.addLayout(controls_row)
 
         self.table = QTableWidget(0, len(self._column_defs), self)
+        self.table.setObjectName("dataPortalBulkTable")
         self.table.setSortingEnabled(True)
         if self._display_mode != "default":
             self._apply_display_mode(self._display_mode, force=True)
@@ -378,6 +513,7 @@ class DataPortalBulkTab(QWidget):
         layout.addLayout(pagination_row)
 
         self._connect_filter_signals()
+        self.setStyleSheet(self._build_base_stylesheet())
 
     def _create_environment_group(self) -> QGroupBox:
         group = QGroupBox("環境選択")
@@ -396,24 +532,15 @@ class DataPortalBulkTab(QWidget):
 
     def _create_filter_group(self) -> QGroupBox:
         group = QGroupBox("データセット抽出")
+        self._filter_group = group
         layout = QVBoxLayout(group)
-
-        radio_style = (
-            f"QRadioButton {{ color: {get_color(ThemeKey.TEXT_PRIMARY)}; }} "
-            f"QRadioButton::indicator {{ width:16px; height:16px; border:1px solid {get_color(ThemeKey.INPUT_BORDER)}; "
-            f"background:{get_color(ThemeKey.INPUT_BACKGROUND)}; border-radius:8px; }} "
-            f"QRadioButton::indicator:checked {{ background:{get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)}; }}"
-        )
 
         share_row = QHBoxLayout()
         share_row.addWidget(QLabel("広域シェア:"))
         self.share_button_group = QButtonGroup(self)
         self.share_both_radio = QRadioButton("両方")
-        self.share_both_radio.setStyleSheet(radio_style)
         self.share_enabled_radio = QRadioButton("有効のみ")
-        self.share_enabled_radio.setStyleSheet(radio_style)
         self.share_disabled_radio = QRadioButton("無効のみ")
-        self.share_disabled_radio.setStyleSheet(radio_style)
         self.share_button_group.addButton(self.share_both_radio, 0)
         self.share_button_group.addButton(self.share_enabled_radio, 1)
         self.share_button_group.addButton(self.share_disabled_radio, 2)
@@ -428,11 +555,8 @@ class DataPortalBulkTab(QWidget):
         member_row.addWidget(QLabel("関係メンバー:"))
         self.member_button_group = QButtonGroup(self)
         self.member_both_radio = QRadioButton("両方")
-        self.member_both_radio.setStyleSheet(radio_style)
         self.member_only_radio = QRadioButton("メンバーのみ")
-        self.member_only_radio.setStyleSheet(radio_style)
         self.member_non_radio = QRadioButton("非メンバーのみ")
-        self.member_non_radio.setStyleSheet(radio_style)
         self.member_button_group.addButton(self.member_both_radio, 0)
         self.member_button_group.addButton(self.member_only_radio, 1)
         self.member_button_group.addButton(self.member_non_radio, 2)
@@ -502,23 +626,26 @@ class DataPortalBulkTab(QWidget):
 
         refresh_row = QHBoxLayout()
         self.refresh_btn = QPushButton("一覧更新")
-        self.refresh_btn.setStyleSheet(get_button_style("secondary"))
+        self.refresh_btn.setProperty("buttonKind", "secondary")
         self.refresh_btn.clicked.connect(self._invalidate_cache)
         refresh_row.addWidget(self.refresh_btn)
 
         self.count_label = QLabel("表示件数: 0")
-        self.count_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
+        self.count_label.setProperty("muted", True)
         refresh_row.addWidget(self.count_label)
         refresh_row.addStretch()
         layout.addLayout(refresh_row)
 
         return group
 
+    def _apply_filter_group_theme(self) -> None:
+        return
+
     def _create_pagination_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
 
         self.prev_page_btn = QPushButton("◀ 前へ")
-        self.prev_page_btn.setStyleSheet(get_button_style("secondary"))
+        self.prev_page_btn.setProperty("buttonKind", "secondary")
         self.prev_page_btn.clicked.connect(self._go_prev_page)
         row.addWidget(self.prev_page_btn)
 
@@ -529,11 +656,11 @@ class DataPortalBulkTab(QWidget):
         row.addWidget(self.page_spin)
 
         self.page_total_label = QLabel("/ 1")
-        self.page_total_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
+        self.page_total_label.setProperty("muted", True)
         row.addWidget(self.page_total_label)
 
         self.next_page_btn = QPushButton("次へ ▶")
-        self.next_page_btn.setStyleSheet(get_button_style("secondary"))
+        self.next_page_btn.setProperty("buttonKind", "secondary")
         self.next_page_btn.clicked.connect(self._go_next_page)
         row.addWidget(self.next_page_btn)
 
@@ -548,7 +675,7 @@ class DataPortalBulkTab(QWidget):
         row.addWidget(self.page_size_combo)
 
         self.page_range_label = QLabel("")
-        self.page_range_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
+        self.page_range_label.setProperty("muted", True)
         row.addWidget(self.page_range_label)
 
         return row
@@ -585,27 +712,7 @@ class DataPortalBulkTab(QWidget):
             pass
 
     def _apply_table_style(self) -> None:
-        self.table.setStyleSheet(
-            f"""
-            QTableWidget {{
-                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
-                color: {get_color(ThemeKey.TEXT_PRIMARY)};
-                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
-                gridline-color: {get_color(ThemeKey.BORDER_DEFAULT)};
-            }}
-            QHeaderView::section {{
-                background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
-                color: {get_color(ThemeKey.TEXT_SECONDARY)};
-                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
-                padding: 4px 6px;
-                font-weight: bold;
-            }}
-            QTableWidget::item:selected {{
-                background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_PRIMARY_TEXT)};
-            }}
-            """
-        )
+        return
 
     def _connect_filter_signals(self) -> None:
         self.share_button_group.buttonClicked.connect(self._on_filter_changed)
@@ -705,6 +812,7 @@ class DataPortalBulkTab(QWidget):
         row = QHBoxLayout()
 
         self.select_columns_btn = QPushButton("表示列…", self)
+        self.select_columns_btn.setProperty("buttonKind", "secondary")
         self.select_columns_btn.clicked.connect(self._on_select_columns)
         row.addWidget(self.select_columns_btn)
 
@@ -718,21 +826,25 @@ class DataPortalBulkTab(QWidget):
         row.addWidget(self.table_mode_combo)
 
         self.bulk_select_toggle_btn = QPushButton("登録 全選択", self)
+        self.bulk_select_toggle_btn.setProperty("buttonKind", "secondary")
         self.bulk_select_toggle_btn.clicked.connect(self._toggle_bulk_register_selection)
         self.bulk_select_toggle_btn.setVisible(False)
         row.addWidget(self.bulk_select_toggle_btn)
 
         self.bulk_register_execute_btn = QPushButton("一括登録実行", self)
+        self.bulk_register_execute_btn.setProperty("buttonKind", "warning")
         self.bulk_register_execute_btn.clicked.connect(self._on_bulk_register_execute)
         self.bulk_register_execute_btn.setVisible(False)
         row.addWidget(self.bulk_register_execute_btn)
 
         row.addWidget(QLabel("表示切替:"))
         self.compact_rows_btn = QPushButton("1行表示", self)
+        self.compact_rows_btn.setProperty("buttonKind", "secondary")
         self.compact_rows_btn.clicked.connect(self._toggle_compact_rows)
         row.addWidget(self.compact_rows_btn)
 
         self.equal_columns_btn = QPushButton("列幅そろえ", self)
+        self.equal_columns_btn.setProperty("buttonKind", "secondary")
         self.equal_columns_btn.clicked.connect(lambda: self._apply_display_mode("equal"))
         row.addWidget(self.equal_columns_btn)
 
@@ -743,6 +855,7 @@ class DataPortalBulkTab(QWidget):
         export_xlsx.triggered.connect(lambda: self._export("xlsx"))
 
         self.export_btn = QPushButton("エクスポート", self)
+        self.export_btn.setProperty("buttonKind", "secondary")
         self.export_btn.setMenu(export_menu)
         row.addWidget(self.export_btn)
 
@@ -831,19 +944,7 @@ class DataPortalBulkTab(QWidget):
         self._refresh_timer.start(120)
 
     def refresh_theme(self) -> None:
-        self._apply_table_style()
-        self.count_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
-        self.page_total_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
-        self.page_range_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
-        self.refresh_btn.setStyleSheet(get_button_style("secondary"))
-        self.prev_page_btn.setStyleSheet(get_button_style("secondary"))
-        self.next_page_btn.setStyleSheet(get_button_style("secondary"))
-        self.select_columns_btn.setStyleSheet(get_button_style("secondary"))
-        self.bulk_select_toggle_btn.setStyleSheet(get_button_style("secondary"))
-        self.bulk_register_execute_btn.setStyleSheet(get_button_style("warning"))
-        self.compact_rows_btn.setStyleSheet(get_button_style("secondary"))
-        self.equal_columns_btn.setStyleSheet(get_button_style("secondary"))
-        self.export_btn.setStyleSheet(get_button_style("secondary"))
+        self.setStyleSheet(self._build_base_stylesheet())
         self.update()
 
     def _refresh_table(self) -> None:
@@ -1417,7 +1518,7 @@ class DataPortalBulkTab(QWidget):
         layout.setSpacing(6)
 
         button = QPushButton(label)
-        button.setStyleSheet(get_button_style(style_kind))
+        button.setProperty("bulkStyleKind", str(style_kind or "secondary"))
         if icon is not None:
             try:
                 button.setIcon(icon)

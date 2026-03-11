@@ -23,7 +23,7 @@ from qt_compat.widgets import (
     QPushButton,
     QMessageBox,
 )
-from classes.theme import get_color, ThemeKey
+from classes.theme import get_color, ThemeKey, ThemeManager
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,10 @@ class OfflineModeTab(QWidget):
         self.config_manager = get_config_manager()
         self._setup_ui()
         self._load_settings()
+        try:
+            ThemeManager.instance().theme_changed.connect(self.refresh_theme)
+        except Exception:
+            pass
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
@@ -143,6 +147,28 @@ class OfflineModeTab(QWidget):
         layout.addLayout(btn_layout)
 
         layout.addStretch(1)
+
+    def refresh_theme(self, *_args):
+        try:
+            primary = get_color(ThemeKey.TEXT_PRIMARY)
+            muted = get_color(ThemeKey.TEXT_MUTED)
+            border = get_color(ThemeKey.BORDER_DEFAULT)
+            self.setStyleSheet(
+                f"QGroupBox {{ color: {primary}; border: 1px solid {border}; border-radius: 5px; margin-top: 10px; padding-top: 10px; }}"
+                f"QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 5px; color: {primary}; }}"
+            )
+            if hasattr(self, 'offline_enabled_checkbox'):
+                self.offline_enabled_checkbox.setStyleSheet(f"color: {primary};")
+            for checkbox in getattr(self, 'site_checkboxes', {}).values():
+                checkbox.setStyleSheet(f"color: {primary};")
+            for label in self.findChildren(QLabel):
+                style = label.styleSheet() or ""
+                if "font-size: 14pt" in style:
+                    label.setStyleSheet(f"font-size: 14pt; font-weight: bold; color: {primary};")
+                elif style:
+                    label.setStyleSheet(f"color: {muted};")
+        except Exception:
+            logger.debug("OfflineModeTab: theme refresh failed", exc_info=True)
 
     def _load_settings(self):
         enabled = bool(self.config_manager.get("offline.enabled", False))

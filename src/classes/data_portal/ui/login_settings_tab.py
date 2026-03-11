@@ -110,6 +110,7 @@ class LoginSettingsTab(QWidget):
     def __init__(self, parent=None):
         """初期化"""
         super().__init__(parent)
+        self.setObjectName("dataPortalLoginSettingsTab")
         
         self.auth_manager = get_auth_manager()
         self.portal_client = None
@@ -122,6 +123,68 @@ class LoginSettingsTab(QWidget):
         self._init_ui()
         self._load_available_environments()
         logger.info("ログイン設定タブ初期化完了")
+
+    def _build_base_stylesheet(self) -> str:
+        return f"""
+            QWidget#dataPortalLoginSettingsTab QLabel#dataPortalUrlLabel,
+            QWidget#dataPortalLoginSettingsTab QLabel#dataPortalManagedCsvInfoLabel {{
+                color: {get_color(ThemeKey.TEXT_MUTED)};
+                font-size: 10px;
+            }}
+            QWidget#dataPortalLoginSettingsTab QLabel[dataRole="sectionLabel"] {{
+                font-weight: bold;
+            }}
+            QWidget#dataPortalLoginSettingsTab QPushButton#dataPortalSaveButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
+                padding: 8px 16px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QWidget#dataPortalLoginSettingsTab QPushButton#dataPortalSaveButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+            }}
+            QWidget#dataPortalLoginSettingsTab QPushButton#dataPortalLoadButton,
+            QWidget#dataPortalLoginSettingsTab QPushButton#dataPortalFetchCsvButton {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
+                padding: 8px 16px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QWidget#dataPortalLoginSettingsTab QPushButton#dataPortalLoadButton:hover,
+            QWidget#dataPortalLoginSettingsTab QPushButton#dataPortalFetchCsvButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+            }}
+            QWidget#dataPortalLoginSettingsTab QPushButton#dataPortalTestButton {{
+                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
+                padding: 8px 16px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QWidget#dataPortalLoginSettingsTab QPushButton#dataPortalTestButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
+            }}
+            QWidget#dataPortalLoginSettingsTab QPushButton#dataPortalClearButton {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
+                padding: 8px 16px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QWidget#dataPortalLoginSettingsTab QPushButton#dataPortalClearButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+            }}
+            QWidget#dataPortalLoginSettingsTab QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+            }}
+        """
 
     def showEvent(self, event):
         """表示時に自動接続テストを一度だけ走らせる。"""
@@ -156,8 +219,8 @@ class LoginSettingsTab(QWidget):
 
         # 管理CSV（最新版）情報
         self.managed_csv_info_label = QLabel("")
+        self.managed_csv_info_label.setObjectName("dataPortalManagedCsvInfoLabel")
         self.managed_csv_info_label.setWordWrap(True)
-        self.managed_csv_info_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
         layout.addWidget(self.managed_csv_info_label)
         
         # ステータス表示エリア
@@ -212,20 +275,8 @@ class LoginSettingsTab(QWidget):
     
     def refresh_theme(self):
         """テーマ変更時のスタイル更新"""
+        self.setStyleSheet(self._build_base_stylesheet())
         self._apply_status_style()
-        for button, kind in (
-            (getattr(self, "save_btn", None), "success"),
-            (getattr(self, "load_btn", None), "info"),
-            (getattr(self, "clear_btn", None), "danger"),
-            (getattr(self, "test_login_btn", None), "warning"),
-            (getattr(self, "fetch_csv_btn", None), "primary"),
-        ):
-            if button is None:
-                continue
-            try:
-                button.setStyleSheet(get_button_style(kind))
-            except Exception:
-                continue
         self.update()
     
     def _create_environment_selector(self) -> QGroupBox:
@@ -240,7 +291,7 @@ class LoginSettingsTab(QWidget):
         
         # URL表示（読み取り専用）
         self.url_label = QLabel("")
-        self.url_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 10px;")
+        self.url_label.setObjectName("dataPortalUrlLabel")
         self.url_label.setWordWrap(True)
         layout.addRow("URL:", self.url_label)
         
@@ -254,7 +305,7 @@ class LoginSettingsTab(QWidget):
         
         # Basic認証情報
         basic_label = QLabel("Basic認証")
-        basic_label.setStyleSheet("font-weight: bold;")
+        basic_label.setProperty("dataRole", "sectionLabel")
         layout.addRow(basic_label)
         
         self.basic_user_input = QLineEdit()
@@ -271,7 +322,7 @@ class LoginSettingsTab(QWidget):
         
         # ログイン情報
         login_label = QLabel("ログイン情報")
-        login_label.setStyleSheet("font-weight: bold;")
+        login_label.setProperty("dataRole", "sectionLabel")
         layout.addRow(login_label)
         
         self.login_user_input = QLineEdit()
@@ -292,45 +343,19 @@ class LoginSettingsTab(QWidget):
         
         # 保存ボタン
         self.save_btn = QPushButton("💾 認証情報を保存")
+        self.save_btn.setObjectName("dataPortalSaveButton")
         self.save_btn.clicked.connect(self._on_save_credentials)
-        self.save_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
-                padding: 8px 16px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
-            }}
-            QPushButton:disabled {{
-                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-            }}
-        """)
         layout.addWidget(self.save_btn)
         
         # 読込ボタン
         self.load_btn = QPushButton("📂 認証情報を読込")
+        self.load_btn.setObjectName("dataPortalLoadButton")
         self.load_btn.clicked.connect(self._on_load_credentials)
-        self.load_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                padding: 8px 16px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
-            }}
-        """)
         layout.addWidget(self.load_btn)
         
         # クリアボタン
         self.clear_btn = QPushButton("🗑️ クリア")
+        self.clear_btn.setObjectName("dataPortalClearButton")
         self.clear_btn.clicked.connect(self._on_clear_form)
         layout.addWidget(self.clear_btn)
         
@@ -338,51 +363,15 @@ class LoginSettingsTab(QWidget):
         
         # テストログインボタン
         self.test_login_btn = QPushButton("🔌 接続テスト")
+        self.test_login_btn.setObjectName("dataPortalTestButton")
         self.test_login_btn.clicked.connect(self._on_test_login)
-        self.test_login_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
-                padding: 8px 16px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
-            }}
-        """)
         layout.addWidget(self.test_login_btn)
 
         # 管理CSV取得ボタン
         self.fetch_csv_btn = QPushButton("⬇️ CSV取得")
+        self.fetch_csv_btn.setObjectName("dataPortalFetchCsvButton")
         self.fetch_csv_btn.clicked.connect(self._on_fetch_managed_csv)
-        self.fetch_csv_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                padding: 8px 16px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-            }}
-            QPushButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
-            }}
-            QPushButton:disabled {{
-                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
-            }}
-        """)
         layout.addWidget(self.fetch_csv_btn)
-
-        try:
-            self.save_btn.setStyleSheet(get_button_style("success"))
-            self.load_btn.setStyleSheet(get_button_style("info"))
-            self.clear_btn.setStyleSheet(get_button_style("danger"))
-            self.test_login_btn.setStyleSheet(get_button_style("warning"))
-            self.fetch_csv_btn.setStyleSheet(get_button_style("primary"))
-        except Exception:
-            pass
         
         return layout
     

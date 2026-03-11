@@ -82,6 +82,78 @@ class ThemeManager(QObject):
         # Native window frame (title bar) theming
         self._window_frame_styler = None
         self._window_frame_bootstrapped = False
+        self._defer_global_styles_once = False
+        self._global_style_apply_deferred = False
+
+    def defer_global_stylesheet_once(self) -> None:
+        """次回の set_mode() で QApplication への global QSS 再適用を遅延させる。"""
+        self._defer_global_styles_once = True
+
+    def has_deferred_global_stylesheet(self) -> bool:
+        """遅延中の global QSS 適用が残っているかどうか。"""
+        return bool(self._global_style_apply_deferred)
+
+    def _apply_global_stylesheet(self, app: QApplication) -> tuple[float, float, float, bool, bool]:
+        """現在テーマの global QSS を QApplication に適用する。"""
+        from .global_styles import get_global_base_style  # type: ignore
+        import hashlib
+        import time
+
+        style_phase_start = time.perf_counter_ns()
+        gen_start = time.perf_counter_ns()
+        qss = self._global_style_cache.get(self._current_mode)
+        if qss is None:
+            qss = get_global_base_style()
+            self._global_style_cache[self._current_mode] = qss
+            gen_elapsed = (time.perf_counter_ns() - gen_start) / 1_000_000
+            print(
+                f"[ThemeManager] global QSS generated ({gen_elapsed:.2f}ms, mode={self._current_mode.value}, length={len(qss)})"
+            )
+            cached = False
+        else:
+            gen_elapsed = (time.perf_counter_ns() - gen_start) / 1_000_000
+            print(f"[ThemeManager] global QSS cache hit (mode={self._current_mode.value}, length={len(qss)})")
+            cached = True
+
+        apply_start = time.perf_counter_ns()
+        style_hash = hashlib.sha256(qss.encode("utf-8")).hexdigest()
+        apply_skipped = False
+        if self._last_style_hash == style_hash:
+            apply_skipped = True
+            print("[ThemeManager] global QSS unchanged - apply skipped (hash match)")
+        else:
+            app.setStyleSheet(qss)
+            self._last_style_hash = style_hash
+        apply_elapsed = (time.perf_counter_ns() - apply_start) / 1_000_000
+        style_total_elapsed = (time.perf_counter_ns() - style_phase_start) / 1_000_000
+        return gen_elapsed, apply_elapsed, style_total_elapsed, cached, apply_skipped
+
+    def apply_deferred_global_stylesheet_if_needed(self) -> bool:
+        """遅延中の global QSS を必要時に反映する。"""
+        if not self._global_style_apply_deferred:
+            return False
+
+        app = QApplication.instance()
+        if app is None:
+            return False
+
+        try:
+            gen_elapsed, apply_elapsed, style_total_elapsed, cached, apply_skipped = self._apply_global_stylesheet(app)
+            meta = []
+            if cached:
+                meta.append("cached")
+            if apply_skipped:
+                meta.append("skip-set")
+            meta_str = (" [" + ",".join(meta) + "]") if meta else ""
+            print(
+                f"[ThemeManager] Deferred global QSS applied: styleGen={gen_elapsed:.2f}ms "
+                f"styleApply={apply_elapsed:.2f}ms styleTotal={style_total_elapsed:.2f}ms{meta_str}"
+            )
+            self._global_style_apply_deferred = False
+            return True
+        except Exception as exc:
+            print(f"[ThemeManager] deferred global QSS apply failed: {exc}")
+            return False
 
     def _ensure_window_frame_styler(self, app: QApplication) -> None:
         """新規に表示されるトップレベルウィンドウ/ダイアログにもタイトルバーのテーマを適用する。"""
@@ -639,39 +711,12 @@ class ThemeManager(QObject):
                 apply_elapsed = 0.0
                 style_total_elapsed = 0.0
                 if not is_pytest_run:
-                    from .global_styles import get_global_base_style  # type: ignore
-                    import hashlib
-
-                    style_phase_start = time.perf_counter_ns()
-                    # (1) Generation (or cache retrieval)
-                    gen_start = time.perf_counter_ns()
-                    qss = self._global_style_cache.get(self._current_mode)
-                    if qss is None:
-                        qss = get_global_base_style()
-                        self._global_style_cache[self._current_mode] = qss
-                        gen_elapsed = (time.perf_counter_ns() - gen_start) / 1_000_000
-                        print(
-                            f"[ThemeManager] global QSS generated ({gen_elapsed:.2f}ms, mode={self._current_mode.value}, length={len(qss)})"
-                        )
+                    if self._defer_global_styles_once:
+                        self._defer_global_styles_once = False
+                        self._global_style_apply_deferred = True
+                        print(f"[ThemeManager] global QSS apply deferred (mode={self._current_mode.value})")
                     else:
-                        cached = True
-                        gen_elapsed = (time.perf_counter_ns() - gen_start) / 1_000_000
-                        print(f"[ThemeManager] global QSS cache hit (mode={self._current_mode.value}, length={len(qss)})")
-
-                    # (2) Hash comparison + (conditional) application
-                    apply_start = time.perf_counter_ns()
-                    style_hash = hashlib.sha256(qss.encode("utf-8")).hexdigest()
-                    if self._last_style_hash == style_hash:
-                        apply_skipped = True
-                        print("[ThemeManager] global QSS unchanged - apply skipped (hash match)")
-                    else:
-                        app.setStyleSheet(qss)
-                        self._last_style_hash = style_hash
-                    apply_elapsed = (time.perf_counter_ns() - apply_start) / 1_000_000
-
-                    # (3) (Deferred) Repaint/layout cost will be measured after updates re-enable
-                    # Store partials for later summary
-                    style_total_elapsed = (time.perf_counter_ns() - style_phase_start) / 1_000_000
+                        gen_elapsed, apply_elapsed, style_total_elapsed, cached, apply_skipped = self._apply_global_stylesheet(app)
                 
                 # パレット適用
                 palette_start = time.perf_counter_ns()

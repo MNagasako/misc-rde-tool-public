@@ -5,6 +5,7 @@ import os
 import sys
 import json
 import datetime
+import time
 import webbrowser
 import shutil
 import codecs
@@ -32,6 +33,42 @@ from classes.managers.log_manager import get_logger
 
 # ロガー設定
 logger = get_logger(__name__)
+
+_GLOBAL_REDUNDANT_FILTER_SKIP_LOG_STATE: dict[tuple[str, str, str], float] = {}
+
+
+def _should_log_redundant_filter_skip(
+    dataset_cache: dict,
+    filter_key: tuple[str, str, str],
+    *,
+    now: float | None = None,
+    interval_sec: float = 60.0,
+) -> bool:
+    """Return True when a redundant filter-skip log should be emitted.
+
+    The same skip reason can fire repeatedly via show refresh / external refresh.
+    Log it once per interval for the same filter key to avoid flooding DEBUG logs.
+    """
+
+    if not isinstance(dataset_cache, dict):
+        return True
+
+    current_now = float(time.monotonic() if now is None else now)
+    last_logged_key = dataset_cache.get("last_skip_logged_filter")
+    last_logged_at = dataset_cache.get("last_skip_logged_at")
+    global_last_logged_at = _GLOBAL_REDUNDANT_FILTER_SKIP_LOG_STATE.get(filter_key)
+
+    should_log = True
+    if last_logged_key == filter_key and isinstance(last_logged_at, (int, float)):
+        should_log = (current_now - float(last_logged_at)) >= float(interval_sec)
+    if should_log and isinstance(global_last_logged_at, (int, float)):
+        should_log = (current_now - float(global_last_logged_at)) >= float(interval_sec)
+
+    if should_log:
+        dataset_cache["last_skip_logged_filter"] = filter_key
+        dataset_cache["last_skip_logged_at"] = current_now
+        _GLOBAL_REDUNDANT_FILTER_SKIP_LOG_STATE[filter_key] = current_now
+    return should_log
 
 
 def _format_user_label_user_org(user_data: dict) -> str:
@@ -1310,6 +1347,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         "dataset_org_cache": {},  # dataset_id -> manager/applicant organization
         "dataset_group_cache": {},  # dataset_id -> group_id
         "last_applied_filter": None,  # (filter_type, grant_filter, subgroup_id)
+        "last_skip_logged_filter": None,
+        "last_skip_logged_at": None,
     }
 
     def _extract_dataset_group_id(dataset: dict) -> str:
@@ -4896,7 +4935,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         filter_key = (filter_type, grant_number_filter.lower().strip(), str(subgroup_filter_id or ""))
 
         if not force_reload and dataset_cache.get("last_applied_filter") == filter_key:
-            logger.debug("同一フィルタの再適用をスキップ: %s", filter_key)
+            if _should_log_redundant_filter_skip(dataset_cache, filter_key):
+                logger.debug("同一フィルタの再適用をスキップ: %s", filter_key)
             return
 
         dataset_cache["last_applied_filter"] = filter_key

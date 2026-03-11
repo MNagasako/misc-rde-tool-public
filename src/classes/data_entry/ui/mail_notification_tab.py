@@ -30,6 +30,7 @@ try:
         QMessageBox,
         QInputDialog,
         QDialog,
+        QSizePolicy,
     )
     from qt_compat.core import Qt, QThread, Signal, QTimer
 except Exception:
@@ -57,6 +58,7 @@ except Exception:
         QMessageBox,
         QInputDialog,
         QDialog,
+        QSizePolicy,
     )
     from PySide6.QtCore import Qt, QThread, Signal, QTimer
 
@@ -1207,6 +1209,8 @@ class MailNotificationTab(QWidget):
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self.table.setTextElideMode(Qt.ElideRight)
+        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+        self.table.setMinimumHeight(240)
         header = self.table.horizontalHeader()
         header.setStretchLastSection(False)
         try:

@@ -21,7 +21,7 @@ try:
         QLabel, QPushButton, QMessageBox, QCheckBox, QProgressDialog
     )
     from qt_compat.core import Qt, QTimer, QObject, Signal, Slot, QThread
-    from classes.theme import get_color, ThemeKey
+    from classes.theme import get_color, ThemeKey, ThemeManager
     PYQT5_AVAILABLE = True
 except ImportError:
     PYQT5_AVAILABLE = False
@@ -112,6 +112,42 @@ class MiscTab(QWidget):
         super().__init__(parent)
         self._update_in_progress = False
         self.setup_ui()
+        try:
+            ThemeManager.instance().theme_changed.connect(self.refresh_theme)
+        except Exception:
+            pass
+
+    def refresh_theme(self, *_args):
+        try:
+            primary = get_color(ThemeKey.TEXT_PRIMARY)
+            muted = get_color(ThemeKey.TEXT_MUTED)
+            border = get_color(ThemeKey.BORDER_DEFAULT)
+            self.setStyleSheet(
+                f"QGroupBox {{ color: {primary}; border: 1px solid {border}; border-radius: 5px; margin-top: 10px; padding-top: 10px; }}"
+                f"QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 5px; color: {primary}; }}"
+            )
+            for checkbox_name in [
+                "menu_show_data_fetch_checkbox",
+                "menu_show_ai_test_checkbox",
+                "menu_show_request_analyzer_checkbox",
+                "splash_checkbox",
+                "update_check_checkbox",
+                "update_prompt_checkbox",
+                "allow_multi_instance_checkbox",
+            ]:
+                checkbox = getattr(self, checkbox_name, None)
+                if checkbox is not None:
+                    checkbox.setStyleSheet(f"color: {primary}; font-weight: normal;")
+            for label in self.findChildren(QLabel):
+                style = label.styleSheet() or ""
+                if "font-size: 14pt" in style:
+                    label.setStyleSheet(f"font-size: 14pt; font-weight: bold; color: {primary};")
+                elif "font-size: 9pt" in style:
+                    label.setStyleSheet(f"color: {muted}; font-size: 9pt; font-weight: normal;")
+                elif "font-weight: normal;" in style and "color:" not in style:
+                    label.setStyleSheet(f"color: {primary}; font-weight: normal;")
+        except Exception:
+            logger.debug("MiscTab: theme refresh failed", exc_info=True)
         
     def setup_ui(self):
         """UI初期化"""

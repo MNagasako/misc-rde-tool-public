@@ -5,6 +5,7 @@ from qt_compat.widgets import (
     QWidget, QVBoxLayout, QLabel, QScrollArea, QPushButton, QHBoxLayout, 
     QMessageBox, QTabWidget, QDialog, QApplication, QComboBox, QSizePolicy, QLineEdit
 )
+from qt_compat.core import Qt
 from ..core import subgroup_api_helper
 from ..util.subgroup_ui_helpers import (
     SubgroupFormBuilder, SubgroupCreateHandler, MemberDataProcessor,
@@ -18,9 +19,28 @@ from .subgroup_inherit_dialog import (
     SubgroupInheritDialog,
     build_subjects_with_grant_number_placeholder,
 )
+from classes.utils.window_sizing import is_window_maximized, resize_main_window
 
 # ロガー設定
 logger = logging.getLogger(__name__)
+
+
+def _apply_existing_load_panel_theme(existing_load_panel: QWidget, existing_desc_label: QLabel) -> None:
+    try:
+        existing_load_panel.setStyleSheet(
+            f"QWidget#existingSubgroupLoadPanel {{ "
+            f"background-color: {get_color(ThemeKey.PANEL_BACKGROUND)}; "
+            f"border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; "
+            f"border-radius: 6px; "
+            f"}}"
+        )
+    except Exception:
+        pass
+
+    try:
+        existing_desc_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
+    except Exception:
+        pass
 
 
 
@@ -52,7 +72,7 @@ def create_subgroup_create_widget(parent, title, color, create_auto_resize_butto
     def _reset_window_height_to_screen(target_widget: QWidget) -> None:
         try:
             window = target_widget.window() if target_widget is not None else None
-            if window is None:
+            if window is None or is_window_maximized(window):
                 return
             screen = getattr(window, 'screen', None)
             if callable(screen):
@@ -64,7 +84,7 @@ def create_subgroup_create_widget(parent, title, color, create_auto_resize_butto
                 return
             available = screen.availableGeometry()
             # 縦サイズのみディスプレイに合わせる（その後はユーザーが変更可能）
-            window.resize(window.width(), available.height())
+            resize_main_window(window, window.width(), available.height())
         except Exception:
             logger.debug("subgroup_create: window height reset failed", exc_info=True)
 
@@ -187,7 +207,23 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     # 既存レイアウトがあればクリア
     if widget.layout() is not None:
         QWidget().setLayout(widget.layout())
-    layout = QVBoxLayout()
+    root_layout = QVBoxLayout()
+    root_layout.setContentsMargins(0, 0, 0, 0)
+    root_layout.setSpacing(0)
+
+    content_widget = QWidget()
+    layout = QVBoxLayout(content_widget)
+    layout.setContentsMargins(8, 8, 8, 8)
+    layout.setSpacing(8)
+
+    outer_scroll = QScrollArea()
+    outer_scroll.setObjectName("subgroupCreateOuterScrollArea")
+    outer_scroll.setWidgetResizable(True)
+    outer_scroll.setFrameStyle(0)
+    outer_scroll.setContentsMargins(0, 0, 0, 0)
+    outer_scroll.setWidget(content_widget)
+    root_layout.addWidget(outer_scroll)
+
     label = QLabel(f"{title}機能")
     apply_label_style(label, get_color(ThemeKey.TEXT_PRIMARY), bold=True, point_size=16)
     #layout.addWidget(label)
@@ -198,13 +234,7 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     # 閲覧・修正タブのフィルタ+コンボ実装を参照し、同等のUIを提供する
     existing_load_panel = QWidget()
     existing_load_panel.setObjectName("existingSubgroupLoadPanel")
-    existing_load_panel.setStyleSheet(
-        f"QWidget#existingSubgroupLoadPanel {{ "
-        f"background-color: {get_color(ThemeKey.PANEL_BACKGROUND)}; "
-        f"border: 1px solid {get_color(ThemeKey.PANEL_BORDER)}; "
-        f"border-radius: 6px; "
-        f"}}"
-    )
+    existing_load_panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
     existing_load_layout = QVBoxLayout(existing_load_panel)
     existing_load_layout.setContentsMargins(10, 8, 10, 8)
     existing_load_layout.setSpacing(6)
@@ -266,8 +296,9 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     existing_desc_label = QLabel("")
     existing_desc_label.setObjectName("existingSubgroupDescriptionLabel")
     existing_desc_label.setWordWrap(True)
-    existing_desc_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
     existing_load_layout.addWidget(existing_desc_label)
+
+    _apply_existing_load_panel_theme(existing_load_panel, existing_desc_label)
 
     layout.addWidget(existing_load_panel)
 
@@ -308,7 +339,8 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
         initial_roles=initial_roles, 
         prechecked_user_ids=prechecked_user_ids,
         show_filter=True,  # 新規作成タブではフィルタを表示
-        user_entries=unified_users  # 統合ユーザーリストを渡す
+        user_entries=unified_users,  # 統合ユーザーリストを渡す
+        disable_internal_scroll=True,
     )
     
     # widget参照用の属性設定（既存コードとの互換性維持）
@@ -316,56 +348,17 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     widget.owner_radio_group = member_selector.owner_radio_group
     widget.member_selector = member_selector  # 共通セレクターへの参照を保持
     
-    # スクロールエリア設定（余白を最小化、画面サイズ対応）
-    scroll = QScrollArea()
-    scroll.setWidgetResizable(True)
-    scroll.setFrameStyle(0)  # フレームを削除
-    scroll.setContentsMargins(0, 0, 0, 0)  # スクロールエリアの余白を削除
-    
-    # スクロールエリアのスタイルシートで余白を完全に削除
-    scroll.setStyleSheet("""
-        QScrollArea {
-            border: none;
-            margin: 0px;
-            padding: 0px;
-        }
-    """)
-    
     member_selector.setMinimumWidth(520)
     member_selector.setMaximumWidth(800)
-    scroll.setMinimumWidth(520)  # スクロールエリア幅も調整
-    scroll.setMaximumWidth(800)  # 余分な余白を削除
-    
-    # 余白はできるだけメンバー領域が消費し、スクロールバーを出しにくくする
-    scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-    
-    # メインウィンドウサイズ調整（親ウィジェットから辿る）- 画面サイズ制限付き
-    try:
-        main_window = widget
-        while main_window.parent() is not None:
-            main_window = main_window.parent()
-        
-        if hasattr(main_window, 'resize'):
-            # 画面サイズを取得
-            from qt_compat.widgets import QApplication
-            screen = QApplication.primaryScreen().geometry()
-            max_window_height = int(screen.height() * 0.9)  # 画面の90%まで
-            
-            current_width = main_window.width()
-            # 基本高さ + 必要な追加分を計算
-            base_height = 600  # より小さい基本高さ
-            additional_height = max(0, (member_count - 8) * 20)  # 8人を超える場合のみ追加
-            calculated_height = base_height + additional_height
-            
-            # 画面の90%を超えないように制限
-            new_height = min(calculated_height, max_window_height)
-            main_window.resize(current_width, new_height)
-            
-            logger.debug("ウィンドウサイズ調整: %s → %s (画面制限: %s)", calculated_height, new_height, max_window_height)
-            
-    except Exception as e:
-        # ウィンドウサイズ調整に失敗してもメンバー表示は続行
-        pass
+    member_selector.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+    member_selector_container = QWidget()
+    member_selector_container.setObjectName("subgroupCreateMemberSelectorContainer")
+    member_selector_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+    member_selector_layout = QVBoxLayout(member_selector_container)
+    member_selector_layout.setContentsMargins(0, 0, 0, 0)
+    member_selector_layout.setSpacing(0)
+    member_selector_layout.addWidget(member_selector)
     
     # メンバーセレクターのラベルとスクロールエリアを余白なしで配置
     member_layout = QVBoxLayout()
@@ -375,32 +368,13 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
     member_label = QLabel("グループメンバー選択（複数可）:")
     apply_label_style(member_label, get_color(ThemeKey.TEXT_PRIMARY), bold=True)
     member_layout.addWidget(member_label)
-    # stretch=1 で余白を優先的に消費
-    member_layout.addWidget(scroll, 1)
+    member_layout.addWidget(member_selector_container)
     
     layout.addLayout(member_layout)
-    scroll.setWidget(member_selector)
 
     def _adjust_scroll_height_for_selector(selector_widget) -> None:
         try:
-            screen = QApplication.primaryScreen().geometry()
-            # できるだけスクロールを抑制するため、上限を少し大きめに取る
-            max_scroll_height = int(screen.height() * 0.55)
-
-            hinted = 0
-            try:
-                hinted = int(selector_widget.sizeHint().height())
-            except Exception:
-                hinted = 0
-
-            member_count = len(getattr(selector_widget, "user_rows", []) or [])
-            estimated = 47 + (member_count * 22)
-            desired = max(hinted, estimated)
-
-            # 小人数でもテーブルが見えない事故を防ぐ
-            min_h = max(220, min(desired, max_scroll_height))
-            scroll.setMinimumHeight(min_h)
-            scroll.setMaximumHeight(max_scroll_height)
+            selector_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         except Exception:
             pass
 
@@ -423,10 +397,15 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
                 subgroup_id=str((group_data or {}).get("id", "") or ""),
                 bearer_token=token,
                 show_filter=True,
-                disable_internal_scroll=False,
+                disable_internal_scroll=True,
             )
 
-            scroll.setWidget(new_selector)
+            while member_selector_layout.count():
+                child = member_selector_layout.takeAt(0)
+                child_widget = child.widget()
+                if child_widget is not None:
+                    child_widget.setParent(None)
+            member_selector_layout.addWidget(new_selector)
             widget.user_rows = new_selector.user_rows
             widget.owner_radio_group = new_selector.owner_radio_group
             widget.member_selector = new_selector
@@ -520,9 +499,13 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
         selector.load_existing_subgroups()
 
         # 新規作成タブでは「選択だけ」で外部チェック等を走らせないため、
-        # currentTextChanged 経由のハンドラを外して indexChanged で description を更新する。
+        # 実際に接続されている selection 用ハンドラのみを外し、description 更新だけを残す。
         try:
-            existing_group_combo.currentTextChanged.disconnect(selector._on_combo_selection_changed)
+            existing_group_combo.currentIndexChanged.disconnect(selector._on_combo_selection_changed)
+        except Exception:
+            pass
+        try:
+            existing_group_combo.activated.disconnect(selector._on_combo_selection_changed)
         except Exception:
             pass
 
@@ -674,5 +657,31 @@ def create_original_subgroup_create_widget(parent, title, color, create_auto_res
         'manual': on_create_subgroup_manual
     })
 
-    widget.setLayout(layout)
+    def refresh_theme() -> None:
+        _apply_existing_load_panel_theme(existing_load_panel, existing_desc_label)
+        try:
+            widget.update()
+        except Exception:
+            pass
+
+    widget.refresh_theme = refresh_theme  # type: ignore[attr-defined]
+
+    try:
+        from classes.theme import ThemeManager
+
+        _theme_manager = ThemeManager.instance()
+        _theme_manager.theme_changed.connect(refresh_theme)
+
+        def _disconnect_theme_changed(*_args):
+            try:
+                _theme_manager.theme_changed.disconnect(refresh_theme)
+            except Exception:
+                pass
+
+        widget.destroyed.connect(_disconnect_theme_changed)
+    except Exception:
+        pass
+
+    layout.addStretch(1)
+    widget.setLayout(root_layout)
     return widget

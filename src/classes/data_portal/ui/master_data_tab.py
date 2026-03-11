@@ -15,6 +15,7 @@ from qt_compat.widgets import (
 from qt_compat.core import Qt, Signal
 
 from classes.managers.log_manager import get_logger
+from classes.theme import ThemeKey, get_color
 from ..core.master_data import MasterDataManager
 
 logger = get_logger("DataPortal.MasterTab")
@@ -47,10 +48,71 @@ class MasterDataTab(QWidget):
         self.equipment_full_data = {}  # 設備分類
         
         self._init_ui()
+        self.refresh_theme()
         logger.info("マスタデータタブ初期化完了")
+
+    def _build_base_stylesheet(self) -> str:
+        return f"""
+            QWidget#dataPortalMasterTabRoot {{
+                background-color: {get_color(ThemeKey.WINDOW_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+            }}
+            QWidget#dataPortalMasterTabRoot QGroupBox {{
+                border: 1px solid {get_color(ThemeKey.PANEL_BORDER)};
+                border-radius: 6px;
+                margin-top: 8px;
+                background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+            }}
+            QWidget#dataPortalMasterTabRoot QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 2px 4px;
+                color: {get_color(ThemeKey.TEXT_SECONDARY)};
+                font-weight: bold;
+            }}
+            QWidget#dataPortalMasterTabRoot QLineEdit,
+            QWidget#dataPortalMasterTabRoot QComboBox {{
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                color: {get_color(ThemeKey.INPUT_TEXT)};
+                border: 1px solid {get_color(ThemeKey.INPUT_BORDER)};
+                border-radius: 4px;
+                padding: 4px 6px;
+            }}
+            QWidget#dataPortalMasterTabRoot QPushButton {{
+                background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_SECONDARY_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_SECONDARY_BORDER)};
+                border-radius: 6px;
+                margin: 2px;
+                padding: 4px 8px;
+                font-weight: bold;
+            }}
+            QWidget#dataPortalMasterTabRoot QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_SECONDARY_BACKGROUND_HOVER)};
+            }}
+            QWidget#dataPortalMasterTabRoot QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
+            }}
+            QWidget#dataPortalMasterTabRoot QTableWidget {{
+                background-color: {get_color(ThemeKey.INPUT_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_PRIMARY)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                gridline-color: {get_color(ThemeKey.BORDER_DEFAULT)};
+            }}
+            QWidget#dataPortalMasterTabRoot QHeaderView::section {{
+                background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
+                color: {get_color(ThemeKey.TEXT_SECONDARY)};
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                padding: 4px 6px;
+                font-weight: bold;
+            }}
+        """
     
     def _init_ui(self):
         """UI初期化"""
+        self.setObjectName("dataPortalMasterTabRoot")
         layout = QVBoxLayout(self)
         
         # 環境選択グループ
@@ -70,6 +132,13 @@ class MasterDataTab(QWidget):
         layout.addWidget(equipment_group)
         
         layout.addStretch()
+
+    def refresh_theme(self) -> None:
+        try:
+            self.setStyleSheet(self._build_base_stylesheet())
+            self.update()
+        except Exception:
+            pass
     
     def _create_environment_group(self) -> QGroupBox:
         """環境選択グループを作成"""

@@ -26,6 +26,7 @@ try:
     from qt_compat.gui import QFont
     from qt_compat.widgets import QSizePolicy
     from classes.theme import get_color, ThemeKey
+    from classes.utils.window_sizing import clear_main_window_size_constraints
     PYQT5_AVAILABLE = True
 except ImportError as e:
     logger.error(f"Qt互換レイヤーインポート失敗: {e}")
@@ -167,18 +168,7 @@ class SettingsTabWidget(QWidget):
         if top_level is None:
             return
         try:
-            if hasattr(top_level, '_fixed_aspect_ratio'):
-                top_level._fixed_aspect_ratio = None
-            if hasattr(top_level, 'setMinimumSize'):
-                top_level.setMinimumSize(200, 200)
-            if hasattr(top_level, 'setMaximumSize'):
-                top_level.setMaximumSize(16777215, 16777215)
-            if hasattr(top_level, 'setMinimumWidth'):
-                top_level.setMinimumWidth(200)
-            if hasattr(top_level, 'setMaximumWidth'):
-                top_level.setMaximumWidth(16777215)
-            if hasattr(top_level, 'showNormal'):
-                top_level.showNormal()
+            clear_main_window_size_constraints(top_level)
         except Exception:
             pass
 
@@ -264,6 +254,13 @@ class SettingsTabWidget(QWidget):
             # 各タブの再描画をトリガー
             for i in range(self.tab_widget.count()):
                 widget = self.tab_widget.widget(i)
+                if widget and hasattr(widget, 'widget') and callable(getattr(widget, 'widget', None)):
+                    try:
+                        inner = widget.widget()
+                        if inner and hasattr(inner, 'refresh_theme'):
+                            inner.refresh_theme()
+                    except Exception:
+                        pass
                 if widget and hasattr(widget, 'update'):
                     widget.update()
             
