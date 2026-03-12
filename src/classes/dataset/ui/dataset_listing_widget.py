@@ -4300,85 +4300,7 @@ class DatasetListingWidget(QWidget):
         )
         if reply != QMessageBox.Yes:
             return
-
-        # Mark force refresh in-flight.
-        self._portal_force_refresh_inflight = True
-        self._portal_force_refresh_pending_parts = set()
-
-        # Stop background workers first.
-        try:
-            self._cancel_portal_fill()
-        except Exception:
-            pass
-        try:
-            self._cancel_portal_prefetch()
-        except Exception:
-            pass
-        try:
-            self._cancel_portal_csv_fill()
-        except Exception:
-            pass
-
-        # Clear cache (best-effort).
-        try:
-            from classes.data_portal.core.portal_entry_status import get_portal_entry_status_cache
-
-            cache = get_portal_entry_status_cache()
-            if hasattr(cache, "clear"):
-                cache.clear(None)
-        except Exception:
-            pass
-
-        # Reset current table values to unchecked.
-        self._portal_auto_fetch_attempted_dataset_ids.clear()
-        try:
-            from classes.dataset.util.portal_status_resolver import UNCHECKED_LABEL
-        except Exception:
-            UNCHECKED_LABEL = "未確認"
-
-        rows = self._model.get_rows()
-        for i, row in enumerate(rows):
-            if not isinstance(row, dict):
-                continue
-            self._model.update_row_fields(i, {"portal_status": UNCHECKED_LABEL, "portal_checked_at": ""})
-
-        # Baseline: apply public output.json classification immediately (no network, cheap).
-        try:
-            self._apply_public_output_json_classification_to_all_rows()
-        except Exception:
-            pass
-
-        # Kick bulk CSV fill first (fast path).
-        try:
-            self._start_portal_csv_fill_async()
-        except Exception:
-            pass
-
-        try:
-            if self._portal_csv_thread is not None and self._portal_csv_thread.isRunning():
-                self._portal_force_refresh_pending_parts.add("csv")
-        except Exception:
-            pass
-
-        # Per-item HTML check is deferred until CSV bulk phase completes.
-        # This ensures "bulk first, misses second" ordering.
-        self._portal_force_refresh_deferred_html_scope = "all"
-        try:
-            if not (self._portal_csv_thread is not None and self._portal_csv_thread.isRunning()):
-                self._start_force_refresh_html_for_pending_scope()
-        except Exception:
-            pass
-
-        # If nothing started, finalize immediately.
-        if not self._portal_force_refresh_pending_parts:
-            self._portal_force_refresh_inflight = False
-            try:
-                self._portal_force_refresh_progress_total = None
-                self._portal_force_refresh_progress_done = 0
-                if hasattr(self, "_spinner_overlay") and self._spinner_overlay is not None:
-                    self._spinner_overlay.stop()
-            except Exception:
-                pass
+        self._force_refresh_portal_statuses_impl(scope="all")
 
     class _StatsFillWorker(QObject):
         row_ready = Signal(int, object, object, object)
@@ -4395,7 +4317,6 @@ class DatasetListingWidget(QWidget):
         def run(self) -> None:
             from config.common import get_dynamic_file_path
             from classes.dataset.util.data_entry_summary import compute_summary_from_payload
-
             import json
             import os
 
@@ -4704,17 +4625,20 @@ class DatasetListingWidget(QWidget):
             except Exception:
                 pass
 
-            # Fill portal status in background (visible page only).
-            try:
-                self._start_portal_fill_async()
-            except Exception:
-                pass
+            # Widget tests manage portal refresh explicitly. Starting background
+            # workers here makes teardown nondeterministic and can hide cache regressions.
+            if not self._is_running_under_pytest():
+                # Fill portal status in background (visible page only).
+                try:
+                    self._start_portal_fill_async()
+                except Exception:
+                    pass
 
-            # Bulk portal status via CSV (logged-in export)
-            try:
-                self._start_portal_csv_fill_async()
-            except Exception:
-                pass
+                # Bulk portal status via CSV (logged-in export)
+                try:
+                    self._start_portal_csv_fill_async()
+                except Exception:
+                    pass
 
         # 改行表示がある列のため、表示行数が少ない場合のみ行高を内容に合わせる
         if not from_fast_cache:
@@ -5081,6 +5005,26 @@ class DatasetListingWidget(QWidget):
             except Exception:
                 pass
 
+    def _apply_cached_portal_statuses_immediately(self) -> None:
+        """Apply cached portal statuses synchronously before network decisions."""
+
+        if self._model is None:
+            return
+
+        rows = self._model.get_rows() if self._model is not None else []
+        if not rows:
+            return
+
+        self._portal_cache_apply_cursor = 0
+        total = len(rows)
+        last_cursor = -1
+        while 0 <= int(self._portal_cache_apply_cursor or 0) < total:
+            current_cursor = int(self._portal_cache_apply_cursor or 0)
+            if current_cursor == last_cursor:
+                break
+            last_cursor = current_cursor
+            self._apply_cached_portal_statuses_batch()
+
     def _apply_cached_portal_statuses_batch(self) -> None:
         if self._model is None:
             return
@@ -5372,8 +5316,10 @@ class DatasetListingWidget(QWidget):
             UNCHECKED_LABEL = "未確認"
 
         # Apply cached labels globally (cheap, local) before deciding network access.
+        # Timer-based application alone is too late during startup/reload and can cause
+        # unnecessary portal checks before the persisted cache becomes visible in the UI.
         try:
-            self._reset_and_schedule_apply_cached_portal_statuses()
+            self._apply_cached_portal_statuses_immediately()
         except Exception:
             pass
 

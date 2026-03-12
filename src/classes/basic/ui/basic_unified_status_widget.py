@@ -256,9 +256,13 @@ class BasicUnifiedStatusWidget(QWidget):
         self._status_update_seq: int = 0
         self._status_update_inflight: bool = False
         self._status_update_pending: bool = False
+        self._status_loading_seq: int = 0
 
         self._auth_label = QLabel("")
         self._auth_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._loading_label = QLabel("")
+        self._loading_label.setObjectName('basicInfoStatusLoadingLabel')
+        self._loading_label.setVisible(False)
 
         # 旧UI互換のため部品は保持（表示はしない）
         self._stage_label = QLabel("個別取得")
@@ -301,6 +305,7 @@ class BasicUnifiedStatusWidget(QWidget):
 
         root = QVBoxLayout(self)
         root.addWidget(self._auth_label)
+        root.addWidget(self._loading_label)
         root.addWidget(self.table, 1)
 
         self.refresh_theme()
@@ -533,6 +538,16 @@ class BasicUnifiedStatusWidget(QWidget):
         self._status_update_pending = False
         self._status_update_seq += 1
         seq = int(self._status_update_seq)
+        self._status_loading_seq = seq
+        try:
+            self.refresh_button.setEnabled(False)
+            self._loading_label.setVisible(False)
+        except Exception:
+            pass
+        try:
+            QTimer.singleShot(1000, lambda current_seq=seq: self._show_loading_hint(current_seq))
+        except Exception:
+            pass
 
         try:
             from classes.utils.perf_monitor import PerfMonitor
@@ -571,6 +586,17 @@ class BasicUnifiedStatusWidget(QWidget):
             except Exception:
                 rows = []
             self._apply_status_rows(seq, rows, perf_logger=perf_logger, PerfMonitor=PerfMonitor)
+
+    def _show_loading_hint(self, seq: int) -> None:
+        if seq != self._status_loading_seq:
+            return
+        if not self._status_update_inflight:
+            return
+        try:
+            self._loading_label.setText('状況を更新中です。読み込みに時間がかかっています...')
+            self._loading_label.setVisible(True)
+        except Exception:
+            pass
 
     def _compute_status_rows(self, *, perf_logger, PerfMonitor) -> list[dict[str, Any]]:
         base_dir = Path(get_dynamic_file_path("output/rde/data"))
@@ -892,6 +918,12 @@ class BasicUnifiedStatusWidget(QWidget):
                 _do_apply()
         finally:
             self._status_update_inflight = False
+            try:
+                self.refresh_button.setEnabled(True)
+                self._loading_label.clear()
+                self._loading_label.setVisible(False)
+            except Exception:
+                pass
             if self._status_update_pending:
                 self._status_update_pending = False
                 # 直近の更新要求をもう一度実行

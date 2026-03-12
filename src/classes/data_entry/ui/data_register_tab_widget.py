@@ -69,6 +69,7 @@ class DataRegisterTabWidget(QWidget):
         self._tab_window_positions_applied: set[int] = set()
         # タブ初回表示時のみ「初期サイズ調整」を行うためのフラグ
         self._tab_window_initial_sizes_applied: set[int] = set()
+        self._lazy_building = False
         self.setup_ui()
         
         # テーマ変更シグナルに接続（Singletonを必ず使用）
@@ -166,6 +167,93 @@ class DataRegisterTabWidget(QWidget):
         container_layout.addStretch(1)
         scroll_area.setWidget(container)
         return scroll_area
+
+    def _create_lazy_placeholder_widget(self, message: str) -> QWidget:
+        placeholder = QWidget()
+        layout = QVBoxLayout(placeholder)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+        label = QLabel(message)
+        label.setWordWrap(True)
+        layout.addWidget(label)
+        layout.addStretch(1)
+        return placeholder
+
+    def _create_lazy_scroll_placeholder(self, message: str, object_name: str) -> QScrollArea:
+        return self._wrap_tab_in_scroll(self._create_lazy_placeholder_widget(message), object_name)
+
+    def _replace_tab_widget(self, index: int, widget: QWidget, title: str) -> None:
+        try:
+            self.tab_widget.blockSignals(True)
+            self.tab_widget.removeTab(index)
+            self.tab_widget.insertTab(index, widget, title)
+            self.tab_widget.setCurrentIndex(index)
+        finally:
+            try:
+                self.tab_widget.blockSignals(False)
+            except Exception:
+                pass
+
+    def _ensure_lazy_tab_built(self, index: int) -> None:
+        if self._lazy_building:
+            return
+
+        try:
+            self._lazy_building = True
+            if self._batch_tab_index is not None and index == self._batch_tab_index:
+                self._ensure_batch_register_tab_built()
+            elif self._status_tab_index is not None and index == self._status_tab_index:
+                self._ensure_status_tab_built()
+            elif self._listing_tab_index is not None and index == self._listing_tab_index:
+                self._ensure_tile_listing_tab_built()
+            elif self._mail_tab_index is not None and index == self._mail_tab_index:
+                self._ensure_mail_notification_tab_built()
+        finally:
+            self._lazy_building = False
+
+    def _ensure_batch_register_tab_built(self) -> None:
+        if getattr(self, 'batch_widget', None) is not None or self._batch_tab_index is None:
+            return
+
+        from .batch_register_widget import BatchRegisterWidget
+
+        batch_widget = BatchRegisterWidget(self.parent_controller)
+        self.batch_widget = batch_widget
+        scroll_area = self._wrap_tab_in_scroll(batch_widget, 'dataRegisterBatchScrollArea')
+        self.batch_register_scroll_area = scroll_area
+        self._replace_tab_widget(self._batch_tab_index, scroll_area, '一括登録')
+
+    def _ensure_status_tab_built(self) -> None:
+        if getattr(self, 'status_widget', None) is not None or self._status_tab_index is None:
+            return
+
+        from .registration_status_widget import RegistrationStatusWidget
+
+        status_widget = RegistrationStatusWidget(self)
+        self.status_widget = status_widget
+        wrapped = self._wrap_tab_in_scroll(status_widget, 'dataRegisterStatusScrollArea')
+        self._replace_tab_widget(self._status_tab_index, wrapped, '登録状況')
+
+    def _ensure_tile_listing_tab_built(self) -> None:
+        if getattr(self, 'tile_listing_widget', None) is not None or self._listing_tab_index is None:
+            return
+
+        from .dataentry_tile_listing_widget import create_dataentry_tile_listing_widget
+
+        listing_widget = create_dataentry_tile_listing_widget(self)
+        self.tile_listing_widget = listing_widget
+        self._replace_tab_widget(self._listing_tab_index, listing_widget, '一覧')
+
+    def _ensure_mail_notification_tab_built(self) -> None:
+        if getattr(self, 'mail_notification_tab', None) is not None or self._mail_tab_index is None:
+            return
+
+        from classes.data_entry.ui.mail_notification_tab import MailNotificationTab
+
+        tab = MailNotificationTab(self)
+        self.mail_notification_tab = tab
+        wrapped = self._wrap_tab_in_scroll(tab, 'dataRegisterMailNotificationScrollArea')
+        self._replace_tab_widget(self._mail_tab_index, wrapped, '✉️ メール通知')
     
     def refresh_theme(self):
         """テーマ変更時のスタイル更新"""
@@ -265,6 +353,11 @@ class DataRegisterTabWidget(QWidget):
         """データ登録タブ選択時のウインドウサイズ調整"""
         # デバッグ出力
         logger.debug("タブ変更: index=%s", index)
+
+        try:
+            self._ensure_lazy_tab_built(index)
+        except Exception as e:
+            logger.error("DataRegisterTabWidget: lazy tab build failed: %s", e)
 
         top_level = self.window()
         screen = QApplication.primaryScreen()
@@ -651,41 +744,23 @@ class DataRegisterTabWidget(QWidget):
         
     def create_batch_register_tab(self):
         """一括登録タブを作成"""
-        from .batch_register_widget import BatchRegisterWidget
-        # 一括登録ウィジェット作成
-        batch_widget = BatchRegisterWidget(self.parent_controller)
-        self.batch_widget = batch_widget
-        # スクロールエリアでラップ
-        scroll_area = QScrollArea()
-        scroll_area.setWidget(batch_widget)
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        # スクロールエリアのサイズポリシー設定
-        scroll_area.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        batch_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        
-        # スクロールエリアのスタイル（ThemeKey適用）
-        from classes.theme.theme_manager import get_color
-        from classes.theme.theme_keys import ThemeKey
-        scroll_area_style = f"""
-            QScrollArea {{
-                background-color: {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BACKGROUND)};
-                border: 1px solid {get_color(ThemeKey.DATA_ENTRY_SCROLL_AREA_BORDER)};
-            }}
-        """
-        scroll_area.setStyleSheet(scroll_area_style)
+        scroll_area = self._create_lazy_scroll_placeholder(
+            '一括登録タブを読み込み中...',
+            'dataRegisterBatchScrollArea',
+        )
+        self.batch_widget = None
         self.batch_register_scroll_area = scroll_area
-        idx = self.tab_widget.addTab(scroll_area, "一括登録")
+        idx = self.tab_widget.addTab(scroll_area, '一括登録')
         return idx
 
     def create_status_tab(self):
         """登録状況タブを作成"""
         try:
-            from .registration_status_widget import RegistrationStatusWidget
-            status_widget = RegistrationStatusWidget(self)
-            self.status_widget = status_widget
-            wrapped = self._wrap_tab_in_scroll(status_widget, "dataRegisterStatusScrollArea")
+            self.status_widget = None
+            wrapped = self._create_lazy_scroll_placeholder(
+                '登録状況タブを読み込み中...',
+                'dataRegisterStatusScrollArea',
+            )
             idx = self.tab_widget.addTab(wrapped, "登録状況")
             self._status_tab_index = idx
         except Exception as e:
@@ -694,11 +769,9 @@ class DataRegisterTabWidget(QWidget):
     def create_tile_listing_tab(self):
         """一覧タブ（全タイル集約）を作成"""
         try:
-            from .dataentry_tile_listing_widget import create_dataentry_tile_listing_widget
-
-            listing_widget = create_dataentry_tile_listing_widget(self)
-            self.tile_listing_widget = listing_widget
-            idx = self.tab_widget.addTab(listing_widget, "一覧")
+            self.tile_listing_widget = None
+            placeholder = self._create_lazy_placeholder_widget('一覧タブを読み込み中...')
+            idx = self.tab_widget.addTab(placeholder, '一覧')
             self._listing_tab_index = idx
         except Exception as e:
             logger.error(f"一覧タブの作成に失敗: {e}")
@@ -706,10 +779,11 @@ class DataRegisterTabWidget(QWidget):
     def create_mail_notification_tab(self):
         """メール通知タブを作成"""
         try:
-            from classes.data_entry.ui.mail_notification_tab import MailNotificationTab
-
-            tab = MailNotificationTab(self)
-            wrapped = self._wrap_tab_in_scroll(tab, "dataRegisterMailNotificationScrollArea")
+            self.mail_notification_tab = None
+            wrapped = self._create_lazy_scroll_placeholder(
+                'メール通知タブを読み込み中...',
+                'dataRegisterMailNotificationScrollArea',
+            )
             idx = self.tab_widget.addTab(wrapped, "✉️ メール通知")
             return idx
         except Exception as e:

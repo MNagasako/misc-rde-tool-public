@@ -6,11 +6,24 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.32）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| 共通UI基盤 | `window_sizing.py` を追加し、最大化中のリサイズ抑止、サイズ制約解除、横方向センタリングを共通化。 |
-| データポータル | タブごとのウィンドウサイズ/位置保持、現在タブのみのテーマ更新、一覧/一括/データカタログの表示安定化を反映。 |
-| AI/サブグループ | AIサジェストダイアログの位置/タブ別サイズ保存と、サブグループ新規作成の既存サブグループ読込セクション再整備を実施。 |
-| テスト/品質 | `test_window_sizing.py`、`test_data_portal_tab_window_state.py`、`test_ai_suggestion_dialog_geometry_persistence.py` などを追加・更新。 |
+| リリース/品質 | リビジョンアップ（v2.5.33）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| タブ初期表示 | データ登録/データ取得2/サブグループ/試料の重いタブを初回選択時構築へ変更し、起動直後の応答を改善。 |
+| 読込中表示 | 基本情報の状況更新で 1 秒超過時に loading hint を表示し、AIテスト2では初期化 progress を表示。 |
+| データポータル一覧 | portal status 永続キャッシュを自動確認前に即時反映し、再起動後の未確認再表示と不要な再確認を抑止。 |
+| テスト/品質 | lazy tabs / loading hint / AI初期化 / portal cache 再利用の widget・unit テストを追加・更新。 |
+
+## v2.5.33 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.33）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| データ登録 | `data_register_tab_widget.py` で一括登録/登録状況/一覧/メール通知タブを lazy build 化。 |
+| データ取得2 | `data_fetch2_tab_widget.py` で一括取得（RDE/DP）を lazy build 化し、フィルタタブは prewarm 付き lazy を維持。 |
+| サブグループ/試料 | `subgroup_create_widget.py` の一覧タブ、`sample_dedup_tab_widget.py` の一覧2タブを遅延構築へ変更。 |
+| 基本情報 | `basic_unified_status_widget.py` で 1 秒超過時の loading hint を追加。 |
+| AI | `ui_ai_test.py` で AI設定/課題一覧の初期化 progress 表示を追加。 |
+| データポータル一覧 | `dataset_listing_widget.py` で portal status キャッシュを即時適用し、全件強制更新は共通実装へ統一。 |
+| テスト/品質 | `test_data_register_tab_widget_lazy_tabs.py`、`test_data_fetch2_bulk_tabs_lazy.py`、`test_basic_unified_status_widget_loading_hint.py`、`test_dataset_listing_widget_controls_and_auto_fetch.py` などを追加・更新。 |
 
 ## v2.5.32 の主な更新点
 

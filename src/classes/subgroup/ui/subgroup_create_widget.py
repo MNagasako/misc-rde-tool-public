@@ -101,13 +101,39 @@ def create_subgroup_create_widget(parent, title, color, create_auto_resize_butto
         logger.warning("サブグループ修正タブのプレースホルダ作成に失敗: %s", e)
         edit_scroll = None
 
-    # 一覧タブ（軽量・即時ロード）
+    # 一覧タブ（JSON/表生成が重いことがあるため遅延ロード）
+    listing_tab = None
+    listing_built = False
     try:
-        # parent は UIController 等(QWIdgetでない)が渡るケースがあるため、QTabWidget を親にする
-        listing_tab = create_subgroup_listing_widget(tab_widget)
-        tab_widget.addTab(listing_tab, "一覧")
+        listing_scroll = QScrollArea()
+        listing_scroll.setWidgetResizable(True)
+        listing_scroll.setFrameStyle(0)
+        listing_scroll.setContentsMargins(0, 0, 0, 0)
+        listing_scroll.setWidget(QLabel('一覧タブを読み込み中...'))
+        tab_widget.addTab(listing_scroll, '一覧')
     except Exception as e:
-        logger.warning("サブグループ一覧タブの作成に失敗: %s", e)
+        logger.warning('サブグループ一覧タブのプレースホルダ作成に失敗: %s', e)
+        listing_scroll = None
+
+    def _ensure_listing_tab_built() -> None:
+        nonlocal listing_tab, listing_built
+        if listing_built:
+            return
+        if listing_scroll is None:
+            return
+        try:
+            listing_tab = create_subgroup_listing_widget(tab_widget)
+            listing_scroll.setWidget(listing_tab)
+        except Exception as e:
+            logger.warning('サブグループ一覧タブの作成に失敗: %s', e)
+            try:
+                fallback = QLabel(f'一覧タブの読み込みに失敗しました: {e}')
+                fallback.setWordWrap(True)
+                listing_scroll.setWidget(fallback)
+            except Exception:
+                pass
+        finally:
+            listing_built = True
 
     def _ensure_edit_tab_built() -> None:
         nonlocal edit_tab, edit_built
@@ -152,6 +178,8 @@ def create_subgroup_create_widget(parent, title, color, create_auto_resize_butto
 
                 if edit_scroll is not None:
                     _reset_window_height_to_screen(edit_scroll)
+            elif current_text == '一覧':
+                _ensure_listing_tab_built()
         except Exception as e:
             logger.error("タブ切り替え時のリフレッシュ処理でエラー: %s", e)
 

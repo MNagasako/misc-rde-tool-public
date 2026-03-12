@@ -93,6 +93,29 @@ class DataFetch2TabWidget(QTabWidget):
         container_layout.addStretch(1)
         scroll.setWidget(container)
         return scroll
+
+    def _create_loading_panel(self, message: str) -> QWidget:
+        panel = QWidget(self)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+        label = QLabel(message)
+        label.setWordWrap(True)
+        layout.addWidget(label)
+        layout.addStretch(1)
+        return panel
+
+    def _replace_tab_widget(self, index: int, widget: QWidget, title: str) -> None:
+        try:
+            self.blockSignals(True)
+            self.removeTab(index)
+            self.insertTab(index, widget, title)
+            self.setCurrentIndex(index)
+        finally:
+            try:
+                self.blockSignals(False)
+            except Exception:
+                pass
         
 
         
@@ -167,10 +190,41 @@ class DataFetch2TabWidget(QTabWidget):
 
     def _on_tab_changed(self, index: int):
         try:
+            if index == getattr(self, '_bulk_rde_tab_index', -1):
+                self._ensure_bulk_rde_widget()
+            elif index == getattr(self, '_bulk_dp_tab_index', -1):
+                self._ensure_bulk_dp_widget()
             if index == getattr(self, '_file_filter_tab_index', -1):
                 self._ensure_file_filter_widget()
         except Exception:
             pass
+
+    def _ensure_bulk_rde_widget(self):
+        if getattr(self, 'bulk_rde_widget', None) is not None:
+            return
+
+        from classes.data_fetch2.ui.bulk_rde_tab import create_bulk_rde_tab
+
+        tab_widget = create_bulk_rde_tab(self)
+        self.bulk_rde_widget = tab_widget
+        try:
+            if hasattr(tab_widget, 'set_filter_config'):
+                tab_widget.set_filter_config(self.current_filter_config)
+        except Exception:
+            pass
+        wrapped = self._wrap_tab_widget(tab_widget, 'dataFetch2BulkRdeScrollArea')
+        self._replace_tab_widget(self._bulk_rde_tab_index, wrapped, '📦 一括取得（RDE）')
+
+    def _ensure_bulk_dp_widget(self):
+        if getattr(self, 'bulk_dp_widget', None) is not None:
+            return
+
+        from classes.data_fetch2.ui.bulk_dp_tab import create_bulk_dp_tab
+
+        tab_widget = create_bulk_dp_tab(self)
+        self.bulk_dp_widget = tab_widget
+        wrapped = self._wrap_tab_widget(tab_widget, 'dataFetch2BulkDpScrollArea')
+        self._replace_tab_widget(self._bulk_dp_tab_index, wrapped, '🌐 一括取得（DP）')
 
     def _ensure_file_filter_widget(self):
         """必要ならFileFilterWidgetを構築してタブへ挿入（1回だけ）。"""
@@ -267,16 +321,10 @@ class DataFetch2TabWidget(QTabWidget):
     def create_bulk_rde_tab(self):
         """一括取得（RDE）タブ"""
         try:
-            from classes.data_fetch2.ui.bulk_rde_tab import create_bulk_rde_tab
-
-            tab_widget = create_bulk_rde_tab(self)
-            self.bulk_rde_widget = tab_widget
-            self.addTab(self._wrap_tab_widget(tab_widget, "dataFetch2BulkRdeScrollArea"), "📦 一括取得（RDE）")
-            try:
-                if hasattr(tab_widget, "set_filter_config"):
-                    tab_widget.set_filter_config(self.current_filter_config)
-            except Exception:
-                pass
+            self.bulk_rde_widget = None
+            placeholder = self._create_loading_panel('一括取得（RDE）タブを読み込み中...')
+            wrapped = self._wrap_tab_widget(placeholder, 'dataFetch2BulkRdeScrollArea')
+            self._bulk_rde_tab_index = self.addTab(wrapped, '📦 一括取得（RDE）')
         except Exception as e:
             logger.error(f"一括取得（RDE）タブ作成エラー: {e}")
             fallback_widget = QWidget()
@@ -290,11 +338,10 @@ class DataFetch2TabWidget(QTabWidget):
     def create_bulk_dp_tab(self):
         """一括取得（DP）タブ"""
         try:
-            from classes.data_fetch2.ui.bulk_dp_tab import create_bulk_dp_tab
-
-            tab_widget = create_bulk_dp_tab(self)
-            self.bulk_dp_widget = tab_widget
-            self.addTab(self._wrap_tab_widget(tab_widget, "dataFetch2BulkDpScrollArea"), "🌐 一括取得（DP）")
+            self.bulk_dp_widget = None
+            placeholder = self._create_loading_panel('一括取得（DP）タブを読み込み中...')
+            wrapped = self._wrap_tab_widget(placeholder, 'dataFetch2BulkDpScrollArea')
+            self._bulk_dp_tab_index = self.addTab(wrapped, '🌐 一括取得（DP）')
         except Exception as e:
             logger.error(f"一括取得（DP）タブ作成エラー: {e}")
             fallback_widget = QWidget()

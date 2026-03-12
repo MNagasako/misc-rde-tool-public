@@ -238,6 +238,8 @@ class AITestWidget:
         """)
         # 後でテーマ更新するため保持
         self._scroll_area = scroll_area
+
+        self._begin_initial_loading()
         
         # AI設定を初期化（ウィジェット設定後に遅延実行）
         QTimer.singleShot(100, self._init_ai_settings)
@@ -265,6 +267,58 @@ class AITestWidget:
         """デバッグ出力（パフォーマンス向上のため制御可能）"""
         if self._debug_enabled:
             print(message)
+
+    def _begin_initial_loading(self):
+        self._startup_pending_steps = {'ai_settings', 'task_data'}
+        try:
+            if hasattr(self, 'ai_progress_bar') and self.ai_progress_bar:
+                self.ai_progress_bar.setRange(0, 0)
+                self.ai_progress_bar.setVisible(True)
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'ai_progress_label') and self.ai_progress_label:
+                self.ai_progress_label.setText('AIテスト2を初期化中...')
+                self.ai_progress_label.setVisible(True)
+        except Exception:
+            pass
+
+    def _update_initial_loading_message(self, message):
+        try:
+            if hasattr(self, 'ai_progress_label') and self.ai_progress_label:
+                self.ai_progress_label.setText(str(message))
+                self.ai_progress_label.setVisible(True)
+        except Exception:
+            pass
+
+    def _finish_initial_loading_step(self, step_name):
+        pending = getattr(self, '_startup_pending_steps', None)
+        if not isinstance(pending, set):
+            return
+        pending.discard(step_name)
+        if pending:
+            return
+        try:
+            if hasattr(self, 'ai_progress_bar') and self.ai_progress_bar:
+                self.ai_progress_bar.setVisible(False)
+                self.ai_progress_bar.setRange(0, 100)
+        except Exception:
+            pass
+        try:
+            if hasattr(self, 'ai_progress_label') and self.ai_progress_label:
+                self.ai_progress_label.setText('初期化完了')
+                label = self.ai_progress_label
+
+                def _hide_label(target=label):
+                    try:
+                        if target is not None and target.parent() is not None:
+                            target.setVisible(False)
+                    except RuntimeError:
+                        pass
+
+                QTimer.singleShot(1200, _hide_label)
+        except Exception:
+            pass
     
     
     def _create_ai_selection_area(self, layout):
@@ -1372,6 +1426,7 @@ class AITestWidget:
     def _initialize_task_data(self):
         """タスクデータの初期化（遅延実行用、パフォーマンス最適化版）"""
         try:
+            self._update_initial_loading_message('課題番号一覧を読み込み中...')
             self._debug_print("[DEBUG] _initialize_task_data called")
             
             # ウィジェットの存在確認
@@ -1418,10 +1473,13 @@ class AITestWidget:
             if self._debug_enabled:
                 import traceback
                 traceback.print_exc()
+        finally:
+            self._finish_initial_loading_step('task_data')
     
     def _init_ai_settings(self):
         """AI設定の初期化（パフォーマンス最適化版）"""
         try:
+            self._update_initial_loading_message('AI設定を読み込み中...')
             self._debug_print("[DEBUG] _init_ai_settings 開始")
             
             # コンボボックスの存在確認
@@ -1599,6 +1657,8 @@ class AITestWidget:
                 self._debug_print(f"[DEBUG] プロバイダー変更: 無効なインデックス")
         except Exception as e:
             logger.error("プロバイダー変更エラー: %s", e)
+        finally:
+            self._finish_initial_loading_step('ai_settings')
     
     def _init_datasource_selection(self):
         """データソース選択の初期化（パフォーマンス最適化版）"""
