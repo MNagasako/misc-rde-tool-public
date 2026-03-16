@@ -1652,7 +1652,10 @@ class FileSetTableWidget(QTableWidget):
         dialog.show()  # ダイアログを表示
         dialog.raise_()  # 最前面に持ってくる
         dialog.activateWindow()  # アクティブ化
-        dialog.exec()
+        if dialog.exec() == QDialog.Accepted:
+            completion_message = dialog.property("_fileset_completion_message")
+            if completion_message:
+                QMessageBox.information(self.window() or self, "完了", str(completion_message))
     
     def _apply_fileset_changes(self, dialog, file_set, file_tree):
         """ファイルセットへの変更を適用（重複チェック付き・種類変更・ZIP設定対応）"""
@@ -1727,17 +1730,23 @@ class FileSetTableWidget(QTableWidget):
             file_set.items = updated_items
             
             # マッピングファイルを自動更新
+            mapping_file_path = None
             try:
-                self._update_mapping_file(file_set)
+                mapping_file_path = self._update_mapping_file(file_set, show_completion_dialog=False)
             except Exception as e:
                 logger.warning("マッピングファイル自動更新エラー: %s", e)
             
+            completion_lines = [
+                f"ファイルセット '{file_set.name}' を更新しました。",
+                f"選択ファイル数: {len(updated_items)}個",
+            ]
+            if mapping_file_path:
+                completion_lines.append(f"マッピングファイル: {mapping_file_path}")
+
+            dialog.setProperty("_fileset_completion_message", "\n".join(completion_lines))
+
             # ダイアログを閉じる
             dialog.accept()
-            
-            QMessageBox.information(self, "完了", 
-                f"ファイルセット '{file_set.name}' を更新しました。\n"
-                f"選択ファイル数: {len(updated_items)}個")
                 
         except Exception as e:
             logger.error("ファイルセット変更適用エラー: %s", e)
@@ -1851,7 +1860,7 @@ class FileSetTableWidget(QTableWidget):
         except Exception as e:
             QMessageBox.warning(self, "エラー", f"マッピングファイルの表示に失敗しました: {str(e)}")
     
-    def _update_mapping_file(self, file_set):
+    def _update_mapping_file(self, file_set, *, show_completion_dialog=True):
         """マッピングファイルを更新（TempFolderManager統一版）"""
         try:
             # TempFolderManagerを使用してマッピングファイルを作成
@@ -1889,15 +1898,18 @@ class FileSetTableWidget(QTableWidget):
             
             # テーブル表示を更新
             self.refresh_data()
-            QMessageBox.information(self, "完了", 
-                f"ファイルセット '{file_set.name}' のマッピングファイルを作成しました。\n"
-                f"パス: {mapping_file}")
+            if show_completion_dialog:
+                QMessageBox.information(self, "完了", 
+                    f"ファイルセット '{file_set.name}' のマッピングファイルを作成しました。\n"
+                    f"パス: {mapping_file}")
+            return mapping_file
             
         except Exception as e:
             logger.error("マッピングファイル更新エラー: %s", e)
             import traceback
             traceback.print_exc()
             QMessageBox.warning(self, "エラー", f"マッピングファイルの更新に失敗しました: {str(e)}")
+            raise
     
     def _get_current_timestamp(self):
         """現在のタイムスタンプを取得"""
