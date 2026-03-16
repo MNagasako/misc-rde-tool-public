@@ -2999,7 +2999,14 @@ class BatchRegisterWidget(QWidget):
 
         schema_toggle.set_summary_widget(schema_summary)
         schema_toggle.set_edit_widget(schema_edit_widget)
+        try:
+            toggle_button = schema_toggle.findChild(QPushButton, "toggleButton")
+            if toggle_button is not None:
+                toggle_button.clicked.connect(lambda *_: self._sync_schema_form_visibility())
+        except Exception:
+            logger.debug("schema toggle visibility sync connection failed", exc_info=True)
         scroll_layout.addWidget(schema_toggle)
+        self._sync_schema_form_visibility()
         
         self.scroll_widget.setLayout(scroll_layout)
         scroll_area.setWidget(self.scroll_widget)
@@ -6359,6 +6366,32 @@ class BatchRegisterWidget(QWidget):
             logger.warning("実験ID一覧更新エラー: %s", e)
             import traceback
             traceback.print_exc()
+
+    def _schema_form_has_fields(self) -> bool:
+        """現在の固有情報フォームに表示対象フィールドがあるかを返す。"""
+        form = getattr(self, 'invoice_schema_form', None)
+        key_to_widget = getattr(form, '_schema_key_to_widget', None) if form is not None else None
+        return isinstance(key_to_widget, dict) and bool(key_to_widget)
+
+    def _sync_schema_form_visibility(self) -> None:
+        """固有情報トグル状態に合わせてフォーム本体の可視性を同期する。"""
+        toggle = getattr(self, '_schema_toggle', None)
+        edit_mode = toggle is not None and toggle.mode() == 'edit'
+        has_fields = self._schema_form_has_fields()
+
+        form = getattr(self, 'invoice_schema_form', None)
+        if form is not None:
+            try:
+                form.setVisible(bool(edit_mode and has_fields))
+            except Exception:
+                logger.debug("schema form visibility sync failed", exc_info=True)
+
+        placeholder = getattr(self, 'schema_placeholder_label', None)
+        if placeholder is not None:
+            try:
+                placeholder.setVisible(bool(edit_mode and not has_fields))
+            except Exception:
+                logger.debug("schema placeholder visibility sync failed", exc_info=True)
     
     def update_schema_form(self, dataset_data, force_clear=True):
         """インボイススキーマに基づく固有情報フォームを更新（通常登録と同等機能）"""
@@ -6445,13 +6478,7 @@ class BatchRegisterWidget(QWidget):
                                 self.schema_form = schema_form  # 保存（後で値取得で使用）
                                 self.invoice_schema_form = schema_form  # 互換性のため（save_fileset_configで使用）
 
-                                # レイアウト追加後に表示制御（トグルがsummaryの場合は展開しない）
-                                try:
-                                    toggle = getattr(self, '_schema_toggle', None)
-                                    edit_mode = toggle is None or toggle.mode() == 'edit'
-                                except Exception:
-                                    edit_mode = True
-                                schema_form.setVisible(bool(edit_mode))
+                                self._sync_schema_form_visibility()
 
                                 try:
                                     refresher = getattr(self, '_refresh_schema_summary', None)
@@ -6557,6 +6584,7 @@ class BatchRegisterWidget(QWidget):
             # プレースホルダーを表示
             self.schema_placeholder_label.setText("データセット選択後に固有情報入力フォームが表示されます")
             self.schema_placeholder_label.show()
+            self._sync_schema_form_visibility()
 
             try:
                 refresher = getattr(self, '_refresh_schema_summary', None)
@@ -6600,6 +6628,7 @@ class BatchRegisterWidget(QWidget):
             # 参照を設定
             self.schema_form = empty_form
             self.invoice_schema_form = empty_form
+            self._sync_schema_form_visibility()
 
             try:
                 refresher = getattr(self, '_refresh_schema_summary', None)

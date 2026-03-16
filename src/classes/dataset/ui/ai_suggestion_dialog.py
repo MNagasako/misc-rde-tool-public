@@ -489,7 +489,7 @@ class AISuggestionDialog(QDialog):
             _apply()
 
     def _apply_minimum_height_policy(self):
-        """(互換) ダイアログ最小高さを画面高の50%に設定（利用可能な場合）。"""
+        """(互換) ダイアログ最小高さを内容に必要な範囲で設定する。"""
         try:
             screen = self.screen() if hasattr(self, 'screen') else None
             if screen is None:
@@ -502,7 +502,12 @@ class AISuggestionDialog(QDialog):
             if not geo or geo.height() <= 0:
                 return
 
-            min_h = int(geo.height() * 0.5)
+            try:
+                content_min_h = int(self.minimumSizeHint().height())
+            except Exception:
+                content_min_h = 0
+
+            min_h = max(320, min(content_min_h, int(geo.height() * 0.5)))
             if min_h > 0:
                 self.setMinimumHeight(min_h)
         except Exception:
@@ -511,7 +516,7 @@ class AISuggestionDialog(QDialog):
     def _apply_window_height_policy(self):
         """ダイアログの高さ制約を画面サイズに合わせて設定する。
 
-        - 最小高さ: 画面高の50%
+        - 最小高さ: 内容に必要な最小高さ（上限は画面高の50%）
         - 最大高さ: 画面高（利用可能領域）
         """
         try:
@@ -527,7 +532,12 @@ class AISuggestionDialog(QDialog):
             if not geo or geo.height() <= 0:
                 return
 
-            min_h = int(geo.height() * 0.5)
+            try:
+                content_min_h = int(self.minimumSizeHint().height())
+            except Exception:
+                content_min_h = 0
+
+            min_h = max(320, min(content_min_h, int(geo.height() * 0.5)))
             max_h = int(geo.height())
             if min_h > 0:
                 self.setMinimumHeight(min_h)
@@ -5110,6 +5120,8 @@ class AISuggestionDialog(QDialog):
             # 対象=報告書のとき、converted.xlsx 由来のレコード（またはフォールバック）と結合して
             # 年度/機関コード/技術領域を表示・フィルタする。
             report_rows_by_task = {}
+            joined_report_fields_for_target_key = lambda _target_key: {}
+
             if kind == 'report':
                 try:
                     report_records = self._get_displayed_report_records()
@@ -5232,7 +5244,7 @@ class AISuggestionDialog(QDialog):
                     rows_sorted = sorted(rows, key=lambda r: _as_int_year(str(r.get('year') or '')), reverse=True)
                     return rows_sorted[0] if rows_sorted else (rows[0] if rows else {})
 
-                def _joined_report_fields_for_target_key(target_key: str) -> dict:
+                def _resolve_joined_report_fields_for_target_key(target_key: str) -> dict:
                     task, y_hint, inst_hint = _parse_report_target_key_parts(str(target_key or ''))
                     task = task or extract_task_number_from_report_target_key(str(target_key or ''))
                     if not task:
@@ -5249,9 +5261,7 @@ class AISuggestionDialog(QDialog):
                         'important_sub': '' if self._is_empty_or_nan(picked.get('important_sub')) else str(picked.get('important_sub') or '').strip(),
                     }
 
-            else:
-                def _joined_report_fields_for_target_key(_target_key: str) -> dict:  # type: ignore[misc]
-                    return {}
+                joined_report_fields_for_target_key = _resolve_joined_report_fields_for_target_key
 
             # 報告書向けフィルタ候補を更新（結合後の値ベース）
             if kind == 'report' and hasattr(self, 'results_report_year_combo'):
@@ -5262,7 +5272,7 @@ class AISuggestionDialog(QDialog):
                 imp_subs = []
 
                 for rec in recs:
-                    jf = _joined_report_fields_for_target_key(str(rec.get('target_key') or ''))
+                    jf = joined_report_fields_for_target_key(str(rec.get('target_key') or ''))
                     y = str(jf.get('year') or '').strip()
                     if y and y not in years:
                         years.append(y)
@@ -5324,7 +5334,7 @@ class AISuggestionDialog(QDialog):
                 filtered_recs = []
                 for rec in recs:
                     tkey = str(rec.get('target_key') or '')
-                    jf = _joined_report_fields_for_target_key(tkey)
+                    jf = joined_report_fields_for_target_key(tkey)
                     y = str(jf.get('year') or '').strip()
                     inst = str(jf.get('inst_code') or '').strip()
                     cm = str(jf.get('cross_main') or '').strip()
@@ -5488,7 +5498,7 @@ class AISuggestionDialog(QDialog):
                     snip = _snippet(rec)
 
                     if kind == 'report':
-                        jf = _joined_report_fields_for_target_key(tkey)
+                        jf = joined_report_fields_for_target_key(tkey)
                         values = [
                             ts,
                             tkey,
@@ -5576,7 +5586,7 @@ class AISuggestionDialog(QDialog):
                     elapsed = _format_elapsed_seconds(rec)
 
                     if kind == 'report':
-                        jf = _joined_report_fields_for_target_key(row['tkey'])
+                        jf = joined_report_fields_for_target_key(row['tkey'])
                         year = str(jf.get('year') or '')
                         inst_code = str(jf.get('inst_code') or '')
                         cross_main = str(jf.get('cross_main') or '')
