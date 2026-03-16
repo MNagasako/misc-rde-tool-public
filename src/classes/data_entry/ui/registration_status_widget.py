@@ -202,14 +202,14 @@ class RegistrationStatusWidget(QWidget):
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
-        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.table.setMinimumHeight(220)
 
         header = self.table.horizontalHeader()
         header.setStretchLastSection(False)
         header.setMinimumSectionSize(24)
         header.setSectionResizeMode(QHeaderView.Interactive)
-        layout.addWidget(self.table)
+        layout.addWidget(self.table, 1)
 
         # 列幅（リンク列の幅/ボタン幅を小さめに）
         try:

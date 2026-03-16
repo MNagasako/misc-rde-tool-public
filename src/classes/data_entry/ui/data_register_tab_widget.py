@@ -163,8 +163,7 @@ class DataRegisterTabWidget(QWidget):
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
-        container_layout.addWidget(content_widget)
-        container_layout.addStretch(1)
+        container_layout.addWidget(content_widget, 1)
         scroll_area.setWidget(container)
         return scroll_area
 
