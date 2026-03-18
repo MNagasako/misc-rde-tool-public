@@ -8,7 +8,12 @@ from qt_compat.core import QTimer
 from qt_compat.gui import QFontMetrics
 from classes.theme import get_color, ThemeKey, ThemeManager, ThemeMode
 from classes.theme.global_styles import get_global_base_style
-from classes.utils.window_sizing import resize_main_window, set_main_window_minimum_size
+from classes.utils.window_sizing import (
+    center_window_on_screen,
+    fit_main_window_height_to_screen,
+    resize_main_window,
+    set_main_window_minimum_size,
+)
 
 logger = logging.getLogger("RDE_WebView")
 
@@ -575,27 +580,12 @@ class UIControllerCore:
 
     def center_window(self):
         """
-        起動時のウィンドウ位置設定: 画面中央（横）、最上部（縦）
-        v2.1.3: 縦位置を画面最上部に変更
-        v2.1.10: 起動時のみ実行、ウィジェット切替時は実行しない
+        起動時のウィンドウ位置設定: 画面中央に配置し、タイトルバーを画面内に収める。
+        v2.5.36: 初回表示時に上下左右とも画面内へクランプし、上端見切れを防止
         """
         try:
-            from qt_compat.widgets import QApplication
-            
-            screen = QApplication.primaryScreen()
-            if screen:
-                screen_geometry = screen.availableGeometry()
-                window_geometry = self.parent.frameGeometry()
-                
-                # 横位置は中央に配置
-                center_point = screen_geometry.center()
-                window_geometry.moveCenter(center_point)
-                
-                # 縦位置は最上部に設定（Y座標を0に）
-                x = window_geometry.x()
-                self.parent.move(x, 0)
-                logger.debug("起動時ウィンドウ位置設定: x=%s, y=0", x)
-                
+            if center_window_on_screen(self.parent):
+                logger.debug("起動時ウィンドウ位置設定: 画面中央へ配置")
         except Exception as e:
             logger.error("ウィンドウ位置設定エラー: %s", e)
     
@@ -1011,7 +1001,14 @@ class UIControllerCore:
             from config.common import DEBUG_INFO_FILE, LOGIN_FILE
             
             self.parent.show()
+            fit_main_window_height_to_screen(self.parent)
             self.center_window()
+
+            try:
+                self.parent._initial_window_client_width = int(self.parent.width())
+                self.parent._initial_window_client_height = int(self.parent.height())
+            except Exception:
+                pass
 
             current_min_width = 200
             try:

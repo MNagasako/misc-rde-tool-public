@@ -109,6 +109,9 @@ class AISuggestionDialog(QDialog):
         - dataset_suggestion: データセット説明文提案モード（AI提案、プロンプト全文、詳細情報タブ）
         - ai_extension: AI拡張機能モード（AI拡張、ファイル抽出設定タブ）
     """
+
+    _INITIAL_VERTICAL_SCREEN_MARGIN = 50
+    _INITIAL_HORIZONTAL_SCREEN_MARGIN = 50
     
     def __init__(self, parent=None, context_data=None, extension_name="dataset_description", auto_generate=True, mode="dataset_suggestion"):
         super().__init__(parent)
@@ -630,12 +633,63 @@ class AISuggestionDialog(QDialog):
     def _geometry_config_prefix(self) -> str:
         return f"ui.ai_suggestion_dialog.{self.mode}"
 
-    def _position_config_key(self) -> str:
+    def _legacy_position_config_key(self) -> str:
         return f"{self._geometry_config_prefix()}.position"
+
+    def _tab_position_config_key(self, index: Optional[int] = None) -> str:
+        tab_index = self.tab_widget.currentIndex() if index is None else int(index)
+        return f"{self._geometry_config_prefix()}.tabs.tab_{tab_index}.position"
 
     def _tab_size_config_key(self, index: Optional[int] = None) -> str:
         tab_index = self.tab_widget.currentIndex() if index is None else int(index)
         return f"{self._geometry_config_prefix()}.tabs.tab_{tab_index}.size"
+
+    def _tab_title(self, index: Optional[int] = None) -> str:
+        try:
+            tab_index = self.tab_widget.currentIndex() if index is None else int(index)
+            return str(self.tab_widget.tabText(tab_index) or "")
+        except Exception:
+            return ""
+
+    def _dialog_anchor_window(self):
+        try:
+            parent_widget = self.parentWidget()
+        except Exception:
+            parent_widget = None
+
+        if parent_widget is None:
+            return None
+
+        try:
+            anchor = parent_widget.window()
+            if anchor is not None and anchor is not self:
+                return anchor
+        except Exception:
+            pass
+
+        return parent_widget
+
+    def _dialog_anchor_initial_width(self) -> Optional[int]:
+        anchor = self._dialog_anchor_window()
+        if anchor is None:
+            return None
+
+        for attr_name in ("_initial_window_client_width", "_initial_main_window_client_width"):
+            try:
+                width = int(getattr(anchor, attr_name, 0) or 0)
+                if width > 0:
+                    return width
+            except Exception:
+                continue
+
+        try:
+            width = int(anchor.width())
+            if width > 0:
+                return width
+        except Exception:
+            pass
+
+        return None
 
     def _available_screen_geometry(self):
         screen = self.screen() if hasattr(self, 'screen') else None
@@ -650,41 +704,83 @@ class AISuggestionDialog(QDialog):
         if geo is None:
             return width, height, x, y
 
-        clamped_width = max(480, min(int(width), int(geo.width())))
-        clamped_height = max(max(320, self.minimumHeight()), min(int(height), int(geo.height())))
+        try:
+            frame = self.frameGeometry()
+            frame_extra_width = max(0, int(frame.width()) - int(self.width()))
+            frame_extra_height = max(0, int(frame.height()) - int(self.height()))
+        except Exception:
+            frame_extra_width = 0
+            frame_extra_height = 0
+
+        max_client_width = max(480, int(geo.width()) - frame_extra_width)
+        max_client_height = max(max(320, self.minimumHeight()), int(geo.height()) - frame_extra_height)
+
+        clamped_width = max(480, min(int(width), max_client_width))
+        clamped_height = max(max(320, self.minimumHeight()), min(int(height), max_client_height))
         min_x = int(geo.x())
         min_y = int(geo.y())
-        max_x = int(geo.x() + geo.width() - clamped_width)
-        max_y = int(geo.y() + geo.height() - clamped_height)
+        frame_width = clamped_width + frame_extra_width
+        frame_height = clamped_height + frame_extra_height
+        max_x = int(geo.x() + geo.width() - frame_width)
+        max_y = int(geo.y() + geo.height() - frame_height)
         clamped_x = min(max(int(x), min_x), max_x if max_x >= min_x else min_x)
         clamped_y = min(max(int(y), min_y), max_y if max_y >= min_y else min_y)
         return clamped_width, clamped_height, clamped_x, clamped_y
 
-    def _center_dialog_frame_on_screen(self) -> None:
+    def _center_dialog_frame_on_screen(self, width: Optional[int] = None, height: Optional[int] = None) -> None:
         geo = self._available_screen_geometry()
         if geo is None:
             return
 
         try:
             frame = self.frameGeometry()
-            frame.moveCenter(geo.center())
+            client_offset_x = max(0, int(self.x()) - int(frame.x()))
+            client_offset_y = max(0, int(self.y()) - int(frame.y()))
+            frame_extra_width = max(0, int(frame.width()) - int(self.width()))
+            frame_extra_height = max(0, int(frame.height()) - int(self.height()))
+            client_width = int(self.width()) if width is None else int(width)
+            client_height = int(self.height()) if height is None else int(height)
+            frame_width = client_width + frame_extra_width
+            frame_height = client_height + frame_extra_height
 
-            max_x = int(geo.right() - frame.width() + 1)
-            max_y = int(geo.bottom() - frame.height() + 1)
-            target_x = max(int(geo.left()), min(int(frame.x()), max_x))
-            target_y = max(int(geo.top()), min(int(frame.y()), max_y))
+            target_frame_x = int(geo.x() + max(0, (int(geo.width()) - frame_width) / 2))
+            target_frame_y = int(geo.y() + max(0, (int(geo.height()) - frame_height) / 2))
+            max_x = int(geo.right() - frame_width + 1)
+            max_y = int(geo.bottom() - frame_height + 1)
+            target_frame_x = max(int(geo.left()), min(int(target_frame_x), max_x))
+            target_frame_y = max(int(geo.top()), min(int(target_frame_y), max_y))
+            target_x = target_frame_x + client_offset_x
+            target_y = target_frame_y + client_offset_y
             self.move(target_x, target_y)
         except Exception:
             logger.debug("AISuggestionDialog: center frame failed", exc_info=True)
 
-    def _save_dialog_position(self):
+    def _save_dialog_position(self, index: Optional[int] = None):
         try:
             if not getattr(self, 'config_manager', None):
                 return
-            self.config_manager.set(self._position_config_key(), {'x': int(self.x()), 'y': int(self.y())})
+            position = {'x': int(self.x()), 'y': int(self.y())}
+            self.config_manager.set(self._tab_position_config_key(index), position)
+            self.config_manager.set(self._legacy_position_config_key(), position)
             self.config_manager.save()
         except Exception:
             logger.debug("AISuggestionDialog: save position failed", exc_info=True)
+
+    def _restore_tab_position(self, index: int) -> bool:
+        try:
+            saved = self.config_manager.get(self._tab_position_config_key(index), None)
+            if not isinstance(saved, dict):
+                saved = self.config_manager.get(self._legacy_position_config_key(), None)
+            if not isinstance(saved, dict):
+                return False
+            x = int(saved.get('x', self.x()))
+            y = int(saved.get('y', self.y()))
+            _, _, clamped_x, clamped_y = self._clamp_geometry(self.width(), self.height(), x, y)
+            self.move(clamped_x, clamped_y)
+            return True
+        except Exception:
+            logger.debug("AISuggestionDialog: restore tab position failed", exc_info=True)
+            return False
 
     def _save_current_tab_size(self, index: Optional[int] = None):
         try:
@@ -710,20 +806,53 @@ class AISuggestionDialog(QDialog):
             logger.debug("AISuggestionDialog: restore tab size failed", exc_info=True)
             return False
 
+    def _initial_dialog_size_for_screen(self, index: Optional[int] = None):
+        geo = self._available_screen_geometry()
+        if geo is None:
+            return int(self.width()), int(self.height())
+
+        try:
+            frame = self.frameGeometry()
+            frame_extra_width = max(0, int(frame.width()) - int(self.width()))
+            frame_extra_height = max(0, int(frame.height()) - int(self.height()))
+        except Exception:
+            frame_extra_width = 0
+            frame_extra_height = 0
+
+        horizontal_margin = int(self._INITIAL_HORIZONTAL_SCREEN_MARGIN) * 2
+        target_width = max(480, int(geo.width()) - horizontal_margin - frame_extra_width)
+
+        if self._tab_title(index) == "ファイル抽出設定":
+            parent_width = self._dialog_anchor_initial_width()
+            if parent_width is not None:
+                target_width = max(480, min(target_width, int(parent_width)))
+
+        vertical_margin = int(self._INITIAL_VERTICAL_SCREEN_MARGIN) * 2
+        target_height = max(
+            max(320, self.minimumHeight()),
+            int(geo.height()) - vertical_margin - frame_extra_height,
+        )
+        return target_width, target_height
+
     def _restore_or_center_dialog(self):
         geo = self._available_screen_geometry()
         if geo is None:
             return
 
+        current_index = self.tab_widget.currentIndex()
         saved_size = self.config_manager.get(self._tab_size_config_key(self.tab_widget.currentIndex()), None)
-        width = int(saved_size.get('width', self.width())) if isinstance(saved_size, dict) else int(self.width())
-        height = int(saved_size.get('height', self.height())) if isinstance(saved_size, dict) else int(self.height())
+        if isinstance(saved_size, dict):
+            width = int(saved_size.get('width', self.width()))
+            height = int(saved_size.get('height', self.height()))
+        else:
+            width, height = self._initial_dialog_size_for_screen(current_index)
 
         clamped_width, clamped_height, _, _ = self._clamp_geometry(width, height, self.x(), self.y())
         self._applying_saved_geometry = True
         try:
             self.resize(clamped_width, clamped_height)
-            self._center_dialog_frame_on_screen()
+            if not self._restore_tab_position(current_index):
+                self._center_dialog_frame_on_screen(clamped_width, clamped_height)
         finally:
             self._applying_saved_geometry = False
 
@@ -731,11 +860,19 @@ class AISuggestionDialog(QDialog):
         try:
             previous_index = getattr(self, '_current_tab_geometry_index', index)
             if previous_index != index:
+                self._save_dialog_position(previous_index)
                 self._save_current_tab_size(previous_index)
 
             self._applying_saved_geometry = True
             try:
-                self._restore_tab_size(index)
+                restored_size = self._restore_tab_size(index)
+                restored_pos = self._restore_tab_position(index)
+                if not restored_size:
+                    default_width, default_height = self._initial_dialog_size_for_screen(index)
+                    current_width, current_height = self._clamp_geometry(default_width, default_height, self.x(), self.y())[:2]
+                    self.resize(current_width, current_height)
+                if not restored_pos:
+                    self._center_dialog_frame_on_screen(self.width(), self.height())
             finally:
                 self._applying_saved_geometry = False
             self._current_tab_geometry_index = index
@@ -755,7 +892,7 @@ class AISuggestionDialog(QDialog):
                 self._applying_saved_geometry = True
                 try:
                     self.resize(width, height)
-                    self._center_dialog_frame_on_screen()
+                    self._center_dialog_frame_on_screen(width, height)
                 finally:
                     self._applying_saved_geometry = False
         except Exception:
@@ -769,12 +906,16 @@ class AISuggestionDialog(QDialog):
         super().moveEvent(event)
         if getattr(self, '_applying_saved_geometry', False):
             return
+        if not getattr(self, '_geometry_restored', False):
+            return
         if self.isVisible():
             self._save_dialog_position()
 
     def resizeEvent(self, event):  # noqa: N802 - Qt互換
         super().resizeEvent(event)
         if getattr(self, '_applying_saved_geometry', False):
+            return
+        if not getattr(self, '_geometry_restored', False):
             return
         if self.isVisible():
             self._save_current_tab_size()
