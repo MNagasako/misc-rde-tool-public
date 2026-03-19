@@ -6,11 +6,21 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.38）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| 試料一覧2 | タイル数フィルタの初期最小値を 1 に統一し、後から 0 / なし へ変更できる運用を維持。 |
-| 試料一覧2 | タイル-データセット-課題番号列で、遅延読込中は各セルに 読み込み中 を表示。 |
-| 試料一覧2 | 参照エントリーが無い行は エントリー無し と表示し、ライト/ダーク両テーマで低彩度表示へ変更。 |
-| テスト/ビルド | 試料一覧2 の回帰テストを追加更新し、pytest段階ゲート・pre-build・PyInstaller ビルド導線を v2.5.38 へ同期。 |
+| リリース/品質 | リビジョンアップ（v2.5.39）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| 試料一覧2 | cache_enabled=False の構成で、更新/再読込/再リンク後の復帰を `_reload_rows()` に統一し、キャッシュ経路を誤通過しないよう改善。 |
+| 試料一覧2 | dataset.json に subjects が無い場合でも dataset detail JSON を参照して課題番号を補完し、`grant_numbers` の join key を安定化。 |
+| 試料一覧2 | dataset 側の課題番号を優先しつつ group 関連付けも detail JSON で補完し、ローカル JSON 欠落時の一覧2表示を安定化。 |
+| テスト/ビルド | 試料一覧2 の回帰テストを追加更新し、pytest段階ゲート・pre-build・PyInstaller ビルド導線を v2.5.39 へ同期。 |
+
+## v2.5.39 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.39）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| 試料一覧2 | `sample_dedup_listing_widget.py` に `_reload_rows()` を追加し、cache_enabled=False の更新ボタン・再リンク後復帰・再読込がキャッシュ経路を通らないよう整理。 |
+| 試料一覧2 | `sample_dedup_table_records.py` で dataset detail JSON から group 関連付けと `subjects.grantNumber` を補完し、dataset.json の情報欠落時でも一覧2の join key を復元。 |
+| 試料一覧2 | `grant_numbers` は subgroup 側の複数候補より dataset 側の実課題番号を優先する単一値として扱い、一覧2の関連付けを安定化。 |
+| テスト/品質 | `test_sample_dedup_table_records.py`、`test_sample_dedup_numeric_range_filter.py`、`test_sample_dedup_widget_creation.py` を更新し、detail fallback と cache 無効時の reload 経路を回帰検証。 |
 
 ## v2.5.38 の主な更新点
 

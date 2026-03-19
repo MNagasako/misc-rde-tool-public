@@ -629,11 +629,15 @@ def purge_invalid_sample_entry(*, subgroup_id: str, sample_id: str) -> Dict[str,
     return {"removed_json": bool(removed_json), "removed_cache": bool(removed_cache)}
 
 
-def _build_dataset_grants_map() -> Dict[str, List[str]]:
+def _build_dataset_grants_map(dataset_ids: Optional[Iterable[str]] = None) -> Dict[str, List[str]]:
     """Build dataset_id -> list[grantNumber].
 
     Prefer dataset-level grant numbers. When unavailable, caller may fall back to subgroup grants.
     """
+
+    wanted_dataset_ids: Optional[Set[str]] = None
+    if dataset_ids is not None:
+        wanted_dataset_ids = {str(x).strip() for x in dataset_ids if str(x).strip()}
 
     dataset_json_path = get_dynamic_file_path("output/rde/data/dataset.json")
     payload = _load_json(dataset_json_path)
@@ -647,6 +651,8 @@ def _build_dataset_grants_map() -> Dict[str, List[str]]:
             continue
         dataset_id = _safe_str(item.get("id")).strip()
         if not dataset_id:
+            continue
+        if wanted_dataset_ids is not None and dataset_id not in wanted_dataset_ids:
             continue
         attrs = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
 
@@ -926,13 +932,21 @@ def build_sample_listing2_rows_from_files(
     """
 
     subgroup_name_by_id, subgroup_grants_by_id, _subgroup_desc_by_id = _build_subgroup_maps()
-    dataset_name_by_id, _dataset_ids_by_group = _build_dataset_maps()
-    dataset_grants_by_id = _build_dataset_grants_map()
-    usage_details = _build_sample_usage_details(dataset_name_by_id.keys(), dataset_name_by_id=dataset_name_by_id)
+    dataset_name_by_id, dataset_ids_by_group = _build_dataset_maps()
 
     wanted_subgroup_ids: Optional[Set[str]] = None
     if subgroup_ids is not None:
         wanted_subgroup_ids = {str(x).strip() for x in subgroup_ids if str(x).strip()}
+
+    relevant_dataset_ids: Set[str] = set()
+    if wanted_subgroup_ids is None:
+        relevant_dataset_ids.update(dataset_name_by_id.keys())
+    else:
+        for subgroup_id in wanted_subgroup_ids:
+            relevant_dataset_ids.update(dataset_ids_by_group.get(subgroup_id, []))
+
+    dataset_grants_by_id = _build_dataset_grants_map(relevant_dataset_ids)
+    usage_details = _build_sample_usage_details(sorted(relevant_dataset_ids), dataset_name_by_id=dataset_name_by_id)
 
     columns = get_default_columns_list2()
     rows: List[Dict[str, Any]] = []

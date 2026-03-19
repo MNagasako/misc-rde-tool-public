@@ -551,12 +551,8 @@ class SampleDedupFilterProxyModel(QSortFilterProxyModel):
         if source_model is None:
             return True
 
-        row_is_loading = self._row_is_loading(source_model, source_row)
-
         for col, (mn, mx) in (self._numeric_ranges or {}).items():
             if mn is None and mx is None:
-                continue
-            if row_is_loading:
                 continue
             if col < 0 or col >= source_model.columnCount():
                 continue
@@ -1886,7 +1882,7 @@ class SampleDedupListingWidget(QWidget):
         controls.addWidget(self._export_btn)
 
         self.reload_button = QPushButton("更新", self)
-        self.reload_button.clicked.connect(lambda: self._load_from_cache_and_refresh_if_needed(auto_fetch=True, force_refresh=True))
+        self.reload_button.clicked.connect(lambda: self._reload_rows(auto_fetch=True, force_refresh=True))
         controls.addWidget(self.reload_button)
 
         self.fetch_button = QPushButton("不足試料を取得", self)
@@ -1968,6 +1964,12 @@ class SampleDedupListingWidget(QWidget):
         self._bind_theme_refresh()
 
         self._bind_prefilter_signals()
+
+    def _reload_rows(self, *, auto_fetch: bool, force_refresh: bool = False) -> None:
+        if self._cache_enabled:
+            self._load_from_cache_and_refresh_if_needed(auto_fetch=auto_fetch, force_refresh=force_refresh)
+            return
+        self._load_without_cache_and_refresh(auto_fetch=auto_fetch)
 
     def _on_table_cell_activated(self, index: object, pos: object) -> None:
         """Handle click/double click with position (robust against viewport eventFilter issues)."""
@@ -3104,7 +3106,7 @@ class SampleDedupListingWidget(QWidget):
         self._refresh_filters_summary()
 
     def reload_data(self, auto_fetch: bool = False) -> None:
-        self._load_from_cache_and_refresh_if_needed(auto_fetch=auto_fetch, force_refresh=True)
+        self._reload_rows(auto_fetch=auto_fetch, force_refresh=True)
 
     def _load_prefilter_choices(self) -> None:
         # Role choices mimic dataset_open_logic
@@ -3227,8 +3229,8 @@ class SampleDedupListingWidget(QWidget):
     def _apply_prefilters_now(self) -> None:
         if self._suppress_prefilter_signals:
             return
-        # Do not force refresh on every change; cache is still used.
-        self._load_from_cache_and_refresh_if_needed(auto_fetch=False, force_refresh=False)
+        # cache_enabled=False の一覧2ではキャッシュを経由せず、そのまま再集計する。
+        self._reload_rows(auto_fetch=False, force_refresh=False)
 
     def _refresh_prefilter_choices(self, *, cascade_from: str) -> None:
         state = self._current_prefilter_state()
@@ -3764,7 +3766,7 @@ class SampleDedupListingWidget(QWidget):
     def _on_fetch_completed(self, message: str) -> None:
         self._hide_loading()
         self.status_label.setText(message)
-        self._load_from_cache_and_refresh_if_needed(auto_fetch=False, force_refresh=True)
+        self._reload_rows(auto_fetch=False, force_refresh=True)
 
     def resizeEvent(self, event):  # noqa: N802
         try:
