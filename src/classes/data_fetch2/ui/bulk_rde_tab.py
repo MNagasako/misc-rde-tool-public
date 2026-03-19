@@ -13,6 +13,7 @@ from threading import Lock
 import zipfile
 from typing import Any
 
+from qt_compat import QtWidgets
 from qt_compat.widgets import (
     QWidget,
     QVBoxLayout,
@@ -474,6 +475,7 @@ class DataFetch2BulkRdeTab(QWidget):
         self.current_filter_config = dict(filter_config or get_default_filter())
 
     def _build_ui(self):
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         root = QVBoxLayout(self)
 
         title = QLabel("一括取得（RDE）")
@@ -614,12 +616,15 @@ class DataFetch2BulkRdeTab(QWidget):
         self.table = QTableWidget(0, len(self.COLUMNS), self)
         self.table.setHorizontalHeaderLabels(self.COLUMNS)
         self.table.setSortingEnabled(True)
-        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+        self.table.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
+        self.table.setSizeAdjustPolicy(QtWidgets.QAbstractScrollArea.AdjustIgnored)
         self.table.setMinimumHeight(240)
+        self.table.setMinimumWidth(0)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Interactive)
-        hh.setSectionResizeMode(3, QHeaderView.Stretch)
-        hh.setSectionResizeMode(11, QHeaderView.Stretch)
+        hh.setStretchLastSection(False)
         self.table.verticalHeader().setSectionResizeMode(QHeaderView.Interactive)
         self.table.verticalHeader().setDefaultSectionSize(int(self.table.fontMetrics().height() * 1.8))
         root.addWidget(self.table, 1)
@@ -1328,7 +1333,9 @@ class DataFetch2BulkRdeTab(QWidget):
         combo.setObjectName(object_name)
         combo.setEditable(True)
         combo.setInsertPolicy(QComboBox.NoInsert)
-        combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        combo.setMinimumContentsLength(16)
         combo.addItem("")
         line_edit = combo.lineEdit()
         if line_edit is not None:
@@ -2098,6 +2105,32 @@ class DataFetch2BulkRdeTab(QWidget):
                         except Exception:
                             continue
 
+    def _saved_items_from_result(self, result: dict, rec: dict) -> list[tuple[str, dict]]:
+        saved_items: list[tuple[str, dict]] = []
+
+        saved_files = result.get("saved_files") if isinstance(result, dict) else None
+        if isinstance(saved_files, list):
+            for src in saved_files:
+                path = str(src or "").strip()
+                if path and os.path.isfile(path):
+                    saved_items.append((path, rec))
+        if saved_items:
+            return saved_items
+
+        tile_number = str(rec.get("tile_number") or "")
+        tile_name = str(rec.get("tile_name") or "")
+        safe_tile = f"{tile_number}_{tile_name}" if tile_number else tile_name
+        safe_tile = safe_tile.replace("/", "_").replace("\\", "_")
+        tile_dir = get_dynamic_file_path(
+            f"output/rde/data/dataFiles/{rec.get('grant_number', '')}/{rec.get('dataset_name', '')}/{safe_tile}"
+        )
+        if os.path.isdir(tile_dir):
+            for name in os.listdir(tile_dir):
+                src = os.path.join(tile_dir, name)
+                if os.path.isfile(src):
+                    saved_items.append((src, rec))
+        return saved_items
+
     def execute_bulk_download(self):
         self._ensure_records_ready()
         selected = self._selected_records()
@@ -2162,18 +2195,7 @@ class DataFetch2BulkRdeTab(QWidget):
             else:
                 ng += 1
 
-            tile_number = str(rec.get("tile_number") or "")
-            tile_name = str(rec.get("tile_name") or "")
-            safe_tile = f"{tile_number}_{tile_name}" if tile_number else tile_name
-            safe_tile = safe_tile.replace("/", "_").replace("\\", "_")
-            tile_dir = get_dynamic_file_path(
-                f"output/rde/data/dataFiles/{grant}/{dataset_name}/{safe_tile}"
-            )
-            if os.path.isdir(tile_dir):
-                for name in os.listdir(tile_dir):
-                    src = os.path.join(tile_dir, name)
-                    if os.path.isfile(src):
-                        saved_items.append((src, rec))
+            saved_items.extend(self._saved_items_from_result(result if isinstance(result, dict) else {}, rec))
 
             self._set_bulk_progress(idx, total, time.perf_counter() - started_at)
 

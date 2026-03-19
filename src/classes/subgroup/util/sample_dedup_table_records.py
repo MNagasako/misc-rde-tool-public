@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 _CACHE_REL_PATH = "output/rde/cache/sample_listing_cache.json"
 _CACHE_VERSION = 2
+_LISTING2_LOADING_TEXT = "読み込み中"
+_LISTING2_EMPTY_TEXT = "エントリー無し"
 
 
 def _cache_path() -> str:
@@ -1053,6 +1055,11 @@ def build_sample_listing2_rows_from_files(
 
             grant_numbers = "\n".join(sorted({x for x in grant_set if x}))
             grant_count = len({x for x in grant_set if x})
+            tile_dataset_grant_state = "loaded"
+            tile_dataset_grant_text = "\n".join([x for x in lines if x])
+            if not tile_dataset_grant_text:
+                tile_dataset_grant_state = "empty"
+                tile_dataset_grant_text = _LISTING2_EMPTY_TEXT
 
             rows.append(
                 {
@@ -1060,7 +1067,8 @@ def build_sample_listing2_rows_from_files(
                     "subgroup_id": subgroup_id,
                     "sample_name": sample_name,
                     "sample_id": sample_id,
-                    "tile_dataset_grant": "\n".join([x for x in lines if x]),
+                    "tile_dataset_grant": tile_dataset_grant_text,
+                    "tile_dataset_grant_state": tile_dataset_grant_state,
                     "tile_dataset_grant_links": links,
                     "data_entry_count": len(entry_ids_set),
                     "dataset_count": len(dataset_ids_set),
@@ -1068,6 +1076,68 @@ def build_sample_listing2_rows_from_files(
                     "grant_count": grant_count,
                     "dataset_ids": "\n".join([x for x in dataset_ids_lines if x]),
                     "data_entry_ids": "\n".join([x for x in tile_ids_lines if x]),
+                    "missing_sample": False,
+                }
+            )
+
+    return columns, rows, missing_sample_files
+
+
+def build_sample_listing2_placeholder_rows_from_files(
+    subgroup_ids: Optional[Iterable[str]] = None,
+) -> Tuple[List[SampleDedupColumn], List[Dict[str, Any]], List[str]]:
+    """Build lightweight placeholder rows for 一覧2 while tile usage is loading."""
+
+    subgroup_name_by_id, subgroup_grants_by_id, _subgroup_desc_by_id = _build_subgroup_maps()
+
+    wanted_subgroup_ids: Optional[Set[str]] = None
+    if subgroup_ids is not None:
+        wanted_subgroup_ids = {str(x).strip() for x in subgroup_ids if str(x).strip()}
+
+    columns = get_default_columns_list2()
+    rows: List[Dict[str, Any]] = []
+    missing_sample_files: List[str] = []
+
+    for subgroup_id, subgroup_name in subgroup_name_by_id.items():
+        if wanted_subgroup_ids is not None and subgroup_id not in wanted_subgroup_ids:
+            continue
+
+        subgroup_grant_numbers = subgroup_grants_by_id.get(subgroup_id, "")
+        subgroup_grant_list = [x.strip() for x in str(subgroup_grant_numbers).splitlines() if x.strip()]
+
+        payload = _load_sample_payload(subgroup_id)
+        if payload is None:
+            missing_sample_files.append(subgroup_id)
+            continue
+
+        data_items = payload.get("data") if isinstance(payload.get("data"), list) else []
+        if not data_items:
+            continue
+
+        for item in data_items:
+            if not isinstance(item, dict):
+                continue
+            sample_id = _safe_str(item.get("id")).strip()
+            attrs = item.get("attributes") if isinstance(item.get("attributes"), dict) else {}
+            names = _safe_list(attrs.get("names")) if attrs else []
+            names = [str(x) for x in names if _safe_str(x).strip()]
+            sample_name = names[0] if names else ""
+
+            rows.append(
+                {
+                    "subgroup_name": subgroup_name,
+                    "subgroup_id": subgroup_id,
+                    "sample_name": sample_name,
+                    "sample_id": sample_id,
+                    "tile_dataset_grant": _LISTING2_LOADING_TEXT,
+                    "tile_dataset_grant_state": "loading",
+                    "tile_dataset_grant_links": [],
+                    "data_entry_count": 0,
+                    "dataset_count": 0,
+                    "grant_numbers": subgroup_grant_numbers,
+                    "grant_count": len({x for x in subgroup_grant_list if x}),
+                    "dataset_ids": "",
+                    "data_entry_ids": "",
                     "missing_sample": False,
                 }
             )

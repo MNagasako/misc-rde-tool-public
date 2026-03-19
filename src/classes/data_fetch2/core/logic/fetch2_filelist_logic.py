@@ -516,6 +516,7 @@ def _process_data_entry_for_parallel(bearer_token, data_entry, save_dir_base, gr
                             if entry.get("attributes", {}).get("fileType") == "MAIN_IMAGE"]
         
         download_count = 0
+        saved_files: list[str] = []
         max_download = file_filter_config.get("max_download_count", 0)
         
         for dataentry in filtered_files:
@@ -554,13 +555,15 @@ def _process_data_entry_for_parallel(bearer_token, data_entry, save_dir_base, gr
             download_success = download_file_for_data_id(entry_data_id, bearer_token, save_dir_base_full, file_name, grantNumber, dataset_name, tile_name, tile_number, parent)
             if download_success:
                 download_count += 1
+                if isinstance(download_success, str):
+                    saved_files.append(download_success)
                 
             # ファイル単位のプログレス通知
             if file_progress_callback:
                 file_progress_callback(file_name)
         
         logger.info(f"データエントリ処理完了: data_id={data_id}, ファイル数: {download_count}")
-        return {"status": "success", "downloaded_count": download_count}
+        return {"status": "success", "downloaded_count": download_count, "saved_files": saved_files}
         
     except Exception as e:
         error_msg = f"データエントリ処理中にエラー (data_id: {data_id}): {e}"

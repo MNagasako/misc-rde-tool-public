@@ -53,6 +53,7 @@ from config.site_rde import URLS
 from classes.subgroup.util.sample_dedup_table_records import (
     SampleDedupColumn,
     build_sample_dedup_rows_from_files,
+    build_sample_listing2_placeholder_rows_from_files,
     fetch_samples_for_subgroups,
     get_default_columns,
     compute_sample_listing_sources_signature,
@@ -278,6 +279,34 @@ class SampleDedupTableModel(QAbstractTableModel):
     def get_rows(self) -> List[Dict[str, Any]]:
         return self._rows
 
+    def _tile_dataset_grant_state(self, row: Dict[str, Any]) -> str:
+        state = _safe_str(row.get("tile_dataset_grant_state")).strip()
+        if state:
+            return state
+
+        text = _safe_str(row.get("tile_dataset_grant")).strip()
+        if text:
+            return "loaded"
+
+        missing_sample = bool(row.get("missing_sample"))
+        if missing_sample:
+            return "empty"
+
+        # 一覧2では空欄のまま後続更新される経路があるため、空文字は loading 扱いに寄せる。
+        return "loading"
+
+    def _tile_dataset_grant_text(self, row: Dict[str, Any]) -> str:
+        text = _safe_str(row.get("tile_dataset_grant"))
+        if text.strip():
+            return text
+
+        state = self._tile_dataset_grant_state(row)
+        if state == "empty":
+            return "エントリー無し"
+        if state == "loading":
+            return "読み込み中"
+        return text
+
     def update_rows_partially(self, new_rows: List[Dict[str, Any]]) -> None:
         """Update rows in-place when possible to keep UI responsive."""
         if not isinstance(new_rows, list):
@@ -358,6 +387,8 @@ class SampleDedupTableModel(QAbstractTableModel):
 
         if role == Qt.DisplayRole:
             value = raw_value
+            if col.key == "tile_dataset_grant":
+                return self._tile_dataset_grant_text(row)
             if col.key == "sample_edit":
                 return "試料編集" if _safe_str(row.get("sample_id")).strip() else ""
             if isinstance(value, bool):
@@ -429,7 +460,18 @@ class SampleDedupTableModel(QAbstractTableModel):
                 return derived
             return None
 
+        if role == Qt.UserRole + 1:
+            if col.key == "tile_dataset_grant":
+                return self._tile_dataset_grant_state(row)
+            return None
+
         if role == Qt.ForegroundRole:
+            if col.key == "tile_dataset_grant":
+                state = self._tile_dataset_grant_state(row)
+                if state == "loading":
+                    return QBrush(get_color(ThemeKey.TEXT_INFO))
+                if state == "empty":
+                    return QBrush(get_color(ThemeKey.TEXT_MUTED))
             # Render UUID cells as links.
             if col.key in {"subgroup_id", "dataset_ids", "data_entry_ids", "sample_id"}:
                 url = self.data(index, Qt.UserRole)
@@ -437,6 +479,12 @@ class SampleDedupTableModel(QAbstractTableModel):
                     return QBrush(get_color(ThemeKey.TEXT_LINK))
 
         if role == Qt.FontRole:
+            if col.key == "tile_dataset_grant":
+                state = self._tile_dataset_grant_state(row)
+                if state in {"loading", "empty"}:
+                    f = QFont()
+                    f.setItalic(True)
+                    return f
             if col.key in {"subgroup_id", "dataset_ids", "data_entry_ids", "sample_id"}:
                 url = self.data(index, Qt.UserRole)
                 if (isinstance(url, str) and url) or (isinstance(url, list) and any(isinstance(x, str) and x for x in url)):
@@ -486,13 +534,29 @@ class SampleDedupFilterProxyModel(QSortFilterProxyModel):
         self._numeric_ranges[col] = (mn, mx)
         self.invalidateFilter()
 
+    def _row_is_loading(self, source_model: object, source_row: int) -> bool:
+        try:
+            rows = getattr(source_model, "_rows", None)
+            if not isinstance(rows, list) or not (0 <= int(source_row) < len(rows)):
+                return False
+            row = rows[int(source_row)]
+            if not isinstance(row, dict):
+                return False
+            return _safe_str(row.get("tile_dataset_grant_state")).strip() == "loading"
+        except Exception:
+            return False
+
     def filterAcceptsRow(self, source_row: int, source_parent: QModelIndex) -> bool:  # noqa: N802
         source_model = self.sourceModel()
         if source_model is None:
             return True
 
+        row_is_loading = self._row_is_loading(source_model, source_row)
+
         for col, (mn, mx) in (self._numeric_ranges or {}).items():
             if mn is None and mx is None:
+                continue
+            if row_is_loading:
                 continue
             if col < 0 or col >= source_model.columnCount():
                 continue
@@ -737,6 +801,7 @@ class MultiLineCompositeLinkDelegate(QStyledItemDelegate):
         text = str(index.data(Qt.DisplayRole) or "")
         if not text:
             return super().paint(painter, option, index)
+        cell_state = _safe_str(index.data(Qt.UserRole + 1)).strip()
 
         # Keep line splitting consistent with hover hit testing (which ignores empty lines).
         lines = [x for x in text.splitlines() if x]
@@ -907,14 +972,28 @@ class MultiLineCompositeLinkDelegate(QStyledItemDelegate):
                 dataset_color = selected_text
                 grant_color = selected_text
                 sep_color = selected_text
+                state_color = selected_text
             else:
                 tile_color = get_qcolor(ThemeKey.TEXT_LINK)
                 dataset_color = get_qcolor(ThemeKey.TEXT_INFO)
                 grant_color = get_qcolor(ThemeKey.TEXT_WARNING)
                 sep_color = get_qcolor(ThemeKey.TEXT_SECONDARY)
+                if cell_state == "loading":
+                    state_color = get_qcolor(ThemeKey.TEXT_INFO)
+                elif cell_state == "empty":
+                    state_color = get_qcolor(ThemeKey.TEXT_MUTED)
+                else:
+                    state_color = get_qcolor(ThemeKey.TEXT_PRIMARY)
 
             painter.save()
             painter.setClipRect(rect)
+
+            font = painter.font()
+            try:
+                font.setItalic(cell_state in {"loading", "empty"})
+                painter.setFont(font)
+            except Exception:
+                pass
 
             y = int(rect.top())
             for i, raw in enumerate(lines):
@@ -957,6 +1036,11 @@ class MultiLineCompositeLinkDelegate(QStyledItemDelegate):
                             pass
                     except Exception:
                         pass
+                if cell_state in {"loading", "empty"}:
+                    painter.setPen(state_color)
+                    painter.drawText(int(rect.left()), y + fm.ascent(), raw)
+                    y += line_h
+                    continue
                 tile, dataset, grant = self._split_line(raw)
                 x = int(rect.left())
 
@@ -2224,6 +2308,7 @@ class SampleDedupListingWidget(QWidget):
     def _rebuild_column_filters(self) -> None:
         self._filter_edits_by_col_index.clear()
         self._range_spins_by_col_index.clear()
+        is_listing2 = self._multiline_link_column_key == "tile_dataset_grant"
         # Dispose old blocks to avoid orphaned widgets when columns change.
         for block in self._filter_blocks_by_col_index.values():
             try:
@@ -2258,7 +2343,10 @@ class SampleDedupListingWidget(QWidget):
                     sp.setMinimum(-1)
                     sp.setMaximum(999999)
                     sp.setSpecialValueText("なし")
-                    sp.setValue(-1)
+                    if is_listing2 and col.key == "data_entry_count" and suffix == "min":
+                        sp.setValue(1)
+                    else:
+                        sp.setValue(-1)
                     sp.setMinimumWidth(90)
 
                 sep = QLabel("～", block)
@@ -2275,6 +2363,8 @@ class SampleDedupListingWidget(QWidget):
                 block_layout.addWidget(mx)
                 block_layout.addStretch(1)
                 self._range_spins_by_col_index[col_index] = (mn, mx)
+                if is_listing2 and col.key == "data_entry_count":
+                    self._filter_proxy.set_numeric_range(col_index, 1, None)
             else:
                 edit = QLineEdit(block)
                 edit.setObjectName(f"sample_dedup_filter_{col.key}")
@@ -3468,6 +3558,7 @@ class SampleDedupListingWidget(QWidget):
         if self._refresh_thread is not None and self._refresh_thread.isRunning():
             return
 
+        self._seed_loading_rows_if_needed(subgroup_ids)
         self._show_loading("試料一覧を更新中...")
 
         class _RefreshThread(QThread):
@@ -3529,9 +3620,21 @@ class SampleDedupListingWidget(QWidget):
         else:
             new_rows = []
 
+        has_loading_placeholders = False
+        try:
+            has_loading_placeholders = any(
+                isinstance(row, dict) and _safe_str(row.get("tile_dataset_grant_state")).strip() == "loading"
+                for row in self._model.get_rows()
+            )
+        except Exception:
+            has_loading_placeholders = False
+
         # Update model
         self._model.set_columns(self._columns)
-        self._model.update_rows_partially(new_rows)
+        if has_loading_placeholders:
+            self._model.set_rows(new_rows)
+        else:
+            self._model.update_rows_partially(new_rows)
         self._rebuild_column_filters()
         self._apply_columns()
 
@@ -3562,6 +3665,24 @@ class SampleDedupListingWidget(QWidget):
             sources_signature=signature,
         )
         save_sample_listing_cache(merged)
+
+    def _seed_loading_rows_if_needed(self, subgroup_ids: List[str] | None) -> None:
+        if self._multiline_link_column_key != "tile_dataset_grant":
+            return
+        try:
+            columns, rows, _missing = build_sample_listing2_placeholder_rows_from_files(subgroup_ids)
+        except Exception:
+            return
+        if not isinstance(columns, list) or not isinstance(rows, list) or not rows:
+            return
+        self._columns = [c for c in columns if isinstance(c, SampleDedupColumn)]
+        placeholder_rows = [r for r in rows if isinstance(r, dict)]
+        if not self._columns or not placeholder_rows:
+            return
+        self._model.set_columns(self._columns)
+        self._model.set_rows(placeholder_rows)
+        self._apply_columns()
+        self._schedule_counts_refresh()
 
     def _export(self, kind: str) -> None:
         kind = str(kind or "").strip().lower()
