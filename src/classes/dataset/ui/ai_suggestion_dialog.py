@@ -841,10 +841,13 @@ class AISuggestionDialog(QDialog):
 
         current_index = self.tab_widget.currentIndex()
         saved_size = self.config_manager.get(self._tab_size_config_key(self.tab_widget.currentIndex()), None)
-        if isinstance(saved_size, dict):
-            width = int(saved_size.get('width', self.width()))
-            height = int(saved_size.get('height', self.height()))
-        else:
+        try:
+            if isinstance(saved_size, dict):
+                width = int(saved_size.get('width', self.width()))
+                height = int(saved_size.get('height', self.height()))
+            else:
+                width, height = self._initial_dialog_size_for_screen(current_index)
+        except Exception:
             width, height = self._initial_dialog_size_for_screen(current_index)
 
         clamped_width, clamped_height, _, _ = self._clamp_geometry(width, height, self.x(), self.y())

@@ -20,8 +20,21 @@ from classes.ai.util.generation_params import (
     normalize_ai_config_inplace,
     selected_generation_params,
 )
+from classes.ai.util.local_llm import (
+    DEFAULT_OLLAMA_BASE_URL,
+    LOCAL_LLM_PROVIDER_LM_STUDIO,
+    LOCAL_LLM_PROVIDER_OLLAMA,
+    build_local_llm_headers,
+    get_local_llm_chat_url,
+    get_local_llm_provider_entries,
+    get_local_llm_provider_label,
+    get_local_llm_provider_type,
+    uses_ollama_native_generate,
+)
 
 logger = logging.getLogger("RDE_AI")
+
+LOCAL_LLM_PROVIDER_ALIASES = {LOCAL_LLM_PROVIDER_OLLAMA, LOCAL_LLM_PROVIDER_LM_STUDIO}
 
 class AIManager:
     """AI機能の統合管理クラス"""
@@ -65,7 +78,13 @@ class AIManager:
                     "vertex_project_id": "",
                     "vertex_location": "asia-northeast1",
                 },
-                "local_llm": {"enabled": False, "base_url": "http://localhost:11434/v1", "models": ["llama3.2:3b"]}
+                "local_llm": {
+                    "enabled": False,
+                    "provider_type": "ollama",
+                    "api_key": "",
+                    "base_url": DEFAULT_OLLAMA_BASE_URL,
+                    "models": ["llama3.2:3b"],
+                }
             },
             "default_provider": "gemini",
             "timeout": 30,
@@ -89,22 +108,46 @@ class AIManager:
         if value > 5:
             value = 5
         return value
+
+    def _resolve_provider(self, provider: str) -> tuple[str, str | None]:
+        normalized = str(provider or "").strip().lower()
+        if normalized in LOCAL_LLM_PROVIDER_ALIASES:
+            return "local_llm", normalized
+        return normalized, None
+
+    def _get_provider_config(self, provider: str) -> Dict[str, Any]:
+        resolved_provider, _local_override = self._resolve_provider(provider)
+        return self.config.get("ai_providers", {}).get(resolved_provider, {})
+
+    def get_available_provider_entries(self) -> List[Dict[str, str]]:
+        entries: List[Dict[str, str]] = []
+        providers = self.config.get("ai_providers", {})
+        for provider, provider_config in providers.items():
+            if not provider_config.get("enabled", False):
+                continue
+            if provider == "local_llm":
+                entries.extend(get_local_llm_provider_entries(provider_config))
+            else:
+                entries.append({
+                    "id": provider,
+                    "display_name": provider,
+                    "host": "",
+                    "provider_type": provider,
+                })
+        return entries
     
     def get_available_providers(self) -> List[str]:
         """利用可能なAIプロバイダーのリストを取得"""
-        providers = []
-        for provider, config in self.config["ai_providers"].items():
-            if config.get("enabled", False):
-                providers.append(provider)
-        return providers
+        return [entry["id"] for entry in self.get_available_provider_entries()]
     
     def get_models_for_provider(self, provider: str) -> List[str]:
         """指定されたプロバイダーのモデル一覧を取得"""
-        if provider in self.config["ai_providers"]:
-            provider_config = self.config["ai_providers"][provider]
+        resolved_provider, _local_override = self._resolve_provider(provider)
+        if resolved_provider in self.config["ai_providers"]:
+            provider_config = self.config["ai_providers"][resolved_provider]
 
             # Geminiは認証方式（APIキー / Vertex SA）ごとにモデル一覧を分離できる
-            if provider == 'gemini':
+            if resolved_provider == 'gemini':
                 try:
                     auth_mode = (provider_config.get('auth_mode') or 'api_key').strip().lower()
                 except Exception:
@@ -122,14 +165,34 @@ class AIManager:
     def get_default_provider(self) -> str:
         """デフォルトプロバイダーを取得"""
         return self.config.get("default_provider", "openai")
+
+    def get_default_provider_for_ui(self) -> str:
+        default_provider = self.get_default_provider()
+        if default_provider == "local_llm":
+            provider_config = self.config.get("ai_providers", {}).get("local_llm", {})
+            return get_local_llm_provider_type(provider_config)
+        return default_provider
     
     def get_default_model(self, provider: str) -> str:
         """指定されたプロバイダーのデフォルトモデルを取得"""
-        if provider in self.config["ai_providers"]:
-            provider_config = self.config["ai_providers"][provider]
+        resolved_provider, _local_override = self._resolve_provider(provider)
+        if resolved_provider in self.config["ai_providers"]:
+            provider_config = self.config["ai_providers"][resolved_provider]
+            models = self.get_models_for_provider(provider)
+
+            def _normalize_selected_model(value: str) -> str:
+                selected = str(value or "").strip()
+                if not selected:
+                    return ""
+                if selected in models:
+                    return selected
+                for model_name in models:
+                    if selected.startswith(f"{model_name} ("):
+                        return model_name
+                return selected
 
             # Geminiは認証方式（APIキー / Vertex SA）ごとにデフォルトモデルを分離できる
-            if provider == 'gemini':
+            if resolved_provider == 'gemini':
                 try:
                     auth_mode = (provider_config.get('auth_mode') or 'api_key').strip().lower()
                 except Exception:
@@ -139,23 +202,23 @@ class AIManager:
                 if isinstance(default_by_auth, dict):
                     v = default_by_auth.get(auth_mode)
                     if isinstance(v, str) and v.strip():
-                        return v.strip()
+                        return _normalize_selected_model(v)
 
             default_model = provider_config.get("default_model", "")
             
             # default_modelが設定されていない場合は最初のモデルを返す
             if not default_model:
-                models = self.get_models_for_provider(provider)
                 if models:
                     return models[0]
             
-            return default_model
+            return _normalize_selected_model(default_model)
         return ""
     
     def send_prompt(self, prompt: str, provider: str, model: str) -> Dict[str, Any]:
         """プロンプトをAIに送信して応答を取得"""
         import datetime as _dt
 
+        provider, local_provider_override = self._resolve_provider(provider)
         try:
             from classes.core.offline_mode import (
                 validate_ai_access_or_raise,
@@ -234,7 +297,7 @@ class AIManager:
                 if provider == "openai":
                     result = self._send_openai_request(prompt, model)
                 elif provider == "local_llm":
-                    result = self._send_local_llm_request(prompt, model)
+                    result = self._send_local_llm_request(prompt, model, provider_type_override=local_provider_override)
                 else:
                     result = {"success": False, "error": f"未対応のプロバイダー: {provider}"}
             except Exception as e:
@@ -983,24 +1046,20 @@ class AIManager:
             },
         }
     
-    def _send_local_llm_request(self, prompt: str, model: str) -> Dict[str, Any]:
+    def _send_local_llm_request(self, prompt: str, model: str, provider_type_override: str | None = None) -> Dict[str, Any]:
         """ローカルLLM（Ollama等）にリクエストを送信"""        
-        config = self.config["ai_providers"]["local_llm"]
-        base_url = config.get("base_url", "http://localhost:11434/api/generate")
-        
-        # Ollama独自APIの場合は /api/generate エンドポイントを直接使用
-        if "/api/generate" in base_url:
-            url = base_url
-        else:
-            # OpenAI互換APIの場合
-            url = f"{base_url}/chat/completions"
-        
-        headers = {
-            "Content-Type": "application/json"
-        }
+        config = copy.deepcopy(self.config["ai_providers"]["local_llm"])
+        if provider_type_override in LOCAL_LLM_PROVIDER_ALIASES:
+            config["provider_type"] = provider_type_override
+        url = get_local_llm_chat_url(config)
+        provider_label = get_local_llm_provider_label(config)
+        provider_type = get_local_llm_provider_type(config)
+        use_native_ollama = uses_ollama_native_generate(config)
+
+        headers = build_local_llm_headers(config)
         
         # Ollama独自API形式のリクエスト
-        if "/api/generate" in base_url:
+        if use_native_ollama:
             data = {
                 "model": model,
                 "prompt": prompt,
@@ -1030,16 +1089,18 @@ class AIManager:
             data["stream"] = False
 
         # 表示/デバッグ用: 本文以外のリクエストパラメータ
-        if "/api/generate" in base_url:
+        if use_native_ollama:
             request_params: Dict[str, Any] = {k: v for k, v in data.items() if k != "prompt"}
         else:
             request_params = {k: v for k, v in data.items() if k != "messages"}
             request_params["messages_count"] = len(data.get("messages", []) or [])
+        request_params["provider_type"] = provider_type
+        request_params["endpoint"] = url
         
         start_time = time.time()
         try:
             # ローカルLLMの場合はタイムアウトを5分（300秒）に設定
-            local_timeout = 300 if "/api/generate" in base_url else self.config.get("timeout", 120)
+            local_timeout = 300 if use_native_ollama else self.config.get("timeout", 120)
             
             response = self.session.post(
                 url,
@@ -1054,7 +1115,7 @@ class AIManager:
                 
                 try:
                     # Ollama独自API形式のレスポンス処理
-                    if "/api/generate" in base_url:
+                    if use_native_ollama:
                         content = result.get("response", "")
                         if not content:
                             logger.warning(f"Local LLM APIから空の応答を受信: {result}")
@@ -1115,6 +1176,7 @@ class AIManager:
                             "tokens_used": tokens_used,
                             "response_time": response_time,
                             "model": model,
+                            "provider_type": provider_type,
                         },
                     }
                 except (KeyError, IndexError, TypeError) as e:
@@ -1131,12 +1193,13 @@ class AIManager:
                             "status_code": response.status_code,
                             "response_time": response_time,
                             "model": model,
+                            "provider_type": provider_type,
                         },
                     }
             else:
                 return {
                     "success": False, 
-                    "error": f"ローカルLLM エラー: {response.status_code} - {response.text}",
+                    "error": f"{provider_label} エラー: {response.status_code} - {response.text}",
                     "model": model,
                     "response_time": response_time,
                     "request_params": request_params,
@@ -1144,19 +1207,21 @@ class AIManager:
                         "status_code": response.status_code,
                         "response_time": response_time,
                         "model": model,
+                        "provider_type": provider_type,
                     },
                 }
         except _requests_types.exceptions.ConnectionError:
             response_time = time.time() - start_time
             return {
                 "success": False, 
-                "error": "ローカルLLMサーバーに接続できません。Ollama等が起動しているか確認してください。",
+                "error": f"{provider_label} サーバーに接続できません。{provider_label} が起動しているか確認してください。",
                 "model": model,
                 "response_time": response_time,
                 "request_params": request_params,
                 "response_params": {
                     "response_time": response_time,
                     "model": model,
+                    "provider_type": provider_type,
                 },
             }
     

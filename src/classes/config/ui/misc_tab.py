@@ -272,7 +272,7 @@ class MiscTab(QWidget):
 
         info_label = QLabel(
             "メインメニューの一部ボタンを表示/非表示にできます。\n"
-            "※『データ取得2』『AIテスト2』は常時表示です。"
+            "※『データ取得2』『AI』は常時表示です。"
         )
         info_label.setWordWrap(True)
         info_label.setStyleSheet(

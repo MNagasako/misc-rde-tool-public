@@ -6,11 +6,22 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.39）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| 試料一覧2 | cache_enabled=False の構成で、更新/再読込/再リンク後の復帰を `_reload_rows()` に統一し、キャッシュ経路を誤通過しないよう改善。 |
-| 試料一覧2 | dataset.json に subjects が無い場合でも dataset detail JSON を参照して課題番号を補完し、`grant_numbers` の join key を安定化。 |
-| 試料一覧2 | dataset 側の課題番号を優先しつつ group 関連付けも detail JSON で補完し、ローカル JSON 欠落時の一覧2表示を安定化。 |
-| テスト/ビルド | 試料一覧2 の回帰テストを追加更新し、pytest段階ゲート・pre-build・PyInstaller ビルド導線を v2.5.39 へ同期。 |
+| リリース/品質 | リビジョンアップ（v2.5.40）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| AI設定 | 生成パラメータテーブルを追加し、Temperature / Top-P / Top-K / Max Output Tokens / Stop Sequences / Candidate Count / Presence / Frequency Penalty を「カスタム使用」で個別制御可能に整理。 |
+| AI設定 | 問い合わせ最大試行回数を設定可能にし、OpenAI / ローカルLLM の失敗時リトライ回数を共通制御。 |
+| ローカルLLM | Ollama / LM Studio を別ランタイムとして扱い、host / protocol / port / base_path と表示名を分離して管理。 |
+| テスト/ビルド | AI設定・ローカルLLM・AIテストUI の回帰テストを追加更新し、pytest段階ゲート・pre-build・PyInstaller ビルド導線を v2.5.40 へ同期。 |
+
+## v2.5.40 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.40）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| AI設定 | `ai_settings_widget.py` に生成パラメータテーブルを追加し、各パラメータをカスタム送信するかどうかを UI で切り替えられるよう改善。 |
+| AI設定 | 問い合わせ最大試行回数を追加し、`ai_manager.py` で OpenAI / ローカルLLM の共通リトライ回数を 1〜5 回で制御。 |
+| ローカルLLM | `local_llm.py` で Ollama / LM Studio の既定 endpoint を分離し、host 解決・OpenAI互換URL生成・provider 表示名を整理。 |
+| AIテスト | `ui_ai_test.py` で初期化中 progress 表示とローカルランタイム名の反映を追加し、AI設定反映までの状態を可視化。 |
+| テスト/品質 | `test_ai_manager_request_retry_openai_local.py`、`test_local_llm_endpoint_parts.py`、`test_local_llm_lm_studio_support.py`、`test_ai_settings_provider_collapse.py`、`test_ai_test_widget_initial_loading.py` を追加・更新し、再試行・URL解決・UI状態を回帰検証。 |
 
 ## v2.5.39 の主な更新点
 

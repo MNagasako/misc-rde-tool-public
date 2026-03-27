@@ -278,7 +278,7 @@ class AITestWidget:
             pass
         try:
             if hasattr(self, 'ai_progress_label') and self.ai_progress_label:
-                self.ai_progress_label.setText('AIテスト2を初期化中...')
+                self.ai_progress_label.setText('AIを初期化中...')
                 self.ai_progress_label.setVisible(True)
         except Exception:
             pass
@@ -1527,11 +1527,12 @@ class AITestWidget:
                         current_count = self.ai_provider_combo.count()
                         logger.debug("ai_provider_combo current count: %s", current_count)
                         
-                        providers = self.ai_manager.get_available_providers()
-                        logger.debug("取得したプロバイダー一覧: %s", providers)
+                        provider_entries = self.ai_manager.get_available_provider_entries()
+                        logger.debug("取得したプロバイダー一覧: %s", provider_entries)
                         
-                        for provider_id in providers:
-                            display_name = provider_id.capitalize()  # プロバイダー名を表示用にフォーマット
+                        for entry in provider_entries:
+                            provider_id = entry.get("id")
+                            display_name = entry.get("display_name") or provider_id
                             self.ai_provider_combo.addItem(display_name, provider_id)
                             self._debug_print(f"[DEBUG] プロバイダー追加: {display_name} ({provider_id})")
                             
@@ -1557,7 +1558,7 @@ class AITestWidget:
             
             # デフォルトプロバイダーを設定
             if self.ai_provider_combo.count() > 1:
-                default_provider = self.ai_manager.get_default_provider()
+                default_provider = self.ai_manager.get_default_provider_for_ui()
                 self._debug_print(f"[DEBUG] デフォルトプロバイダー検索: {default_provider}")
                 # デフォルトプロバイダーがリストにあるかチェック
                 default_index = -1
@@ -1587,9 +1588,9 @@ class AITestWidget:
             
             # デフォルト設定表示ラベルを更新
             if hasattr(self, 'default_ai_label'):
-                default_provider = self.ai_manager.get_default_provider()
+                default_provider = self.ai_manager.get_default_provider_for_ui()
                 default_model = self.ai_manager.get_default_model(default_provider)
-                self.default_ai_label.setText(f"💡 デフォルト: {default_provider.upper()} / {default_model}")
+                self.default_ai_label.setText(f"💡 デフォルト: {default_provider} / {default_model}")
                 self.default_ai_label.setToolTip(f"グローバル設定のデフォルトAI\nプロバイダー: {default_provider}\nモデル: {default_model}")
                 
         except Exception as e:

@@ -1024,7 +1024,7 @@ class UIController(UIControllerCore):
         )
 
         self.menu_buttons['ai_test2'] = self.create_auto_resize_button(
-            'AIテスト2', button_width, button_height, base_inactive_style
+            'AI', button_width, button_height, base_inactive_style
         )
         self.menu_buttons['ai_test2'].clicked.connect(
             lambda: self.open_ai_extension_dialog_from_menu()
