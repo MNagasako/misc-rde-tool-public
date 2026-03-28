@@ -22,8 +22,9 @@ from qt_compat.widgets import (
 from qt_compat.core import Qt, Signal, QThread
 from classes.theme import get_color, ThemeKey
 from classes.ai.core.ai_manager import AIManager
+from classes.ai.util.prompt_assembly import log_prompt_request_completion
 from classes.dataset.util.dataset_context_collector import get_dataset_context_collector
-from classes.dataset.util.ai_extension_helper import load_prompt_file, format_prompt_with_context
+from classes.dataset.util.ai_extension_helper import load_prompt_file, format_prompt_with_context_details
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -75,9 +76,10 @@ class TagSuggestionRequestThread(QThread):
     result_ready = Signal(object)
     error_occurred = Signal(str)
 
-    def __init__(self, prompt: str):
+    def __init__(self, prompt: str, request_meta=None):
         super().__init__()
         self.prompt = prompt
+        self.request_meta = request_meta or {}
 
     def run(self):
         try:
@@ -92,11 +94,13 @@ class TagSuggestionRequestThread(QThread):
 
             ai_manager = AIManager()
             result = ai_manager.send_prompt(self.prompt, provider, model)
+            log_prompt_request_completion(self.request_meta, result=result)
             if result.get('success', False):
                 self.result_ready.emit(result)
             else:
                 self.error_occurred.emit(result.get('error', '不明なエラー'))
         except Exception as e:
+            log_prompt_request_completion(self.request_meta, error=str(e))
             self.error_occurred.emit(str(e))
 
 
@@ -473,8 +477,16 @@ class TagBuilderDialog(QDialog):
             QMessageBox.warning(self, "AI提案", f"データセット情報の収集に失敗しました:\n{e}")
             return
 
-        prompt = format_prompt_with_context(template, full_context)
+        prompt_result = format_prompt_with_context_details(
+            template,
+            full_context,
+            feature_id='json_suggest_tag_rde',
+            template_name='json_suggest_tag_rde',
+            template_path='input/ai/prompts/json/json_suggest_tag_rde.txt',
+        )
+        prompt = prompt_result.prompt
         self._last_ai_prompt = prompt
+        self._last_ai_prompt_diag = prompt_result.diagnostics
         self._last_ai_response_text = ""
         self.ai_prompt_button.setEnabled(bool(self._last_ai_prompt.strip()))
         self.ai_response_button.setEnabled(False)
@@ -484,7 +496,7 @@ class TagBuilderDialog(QDialog):
         self.ai_apply_all_button.setEnabled(False)
         self.ai_progress.setVisible(True)
 
-        self._ai_thread = TagSuggestionRequestThread(prompt)
+        self._ai_thread = TagSuggestionRequestThread(prompt, request_meta=self._last_ai_prompt_diag)
         self._ai_thread.result_ready.connect(self._on_ai_result_ready)
         self._ai_thread.error_occurred.connect(self._on_ai_error)
         self._ai_thread.finished.connect(self._on_ai_finished)

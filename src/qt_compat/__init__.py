@@ -18,8 +18,24 @@ PyQt5の依存を完全に削除し、PySide6のみで動作します。
 
 import sys
 import logging
+import os
 
 logger = logging.getLogger(__name__)
+
+
+def _append_env_flag(name: str, flag: str) -> None:
+    """環境変数に Chromium/Qt の起動フラグを重複なく追加する。"""
+    current = (os.environ.get(name) or "").strip()
+    parts = [part for part in current.split() if part]
+    if flag not in parts:
+        parts.append(flag)
+        os.environ[name] = " ".join(parts)
+
+
+def _configure_webengine_logging_env() -> None:
+    """QtWebEngine/Chromium の既知ノイズログを抑制する。"""
+    _append_env_flag('QTWEBENGINE_CHROMIUM_FLAGS', '--disable-logging')
+    _append_env_flag('QTWEBENGINE_CHROMIUM_FLAGS', '--log-level=3')
 
 # PySide6のインポート（必須）
 try:
@@ -58,8 +74,9 @@ def initialize_webengine():
     Returns:
         bool: 初期化が成功した場合True
     """
-    import os
     from config.common import get_static_resource_path
+
+    _configure_webengine_logging_env()
     
     # PyInstallerバイナリ実行時のQt設定
     if getattr(sys, 'frozen', False):

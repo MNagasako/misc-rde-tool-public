@@ -21,6 +21,7 @@ class AIExtensionConfigManager:
     _DATASET_DESC_PROMPT_BUTTON_ID_KEY = "dataset_description_ai_proposal_prompt_button_id"
     _DATASET_QUICK_AI_PROMPT_BUTTON_ID_KEY = "dataset_quick_ai_prompt_button_id"
     _DATASET_AI_CHECK_PROMPT_BUTTON_ID_KEY = "dataset_ai_check_prompt_button_id"
+    _PROMPT_ASSEMBLY_MODE_KEY = "prompt_assembly_mode"
 
     def __init__(self, config_data: Optional[Dict[str, Any]] = None):
         self._config_data = copy.deepcopy(config_data) if config_data else load_ai_extension_config()
@@ -41,6 +42,20 @@ class AIExtensionConfigManager:
                 cloned['output_format'] = 'text'
             if 'target_kind' not in cloned:
                 cloned['target_kind'] = infer_ai_suggest_target_kind(cloned)
+            if cloned.get('prompt_assembly_mode') not in {'full_embed', 'filtered_embed'}:
+                cloned['prompt_assembly_mode'] = 'full_embed'
+            source_overrides = cloned.get('prompt_assembly_sources')
+            if not isinstance(source_overrides, dict):
+                source_overrides = {}
+            normalized_sources = {}
+            for placeholder, override in source_overrides.items():
+                if not isinstance(override, dict):
+                    continue
+                mode = override.get('mode')
+                normalized_sources[placeholder] = {
+                    'mode': mode if mode in {'full_embed', 'filtered_embed'} else 'full_embed'
+                }
+            cloned['prompt_assembly_sources'] = normalized_sources
             normalized.append(cloned)
         return normalized
 
@@ -135,6 +150,8 @@ class AIExtensionConfigManager:
             'icon': base.get('icon') or '🤖',
             'category': base.get('category') or 'カスタム',
             'output_format': base.get('output_format') or 'text',
+            'prompt_assembly_mode': base.get('prompt_assembly_mode') or 'full_embed',
+            'prompt_assembly_sources': copy.deepcopy(base.get('prompt_assembly_sources') or {}),
         })
         base['allow_delete'] = True
         self._buttons.append(base)

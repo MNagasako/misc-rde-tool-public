@@ -28,6 +28,69 @@ from config.common import get_dynamic_file_path
 # ロガー設定
 logger = logging.getLogger(__name__)
 
+
+def _format_prompt_diagnostics_for_display(prompt_diagnostics) -> str:
+    try:
+        if not isinstance(prompt_diagnostics, dict):
+            return ""
+        source_diagnostics = prompt_diagnostics.get('source_diagnostics') or []
+        filtered_sources = [
+            source for source in source_diagnostics
+            if isinstance(source, dict) and source.get('mode') == 'filtered_embed'
+        ]
+        if not filtered_sources:
+            return ""
+
+        from classes.ai.util.prompt_assembly import get_prompt_assembly_source_catalog
+
+        catalog = get_prompt_assembly_source_catalog()
+        lines = ["候補限定埋め込みの検索内容", ""]
+        for source in filtered_sources:
+            placeholder = source.get('placeholder') or ''
+            meta = catalog.get(placeholder, {})
+            lines.append(f"対象: {meta.get('label', placeholder)} ({placeholder})")
+            lines.append(f"方式: {source.get('mode')}")
+            if meta.get('method'):
+                lines.append(f"検索方法: {meta.get('method')}")
+            query_preview = (source.get('query_preview') or '').strip()
+            if query_preview:
+                lines.append("検索に使った文脈:")
+                lines.append(query_preview)
+            query_terms = source.get('query_terms') or []
+            if query_terms:
+                lines.append(f"主な検索語: {', '.join(str(term) for term in query_terms[:12])}")
+            alias_expanded_tokens = source.get('alias_expanded_tokens') or []
+            if alias_expanded_tokens:
+                lines.append("alias 展開:")
+                for alias_info in alias_expanded_tokens[:8]:
+                    expanded = alias_info.get('expanded') or []
+                    lines.append(f"- {alias_info.get('token')}: {', '.join(str(item) for item in expanded[:6])}")
+            ignored_noise_tokens = source.get('ignored_noise_tokens') or []
+            if ignored_noise_tokens:
+                lines.append("無視した noise token:")
+                for ignored in ignored_noise_tokens[:8]:
+                    lines.append(f"- {ignored.get('token')} ({ignored.get('reason')})")
+            top_matches = source.get('top_matches') or []
+            if top_matches:
+                lines.append("ヒット候補:")
+                for match in top_matches:
+                    path_text = match.get('path_text') or match.get('label') or ''
+                    lines.append(f"- score={match.get('score')} {path_text}")
+            selected_summary = source.get('selected_summary') or []
+            if selected_summary:
+                lines.append("埋め込みに採用した候補:")
+                for item in selected_summary:
+                    lines.append(f"- {item}")
+            if source.get('fallback_used'):
+                lines.append(f"fallback: {source.get('fallback_reason') or 'full_embed'}")
+            if source.get('trimmed'):
+                lines.append(f"trimmed_candidates: {source.get('trimmed_candidates')}")
+            lines.append("")
+        return '\n'.join(lines).strip()
+    except Exception:
+        logger.debug("prompt diagnostics display formatting failed", exc_info=True)
+        return ""
+
 # NOTE:
 # ai_suggestion_dialog は初回表示時のimportコストがボトルネックになりやすいため、
 # 重い依存（AIManager/拡張レジストリ/スピナー等）は使用箇所で遅延importする。
@@ -50,10 +113,11 @@ class AIRequestThread(QThread):
     result_ready = Signal(object)  # PySide6: dict→object
     error_occurred = Signal(str)
     
-    def __init__(self, prompt, context_data=None):
+    def __init__(self, prompt, context_data=None, request_meta=None):
         super().__init__()
         self.prompt = prompt
         self.context_data = context_data or {}
+        self.request_meta = request_meta or {}
         self._stop_requested = False
         
     def stop(self):
@@ -86,6 +150,14 @@ class AIRequestThread(QThread):
             
             # AIリクエスト実行
             result = ai_manager.send_prompt(self.prompt, provider, model)
+            try:
+                from classes.ai.util.prompt_assembly import log_prompt_request_completion
+
+                if isinstance(result, dict) and self.request_meta:
+                    result.setdefault('prompt_diagnostics', self.request_meta)
+                log_prompt_request_completion(self.request_meta, result=result)
+            except Exception:
+                logger.debug("AIRequestThread diagnostics logging failed", exc_info=True)
             
             # 送信後もキャンセルチェック
             if self._stop_requested:
@@ -99,7 +171,20 @@ class AIRequestThread(QThread):
                 self.error_occurred.emit(f"AIリクエストエラー: {error_msg}")
                 
         except Exception as e:
+            try:
+                from classes.ai.util.prompt_assembly import log_prompt_request_completion
+
+                log_prompt_request_completion(self.request_meta, error=str(e))
+            except Exception:
+                logger.debug("AIRequestThread diagnostics error logging failed", exc_info=True)
             self.error_occurred.emit(f"AIリクエスト処理エラー: {str(e)}")
+
+
+def _create_ai_request_thread(prompt, context_data=None, request_meta=None):
+    try:
+        return AIRequestThread(prompt, context_data, request_meta=request_meta)
+    except TypeError:
+        return AIRequestThread(prompt, context_data)
 
 
 class AISuggestionDialog(QDialog):
@@ -113,9 +198,10 @@ class AISuggestionDialog(QDialog):
     _INITIAL_VERTICAL_SCREEN_MARGIN = 50
     _INITIAL_HORIZONTAL_SCREEN_MARGIN = 50
     
-    def __init__(self, parent=None, context_data=None, extension_name="dataset_description", auto_generate=True, mode="dataset_suggestion"):
+    def __init__(self, parent=None, context_data=None, extension_name="dataset_description", auto_generate=True, mode="dataset_suggestion", prompt_assembly_override=None):
         super().__init__(parent)
         self.context_data = context_data or {}
+        self._prompt_assembly_override = prompt_assembly_override if isinstance(prompt_assembly_override, dict) else None
         self.extension_name = extension_name
         self.suggestions = []
         self.selected_suggestion = None
@@ -134,11 +220,13 @@ class AISuggestionDialog(QDialog):
         self._bulk_dataset_queue = []
         self._bulk_dataset_index = 0
         self._bulk_dataset_total = 0
+        self._last_prompt_diagnostics = None
         self._bulk_dataset_next_index = 0
         self._bulk_dataset_inflight = 0
         self._bulk_dataset_max_concurrency = 5
         self._bulk_dataset_running = False
         self._bulk_dataset_cancelled = False
+        self._bulk_dataset_prompt_assembly_override = None
         # 報告書タブ（converted.xlsx）用
         self.report_ai_threads = []
         self._active_report_button = None
@@ -155,6 +243,7 @@ class AISuggestionDialog(QDialog):
         self._bulk_report_max_concurrency = 5
         self._bulk_report_running = False
         self._bulk_report_cancelled = False
+        self._bulk_report_prompt_assembly_override = None
         self.auto_generate = auto_generate  # 自動生成フラグ
         self.last_used_prompt = None  # 最後に使用したプロンプトを保存
         self.last_api_request_params = None  # 最後に使用したAPIリクエストパラメータ（本文除外）
@@ -769,7 +858,7 @@ class AISuggestionDialog(QDialog):
     def _restore_tab_position(self, index: int) -> bool:
         try:
             saved = self.config_manager.get(self._tab_position_config_key(index), None)
-            if not isinstance(saved, dict):
+            if not isinstance(saved, dict) and int(index) == 0:
                 saved = self.config_manager.get(self._legacy_position_config_key(), None)
             if not isinstance(saved, dict):
                 return False
@@ -841,10 +930,13 @@ class AISuggestionDialog(QDialog):
 
         current_index = self.tab_widget.currentIndex()
         saved_size = self.config_manager.get(self._tab_size_config_key(self.tab_widget.currentIndex()), None)
-        if isinstance(saved_size, dict):
-            width = int(saved_size.get('width', self.width()))
-            height = int(saved_size.get('height', self.height()))
-        else:
+        try:
+            if isinstance(saved_size, dict):
+                width = int(saved_size.get('width', self.width()))
+                height = int(saved_size.get('height', self.height()))
+            else:
+                width, height = self._initial_dialog_size_for_screen(current_index)
+        except Exception:
             width, height = self._initial_dialog_size_for_screen(current_index)
 
         clamped_width, clamped_height, _, _ = self._clamp_geometry(width, height, self.x(), self.y())
@@ -1128,7 +1220,11 @@ class AISuggestionDialog(QDialog):
             # 使用するプロンプトを保存（再試行用）
             self.last_used_prompt = prompt
             self._json_retry_count = 0
-            thread = AIRequestThread(prompt, self.context_data)
+            thread = _create_ai_request_thread(
+                prompt,
+                self.context_data,
+                request_meta=getattr(self, '_last_prompt_diagnostics', None),
+            )
             if thread is None:
                 logger.error("AIRequestThreadがNoneです。初期化失敗")
                 self.generate_button.stop_loading()
@@ -1181,7 +1277,11 @@ class AISuggestionDialog(QDialog):
                     pass
                 self.spinner_overlay.start()
             # 再送
-            self.ai_thread = AIRequestThread(prompt, self.context_data)
+            self.ai_thread = _create_ai_request_thread(
+                prompt,
+                self.context_data,
+                request_meta=getattr(self, '_last_prompt_diagnostics', None),
+            )
             if not self.ai_thread:
                 raise RuntimeError("AIRequestThreadの初期化に失敗しました")
             try:
@@ -1414,11 +1514,16 @@ class AISuggestionDialog(QDialog):
             context['llm_model_name'] = f"{provider}:{model}"  # プロンプトテンプレート用
             
             # データセット説明AI提案（AI提案タブ）で使用するテンプレートをAI拡張設定から読み込み
-            from classes.dataset.util.ai_extension_helper import load_ai_extension_config, load_prompt_file, format_prompt_with_context
+            from classes.dataset.util.ai_extension_helper import (
+                format_prompt_with_context_details,
+                load_ai_extension_config,
+                load_prompt_file,
+            )
             ext_conf = load_ai_extension_config()
             prompt_file = None
             # 本タブはJSON応答を前提とする
             self._expected_output_format = "json"
+            selected_button_id = "json_explain_dataset_basic"
             try:
                 selected_button_id = (
                     (ext_conf or {}).get("dataset_description_ai_proposal_prompt_button_id")
@@ -1461,7 +1566,16 @@ class AISuggestionDialog(QDialog):
                 jf_len
             )
 
-            prompt = format_prompt_with_context(template_text, context)
+            prompt_result = format_prompt_with_context_details(
+                template_text,
+                context,
+                feature_id=selected_button_id,
+                template_name=selected_button_id,
+                template_path=prompt_file or "",
+                prompt_assembly_override=self._prompt_assembly_override,
+            )
+            prompt = prompt_result.prompt
+            self._last_prompt_diagnostics = prompt_result.diagnostics
 
             # 置換後に未解決プレースホルダが残っていないか確認
             unresolved_keys = []
@@ -1845,7 +1959,7 @@ class AISuggestionDialog(QDialog):
         self.extension_dataset_combo.setEditable(True)
         self.extension_dataset_combo.setInsertPolicy(QComboBox.NoInsert)
         self.extension_dataset_combo.setMaxVisibleItems(12)
-        self.extension_dataset_combo.lineEdit().setPlaceholderText("データセットを検索・選択してください")
+        self.extension_dataset_combo.lineEdit().setPlaceholderText("データセットを選択・検索")
         dataset_combo_layout.addWidget(self.extension_dataset_combo)
         
         dataset_select_layout.addWidget(dataset_combo_container)
@@ -3299,9 +3413,17 @@ class AISuggestionDialog(QDialog):
         try:
             button_id = button_config.get('id', 'unknown')
 
+            runtime_prompt_override = None
+
             # 一括問い合わせ
             if getattr(self, 'dataset_bulk_checkbox', None) is not None and self.dataset_bulk_checkbox.isChecked():
-                self._start_bulk_dataset_requests(button_config)
+                runtime_prompt_override = self._request_runtime_prompt_assembly_override(
+                    button_config,
+                    target_label='データセット',
+                )
+                if runtime_prompt_override is False:
+                    return
+                self._start_bulk_dataset_requests(button_config, prompt_assembly_override=runtime_prompt_override)
                 return
 
             if not isinstance(getattr(self, '_selected_dataset_record', None), dict):
@@ -3372,6 +3494,13 @@ class AISuggestionDialog(QDialog):
             except Exception:
                 pass
 
+            runtime_prompt_override = self._request_runtime_prompt_assembly_override(
+                button_config,
+                target_label='データセット',
+            )
+            if runtime_prompt_override is False:
+                return
+
             clicked_button = self.sender()
             self._active_dataset_button = clicked_button if hasattr(clicked_button, 'start_loading') else None
             if clicked_button and hasattr(clicked_button, 'start_loading'):
@@ -3383,7 +3512,7 @@ class AISuggestionDialog(QDialog):
             except Exception:
                 pass
 
-            prompt = self.build_extension_prompt(button_config)
+            prompt = self.build_extension_prompt(button_config, prompt_assembly_override=runtime_prompt_override)
             if not prompt:
                 if clicked_button:
                     clicked_button.stop_loading()
@@ -3491,7 +3620,10 @@ class AISuggestionDialog(QDialog):
                 pass
 
             button_config = getattr(self, '_bulk_dataset_button_config', {}) or {}
-            prompt = self.build_extension_prompt(button_config)
+            prompt = self.build_extension_prompt(
+                button_config,
+                prompt_assembly_override=getattr(self, '_bulk_dataset_prompt_assembly_override', None),
+            )
             if not prompt:
                 self._bulk_dataset_index += 1
                 continue
@@ -3516,7 +3648,7 @@ class AISuggestionDialog(QDialog):
         ):
             self._finish_bulk_dataset_requests()
 
-    def _start_bulk_dataset_requests(self, button_config):
+    def _start_bulk_dataset_requests(self, button_config, prompt_assembly_override=None):
         """データセットタブ: 一括問い合わせ（選択 or 表示全件）"""
         try:
             selected = self._get_selected_dataset_records()
@@ -3589,6 +3721,7 @@ class AISuggestionDialog(QDialog):
             self._bulk_dataset_running = True
             self._bulk_dataset_cancelled = False
             self._bulk_dataset_button_config = button_config
+            self._bulk_dataset_prompt_assembly_override = prompt_assembly_override if isinstance(prompt_assembly_override, dict) else None
 
             requested = None
             try:
@@ -3710,7 +3843,11 @@ class AISuggestionDialog(QDialog):
             if getattr(self, 'dataset_spinner_overlay', None):
                 self.dataset_spinner_overlay.set_message(f"{button_icon} {button_label} 実行中...")
 
-            ai_thread = AIRequestThread(prompt, self.context_data)
+            ai_thread = _create_ai_request_thread(
+                prompt,
+                self.context_data,
+                request_meta=getattr(self, '_last_prompt_diagnostics', None),
+            )
             self.dataset_ai_threads.append(ai_thread)
             self.update_dataset_spinner_visibility()
 
@@ -4306,9 +4443,17 @@ class AISuggestionDialog(QDialog):
     def on_report_button_clicked(self, button_config):
         """報告書タブのAIボタンクリック時の処理"""
         try:
+            runtime_prompt_override = None
+
             # 一括問い合わせ
             if getattr(self, 'report_bulk_checkbox', None) is not None and self.report_bulk_checkbox.isChecked():
-                self._start_bulk_report_requests(button_config)
+                runtime_prompt_override = self._request_runtime_prompt_assembly_override(
+                    button_config,
+                    target_label='報告書',
+                )
+                if runtime_prompt_override is False:
+                    return
+                self._start_bulk_report_requests(button_config, prompt_assembly_override=runtime_prompt_override)
                 return
 
             if not self._selected_report_placeholders:
@@ -4385,12 +4530,19 @@ class AISuggestionDialog(QDialog):
                 # ログ機能は失敗しても問い合わせ自体は継続
                 pass
 
+            runtime_prompt_override = self._request_runtime_prompt_assembly_override(
+                button_config,
+                target_label='報告書',
+            )
+            if runtime_prompt_override is False:
+                return
+
             clicked_button = self.sender()
             self._active_report_button = clicked_button if hasattr(clicked_button, 'start_loading') else None
             if clicked_button and hasattr(clicked_button, 'start_loading'):
                 clicked_button.start_loading("AI処理中")
 
-            prompt = self.build_report_prompt(button_config)
+            prompt = self.build_report_prompt(button_config, prompt_assembly_override=runtime_prompt_override)
             if not prompt:
                 if clicked_button:
                     clicked_button.stop_loading()
@@ -4402,7 +4554,7 @@ class AISuggestionDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "エラー", f"報告書ボタン処理エラー: {str(e)}")
 
-    def _start_bulk_report_requests(self, button_config):
+    def _start_bulk_report_requests(self, button_config, prompt_assembly_override=None):
         """報告書タブ: 一括問い合わせ（選択 or 表示全件）"""
         try:
             selected = self._get_selected_report_records()
@@ -4481,6 +4633,7 @@ class AISuggestionDialog(QDialog):
             self._bulk_report_running = True
             self._bulk_report_cancelled = False
             self._bulk_report_button_config = button_config
+            self._bulk_report_prompt_assembly_override = prompt_assembly_override if isinstance(prompt_assembly_override, dict) else None
 
             # 最大並列数（標準5、最大20）
             requested = None
@@ -4564,7 +4717,11 @@ class AISuggestionDialog(QDialog):
 
             placeholders = self._build_report_placeholders_for_record(rec)
             button_config = getattr(self, '_bulk_report_button_config', {}) or {}
-            prompt = self.build_report_prompt(button_config, placeholders=placeholders)
+            prompt = self.build_report_prompt(
+                button_config,
+                placeholders=placeholders,
+                prompt_assembly_override=getattr(self, '_bulk_report_prompt_assembly_override', None),
+            )
             if not prompt:
                 self._bulk_report_index += 1
                 continue
@@ -5813,7 +5970,7 @@ class AISuggestionDialog(QDialog):
         except Exception:
             pass
 
-    def build_report_prompt(self, button_config, placeholders: Optional[dict] = None):
+    def build_report_prompt(self, button_config, placeholders: Optional[dict] = None, prompt_assembly_override=None):
         """報告書タブ用プロンプトを構築"""
         try:
             prompt_file = button_config.get('prompt_file')
@@ -5851,12 +6008,44 @@ ARIMNO: {{ARIMNO}}
 
             context_data = (placeholders or {}).copy() if placeholders is not None else (self._selected_report_placeholders.copy() if self._selected_report_placeholders else {})
 
-            from classes.dataset.util.ai_extension_helper import format_prompt_with_context
-            formatted_prompt = format_prompt_with_context(template_content, context_data)
+            from classes.dataset.util.ai_extension_helper import format_prompt_with_context_details
+            prompt_result = format_prompt_with_context_details(
+                template_content,
+                context_data,
+                feature_id=button_config.get('id', 'unknown'),
+                template_name=button_config.get('id', 'unknown'),
+                template_path=prompt_file or "",
+                prompt_assembly_override=prompt_assembly_override,
+            )
+            formatted_prompt = prompt_result.prompt
+            self._last_prompt_diagnostics = prompt_result.diagnostics
             return formatted_prompt
 
         except Exception as e:
             logger.error("報告書プロンプト構築エラー: %s", e)
+            return None
+
+    def _request_runtime_prompt_assembly_override(self, button_config, *, target_label: str):
+        try:
+            from classes.dataset.ui.prompt_assembly_runtime_dialog import request_prompt_assembly_override
+            from classes.dataset.util.ai_extension_helper import load_prompt_file
+
+            prompt_file = button_config.get('prompt_file') or ""
+            if target_label == '報告書' and prompt_file:
+                prompt_file = self._get_prompt_file_for_target(prompt_file, 'report', button_config.get('id', 'unknown'))
+            template_text = load_prompt_file(prompt_file) if prompt_file else (button_config.get('prompt_template') or "")
+            accepted, runtime_override = request_prompt_assembly_override(
+                self,
+                button_label=button_config.get('label', 'AI機能'),
+                template_text=template_text,
+                button_config=button_config,
+                target_label=target_label,
+            )
+            if not accepted:
+                return False
+            return runtime_override
+        except Exception:
+            logger.debug("runtime prompt assembly selector failed", exc_info=True)
             return None
 
     def execute_report_ai_request(
@@ -5904,7 +6093,11 @@ ARIMNO: {{ARIMNO}}
             started_perf = time.perf_counter()
 
             # AIリクエストスレッド
-            ai_thread = AIRequestThread(prompt, self._selected_report_placeholders)
+            ai_thread = _create_ai_request_thread(
+                prompt,
+                self._selected_report_placeholders,
+                request_meta=getattr(self, '_last_prompt_diagnostics', None),
+            )
             self.report_ai_threads.append(ai_thread)
 
             self.update_report_spinner_visibility()
@@ -6895,9 +7088,18 @@ ARIMNO: {{ARIMNO}}
 
             if clicked_button and hasattr(clicked_button, 'start_loading'):
                 clicked_button.start_loading("AI処理中")
+
+            runtime_prompt_override = self._request_runtime_prompt_assembly_override(
+                button_config,
+                target_label='データセット',
+            )
+            if runtime_prompt_override is False:
+                if clicked_button:
+                    clicked_button.stop_loading()
+                return
             
             # プロンプトを構築
-            prompt = self.build_extension_prompt(button_config)
+            prompt = self.build_extension_prompt(button_config, prompt_assembly_override=runtime_prompt_override)
             
             if not prompt:
                 if clicked_button:
@@ -6911,7 +7113,7 @@ ARIMNO: {{ARIMNO}}
         except Exception as e:
             QMessageBox.critical(self, "エラー", f"AI拡張ボタン処理エラー: {str(e)}")
     
-    def build_extension_prompt(self, button_config):
+    def build_extension_prompt(self, button_config, prompt_assembly_override=None):
         """AI拡張プロンプトを構築"""
         try:
             prompt_file = button_config.get('prompt_file')
@@ -6955,8 +7157,17 @@ ARIMNO: {{ARIMNO}}
             logger.debug("コンテキストデータ準備完了: %s", list(context_data.keys()))
             
             # プロンプトを置換
-            from classes.dataset.util.ai_extension_helper import format_prompt_with_context
-            formatted_prompt = format_prompt_with_context(template_content, context_data)
+            from classes.dataset.util.ai_extension_helper import format_prompt_with_context_details
+            prompt_result = format_prompt_with_context_details(
+                template_content,
+                context_data,
+                feature_id=button_config.get('id', 'unknown'),
+                template_name=button_config.get('id', 'unknown'),
+                template_path=prompt_file or "",
+                prompt_assembly_override=prompt_assembly_override,
+            )
+            formatted_prompt = prompt_result.prompt
+            self._last_prompt_diagnostics = prompt_result.diagnostics
             
             logger.debug("プロンプト構築完了 - 長さ: %s文字", len(formatted_prompt))
             return formatted_prompt
@@ -7084,7 +7295,11 @@ ARIMNO: {{ARIMNO}}
                 self.extension_spinner_overlay.set_message(f"{button_icon} {button_label} 実行中...")
             
             # AIリクエストスレッドを作成・実行
-            ai_thread = AIRequestThread(prompt, self.context_data)
+            ai_thread = _create_ai_request_thread(
+                prompt,
+                self.context_data,
+                request_meta=getattr(self, '_last_prompt_diagnostics', None),
+            )
             
             # スレッドリストに追加（管理用）
             self.extension_ai_threads.append(ai_thread)
@@ -7630,12 +7845,14 @@ ARIMNO: {{ARIMNO}}
             if not self.last_used_prompt:
                 QMessageBox.information(self, "情報", "表示可能なプロンプトがありません。\nAI機能を実行してから再度お試しください。")
                 return
+
+            diagnostics_text = _format_prompt_diagnostics_for_display(getattr(self, '_last_prompt_diagnostics', None))
             
             # プロンプト表示ダイアログを作成
             prompt_dialog = QDialog(self)
             prompt_dialog.setWindowTitle("使用したプロンプト")
             prompt_dialog.setModal(True)
-            prompt_dialog.resize(800, 600)
+            prompt_dialog.resize(980, 760 if diagnostics_text else 640)
             
             layout = QVBoxLayout(prompt_dialog)
             
@@ -7643,8 +7860,18 @@ ARIMNO: {{ARIMNO}}
             header_label = QLabel("📄 AIリクエストで実際に使用したプロンプト")
             header_label.setStyleSheet("font-size: 14px; font-weight: bold; margin: 5px; ")
             layout.addWidget(header_label)
+
+            if diagnostics_text:
+                subheader_label = QLabel("候補限定埋め込みの検索内容もあわせて表示しています。")
+                subheader_label.setStyleSheet("font-size: 11px; margin: 2px 5px 6px 5px;")
+                layout.addWidget(subheader_label)
             
+            content_splitter = QSplitter(Qt.Vertical)
+
             # プロンプト表示エリア
+            prompt_widget = QWidget()
+            prompt_widget_layout = QVBoxLayout(prompt_widget)
+            prompt_widget_layout.setContentsMargins(0, 0, 0, 0)
             prompt_display = QTextEdit()
             prompt_display.setReadOnly(True)
             prompt_display.setPlainText(self.last_used_prompt)
@@ -7658,7 +7885,33 @@ ARIMNO: {{ARIMNO}}
                     padding: 8px;
                 }}
             """)
-            layout.addWidget(prompt_display)
+            prompt_widget_layout.addWidget(prompt_display)
+            content_splitter.addWidget(prompt_widget)
+
+            if diagnostics_text:
+                diagnostics_group = QGroupBox("候補限定埋め込みの検索内容")
+                diagnostics_layout = QVBoxLayout(diagnostics_group)
+                diagnostics_label = QLabel("どの文脈を検索語として使い、どの候補がヒットしたかを表示します。")
+                diagnostics_label.setStyleSheet("font-size: 11px; margin: 2px;")
+                diagnostics_layout.addWidget(diagnostics_label)
+
+                diagnostics_display = QTextEdit()
+                diagnostics_display.setReadOnly(True)
+                diagnostics_display.setPlainText(diagnostics_text)
+                diagnostics_display.setStyleSheet(f"""
+                    QTextEdit {{
+                        border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                        border-radius: 5px;
+                        font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                        font-size: 11px;
+                        padding: 8px;
+                    }}
+                """)
+                diagnostics_layout.addWidget(diagnostics_display)
+                content_splitter.addWidget(diagnostics_group)
+                content_splitter.setSizes([430, 250])
+
+            layout.addWidget(content_splitter)
             
             # 統計情報
             char_count = len(self.last_used_prompt)
@@ -8219,7 +8472,7 @@ ARIMNO: {{ARIMNO}}
                 subgroup_json_path=subgroup_json_path,
                 combo=self.extension_dataset_combo,
                 show_text_search_field=False,
-                clear_on_blank_click=True,
+                clear_on_blank_click=False,
                 parent=self,
             )
 
@@ -8385,7 +8638,7 @@ ARIMNO: {{ARIMNO}}
             logger.error("データセット情報表示更新エラー: %s", e)
     
     def show_all_datasets(self):
-        """全データセット表示（▼ボタン用）"""
+        """事前フィルタを保ったままコンボ内検索を解除して一覧を表示（▼ボタン用）"""
         try:
             if self._dataset_filter_fetcher:
                 self._dataset_filter_fetcher.show_all()

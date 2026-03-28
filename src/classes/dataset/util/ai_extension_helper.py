@@ -11,11 +11,25 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Dict, Iterable, List, Optional, Tuple
 from config.common import get_dynamic_file_path
+from classes.ai.util.prompt_assembly import build_prompt
 
 import logging
 
 # ロガー設定
 logger = logging.getLogger(__name__)
+
+_PROMPT_PLACEHOLDER_PATTERN = re.compile(r"{([A-Za-z0-9_]+)}")
+_DATAPORTAL_MASTER_CACHE: Dict[str, str] = {}
+_STATIC_MATERIAL_INDEX_CACHE: Optional[str] = None
+_BUTTON_PROMPT_ASSEMBLY_FIELD_MAP = {
+    'prompt_assembly_mode': 'mode',
+    'prompt_assembly_fallback_behavior': 'fallback_behavior',
+    'prompt_assembly_min_candidates': 'min_candidates',
+    'prompt_assembly_max_candidates': 'max_candidates',
+    'prompt_assembly_max_chars': 'max_chars',
+    'prompt_assembly_max_token_estimate': 'max_token_estimate',
+    'prompt_assembly_debug_save_enabled': 'debug_save_enabled',
+}
 
 
 def infer_ai_suggest_target_kind(button_config: Dict) -> str:
@@ -756,11 +770,111 @@ def save_prompt_file(prompt_file_path, content):
         logger.error("プロンプトファイル保存エラー: %s", e)
         return False
 
-def format_prompt_with_context(prompt_template, context_data):
-    """プロンプトテンプレートをコンテキストデータで置換する（ARIM報告書対応・データポータルマスタ対応）"""
+def _extract_prompt_placeholders(prompt_template: str) -> List[str]:
+    return list(dict.fromkeys(_PROMPT_PLACEHOLDER_PATTERN.findall(prompt_template or "")))
+
+
+def _apply_runtime_prompt_assembly_override(
+    config: Dict,
+    feature_id: str,
+    prompt_assembly_override: Optional[Dict],
+) -> None:
+    if not feature_id or not isinstance(prompt_assembly_override, dict):
+        return
+
+    prompt_assembly = config.setdefault('prompt_assembly', {})
+    features = prompt_assembly.setdefault('features', {})
+    feature_override = features.setdefault(feature_id, {})
+
+    mode_value = prompt_assembly_override.get('mode')
+    if mode_value in {'full_embed', 'filtered_embed'}:
+        feature_override['mode'] = mode_value
+
+    source_overrides = prompt_assembly_override.get('sources')
+    if isinstance(source_overrides, dict):
+        merged_sources = feature_override.setdefault('sources', {})
+        for placeholder, override in source_overrides.items():
+            if not isinstance(override, dict):
+                continue
+            target_override = merged_sources.setdefault(placeholder, {})
+            source_mode = override.get('mode')
+            if source_mode in {'full_embed', 'filtered_embed'}:
+                target_override['mode'] = source_mode
+
+
+def _load_prompt_runtime_ai_config(feature_id: str = "", prompt_assembly_override: Optional[Dict] = None) -> Dict:
     try:
-        # 基本的な置換処理
-        formatted_prompt = prompt_template
+        from classes.config.ui.ai_settings_widget import get_ai_config
+
+        config = get_ai_config() or {}
+    except Exception:
+        config = {}
+
+    try:
+        from classes.ai.util.generation_params import normalize_ai_config_inplace
+
+        normalize_ai_config_inplace(config)
+    except Exception:
+        pass
+
+    try:
+        _merge_button_prompt_assembly_override(config, feature_id)
+    except Exception:
+        logger.debug("button-level prompt assembly override merge failed", exc_info=True)
+    try:
+        _apply_runtime_prompt_assembly_override(config, feature_id, prompt_assembly_override)
+    except Exception:
+        logger.debug("runtime prompt assembly override merge failed", exc_info=True)
+    return config
+
+
+def _merge_button_prompt_assembly_override(config: Dict, feature_id: str) -> None:
+    if not feature_id:
+        return
+    ext_conf = load_ai_extension_config() or {}
+    buttons = ext_conf.get('buttons', []) or []
+    button_config = None
+    for button in buttons:
+        if (button.get('id') or '').strip() == feature_id:
+            button_config = button
+            break
+    if not isinstance(button_config, dict):
+        return
+
+    prompt_assembly = config.setdefault('prompt_assembly', {})
+    features = prompt_assembly.setdefault('features', {})
+    feature_override = features.setdefault(feature_id, {})
+
+    for source_key, target_key in _BUTTON_PROMPT_ASSEMBLY_FIELD_MAP.items():
+        value = button_config.get(source_key)
+        if value in (None, ""):
+            continue
+        feature_override[target_key] = value
+
+    source_overrides = button_config.get('prompt_assembly_sources')
+    if isinstance(source_overrides, dict):
+        merged_sources = feature_override.setdefault('sources', {})
+        for placeholder, override in source_overrides.items():
+            if not isinstance(override, dict):
+                continue
+            target_override = merged_sources.setdefault(placeholder, {})
+            mode_value = override.get('mode')
+            if mode_value in {'full_embed', 'filtered_embed'}:
+                target_override['mode'] = mode_value
+
+
+def format_prompt_with_context_details(
+    prompt_template,
+    context_data,
+    *,
+    feature_id: str = "",
+    template_name: str = "",
+    template_path: str = "",
+    prompt_assembly_override: Optional[Dict] = None,
+):
+    """プロンプトテンプレートをコンテキストデータで置換し、診断情報も返す。"""
+    try:
+        placeholders = set(_extract_prompt_placeholders(prompt_template))
         
         # ARIM報告書データを取得・統合
         enhanced_context = context_data.copy()
@@ -797,13 +911,17 @@ def format_prompt_with_context(prompt_template, context_data):
             logger.debug("テンプレート置換のエイリアス適用で警告: %s", _alias_err)
         grant_number = context_data.get('grant_number')
         offline_mode = os.environ.get('ARIM_FETCHER_OFFLINE', '').lower() in ('1', 'true', 'yes')
-        
-        if grant_number and grant_number != "未設定" and not offline_mode:
+
+        needs_report_context = any(
+            placeholder.startswith('arim_report_') or placeholder.startswith('report_')
+            for placeholder in placeholders
+        )
+        if grant_number and grant_number != "未設定" and not offline_mode and needs_report_context:
             logger.debug("ARIM報告書データ取得開始: %s", grant_number)
             try:
                 from classes.dataset.util.arim_report_fetcher import fetch_arim_report_data
                 arim_data = fetch_arim_report_data(grant_number)
-                
+
                 if arim_data:
                     enhanced_context.update(arim_data)
                     logger.info("ARIM報告書データを統合: %s項目", len(arim_data))
@@ -824,10 +942,14 @@ def format_prompt_with_context(prompt_template, context_data):
                 # エラーがあってもベースのコンテキストで続行
         elif offline_mode:
             logger.info("ARIM報告書取得をスキップしました（ARIM_FETCHER_OFFLINE モード）")
-        
+
         # データポータルマスタデータを取得・統合
         try:
-            master_data = load_dataportal_master_data()
+            requested_master_keys = [
+                key for key in ('dataportal_material_index', 'dataportal_tag', 'dataportal_equipment')
+                if key in placeholders
+            ]
+            master_data = load_dataportal_master_data(requested_master_keys)
             if master_data:
                 enhanced_context.update(master_data)
                 logger.debug("データポータルマスタデータを統合: %s項目", len(master_data))
@@ -835,13 +957,14 @@ def format_prompt_with_context(prompt_template, context_data):
             logger.warning("データポータルマスタデータ取得でエラー: %s", e)
 
         # 静的マテリアルインデックス（MI.json）を取得・統合
-        try:
-            static_mi = load_static_material_index()
-            if static_mi:
-                enhanced_context.update(static_mi)
-                logger.debug("静的マテリアルインデックスを統合")
-        except Exception as e:
-            logger.warning("静的マテリアルインデックス取得でエラー: %s", e)
+        if 'static_material_index' in placeholders:
+            try:
+                static_mi = load_static_material_index()
+                if static_mi:
+                    enhanced_context.update(static_mi)
+                    logger.debug("静的マテリアルインデックスを統合")
+            except Exception as e:
+                logger.warning("静的マテリアルインデックス取得でエラー: %s", e)
 
         # output/arim-site/reports/converted.xlsx の列データを取得・統合（列→プレースホルダ拡張）
         try:
@@ -869,23 +992,43 @@ def format_prompt_with_context(prompt_template, context_data):
                         logger.debug("converted.xlsx 由来 arim_report_* 補完失敗: %s", e)
         except Exception as e:
             logger.warning("converted.xlsx プレースホルダ統合でエラー: %s", e)
-        
-        # コンテキストデータのキーと値で置換
-        for key, value in enhanced_context.items():
-            placeholder = f"{{{key}}}"
-            if placeholder in formatted_prompt:
-                # 値がNoneまたは空の場合はデフォルト値を使用
-                replacement_value = str(value) if value is not None else "未設定"
-                formatted_prompt = formatted_prompt.replace(placeholder, replacement_value)
-        
-        return formatted_prompt
-        
+
+        result = build_prompt(
+            prompt_template,
+            enhanced_context,
+            ai_config=_load_prompt_runtime_ai_config(feature_id, prompt_assembly_override),
+            feature_id=feature_id,
+            template_name=template_name,
+            template_path=template_path,
+        )
+        return result
+
     except Exception as e:
         logger.error("プロンプト置換エラー: %s", e)
-        return prompt_template
+        return build_prompt(
+            prompt_template,
+            context_data or {},
+            ai_config=_load_prompt_runtime_ai_config(feature_id, prompt_assembly_override),
+            feature_id=feature_id,
+            template_name=template_name,
+            template_path=template_path,
+        )
 
 
-def load_dataportal_master_data():
+def format_prompt_with_context(prompt_template, context_data, *, feature_id: str = "", template_name: str = "", template_path: str = "", prompt_assembly_override: Optional[Dict] = None):
+    """プロンプトテンプレートをコンテキストデータで置換する（ARIM報告書対応・データポータルマスタ対応）"""
+    result = format_prompt_with_context_details(
+        prompt_template,
+        context_data,
+        feature_id=feature_id,
+        template_name=template_name,
+        template_path=template_path,
+        prompt_assembly_override=prompt_assembly_override,
+    )
+    return result.prompt
+
+
+def load_dataportal_master_data(requested_keys: Optional[Iterable[str]] = None):
     """データポータルマスタデータを読み込む
     
     Returns:
@@ -895,20 +1038,27 @@ def load_dataportal_master_data():
             - dataportal_equipment: 装置分類マスタ（JSON文字列）
     """
     result = {}
-    
+
     # マスタデータの定義（ファイル名パターン）
     master_types = [
         ('dataportal_material_index', 'material_index'),
         ('dataportal_tag', 'tag'),
         ('dataportal_equipment', 'equipment')
     ]
-    
+    requested = set(requested_keys or [name for name, _prefix in master_types])
+
     for placeholder_key, file_prefix in master_types:
+        if placeholder_key not in requested:
+            continue
         try:
+            cached = _DATAPORTAL_MASTER_CACHE.get(placeholder_key)
+            if cached is not None:
+                result[placeholder_key] = cached
+                continue
             # production優先、なければtestを使用
             production_path = get_dynamic_file_path(f'input/master_data/{file_prefix}_production.json')
             test_path = get_dynamic_file_path(f'input/master_data/{file_prefix}_test.json')
-            
+
             target_path = None
             if os.path.exists(production_path):
                 target_path = production_path
@@ -924,15 +1074,16 @@ def load_dataportal_master_data():
             # JSONファイル読み込み
             with open(target_path, 'r', encoding='utf-8') as f:
                 master_json = json.load(f)
-            
+
             # JSON文字列として格納（整形して見やすく）
             result[placeholder_key] = json.dumps(master_json, ensure_ascii=False, indent=2)
+            _DATAPORTAL_MASTER_CACHE[placeholder_key] = result[placeholder_key]
             logger.info("マスタデータ読み込み成功: %s (件数: %s)", file_prefix, master_json.get('count', 'N/A'))
-            
+
         except Exception as e:
             logger.error("マスタデータ読み込みエラー (%s): %s", file_prefix, e)
             result[placeholder_key] = f"マスタデータ読み込みエラー: {str(e)}"
-    
+
     return result
 
 
@@ -942,7 +1093,10 @@ def load_static_material_index():
     Returns:
         dict: { 'static_material_index': '<JSON文字列>' }
     """
+    global _STATIC_MATERIAL_INDEX_CACHE
     try:
+        if _STATIC_MATERIAL_INDEX_CACHE is not None:
+            return {'static_material_index': _STATIC_MATERIAL_INDEX_CACHE}
         mi_path = get_dynamic_file_path('input/ai/MI.json')
         if not os.path.exists(mi_path):
             logger.info("MI.jsonが見つかりません: %s", mi_path)
@@ -953,6 +1107,7 @@ def load_static_material_index():
             mi_json = json.load(f)
 
         mi_str = json.dumps(mi_json, ensure_ascii=False, indent=2)
+        _STATIC_MATERIAL_INDEX_CACHE = mi_str
         logger.info("MI.json読み込み成功（カテゴリ数推定）")
         return {'static_material_index': mi_str}
 

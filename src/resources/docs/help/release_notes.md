@@ -6,11 +6,35 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.39）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| 試料一覧2 | cache_enabled=False の構成で、更新/再読込/再リンク後の復帰を `_reload_rows()` に統一し、キャッシュ経路を誤通過しないよう改善。 |
-| 試料一覧2 | dataset.json に subjects が無い場合でも dataset detail JSON を参照して課題番号を補完し、`grant_numbers` の join key を安定化。 |
-| 試料一覧2 | dataset 側の課題番号を優先しつつ group 関連付けも detail JSON で補完し、ローカル JSON 欠落時の一覧2表示を安定化。 |
-| テスト/ビルド | 試料一覧2 の回帰テストを追加更新し、pytest段階ゲート・pre-build・PyInstaller ビルド導線を v2.5.39 へ同期。 |
+| リリース/品質 | リビジョンアップ（v2.5.41）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| AI拡張設定 | AIサジェスト機能定義の管理ダイアログに prompt assembly 方式・source別 override・辞書管理タブを追加。 |
+| AI提案/AI CHECK | データセット説明 AI提案、Quick AI、AI CHECK で使うテンプレートを個別選択できるよう整理。 |
+| Prompt Assembly | 実行直前に全文埋め込み / 候補限定埋め込みを選べる runtime dialog と、filtered_embed 辞書 summary / preset seed / output走査評価を追加。 |
+| データセット選択 | AI提案系のデータセットコンボで入力絞り込みと popup 表示の安定性を改善。 |
+| テスト/ビルド | prompt assembly・辞書管理・テンプレート選択・dataset combo filter の回帰テストを追加更新し、pytest段階ゲート・pre-build・PyInstaller 導線を v2.5.41 へ同期。 |
+
+## v2.5.41 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.41）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| AI拡張設定 | `ai_extension_config_dialog.py` に prompt assembly 方式選択、source別 override、辞書管理タブを追加し、ボタン定義と辞書育成を同一ダイアログで完結可能に整理。 |
+| AI提案/AI CHECK | `AIExtensionConfigManager` と `ai_suggestion_dialog.py` / `quick_ai_suggestion.py` を更新し、データセット説明 AI提案・Quick AI・AI CHECK のテンプレートを個別選択できるよう改善。 |
+| Prompt Assembly | `prompt_assembly_runtime_dialog.py` で実行前の runtime override を追加し、`prompt_assembly.py` / `prompt_dictionary_presets.py` で辞書 preset seed、summary cache、output 走査候補生成・評価を実装。 |
+| AI設定 | `ai_settings_widget.py` に filtered_embed 辞書サマリと管理ダイアログ導線を追加し、辞書状態の確認を容易化。 |
+| データセット選択 | `dataset_filter_fetcher.py` を利用する AI提案系のコンボで、入力中の絞り込み・popup focus・選択維持の安定性を改善。 |
+| テスト/品質 | `test_prompt_assembly.py`、`test_prompt_dictionary_presets.py`、`test_ai_extension_config_dataset_desc_prompt_selection.py`、`test_prompt_assembly_runtime_dialog.py`、`test_ai_settings_prompt_dictionary_summary.py`、`test_ai_test2_dialog_dataset_combo_filters.py` などを追加・更新。 |
+
+## v2.5.40 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.40）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| AI設定 | `ai_settings_widget.py` に生成パラメータテーブルを追加し、各パラメータをカスタム送信するかどうかを UI で切り替えられるよう改善。 |
+| AI設定 | 問い合わせ最大試行回数を追加し、`ai_manager.py` で OpenAI / ローカルLLM の共通リトライ回数を 1〜5 回で制御。 |
+| ローカルLLM | `local_llm.py` で Ollama / LM Studio の既定 endpoint を分離し、host 解決・OpenAI互換URL生成・provider 表示名を整理。 |
+| AIテスト | `ui_ai_test.py` で初期化中 progress 表示とローカルランタイム名の反映を追加し、AI設定反映までの状態を可視化。 |
+| テスト/品質 | `test_ai_manager_request_retry_openai_local.py`、`test_local_llm_endpoint_parts.py`、`test_local_llm_lm_studio_support.py`、`test_ai_settings_provider_collapse.py`、`test_ai_test_widget_initial_loading.py` を追加・更新し、再試行・URL解決・UI状態を回帰検証。 |
 
 ## v2.5.39 の主な更新点
 

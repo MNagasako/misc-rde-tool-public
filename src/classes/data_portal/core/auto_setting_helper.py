@@ -13,10 +13,11 @@ from classes.managers.log_manager import get_logger
 from net.http_helpers import proxy_get
 from classes.reports.core.report_scraper import ReportScraper
 from classes.ai.core.ai_manager import AIManager
+from classes.ai.util.prompt_assembly import log_prompt_request_completion
 from classes.dataset.util.ai_extension_helper import (
+    format_prompt_with_context_details,
     load_ai_extension_config,
     load_prompt_file,
-    format_prompt_with_context,
 )
 from config.common import OUTPUT_DIR
 
@@ -58,7 +59,7 @@ def _load_dataset_basic_context(dataset_id: str) -> Dict[str, Any]:
         return {}
 
 
-def _build_ai_prompt(dataset_id: str, category: str) -> Tuple[Optional[str], Optional[str]]:
+def _build_ai_prompt(dataset_id: str, category: str) -> Tuple[Optional[str], Optional[str], Optional[Dict[str, Any]]]:
     """カテゴリに応じたプロンプトを構築
 
     Args:
@@ -74,7 +75,7 @@ def _build_ai_prompt(dataset_id: str, category: str) -> Tuple[Optional[str], Opt
     target_id = button_ids.get(category)
     if not target_id:
         logger.warning(f"AIボタンID未設定: category={category}")
-        return None, None
+        return None, None, None
 
     # buttons から該当の設定を取得
     prompt_file = None
@@ -86,12 +87,12 @@ def _build_ai_prompt(dataset_id: str, category: str) -> Tuple[Optional[str], Opt
             break
     if not prompt_file:
         logger.warning(f"prompt_file未検出: button_id={target_id}")
-        return None, None
+        return None, None, None
 
     raw_template = load_prompt_file(prompt_file)
     if not raw_template:
         logger.warning(f"プロンプトテンプレートが読み込めません: {prompt_file}")
-        return None, None
+        return None, None, None
 
     # DatasetContextCollectorで完全なコンテキストを収集(AI説明文提案と同じフロー)
     from classes.dataset.util.dataset_context_collector import get_dataset_context_collector
@@ -124,7 +125,14 @@ def _build_ai_prompt(dataset_id: str, category: str) -> Tuple[Optional[str], Opt
     logger.debug(f"完全コンテキスト収集完了: {list(full_context.keys())}")
     
     # format_prompt_with_contextでプレースホルダを置換（ARIM/マスタ/MI統合込み）
-    prompt = format_prompt_with_context(raw_template, full_context)
+    prompt_result = format_prompt_with_context_details(
+        raw_template,
+        full_context,
+        feature_id=target_id,
+        template_name=target_id,
+        template_path=prompt_file,
+    )
+    prompt = prompt_result.prompt
     
     # 未解決プレースホルダの確認
     unresolved = []
@@ -134,7 +142,7 @@ def _build_ai_prompt(dataset_id: str, category: str) -> Tuple[Optional[str], Opt
     if unresolved:
         logger.warning(f"未解決プレースホルダ（データポータルAI）: {unresolved}")
     
-    return prompt, output_format
+    return prompt, output_format, prompt_result.diagnostics
 
 
 def _strip_code_fences(text: str) -> str:
@@ -238,7 +246,7 @@ def fetch_ai_proposals_for_category(dataset_id: str, category: str) -> List[Dict
     Returns proposals: [{id,label,rank,reason}]
     """
     try:
-        prompt, output_format = _build_ai_prompt(dataset_id, category)
+        prompt, output_format, prompt_diag = _build_ai_prompt(dataset_id, category)
         if not prompt:
             return []
 
@@ -258,6 +266,7 @@ def fetch_ai_proposals_for_category(dataset_id: str, category: str) -> List[Dict
             # 復元
             if original_timeout is not None:
                 ai_manager.config["timeout"] = original_timeout
+        log_prompt_request_completion(prompt_diag, result=result)
 
         if not result.get("success"):
             logger.warning(f"AI応答失敗: {result.get('error')}")
@@ -287,8 +296,9 @@ def fetch_ai_proposals_for_category_with_debug(dataset_id: str, category: str) -
     proposals: List[Dict[str, Any]] = []
     prompt_text = ""
     raw_text = ""
+    prompt_diag: Optional[Dict[str, Any]] = None
     try:
-        prompt, _ = _build_ai_prompt(dataset_id, category)
+        prompt, _, prompt_diag = _build_ai_prompt(dataset_id, category)
         if not prompt:
             return [], "", ""
         prompt_text = prompt
@@ -305,6 +315,7 @@ def fetch_ai_proposals_for_category_with_debug(dataset_id: str, category: str) -
         finally:
             if original_timeout is not None:
                 ai_manager.config["timeout"] = original_timeout
+        log_prompt_request_completion(prompt_diag, result=result)
 
         raw_text = result.get("response") or result.get("content", "") or ""
         if not result.get("success"):
@@ -322,6 +333,7 @@ def fetch_ai_proposals_for_category_with_debug(dataset_id: str, category: str) -
             p["id"] = str(p.get("id", ""))
         return proposals, prompt_text, raw_text
     except Exception as e:
+        log_prompt_request_completion(prompt_diag, error=str(e))
         logger.error(f"AI提案取得（デバッグ付）エラー: {e}")
         return proposals, prompt_text, raw_text
 

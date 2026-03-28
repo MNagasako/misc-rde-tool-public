@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple, Union
 import json
 
+from classes.ai.util.prompt_assembly import normalize_prompt_assembly_config_inplace
+
 
 @dataclass(frozen=True)
 class GenerationParamSpec:
@@ -150,6 +152,8 @@ def normalize_ai_config_inplace(config: Dict[str, Any]) -> Dict[str, Any]:
             gen_params[key].setdefault("use_custom", False)
             gen_params[key].setdefault("value", spec.default_value)
     config["generation_params"] = gen_params
+
+    normalize_prompt_assembly_config_inplace(config)
 
     return config
 

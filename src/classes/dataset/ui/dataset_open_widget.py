@@ -1542,11 +1542,40 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
 
             from qt_compat.widgets import QDialog
             from classes.dataset.ui.ai_suggestion_dialog import AISuggestionDialog
+
+            prompt_assembly_override = None
+            try:
+                from classes.dataset.ui.prompt_assembly_runtime_dialog import request_prompt_assembly_override
+                from classes.dataset.util.ai_extension_helper import load_ai_extension_config, load_prompt_file
+
+                ext_conf = load_ai_extension_config() or {}
+                selected_button_id = ext_conf.get("dataset_description_ai_proposal_prompt_button_id") or "json_explain_dataset_basic"
+                button_config = None
+                for btn in ext_conf.get("buttons", []):
+                    if btn.get("id") == selected_button_id:
+                        button_config = btn
+                        break
+                if isinstance(button_config, dict):
+                    prompt_file = button_config.get("prompt_file") or ""
+                    template_text = load_prompt_file(prompt_file) if prompt_file else (button_config.get("prompt_template") or "")
+                    accepted, prompt_assembly_override = request_prompt_assembly_override(
+                        container,
+                        button_label=button_config.get("label", "AI提案"),
+                        template_text=template_text,
+                        button_config=button_config,
+                        target_label="データセット",
+                    )
+                    if not accepted:
+                        return
+            except Exception:
+                logger.debug("新規開設2: AI提案 runtime prompt assembly selection failed", exc_info=True)
+
             dialog = AISuggestionDialog(
                 parent=container,
                 context_data=_build_ai_context(),
                 auto_generate=True,
                 mode="dataset_suggestion",
+                prompt_assembly_override=prompt_assembly_override,
             )
             if dialog.exec() == QDialog.Accepted:
                 suggestion = dialog.get_selected_suggestion()
@@ -1615,6 +1644,23 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
                 else:
                     raise
 
+            prompt_assembly_override = None
+            try:
+                from classes.dataset.ui.prompt_assembly_runtime_dialog import request_prompt_assembly_override
+
+                accepted, prompt_assembly_override = request_prompt_assembly_override(
+                    container,
+                    button_label=button_config.get("label", "AI CHECK"),
+                    template_text=prompt_template,
+                    button_config=button_config,
+                    target_label="データセット",
+                )
+                if not accepted:
+                    ai_check_button.stop_loading()
+                    return
+            except Exception:
+                logger.debug("新規開設2: AI CHECK runtime prompt assembly selection failed", exc_info=True)
+
             from classes.dataset.util.dataset_context_collector import get_dataset_context_collector
             context_collector = get_dataset_context_collector()
 
@@ -1641,8 +1687,16 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
             full_context["llm_model_name"] = f"{provider}:{model}"
             full_context["description"] = current_description
 
-            from classes.dataset.util.ai_extension_helper import format_prompt_with_context
-            prompt = format_prompt_with_context(prompt_template, full_context)
+            from classes.dataset.util.ai_extension_helper import format_prompt_with_context_details
+            prompt_result = format_prompt_with_context_details(
+                prompt_template,
+                full_context,
+                feature_id='ai_check',
+                template_name='ai_check',
+                template_path=prompt_file,
+                prompt_assembly_override=prompt_assembly_override,
+            )
+            prompt = prompt_result.prompt
 
             from qt_compat.widgets import QDialog
             from classes.dataset.ui.ai_suggestion_dialog import AIRequestThread
@@ -1752,7 +1806,7 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
 
                 _ai_check_thread_ref["thread"] = None
 
-            ai_thread = AIRequestThread(prompt, full_context)
+            ai_thread = AIRequestThread(prompt, full_context, request_meta=prompt_result.diagnostics)
             _ai_check_thread_ref["thread"] = ai_thread
             try:
                 ai_thread.finished.connect(lambda: _ai_check_thread_ref.__setitem__("thread", None))
@@ -2659,16 +2713,20 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
                 return
 
             if current_tab is main_widget._dataset_edit_tab:
+                edit_was_built = edit_built
                 _ensure_edit_built()
-                logger.info("修正タブが選択されました - データセットリストをリフレッシュします")
-                if edit_tab is not None and hasattr(edit_tab, '_refresh_dataset_list'):
-                    try:
-                        edit_tab._refresh_dataset_list(show_progress=False)
-                    except TypeError:
-                        edit_tab._refresh_dataset_list()
-                    logger.info("データセットリストのリフレッシュが完了しました")
+                if not edit_was_built:
+                    logger.info("修正タブが選択されました - 初回生成直後のため追加リフレッシュをスキップします")
                 else:
-                    logger.debug("データセットリフレッシュ機能がスキップされました (edit_tab=%s)", edit_tab is not None)
+                    logger.info("修正タブが選択されました - データセットリストをリフレッシュします")
+                    if edit_tab is not None and hasattr(edit_tab, '_refresh_dataset_list'):
+                        try:
+                            edit_tab._refresh_dataset_list(show_progress=False)
+                        except TypeError:
+                            edit_tab._refresh_dataset_list()
+                        logger.info("データセットリストのリフレッシュが完了しました")
+                    else:
+                        logger.debug("データセットリフレッシュ機能がスキップされました (edit_tab=%s)", edit_tab is not None)
             elif current_tab is main_widget._dataset_dataentry_tab:
                 _ensure_dataentry_built()
                 logger.info("データエントリータブが選択されました")

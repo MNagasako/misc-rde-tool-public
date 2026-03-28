@@ -24,7 +24,23 @@ from classes.ai.util.generation_params import (
     normalize_ai_config_inplace,
     parse_stop_sequences,
 )
-
+from classes.ai.util.local_llm import (
+    DEFAULT_LM_STUDIO_BASE_URL,
+    DEFAULT_OLLAMA_BASE_URL,
+    LOCAL_LLM_PROVIDER_LM_STUDIO,
+    LOCAL_LLM_PROVIDER_OLLAMA,
+    build_local_llm_headers,
+    compose_local_llm_base_url,
+    default_local_llm_endpoint_parts,
+    get_local_llm_api_key,
+    get_local_llm_chat_url,
+    get_local_llm_models_url,
+    get_local_llm_provider_entries,
+    get_local_llm_provider_label,
+    get_local_llm_provider_type,
+    parse_local_llm_base_url,
+    uses_ollama_native_generate,
+)
 try:
     from qt_compat.widgets import (
         QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
@@ -55,33 +71,27 @@ except ImportError:
 
 class AISettingsWidget(QWidget):
     """AI設定ウィジェット"""
-    
     # シグナル定義
     settings_changed = Signal()
-    
+
     def __init__(self, parent=None, use_internal_scroll: bool = True):
         super().__init__(parent)
-        self.parent_widget = parent
         self._use_internal_scroll = use_internal_scroll
         self.config_file_path = get_dynamic_file_path("input/ai_config.json")
         self.current_config = {}
-        # モデル一覧の元データと価格キャッシュ
         self._models_master: Dict[str, List[str]] = {}
-        # Geminiは認証方式ごとにモデル一覧/デフォルトを保持
         self._gemini_models_by_auth_ui: Dict[str, Dict[str, Any]] = {}
         self._gemini_current_auth_mode: str = 'api_key'
         self._pricing_cache: Dict[str, Dict[str, str]] = {}
         # 取得処理の多重実行防止とスレッド参照
-        self._fetch_inflight: set[str] = set()
         self._workers: Dict[str, "QThread"] = {}
         self._progress_boxes: Dict[str, "QMessageBox"] = {}
-        
+        self._fetch_inflight: set[str] = set()
+
         # UI要素の参照
         self.provider_widgets = {}
         self.default_provider_combo = None
         self.timeout_spinbox = None
-        self.request_max_attempts_spinbox = None
-        self.max_tokens_spinbox = None  # 互換性のため残す（UIでは使用しない）
         self.temperature_spinbox = None  # 互換性のため残す（UIでは使用しない）
 
         # 生成パラメータ（新UI）
@@ -112,6 +122,9 @@ class AISettingsWidget(QWidget):
         
         # グローバル設定
         self.setup_global_settings(content_layout)
+
+        # filtered_embed 辞書サマリ
+        self.setup_prompt_dictionary_summary(content_layout)
 
         # 生成パラメータ設定（グローバルの下に追加）
         self.setup_generation_params_settings(content_layout)
@@ -238,6 +251,59 @@ class AISettingsWidget(QWidget):
         self.generation_params_table = table
         group_layout.addWidget(table)
         layout.addWidget(group)
+
+    def setup_prompt_dictionary_summary(self, layout):
+        """filtered_embed 辞書サマリ"""
+        group = QGroupBox("filtered_embed 辞書")
+        group_layout = QVBoxLayout(group)
+
+        self.prompt_dictionary_summary_label = QLabel("")
+        self.prompt_dictionary_summary_label.setWordWrap(True)
+        group_layout.addWidget(self.prompt_dictionary_summary_label)
+
+        button_row = QHBoxLayout()
+        refresh_button = QPushButton("サマリ更新")
+        refresh_button.clicked.connect(self.refresh_prompt_dictionary_summary)
+        manage_button = QPushButton("管理ダイアログを開く")
+        manage_button.clicked.connect(self.open_prompt_dictionary_manager)
+        button_row.addWidget(refresh_button)
+        button_row.addWidget(manage_button)
+        button_row.addStretch()
+        group_layout.addLayout(button_row)
+
+        layout.addWidget(group)
+        self.refresh_prompt_dictionary_summary()
+
+    def refresh_prompt_dictionary_summary(self):
+        try:
+            from classes.ai.util.prompt_assembly import get_prompt_dictionary_summary
+
+            summary = get_prompt_dictionary_summary()
+            self.prompt_dictionary_summary_label.setText(
+                " | ".join(
+                    [
+                        f"general_aliases={summary.get('general_alias_count', 0)}",
+                        f"stopwords={summary.get('stopword_count', 0)}",
+                        f"weak_stopwords={summary.get('weak_stopword_count', 0)}",
+                        f"candidates={summary.get('candidate_count', 0)}",
+                        f"last_scanned={summary.get('last_scanned_at', '') or '未実行'}",
+                    ]
+                )
+            )
+        except Exception as e:
+            logger.warning(f"prompt dictionary summary refresh failed: {e}")
+            self.prompt_dictionary_summary_label.setText("辞書サマリを取得できませんでした。")
+
+    def open_prompt_dictionary_manager(self):
+        try:
+            from classes.dataset.ui.ai_extension_config_dialog import AIExtensionConfigDialog
+
+            dialog = AIExtensionConfigDialog(self)
+            if dialog.exec():
+                self.refresh_prompt_dictionary_summary()
+        except Exception as e:
+            logger.error(f"prompt dictionary manager open failed: {e}")
+            QMessageBox.warning(self, "エラー", f"辞書管理ダイアログを開けませんでした: {e}")
     
     def setup_provider_settings(self, layout):
         """プロバイダー設定セクション"""
@@ -664,11 +730,38 @@ class AISettingsWidget(QWidget):
         # 設定フォーム（詳細）
         form_layout = QFormLayout()
 
-        # Base URL（ローカルLLMの場合はAPI Keyの代わり）
+        provider_type_combo = QComboBox()
+        provider_type_combo.addItem("Ollama", LOCAL_LLM_PROVIDER_OLLAMA)
+        provider_type_combo.addItem("LM Studio", LOCAL_LLM_PROVIDER_LM_STUDIO)
+        form_layout.addRow("接続先種別:", provider_type_combo)
+
+        protocol_combo = QComboBox()
+        protocol_combo.setEditable(True)
+        protocol_combo.addItems(["http", "https"])
+        form_layout.addRow("プロトコル:", protocol_combo)
+
+        host_edit = QLineEdit()
+        host_edit.setPlaceholderText("例: localhost / dezi-omen")
+        form_layout.addRow("ホスト名:", host_edit)
+
+        port_spin = QSpinBox()
+        port_spin.setRange(1, 65535)
+        form_layout.addRow("ポート:", port_spin)
+
+        base_path_edit = QLineEdit()
+        base_path_edit.setPlaceholderText("例: /v1 /api/generate")
+        form_layout.addRow("ベースアドレス:", base_path_edit)
+
         base_url_edit = QLineEdit()
-        base_url_edit.setText("http://localhost:11434/api/generate")
-        base_url_edit.setPlaceholderText("ローカルLLMサーバーのURLを入力...")
-        form_layout.addRow("サーバーURL:", base_url_edit)
+        base_url_edit.setReadOnly(True)
+        base_url_edit.setPlaceholderText("分解項目から自動生成されます")
+        form_layout.addRow("生成URL:", base_url_edit)
+
+        api_key_edit = QLineEdit()
+        api_key_edit.setEchoMode(QLineEdit.Password)
+        api_key_edit.setPlaceholderText("通常は空欄。LM Studioで認証が必要な場合のみ入力")
+        api_key_edit.setEnabled(False)
+        form_layout.addRow("API Key（任意）:", api_key_edit)
         
         # 利用可能モデルラベルと更新ボタン + フィルタ
         models_header_layout = QHBoxLayout()
@@ -712,7 +805,7 @@ class AISettingsWidget(QWidget):
         form_layout.addRow("", models_table)
         
         # 注意事項
-        note_label = QLabel("注意: Ollama等のローカルLLMサーバーが必要です。")
+        note_label = QLabel("注意: Ollamaサーバーが必要です。")
         note_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-style: italic;")
         form_layout.addRow("", note_label)
 
@@ -728,15 +821,119 @@ class AISettingsWidget(QWidget):
         # ウィジェット参照を保存（ローカルLLMはAPI Keyがない）
         self.provider_widgets['local_llm'] = {
             'enabled': enabled_checkbox,
+            'provider_type': provider_type_combo,
+            'protocol': protocol_combo,
+            'host': host_edit,
+            'port': port_spin,
+            'base_path': base_path_edit,
             'base_url': base_url_edit,
+            'api_key': api_key_edit,
             'default_model': default_model_combo,
             'models_table': models_table,
             'fetch_button': fetch_models_button,
             'filter': models_filter,
             'clear_filter': clear_filter_btn,
+            'note_label': note_label,
             'toggle_button': toggle_button,
             'details_widget': details_widget,
         }
+
+        default_endpoint_state = {
+            'provider_type': LOCAL_LLM_PROVIDER_OLLAMA,
+            'protocol': 'http',
+            'host': 'localhost',
+            'port': 11434,
+            'base_path': '/api/generate',
+        }
+
+        def _current_local_endpoint_parts() -> Dict[str, Any]:
+            return {
+                'provider_type': provider_type_combo.currentData() or LOCAL_LLM_PROVIDER_OLLAMA,
+                'protocol': protocol_combo.currentText().strip() or 'http',
+                'host': host_edit.text().strip() or 'localhost',
+                'port': int(port_spin.value()),
+                'base_path': base_path_edit.text().strip() or '/api/generate',
+            }
+
+        def _apply_endpoint_parts(parts: Dict[str, Any], *, keep_host_if_empty: bool = False) -> None:
+            merged = dict(parts or {})
+            provider_type = merged.get('provider_type') or provider_type_combo.currentData() or LOCAL_LLM_PROVIDER_OLLAMA
+            host_value = str(merged.get('host') or '').strip()
+            defaults = default_local_llm_endpoint_parts(provider_type, host=host_value or 'localhost')
+            combined = {
+                'provider_type': provider_type,
+                'protocol': merged.get('protocol') or defaults['protocol'],
+                'host': host_value if (host_value or keep_host_if_empty) else defaults['host'],
+                'port': merged.get('port') or defaults['port'],
+                'base_path': merged.get('base_path') or defaults['base_path'],
+            }
+
+            idx = provider_type_combo.findData(provider_type)
+            if idx >= 0 and provider_type_combo.currentIndex() != idx:
+                provider_type_combo.blockSignals(True)
+                provider_type_combo.setCurrentIndex(idx)
+                provider_type_combo.blockSignals(False)
+
+            protocol_combo.blockSignals(True)
+            protocol_combo.setCurrentText(str(combined['protocol']))
+            protocol_combo.blockSignals(False)
+
+            host_edit.blockSignals(True)
+            host_edit.setText(str(combined['host'] or defaults['host']))
+            host_edit.blockSignals(False)
+
+            port_spin.blockSignals(True)
+            port_spin.setValue(int(combined['port']))
+            port_spin.blockSignals(False)
+
+            base_path_edit.blockSignals(True)
+            base_path_edit.setText(str(combined['base_path']))
+            base_path_edit.blockSignals(False)
+
+            default_endpoint_state.update({
+                'provider_type': provider_type,
+                'protocol': str(combined['protocol']),
+                'host': str(combined['host']),
+                'port': int(combined['port']),
+                'base_path': str(combined['base_path']),
+            })
+            base_url_edit.setText(compose_local_llm_base_url(combined, provider_type))
+
+        def _refresh_generated_local_url() -> None:
+            current = _current_local_endpoint_parts()
+            current_host = str(current.get('host') or '').strip()
+            if not current_host:
+                current['host'] = default_endpoint_state.get('host') or 'localhost'
+            base_url_edit.setText(compose_local_llm_base_url(current, current.get('provider_type')))
+
+        def _suggest_local_endpoint_defaults() -> None:
+            provider_type = provider_type_combo.currentData() or LOCAL_LLM_PROVIDER_OLLAMA
+            current_host = host_edit.text().strip() or default_endpoint_state.get('host') or 'localhost'
+            defaults = default_local_llm_endpoint_parts(provider_type, host=current_host)
+            _apply_endpoint_parts(defaults)
+
+        def _apply_local_llm_provider_ui():
+            provider_type = provider_type_combo.currentData() or LOCAL_LLM_PROVIDER_OLLAMA
+            provider_label = "LM Studio" if provider_type == LOCAL_LLM_PROVIDER_LM_STUDIO else "Ollama"
+            _suggest_local_endpoint_defaults()
+
+            if provider_type == LOCAL_LLM_PROVIDER_LM_STUDIO:
+                api_key_edit.setEnabled(True)
+                fetch_models_button.setToolTip("LM Studio の OpenAI互換APIから利用可能なモデルリストを取得")
+                note_label.setText("注意: LM Studio では OpenAI互換の /v1/models と /chat/completions を使用します。")
+            else:
+                api_key_edit.setEnabled(False)
+                fetch_models_button.setToolTip("Ollama サーバーから利用可能なモデルリストを取得")
+                note_label.setText("注意: Ollama では /api/tags と /api/generate を使用します。")
+
+            pricing_note.setText(f"ローカル環境 ({provider_label}): 料金情報は対象外です")
+
+        protocol_combo.currentTextChanged.connect(lambda *_: _refresh_generated_local_url())
+        host_edit.textChanged.connect(lambda *_: (_refresh_generated_local_url(), self._refresh_test_provider_combo()))
+        port_spin.valueChanged.connect(lambda *_: _refresh_generated_local_url())
+        base_path_edit.textChanged.connect(lambda *_: _refresh_generated_local_url())
+        provider_type_combo.currentIndexChanged.connect(lambda *_: (_apply_local_llm_provider_ui(), self._refresh_test_provider_combo()))
+        _apply_local_llm_provider_ui()
 
         toggle_button.clicked.connect(lambda: self._toggle_provider_details('local_llm'))
         
@@ -759,7 +956,7 @@ class AISettingsWidget(QWidget):
         test_form_layout = QFormLayout()
         
         self.test_provider_combo = QComboBox()
-        self.test_provider_combo.addItems(["デフォルト", "openai", "gemini", "local_llm"])
+        self._refresh_test_provider_combo()
         test_form_layout.addRow("テストプロバイダー:", self.test_provider_combo)
         
         self.test_model_combo = QComboBox()
@@ -829,6 +1026,38 @@ class AISettingsWidget(QWidget):
         group_layout.addWidget(self.test_response_params_area)
         
         layout.addWidget(group)
+
+    def _refresh_test_provider_combo(self):
+        combo = getattr(self, 'test_provider_combo', None)
+        if combo is None:
+            return
+
+        current_data = combo.currentData() if combo.count() > 0 else None
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem("デフォルト", "default")
+        combo.addItem("openai", "openai")
+        combo.addItem("gemini", "gemini")
+
+        config = self.current_config if isinstance(getattr(self, 'current_config', None), dict) else {}
+        local_config = dict(config.get('ai_providers', {}).get('local_llm', {}) if isinstance(config, dict) else {})
+        local_widgets = getattr(self, 'provider_widgets', {}).get('local_llm', {}) if isinstance(getattr(self, 'provider_widgets', {}), dict) else {}
+        if local_widgets:
+            try:
+                local_config['provider_type'] = local_widgets.get('provider_type').currentData() or local_config.get('provider_type')
+            except Exception:
+                pass
+            try:
+                local_config['host'] = local_widgets.get('host').text().strip() or local_config.get('host')
+            except Exception:
+                pass
+        for entry in get_local_llm_provider_entries(local_config):
+            combo.addItem(entry['display_name'], entry['id'])
+
+        target_data = current_data or "default"
+        index = combo.findData(target_data)
+        combo.setCurrentIndex(index if index >= 0 else 0)
+        combo.blockSignals(False)
     
     def setup_buttons(self, layout):
         """ボタンエリア"""
@@ -873,6 +1102,7 @@ class AISettingsWidget(QWidget):
             
             # UI要素に設定を反映
             self.apply_config_to_ui()
+            self._refresh_test_provider_combo()
             
         except Exception as e:
             logger.error(f"AI設定読み込みエラー: {e}")
@@ -892,11 +1122,13 @@ class AISettingsWidget(QWidget):
                 self.current_config = self.get_hardcoded_defaults()
             
             self.apply_config_to_ui()
+            self._refresh_test_provider_combo()
             
         except Exception as e:
             logger.error(f"デフォルト設定読み込みエラー: {e}")
             self.current_config = self.get_hardcoded_defaults()
             self.apply_config_to_ui()
+            self._refresh_test_provider_combo()
     
     def get_hardcoded_defaults(self):
         """ハードコードされたデフォルト設定"""
@@ -922,7 +1154,9 @@ class AISettingsWidget(QWidget):
                 },
                 "local_llm": {
                     "enabled": False,
-                    "base_url": "http://localhost:11434/api/generate",
+                    "provider_type": LOCAL_LLM_PROVIDER_OLLAMA,
+                    "base_url": DEFAULT_OLLAMA_BASE_URL,
+                    "api_key": "",
                     "models": ["llama3.1:8b", "gemma3:1b", "gemma3:4b"],
                     "default_model": "llama3.1:8b"
                 }
@@ -1046,10 +1280,33 @@ class AISettingsWidget(QWidget):
                         widgets['vertex_project_id'].setText(provider_config.get('vertex_project_id', ''))
                     if 'vertex_location' in widgets:
                         widgets['vertex_location'].setText(provider_config.get('vertex_location', 'asia-northeast1'))
+                elif provider_name == 'local_llm':
+                    endpoint_parts = parse_local_llm_base_url(provider_config)
+                    provider_type = get_local_llm_provider_type(provider_config)
+                    if 'provider_type' in widgets:
+                        idx = widgets['provider_type'].findData(provider_type)
+                        if idx >= 0:
+                            widgets['provider_type'].setCurrentIndex(idx)
+                    if 'protocol' in widgets:
+                        widgets['protocol'].setCurrentText(str(endpoint_parts.get('protocol') or 'http'))
+                    if 'host' in widgets:
+                        widgets['host'].setText(str(endpoint_parts.get('host') or 'localhost'))
+                    if 'port' in widgets:
+                        try:
+                            widgets['port'].setValue(int(endpoint_parts.get('port') or 0))
+                        except Exception:
+                            pass
+                    if 'base_path' in widgets:
+                        widgets['base_path'].setText(str(endpoint_parts.get('base_path') or ''))
+                    if 'api_key' in widgets:
+                        widgets['api_key'].setText(get_local_llm_api_key(provider_config))
                 
                 # Base URL
                 if 'base_url' in widgets:
-                    widgets['base_url'].setText(provider_config.get('base_url', ''))
+                    if provider_name == 'local_llm':
+                        widgets['base_url'].setText(parse_local_llm_base_url(provider_config).get('base_url', ''))
+                    else:
+                        widgets['base_url'].setText(provider_config.get('base_url', ''))
                 
                 # デフォルトモデル
                 if 'default_model' in widgets:
@@ -1103,6 +1360,8 @@ class AISettingsWidget(QWidget):
                         models = provider_config.get('models', [])
                         default_model = provider_config.get('default_model', '')
                     self._populate_models_table(widgets['models_table'], models, provider_name, default_model)
+                    if 'default_model' in widgets:
+                        self._update_default_model_combo(widgets['default_model'], models, provider_name, default_model)
                     # マスターに保持（フィルタ解除で使う）
                     self._models_master[self._get_models_master_key(provider_name)] = list(models)
                 elif 'models' in widgets:
@@ -1165,9 +1424,10 @@ class AISettingsWidget(QWidget):
             
             # プロバイダー設定を収集
             for provider_name, widgets in self.provider_widgets.items():
+                default_model_value = self._get_combo_model_value(widgets.get('default_model'))
                 provider_config = {
                     "enabled": widgets['enabled'].isChecked(),
-                    "default_model": widgets['default_model'].currentText()
+                    "default_model": default_model_value
                 }
                 
                 # API Key（ローカルLLMにはない）
@@ -1184,9 +1444,18 @@ class AISettingsWidget(QWidget):
                         provider_config['vertex_project_id'] = widgets['vertex_project_id'].text().strip()
                     if 'vertex_location' in widgets:
                         provider_config['vertex_location'] = widgets['vertex_location'].text().strip() or 'asia-northeast1'
+                elif provider_name == 'local_llm':
+                    provider_config['provider_type'] = widgets['provider_type'].currentData() or LOCAL_LLM_PROVIDER_OLLAMA
+                    provider_config['protocol'] = widgets['protocol'].currentText().strip() or 'http'
+                    provider_config['host'] = widgets['host'].text().strip() or 'localhost'
+                    provider_config['port'] = int(widgets['port'].value())
+                    provider_config['base_path'] = widgets['base_path'].text().strip() or '/api/generate'
+                    provider_config['base_url'] = compose_local_llm_base_url(provider_config, provider_config['provider_type'])
+                    if 'api_key' in widgets:
+                        provider_config['api_key'] = widgets['api_key'].text().strip()
                 
                 # Base URL
-                if 'base_url' in widgets:
+                if 'base_url' in widgets and provider_name != 'local_llm':
                     provider_config['base_url'] = widgets['base_url'].text()
                 
                 # モデルリスト（テーブル or 旧テキストエリア）
@@ -1250,7 +1519,8 @@ class AISettingsWidget(QWidget):
                 
                 # ローカルLLMの注記
                 if provider_name == 'local_llm':
-                    provider_config['note'] = "Ollama等のローカルLLMサーバーが必要です。"
+                    provider_label = get_local_llm_provider_label(provider_config)
+                    provider_config['note'] = f"{provider_label} 等のローカルLLMサーバーが必要です。"
                 
                 config['ai_providers'][provider_name] = provider_config
             
@@ -1331,6 +1601,9 @@ class AISettingsWidget(QWidget):
             params: Dict[str, Any] = {}
             if provider != 'local_llm':
                 params['api_key'] = provider_widgets.get('api_key').text().strip() if provider_widgets.get('api_key') else ''
+            else:
+                params['provider_type'] = provider_widgets.get('provider_type').currentData() if provider_widgets.get('provider_type') else LOCAL_LLM_PROVIDER_OLLAMA
+                params['api_key'] = provider_widgets.get('api_key').text().strip() if provider_widgets.get('api_key') else ''
             params['base_url'] = provider_widgets.get('base_url').text().strip() if provider_widgets.get('base_url') else ''
 
             if provider == 'gemini' and str(gemini_mode or 'api_key') == 'vertex_sa':
@@ -1342,7 +1615,11 @@ class AISettingsWidget(QWidget):
             # 進捗表示
             progress = QMessageBox(self)
             progress.setWindowTitle("モデル取得中")
-            progress.setText("ローカルLLMサーバーからモデルリストを取得しています..." if provider == 'local_llm' else f"{provider.upper()} APIからモデルリストを取得しています...")
+            if provider == 'local_llm':
+                local_label = get_local_llm_provider_label(params)
+                progress.setText(f"{local_label} からモデルリストを取得しています...")
+            else:
+                progress.setText(f"{provider.upper()} APIからモデルリストを取得しています...")
             progress.setStandardButtons(QMessageBox.NoButton)
             progress.setModal(False)  # ブロッキング防止
             self._progress_boxes[provider] = progress
@@ -1359,39 +1636,8 @@ class AISettingsWidget(QWidget):
 
             def _on_success(models: List[str]):
                 try:
-                    # テーブル or 旧テキストエリアに反映
-                    if 'models_table' in provider_widgets:
-                        # 新方式：テーブル表示
-                        table = provider_widgets['models_table']
-                        # 既存モデルと結合
-                        existing_models = []
-                        for row in range(table.rowCount()):
-                            name_item = table.item(row, 1)
-                            if name_item:
-                                existing_models.append(name_item.text())
-                        all_models = sorted(set(existing_models + models))
-                        
-                        # デフォルトモデルを取得
-                        default_model_combo = provider_widgets.get('default_model')
-                        current_default = default_model_combo.currentText() if default_model_combo else ''
-                        if not current_default and all_models:
-                            current_default = all_models[0]
-                        
-                        # テーブル再構築
-                        self._populate_models_table(table, all_models, provider, current_default)
-                        self._models_master[self._get_models_master_key(provider)] = list(all_models)
-                        
-                        # デフォルトモデルコンボボックスも更新（料金情報付き）
-                        if default_model_combo:
-                            self._update_default_model_combo(default_model_combo, all_models, provider, current_default)
-                    
-                    elif 'models' in provider_widgets:
-                        # 旧方式：テキストエリア（後方互換）
-                        models_edit = provider_widgets['models']
-                        existing = [m.strip() for m in models_edit.toPlainText().split(',') if m.strip()]
-                        all_models = sorted(set(existing + models))
-                        models_edit.setPlainText(', '.join(all_models))
-                        self._models_master[self._get_models_master_key(provider)] = list(all_models)
+                    apply_result = self._apply_fetched_models(provider, models)
+                    all_models = list(apply_result.get('models') or [])
                     
                     # 価格ラベル更新（旧方式のみ）
                     pricing_label = provider_widgets.get('pricing_label')
@@ -1408,14 +1654,25 @@ class AISettingsWidget(QWidget):
                         else:
                             pricing_label.setText("価格情報を取得できませんでした（ネットワーク/サイト制限）")
                     
-                    QMessageBox.information(self, "モデル取得成功", f"{len(models)}個のモデルを取得しました。\n\n取得したモデル:\n" + "\n".join(f"• {m}" for m in models[:10]) + (f"\n... 他{len(models)-10}個" if len(models) > 10 else ""))
+                    message = f"{len(all_models)}個のモデルを取得しました。\n\n取得したモデル:\n" + "\n".join(f"• {m}" for m in all_models[:10]) + (f"\n... 他{len(all_models)-10}個" if len(all_models) > 10 else "")
+                    if apply_result.get('default_missing'):
+                        previous_default = apply_result.get('previous_default') or '未設定'
+                        new_default = apply_result.get('default_model') or '未設定'
+                        message += f"\n\n既存の選択モデル '{previous_default}' はサーバー一覧から消えたため、'{new_default}' に切り替えました。"
+                    elif not all_models:
+                        message += "\n\nサーバー上で利用可能なモデルが見つからなかったため、一覧とデフォルト選択を空にしました。"
+                    QMessageBox.information(self, "モデル取得成功", message)
                 finally:
                     self._finalize_fetch(provider)
 
             def _on_failed(error: str):
                 try:
                     if provider == 'local_llm':
-                        QMessageBox.warning(self, "モデル取得失敗", "ローカルLLMサーバーからモデルリストを取得できませんでした。\n\n• サーバーが起動しているか確認してください\n• サーバーURLが正しいか確認してください")
+                        local_label = get_local_llm_provider_label(params)
+                        guidance = "• サーバーが起動しているか確認してください\n• サーバーURLが正しいか確認してください"
+                        if get_local_llm_provider_type(params) == LOCAL_LLM_PROVIDER_LM_STUDIO:
+                            guidance += "\n• LM Studio のローカルサーバーが有効か確認してください"
+                        QMessageBox.warning(self, "モデル取得失敗", f"{local_label} からモデルリストを取得できませんでした。\n\n{error}\n\n{guidance}")
                     else:
                         QMessageBox.warning(self, "モデル取得失敗", f"{provider.upper()} APIからモデルリストを取得できませんでした。\n\n{error}\nAPI Keyとネットワーク接続を確認してください。")
                 finally:
@@ -1459,12 +1716,18 @@ class AISettingsWidget(QWidget):
                     return sorted(set(models))
                 return []
             if provider == 'local_llm':
-                base_url = provider_widgets['base_url'].text().strip()
-                ollama_base = base_url.replace('/api/generate', '').replace('/v1/chat/completions', '')
-                resp = proxy_get(f"{ollama_base}/api/tags", timeout=8)
+                provider_config = {
+                    'provider_type': provider_widgets.get('provider_type').currentData() if provider_widgets.get('provider_type') else LOCAL_LLM_PROVIDER_OLLAMA,
+                    'base_url': provider_widgets['base_url'].text().strip(),
+                    'api_key': provider_widgets.get('api_key').text().strip() if provider_widgets.get('api_key') else '',
+                }
+                resp = proxy_get(get_local_llm_models_url(provider_config), headers=build_local_llm_headers(provider_config), timeout=8)
                 if resp.status_code == 200:
                     data = resp.json()
-                    models = [m.get('name') for m in data.get('models', []) if m.get('name')]
+                    if get_local_llm_provider_type(provider_config) == LOCAL_LLM_PROVIDER_LM_STUDIO:
+                        models = [m.get('id') for m in data.get('data', []) if m.get('id')]
+                    else:
+                        models = [m.get('name') for m in data.get('models', []) if m.get('name')]
                     return sorted(set(models))
                 return []
             return []
@@ -1921,42 +2184,53 @@ class AISettingsWidget(QWidget):
     
     def _test_local_llm_connection(self, model_name: str, provider_widgets: dict):
         """ローカルLLMモデルの接続テスト"""
-        import json
         from net.session_manager import create_new_proxy_session
-        
-        base_url = provider_widgets['base_url'].text().strip()
-        
-        if not base_url:
+
+        provider_config = {
+            'provider_type': provider_widgets.get('provider_type').currentData() if provider_widgets.get('provider_type') else LOCAL_LLM_PROVIDER_OLLAMA,
+            'base_url': provider_widgets['base_url'].text().strip(),
+            'api_key': provider_widgets.get('api_key').text().strip() if provider_widgets.get('api_key') else '',
+        }
+
+        if not provider_config['base_url']:
             raise ValueError("サーバーURLが設定されていません")
-        
+
         # 新しいセッションを作成（RDEトークン付与を回避、ただしSSL検証はネットワーク設定に従う）
         session = create_new_proxy_session()
-        
-        # Ollama形式のテスト（/api/tagsエンドポイント）
-        server_base = base_url.rsplit('/api/', 1)[0]
-        test_url = f"{server_base}/api/tags"
-        
-        response = session.get(test_url, timeout=10)
-        
+
+        provider_label = get_local_llm_provider_label(provider_config)
+        response = session.get(
+            get_local_llm_models_url(provider_config),
+            headers=build_local_llm_headers(provider_config),
+            timeout=10,
+        )
+
         if response.status_code == 200:
             data = response.json()
-            models = data.get('models', [])
-            model_found = any(m.get('name') == model_name for m in models)
+            if get_local_llm_provider_type(provider_config) == LOCAL_LLM_PROVIDER_LM_STUDIO:
+                models = data.get('data', [])
+                available_names = [m.get('id', '') for m in models]
+                model_found = any(name == model_name for name in available_names)
+            else:
+                models = data.get('models', [])
+                available_names = [m.get('name', '') for m in models]
+                model_found = any(name == model_name for name in available_names)
             
             if model_found:
                 QMessageBox.information(
                     self,
                     "接続テスト成功",
                     f"✅ {model_name} への接続に成功しました。\n\n"
-                    f"サーバー: {server_base}\n"
-                    f"利用可能モデル数: {len(models)}"
+                    f"接続先: {provider_label}\n"
+                    f"モデル一覧URL: {get_local_llm_models_url(provider_config)}\n"
+                    f"利用可能モデル数: {len(available_names)}"
                 )
             else:
                 QMessageBox.warning(
                     self,
                     "モデル未検出",
                     f"サーバー接続は成功しましたが、{model_name} が見つかりません。\n\n"
-                    f"利用可能なモデル:\n" + "\n".join(m.get('name', '') for m in models[:5])
+                    f"利用可能なモデル:\n" + "\n".join(name for name in available_names[:5])
                 )
         else:
             raise ValueError(f"サーバー応答エラー (HTTP {response.status_code}): {response.text}")
@@ -2107,19 +2381,26 @@ class AISettingsWidget(QWidget):
     def update_test_models(self):
         """テスト用モデルリストを更新"""
         try:
-            provider = self.test_provider_combo.currentText()
+            provider = self.test_provider_combo.currentData() or self.test_provider_combo.currentText()
             self.test_model_combo.clear()
             
-            if provider == "デフォルト":
+            if provider == "default":
                 # デフォルトプロバイダーのデフォルトモデルを設定
                 default_provider = self.default_provider_combo.currentText()
-                if default_provider in self.provider_widgets:
-                    default_model = self.provider_widgets[default_provider]['default_model'].currentText()
+                if default_provider == 'local_llm':
+                    config = self.get_test_config() or {}
+                    default_provider = get_local_llm_provider_type(config.get('ai_providers', {}).get('local_llm', {}))
+                widgets_provider = 'local_llm' if default_provider in (LOCAL_LLM_PROVIDER_OLLAMA, LOCAL_LLM_PROVIDER_LM_STUDIO) else default_provider
+                if widgets_provider in self.provider_widgets:
+                    default_model = self.provider_widgets[widgets_provider]['default_model'].currentText()
                     self.test_model_combo.addItem(f"{default_model} (デフォルト)")
                     self.test_model_combo.setCurrentText(f"{default_model} (デフォルト)")
-            elif provider in self.provider_widgets:
+            else:
                 # プロバイダー固有のモデルリストを設定
-                widgets = self.provider_widgets[provider]
+                widgets_provider = 'local_llm' if provider in (LOCAL_LLM_PROVIDER_OLLAMA, LOCAL_LLM_PROVIDER_LM_STUDIO) else provider
+                if widgets_provider not in self.provider_widgets:
+                    return
+                widgets = self.provider_widgets[widgets_provider]
                 models = []
                 
                 # テーブル表示の場合
@@ -2139,7 +2420,7 @@ class AISettingsWidget(QWidget):
                     
                     # デフォルトモデルを選択
                     if 'default_model' in widgets:
-                        default_model = widgets['default_model'].currentText()
+                        default_model = self._get_combo_model_value(widgets['default_model'])
                         index = self.test_model_combo.findText(default_model)
                         if index >= 0:
                             self.test_model_combo.setCurrentIndex(index)
@@ -2165,16 +2446,19 @@ class AISettingsWidget(QWidget):
     
     def get_test_provider_and_model(self):
         """テスト用プロバイダーとモデルを取得"""
-        provider = self.test_provider_combo.currentText()
+        provider = self.test_provider_combo.currentData() or self.test_provider_combo.currentText()
         model = self.test_model_combo.currentText()
         
-        if provider == "デフォルト":
+        if provider == "default":
             config = self.get_test_config()
             if config:
                 provider = config.get('default_provider', 'gemini')
+                if provider == 'local_llm':
+                    provider = get_local_llm_provider_type(config.get('ai_providers', {}).get('local_llm', {}))
                 providers = config.get('ai_providers', {})
-                if provider in providers:
-                    model = providers[provider].get('default_model', '')
+                provider_key = 'local_llm' if provider in (LOCAL_LLM_PROVIDER_OLLAMA, LOCAL_LLM_PROVIDER_LM_STUDIO) else provider
+                if provider_key in providers:
+                    model = providers[provider_key].get('default_model', '')
         
         # "モデル名 (デフォルト)" の形式から実際のモデル名を抽出
         if " (デフォルト)" in model:
@@ -2457,8 +2741,8 @@ class AISettingsWidget(QWidget):
 
         if provider == 'local_llm':
             providers = (cfg.get('ai_providers') or {})
-            base_url = ((providers.get('local_llm') or {}).get('base_url') or '')
-            if '/api/generate' in base_url:
+            provider_config = providers.get('local_llm') or {}
+            if uses_ollama_native_generate(provider_config):
                 # Ollama等: /api/generate はprompt本文を除外し、optionsのみ表示
                 from classes.ai.util.generation_params import selected_generation_params
 
@@ -2475,7 +2759,12 @@ class AISettingsWidget(QWidget):
                 if 'stop_sequences' in selected:
                     options['stop'] = selected['stop_sequences']
 
-                payload = {'model': model, 'stream': False}
+                payload = {
+                    'model': model,
+                    'stream': False,
+                    'provider_type': get_local_llm_provider_type(provider_config),
+                    'endpoint': get_local_llm_chat_url(provider_config),
+                }
                 if options:
                     payload['options'] = options
                 return {'provider': provider, 'model': model, 'payload': payload}
@@ -2485,6 +2774,8 @@ class AISettingsWidget(QWidget):
             payload['stream'] = False
             safe = {k: v for k, v in payload.items() if k != 'messages'}
             safe['messages_count'] = len(payload.get('messages', []) or [])
+            safe['provider_type'] = get_local_llm_provider_type(provider_config)
+            safe['endpoint'] = get_local_llm_chat_url(provider_config)
             return {'provider': provider, 'model': model, 'payload': safe}
 
         return {'provider': provider, 'model': model}
@@ -2494,6 +2785,51 @@ class AISettingsWidget(QWidget):
         if not isinstance(result, dict):
             return {'raw': str(result)}
         return {k: v for k, v in result.items() if k not in ('response', 'content', 'raw_response')}
+
+    def _get_combo_model_value(self, combo: Any) -> str:
+        try:
+            if combo is None:
+                return ''
+            text = str(combo.currentText() or '').strip()
+            index = combo.currentIndex()
+            if index >= 0:
+                data = combo.itemData(index)
+                if isinstance(data, str) and data.strip():
+                    normalized_data = data.strip()
+                    if text and text != normalized_data:
+                        return text
+                    return normalized_data
+            return text
+        except Exception:
+            return ''
+
+    def _apply_fetched_models(self, provider: str, models: List[str]) -> Dict[str, Any]:
+        widgets = self.provider_widgets.get(provider, {})
+        normalized_models = sorted({str(model).strip() for model in models if str(model).strip()}, key=lambda value: value.lower())
+        previous_default = self._get_combo_model_value(widgets.get('default_model'))
+        default_missing = bool(previous_default) and previous_default not in normalized_models
+
+        if normalized_models:
+            default_model = previous_default if previous_default in normalized_models else normalized_models[0]
+        else:
+            default_model = ''
+
+        if 'models_table' in widgets:
+            self._populate_models_table(widgets['models_table'], normalized_models, provider, default_model)
+        elif 'models' in widgets:
+            widgets['models'].setPlainText(', '.join(normalized_models))
+
+        if widgets.get('default_model'):
+            self._update_default_model_combo(widgets['default_model'], normalized_models, provider, default_model)
+
+        self._models_master[self._get_models_master_key(provider)] = list(normalized_models)
+        self._apply_models_filter(provider)
+        return {
+            'models': normalized_models,
+            'default_model': default_model,
+            'previous_default': previous_default,
+            'default_missing': default_missing,
+        }
 
 
 class _ModelFetchWorker(QThread):
@@ -2749,15 +3085,25 @@ class _ModelFetchWorker(QThread):
                         # APIキー無し: 公式ドキュメント解析で候補を提示
                         models = _fetch_gemini_models_from_official_docs()
             elif provider == 'local_llm':
-                base_url = p.get('base_url', '')
-                if not base_url:
+                provider_config = {
+                    'provider_type': p.get('provider_type') or LOCAL_LLM_PROVIDER_OLLAMA,
+                    'base_url': p.get('base_url', ''),
+                    'api_key': p.get('api_key', ''),
+                }
+                if not provider_config['base_url']:
                     self.failed.emit('サーバーURLが未設定です')
                     return
-                ollama_base = base_url.replace('/api/generate', '').replace('/v1/chat/completions', '')
-                resp = session.get(f"{ollama_base}/api/tags", timeout=(3, 5))
+                resp = session.get(
+                    get_local_llm_models_url(provider_config),
+                    headers=build_local_llm_headers(provider_config),
+                    timeout=(3, 5),
+                )
                 if resp.status_code == 200:
                     data = resp.json()
-                    models = [m.get('name') for m in data.get('models', []) if m.get('name')]
+                    if get_local_llm_provider_type(provider_config) == LOCAL_LLM_PROVIDER_LM_STUDIO:
+                        models = [m.get('id') for m in data.get('data', []) if m.get('id')]
+                    else:
+                        models = [m.get('name') for m in data.get('models', []) if m.get('name')]
                 else:
                     self.failed.emit(f"HTTP {resp.status_code}")
                     return
@@ -2799,7 +3145,8 @@ def get_ai_config():
                         'max_tokens': config.get('max_tokens', 1000),
                         'temperature': config.get('temperature', 0.7),
                         # 新キー
-                        'generation_params': config.get('generation_params', {})
+                        'generation_params': config.get('generation_params', {}),
+                        'prompt_assembly': config.get('prompt_assembly', {})
                     }
                     return normalized_config
                 else:

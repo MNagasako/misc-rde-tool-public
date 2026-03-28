@@ -8,6 +8,7 @@ import re
 from typing import Dict, Any, Optional
 from classes.ai.core.ai_manager import AIManager
 from classes.ai.extensions import AIExtensionRegistry, DatasetDescriptionExtension
+from classes.ai.util.prompt_assembly import log_prompt_request_completion
 from classes.dataset.util.dataset_context_collector import get_dataset_context_collector
 
 import logging
@@ -16,7 +17,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def generate_quick_suggestion(context_data: Dict[str, Any]) -> Optional[str]:
+def generate_quick_suggestion(context_data: Dict[str, Any], prompt_assembly_override: Optional[Dict[str, Any]] = None) -> Optional[str]:
     """
     クイック版AI提案生成
     
@@ -28,6 +29,7 @@ def generate_quick_suggestion(context_data: Dict[str, Any]) -> Optional[str]:
     """
     try:
         logger.debug("クイックAI提案生成開始 - 入力コンテキスト: %s", context_data)
+        prompt_diagnostics = None
         
         # AI設定を取得してプロバイダー・モデル情報を追加
         from classes.config.ui.ai_settings_widget import get_ai_config
@@ -74,7 +76,11 @@ def generate_quick_suggestion(context_data: Dict[str, Any]) -> Optional[str]:
         # （未設定/不在時は従来の quick テンプレートへフォールバック）
         prompt: Optional[str] = None
         try:
-            from classes.dataset.util.ai_extension_helper import load_ai_extension_config, load_prompt_file, format_prompt_with_context
+            from classes.dataset.util.ai_extension_helper import (
+                format_prompt_with_context_details,
+                load_ai_extension_config,
+                load_prompt_file,
+            )
 
             ext_conf = load_ai_extension_config() or {}
             selected_button_id = (
@@ -93,7 +99,16 @@ def generate_quick_suggestion(context_data: Dict[str, Any]) -> Optional[str]:
                 prompt_template = button_config.get("prompt_template") or ""
                 template_text = load_prompt_file(prompt_file) if prompt_file else (prompt_template.strip() or "")
                 if template_text:
-                    prompt = format_prompt_with_context(template_text, context)
+                    prompt_result = format_prompt_with_context_details(
+                        template_text,
+                        context,
+                        feature_id=selected_button_id,
+                        template_name=selected_button_id,
+                        template_path=prompt_file,
+                        prompt_assembly_override=prompt_assembly_override,
+                    )
+                    prompt = prompt_result.prompt
+                    prompt_diagnostics = prompt_result.diagnostics
         except Exception as _e:
             logger.debug("QUICK AI: ボタン定義からのプロンプト構築に失敗: %s", _e)
 
@@ -117,7 +132,17 @@ def generate_quick_suggestion(context_data: Dict[str, Any]) -> Optional[str]:
                 return None
 
             # プロンプトをレンダリング（contextを使用）
-            prompt = template.render(context)
+            from classes.dataset.util.ai_extension_helper import format_prompt_with_context_details
+
+            prompt_result = format_prompt_with_context_details(
+                template.base_prompt,
+                context,
+                feature_id=template.template_name,
+                template_name=template.template_name,
+                prompt_assembly_override=prompt_assembly_override,
+            )
+            prompt = prompt_result.prompt
+            prompt_diagnostics = prompt_result.diagnostics
         
         logger.debug("生成されたプロンプト長: %s 文字", len(prompt))
         logger.debug("ARIM関連情報含有: %s", 'ARIM課題関連情報' in prompt)
@@ -127,6 +152,7 @@ def generate_quick_suggestion(context_data: Dict[str, Any]) -> Optional[str]:
         
         logger.info("AIリクエスト開始（クイック版）")
         result = ai_manager.send_prompt(prompt, provider, model)
+        log_prompt_request_completion(prompt_diagnostics, result=result)
         
         if result.get('success', False):
             response_text = result.get('response') or result.get('content', '')
@@ -145,6 +171,7 @@ def generate_quick_suggestion(context_data: Dict[str, Any]) -> Optional[str]:
             return None
             
     except Exception as e:
+        log_prompt_request_completion(prompt_diagnostics, error=str(e))
         logger.error("クイック版AI提案生成エラー: %s", e)
         import traceback
         traceback.print_exc()

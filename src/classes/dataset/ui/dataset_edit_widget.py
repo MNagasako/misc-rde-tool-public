@@ -339,6 +339,25 @@ def relax_dataset_edit_filters_for_launch(
         except Exception:  # pragma: no cover - defensive fallback
             logger.debug("dataset_edit: filter reload failed", exc_info=True)
     return changed
+
+
+def _extract_selected_dataset_id(combo_box) -> str:
+    """現在選択中のコンボ項目から dataset_id を取り出す。"""
+    if combo_box is None:
+        return ""
+    try:
+        current_index = combo_box.currentIndex()
+    except Exception:
+        return ""
+    if current_index < 0:
+        return ""
+    try:
+        selected_dataset = combo_box.itemData(current_index)
+    except Exception:
+        return ""
+    if isinstance(selected_dataset, dict):
+        return str(selected_dataset.get("id") or "").strip()
+    return ""
 def _create_refresh_on_show_widget(parent=None):
     return RefreshOnShowWidget(parent)
 
@@ -1011,11 +1030,18 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     existing_dataset_combo.setInsertPolicy(QComboBox.NoInsert)  # 新しいアイテムの挿入を禁止
     existing_dataset_combo.setMaxVisibleItems(12)  # ドロップダウンの表示行数を12行に
     existing_dataset_combo.view().setMinimumHeight(240)  # 12行分程度（1行約20px想定）
+    dataset_combo_ready_tooltip = (
+        "クリックでデータセット一覧を展開します\n"
+        "大量データの場合はプログレス表示されます\n"
+        "カーソルキーで選択可能"
+    )
+    dataset_combo_preparing_message = "データセット一覧を準備中です。しばらくお待ちください..."
     
     # パフォーマンス最適化設定
     existing_dataset_combo.view().setUniformItemSizes(True)  # アイテムサイズを統一（高速化）
     existing_dataset_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)  # サイズ調整ポリシー
-    existing_dataset_combo.setToolTip("クリックでデータセット一覧を展開します\n大量データの場合はプログレス表示されます\nカーソルキーで選択可能")
+    existing_dataset_combo.setToolTip(dataset_combo_ready_tooltip)
+    existing_dataset_combo._is_preparing = False
     
     # キー入力対応: lineEdit の keyPressEvent をラップして、カーソルキーでポップアップ操作を実現
     def setup_combo_key_handling():
@@ -1028,6 +1054,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         
         def combo_key_press_event(event):
             """カーソルキー・ホイール対応のキープレスハンドラ"""
+            if getattr(existing_dataset_combo, "_is_preparing", False):
+                event.ignore()
+                return
             key = event.key()
             
             # ポップアップが未表示の場合、上/下キーでポップアップを表示
@@ -1109,6 +1138,34 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         enabled = _has_dataset_selection()
         for button in launch_buttons:
             button.setEnabled(enabled)
+
+    def _set_dataset_combo_preparing_state(preparing: bool, message: str | None = None) -> None:
+        status_message = (message or dataset_combo_preparing_message).strip() or dataset_combo_preparing_message
+        was_blocked = existing_dataset_combo.signalsBlocked()
+        existing_dataset_combo.blockSignals(True)
+        try:
+            existing_dataset_combo._is_preparing = bool(preparing)
+            line_edit = existing_dataset_combo.lineEdit()
+
+            if preparing:
+                existing_dataset_combo.setEnabled(False)
+                existing_dataset_combo.setToolTip(status_message)
+                existing_dataset_combo.clear()
+                existing_dataset_combo.setCurrentIndex(-1)
+                if line_edit:
+                    line_edit.setReadOnly(True)
+                    line_edit.setPlaceholderText(status_message)
+                    line_edit.setText(status_message)
+                    line_edit.setCursorPosition(0)
+            else:
+                existing_dataset_combo.setEnabled(True)
+                existing_dataset_combo.setToolTip(dataset_combo_ready_tooltip)
+                if line_edit:
+                    line_edit.setReadOnly(False)
+                    line_edit.clear()
+        finally:
+            existing_dataset_combo.blockSignals(was_blocked)
+        _update_launch_button_state()
 
     def _load_dataset_record(dataset_id: str):
         dataset_path = get_dynamic_file_path("output/rde/data/dataset.json")
@@ -1202,6 +1259,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     widget._dataset_launch_buttons = launch_buttons  # type: ignore[attr-defined]
     existing_dataset_combo.currentIndexChanged.connect(lambda *_: _update_launch_button_state())
     _update_launch_button_state()
+    _set_dataset_combo_preparing_state(True)
 
     def _find_dataset_index(dataset_id: str) -> int:
         if not dataset_id:
@@ -1349,6 +1407,14 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         "last_applied_filter": None,  # (filter_type, grant_filter, subgroup_id)
         "last_skip_logged_filter": None,
         "last_skip_logged_at": None,
+    }
+    dataset_load_state = {
+        "in_progress": False,
+        "current_request": None,
+        "pending_request": None,
+    }
+    initial_load_state = {
+        "completed": False,
     }
 
     def _extract_dataset_group_id(dataset: dict) -> str:
@@ -1547,6 +1613,46 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         dataset_cache["dataset_group_cache"].clear()
         dataset_cache["last_applied_filter"] = None
         logger.info("データセットキャッシュをクリアしました")
+
+    def _build_dataset_load_request(
+        filter_type,
+        grant_number_filter,
+        subgroup_filter_id,
+        force_reload,
+        preserve_selection_id,
+        show_progress,
+    ):
+        return {
+            "filter_type": filter_type,
+            "grant_number_filter": grant_number_filter,
+            "subgroup_filter_id": subgroup_filter_id,
+            "force_reload": bool(force_reload),
+            "preserve_selection_id": preserve_selection_id,
+            "show_progress": bool(show_progress),
+        }
+
+    def _same_dataset_load_request(left, right):
+        if not isinstance(left, dict) or not isinstance(right, dict):
+            return False
+        return (
+            left.get("filter_type") == right.get("filter_type")
+            and left.get("grant_number_filter") == right.get("grant_number_filter")
+            and str(left.get("subgroup_filter_id") or "") == str(right.get("subgroup_filter_id") or "")
+            and bool(left.get("force_reload")) == bool(right.get("force_reload"))
+        )
+
+    def _merge_dataset_load_request(existing_request, new_request):
+        if not isinstance(existing_request, dict):
+            return dict(new_request)
+        merged = dict(existing_request)
+        merged.update(new_request)
+        merged["force_reload"] = bool(existing_request.get("force_reload") or new_request.get("force_reload"))
+        merged["show_progress"] = bool(existing_request.get("show_progress") or new_request.get("show_progress"))
+        merged["preserve_selection_id"] = (
+            new_request.get("preserve_selection_id")
+            or existing_request.get("preserve_selection_id")
+        )
+        return merged
     
     is_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
 
@@ -2037,6 +2143,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     def update_combo_box_ui(datasets, display_names, filter_type, grant_number_filter, dataset_count):
         """コンボボックスのUIを更新する"""
         refresh_update_controls(filter_type, grant_number_filter)
+        preparing_message = (
+            f"データセット一覧を準備中です... ({dataset_count}件)"
+            if dataset_count
+            else dataset_combo_preparing_message
+        )
+        _set_dataset_combo_preparing_state(True, preparing_message)
+        _process_events()
 
         was_blocked = existing_dataset_combo.signalsBlocked()
         existing_dataset_combo.blockSignals(True)
@@ -2058,13 +2171,16 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 logger.debug("データセットなし: プレースホルダのみ追加")
             else:
                 # 全データセットをコンボボックスに追加
-                for i in range(min(len(display_names), len(datasets))):
+                total_items = min(len(display_names), len(datasets))
+                for i in range(total_items):
                     display_text = display_names[i]
                     dataset = datasets[i]
                     if isinstance(dataset, dict):
                         existing_dataset_combo.addItem(display_text, dataset)
                     else:
                         logger.warning("データセットが辞書ではありません: index=%s, type=%s", i, type(dataset))
+                    if total_items > 200 and (i % 100 == 0 or i == total_items - 1):
+                        _process_events()
                 logger.debug("コンボボックスに %s 件のアイテムを追加", len(datasets))
 
             # QCompleterを設定
@@ -2119,6 +2235,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 pass
         finally:
             existing_dataset_combo.blockSignals(was_blocked)
+            _set_dataset_combo_preparing_state(False)
 
     # データセット情報を読み込んでドロップダウンに追加
     def load_existing_datasets(
@@ -2139,6 +2256,14 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             preserve_selection_id: 再読み込み後に再選択したいデータセットID
         """
         dataset_path = get_dynamic_file_path("output/rde/data/dataset.json")
+        request = _build_dataset_load_request(
+            filter_type,
+            grant_number_filter,
+            subgroup_filter_id,
+            force_reload,
+            preserve_selection_id,
+            show_progress,
+        )
         logger.debug("データセットファイルパス: %s", dataset_path)
         logger.debug("ファイル存在確認: %s", os.path.exists(dataset_path))
         logger.debug(
@@ -2148,6 +2273,16 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             subgroup_filter_id,
         )
         logger.debug("強制再読み込み: %s", force_reload)
+
+        if dataset_load_state["in_progress"]:
+            current_request = dataset_load_state.get("current_request")
+            pending_request = dataset_load_state.get("pending_request")
+            dataset_load_state["pending_request"] = _merge_dataset_load_request(pending_request, request)
+            if _same_dataset_load_request(current_request, request):
+                logger.debug("データセット一覧読み込み中のため同一条件の再入を保留: %s", request)
+            else:
+                logger.info("データセット一覧読み込み中のため後続リクエストを保留: %s", request)
+            return
         
         # キャッシュキーを生成
         cache_key = get_cache_key(filter_type, grant_number_filter, subgroup_filter_id)
@@ -2166,11 +2301,16 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             logger.info("キャッシュからの読み込み完了: %s件", len(datasets))
             return
         
+        _set_dataset_combo_preparing_state(True)
+        _process_events()
+        dataset_load_state["in_progress"] = True
+        dataset_load_state["current_request"] = request
         try:
             logger.info("データセット一覧の再読み込みを開始")
             
             if not os.path.exists(dataset_path):
                 logger.error("データセットファイルが見つかりません: %s", dataset_path)
+                _set_dataset_combo_preparing_state(False)
                 return
             
             # ファイルの最終更新時刻を取得
@@ -2182,7 +2322,11 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 
                 # 統合プログレス表示
                 # ※明示 show() は minimumDuration を無効化して一瞬ポップアップの原因になり得るため呼ばない
-                loading_progress = create_progress_dialog("データ読み込み中", "データセット情報を読み込んでいます...", 0)
+                loading_progress = (
+                    create_progress_dialog("データ読み込み中", "データセット情報を読み込んでいます...", 0)
+                    if show_progress
+                    else _NullProgress()
+                )
                 
                 try:
                     loading_progress.setLabelText("dataset.jsonを読み込んでいます...")
@@ -2349,6 +2493,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             if not hasattr(existing_dataset_combo, '_mouse_press_event_set'):
                 orig_mouse_press = existing_dataset_combo.mousePressEvent
                 def combo_mouse_press_event(event):
+                    if getattr(existing_dataset_combo, "_is_preparing", False):
+                        event.ignore()
+                        return
                     # ドロップダウンボタンクリック時は常に全リスト表示
                     # テキストボックス部分のクリックでもCompleterが機能するため問題なし
                     current_text = existing_dataset_combo.lineEdit().text() if existing_dataset_combo.lineEdit() else ""
@@ -2382,10 +2529,44 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 existing_dataset_combo._mouse_press_event_set = True
             
         except Exception as e:
+            _set_dataset_combo_preparing_state(False)
             QMessageBox.warning(widget, "エラー", f"データセット情報の読み込みに失敗しました: {e}")
             logger.error("データセット読み込みエラー: %s", e)
             import traceback
             traceback.print_exc()
+        finally:
+            dataset_load_state["in_progress"] = False
+            completed_request = dataset_load_state.get("current_request")
+            pending_request = dataset_load_state.get("pending_request")
+            dataset_load_state["current_request"] = None
+            dataset_load_state["pending_request"] = None
+
+            if pending_request:
+                if _same_dataset_load_request(completed_request, pending_request):
+                    logger.debug("保留していた同一条件の再読込要求を破棄: %s", pending_request)
+                    pending_selection_id = pending_request.get("preserve_selection_id")
+                    if pending_selection_id:
+                        try:
+                            _restore_dataset_selection(pending_selection_id)
+                        except Exception:
+                            logger.debug("保留していた選択復元の適用に失敗", exc_info=True)
+                else:
+                    logger.info("保留していたデータセット再読込を実行: %s", pending_request)
+
+                    def _run_pending_dataset_load(req=pending_request):
+                        load_existing_datasets(
+                            req.get("filter_type", "managed_only"),
+                            req.get("grant_number_filter", ""),
+                            req.get("subgroup_filter_id", ""),
+                            bool(req.get("force_reload")),
+                            preserve_selection_id=req.get("preserve_selection_id"),
+                            show_progress=bool(req.get("show_progress")),
+                        )
+
+                    try:
+                        QTimer.singleShot(0, _run_pending_dataset_load)
+                    except Exception:
+                        _run_pending_dataset_load()
     
     # 関連データセット選択機能
     def setup_related_datasets(related_dataset_combo, exclude_dataset_id=None):
@@ -2803,14 +2984,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 context_data = {}
                 
                 # 【重要】現在選択されているデータセットIDを取得
-                current_index = existing_dataset_combo.currentIndex()
-                if current_index > 0:  # 0は"選択してください"項目
-                    selected_dataset = existing_dataset_combo.itemData(current_index)
-                    if selected_dataset:
-                        dataset_id = selected_dataset.get("id")
-                        if dataset_id:
-                            context_data['dataset_id'] = dataset_id
-                            logger.debug("データセットID設定: %s", dataset_id)
+                dataset_id = _extract_selected_dataset_id(existing_dataset_combo)
+                if dataset_id:
+                    context_data['dataset_id'] = dataset_id
+                    logger.debug("データセットID設定: %s", dataset_id)
                 
                 # データセット名
                 if hasattr(edit_dataset_name_edit, 'text'):
@@ -2855,13 +3032,41 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                         logger.debug("データセットIDフォールバック取得に失敗: %s", _e)
 
                 logger.debug("AI提案に渡すコンテキストデータ: %s", context_data)
-                
+
+                prompt_assembly_override = None
+                try:
+                    from classes.dataset.ui.prompt_assembly_runtime_dialog import request_prompt_assembly_override
+                    from classes.dataset.util.ai_extension_helper import load_ai_extension_config, load_prompt_file
+
+                    ext_conf = load_ai_extension_config() or {}
+                    selected_button_id = ext_conf.get("dataset_description_ai_proposal_prompt_button_id") or "json_explain_dataset_basic"
+                    button_config = None
+                    for btn in ext_conf.get("buttons", []):
+                        if btn.get("id") == selected_button_id:
+                            button_config = btn
+                            break
+                    if isinstance(button_config, dict):
+                        prompt_file = button_config.get("prompt_file") or ""
+                        template_text = load_prompt_file(prompt_file) if prompt_file else (button_config.get("prompt_template") or "")
+                        accepted, prompt_assembly_override = request_prompt_assembly_override(
+                            widget,
+                            button_label=button_config.get("label", "AI提案"),
+                            template_text=template_text,
+                            button_config=button_config,
+                            target_label="データセット",
+                        )
+                        if not accepted:
+                            return
+                except Exception:
+                    logger.debug("AI提案 runtime prompt assembly selection failed", exc_info=True)
+
                 # AI提案ダイアログを表示（自動生成有効、データセット提案モード）
                 dialog = AISuggestionDialog(
                     parent=widget, 
                     context_data=context_data, 
                     auto_generate=True,
-                    mode="dataset_suggestion"  # データセット提案モード: AI提案、プロンプト全文、詳細情報タブ
+                    mode="dataset_suggestion",  # データセット提案モード: AI提案、プロンプト全文、詳細情報タブ
+                    prompt_assembly_override=prompt_assembly_override,
                 )
                 
                 # ダイアログをモーダルで開く（完了/キャンセルまで待機）
@@ -2891,14 +3096,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 context_data = {}
                 
                 # 【重要】現在選択されているデータセットIDを取得
-                current_index = existing_dataset_combo.currentIndex()
-                if current_index > 0:  # 0は"選択してください"項目
-                    selected_dataset = existing_dataset_combo.itemData(current_index)
-                    if selected_dataset:
-                        dataset_id = selected_dataset.get("id")
-                        if dataset_id:
-                            context_data['dataset_id'] = dataset_id
-                            logger.debug("データセットID設定（クイック版）: %s", dataset_id)
+                dataset_id = _extract_selected_dataset_id(existing_dataset_combo)
+                if dataset_id:
+                    context_data['dataset_id'] = dataset_id
+                    logger.debug("データセットID設定（クイック版）: %s", dataset_id)
                 
                 # データセット名
                 if hasattr(edit_dataset_name_edit, 'text'):
@@ -2928,10 +3129,37 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                     context_data['contact'] = edit_contact_edit.text().strip()
                 
                 logger.debug("クイックAI提案に渡すコンテキストデータ: %s", context_data)
-                
+
+                prompt_assembly_override = None
+                try:
+                    from classes.dataset.ui.prompt_assembly_runtime_dialog import request_prompt_assembly_override
+                    from classes.dataset.util.ai_extension_helper import load_ai_extension_config, load_prompt_file
+
+                    ext_conf = load_ai_extension_config() or {}
+                    selected_button_id = ext_conf.get("dataset_quick_ai_prompt_button_id") or "dataset_explanation_quick"
+                    button_config = None
+                    for btn in ext_conf.get("buttons", []):
+                        if btn.get("id") == selected_button_id:
+                            button_config = btn
+                            break
+                    if isinstance(button_config, dict):
+                        prompt_file = button_config.get("prompt_file") or ""
+                        template_text = load_prompt_file(prompt_file) if prompt_file else (button_config.get("prompt_template") or "")
+                        accepted, prompt_assembly_override = request_prompt_assembly_override(
+                            widget,
+                            button_label=button_config.get("label", "Quick AI"),
+                            template_text=template_text,
+                            button_config=button_config,
+                            target_label="データセット",
+                        )
+                        if not accepted:
+                            return
+                except Exception:
+                    logger.debug("Quick AI runtime prompt assembly selection failed", exc_info=True)
+
                 # クイック版AI機能を実行（ダイアログなし）
                 from classes.dataset.core.quick_ai_suggestion import generate_quick_suggestion
-                suggestion = generate_quick_suggestion(context_data)
+                suggestion = generate_quick_suggestion(context_data, prompt_assembly_override=prompt_assembly_override)
                 
                 if suggestion:
                     # 既存の説明文を置き換え（QTextEditの場合はsetPlainTextを使用して改行を保持）
@@ -3016,6 +3244,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                     QMessageBox.critical(widget, "エラー", "品質チェック設定が見つかりません")
                     ai_check_button.stop_loading()
                     return
+
+                prompt_assembly_override = None
                 
                 # プロンプトファイルを読み込み
                 prompt_file = button_config.get("prompt_file")
@@ -3023,9 +3253,25 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 
                 with open(prompt_path, 'r', encoding='utf-8') as f:
                     prompt_template = f.read()
+
+                try:
+                    from classes.dataset.ui.prompt_assembly_runtime_dialog import request_prompt_assembly_override
+
+                    accepted, prompt_assembly_override = request_prompt_assembly_override(
+                        widget,
+                        button_label=button_config.get("label", "AI CHECK"),
+                        template_text=prompt_template,
+                        button_config=button_config,
+                        target_label="データセット",
+                    )
+                    if not accepted:
+                        ai_check_button.stop_loading()
+                        return
+                except Exception:
+                    logger.debug("AI CHECK runtime prompt assembly selection failed", exc_info=True)
                 
                 # コンテキストをプロンプトに適用（AIテスト2と同じ）
-                from classes.dataset.util.ai_extension_helper import format_prompt_with_context
+                from classes.dataset.util.ai_extension_helper import format_prompt_with_context_details
                 
                 # 完全コンテキスト収集
                 from classes.dataset.util.dataset_context_collector import get_dataset_context_collector
@@ -3052,7 +3298,15 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 # プロンプトテンプレートで {description} が使用されているため、エイリアスを設定
                 full_context['description'] = current_description
                 
-                prompt = format_prompt_with_context(prompt_template, full_context)
+                prompt_result = format_prompt_with_context_details(
+                    prompt_template,
+                    full_context,
+                    feature_id=selected_button_id,
+                    template_name=selected_button_id,
+                    template_path=prompt_file,
+                    prompt_assembly_override=prompt_assembly_override,
+                )
+                prompt = prompt_result.prompt
                 
                 # プロンプトをログ出力（デバッグ用）
                 logger.debug("AI CHECKボタン: プロンプト長=%s文字", len(prompt))
@@ -3326,7 +3580,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                     widget._ai_check_thread = None
                 
                 # AIスレッド実行 - widget に参照を保持
-                ai_thread = AIRequestThread(prompt, full_context)
+                ai_thread = AIRequestThread(prompt, full_context, request_meta=prompt_result.diagnostics)
                 widget._ai_check_thread = ai_thread  # スレッド参照を保持
                 ai_thread.result_ready.connect(on_check_success)
                 ai_thread.error_occurred.connect(on_check_error)
@@ -3509,7 +3763,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 dataset_context = {}
                 try:
                     current_index = existing_dataset_combo.currentIndex()
-                    if current_index > 0:
+                    if current_index >= 0:
                         selected_dataset = existing_dataset_combo.itemData(current_index)
                         if isinstance(selected_dataset, dict):
                             selected_dataset_id = selected_dataset.get("id")
@@ -3553,7 +3807,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 current_dataset_id = None
                 current_grant_number = None
                 current_index = existing_dataset_combo.currentIndex()
-                if current_index > 0:
+                if current_index >= 0:
                     selected_dataset = existing_dataset_combo.itemData(current_index)
                     if selected_dataset:
                         current_dataset_id = selected_dataset.get("id")
@@ -5237,6 +5491,11 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             _load_subgroup_filter_items()
             load_existing_datasets("managed_only", "", "", show_progress=False)
         finally:
+            initial_load_state["completed"] = True
+            try:
+                widget.set_auto_refresh_enabled(True)
+            except Exception:
+                pass
             _register_dataset_launch_receiver_once()
 
     def _safe_initial_load_and_register_receiver() -> None:
@@ -5261,6 +5520,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         _safe_initial_load_and_register_receiver()
 
     try:
+        widget.set_auto_refresh_enabled(False)
         initial_timer = QTimer(widget)
         initial_timer.setSingleShot(True)
         initial_timer.timeout.connect(_initial_load_once)
@@ -5309,7 +5569,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     
     widget._refresh_dataset_list = refresh_with_current_filter
     widget._refresh_cache = refresh_cache_from_external
-    widget.add_show_refresh_callback(lambda: refresh_with_current_filter(show_progress=False))
+    def _refresh_dataset_list_on_show():
+        if not initial_load_state["completed"]:
+            logger.debug("初期ロード完了前の showEvent リフレッシュをスキップ")
+            return
+        refresh_with_current_filter(show_progress=False)
+
+    widget.add_show_refresh_callback(_refresh_dataset_list_on_show)
     widget._restore_dataset_selection = _restore_dataset_selection
     
     # グローバル通知システムに登録
