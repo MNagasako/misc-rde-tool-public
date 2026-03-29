@@ -1288,6 +1288,8 @@ class DataFetch2BulkRdeTab(QWidget):
             self._records_dirty = False
             self.rebuild_progress.setVisible(False)
             self.status.setText("有効な絞込みフィルタを設定してください。")
+            if not auto_trigger and not force_source_refresh:
+                QMessageBox.warning(self, "絞込み条件未設定", "有効な絞込みフィルタを設定してください。")
             return
 
         self._search_started_at = time.perf_counter()

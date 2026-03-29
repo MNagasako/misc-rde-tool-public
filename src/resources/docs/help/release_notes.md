@@ -6,11 +6,22 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.42）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| データポータル | データカタログの主要操作ボタンを単一アクション行へ整理し、JSON / ZIP / 修正 / 公開表示 / ステータス変更をテーマ別スタイルで判別しやすく改善。 |
-| データポータル | 主要操作ボタンの compact padding と hover / pressed / disabled 表現を統一し、狭い横幅でも視認性とクリック性を維持。 |
-| 共有UI | データ取得2由来のデータセットコンボ表示スタイルを維持し、データポータル統合時のフォント・高さ・背景表示を安定化。 |
-| テスト/ビルド | dataset upload / shared combo の回帰テストを更新し、pytest段階ゲート・pre-build・PyInstaller 導線を v2.5.42 へ同期。 |
+| リリース/品質 | リビジョンアップ（v2.5.43）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| データ取得2 | データセット取得タブを初回選択時構築へ寄せ、planned summary の初期自動集計を止めて初回表示のトークン/API負荷を削減。 |
+| 一括取得（DP） | フィルタ候補準備を async bootstrap 化し、ローカル public output 優先・進捗詳細・残り時間表示で検索待ちを可視化。 |
+| UI品質 | data_fetch2 初回モード切替時の余計な resize / overlay 後処理と dataset_open 再生成時の notifier callback リークを抑制。 |
+| テスト/ビルド | data_fetch2 bulk / lazy build / planned summary / dataset launch の回帰テストを更新し、pytest段階ゲート・pre-build・PyInstaller 導線を v2.5.43 へ同期。 |
+
+## v2.5.43 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.43）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| データ取得2 | `data_fetch2_tab_widget.py` でデータセット取得タブを lazy build 化し、フィルタタブの prewarm を遅延化。初回表示では planned summary の自動集計を行わず、明示選択時だけ更新。 |
+| 一括取得（DP） | `bulk_dp_tab.py` でフィルタ候補の bootstrap を非同期化し、起動直後でも検索 UI を先に操作できるよう改善。 |
+| 一括取得（DP） | 検索中に進捗詳細ラベルを追加し、進捗件数・抽出見込み件数・速度・ETA を表示。ローカル `output.json` がある場合はそれを優先して高速に一覧化。 |
+| UI品質 | `ui_controller.py` で data_fetch2 初回表示時の後段 resize / overlay hide を抑制し、`dataset_open` 再生成時の refresh notifier callback を常に 1 件へ維持。 |
+| テスト/品質 | `test_bulk_dp_tab.py`、`test_data_fetch2_bulk_tabs_lazy.py`、`test_data_fetch2_filter_tab_deferred_build.py`、`test_dataset_open_widget_reset.py`、`test_planned_summary_label.py` などを追加・更新。 |
 
 ## v2.5.42 の主な更新点
 

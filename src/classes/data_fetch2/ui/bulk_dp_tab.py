@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import logging
 import os
@@ -27,7 +28,7 @@ from qt_compat.widgets import (
     QProgressBar,
     QSizePolicy,
 )
-from qt_compat.core import Qt, QUrl, QThread, Signal
+from qt_compat.core import Qt, QUrl, QThread, Signal, QTimer
 from qt_compat.gui import QDesktopServices
 
 from config.common import get_dynamic_file_path
@@ -41,6 +42,9 @@ from classes.data_fetch2.util.parallel_search import resolve_parallel_workers, s
 
 
 logger = logging.getLogger(__name__)
+
+
+_BULK_DP_BOOTSTRAP_CACHE: dict[str, Any] | None = None
 
 
 def _to_text(value: Any) -> str:
@@ -266,6 +270,7 @@ def _load_public_output_records(environment: str) -> tuple[list[dict], bool]:
 
 
 class _BulkDpSearchThread(QThread):
+    progress_changed = Signal(int, int, str)
     finished_fetch = Signal(object, str)
 
     def __init__(
@@ -291,9 +296,18 @@ class _BulkDpSearchThread(QThread):
     def _is_cancelled(self) -> bool:
         return bool(self._cancel_requested)
 
+    def _emit_progress(self, current: int, total: int, message: str):
+        if self._is_cancelled():
+            return
+        try:
+            self.progress_changed.emit(int(current or 0), int(total or 0), str(message or ""))
+        except Exception:
+            pass
+
     def run(self):
         try:
             started = time.perf_counter()
+            self._emit_progress(0, 0, "公開データを確認中...")
             if self._is_cancelled():
                 self.finished_fetch.emit([], "__CANCELLED__")
                 return
@@ -302,6 +316,7 @@ class _BulkDpSearchThread(QThread):
             local_records_raw, local_source_exists = _load_public_output_records(self._environment)
             local_filter_started = time.perf_counter()
             if local_records_raw:
+                self._emit_progress(0, max(1, len(local_records_raw)), "ローカルキャッシュを絞り込み中...")
                 if self._candidate_dataset_ids is not None:
                     local_records_raw = [
                         rec for rec in local_records_raw
@@ -313,6 +328,7 @@ class _BulkDpSearchThread(QThread):
             if local_source_exists:
                 local_filter_sec = max(0.0, time.perf_counter() - local_filter_started)
                 records = [_build_record_from_public_record(rec) for rec in local_records_raw]
+                self._emit_progress(1, 1, "ローカルキャッシュから一覧化しました")
                 self.finished_fetch.emit(
                     {
                         "records": records,
@@ -333,9 +349,17 @@ class _BulkDpSearchThread(QThread):
                     keyword=self._keyword,
                     environment=self._environment,
                     page_max_workers=self._detail_workers,
+                    progress_callback=self._emit_progress,
                 )
             except TypeError:
-                links = search_public_arim_data(keyword=self._keyword, environment=self._environment)
+                try:
+                    links = search_public_arim_data(
+                        keyword=self._keyword,
+                        environment=self._environment,
+                        page_max_workers=self._detail_workers,
+                    )
+                except TypeError:
+                    links = search_public_arim_data(keyword=self._keyword, environment=self._environment)
             link_fetch_sec = max(0.0, time.perf_counter() - started)
             if self._is_cancelled():
                 self.finished_fetch.emit([], "__CANCELLED__")
@@ -359,12 +383,21 @@ class _BulkDpSearchThread(QThread):
 
             if self._use_details or not can_build_from_links:
                 details_started = time.perf_counter()
-                details = fetch_public_arim_data_details(
-                    links,
-                    environment=self._environment,
-                    max_workers=self._detail_workers,
-                    cache_enabled=True,
-                )
+                try:
+                    details = fetch_public_arim_data_details(
+                        links,
+                        environment=self._environment,
+                        max_workers=self._detail_workers,
+                        cache_enabled=True,
+                        progress_callback=self._emit_progress,
+                    )
+                except TypeError:
+                    details = fetch_public_arim_data_details(
+                        links,
+                        environment=self._environment,
+                        max_workers=self._detail_workers,
+                        cache_enabled=True,
+                    )
                 detail_fetch_sec = max(0.0, time.perf_counter() - details_started)
                 if self._is_cancelled():
                     self.finished_fetch.emit([], "__CANCELLED__")
@@ -400,10 +433,84 @@ class _BulkDpSearchThread(QThread):
             self.finished_fetch.emit([], str(exc))
 
 
+def _build_bulk_dp_bootstrap_payload(
+    load_dataset_inference_map: callable,
+) -> dict[str, Any]:
+    try:
+        rde_index_payload = ensure_rde_search_index(force_rebuild=False)
+    except Exception:
+        rde_index_payload = None
+
+    try:
+        dataset_inference_map, dataset_inference_by_title = load_dataset_inference_map()
+    except Exception:
+        dataset_inference_map, dataset_inference_by_title = {}, {}
+
+    payload = {
+        "rde_index_payload": rde_index_payload,
+        "dataset_inference_map": dataset_inference_map,
+        "dataset_inference_by_title": dataset_inference_by_title,
+        "dataset_name_by_id": {
+            str(dataset_id): _to_text(info.get("dataset_name")).strip()
+            for dataset_id, info in dataset_inference_map.items()
+            if isinstance(info, dict)
+        },
+        "dataset_grant_by_id": {
+            str(dataset_id): _to_text(info.get("project_number")).strip()
+            for dataset_id, info in dataset_inference_map.items()
+            if isinstance(info, dict)
+        },
+        "dataset_uuid_by_title": {
+            _to_text(info.get("dataset_name")).strip().casefold(): str(dataset_id)
+            for dataset_id, info in dataset_inference_map.items()
+            if isinstance(info, dict) and _to_text(info.get("dataset_name")).strip()
+        },
+        "subgroup_name_by_id": {
+            _to_text(info.get("subgroup_id")).strip(): _to_text(info.get("subgroup")).strip()
+            for info in dataset_inference_map.values()
+            if isinstance(info, dict)
+            and _to_text(info.get("subgroup_id")).strip()
+            and _to_text(info.get("subgroup")).strip()
+        },
+        "sample_name_by_id": {
+            _to_text(info.get("sample_uuid")).strip(): _to_text(info.get("sample_name")).strip()
+            for info in dataset_inference_map.values()
+            if isinstance(info, dict)
+            and _to_text(info.get("sample_uuid")).strip()
+            and _to_text(info.get("sample_name")).strip()
+        },
+    }
+    return payload
+
+
+class _BulkDpBootstrapThread(QThread):
+    finished_bootstrap = Signal(object, str)
+
+    def __init__(self, load_dataset_inference_map: callable, parent: QWidget | None = None):
+        super().__init__(parent)
+        self._load_dataset_inference_map = load_dataset_inference_map
+
+    def run(self):
+        global _BULK_DP_BOOTSTRAP_CACHE
+
+        try:
+            cached = _BULK_DP_BOOTSTRAP_CACHE
+            if isinstance(cached, dict):
+                self.finished_bootstrap.emit(cached, "")
+                return
+
+            payload = _build_bulk_dp_bootstrap_payload(self._load_dataset_inference_map)
+            _BULK_DP_BOOTSTRAP_CACHE = payload
+            self.finished_bootstrap.emit(payload, "")
+        except Exception as exc:
+            self.finished_bootstrap.emit({}, str(exc))
+
+
 class DataFetch2BulkDpTab(QWidget):
     PAGE_SIZE_OPTIONS = [50, 100, 200, 500, 1000, 2000, 5000, 10000]
 
     COLUMNS = [
+        "DP",
         "タイトル",
         "課題番号",
         "サブグループ",
@@ -416,11 +523,9 @@ class DataFetch2BulkDpTab(QWidget):
         "装置(ローカルID)",
         "タグ",
         "関連データセット",
-        "詳細ページURL",
-        "コンテンツURL(mode=free)",
     ]
 
-    def __init__(self, parent: QWidget | None = None):
+    def __init__(self, parent: QWidget | None = None, *, async_bootstrap: bool | None = None):
         super().__init__(parent)
         self._all_records: list[dict] = []
         self._records: list[dict] = []
@@ -436,11 +541,20 @@ class DataFetch2BulkDpTab(QWidget):
         self._sample_name_by_id: dict[str, str] = {}
         self._entry_enrichment_cache: dict[str, dict[str, str]] = {}
         self._search_thread: _BulkDpSearchThread | None = None
+        self._bootstrap_thread: _BulkDpBootstrapThread | None = None
+        self._search_result_cache: dict[tuple[str, str, bool, str], Any] = {}
+        self._last_search_cache_key: tuple[str, str, bool, str] | None = None
+        self._processing_job: dict[str, Any] | None = None
+        self._bootstrap_ready = False
+        self._async_bootstrap = self._should_use_async_bootstrap(async_bootstrap)
         self._compact_rows_mode = False
         self._search_started_at: float | None = None
         self._cancel_requested = False
         self._build_ui()
-        self._bootstrap_filter_candidates()
+        if self._async_bootstrap:
+            self._start_async_bootstrap()
+        else:
+            self._bootstrap_filter_candidates()
 
     def _elapsed_search_seconds(self) -> float:
         if self._search_started_at is None:
@@ -514,8 +628,8 @@ class DataFetch2BulkDpTab(QWidget):
         root.addWidget(title)
 
         desc = QLabel(
-            "データポータルの検索結果を一覧化し、詳細ページリンクとコンテンツリンク(mode=free)を表示します。"
-            "\nDPは直接ダウンロード不可のため、リンク先を開いて取得してください。"
+            "データポータルの検索結果を一覧化します。"
+            "\n先頭のDP列のリンクボタンから詳細ページをブラウザで開けます。"
         )
         desc.setWordWrap(True)
         desc.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
@@ -574,8 +688,6 @@ class DataFetch2BulkDpTab(QWidget):
 
         op_row = QHBoxLayout()
         self.search_btn = QPushButton("検索して一覧化")
-        self.open_detail_btn = QPushButton("選択行の詳細ページを開く")
-        self.open_content_btn = QPushButton("選択行のコンテンツリンクを開く")
         export_menu = QMenu(self)
         export_csv = export_menu.addAction("CSV出力")
         export_csv.triggered.connect(lambda: self._export("csv"))
@@ -593,8 +705,6 @@ class DataFetch2BulkDpTab(QWidget):
         worker_index = self.search_workers_combo.findData(default_workers)
         self.search_workers_combo.setCurrentIndex(worker_index if worker_index >= 0 else 0)
         op_row.addWidget(self.search_btn)
-        op_row.addWidget(self.open_detail_btn)
-        op_row.addWidget(self.open_content_btn)
         op_row.addWidget(self.export_btn)
         op_row.addWidget(self.compact_rows_btn)
         op_row.addWidget(self.cancel_btn)
@@ -603,14 +713,28 @@ class DataFetch2BulkDpTab(QWidget):
         root.addLayout(op_row)
 
         self.search_btn.setStyleSheet(get_button_style("primary"))
-        self.open_detail_btn.setStyleSheet(get_button_style("info"))
-        self.open_content_btn.setStyleSheet(get_button_style("info"))
         self.export_btn.setStyleSheet(get_button_style("success"))
         self.compact_rows_btn.setStyleSheet(get_button_style("info"))
         self.cancel_btn.setStyleSheet(get_button_style("warning"))
 
         self.status = QLabel("待機中")
         root.addWidget(self.status)
+
+        self.progress_detail = QLabel("")
+        self.progress_detail.setWordWrap(True)
+        self.progress_detail.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
+        self.progress_detail.setVisible(False)
+        root.addWidget(self.progress_detail)
+
+        self.bootstrap_status = QLabel("フィルタ候補を準備中...")
+        self.bootstrap_status.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)};")
+        self.bootstrap_status.setVisible(False)
+        root.addWidget(self.bootstrap_status)
+
+        self.bootstrap_progress = QProgressBar(self)
+        self.bootstrap_progress.setRange(0, 0)
+        self.bootstrap_progress.setVisible(False)
+        root.addWidget(self.bootstrap_progress)
 
         self.search_spinner = QProgressBar(self)
         self.search_spinner.setRange(0, 0)
@@ -647,8 +771,6 @@ class DataFetch2BulkDpTab(QWidget):
         root.addWidget(self.table, 1)
 
         self.search_btn.clicked.connect(self._on_search_button_clicked)
-        self.open_detail_btn.clicked.connect(lambda: self._open_selected_url("detail_url"))
-        self.open_content_btn.clicked.connect(lambda: self._open_selected_url("content_url"))
         self.compact_rows_btn.clicked.connect(self._toggle_row_height_mode)
         self.cancel_btn.clicked.connect(self._cancel_search)
         self.page_size_combo.currentIndexChanged.connect(self._on_page_size_changed)
@@ -682,11 +804,12 @@ class DataFetch2BulkDpTab(QWidget):
 
     def _set_search_busy(self, busy: bool):
         logger.debug("bulk_dp: set search busy=%s", busy)
+        if busy:
+            self.search_spinner.setRange(0, 0)
+            self.search_spinner.setValue(0)
         self.search_spinner.setVisible(busy)
         self.search_btn.setEnabled(not busy)
         self.cancel_btn.setEnabled(busy)
-        self.open_detail_btn.setEnabled(not busy)
-        self.open_content_btn.setEnabled(not busy)
         self.export_btn.setEnabled(not busy)
         self.compact_rows_btn.setEnabled(not busy)
         self.search_workers_combo.setEnabled(not busy)
@@ -695,14 +818,49 @@ class DataFetch2BulkDpTab(QWidget):
             self.page_prev_btn.setEnabled(False)
             self.page_next_btn.setEnabled(False)
         else:
+            self.progress_detail.setVisible(False)
+            self.progress_detail.clear()
             self._update_pagination_controls()
 
+    @staticmethod
+    def _format_eta(seconds: float) -> str:
+        total_seconds = max(0, int(round(float(seconds or 0.0))))
+        minutes, secs = divmod(total_seconds, 60)
+        hours, minutes = divmod(minutes, 60)
+        if hours > 0:
+            return f"{hours:d}:{minutes:02d}:{secs:02d}"
+        return f"{minutes:02d}:{secs:02d}"
+
+    def _set_progress_detail(self, detail: str):
+        text = str(detail or "").strip()
+        self.progress_detail.setText(text)
+        self.progress_detail.setVisible(bool(text))
+
+    def _build_progress_detail(self, current: int, total: int, *, started_at: float | None, accepted: int | None = None) -> str:
+        current_safe = max(0, int(current or 0))
+        total_safe = max(0, int(total or 0))
+        parts: list[str] = []
+        if total_safe > 0:
+            parts.append(f"進捗: {current_safe}/{total_safe}")
+        elif current_safe > 0:
+            parts.append(f"進捗: {current_safe}")
+        if accepted is not None:
+            parts.append(f"抽出見込み: {max(0, int(accepted))}件")
+        if started_at is not None and current_safe > 0:
+            elapsed = max(0.001, time.perf_counter() - started_at)
+            rate = current_safe / elapsed
+            parts.append(f"速度: {rate:.1f}/秒")
+            if total_safe > current_safe and rate > 0:
+                eta = (total_safe - current_safe) / rate
+                parts.append(f"残り約: {self._format_eta(eta)}")
+        return " / ".join(parts)
+
     def _cancel_search(self):
-        if self._search_thread is None or not self._search_thread.isRunning():
-            return
         self._cancel_requested = True
-        self._search_thread.request_cancel()
+        if self._search_thread is not None and self._search_thread.isRunning():
+            self._search_thread.request_cancel()
         self.status.setText(f"キャンセル要求を送信中... ({self._format_elapsed()})")
+        self._set_progress_detail("進行中の処理を安全に停止しています")
 
     def _log_record_quality(self, records: list[dict]):
         if not records:
@@ -746,49 +904,73 @@ class DataFetch2BulkDpTab(QWidget):
             records.append(self._enrich_record(record))
         return records
 
+    def _should_use_async_bootstrap(self, async_bootstrap: bool | None) -> bool:
+        if async_bootstrap is not None:
+            return bool(async_bootstrap)
+        return "PYTEST_CURRENT_TEST" not in os.environ
+
+    def _set_bootstrap_busy(self, busy: bool, message: str = ""):
+        self.bootstrap_status.setVisible(busy)
+        self.bootstrap_progress.setVisible(busy)
+        if message:
+            self.bootstrap_status.setText(message)
+
+    def _apply_bootstrap_payload(self, payload: dict[str, Any], *, refresh_current: bool):
+        self._rde_index_payload = payload.get("rde_index_payload") if isinstance(payload.get("rde_index_payload"), dict) else None
+        self._dataset_inference_map = payload.get("dataset_inference_map") if isinstance(payload.get("dataset_inference_map"), dict) else {}
+        self._dataset_inference_by_title = payload.get("dataset_inference_by_title") if isinstance(payload.get("dataset_inference_by_title"), dict) else {}
+        self._dataset_name_by_id = payload.get("dataset_name_by_id") if isinstance(payload.get("dataset_name_by_id"), dict) else {}
+        self._dataset_grant_by_id = payload.get("dataset_grant_by_id") if isinstance(payload.get("dataset_grant_by_id"), dict) else {}
+        self._dataset_uuid_by_title = payload.get("dataset_uuid_by_title") if isinstance(payload.get("dataset_uuid_by_title"), dict) else {}
+        self._subgroup_name_by_id = payload.get("subgroup_name_by_id") if isinstance(payload.get("subgroup_name_by_id"), dict) else {}
+        self._sample_name_by_id = payload.get("sample_name_by_id") if isinstance(payload.get("sample_name_by_id"), dict) else {}
+        self._bootstrap_ready = True
+
+        if refresh_current and self._all_records and (self._search_thread is None or not self._search_thread.isRunning()):
+            self._all_records = [self._enrich_record(dict(rec)) for rec in self._all_records if isinstance(rec, dict)]
+            self._build_record_exact_indexes(self._all_records)
+            candidates = self._candidate_records_from_indexes()
+            self._records = self._parallel_filter_records(candidates)
+            self._current_page = 1
+            self._populate(self._records)
+
+        self._update_filter_options(self._all_records)
+
+    def _start_async_bootstrap(self):
+        global _BULK_DP_BOOTSTRAP_CACHE
+
+        cached = _BULK_DP_BOOTSTRAP_CACHE
+        if isinstance(cached, dict):
+            self._apply_bootstrap_payload(cached, refresh_current=False)
+            return
+
+        self._set_bootstrap_busy(True, "フィルタ候補を準備中...")
+        self._bootstrap_thread = _BulkDpBootstrapThread(self._load_dataset_inference_map, self)
+        self._bootstrap_thread.finished_bootstrap.connect(self._on_bootstrap_finished)
+        self._bootstrap_thread.finished.connect(self._on_bootstrap_thread_stopped)
+        self._bootstrap_thread.start()
+
+    def _on_bootstrap_finished(self, payload: Any, error_text: str):
+        if error_text:
+            logger.warning("bulk_dp: bootstrap failed: %s", error_text)
+            self._set_bootstrap_busy(False)
+            self.bootstrap_status.setVisible(True)
+            self.bootstrap_status.setText("フィルタ候補の準備に失敗しました。検索は継続できます。")
+            return
+
+        self._apply_bootstrap_payload(payload if isinstance(payload, dict) else {}, refresh_current=True)
+        self._set_bootstrap_busy(False)
+        if not self.search_spinner.isVisible() and not self._records:
+            self.status.setText("待機中")
+
+    def _on_bootstrap_thread_stopped(self):
+        if self._bootstrap_thread is not None:
+            self._bootstrap_thread.deleteLater()
+            self._bootstrap_thread = None
+
     def _bootstrap_filter_candidates(self):
-        try:
-            self._rde_index_payload = ensure_rde_search_index(force_rebuild=False)
-        except Exception:
-            self._rde_index_payload = None
-
-        try:
-            self._dataset_inference_map, self._dataset_inference_by_title = self._load_dataset_inference_map()
-        except Exception:
-            self._dataset_inference_map = {}
-            self._dataset_inference_by_title = {}
-
-        self._dataset_name_by_id = {
-            str(dataset_id): _to_text(info.get("dataset_name")).strip()
-            for dataset_id, info in self._dataset_inference_map.items()
-            if isinstance(info, dict)
-        }
-        self._dataset_grant_by_id = {
-            str(dataset_id): _to_text(info.get("project_number")).strip()
-            for dataset_id, info in self._dataset_inference_map.items()
-            if isinstance(info, dict)
-        }
-        self._dataset_uuid_by_title = {
-            _to_text(info.get("dataset_name")).strip().casefold(): str(dataset_id)
-            for dataset_id, info in self._dataset_inference_map.items()
-            if isinstance(info, dict) and _to_text(info.get("dataset_name")).strip()
-        }
-        self._subgroup_name_by_id = {
-            _to_text(info.get("subgroup_id")).strip(): _to_text(info.get("subgroup")).strip()
-            for info in self._dataset_inference_map.values()
-            if isinstance(info, dict)
-            and _to_text(info.get("subgroup_id")).strip()
-            and _to_text(info.get("subgroup")).strip()
-        }
-        self._sample_name_by_id = {
-            _to_text(info.get("sample_uuid")).strip(): _to_text(info.get("sample_name")).strip()
-            for info in self._dataset_inference_map.values()
-            if isinstance(info, dict)
-            and _to_text(info.get("sample_uuid")).strip()
-            and _to_text(info.get("sample_name")).strip()
-        }
-
-        self._update_filter_options([])
+        payload = _build_bulk_dp_bootstrap_payload(self._load_dataset_inference_map)
+        self._apply_bootstrap_payload(payload, refresh_current=False)
 
     def _resolve_subgroup_label(self, subgroup: str, subgroup_id: str) -> str:
         text = _to_text(subgroup).strip()
@@ -1100,6 +1282,52 @@ class DataFetch2BulkDpTab(QWidget):
             return search_dataset_ids(self._rde_index_payload, criteria)
         except Exception:
             return None
+
+    @staticmethod
+    def _dataset_id_signature(dataset_ids: set[str] | None) -> str:
+        if not dataset_ids:
+            return "all"
+        digest = hashlib.sha1()
+        for dataset_id in sorted(str(x).strip() for x in dataset_ids if str(x).strip()):
+            digest.update(dataset_id.encode("utf-8", errors="ignore"))
+            digest.update(b"\n")
+        return f"{len(dataset_ids)}:{digest.hexdigest()}"
+
+    def _search_cache_key(self, environment: str, keyword: str, candidate_dataset_ids: set[str] | None, use_details: bool) -> tuple[str, str, bool, str]:
+        return (
+            str(environment or "production"),
+            str(keyword or "").strip(),
+            bool(use_details),
+            self._dataset_id_signature(candidate_dataset_ids),
+        )
+
+    def _set_search_progress(self, current: int, total: int, message: str):
+        current_safe = max(0, int(current or 0))
+        total_safe = max(0, int(total or 0))
+        if total_safe > 0:
+            self.search_spinner.setRange(0, total_safe)
+            self.search_spinner.setValue(min(current_safe, total_safe))
+        else:
+            self.search_spinner.setRange(0, 0)
+            self.search_spinner.setValue(0)
+
+        progress_text = str(message or "検索中...").strip() or "検索中..."
+        self.status.setText(f"{progress_text} ({self._format_elapsed()})")
+        self._set_progress_detail(self._build_progress_detail(current_safe, total_safe, started_at=self._search_started_at))
+
+    def _open_url(self, url: str):
+        target = str(url or "").strip()
+        if not target:
+            QMessageBox.information(self, "情報", "対象URLがありません。")
+            return
+        QDesktopServices.openUrl(QUrl(target))
+
+    def _create_detail_link_button(self, rec: dict) -> QPushButton:
+        button = QPushButton("🔗", self.table)
+        button.setToolTip("詳細ページをブラウザで開く")
+        button.setStyleSheet(get_button_style("info"))
+        button.clicked.connect(lambda _checked=False, url=str(rec.get("detail_url") or ""): self._open_url(url))
+        return button
 
     def _candidate_records_from_indexes(self) -> list[dict]:
         if not self._all_records:
@@ -1726,22 +1954,183 @@ class DataFetch2BulkDpTab(QWidget):
         self._set_search_busy(True)
         candidate_dataset_ids = self._candidate_dataset_ids_from_rde_index()
         use_details = not bool(self._dataset_inference_map)
+        cache_key = self._search_cache_key(env, keyword, candidate_dataset_ids, use_details)
+        self._last_search_cache_key = cache_key
         logger.debug(
             "bulk_dp: async params candidate_ids=%s use_details=%s",
             "none" if candidate_dataset_ids is None else len(candidate_dataset_ids),
             use_details,
         )
 
+        cached_payload = self._search_result_cache.get(cache_key)
+        if cached_payload is not None:
+            self._set_search_progress(1, 1, "キャッシュ済み検索結果を適用中...")
+            self._on_search_fetch_finished(cached_payload, "")
+            return
+
         self._search_thread = _BulkDpSearchThread(keyword, env, candidate_dataset_ids, use_details, workers, self)
+        self._search_thread.progress_changed.connect(self._on_search_progress)
         self._search_thread.finished_fetch.connect(self._on_search_fetch_finished)
         self._search_thread.finished.connect(self._on_search_thread_stopped)
         self._search_thread.start()
+
+    def _on_search_progress(self, current: int, total: int, message: str):
+        self._set_search_progress(current, total, message)
 
     def _on_search_thread_stopped(self):
         logger.debug("bulk_dp: search thread stopped")
         if self._search_thread is not None:
             self._search_thread.deleteLater()
             self._search_thread = None
+
+    def _matches_processing_snapshot(self, rec: dict, criteria: dict[str, str], candidate_dataset_ids: set[str] | None) -> bool:
+        return self._matches_criteria(rec, criteria)
+
+    def _make_record_from_detail(self, detail: Any) -> dict:
+        fields = detail.fields if isinstance(getattr(detail, "fields", None), dict) else {}
+        return {
+            "title": _to_text(getattr(detail, "title", "")).strip(),
+            "project_number": _to_text(fields.get("project_number")),
+            "subgroup": _to_text(fields.get("subgroup") or fields.get("sub_group") or ""),
+            "subgroup_id": "",
+            "registrant": _to_text(fields.get("dataset_registrant")),
+            "organization": _to_text(fields.get("organization")),
+            "dataset_id": _to_text(fields.get("dataset_id") or getattr(detail, "code", "")),
+            "template": _to_text(fields.get("dataset_template") or ""),
+            "sample_name": _to_text(fields.get("sample_name") or ""),
+            "sample_uuid": _to_text(fields.get("sample_uuid") or ""),
+            "equipment_name": _to_text(fields.get("equipment_name") or ""),
+            "equipment_local_id": _to_text(fields.get("equipment_local_id") or ""),
+            "tags": _to_text(fields.get("keyword_tags") or ""),
+            "related_datasets": _to_text(fields.get("related_datasets") or ""),
+            "related_datasets_display": "",
+            "detail_url": _to_text(getattr(detail, "detail_url", "")).strip(),
+            "content_url": (_to_text(getattr(detail, "download_links", [""])[0]) if getattr(detail, "download_links", None) else ""),
+        }
+
+    def _start_processing_results(self, details: Any, phase_suffix: str):
+        if isinstance(details, dict) and isinstance(details.get("links"), list):
+            source_kind = "links"
+            source_items = list(details.get("links") or [])
+        elif isinstance(details, dict) and isinstance(details.get("records"), list):
+            source_kind = "records"
+            source_items = [dict(rec) for rec in details.get("records") or [] if isinstance(rec, dict)]
+        elif isinstance(details, dict) and isinstance(details.get("details"), list):
+            source_kind = "details"
+            source_items = list(details.get("details") or [])
+        elif isinstance(details, list):
+            source_kind = "details"
+            source_items = list(details)
+        else:
+            source_kind = "details"
+            source_items = []
+
+        if not source_items:
+            self._all_records = []
+            self._records = []
+            self._record_exact_indexes = {}
+            self._populate([])
+            self.status.setText(f"検索結果: 0件 ({self._format_elapsed()}{phase_suffix})")
+            self._set_search_busy(False)
+            return
+
+        self._processing_job = {
+            "kind": source_kind,
+            "items": source_items,
+            "index": 0,
+            "all_records": [],
+            "filtered_records": [],
+            "criteria": self._current_filter_criteria(),
+            "candidate_dataset_ids": self._candidate_dataset_ids_from_rde_index(),
+            "phase_suffix": phase_suffix,
+            "started_at": time.perf_counter(),
+            "total": len(source_items),
+        }
+        self._set_search_progress(0, len(source_items), "一覧化を準備中...")
+        QTimer.singleShot(0, self._process_results_chunk)
+
+    def _process_results_chunk(self):
+        job = self._processing_job
+        if not isinstance(job, dict):
+            return
+        if self._cancel_requested:
+            self._processing_job = None
+            self.status.setText(f"検索をキャンセルしました。({self._format_elapsed()})")
+            self._set_search_busy(False)
+            return
+
+        items = job["items"]
+        total = int(job["total"])
+        kind = str(job["kind"])
+        criteria = job["criteria"]
+        candidate_dataset_ids = job["candidate_dataset_ids"]
+        started_at = job["started_at"]
+
+        slice_started = time.perf_counter()
+        while job["index"] < total:
+            raw_item = items[job["index"]]
+            if kind == "links":
+                record = self._build_records_from_links([raw_item])[0]
+            elif kind == "records":
+                record = self._enrich_record(dict(raw_item))
+            else:
+                record = self._enrich_record(self._make_record_from_detail(raw_item))
+
+            job["all_records"].append(record)
+            if self._matches_processing_snapshot(record, criteria, candidate_dataset_ids):
+                job["filtered_records"].append(record)
+            job["index"] += 1
+
+            if (time.perf_counter() - slice_started) >= 0.03:
+                break
+
+        current = int(job["index"])
+        accepted = len(job["filtered_records"])
+        self._set_search_progress(current, total, "一覧化中...")
+        self._set_progress_detail(
+            self._build_progress_detail(
+                current,
+                total,
+                started_at=started_at,
+                accepted=accepted,
+            )
+        )
+
+        if current < total:
+            QTimer.singleShot(0, self._process_results_chunk)
+            return
+
+        self._all_records = job["all_records"]
+        self._records = job["filtered_records"]
+        candidate_dataset_ids = job.get("candidate_dataset_ids")
+        if candidate_dataset_ids:
+            overlapping_ids = {
+                _to_text(rec.get("dataset_id")).strip()
+                for rec in self._all_records
+                if _to_text(rec.get("dataset_id")).strip() in candidate_dataset_ids
+            }
+            if overlapping_ids:
+                self._records = [
+                    rec for rec in self._records
+                    if _to_text(rec.get("dataset_id")).strip() in overlapping_ids
+                ]
+        self._processing_job = None
+        self._build_record_exact_indexes(self._all_records)
+        self._update_filter_options(self._all_records)
+        self._current_page = 1
+        self._populate(self._records)
+        self._log_record_quality(self._records)
+        phase_suffix = str(job.get("phase_suffix") or "")
+        self.status.setText(f"検索結果: {len(self._records)}件 ({self._format_elapsed()}{phase_suffix})")
+        self._set_progress_detail(
+            self._build_progress_detail(
+                len(self._all_records),
+                len(self._all_records),
+                started_at=started_at,
+                accepted=len(self._records),
+            )
+        )
+        self._set_search_busy(False)
 
     def _on_search_fetch_finished(self, details: Any, error_text: str):
         logger.debug("bulk_dp: search thread finished error=%s details_type=%s", bool(error_text), type(details).__name__)
@@ -1777,85 +2166,9 @@ class DataFetch2BulkDpTab(QWidget):
             self._set_search_busy(False)
             return
 
-        if isinstance(details, dict) and isinstance(details.get("links"), list):
-            links = details.get("links") or []
-            records = self._build_records_from_links(links)
-            self._all_records = records
-            self._build_record_exact_indexes(self._all_records)
-            self._update_filter_options(self._all_records)
-
-            candidates = self._candidate_records_from_indexes()
-            self._records = self._parallel_filter_records(candidates)
-            self._current_page = 1
-            self._populate(self._records)
-            self._log_record_quality(self._records)
-            self.status.setText(f"検索結果: {len(self._records)}件 ({elapsed}{phase_suffix})")
-            self._set_search_busy(False)
-            return
-
-        if isinstance(details, dict) and isinstance(details.get("records"), list):
-            raw_records = details.get("records") or []
-            records = [self._enrich_record(dict(rec)) for rec in raw_records if isinstance(rec, dict)]
-            self._all_records = records
-            self._build_record_exact_indexes(self._all_records)
-            self._update_filter_options(self._all_records)
-
-            candidates = self._candidate_records_from_indexes()
-            self._records = self._parallel_filter_records(candidates)
-            self._current_page = 1
-            self._populate(self._records)
-            self._log_record_quality(self._records)
-            self.status.setText(f"検索結果: {len(self._records)}件 ({elapsed}{phase_suffix})")
-            self._set_search_busy(False)
-            return
-
-        if isinstance(details, dict) and isinstance(details.get("details"), list):
-            details_list = details.get("details") or []
-        else:
-            details_list = details if isinstance(details, list) else []
-        if not details_list:
-            self._all_records = []
-            self._records = []
-            self._record_exact_indexes = {}
-            self._populate([])
-            self.status.setText(f"検索結果: 0件 ({elapsed}{phase_suffix})")
-            self._set_search_busy(False)
-            return
-        records: list[dict] = []
-        for d in details_list:
-            fields = d.fields if isinstance(d.fields, dict) else {}
-            record = {
-                    "title": d.title,
-                    "project_number": _to_text(fields.get("project_number")),
-                    "subgroup": _to_text(fields.get("subgroup") or fields.get("sub_group") or ""),
-                    "subgroup_id": "",
-                    "registrant": _to_text(fields.get("dataset_registrant")),
-                    "organization": _to_text(fields.get("organization")),
-                    "dataset_id": _to_text(fields.get("dataset_id") or d.code),
-                    "template": _to_text(fields.get("dataset_template") or ""),
-                    "sample_name": _to_text(fields.get("sample_name") or ""),
-                    "sample_uuid": _to_text(fields.get("sample_uuid") or ""),
-                    "equipment_name": _to_text(fields.get("equipment_name") or ""),
-                    "equipment_local_id": _to_text(fields.get("equipment_local_id") or ""),
-                    "tags": _to_text(fields.get("keyword_tags") or ""),
-                    "related_datasets": _to_text(fields.get("related_datasets") or ""),
-                    "related_datasets_display": "",
-                    "detail_url": d.detail_url,
-                    "content_url": (d.download_links[0] if d.download_links else ""),
-                }
-            records.append(self._enrich_record(record))
-
-        self._all_records = records
-        self._build_record_exact_indexes(self._all_records)
-        self._update_filter_options(self._all_records)
-
-        candidates = self._candidate_records_from_indexes()
-        self._records = self._parallel_filter_records(candidates)
-        self._current_page = 1
-        self._populate(self._records)
-        self._log_record_quality(self._records)
-        self.status.setText(f"検索結果: {len(self._records)}件 ({elapsed}{phase_suffix})")
-        self._set_search_busy(False)
+        if self._last_search_cache_key is not None:
+            self._search_result_cache[self._last_search_cache_key] = details
+        self._start_processing_results(details, phase_suffix)
 
     def _populate(self, records: list[dict]):
         self._records = list(records)
@@ -1868,6 +2181,7 @@ class DataFetch2BulkDpTab(QWidget):
         for rec in records:
             r = self.table.rowCount()
             self.table.insertRow(r)
+            self.table.setCellWidget(r, 0, self._create_detail_link_button(rec))
             values = [
                 rec.get("title", ""),
                 rec.get("project_number", ""),
@@ -1881,10 +2195,8 @@ class DataFetch2BulkDpTab(QWidget):
                 rec.get("equipment_local_id", ""),
                 rec.get("tags", ""),
                 rec.get("related_datasets_display") or rec.get("related_datasets", ""),
-                rec.get("detail_url", ""),
-                rec.get("content_url", ""),
             ]
-            for c, v in enumerate(values):
+            for c, v in enumerate(values, start=1):
                 it = QTableWidgetItem(_to_text(v))
                 it.setData(Qt.UserRole, rec)
                 it.setFlags(it.flags() ^ Qt.ItemIsEditable)
@@ -1896,22 +2208,14 @@ class DataFetch2BulkDpTab(QWidget):
         row = self.table.currentRow()
         if row < 0:
             return None
-        item = self.table.item(row, 0)
-        if item is None:
-            return None
-        rec = item.data(Qt.UserRole)
-        return rec if isinstance(rec, dict) else None
-
-    def _open_selected_url(self, key: str):
-        rec = self._selected_record()
-        if rec is None:
-            QMessageBox.information(self, "情報", "行を選択してください。")
-            return
-        url = str(rec.get(key) or "").strip()
-        if not url:
-            QMessageBox.information(self, "情報", "対象URLがありません。")
-            return
-        QDesktopServices.openUrl(QUrl(url))
+        for column in range(1, self.table.columnCount()):
+            item = self.table.item(row, column)
+            if item is None:
+                continue
+            rec = item.data(Qt.UserRole)
+            if isinstance(rec, dict):
+                return rec
+        return None
 
     def export_csv(self):
         if not self._records:

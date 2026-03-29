@@ -271,6 +271,17 @@ class UIController(UIControllerCore):
         else:
             # WebView非表示時はmenu_area_layoutの一番上に追加
             if hasattr(parent, 'menu_area_layout'):
+                target_parent = None
+                try:
+                    target_parent = parent.menu_area_layout.parentWidget()
+                except Exception:
+                    target_parent = getattr(parent, 'menu_area_widget', None)
+                if (
+                    target_parent is not None
+                    and parent.autologin_msg_label.parent() is target_parent
+                    and parent.webview_msg_label.parent() is target_parent
+                ):
+                    return
                 for label in [parent.autologin_msg_label, parent.webview_msg_label]:
                     if label.parent() and label.parent().layout():
                         label.parent().layout().removeWidget(label)
@@ -1377,7 +1388,7 @@ class UIController(UIControllerCore):
                 clear_main_window_size_constraints(top_level)
 
             # サブグループ・データセット・基本情報・設定モードは初期高さをディスプレイの90%に設定（後から変更可）
-            if mode in ["subgroup_create", "basic_info", "dataset_open", "data_register", "settings", "ai_test", "data_fetch2", "data_portal", "help"]:
+            if mode in ["subgroup_create", "basic_info", "dataset_open", "data_register", "settings", "ai_test", "data_portal", "help"]:
                 import os
 
                 if not os.environ.get("PYTEST_CURRENT_TEST") and not is_window_maximized(top_level):
@@ -1492,7 +1503,7 @@ class UIController(UIControllerCore):
 
         # Final safety: overlay must only be visible in data_fetch mode.
         # Async WebView events can fire during/after mode switches.
-        if mode != "data_fetch" and hasattr(self.parent, 'overlay_manager'):
+        if mode not in {"data_fetch", "data_fetch2"} and hasattr(self.parent, 'overlay_manager'):
             try:
                 self._schedule_qt_single_shot(0, self.parent.overlay_manager.hide_overlay, key="hide_overlay_after_mode_switch")
             except Exception:

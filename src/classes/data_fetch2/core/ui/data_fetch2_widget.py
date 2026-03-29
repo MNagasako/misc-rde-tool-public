@@ -1647,11 +1647,9 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
         logger.info("dataset_dropdown connected to update_planned_summary")
     except Exception:
         pass
-    # 初期選択がある場合にも更新を一度実行
-    try:
-        QTimer.singleShot(0, update_planned_summary)
-    except Exception:
-        pass
+    # 初期表示では planned summary の自動集計を行わない。
+    # Bearer token 検証や API 集計がタブ初回表示の体感速度を阻害しやすいため、
+    # 明示的な選択変更または外部連携で dataset が決まった時だけ更新する。
 
     def _find_dataset_index(dataset_id: str) -> int:
         combo = getattr(fetch2_dropdown_widget, 'dataset_dropdown', None)

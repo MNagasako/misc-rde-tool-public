@@ -4,6 +4,7 @@
 """
 
 import logging
+import os
 from typing import Optional
 import time
 
@@ -32,11 +33,14 @@ logger = logging.getLogger(__name__)
 class DataFetch2TabWidget(QTabWidget):
     """データ取得2機能のタブウィジェット"""
     
-    def __init__(self, parent=None, *, prewarm_filter_widget: bool = True):
+    def __init__(self, parent=None, *, prewarm_filter_widget: bool = True, prewarm_dataset_widget: bool = True, prewarm_filter_delay_ms: int | None = None):
         super().__init__(parent)
         self.parent_controller = parent
         self.bearer_token = None
         self._prewarm_filter_widget = bool(prewarm_filter_widget)
+        self._prewarm_dataset_widget = bool(prewarm_dataset_widget)
+        self._prewarm_filter_delay_ms = self._resolve_filter_prewarm_delay(prewarm_filter_delay_ms)
+        self.data_fetch_widget = None
         
         # フィルタ設定の初期化
         try:
@@ -59,6 +63,18 @@ class DataFetch2TabWidget(QTabWidget):
     def set_bearer_token(self, token):
         """Bearer tokenを設定"""
         self.bearer_token = token
+        try:
+            if self.data_fetch_widget and hasattr(self.data_fetch_widget, 'set_bearer_token'):
+                self.data_fetch_widget.set_bearer_token(token)
+        except Exception:
+            logger.debug("data_fetch2: failed to propagate bearer token", exc_info=True)
+
+    def _resolve_filter_prewarm_delay(self, explicit_delay_ms: int | None) -> int:
+        if explicit_delay_ms is not None:
+            return max(0, int(explicit_delay_ms))
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return 0
+        return 1500
         
     def setup_ui(self):
         """UI初期化"""
@@ -184,12 +200,14 @@ class DataFetch2TabWidget(QTabWidget):
         # プレウォーム（初回描画のあとに構築）
         try:
             if self._prewarm_filter_widget:
-                QTimer.singleShot(0, self._ensure_file_filter_widget)
+                QTimer.singleShot(self._prewarm_filter_delay_ms, self._ensure_file_filter_widget)
         except Exception:
             pass
 
     def _on_tab_changed(self, index: int):
         try:
+            if index == getattr(self, '_dataset_tab_index', -1):
+                self._ensure_dataset_widget()
             if index == getattr(self, '_bulk_rde_tab_index', -1):
                 self._ensure_bulk_rde_widget()
             elif index == getattr(self, '_bulk_dp_tab_index', -1):
@@ -214,6 +232,37 @@ class DataFetch2TabWidget(QTabWidget):
             pass
         wrapped = self._wrap_tab_widget(tab_widget, 'dataFetch2BulkRdeScrollArea')
         self._replace_tab_widget(self._bulk_rde_tab_index, wrapped, '📦 一括取得（RDE）')
+
+    def _ensure_dataset_widget(self):
+        if getattr(self, 'data_fetch_widget', None) is not None:
+            return
+
+        try:
+            from classes.data_fetch2.core.ui.data_fetch2_widget import create_data_fetch2_widget
+
+            tab_widget = create_data_fetch2_widget(self, self.bearer_token)
+            if tab_widget:
+                self.data_fetch_widget = tab_widget
+                try:
+                    if hasattr(self, 'current_filter_config') and hasattr(self.data_fetch_widget, 'set_filter_config_for_display'):
+                        self.data_fetch_widget.set_filter_config_for_display(self.current_filter_config)
+                except Exception:
+                    pass
+                wrapped = self._wrap_tab_widget(tab_widget, 'dataFetch2DatasetScrollArea')
+                self._replace_tab_widget(self._dataset_tab_index, wrapped, '📊 データ取得')
+                return
+        except ImportError as e:
+            logger.error(f"データ取得ウィジェットのインポートエラー: {e}")
+        except Exception as e:
+            logger.error(f"データ取得ウィジェット作成エラー: {e}")
+
+        fallback_widget = QWidget()
+        fallback_layout = QVBoxLayout(fallback_widget)
+        fallback_label = QLabel("データ取得機能は利用できません")
+        fallback_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;")
+        fallback_layout.addWidget(fallback_label)
+        self.data_fetch_widget = None
+        self._replace_tab_widget(self._dataset_tab_index, fallback_widget, '📊 データ取得')
 
     def _ensure_bulk_dp_widget(self):
         if getattr(self, 'bulk_dp_widget', None) is not None:
@@ -283,37 +332,15 @@ class DataFetch2TabWidget(QTabWidget):
         
     def create_dataset_tab(self):
         """データセット選択・取得タブ"""
+        self.data_fetch_widget = None
+        placeholder = self._create_loading_panel('データ取得タブを読み込み中...')
+        wrapped = self._wrap_tab_widget(placeholder, 'dataFetch2DatasetScrollArea')
+        self._dataset_tab_index = self.addTab(wrapped, '📊 データ取得')
         try:
-            from classes.data_fetch2.core.ui.data_fetch2_widget import create_data_fetch2_widget
-            # 既存の機能ウィジェットを統合
-            tab_widget = create_data_fetch2_widget(self, self.bearer_token)
-            if tab_widget:
-                self.data_fetch_widget = tab_widget  # ウィジェットへの参照を保存
-                self.addTab(self._wrap_tab_widget(tab_widget, "dataFetch2DatasetScrollArea"), "📊 データ取得")
-                # 初期フィルタの表示を即時反映
-                try:
-                    if hasattr(self, 'current_filter_config') and hasattr(self.data_fetch_widget, 'set_filter_config_for_display'):
-                        self.data_fetch_widget.set_filter_config_for_display(self.current_filter_config)
-                except Exception:
-                    pass
-            else:
-                # フォールバック
-                fallback_widget = QWidget()
-                fallback_layout = QVBoxLayout(fallback_widget)
-                fallback_label = QLabel("データ取得機能は利用できません")
-                fallback_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;")
-                fallback_layout.addWidget(fallback_label)
-                self.data_fetch_widget = None
-                self.addTab(fallback_widget, "📊 データ取得")
-        except ImportError as e:
-            logger.error(f"データ取得ウィジェットのインポートエラー: {e}")
-            fallback_widget = QWidget()
-            fallback_layout = QVBoxLayout(fallback_widget)
-            fallback_label = QLabel("データ取得機能は利用できません")
-            fallback_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_ERROR)}; font-weight: bold;")
-            fallback_layout.addWidget(fallback_label)
-            self.data_fetch_widget = None
-            self.addTab(fallback_widget, "📊 データ取得")
+            if self._prewarm_dataset_widget:
+                QTimer.singleShot(0, self._ensure_dataset_widget)
+        except Exception:
+            pass
 
     def create_mail_notification_tab(self):
         pass  # メール通知タブの作成を削除
@@ -414,11 +441,16 @@ class DataFetch2TabWidget(QTabWidget):
             logger.debug(f"初期フィルタ同期エラー: {e}")
 
 
-def create_data_fetch2_tab_widget(parent=None, *, prewarm_filter_widget: bool = True):
+def create_data_fetch2_tab_widget(parent=None, *, prewarm_filter_widget: bool = True, prewarm_dataset_widget: bool = True, prewarm_filter_delay_ms: int | None = None):
     """データ取得2タブウィジェットを作成"""
     try:
         # prewarm_filter_widget=True が従来挙動（初回描画をブロックしないため遅延構築）
-        return DataFetch2TabWidget(parent, prewarm_filter_widget=prewarm_filter_widget)
+        return DataFetch2TabWidget(
+            parent,
+            prewarm_filter_widget=prewarm_filter_widget,
+            prewarm_dataset_widget=prewarm_dataset_widget,
+            prewarm_filter_delay_ms=prewarm_filter_delay_ms,
+        )
     except Exception as e:
         logger.error(f"データ取得2タブウィジェット作成エラー: {e}")
         return None
