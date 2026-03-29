@@ -6,12 +6,21 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.41）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| AI拡張設定 | AIサジェスト機能定義の管理ダイアログに prompt assembly 方式・source別 override・辞書管理タブを追加。 |
-| AI提案/AI CHECK | データセット説明 AI提案、Quick AI、AI CHECK で使うテンプレートを個別選択できるよう整理。 |
-| Prompt Assembly | 実行直前に全文埋め込み / 候補限定埋め込みを選べる runtime dialog と、filtered_embed 辞書 summary / preset seed / output走査評価を追加。 |
-| データセット選択 | AI提案系のデータセットコンボで入力絞り込みと popup 表示の安定性を改善。 |
-| テスト/ビルド | prompt assembly・辞書管理・テンプレート選択・dataset combo filter の回帰テストを追加更新し、pytest段階ゲート・pre-build・PyInstaller 導線を v2.5.41 へ同期。 |
+| リリース/品質 | リビジョンアップ（v2.5.42）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| データポータル | データカタログの主要操作ボタンを単一アクション行へ整理し、JSON / ZIP / 修正 / 公開表示 / ステータス変更をテーマ別スタイルで判別しやすく改善。 |
+| データポータル | 主要操作ボタンの compact padding と hover / pressed / disabled 表現を統一し、狭い横幅でも視認性とクリック性を維持。 |
+| 共有UI | データ取得2由来のデータセットコンボ表示スタイルを維持し、データポータル統合時のフォント・高さ・背景表示を安定化。 |
+| テスト/ビルド | dataset upload / shared combo の回帰テストを更新し、pytest段階ゲート・pre-build・PyInstaller 導線を v2.5.42 へ同期。 |
+
+## v2.5.42 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.42）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| データポータル | `dataset_upload_tab.py` で書誌情報JSON / コンテンツZIP / データカタログ修正 / ブラウザ表示 / ステータス変更の主要操作を 1 行のアクションボタン列へ整理。 |
+| データポータル | 主要操作ボタンに success / info / warning のテーマ別スタイルを割り当て、padding・border・hover / pressed / disabled 表現を統一。 |
+| 共有UI | `data_fetch2_widget.py` を共有するドロップダウンのコンボ表示スタイルを維持し、データポータル側へ統合した際のフォントサイズ・最小高さ・背景色の視認性を安定化。 |
+| テスト/品質 | `test_dataset_upload_tab.py`、`test_dataset_upload_tab_scroll_and_theme.py`、`test_data_fetch2_combo_font_display.py` を更新し、アクション行レイアウト・ボタンスタイル・共有コンボ表示を回帰検証。 |
 
 ## v2.5.41 の主な更新点
 

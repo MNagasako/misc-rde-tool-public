@@ -14,7 +14,7 @@ from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
     QLabel, QLineEdit, QPushButton, QComboBox,
     QFormLayout, QTextEdit, QMessageBox, QFileDialog,
-    QCheckBox, QProgressBar, QRadioButton, QButtonGroup, QScrollArea, QGridLayout
+    QCheckBox, QProgressBar, QRadioButton, QButtonGroup, QScrollArea
 )
 from qt_compat.core import Qt, Signal, QThread, QTimer
 
@@ -259,47 +259,48 @@ class DatasetUploadTab(QWidget):
                 background: {get_color(ThemeKey.PANEL_BACKGROUND)};
                 color: {get_color(ThemeKey.TEXT_PRIMARY)};
             }}
-            QWidget#datasetUploadTabRoot QPushButton#datasetUploadBulkDownloadButton,
-            QWidget#datasetUploadTabRoot QPushButton#datasetUploadEditPortalButton,
-            QWidget#datasetUploadTabRoot QPushButton#datasetUploadZipButton,
-            QWidget#datasetUploadTabRoot QPushButton#datasetUploadPublicViewButton {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_INFO_TEXT)};
-                padding: 10px 20px;
-                border: none;
+        """
+
+    def _build_prominent_button_styles(
+        self,
+        *,
+        background_key: ThemeKey,
+        text_key: ThemeKey,
+        border_key: ThemeKey,
+        hover_background_key: ThemeKey,
+        pressed_background_key: ThemeKey,
+        font_size: str | None = None,
+    ) -> str:
+        font_size_rule = f"font-size: {font_size};" if font_size else ""
+        return f"""
+            QPushButton {{
+                background-color: {get_color(background_key)};
+                color: {get_color(text_key)};
+                border: 1px solid {get_color(border_key)};
+                border-style: solid;
                 border-radius: 4px;
+                padding: 2px 12px;
                 font-weight: bold;
+                min-height: 34px;
+                {font_size_rule}
             }}
-            QWidget#datasetUploadTabRoot QPushButton#datasetUploadBulkDownloadButton:hover,
-            QWidget#datasetUploadTabRoot QPushButton#datasetUploadEditPortalButton:hover,
-            QWidget#datasetUploadTabRoot QPushButton#datasetUploadZipButton:hover,
-            QWidget#datasetUploadTabRoot QPushButton#datasetUploadPublicViewButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_INFO_BACKGROUND_HOVER)};
+            QPushButton:hover {{
+                background-color: {get_color(hover_background_key)};
+                color: {get_color(text_key)};
+                border: 1px solid {get_color(border_key)};
             }}
-            QWidget#datasetUploadTabRoot QPushButton#datasetUploadImageUploadButton,
-            QWidget#datasetUploadTabRoot QPushButton#datasetUploadToggleStatusButton {{
-                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_WARNING_TEXT)};
-                padding: 10px 20px;
-                border: none;
+            QPushButton:pressed {{
+                background-color: {get_color(pressed_background_key)};
+                color: {get_color(text_key)};
+                border: 1px solid {get_color(border_key)};
+            }}
+            QPushButton:disabled {{
+                background-color: {get_color(ThemeKey.BUTTON_DISABLED_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DISABLED_TEXT)};
+                border: 1px solid {get_color(ThemeKey.BUTTON_DISABLED_BORDER)};
                 border-radius: 4px;
-                font-weight: bold;
-            }}
-            QWidget#datasetUploadTabRoot QPushButton#datasetUploadImageUploadButton:hover,
-            QWidget#datasetUploadTabRoot QPushButton#datasetUploadToggleStatusButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER)};
-            }}
-            QWidget#datasetUploadTabRoot QPushButton#datasetUploadJsonUploadButton {{
-                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND)};
-                color: {get_color(ThemeKey.BUTTON_SUCCESS_TEXT)};
-                padding: 10px 20px;
-                border: none;
-                border-radius: 4px;
-                font-weight: bold;
-                font-size: 14px;
-            }}
-            QWidget#datasetUploadTabRoot QPushButton#datasetUploadJsonUploadButton:hover {{
-                background-color: {get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER)};
+                padding: 2px 12px;
+                min-height: 34px;
             }}
         """
 
@@ -375,6 +376,7 @@ class DatasetUploadTab(QWidget):
         try:
             self.setStyleSheet(self._build_base_stylesheet())
             self._apply_status_style()
+            self._apply_prominent_button_styles()
             self.update()
         except Exception as e:
             logger.debug(f"DatasetUploadTab refresh_theme failed: {e}")
@@ -382,6 +384,89 @@ class DatasetUploadTab(QWidget):
     def _apply_file_list_theme(self) -> None:
         """互換用。主要な配色は root QSS で管理する。"""
         return
+
+    def _configure_prominent_button(self, button: QPushButton, *, min_width: int) -> None:
+        button.setMinimumHeight(34)
+        button.setMinimumWidth(min_width)
+
+    def _apply_prominent_button_styles(self) -> None:
+        button_configs = [
+            (
+                getattr(self, "bulk_download_btn", None),
+                self._build_prominent_button_styles(
+                    background_key=ThemeKey.BUTTON_INFO_BACKGROUND,
+                    text_key=ThemeKey.BUTTON_INFO_TEXT,
+                    border_key=ThemeKey.BUTTON_INFO_BORDER,
+                    hover_background_key=ThemeKey.BUTTON_INFO_BACKGROUND_HOVER,
+                    pressed_background_key=ThemeKey.BUTTON_INFO_BACKGROUND_PRESSED,
+                ),
+            ),
+            (
+                getattr(self, "upload_zip_btn", None),
+                self._build_prominent_button_styles(
+                    background_key=ThemeKey.BUTTON_INFO_BACKGROUND,
+                    text_key=ThemeKey.BUTTON_INFO_TEXT,
+                    border_key=ThemeKey.BUTTON_INFO_BORDER,
+                    hover_background_key=ThemeKey.BUTTON_INFO_BACKGROUND_HOVER,
+                    pressed_background_key=ThemeKey.BUTTON_INFO_BACKGROUND_PRESSED,
+                ),
+            ),
+            (
+                getattr(self, "edit_portal_btn", None),
+                self._build_prominent_button_styles(
+                    background_key=ThemeKey.BUTTON_INFO_BACKGROUND,
+                    text_key=ThemeKey.BUTTON_INFO_TEXT,
+                    border_key=ThemeKey.BUTTON_INFO_BORDER,
+                    hover_background_key=ThemeKey.BUTTON_INFO_BACKGROUND_HOVER,
+                    pressed_background_key=ThemeKey.BUTTON_INFO_BACKGROUND_PRESSED,
+                ),
+            ),
+            (
+                getattr(self, "public_view_btn", None),
+                self._build_prominent_button_styles(
+                    background_key=ThemeKey.BUTTON_INFO_BACKGROUND,
+                    text_key=ThemeKey.BUTTON_INFO_TEXT,
+                    border_key=ThemeKey.BUTTON_INFO_BORDER,
+                    hover_background_key=ThemeKey.BUTTON_INFO_BACKGROUND_HOVER,
+                    pressed_background_key=ThemeKey.BUTTON_INFO_BACKGROUND_PRESSED,
+                ),
+            ),
+            (
+                getattr(self, "upload_images_btn", None),
+                self._build_prominent_button_styles(
+                    background_key=ThemeKey.BUTTON_WARNING_BACKGROUND,
+                    text_key=ThemeKey.BUTTON_WARNING_TEXT,
+                    border_key=ThemeKey.BUTTON_WARNING_BORDER,
+                    hover_background_key=ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER,
+                    pressed_background_key=ThemeKey.BUTTON_WARNING_BACKGROUND_PRESSED,
+                ),
+            ),
+            (
+                getattr(self, "toggle_status_btn", None),
+                self._build_prominent_button_styles(
+                    background_key=ThemeKey.BUTTON_WARNING_BACKGROUND,
+                    text_key=ThemeKey.BUTTON_WARNING_TEXT,
+                    border_key=ThemeKey.BUTTON_WARNING_BORDER,
+                    hover_background_key=ThemeKey.BUTTON_WARNING_BACKGROUND_HOVER,
+                    pressed_background_key=ThemeKey.BUTTON_WARNING_BACKGROUND_PRESSED,
+                ),
+            ),
+            (
+                getattr(self, "upload_btn", None),
+                self._build_prominent_button_styles(
+                    background_key=ThemeKey.BUTTON_SUCCESS_BACKGROUND,
+                    text_key=ThemeKey.BUTTON_SUCCESS_TEXT,
+                    border_key=ThemeKey.BUTTON_SUCCESS_BORDER,
+                    hover_background_key=ThemeKey.BUTTON_SUCCESS_BACKGROUND_HOVER,
+                    pressed_background_key=ThemeKey.BUTTON_SUCCESS_BACKGROUND_PRESSED,
+                    font_size="10pt",
+                ),
+            ),
+        ]
+
+        for button, style in button_configs:
+            if button is not None:
+                button.setStyleSheet(style)
     
     def _create_environment_selector(self) -> QGroupBox:
         """環境選択セクション"""
@@ -462,6 +547,7 @@ class DatasetUploadTab(QWidget):
         
         self.bulk_download_btn = QPushButton("📥 画像ファイル一括取得")
         self.bulk_download_btn.setObjectName("datasetUploadBulkDownloadButton")
+        self._configure_prominent_button(self.bulk_download_btn, min_width=148)
         self.bulk_download_btn.setEnabled(False)
         self.bulk_download_btn.clicked.connect(self._on_bulk_download)
         file_download_row.addWidget(self.bulk_download_btn)
@@ -562,6 +648,7 @@ class DatasetUploadTab(QWidget):
         
         self.upload_images_btn = QPushButton("📤 画像アップロード")
         self.upload_images_btn.setObjectName("datasetUploadImageUploadButton")
+        self._configure_prominent_button(self.upload_images_btn, min_width=148)
         self.upload_images_btn.setEnabled(False)
         self.upload_images_btn.clicked.connect(self._on_upload_images)
         self.upload_images_btn.setToolTip("書誌情報JSONをアップロード後に使用可能になります")
@@ -776,10 +863,7 @@ class DatasetUploadTab(QWidget):
         return group
     
     def _create_upload_button_section(self) -> QVBoxLayout:
-        """アップロードボタンセクション
-
-        NOTE: ボタン数が増えたため、デフォルト幅でも横スクロールが出にくいよう2段構成にする。
-        """
+        """アップロードボタンセクション"""
 
         layout = QVBoxLayout()
 
@@ -791,21 +875,23 @@ class DatasetUploadTab(QWidget):
         top_row.addStretch()
         layout.addLayout(top_row)
 
-        # 2段目: アクションボタン群（グリッドで折り返し）
-        action_grid = QGridLayout()
-        action_grid.setHorizontalSpacing(10)
-        action_grid.setVerticalSpacing(8)
-        action_grid.setContentsMargins(0, 0, 0, 0)
+        # 2段目: アクションボタン群（横一列）
+        action_row = QHBoxLayout()
+        action_row.setSpacing(10)
+        action_row.setContentsMargins(0, 0, 0, 0)
+        self.catalog_action_row_layout = action_row
 
         # 書誌情報JSONアップロードボタン
         self.upload_btn = QPushButton("📤 書誌情報JSONアップロード")
         self.upload_btn.setObjectName("datasetUploadJsonUploadButton")
+        self._configure_prominent_button(self.upload_btn, min_width=132)
         self.upload_btn.setEnabled(False)
         self.upload_btn.clicked.connect(self._on_upload)
 
         # コンテンツZIPアップロードボタン（データカタログ修正が有効な場合のみ）
         self.upload_zip_btn = QPushButton("📦 コンテンツZIPアップロード")
         self.upload_zip_btn.setObjectName("datasetUploadZipButton")
+        self._configure_prominent_button(self.upload_zip_btn, min_width=130)
         self.upload_zip_btn.setEnabled(False)
         self.upload_zip_btn.clicked.connect(self._on_upload_zip)
         self.upload_zip_btn.setToolTip("ローカルZIPアップロード、またはRDEから自動取得してZIP化→アップロードを選択できます")
@@ -813,6 +899,7 @@ class DatasetUploadTab(QWidget):
         # データポータル修正ボタン
         self.edit_portal_btn = QPushButton("✏️ データカタログ修正")
         self.edit_portal_btn.setObjectName("datasetUploadEditPortalButton")
+        self._configure_prominent_button(self.edit_portal_btn, min_width=118)
         self.edit_portal_btn.setEnabled(False)
         self.edit_portal_btn.clicked.connect(self._on_edit_portal)
         self.edit_portal_btn.setToolTip("データポータルに登録済みのエントリを修正します")
@@ -820,6 +907,7 @@ class DatasetUploadTab(QWidget):
         # ブラウザ表示ボタン（公開ページ）
         self.public_view_btn = QPushButton("🌐 ブラウザで表示")
         self.public_view_btn.setObjectName("datasetUploadPublicViewButton")
+        self._configure_prominent_button(self.public_view_btn, min_width=110)
         self.public_view_btn.setEnabled(False)
         self.public_view_btn.clicked.connect(self._on_open_public_view)
         self.public_view_btn.setToolTip("データポータル公開ページを既定ブラウザで開きます")
@@ -827,18 +915,23 @@ class DatasetUploadTab(QWidget):
         # ステータス変更ボタン
         self.toggle_status_btn = QPushButton("🔄 ステータス変更")
         self.toggle_status_btn.setObjectName("datasetUploadToggleStatusButton")
+        self._configure_prominent_button(self.toggle_status_btn, min_width=102)
         self.toggle_status_btn.setEnabled(False)
         self.toggle_status_btn.clicked.connect(self._on_toggle_status)
         self.toggle_status_btn.setToolTip("データポータルの公開/非公開ステータスを切り替えます")
 
-        # 配置（3列×2行）
-        action_grid.addWidget(self.upload_btn, 0, 0)
-        action_grid.addWidget(self.upload_zip_btn, 0, 1)
-        action_grid.addWidget(self.edit_portal_btn, 0, 2)
-        action_grid.addWidget(self.public_view_btn, 1, 0)
-        action_grid.addWidget(self.toggle_status_btn, 1, 1)
+        self.catalog_action_buttons = [
+            self.upload_btn,
+            self.upload_zip_btn,
+            self.edit_portal_btn,
+            self.public_view_btn,
+            self.toggle_status_btn,
+        ]
+        for button in self.catalog_action_buttons:
+            action_row.addWidget(button)
+        action_row.addStretch()
 
-        layout.addLayout(action_grid)
+        layout.addLayout(action_row)
 
         # コンテンツZIPアップ済み表示（コンテンツリンク有無で判定）
         self.contents_zip_status_label = QLabel("")

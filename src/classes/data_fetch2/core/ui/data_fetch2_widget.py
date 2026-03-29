@@ -359,23 +359,13 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
             subcontrol-origin: padding;
             subcontrol-position: top right;
             width: 30px;
-            border-left: 1px solid {get_color(ThemeKey.COMBO_BORDER_FOCUS)};
+            background-color: {get_color(ThemeKey.COMBO_ARROW_BACKGROUND)};
+            border-left: 1px solid {get_color(ThemeKey.COMBO_BORDER)};
             border-top-right-radius: 4px;
             border-bottom-right-radius: 4px;
         }}
         QComboBox::drop-down:hover {{
-            background-color: {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND_HOVER)};
-        }}
-        QComboBox::down-arrow {{
-            width: 0;
-            height: 0;
-            border-left: 6px solid transparent;
-            border-right: 6px solid transparent;
-            border-top: 8px solid {get_color(ThemeKey.TEXT_PRIMARY)};
-            margin: 0px;
-        }}
-        QComboBox::down-arrow:on {{
-            border-top: 8px solid {get_color(ThemeKey.BUTTON_PRIMARY_BACKGROUND)};
+            background-color: {get_color(ThemeKey.COMBO_ARROW_BACKGROUND_PRESSED)};
         }}
         QComboBox:disabled {{
             background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)};
