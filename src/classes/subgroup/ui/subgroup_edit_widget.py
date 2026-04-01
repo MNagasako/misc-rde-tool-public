@@ -28,6 +28,16 @@ from classes.utils.label_style import apply_label_style
 # ロガー設定
 logger = logging.getLogger(__name__)
 from ...dataset.util.dataset_refresh_notifier import get_subgroup_refresh_notifier
+
+import weakref
+_member_manager_ref: weakref.ref | None = None
+
+
+def _get_member_manager() -> Optional["EditMemberManager"]:
+    """モジュール内で保持する EditMemberManager の弱参照を返す。"""
+    if _member_manager_ref is None:
+        return None
+    return _member_manager_ref()
 from ..util.subgroup_ui_helpers import (
     SubjectInputValidator, SubgroupFormBuilder, 
     SubgroupCreateHandler, MemberDataProcessor,
@@ -241,11 +251,50 @@ class EditMemberManager:
         self.scroll_area = scroll_area
         self.current_member_selector = None
         self.parent_widget = parent_widget  # Bearer token取得用
+        self._member_selector_cache: dict[str, "CommonSubgroupMemberSelector"] = {}
     
+    def invalidate_cache(self, subgroup_id: str | None = None) -> None:
+        """キャッシュを無効化する。subgroup_id=None で全クリア."""
+        if subgroup_id is None:
+            self._member_selector_cache.clear()
+        else:
+            self._member_selector_cache.pop(subgroup_id, None)
+
+    def _detach_current_widget(self) -> None:
+        """scroll_area から現在のウィジェットを取り外す (Qt による自動削除を防止)。"""
+        old = self.scroll_area.takeWidget()
+        if old is not None:
+            old.setParent(None)
+
+    @staticmethod
+    def _is_alive(widget) -> bool:
+        """Qt C++ オブジェクトが生存しているか判定する。"""
+        try:
+            widget.objectName()
+            return True
+        except RuntimeError:
+            return False
+
     def update_member_selection(self, group_data, user_entries):
         """メンバー選択状態を既存グループに合わせて更新"""
         if not group_data:
             return None
+
+        subgroup_id = group_data.get('id', '')
+        
+        # キャッシュにヒットする場合はウィジェットを再利用
+        if subgroup_id and subgroup_id in self._member_selector_cache:
+            cached = self._member_selector_cache[subgroup_id]
+            if self._is_alive(cached):
+                self._detach_current_widget()
+                self.scroll_area.setWidget(cached)
+                self.current_member_selector = cached
+                self._suppress_inner_scroll(cached)
+                logger.debug("メンバーセレクター: キャッシュヒット subgroup_id=%s", subgroup_id)
+                return cached
+            # C++ 側が削除済み → キャッシュから除去して再生成
+            del self._member_selector_cache[subgroup_id]
+            logger.debug("メンバーセレクター: キャッシュ破棄 (C++ deleted) subgroup_id=%s", subgroup_id)
         
         # 現在のロールマッピングを作成
         current_roles = {}
@@ -269,26 +318,17 @@ class EditMemberManager:
             disable_internal_scroll=True,
         )
         
-        # スクロールエリアに設定
+        # キャッシュに保存
+        if subgroup_id:
+            self._member_selector_cache[subgroup_id] = new_member_selector
+
+        # スクロールエリアに設定 (既存ウィジェットを先に引き剥がして削除を防止)
+        self._detach_current_widget()
         self.scroll_area.setWidget(new_member_selector)
         self.current_member_selector = new_member_selector
 
         # 閲覧・修正タブは外側スクロールに集約するため、内側のスクロールを抑止
-        try:
-            from qt_compat.core import Qt
-            self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            self.scroll_area.setWidgetResizable(True)
-            self.scroll_area.setFrameStyle(0)
-            self.scroll_area.setContentsMargins(0, 0, 0, 0)
-
-            # セレクター側がコンテンツ全体の高さを持つ前提で、スクロールエリアも高さ追従
-            target_h = int(new_member_selector.sizeHint().height()) if new_member_selector is not None else 0
-            if target_h > 0:
-                self.scroll_area.setMinimumHeight(target_h)
-                self.scroll_area.setMaximumHeight(target_h)
-        except Exception:
-            logger.debug("member selector scroll suppression failed", exc_info=True)
+        self._suppress_inner_scroll(new_member_selector)
         
         # Bearer tokenが取得できていない場合、後で再実行を試行
         if not bearer_token:
@@ -313,6 +353,23 @@ class EditMemberManager:
         
         return new_member_selector
     
+    def _suppress_inner_scroll(self, selector_widget) -> None:
+        """閲覧・修正タブは外側スクロールに集約するため、内側のスクロールを抑止"""
+        try:
+            from qt_compat.core import Qt
+            self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            self.scroll_area.setWidgetResizable(True)
+            self.scroll_area.setFrameStyle(0)
+            self.scroll_area.setContentsMargins(0, 0, 0, 0)
+
+            target_h = int(selector_widget.sizeHint().height()) if selector_widget is not None else 0
+            if target_h > 0:
+                self.scroll_area.setMinimumHeight(target_h)
+                self.scroll_area.setMaximumHeight(target_h)
+        except Exception:
+            logger.debug("member selector scroll suppression failed", exc_info=True)
+
     def _retry_with_bearer_token(self, group_data, user_entries, parent_widget=None):
         """Bearer token取得後の再実行（安全版）"""
         target_parent = parent_widget or self.parent_widget
@@ -1436,6 +1493,10 @@ def _initialize_managers(combo, filter_combo, pre_filter_input, scroll_area, for
     form_manager = EditFormManager(None, form_builder, form_widgets)
     member_manager = EditMemberManager(scroll_area, parent_widget=widget)  # parent_widgetを追加
     edit_handler = SubgroupEditHandler(None, None, member_manager.get_current_selector())
+
+    # モジュールレベル弱参照を保持 (更新時のキャッシュ破棄で使用)
+    global _member_manager_ref
+    _member_manager_ref = weakref.ref(member_manager)
     
     # subGroup.json更新時にコンボボックスエントリーを更新
     try:
@@ -1562,6 +1623,55 @@ def _setup_event_handlers(widget, parent, managers, button_section, form_widgets
     refresh_btn.clicked.connect(selector.load_existing_subgroups)
 
 
+def _apply_payload_to_local_json(group_id: str, payload: dict) -> None:
+    """PATCH 成功後、ローカル JSON をペイロードで上書きする。
+
+    サーバー CDN/キャッシュ層の伝播遅延により ``auto_refresh_subgroup_json()``
+    が古いデータを取得する場合がある。送信済み（サーバー受理済み）ペイロードの
+    roles / name / description 等でローカルファイルを直接パッチすることで、
+    直後の ``load_existing_subgroups()`` が正しいデータを返すようにする。
+    """
+    payload_attr = (payload.get("data") or {}).get("attributes") or {}
+    if not payload_attr:
+        return
+
+    gid = str(group_id)
+
+    # --- 1. subGroup.json ---
+    _patch_included_group(SUBGROUP_JSON_PATH, gid, payload_attr)
+
+    # --- 2. subGroups/{group_id}.json (詳細ファイル) ---
+    for details_dir in (SUBGROUP_DETAILS_DIR, SUBGROUP_REL_DETAILS_DIR):
+        detail_path = os.path.join(details_dir, f"{gid}.json")
+        _patch_included_group(detail_path, gid, payload_attr)
+
+
+def _patch_included_group(json_path: str, group_id: str, payload_attr: dict) -> None:
+    """JSON ファイル内の ``included`` から該当グループを探し roles 等を上書きする。"""
+    if not os.path.exists(json_path):
+        return
+    try:
+        with open(json_path, encoding="utf-8") as f:
+            data = json.load(f)
+
+        patched = False
+        for item in data.get("included") or []:
+            if item.get("type") == "group" and str(item.get("id")) == group_id:
+                attr = item.setdefault("attributes", {})
+                for key in ("roles", "name", "description", "subjects", "funds"):
+                    if key in payload_attr:
+                        attr[key] = payload_attr[key]
+                patched = True
+                break
+
+        if patched:
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            logger.debug("ローカル JSON パッチ完了: %s", json_path)
+    except Exception as e:
+        logger.warning("ローカル JSON パッチ失敗 (%s): %s", json_path, e)
+
+
 def _execute_update(edit_handler, form_values, roles, widget, selector):
     """更新処理の実行"""
     selected_group = edit_handler.selected_group_data
@@ -1589,6 +1699,30 @@ def _execute_update(edit_handler, form_values, roles, widget, selector):
     
     if success:
         logger.info("サブグループ[%s]の更新が完了しました", group_name)
+
+        # ローカル JSON を送信済みペイロードで上書き（CDN 遅延対策）
+        try:
+            _apply_payload_to_local_json(group_id, payload)
+        except Exception as e:
+            logger.warning("ローカル JSON パッチ失敗: %s", e)
+
+        # 更新されたサブグループのメンバーセレクターキャッシュを破棄
+        try:
+            from classes.subgroup.ui.subgroup_edit_widget import _get_member_manager
+            mgr = _get_member_manager()
+            if mgr is not None:
+                mgr.invalidate_cache(str(group_id))
+                logger.debug("メンバーセレクターキャッシュを破棄: %s", group_id)
+        except Exception:
+            pass
+
+        # モジュールレベルの詳細ユーザー属性キャッシュも破棄（再ダウンロード済みJSONを読み直させる）
+        try:
+            from classes.subgroup.core.subgroup_api_helper import clear_detail_user_cache
+            clear_detail_user_cache(str(group_id))
+            logger.debug("詳細ユーザー属性キャッシュを破棄: %s", group_id)
+        except Exception:
+            pass
 
         # 更新直後は当該サブグループを再選択して再表示する
         try:

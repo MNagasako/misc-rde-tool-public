@@ -15,6 +15,7 @@ Notes:
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass
 from typing import Iterable, Literal, Optional
@@ -22,6 +23,8 @@ from typing import Iterable, Literal, Optional
 from config.common import get_dynamic_file_path
 from config.common import ensure_directory_exists
 from net.http_helpers import proxy_get
+
+logger = logging.getLogger(__name__)
 
 
 ResourceType = Literal["dataset", "group"]
@@ -99,6 +102,36 @@ class RemoteCheckResult:
     status_code: int | None = None
 
 
+# ---------------------------------------------------------------------------
+# TTL existence cache (shared across check_group_exists / check_dataset_exists)
+# ---------------------------------------------------------------------------
+_EXISTENCE_TTL_SEC: float = 30 * 60  # 30 min
+_existence_cache: dict[str, tuple[float, bool]] = {}
+# key: resource_id, value: (timestamp, exists)
+
+
+def record_existence(resource_id: str, exists: bool) -> None:
+    """外部 (Basic Info 等) から存在確認結果をキャッシュに登録する。"""
+    _existence_cache[resource_id] = (time.time(), exists)
+
+
+def invalidate_existence(resource_id: str) -> None:
+    """特定リソースの存在キャッシュを破棄する。"""
+    _existence_cache.pop(resource_id, None)
+
+
+def _get_cached_existence(resource_id: str) -> Optional[bool]:
+    """TTL 内であればキャッシュ済みの存在結果を返す。期限切れなら None。"""
+    entry = _existence_cache.get(resource_id)
+    if entry is None:
+        return None
+    ts, exists = entry
+    if (time.time() - ts) > _EXISTENCE_TTL_SEC:
+        del _existence_cache[resource_id]
+        return None
+    return exists
+
+
 def check_dataset_exists(dataset_id: str, *, timeout: float = 3.0) -> RemoteCheckResult:
     """Return whether dataset exists on RDE API.
 
@@ -110,14 +143,21 @@ def check_dataset_exists(dataset_id: str, *, timeout: float = 3.0) -> RemoteChec
     if not dataset_id:
         return RemoteCheckResult(exists=None, status_code=None)
 
+    cached = _get_cached_existence(dataset_id)
+    if cached is not None:
+        logger.debug("dataset存在チェック: キャッシュヒット id=%s exists=%s", dataset_id[:20], cached)
+        return RemoteCheckResult(exists=cached, status_code=200 if cached else 404)
+
     url = f"https://rde-api.nims.go.jp/datasets/{dataset_id}"
     try:
         resp = proxy_get(url, headers={"Accept": "application/vnd.api+json"}, timeout=timeout)
         status = int(getattr(resp, "status_code", 0) or 0)
         if status in (404, 410):
             mark_missing("dataset", dataset_id)
+            record_existence(dataset_id, False)
             return RemoteCheckResult(exists=False, status_code=status)
         if 200 <= status < 300:
+            record_existence(dataset_id, True)
             return RemoteCheckResult(exists=True, status_code=status)
         if status in (401, 403):
             return RemoteCheckResult(exists=None, status_code=status)
@@ -130,14 +170,21 @@ def check_group_exists(group_id: str, *, timeout: float = 3.0) -> RemoteCheckRes
     if not group_id:
         return RemoteCheckResult(exists=None, status_code=None)
 
+    cached = _get_cached_existence(group_id)
+    if cached is not None:
+        logger.debug("group存在チェック: キャッシュヒット id=%s exists=%s", group_id[:20], cached)
+        return RemoteCheckResult(exists=cached, status_code=200 if cached else 404)
+
     url = f"https://rde-api.nims.go.jp/groups/{group_id}"
     try:
         resp = proxy_get(url, headers={"Accept": "application/vnd.api+json"}, timeout=timeout)
         status = int(getattr(resp, "status_code", 0) or 0)
         if status in (404, 410):
             mark_missing("group", group_id)
+            record_existence(group_id, False)
             return RemoteCheckResult(exists=False, status_code=status)
         if 200 <= status < 300:
+            record_existence(group_id, True)
             return RemoteCheckResult(exists=True, status_code=status)
         if status in (401, 403):
             return RemoteCheckResult(exists=None, status_code=status)

@@ -65,6 +65,9 @@ def _log_and_execute(method: str, url: str, session: requests.Session, **kwargs)
             success=True
         )
         
+        # 外部アクセスモニターへ記録
+        _record_to_monitor(method, url, response.status_code, elapsed_ms)
+        
         return response
         
     except requests.exceptions.SSLError as e:
@@ -79,6 +82,7 @@ def _log_and_execute(method: str, url: str, session: requests.Session, **kwargs)
             error=error_msg
         )
         api_logger.log_ssl_verification_failure(url, str(e)[:200])
+        _record_to_monitor(method, url, 0, elapsed_ms, error_text=error_msg)
         raise
         
     except requests.exceptions.ProxyError as e:
@@ -95,6 +99,7 @@ def _log_and_execute(method: str, url: str, session: requests.Session, **kwargs)
         proxy_url = proxies.get('https') or proxies.get('http')
         if proxy_url:
             api_logger.log_proxy_connection(proxy_url, False)
+        _record_to_monitor(method, url, 0, elapsed_ms, error_text=error_msg)
         raise
         
     except Exception as e:
@@ -108,7 +113,29 @@ def _log_and_execute(method: str, url: str, session: requests.Session, **kwargs)
             success=False,
             error=error_msg
         )
+        _record_to_monitor(method, url, 0, elapsed_ms, error_text=error_msg)
         raise
+
+
+def _record_to_monitor(
+    method: str, url: str, status_code: int, elapsed_ms: float,
+    source_kind: str = "network", error_text: str = "",
+) -> None:
+    """外部アクセスモニターへ安全に記録 (例外を飲み込む)"""
+    try:
+        from classes.core.external_access_monitor import ExternalAccessMonitorStore
+        store = ExternalAccessMonitorStore.instance()
+        store.record_access(
+            url=url,
+            method=method,
+            status_code=status_code,
+            duration_ms=elapsed_ms,
+            source_kind=source_kind,
+            error_text=error_text,
+        )
+    except Exception:
+        pass  # モニター障害でHTTPリクエストを妨げない
+
 
 def proxy_get(url: str, **kwargs) -> requests.Response:
     """

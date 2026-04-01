@@ -52,9 +52,13 @@ class MasterDataManager:
         
         logger.info(f"MasterDataManager 初期化: {self.environment} 環境")
     
-    def fetch_material_index_master(self) -> Tuple[bool, Dict[str, str]]:
+    def fetch_material_index_master(self, progress_callback=None) -> Tuple[bool, Dict[str, str]]:
         """
         マテリアルインデックスマスタを取得（全ページ対応）
+        
+        Args:
+            progress_callback: 進捗コールバック関数
+                呼び出し形式: callback(page, items_so_far, page_items)
         
         Returns:
             Tuple[bool, Dict[str, str]]: (成功フラグ, {コード: 名称} の辞書)
@@ -121,6 +125,13 @@ class MasterDataManager:
                 
                 logger.info(f"ページ {page}: {page_data_count} 件取得")
                 
+                # 進捗コールバック呼び出し
+                if progress_callback:
+                    try:
+                        progress_callback(page, len(material_index_map), page_data_count)
+                    except Exception:
+                        pass
+                
                 # 次のページがあるかチェック
                 # ページネーションリンクを探す（複数パターン対応）
                 # パターン1: "次へ"テキストを含むリンク
@@ -163,9 +174,13 @@ class MasterDataManager:
             logger.error(traceback.format_exc())
             return False, {}
     
-    def fetch_tag_master(self) -> Tuple[bool, Dict[str, str]]:
+    def fetch_tag_master(self, progress_callback=None) -> Tuple[bool, Dict[str, str]]:
         """
         タグマスタを取得（全ページ対応）
+        
+        Args:
+            progress_callback: 進捗コールバック関数
+                呼び出し形式: callback(page, items_so_far, page_items)
         
         Returns:
             Tuple[bool, Dict[str, str]]: (成功フラグ, {コード: 名称} の辞書)
@@ -231,6 +246,13 @@ class MasterDataManager:
                         page_data_count += 1
                 
                 logger.info(f"ページ {page}: {page_data_count} 件取得")
+                
+                # 進捗コールバック呼び出し
+                if progress_callback:
+                    try:
+                        progress_callback(page, len(tag_map), page_data_count)
+                    except Exception:
+                        pass
                 
                 # 次のページがあるかチェック
                 # ページネーションリンクを探す（複数パターン対応）

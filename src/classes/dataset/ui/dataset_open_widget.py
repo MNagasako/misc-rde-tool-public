@@ -518,6 +518,10 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     except Exception:
         pass
 
+    # データセットID→管理者組織名のキャッシュ。再フィルタ時に2000件超の
+    # ファイル再読み込みを回避する。
+    _manager_org_cache: dict[str, str] = {}
+
     def _populate_existing_dataset_combo() -> None:
         preserve_id = ""
         try:
@@ -626,7 +630,12 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
 
                 is_org_subject = False
                 if self_org_name:
-                    manager_org = _resolve_dataset_manager_org(str(ds_id), manager_id)
+                    ds_id_str = str(ds_id)
+                    if ds_id_str in _manager_org_cache:
+                        manager_org = _manager_org_cache[ds_id_str]
+                    else:
+                        manager_org = _resolve_dataset_manager_org(ds_id_str, manager_id)
+                        _manager_org_cache[ds_id_str] = manager_org
                     if manager_org:
                         is_org_subject = (manager_org == self_org_name)
 
@@ -840,8 +849,12 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
         except Exception:
             logger.debug("新規開設2: 既存データセットからの自動反映に失敗", exc_info=True)
 
+    def _reload_existing_dataset_combo():
+        _manager_org_cache.clear()
+        _populate_existing_dataset_combo()
+
     _populate_existing_dataset_combo()
-    reload_btn.clicked.connect(_populate_existing_dataset_combo)
+    reload_btn.clicked.connect(_reload_existing_dataset_combo)
     display_managed_only_radio.toggled.connect(lambda *_: _populate_existing_dataset_combo())
     display_org_subjects_radio.toggled.connect(lambda *_: _populate_existing_dataset_combo())
     display_others_only_radio.toggled.connect(lambda *_: _populate_existing_dataset_combo())
@@ -1531,7 +1544,25 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
         context["access_policy"] = "restricted"
         return context
 
+    def _check_ai_provider_reachable() -> bool:
+        """AIプロバイダへの到達性を事前チェックする。到達不可なら警告を表示しFalseを返す。"""
+        try:
+            from classes.ai.core.ai_manager import AIManager
+            from qt_compat.widgets import QMessageBox
+            ai_mgr = AIManager()
+            ok, msg = ai_mgr.check_provider_reachable()
+            if not ok:
+                QMessageBox.warning(container, "AI接続エラー", msg)
+                return False
+            return True
+        except Exception as e:
+            logger.warning("AIプロバイダ到達性チェックで例外: %s", e)
+            return True  # チェック自体の失敗では処理を止めない
+
     def _show_ai_suggestion_dialog():
+        # AIプロバイダ到達性チェック（プロンプト準備前）
+        if not _check_ai_provider_reachable():
+            return
         try:
             ai_button.start_loading("AI生成中")
             try:
@@ -1592,6 +1623,9 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     ai_button.clicked.connect(_show_ai_suggestion_dialog)
 
     def _show_ai_check_dialog():
+        # AIプロバイダ到達性チェック（プロンプト準備前）
+        if not _check_ai_provider_reachable():
+            return
         try:
             current_description = description_edit.toPlainText().strip() if hasattr(description_edit, "toPlainText") else ""
             if not current_description:

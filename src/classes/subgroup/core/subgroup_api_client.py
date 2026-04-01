@@ -323,6 +323,15 @@ class SubgroupApiClient:
             logger.debug("proxy_patch() 呼び出し中...")
             resp = proxy_patch(api_url, headers=headers, json=payload, timeout=15)
             logger.debug("API レスポンス: status_code=%s", resp.status_code)
+
+            # 更新成功時にメンバーセレクターキャッシュと存在チェックキャッシュを更新
+            if resp.status_code in (200, 201):
+                try:
+                    from classes.utils.remote_resource_pruner import record_existence
+                    record_existence(group_id, True)
+                except Exception:
+                    pass
+
             return self._handle_response(resp, group_name, "更新", auto_refresh)
         except Exception as e:
             logger.error("API送信エラー: %s", e)

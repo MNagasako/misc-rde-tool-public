@@ -376,6 +376,9 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     # コンボボックス作成
     combo = QComboBox()
     combo.setMinimumWidth(650)
+    # sizeHint()が全項目を走査して最大幅を計算するのを防止（2921件で数秒のブロック回避）
+    combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+    combo.setMinimumContentsLength(30)
     combo.setEditable(True)
     combo.setInsertPolicy(QComboBox.NoInsert)
     combo.setMaxVisibleItems(15)
@@ -550,12 +553,17 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
                 combo.setModel(model)
                 combo.setModelColumn(0)
 
-                # QCompleter設定（モデルベースで一括）
-                completer = QCompleter(model, combo)
-                completer.setCompletionColumn(0)
-                completer.setCaseSensitivity(Qt.CaseInsensitive)
-                completer.setFilterMode(Qt.MatchContains)
-                combo.setCompleter(completer)
+                # QCompleter設定は初回のみ遅延（MatchContainsの内部インデックス構築が重い）
+                # 後続のフィルタ変更時は即座に設定
+                if not getattr(container, '_completer_initialized', False):
+                    container._pending_completer_model = model
+                    container._completer_initialized = True
+                else:
+                    completer = QCompleter(model, combo)
+                    completer.setCompletionColumn(0)
+                    completer.setCaseSensitivity(Qt.CaseInsensitive)
+                    completer.setFilterMode(Qt.MatchContains)
+                    combo.setCompleter(completer)
             finally:
                 combo.blockSignals(False)
                 combo.setUpdatesEnabled(True)
@@ -877,6 +885,22 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
         theme_manager.theme_changed.connect(container._rde_theme_changed_bridge.on_theme_changed)  # type: ignore[attr-defined]
     except Exception:
         pass
+
+    # QCompleterの遅延初期化（初回Paintをブロックしないよう、最初のイベントループ終了後に設定）
+    def _deferred_completer_init():
+        try:
+            pending_model = getattr(container, '_pending_completer_model', None)
+            if pending_model is not None:
+                completer = QCompleter(pending_model, combo)
+                completer.setCompletionColumn(0)
+                completer.setCaseSensitivity(Qt.CaseInsensitive)
+                completer.setFilterMode(Qt.MatchContains)
+                combo.setCompleter(completer)
+                container._pending_completer_model = None
+                logger.debug("data_fetch2: deferred QCompleter initialized")
+        except Exception:
+            logger.debug("data_fetch2: deferred QCompleter init failed", exc_info=True)
+    QTimer.singleShot(0, _deferred_completer_init)
     
     return container
 

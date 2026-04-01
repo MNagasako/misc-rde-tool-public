@@ -22,6 +22,18 @@ logger = logging.getLogger(__name__)
 _DETAIL_USER_CACHE: Dict[str, Dict[str, dict]] = {}
 
 
+def clear_detail_user_cache(subgroup_id: str | None = None) -> None:
+    """モジュールレベルの _DETAIL_USER_CACHE を無効化する。
+
+    Args:
+        subgroup_id: 指定時はそのエントリのみ削除。None で全クリア。
+    """
+    if subgroup_id is None:
+        _DETAIL_USER_CACHE.clear()
+    else:
+        _DETAIL_USER_CACHE.pop(subgroup_id, None)
+
+
 def fetch_user_details_by_id(user_id, bearer_token=None):
     """
     userIdからユーザー詳細情報をAPI経由で取得

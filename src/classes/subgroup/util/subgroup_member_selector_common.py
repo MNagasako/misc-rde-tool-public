@@ -285,17 +285,19 @@ class CommonSubgroupMemberSelector(QWidget):
                     cache_user_from_api(user_id, details)
                     name = details.get('userName', '')
                     mail = details.get('emailAddress', '')
-                    # 画面更新
+                    # 画面更新（APIが空値を返した場合は既存表示値を維持）
                     name_item = self.table.item(row, 0)
                     email_item = self.table.item(row, 1)
-                    if name_item:
+                    if name_item and name:
                         name_item.setText(name)
-                    if email_item:
+                    if email_item and mail:
                         email_item.setText(mail)
                     updated_count += 1
-                    # シェル出力（確実に見えるようprintも使用）
-                    print(f"[MemberSelector.refresh] row={row} ID={user_id} NAME={name} MAIL={mail}")
-                    logger.info(f"[MemberSelector.refresh] row={row} ID={user_id} NAME={name} MAIL={mail}")
+                    # 表示に使った値をログ出力
+                    display_name = name or (name_item.text() if name_item else '')
+                    display_mail = mail or (email_item.text() if email_item else '')
+                    print(f"[MemberSelector.refresh] row={row} ID={user_id} NAME={display_name} MAIL={display_mail}")
+                    logger.info(f"[MemberSelector.refresh] row={row} ID={user_id} NAME={display_name} MAIL={display_mail}")
             QMessageBox.information(self, "更新完了", f"{updated_count}件のエントリーを更新しました。")
         except Exception as e:
             QMessageBox.critical(self, "更新エラー", f"手動更新中にエラーが発生しました:\n{e}")

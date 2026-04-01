@@ -538,11 +538,14 @@ class DataFetch2BulkDpTab(QWidget):
         self._dataset_grant_by_id: dict[str, str] = {}
         self._dataset_uuid_by_title: dict[str, str] = {}
         self._subgroup_name_by_id: dict[str, str] = {}
+        self._dataset_items_by_id: dict[str, dict] | None = None
         self._sample_name_by_id: dict[str, str] = {}
         self._entry_enrichment_cache: dict[str, dict[str, str]] = {}
         self._search_thread: _BulkDpSearchThread | None = None
         self._bootstrap_thread: _BulkDpBootstrapThread | None = None
         self._search_result_cache: dict[tuple[str, str, bool, str], Any] = {}
+        self._search_result_ts: dict[tuple[str, str, bool, str], float] = {}
+        self._SEARCH_CACHE_TTL = 1800.0  # 30分
         self._last_search_cache_key: tuple[str, str, bool, str] | None = None
         self._processing_job: dict[str, Any] | None = None
         self._bootstrap_ready = False
@@ -1788,6 +1791,24 @@ class DataFetch2BulkDpTab(QWidget):
                 rec["sample_name"] = _to_text(self._sample_name_by_id.get(sample_uuid)).strip()
         return rec
 
+    def _ensure_dataset_items_by_id(self) -> dict[str, dict]:
+        """dataset.json を1回だけロードし dataset_id → dict のルックアップ辞書を返す。"""
+        if self._dataset_items_by_id is not None:
+            return self._dataset_items_by_id
+        result: dict[str, dict] = {}
+        try:
+            items = _load_data_items(get_dynamic_file_path("output/rde/data/dataset.json"))
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                dsid = _to_text(item.get("id")).strip()
+                if dsid:
+                    result[dsid] = item
+        except Exception:
+            pass
+        self._dataset_items_by_id = result
+        return result
+
     def _load_entry_derived_info_for_dataset(self, dataset_id: str) -> dict[str, str]:
         dsid = _to_text(dataset_id).strip()
         if not dsid:
@@ -1805,12 +1826,9 @@ class DataFetch2BulkDpTab(QWidget):
         }
 
         try:
-            dataset_items = _load_data_items(get_dynamic_file_path("output/rde/data/dataset.json"))
-            for ds in dataset_items:
-                if not isinstance(ds, dict):
-                    continue
-                if _to_text(ds.get("id")).strip() != dsid:
-                    continue
+            dataset_lookup = self._ensure_dataset_items_by_id()
+            ds = dataset_lookup.get(dsid)
+            if isinstance(ds, dict):
                 attrs = ds.get("attributes") if isinstance(ds.get("attributes"), dict) else {}
                 rels = ds.get("relationships") if isinstance(ds.get("relationships"), dict) else {}
                 group_data = (rels.get("group") or {}).get("data") if isinstance(rels, dict) else None
@@ -1820,7 +1838,6 @@ class DataFetch2BulkDpTab(QWidget):
                 subgroup_id = subgroup_id or _to_text(attrs.get("groupId")).strip()
                 info["subgroup_id"] = subgroup_id
                 info["subgroup"] = _to_text(self._subgroup_name_by_id.get(subgroup_id) or subgroup_id).strip()
-                break
         except Exception:
             pass
 
@@ -1963,7 +1980,8 @@ class DataFetch2BulkDpTab(QWidget):
         )
 
         cached_payload = self._search_result_cache.get(cache_key)
-        if cached_payload is not None:
+        cached_ts = self._search_result_ts.get(cache_key, 0.0)
+        if cached_payload is not None and (time.time() - cached_ts) < self._SEARCH_CACHE_TTL:
             self._set_search_progress(1, 1, "キャッシュ済み検索結果を適用中...")
             self._on_search_fetch_finished(cached_payload, "")
             return
@@ -2047,6 +2065,9 @@ class DataFetch2BulkDpTab(QWidget):
             "total": len(source_items),
         }
         self._set_search_progress(0, len(source_items), "一覧化を準備中...")
+        # dataset.json のルックアップ辞書を事前にキャッシュしてエンリッチメント中の
+        # 反復ロードを防止する
+        self._ensure_dataset_items_by_id()
         QTimer.singleShot(0, self._process_results_chunk)
 
     def _process_results_chunk(self):
@@ -2081,7 +2102,7 @@ class DataFetch2BulkDpTab(QWidget):
                 job["filtered_records"].append(record)
             job["index"] += 1
 
-            if (time.perf_counter() - slice_started) >= 0.03:
+            if (time.perf_counter() - slice_started) >= 0.05:
                 break
 
         current = int(job["index"])
@@ -2121,6 +2142,13 @@ class DataFetch2BulkDpTab(QWidget):
         self._populate(self._records)
         self._log_record_quality(self._records)
         phase_suffix = str(job.get("phase_suffix") or "")
+        processing_sec = max(0.0, time.perf_counter() - started_at)
+        logger.info(
+            "bulk_dp: processing completed total=%s filtered=%s processing_sec=%.3f",
+            len(self._all_records),
+            len(self._records),
+            processing_sec,
+        )
         self.status.setText(f"検索結果: {len(self._records)}件 ({self._format_elapsed()}{phase_suffix})")
         self._set_progress_detail(
             self._build_progress_detail(
@@ -2168,6 +2196,7 @@ class DataFetch2BulkDpTab(QWidget):
 
         if self._last_search_cache_key is not None:
             self._search_result_cache[self._last_search_cache_key] = details
+            self._search_result_ts[self._last_search_cache_key] = time.time()
         self._start_processing_results(details, phase_suffix)
 
     def _populate(self, records: list[dict]):

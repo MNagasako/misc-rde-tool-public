@@ -1403,6 +1403,12 @@ class UIController(UIControllerCore):
                     except Exception as e:
                         logger.debug("初期高さ90%リサイズ失敗: %s", e)
 
+            # データ取得2専用の初期高さ600pxでリサイズ（最大・最小制約はかけない）
+            if mode == "data_fetch2":
+                if not os.environ.get("PYTEST_CURRENT_TEST") and not is_window_maximized(top_level):
+                    if top_level:
+                        resize_main_window(top_level, height=600)
+
             # データセットは初期幅をディスプレイの75%に設定（後から変更可）
             if mode in [ "dataset_open" ]:
                 import os
@@ -1462,27 +1468,6 @@ class UIController(UIControllerCore):
                     self._schedule_qt_single_shot(0, self._refresh_webview_after_show, key="refresh_webview_after_show")
                 except Exception:
                     pass
-            
-        elif mode == "data_fetch2":
-            # データ取得2モード：ブラウザ表示は不要のため完全に非表示
-            # WebView本体を非表示
-            if hasattr(self.parent, 'webview'):
-                self.parent.webview.setVisible(False)
-            
-            # WebViewを含むWidgetも非表示・高さ0
-            webview_widget = self.parent.findChild(QWidget, 'webview_widget')
-            if webview_widget:
-                webview_widget.setVisible(False)
-                # NOTE: visibility is enough; avoid fixedHeight(0).
-            
-            # オーバーレイも非表示
-            if hasattr(self.parent, 'overlay_manager'):
-                self.parent.overlay_manager.hide_overlay()
-            
-            # データ取得2専用の初期高さ600pxでリサイズ（最大・最小制約はかけない）
-            if top_level:
-                clear_main_window_size_constraints(top_level)
-                resize_main_window(top_level, height=600)
             
         elif mode == "request_analyzer":
             # リクエスト解析モード：WebViewは使用しないため常に非表示
@@ -2489,7 +2474,9 @@ class UIController(UIControllerCore):
         elif mode == "basic_info":
             return self._create_widget("基本情報")
         elif mode == "data_fetch2":
-            return self._create_widget("データ取得2")
+            if not hasattr(self, '_data_fetch2_widget') or self._data_fetch2_widget is None:
+                self._data_fetch2_widget = self._create_widget("データ取得2")
+            return self._data_fetch2_widget
         elif mode == "ai_test":
             return self._create_ai_test_widget()
         elif mode == "data_portal":

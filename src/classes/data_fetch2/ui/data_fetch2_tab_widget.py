@@ -237,10 +237,14 @@ class DataFetch2TabWidget(QTabWidget):
         if getattr(self, 'data_fetch_widget', None) is not None:
             return
 
+        t0 = time.perf_counter()
+        # 構築中のレイアウト再計算・再描画を抑制（2921項目のsizeHint走査を回避）
+        self.setUpdatesEnabled(False)
         try:
             from classes.data_fetch2.core.ui.data_fetch2_widget import create_data_fetch2_widget
 
             tab_widget = create_data_fetch2_widget(self, self.bearer_token)
+            t1 = time.perf_counter()
             if tab_widget:
                 self.data_fetch_widget = tab_widget
                 try:
@@ -250,11 +254,18 @@ class DataFetch2TabWidget(QTabWidget):
                     pass
                 wrapped = self._wrap_tab_widget(tab_widget, 'dataFetch2DatasetScrollArea')
                 self._replace_tab_widget(self._dataset_tab_index, wrapped, '📊 データ取得')
+                t2 = time.perf_counter()
+                logger.info(
+                    "data_fetch2: _ensure_dataset_widget create=%.3fs replace=%.3fs total=%.3fs",
+                    t1 - t0, t2 - t1, t2 - t0,
+                )
                 return
         except ImportError as e:
             logger.error(f"データ取得ウィジェットのインポートエラー: {e}")
         except Exception as e:
             logger.error(f"データ取得ウィジェット作成エラー: {e}")
+        finally:
+            self.setUpdatesEnabled(True)
 
         fallback_widget = QWidget()
         fallback_layout = QVBoxLayout(fallback_widget)

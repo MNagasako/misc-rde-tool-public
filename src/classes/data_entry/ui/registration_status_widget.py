@@ -21,9 +21,15 @@ from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
 
 import classes.data_entry.core.registration_status_service as regsvc
+from classes.core.ttl_cache import TTLCache
 from classes.managers.token_manager import TokenManager
 
 logger = logging.getLogger(__name__)
+
+# 終端ステータス (COMPLETED/FAILED/CANCELLED) のエントリIDを恒久記憶する。
+# 一度終端に達したエントリは状態が変わらないため、個別詳細キャッシュの
+# 再取得対象から永続的に除外できる。
+_terminal_cache = TTLCache("terminal_entries")
 JST = timezone(timedelta(hours=9))
 
 
@@ -429,6 +435,7 @@ class RegistrationStatusWidget(QWidget):
         try:
             logger.info("[登録状況] キャッシュ削除ボタン押下")
             regsvc.clear_cache()
+            _terminal_cache.clear()
             self.lbl_summary.setText("キャッシュを削除しました")
             self.table.setRowCount(0)
         except Exception as ex:
@@ -538,7 +545,18 @@ class RegistrationStatusWidget(QWidget):
         if not self._is_visible:
             return
         try:
-            entry_ids = [e.get('id') for e in entries if e.get('id')]
+            entry_ids: list[str] = []
+            for e in entries:
+                entry_id = e.get('id')
+                if not entry_id:
+                    continue
+                if self._is_terminal_status(e.get('status')):
+                    if _terminal_cache.has(entry_id):
+                        # 恒久キャッシュ済み → 個別詳細の再取得不要
+                        continue
+                    # 初回: 詳細をキャッシュした後に恒久登録する
+                    _terminal_cache.put_permanent(entry_id, True)
+                entry_ids.append(entry_id)
             if not entry_ids:
                 return
             self._cancel_cache_worker(retire=True)
@@ -844,6 +862,7 @@ class RegistrationStatusWidget(QWidget):
         status_item = self.table.item(row, self.COL_STATUS)
         status_text = status_item.text() if status_item else ''
         if self._is_terminal_status(status_text):
+            _terminal_cache.put_permanent(entry_id, True)
             item = self._get_auto_item(row)
             if item:
                 item.setText(self._terminal_label(status_text))

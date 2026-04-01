@@ -1139,7 +1139,32 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         for button in launch_buttons:
             button.setEnabled(enabled)
 
+    # 準備中メッセージ用のタイマーと開始時刻
+    _preparing_start_time: float | None = None
+    _preparing_total_count: int | None = None
+    _preparing_timer = QTimer()
+    _preparing_timer.setInterval(1000)
+
+    def _update_preparing_eta() -> None:
+        """準備中メッセージに経過時間と残時間予測を追加更新"""
+        if _preparing_start_time is None:
+            return
+        import time as _time
+        elapsed = _time.time() - _preparing_start_time
+        elapsed_str = f"{int(elapsed)}秒経過"
+        line_edit = existing_dataset_combo.lineEdit()
+        if line_edit:
+            base = dataset_combo_preparing_message
+            if _preparing_total_count:
+                base = f"データセット一覧を準備中です... ({_preparing_total_count}件)"
+            line_edit.setText(f"{base} [{elapsed_str}]")
+            line_edit.setCursorPosition(0)
+
+    _preparing_timer.timeout.connect(_update_preparing_eta)
+
     def _set_dataset_combo_preparing_state(preparing: bool, message: str | None = None) -> None:
+        nonlocal _preparing_start_time, _preparing_total_count
+        import time as _time
         status_message = (message or dataset_combo_preparing_message).strip() or dataset_combo_preparing_message
         was_blocked = existing_dataset_combo.signalsBlocked()
         existing_dataset_combo.blockSignals(True)
@@ -1148,6 +1173,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             line_edit = existing_dataset_combo.lineEdit()
 
             if preparing:
+                if _preparing_start_time is None:
+                    _preparing_start_time = _time.time()
                 existing_dataset_combo.setEnabled(False)
                 existing_dataset_combo.setToolTip(status_message)
                 existing_dataset_combo.clear()
@@ -1157,12 +1184,20 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                     line_edit.setPlaceholderText(status_message)
                     line_edit.setText(status_message)
                     line_edit.setCursorPosition(0)
+                    line_edit.setStyleSheet(
+                        f"color: {get_color(ThemeKey.STATUS_ERROR)}; font-weight: bold;"
+                    )
+                _preparing_timer.start()
             else:
+                _preparing_start_time = None
+                _preparing_total_count = None
+                _preparing_timer.stop()
                 existing_dataset_combo.setEnabled(True)
                 existing_dataset_combo.setToolTip(dataset_combo_ready_tooltip)
                 if line_edit:
                     line_edit.setReadOnly(False)
                     line_edit.clear()
+                    line_edit.setStyleSheet("")
         finally:
             existing_dataset_combo.blockSignals(was_blocked)
         _update_launch_button_state()
@@ -2142,12 +2177,14 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
 
     def update_combo_box_ui(datasets, display_names, filter_type, grant_number_filter, dataset_count):
         """コンボボックスのUIを更新する"""
+        nonlocal _preparing_total_count
         refresh_update_controls(filter_type, grant_number_filter)
         preparing_message = (
             f"データセット一覧を準備中です... ({dataset_count}件)"
             if dataset_count
             else dataset_combo_preparing_message
         )
+        _preparing_total_count = dataset_count or None
         _set_dataset_combo_preparing_state(True, preparing_message)
         _process_events()
 
@@ -2973,9 +3010,33 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         
         ai_buttons_layout.addWidget(ai_check_button)
         
+        # 共通: AIプロバイダー到達チェック
+        def _check_ai_provider_reachable() -> bool:
+            """AIプロバイダーへの到達チェック。到達不可時はメッセージ表示してFalseを返す。"""
+            try:
+                from classes.ai.core.ai_manager import AIManager
+                mgr = AIManager()
+                reachable, detail = mgr.check_provider_reachable()
+                if not reachable:
+                    provider = mgr.get_default_provider()
+                    QMessageBox.warning(
+                        widget,
+                        "AI接続エラー",
+                        f"AIプロバイダー ({provider}) に接続できません。\n\n{detail}\n\nネットワーク接続を確認してください。",
+                    )
+                    return False
+                return True
+            except Exception as e:
+                logger.warning("AIプロバイダー到達チェック失敗: %s", e)
+                return True  # チェック自体の失敗ではブロックしない
+
         # AI提案ダイアログ表示のコールバック関数（既存）
         def show_ai_suggestion():
             try:
+                # AIプロバイダー到達チェック（プロンプト準備前に実施）
+                if not _check_ai_provider_reachable():
+                    return
+
                 # スピナー開始（ボタン無効化）
                 ai_suggest_button.start_loading("AI生成中")
                 _process_events()  # UI更新
@@ -3088,6 +3149,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         # クイックAI生成のコールバック関数（新規）
         def show_quick_ai_suggestion():
             try:
+                # AIプロバイダー到達チェック（プロンプト準備前に実施）
+                if not _check_ai_provider_reachable():
+                    return
+
                 # スピナー開始
                 quick_ai_button.start_loading("生成中")
                 _process_events()  # UI更新
@@ -3183,6 +3248,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         # AI CHECKボタンのコールバック関数
         def check_description_quality():
             """説明文の簡易品質チェック（AIテスト2と同じロジック）"""
+            # AIプロバイダ到達性チェック（プロンプト準備前）
+            if not _check_ai_provider_reachable():
+                return
             try:
                 # データセットが選択されているかチェック
                 selected_dataset = _get_selected_dataset_from_combo()

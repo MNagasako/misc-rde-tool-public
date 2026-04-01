@@ -6,11 +6,29 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.43）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| データ取得2 | データセット取得タブを初回選択時構築へ寄せ、planned summary の初期自動集計を止めて初回表示のトークン/API負荷を削減。 |
-| 一括取得（DP） | フィルタ候補準備を async bootstrap 化し、ローカル public output 優先・進捗詳細・残り時間表示で検索待ちを可視化。 |
-| UI品質 | data_fetch2 初回モード切替時の余計な resize / overlay 後処理と dataset_open 再生成時の notifier callback リークを抑制。 |
-| テスト/ビルド | data_fetch2 bulk / lazy build / planned summary / dataset launch の回帰テストを更新し、pytest段階ゲート・pre-build・PyInstaller 導線を v2.5.43 へ同期。 |
+| リリース/品質 | リビジョンアップ（v2.5.44）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| 外部アクセスモニター | 外部アクセスモニター機能を新規追加。HTTPリクエストの発信先・頻度・タイミングを一覧表示し、アプリの通信状況を透明化。 |
+| サブグループ完全性チェック | Basic Info で subGroupsAncestors の完全性を自動確認し、重複カウントメッセージを抑制。 |
+| マスタデータ改善 | マテリアルインデックス・タグマスタの取得に進捗コールバックを追加。Master Data Tab に CSV/XLSX エクスポート・自然ソートを実装。 |
+| data_fetch2最適化 | QComboBox パフォーマンス最適化、ウィジェット初期化改善、dataset.json キャッシュ追加。 |
+| AIプロバイダー到達性 | AIプロバイダーの到達性チェック機能を追加し、各ダイアログ・ウィジェットの接続状態を可視化。 |
+| TTLキャッシュ | 汎用 TTL キャッシュクラス（ttl_cache.py）を追加し、各所のキャッシュ管理を統一。 |
+| サブグループ編集 | ペイロード適用・ユーザーキャッシュクリア・メンバー管理の安定性を強化。 |
+| テスト/品質 | 外部アクセスモニター・TTLキャッシュ・到達性チェック・サブグループ・マスタデータ等の回帰テストを大幅追加。 |
+
+## v2.5.44 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.44）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| 外部アクセスモニター | `external_access_monitor.py` / `external_access_monitor_widget.py` を追加し、HTTPリクエストの送信先・頻度を UI で可視化。`http_helpers.py` にモニター通知フックを実装。 |
+| サブグループ完全性チェック | `basic_info_logic.py` で subGroupsAncestors の完全性確認と重複メッセージ抑制を追加。 |
+| マスタデータ強化 | `master_data.py` / `master_data_tab.py` にマテリアルインデックス・タグマスタの進捗コールバックと CSV/XLSX エクスポート・自然ソートを実装。 |
+| data_fetch2 | `data_fetch2_widget.py` / `data_fetch2_tab_widget.py` で QComboBox パフォーマンス最適化とウィジェット初期化改善。`bulk_dp_tab.py` に dataset.json キャッシュを追加。 |
+| AIプロバイダー到達性 | `ai_manager.py` にプロバイダー到達性チェック機能を追加し、`ai_suggestion_dialog.py`・`dataset_edit_widget.py`・`dataset_open_widget.py` で使用。 |
+| TTLキャッシュ | `ttl_cache.py` を追加し、bulk_dp・dataset_open・registration_status 等のキャッシュに適用。 |
+| サブグループ編集 | `subgroup_edit_widget.py` でペイロード適用・ユーザーキャッシュクリア・メンバー管理を改善。`remote_resource_pruner.py` を追加。 |
+| テスト/品質 | `test_external_access_monitor.py`、`test_external_access_monitor_widget.py`、`test_ttl_cache.py`、`test_ai_manager_reachability.py`、`test_subgroups_ancestors_check.py` 等を追加。 |
 
 ## v2.5.43 の主な更新点
 

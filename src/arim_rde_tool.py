@@ -397,8 +397,8 @@ class Browser(QWidget):
         settings.setAttribute(QWebEngineSettings.WebAttribute.AllowRunningInsecureContent, True)
         logger.info("[WEBENGINE] JavaScript と LocalStorage を有効化")
         
-        interceptor = ImageInterceptor()
-        self.webview.page().profile().setUrlRequestInterceptor(interceptor)
+        self._interceptor = ImageInterceptor()
+        self.webview.page().profile().setUrlRequestInterceptor(self._interceptor)
         self.browser_controller.setup_webview(self.webview)
         self.webview.page().profile().cookieStore().cookieAdded.connect(self.login_manager.on_cookie_added)
         self.ui_controller.setup_main_layout()
@@ -1046,6 +1046,13 @@ def main():
     # ディレクトリの初期化（遅延初期化）
     from config.common import initialize_directories
     initialize_directories()
+
+    # 外部アクセスモニターDB初期化
+    try:
+        from classes.core.external_access_monitor import ExternalAccessMonitorStore
+        ExternalAccessMonitorStore.instance().init_db()
+    except Exception:
+        pass
     
     try:
         parser = argparse.ArgumentParser()

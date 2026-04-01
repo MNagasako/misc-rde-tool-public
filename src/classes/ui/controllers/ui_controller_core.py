@@ -889,6 +889,15 @@ class UIControllerCore:
             # 右側全体に追加
             right_main_layout.addWidget(webview_widget, 3)
             right_main_layout.addWidget(self.parent.menu_area_widget, 1)
+
+            # 外部アクセスモニターバー（最下部）
+            try:
+                from classes.ui.external_access_monitor_widget import ExternalAccessMonitorBar
+                self.parent.external_access_monitor_bar = ExternalAccessMonitorBar(self.parent)
+                right_main_layout.addWidget(self.parent.external_access_monitor_bar, 0)
+            except Exception as e:
+                logger.debug("外部アクセスモニターバー初期化スキップ: %s", e)
+
             right_widget.setLayout(right_main_layout)
 
             # ルートレイアウトに左右追加

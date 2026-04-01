@@ -6,6 +6,8 @@ AI Manager - ARIM RDE Tool AI機能テスト（パス管理修正版）
 import os
 import json
 import time
+import socket
+from urllib.parse import urlparse
 # === セッション管理ベースのプロキシ対応 ===
 from net.session_manager import get_proxy_session
 import requests as _requests_types  # 型ヒント・例外処理用
@@ -26,6 +28,7 @@ from classes.ai.util.local_llm import (
     LOCAL_LLM_PROVIDER_OLLAMA,
     build_local_llm_headers,
     get_local_llm_chat_url,
+    get_local_llm_models_url,
     get_local_llm_provider_entries,
     get_local_llm_provider_label,
     get_local_llm_provider_type,
@@ -108,6 +111,19 @@ class AIManager:
         if value > 5:
             value = 5
         return value
+
+    # -- タイムアウト -----------------------------------------------------------
+
+    _CONNECT_TIMEOUT = 5  # 接続タイムアウト（秒）: ネットワーク不通時に即座に失敗させる
+
+    def _llm_timeout(self, read_timeout: int | None = None) -> tuple[int, int]:
+        """LLM向け (connect, read) タイムアウトを返す。
+
+        connect_timeout を短く設定し、プロバイダへの接続がそもそも
+        できない場合はリトライを待たずに即エラーとする。
+        """
+        rt = read_timeout if read_timeout is not None else self.config.get("timeout", 120)
+        return (self._CONNECT_TIMEOUT, rt)
 
     def _resolve_provider(self, provider: str) -> tuple[str, str | None]:
         normalized = str(provider or "").strip().lower()
@@ -434,7 +450,7 @@ class AIManager:
         }
 
         # NOTE: ここはフォームで送る
-        resp = self.session.post(token_uri, data=body, timeout=self.config.get("timeout", 120))
+        resp = self.session.post(token_uri, data=body, timeout=self._llm_timeout())
         if resp.status_code != 200:
             raise RuntimeError(f"OAuthトークン取得に失敗: {resp.status_code} - {resp.text}")
         try:
@@ -490,7 +506,7 @@ class AIManager:
             url,
             headers=headers,
             json=data,
-            timeout=self.config.get("timeout", 120)
+            timeout=self._llm_timeout(),
         )
         response_time = time.time() - start_time
         
@@ -732,7 +748,7 @@ class AIManager:
                     request_url,
                     headers=headers,
                     json=data,
-                    timeout=self.config.get("timeout", 120)
+                    timeout=self._llm_timeout(),
                 )
             except _requests_types.exceptions.RequestException as e:
                 # 企業ネットワーク等で regional endpoint がDNS/プロキシ制限されるケースがあるため、Vertex時のみ global endpoint を1回だけ試す
@@ -746,7 +762,7 @@ class AIManager:
                                 alt_url,
                                 headers=headers,
                                 json=data,
-                                timeout=self.config.get("timeout", 120)
+                                timeout=self._llm_timeout(),
                             )
                             request_url = alt_url
                         else:
@@ -814,7 +830,7 @@ class AIManager:
                             request_url,
                             headers=headers,
                             json=data,
-                            timeout=self.config.get("timeout", 120),
+                            timeout=self._llm_timeout(),
                         )
                         response = retry_resp
                         last_status_code = response.status_code
@@ -845,7 +861,7 @@ class AIManager:
                         request_url,
                         headers=headers,
                         json=data,
-                        timeout=self.config.get("timeout", 120)
+                        timeout=self._llm_timeout(),
                     )
                     response = retry_resp
                     last_status_code = response.status_code
@@ -1099,14 +1115,14 @@ class AIManager:
         
         start_time = time.time()
         try:
-            # ローカルLLMの場合はタイムアウトを5分（300秒）に設定
-            local_timeout = 300 if use_native_ollama else self.config.get("timeout", 120)
-            
+            # ローカルLLMの場合はread_timeoutを5分（300秒）に設定
+            llm_timeout = self._llm_timeout(300) if use_native_ollama else self._llm_timeout()
+
             response = self.session.post(
                 url,
                 headers=headers,
                 json=data,
-                timeout=local_timeout
+                timeout=llm_timeout,
             )
             response_time = time.time() - start_time
             
@@ -1235,3 +1251,80 @@ class AIManager:
         
         default_model = self.get_default_model(provider) or models[0]
         return self.send_prompt(test_prompt, provider, default_model)
+
+    # -- 軽量プロバイダー到達チェック ------------------------------------
+
+    _REACHABILITY_TIMEOUT = 5  # 秒（リモートプロバイダ用）
+    _REACHABILITY_TIMEOUT_LOCAL = 1  # 秒（ローカルLLM用）
+
+    def _resolve_provider_base_url(self, provider: str | None = None) -> str | None:
+        """プロバイダーの接続先ホストURLを返す（到達チェック用）。"""
+        resolved, _local = self._resolve_provider(provider or self.get_default_provider())
+        cfg = self._get_provider_config(resolved)
+
+        if resolved == "openai":
+            return str(cfg.get("base_url", "https://api.openai.com/v1")).rstrip("/")
+        if resolved == "gemini":
+            auth_mode = (cfg.get("auth_mode") or "api_key").strip().lower()
+            if auth_mode == "vertex_sa":
+                loc = (cfg.get("vertex_location") or "").strip()
+                host = "https://aiplatform.googleapis.com" if loc == "global" else f"https://{loc}-aiplatform.googleapis.com"
+                return host
+            return str(cfg.get("base_url", "https://generativelanguage.googleapis.com/v1")).rstrip("/")
+        if resolved == "local_llm":
+            return get_local_llm_models_url(cfg)
+        return None
+
+    def check_provider_reachable(self, provider: str | None = None) -> tuple[bool, str]:
+        """AIプロバイダーへの到達性を軽量チェックする。
+
+        TCP接続のみ（リクエストボディなし）を短タイムアウトで試行し、
+        ホストに到達できるかどうかを即座に判定する。
+
+        Returns:
+            (reachable, detail_message)
+        """
+        resolved, _ = self._resolve_provider(provider or self.get_default_provider())
+        cfg = self._get_provider_config(resolved)
+
+        if not cfg.get("enabled", False) and resolved != "local_llm":
+            return False, f"プロバイダー '{resolved}' は無効です"
+
+        base_url = self._resolve_provider_base_url(resolved)
+        if not base_url:
+            return False, f"プロバイダー '{resolved}' の接続先URLが取得できません"
+
+        timeout = self._REACHABILITY_TIMEOUT_LOCAL if resolved == "local_llm" else self._REACHABILITY_TIMEOUT
+
+        try:
+            if resolved == "local_llm":
+                # ローカルLLM: socket レベルで名前解決 + TCP接続のみ確認
+                # requests は DNS タイムアウトを制御できないため直接 socket を使用
+                parsed = urlparse(base_url)
+                host = parsed.hostname or "localhost"
+                port = parsed.port or (443 if parsed.scheme == "https" else 80)
+                # 1) ホスト名解決
+                try:
+                    socket.getaddrinfo(host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                except socket.gaierror as e:
+                    return False, f"ホスト名解決失敗: {host} — {e}"
+                # 2) TCP接続確認
+                try:
+                    conn = socket.create_connection((host, port), timeout=timeout)
+                    conn.close()
+                except OSError as e:
+                    return False, f"TCP接続失敗: {host}:{port} — {e}"
+                return True, f"OK (TCP {host}:{port})"
+            else:
+                resp = self.session.head(base_url, timeout=timeout, allow_redirects=True)
+            # HTTP応答が返ればホスト到達OK（ステータスコードは問わない,
+            # 認証エラー 401/403 でもネットワーク到達自体は成功）
+            return True, f"OK (HTTP {resp.status_code})"
+        except _requests_types.exceptions.ConnectTimeout:
+            return False, f"接続タイムアウト ({timeout}秒): {base_url}"
+        except _requests_types.exceptions.ProxyError as e:
+            return False, f"プロキシエラー: {base_url} — {e}"
+        except _requests_types.exceptions.ConnectionError as e:
+            return False, f"接続エラー: {base_url} — {e}"
+        except Exception as e:
+            return False, f"ネットワークエラー: {type(e).__name__}: {e}"

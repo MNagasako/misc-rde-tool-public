@@ -1178,11 +1178,29 @@ class AISuggestionDialog(QDialog):
                 
         except Exception as e:
             logger.error("AIキャンセルエラー: %s", e)
+
+    def _check_provider_reachable(self) -> bool:
+        """AIプロバイダへの到達性を事前チェックする。到達不可なら警告を表示しFalseを返す。"""
+        try:
+            from classes.ai.core.ai_manager import AIManager
+            ai_mgr = AIManager()
+            ok, msg = ai_mgr.check_provider_reachable()
+            if not ok:
+                QMessageBox.warning(self, "AI接続エラー", msg)
+                return False
+            return True
+        except Exception as e:
+            logger.warning("AIプロバイダ到達性チェックで例外: %s", e)
+            return True  # チェック自体の失敗では処理を止めない
         
     def generate_suggestions(self):
         """AI提案を生成"""
         if self.ai_thread and self.ai_thread.isRunning():
             logger.debug("既にAIスレッドが実行中です")
+            return
+
+        # AIプロバイダ到達性チェック（プロンプト準備前）
+        if not self._check_provider_reachable():
             return
         
         try:
@@ -3650,6 +3668,9 @@ class AISuggestionDialog(QDialog):
 
     def _start_bulk_dataset_requests(self, button_config, prompt_assembly_override=None):
         """データセットタブ: 一括問い合わせ（選択 or 表示全件）"""
+        # AIプロバイダ到達性チェック（一括処理開始前）
+        if not self._check_provider_reachable():
+            return
         try:
             selected = self._get_selected_dataset_records()
             displayed = self._get_displayed_dataset_records()
@@ -4556,6 +4577,9 @@ class AISuggestionDialog(QDialog):
 
     def _start_bulk_report_requests(self, button_config, prompt_assembly_override=None):
         """報告書タブ: 一括問い合わせ（選択 or 表示全件）"""
+        # AIプロバイダ到達性チェック（一括処理開始前）
+        if not self._check_provider_reachable():
+            return
         try:
             selected = self._get_selected_report_records()
             displayed = self._get_displayed_report_records()

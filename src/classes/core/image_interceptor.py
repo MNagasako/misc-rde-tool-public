@@ -3,6 +3,7 @@ import os
 import logging
 # === セッション管理ベースのプロキシ対応 ===
 from classes.utils.api_request_helper import fetch_binary
+from classes.core.external_access_monitor import ExternalAccessMonitorStore
 
 logger = logging.getLogger("RDE_WebView")
 
@@ -10,6 +11,20 @@ class ImageInterceptor(QWebEngineUrlRequestInterceptor):
     def interceptRequest(self, info):
         logger.debug('ImageInterceptor.interceptRequest called')
         url = info.requestUrl().toString()
+        method = bytes(info.requestMethod()).decode("utf-8", errors="replace")
+
+        # 外部アクセスモニターへ記録（WebView経由のリクエスト）
+        try:
+            ExternalAccessMonitorStore.instance().record_access(
+                url=url,
+                method=method or "GET",
+                status_code=0,
+                duration_ms=0.0,
+                source_kind="webview",
+            )
+        except Exception:
+            pass
+
         if any(url.lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp']):
             logger.info(f"[PROXY] Intercepted image request: {url}")
             try:

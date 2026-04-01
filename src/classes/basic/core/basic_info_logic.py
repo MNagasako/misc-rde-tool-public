@@ -263,6 +263,18 @@ def _subgroups_folder_complete() -> bool:
             return False
 
         logger.info(f"  ✅ subGroups/フォルダの完全性確認完了: {actual_count}個すべて揃っている")
+
+        # subGroupsAncestors/ ディレクトリの存在も確認（relationshipグループ詳細）
+        ancestors_dir = Path(SUBGROUP_REL_DETAILS_DIR)
+        if not ancestors_dir.exists():
+            logger.warning(f"  ⚠️  subGroupsAncestors/ディレクトリが存在しません: {ancestors_dir}")
+            return False
+        ancestors_files = list(ancestors_dir.glob("*.json"))
+        if not ancestors_files:
+            logger.warning(f"  ⚠️  subGroupsAncestors/ディレクトリにファイルがありません: {ancestors_dir}")
+            return False
+        logger.info(f"  ✅ subGroupsAncestors/フォルダ確認完了: {len(ancestors_files)}個")
+
         logger.info("[フォルダ完全性チェック終了] 欠損なし\n")
         return True
     except Exception as e:
@@ -1355,19 +1367,26 @@ def fetch_all_data_entrys_info(bearer_token, output_dir=None, progress_callback=
 
 
 
-def fetch_data_entry_info_from_api(bearer_token, dataset_id, output_dir=None):
+def fetch_data_entry_info_from_api(bearer_token, dataset_id, output_dir=None, force_refresh: bool = False):
     """
     指定データセットIDのデータエントリ情報をAPIから取得し、dataEntry.jsonとして保存
     v1.18.4: Bearer Token自動選択対応
+    v2.3: TTLCache連携 - キャッシュ有効なら再取得をスキップ
     """
+    from datetime import timedelta
+    from classes.core.ttl_cache import TTLCache
+
     url = f"https://rde-api.nims.go.jp/data?filter%5Bdataset.id%5D={dataset_id}&sort=-created&page%5Boffset%5D=0&page%5Blimit%5D=24&include=owner%2Csample%2CthumbnailFile%2Cfiles"
     target_dir = output_dir or DATA_ENTRY_DIR
     save_path = os.path.join(target_dir, f"{dataset_id}.json")
-    
-    if os.path.exists(save_path):
-        logger.info(f"データエントリファイル既存のためスキップ: {dataset_id}.json")
-        return
-        
+
+    # TTLCache による期限付きチェック（既定30分）
+    cache = TTLCache("data_entry", default_ttl=timedelta(minutes=30))
+    if not force_refresh and cache.has(f"entry:{dataset_id}"):
+        if os.path.exists(save_path):
+            logger.info("データエントリ: TTLキャッシュ有効のためスキップ: %s", dataset_id)
+            return
+
     headers = {
         "Accept": "application/vnd.api+json",
         "Host": "rde-api.nims.go.jp",
@@ -1388,12 +1407,23 @@ def fetch_data_entry_info_from_api(bearer_token, dataset_id, output_dir=None):
         os.makedirs(target_dir, exist_ok=True)
         with open(save_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+
+        # TTLCache に記録
+        cache.put(f"entry:{dataset_id}", True)
             
         logger.info(f"データエントリ取得・保存完了: {dataset_id}.json -> {save_path}")
         
     except Exception as e:
         logger.error(f"データエントリ取得・保存失敗: dataset_id={dataset_id}, error={e}")
         raise
+
+
+def invalidate_entry_cache(dataset_id: str) -> None:
+    """エントリキャッシュを無効化する（アプリからの更新時に呼び出す）"""
+    from classes.core.ttl_cache import TTLCache
+    cache = TTLCache("data_entry")
+    cache.invalidate(f"entry:{dataset_id}")
+    logger.info("エントリキャッシュ無効化: %s", dataset_id)
 
 
 def fetch_invoice_info_from_api(bearer_token, entry_id, output_dir=None):
@@ -2141,6 +2171,16 @@ def fetch_group_info_from_api(url, headers, save_path, bearer_token=None):
         data = resp.json()
         save_json(data, *save_path)
         
+        # 存在チェックキャッシュにも成功を記録 (コンボ切替時のAPI削減)
+        try:
+            import re as _re
+            _m = _re.search(r'/groups/([a-f0-9-]+)', url)
+            if _m:
+                from classes.utils.remote_resource_pruner import record_existence
+                record_existence(_m.group(1), True)
+        except Exception:
+            pass
+
         # API記録を追加（成功）
         try:
             from classes.basic.core.api_recording_wrapper import record_api_call_for_group
@@ -2517,6 +2557,13 @@ def fetch_all_subgroups(
 
             resp.raise_for_status()
             subgroup_detail = resp.json()
+
+            # 存在チェックキャッシュにも成功を記録 (コンボ切替時のAPI削減)
+            try:
+                from classes.utils.remote_resource_pruner import record_existence
+                record_existence(subgroup_id, True)
+            except Exception:
+                pass
 
             with open(save_path, "w", encoding="utf-8") as f:
                 json.dump(subgroup_detail, f, ensure_ascii=False, indent=2)
@@ -3968,8 +4015,10 @@ def fetch_basic_info_logic(
                 if prefix:
                     text = f"{prefix}{text}" if text else prefix.rstrip()
                 if t > 0 and not (t == 100 and 0 <= c <= 100):
-                    # countモードのときは件数も見せる（同じ内容が含まれていれば重複は許容）
-                    text = f"{text} ({c}/{t})" if text else f"{c}/{t}"
+                    # countモードのときは件数も見せる（メッセージに既に (N/M) が含まれていれば重複付与しない）
+                    import re as _re
+                    if not _re.search(r'\(\d+/\d+\)', text):
+                        text = f"{text} ({c}/{t})" if text else f"{c}/{t}"
                 return update_stage_progress(stage_index, percent, text)
 
             return _adapter
@@ -4036,6 +4085,25 @@ def fetch_basic_info_logic(
                 if not group_id or not project_group_id:
                     raise ValueError("キャッシュに必要なグループIDが含まれていません")
                 logger.info("グループ関連情報: 既存ファイルを再利用しました")
+
+                # キャッシュ再利用時もsubGroupsAncestors/を補完する
+                headers = _make_headers(
+                    bearer_token,
+                    host="rde-api.nims.go.jp",
+                    origin="https://rde.nims.go.jp",
+                    referer="https://rde.nims.go.jp/",
+                )
+                fetch_relationship_group_details(
+                    bearer_token=bearer_token,
+                    sub_group_data=cached_project_data,
+                    headers=headers,
+                    progress_callback=pipeline_progress_adapter,
+                    base_progress=85,
+                    progress_range=10,
+                    destination_dir=SUBGROUP_REL_DETAILS_DIR,
+                    force_download=False,
+                    max_workers=parallel_workers,
+                )
             except Exception as cache_error:
                 logger.warning("グループ関連JSONの読み込みに失敗したため再取得を実行します: %s", cache_error)
                 use_cache = False
@@ -4048,6 +4116,7 @@ def fetch_basic_info_logic(
                     preferred_program_id=program_id,
                     progress_callback=pipeline_progress_adapter,
                     force_project_dialog=force_project_dialog,
+                    force_download=force_download,
                 )
             except GroupFetchCancelled:
                 return "キャンセルされました"
@@ -4908,6 +4977,24 @@ def fetch_common_info_only_logic(
                 if not group_id or not project_group_id:
                     raise ValueError("キャッシュに必要なグループIDが含まれていません")
                 logger.info("グループ関連情報: 既存ファイルを再利用しました")
+
+                # キャッシュ再利用時もsubGroupsAncestors/を補完する
+                headers = _make_headers(
+                    bearer_token,
+                    host="rde-api.nims.go.jp",
+                    origin="https://rde.nims.go.jp",
+                    referer="https://rde.nims.go.jp/",
+                )
+                fetch_relationship_group_details(
+                    bearer_token=bearer_token,
+                    sub_group_data=cached_project_data,
+                    headers=headers,
+                    progress_callback=pipeline_progress_callback,
+                    base_progress=85,
+                    progress_range=10,
+                    destination_dir=SUBGROUP_REL_DETAILS_DIR,
+                    force_download=False,
+                )
             except Exception as cache_error:
                 logger.warning("グループ関連JSONの読み込みに失敗したため再取得を実行します: %s", cache_error)
                 use_cache = False
