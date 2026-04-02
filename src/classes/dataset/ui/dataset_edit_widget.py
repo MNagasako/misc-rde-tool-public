@@ -1142,7 +1142,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     # 準備中メッセージ用のタイマーと開始時刻
     _preparing_start_time: float | None = None
     _preparing_total_count: int | None = None
-    _preparing_timer = QTimer()
+    _preparing_timer = QTimer(existing_dataset_combo)
     _preparing_timer.setInterval(1000)
 
     def _update_preparing_eta() -> None:
@@ -1152,7 +1152,11 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         import time as _time
         elapsed = _time.time() - _preparing_start_time
         elapsed_str = f"{int(elapsed)}秒経過"
-        line_edit = existing_dataset_combo.lineEdit()
+        try:
+            line_edit = existing_dataset_combo.lineEdit()
+        except RuntimeError:
+            _preparing_timer.stop()
+            return
         if line_edit:
             base = dataset_combo_preparing_message
             if _preparing_total_count:

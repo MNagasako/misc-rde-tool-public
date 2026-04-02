@@ -938,6 +938,36 @@ class Browser(QWidget):
 
     @debug_log
     def closeEvent(self, event):
+        from classes.utils.thread_registry import has_active_threads, active_thread_count, stop_all, wait_all
+
+        if has_active_threads():
+            count = active_thread_count()
+            from qt_compat.widgets import QMessageBox
+
+            msg = QMessageBox(self)
+            msg.setWindowTitle("バックグラウンド処理中")
+            msg.setIcon(QMessageBox.Question)
+            msg.setText(
+                f"バックグラウンドで {count} 件の処理が実行中です。\n"
+                "どのように終了しますか？"
+            )
+            btn_stop = msg.addButton("すべて停止して閉じる", QMessageBox.AcceptRole)
+            btn_wait = msg.addButton("完了まで待つ", QMessageBox.ApplyRole)
+            btn_cancel = msg.addButton("キャンセル", QMessageBox.RejectRole)
+            msg.setDefaultButton(btn_cancel)
+            msg.exec()
+
+            clicked = msg.clickedButton()
+            if clicked is btn_cancel:
+                event.ignore()
+                return
+            elif clicked is btn_wait:
+                self.setVisible(False)
+                wait_all(timeout_ms=60000)
+            else:
+                # btn_stop (default path)
+                stop_all(timeout_ms=3000)
+
         # v2.0.4: デバッグモード終了時のクリーンアップ
         from classes.utils.token_cleanup import cleanup_on_exit
         cleanup_on_exit()

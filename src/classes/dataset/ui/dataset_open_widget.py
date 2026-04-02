@@ -26,17 +26,199 @@ from qt_compat.widgets import QWidget, QVBoxLayout, QLabel, QTabWidget, QScrollA
 from qt_compat.widgets import QHBoxLayout, QFormLayout, QLineEdit, QTextEdit, QPushButton
 from qt_compat.widgets import QButtonGroup, QComboBox, QRadioButton, QSizePolicy
 from qt_compat.widgets import QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
-from qt_compat.core import QDate, Qt, QTimer
+from qt_compat.widgets import QProgressBar
+from qt_compat.core import QDate, Qt, QTimer, Signal, QThread
 from classes.dataset.core.dataset_open_logic import create_group_select_widget
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
 from config.common import DATASET_JSON_PATH, SUBGROUP_DETAILS_DIR, SUBGROUP_REL_DETAILS_DIR, get_dynamic_file_path
 from classes.utils.window_sizing import is_window_maximized, resize_main_window
+from classes.utils.thread_registry import register_thread
 
 import logging
 
 # ロガー設定
 logger = logging.getLogger(__name__)
+
+
+class _ExistingDatasetLoadWorker(QThread):
+    """既存データセット一覧の読み込みをバックグラウンドで行うワーカー。
+
+    重い I/O（dataset.json + 個別 datasets/{id}.json の読み込み）を
+    メインスレッド外で実行し、結果をシグナルで返す。
+    """
+
+    result_ready = Signal(list, set)  # (items: list[(label,dsid)], all_ids: set[str])
+
+    def __init__(
+        self,
+        filter_mode: str,
+        grant_filter_text: str,
+        manager_org_cache: dict,
+        user_grants: set,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._filter_mode = filter_mode
+        self._grant_filter_text = grant_filter_text
+        self._manager_org_cache = manager_org_cache
+        self._user_grants = user_grants
+        self._stop_requested = False
+
+    def stop(self):
+        self._stop_requested = True
+
+    def run(self):
+        try:
+            items, all_ids = self._load_datasets()
+            if not self._stop_requested:
+                self.result_ready.emit(items, all_ids)
+        except Exception:
+            logger.debug("_ExistingDatasetLoadWorker: failed", exc_info=True)
+            if not self._stop_requested:
+                self.result_ready.emit([], set())
+
+    def _load_datasets(self) -> tuple[list[tuple[str, str]], set[str]]:
+        def _read_json(path: str) -> dict:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+
+        def _normalize_text_value(value) -> str:
+            if value is None:
+                return ""
+            try:
+                if isinstance(value, float) and math.isnan(value):
+                    return ""
+            except Exception:
+                pass
+            text = str(value)
+            if text.strip().lower() == "nan":
+                return ""
+            return text
+
+        def _resolve_dataset_manager_org(dataset_id: str, manager_id_hint: str) -> str:
+            try:
+                detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dataset_id}.json")
+                detail = _read_json(detail_path)
+                rel = (((detail or {}).get("data", {}) or {}).get("relationships", {}) or {})
+                manager_rel = ((rel.get("manager", {}) or {}).get("data", {}) or {})
+                applicant_rel = ((rel.get("applicant", {}) or {}).get("data", {}) or {})
+                manager_id = str(manager_rel.get("id") or manager_id_hint or "")
+                applicant_id = str(applicant_rel.get("id") or "")
+                target_ids = {x for x in [manager_id, applicant_id] if x}
+                included = (detail or {}).get("included", []) or []
+                for inc in included:
+                    if not isinstance(inc, dict):
+                        continue
+                    if inc.get("type") != "user":
+                        continue
+                    uid = str(inc.get("id") or "")
+                    if uid and uid in target_ids:
+                        attrs = inc.get("attributes", {}) or {}
+                        org_name = str(attrs.get("organizationName") or attrs.get("organization") or "").strip()
+                        if org_name:
+                            return org_name
+            except Exception:
+                pass
+            return ""
+
+        def _read_self_info() -> tuple[str, str]:
+            try:
+                self_path = get_dynamic_file_path("output/rde/data/self.json")
+                with open(self_path, encoding="utf-8") as f:
+                    self_data = json.load(f)
+                attrs = ((self_data or {}).get("data", {}) or {}).get("attributes", {}) or {}
+                uid = str(((self_data or {}).get("data", {}) or {}).get("id") or "").strip()
+                org = str(attrs.get("organizationName") or attrs.get("organization") or "").strip()
+                return uid, org
+            except Exception:
+                return "", ""
+
+        data = _read_json(DATASET_JSON_PATH)
+        datasets = (data or {}).get("data", []) or []
+
+        all_ids: set[str] = set()
+        try:
+            all_ids = {
+                str(it.get("id"))
+                for it in datasets
+                if isinstance(it, dict) and it.get("id")
+            }
+        except Exception:
+            pass
+
+        managed_items: list[tuple[str, str]] = []
+        org_items: list[tuple[str, str]] = []
+        other_items: list[tuple[str, str]] = []
+
+        self_user_id, self_org_name = _read_self_info()
+
+        for item in datasets:
+            if self._stop_requested:
+                break
+            if not isinstance(item, dict):
+                continue
+            ds_id = item.get("id")
+            if not ds_id:
+                continue
+            attr = item.get("attributes", {}) or {}
+            name = _normalize_text_value(attr.get("name")).strip() or "名前なし"
+            grant = _normalize_text_value(attr.get("grantNumber")).strip()
+
+            if self._grant_filter_text and self._grant_filter_text not in (grant or "").lower():
+                continue
+
+            label_parts = [name]
+            if grant:
+                label_parts.append(f"[{grant}]")
+            label = " ".join(label_parts) if label_parts else str(ds_id)
+
+            rel = item.get("relationships", {}) or {}
+            manager_data = ((rel.get("manager", {}) or {}).get("data", {}) or {})
+            applicant_data = ((rel.get("applicant", {}) or {}).get("data", {}) or {})
+            manager_id = str(manager_data.get("id") or "").strip()
+            applicant_id = str(applicant_data.get("id") or "").strip()
+
+            is_managed = bool(self_user_id and (manager_id == self_user_id or applicant_id == self_user_id))
+
+            is_org_subject = False
+            if self_org_name:
+                ds_id_str = str(ds_id)
+                if ds_id_str in self._manager_org_cache:
+                    manager_org = self._manager_org_cache[ds_id_str]
+                else:
+                    manager_org = _resolve_dataset_manager_org(ds_id_str, manager_id)
+                    self._manager_org_cache[ds_id_str] = manager_org
+                if manager_org:
+                    is_org_subject = (manager_org == self_org_name)
+
+            if not is_org_subject and self._user_grants and grant and grant in self._user_grants:
+                is_org_subject = True
+
+            if is_managed:
+                managed_items.append((label, str(ds_id)))
+            elif is_org_subject:
+                org_items.append((label, str(ds_id)))
+            else:
+                other_items.append((label, str(ds_id)))
+
+        filter_mode = self._filter_mode
+        if filter_mode in ("managed_only", "org_subjects") and not (managed_items or org_items):
+            filter_mode = "all"
+
+        if filter_mode == "managed_only":
+            items = managed_items
+        elif filter_mode == "org_subjects":
+            items = org_items
+        elif filter_mode == "others_only":
+            items = other_items
+        else:
+            items = managed_items + org_items + other_items
+
+        return items, all_ids
 
 
 def _parse_tags_text(text: str) -> list[str]:
@@ -393,6 +575,7 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
 
     try:
         container.destroyed.connect(lambda *_: _stop_ai_thread(_ai_check_thread_ref.get("thread")))
+        container.destroyed.connect(lambda *_: _stop_dataset_load_worker())
     except Exception:
         pass
 
@@ -521,6 +704,41 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     # データセットID→管理者組織名のキャッシュ。再フィルタ時に2000件超の
     # ファイル再読み込みを回避する。
     _manager_org_cache: dict[str, str] = {}
+    _dataset_load_worker_ref: dict[str, _ExistingDatasetLoadWorker | None] = {"worker": None}
+
+    def _stop_dataset_load_worker() -> None:
+        worker = _dataset_load_worker_ref.get("worker")
+        if worker is not None:
+            try:
+                worker.stop()
+                worker.wait(2000)
+            except Exception:
+                pass
+            _dataset_load_worker_ref["worker"] = None
+
+    def _on_datasets_loaded(items: list, all_ids: set, preserve_id: str = "") -> None:
+        try:
+            _all_dataset_ids_ref["ids"] = all_ids
+        except Exception:
+            pass
+        existing_combo.blockSignals(True)
+        existing_combo.clear()
+        existing_combo.addItem("(選択してください)", "")
+        for label, dsid in items:
+            existing_combo.addItem(label, dsid)
+        try:
+            if preserve_id:
+                idx = existing_combo.findData(preserve_id)
+                if idx >= 0:
+                    existing_combo.setCurrentIndex(idx)
+                else:
+                    existing_combo.setCurrentIndex(0)
+            else:
+                existing_combo.setCurrentIndex(0)
+        except Exception:
+            existing_combo.setCurrentIndex(0)
+        existing_combo.blockSignals(False)
+        reload_btn.setEnabled(True)
 
     def _populate_existing_dataset_combo() -> None:
         preserve_id = ""
@@ -541,145 +759,27 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
         grant_filter_text = (grant_filter_input.text() or "").strip().lower()
         user_grants = _get_user_grant_numbers()
 
+        # 前回ワーカーが動いていれば停止
+        _stop_dataset_load_worker()
+
+        # 読み込み中の表示
         existing_combo.blockSignals(True)
         existing_combo.clear()
-        existing_combo.addItem("(選択してください)", "")
-        try:
-            data = _read_json(DATASET_JSON_PATH)
-            datasets = (data or {}).get("data", []) or []
+        existing_combo.addItem("読み込み中...", "")
+        existing_combo.blockSignals(False)
+        reload_btn.setEnabled(False)
 
-            # Keep a set of all dataset IDs for validating relatedDatasets.
-            try:
-                _all_dataset_ids_ref["ids"] = {
-                    str(it.get("id"))
-                    for it in datasets
-                    if isinstance(it, dict) and it.get("id")
-                }
-            except Exception:
-                _all_dataset_ids_ref["ids"] = set()
-
-            managed_items: list[tuple[str, str]] = []
-            org_items: list[tuple[str, str]] = []
-            other_items: list[tuple[str, str]] = []
-
-            def _read_self_info() -> tuple[str, str]:
-                try:
-                    self_path = get_dynamic_file_path("output/rde/data/self.json")
-                    with open(self_path, encoding="utf-8") as f:
-                        self_data = json.load(f)
-                    attrs = ((self_data or {}).get("data", {}) or {}).get("attributes", {}) or {}
-                    uid = str(((self_data or {}).get("data", {}) or {}).get("id") or "").strip()
-                    org = str(attrs.get("organizationName") or attrs.get("organization") or "").strip()
-                    return uid, org
-                except Exception:
-                    return "", ""
-
-            def _resolve_dataset_manager_org(dataset_id: str, manager_id_hint: str) -> str:
-                try:
-                    detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dataset_id}.json")
-                    detail = _read_json(detail_path)
-                    rel = (((detail or {}).get("data", {}) or {}).get("relationships", {}) or {})
-                    manager_rel = ((rel.get("manager", {}) or {}).get("data", {}) or {})
-                    applicant_rel = ((rel.get("applicant", {}) or {}).get("data", {}) or {})
-                    manager_id = str(manager_rel.get("id") or manager_id_hint or "")
-                    applicant_id = str(applicant_rel.get("id") or "")
-                    target_ids = {x for x in [manager_id, applicant_id] if x}
-                    included = (detail or {}).get("included", []) or []
-                    for inc in included:
-                        if not isinstance(inc, dict):
-                            continue
-                        if inc.get("type") != "user":
-                            continue
-                        uid = str(inc.get("id") or "")
-                        if uid and uid in target_ids:
-                            attrs = inc.get("attributes", {}) or {}
-                            org_name = str(attrs.get("organizationName") or attrs.get("organization") or "").strip()
-                            if org_name:
-                                return org_name
-                except Exception:
-                    pass
-                return ""
-
-            self_user_id, self_org_name = _read_self_info()
-
-            for item in datasets:
-                if not isinstance(item, dict):
-                    continue
-                ds_id = item.get("id")
-                if not ds_id:
-                    continue
-                attr = item.get("attributes", {}) or {}
-                name = _normalize_text_value(attr.get("name")).strip() or "名前なし"
-                grant = _normalize_text_value(attr.get("grantNumber")).strip()
-
-                if grant_filter_text and grant_filter_text not in (grant or "").lower():
-                    continue
-
-                label_parts = [name]
-                if grant:
-                    label_parts.append(f"[{grant}]")
-                label = " ".join(label_parts) if label_parts else str(ds_id)
-
-                rel = item.get("relationships", {}) or {}
-                manager_data = ((rel.get("manager", {}) or {}).get("data", {}) or {})
-                applicant_data = ((rel.get("applicant", {}) or {}).get("data", {}) or {})
-                manager_id = str(manager_data.get("id") or "").strip()
-                applicant_id = str(applicant_data.get("id") or "").strip()
-
-                is_managed = bool(self_user_id and (manager_id == self_user_id or applicant_id == self_user_id))
-
-                is_org_subject = False
-                if self_org_name:
-                    ds_id_str = str(ds_id)
-                    if ds_id_str in _manager_org_cache:
-                        manager_org = _manager_org_cache[ds_id_str]
-                    else:
-                        manager_org = _resolve_dataset_manager_org(ds_id_str, manager_id)
-                        _manager_org_cache[ds_id_str] = manager_org
-                    if manager_org:
-                        is_org_subject = (manager_org == self_org_name)
-
-                # fallback: detail不在などで機関判定不可なら、従来の課題所属判定を補助的に使う
-                if not is_org_subject and user_grants and grant and grant in user_grants:
-                    is_org_subject = True
-
-                if is_managed:
-                    managed_items.append((label, str(ds_id)))
-                elif is_org_subject:
-                    org_items.append((label, str(ds_id)))
-                else:
-                    other_items.append((label, str(ds_id)))
-
-            # safety: 分類情報が取れない場合は全件表示にフォールバック
-            if filter_mode in ("managed_only", "org_subjects") and not (managed_items or org_items):
-                filter_mode = "all"
-
-            if filter_mode == "managed_only":
-                items = managed_items
-            elif filter_mode == "org_subjects":
-                items = org_items
-            elif filter_mode == "others_only":
-                items = other_items
-            else:
-                items = managed_items + org_items + other_items
-
-            for label, dsid in items:
-                existing_combo.addItem(label, dsid)
-        except Exception:
-            logger.debug("新規開設2: dataset.json 読み込みに失敗", exc_info=True)
-        finally:
-            try:
-                if preserve_id:
-                    idx = existing_combo.findData(preserve_id)
-                    if idx >= 0:
-                        existing_combo.setCurrentIndex(idx)
-                    else:
-                        existing_combo.setCurrentIndex(0)
-                else:
-                    existing_combo.setCurrentIndex(0)
-            except Exception:
-                existing_combo.setCurrentIndex(0)
-            existing_combo.blockSignals(False)
+        worker = _ExistingDatasetLoadWorker(
+            filter_mode=filter_mode,
+            grant_filter_text=grant_filter_text,
+            manager_org_cache=_manager_org_cache,
+            user_grants=user_grants,
+        )
+        _preserved_id = preserve_id  # capture for lambda
+        worker.result_ready.connect(lambda items, all_ids: _on_datasets_loaded(items, all_ids, _preserved_id))
+        register_thread(worker)
+        _dataset_load_worker_ref["worker"] = worker
+        worker.start()
 
     def _apply_autofill_from_existing_dataset(dataset_id: str) -> None:
         dataset_id = (dataset_id or "").strip()
@@ -2524,12 +2624,47 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     except Exception as e:
         logger.warning("一覧タブのプレースホルダ作成に失敗: %s", e)
     
+    _create2_building = False  # ビルド中フラグ（二重実行防止）
+
     def _ensure_create2_built() -> None:
-        nonlocal create2_tab
+        nonlocal create2_tab, _create2_building
         if create2_tab is not None:
             return
         if create2_idx < 0:
             return
+        if _create2_building:
+            return
+        _create2_building = True
+
+        # プログレス表示を即座に見せる
+        try:
+            if create2_scroll is not None:
+                progress_widget = QWidget()
+                progress_layout = QVBoxLayout(progress_widget)
+                progress_layout.addStretch(1)
+                progress_label = QLabel("新規開設2タブを構築中...")
+                progress_label.setAlignment(Qt.AlignCenter)
+                try:
+                    progress_label.setStyleSheet(
+                        f"font-size: 14px; color: {get_color(ThemeKey.TEXT_PRIMARY)};"
+                    )
+                except Exception:
+                    pass
+                progress_layout.addWidget(progress_label)
+                progress_bar = QProgressBar()
+                progress_bar.setRange(0, 0)  # indeterminate
+                progress_bar.setMaximumWidth(300)
+                progress_layout.addWidget(progress_bar, alignment=Qt.AlignCenter)
+                progress_layout.addStretch(1)
+                create2_scroll.setWidget(progress_widget)
+        except Exception:
+            logger.debug("dataset_open: create2 progress display failed", exc_info=True)
+
+        # イベントループに戻してからビルドする（プログレスを表示させてフリーズ感を減らす）
+        QTimer.singleShot(0, _do_build_create2)
+
+    def _do_build_create2() -> None:
+        nonlocal create2_tab, _create2_building
         try:
             built = _create_dataset_create2_tab(parent)
 
@@ -2575,6 +2710,8 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
             tab_widget.setCurrentIndex(create2_idx)
         except Exception as e:
             logger.warning("データセット開設2タブの作成に失敗: %s", e)
+        finally:
+            _create2_building = False
 
     def _ensure_edit_built() -> None:
         nonlocal edit_tab, edit_built

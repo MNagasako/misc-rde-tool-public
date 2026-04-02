@@ -34,7 +34,23 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.43）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| リリース/品質 | リビジョンアップ（v2.5.45）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| 終了時スレッド制御 | `thread_registry.py` を導入し、終了時に実行中 QThread の待機または強制停止を選べるよう改善。 |
+| AI提案ダイアログ | 保存済みの小さい高さがあっても、初回表示時は画面の利用可能領域基準の高さを優先するよう安定化。 |
+| 新規開設2 | 既存データセット読込 UI を遅延構築に変更し、構築中プログレス表示と worker 停止経路を追加。 |
+| データセットフィルタ | `show_all()` で大量候補でも即時表示できるよう同期パスを追加し、カーソルキー/ホイール移動時の誤フィルタを防止。 |
+| テスト/品質 | スレッド停止制御、AI提案ダイアログ初回高さ、create2 遅延構築、フィルタコンボ操作性の回帰テストを追加。 |
+
+## v2.5.45 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.45）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| 終了時スレッド制御 | `thread_registry.py` を追加し、`arim_rde_tool.py` の closeEvent で実行中スレッド数を確認しつつ、待機または強制停止を選択できるよう更新。 |
+| AI提案ダイアログ | `ai_suggestion_dialog.py` で AI拡張各タブの初回高さを保存値ではなく画面の利用可能領域基準で決定し、狭い高さの復元を防止。 |
+| 新規開設2 | `dataset_open_widget.py` で create2 タブを初回選択時に構築し、構築中プログレス表示・既存データセット読込 worker の停止経路・対象範囲フィルタを整理。 |
+| データセットフィルタ | `dataset_filter_fetcher.py` で `show_all()` 実行時の同期全件表示と、カーソルキー/ホイール操作中にテキスト検索を発火させない制御を追加。 |
+| テスト/品質 | `test_close_event_thread_control.py`、`test_ai_suggestion_dialog_initial_height.py`、`test_create2_deferred_build.py`、`test_dataset_filter_fetcher_show_all_sync.py`、`test_dataset_filter_fetcher_index_navigation.py` などを追加・更新。 |
 | データ取得2 | `data_fetch2_tab_widget.py` でデータセット取得タブを lazy build 化し、フィルタタブの prewarm を遅延化。初回表示では planned summary の自動集計を行わず、明示選択時だけ更新。 |
 | 一括取得（DP） | `bulk_dp_tab.py` でフィルタ候補の bootstrap を非同期化し、起動直後でも検索 UI を先に操作できるよう改善。 |
 | 一括取得（DP） | 検索中に進捗詳細ラベルを追加し、進捗件数・抽出見込み件数・速度・ETA を表示。ローカル `output.json` がある場合はそれを優先して高速に一覧化。 |

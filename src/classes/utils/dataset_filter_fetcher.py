@@ -88,6 +88,8 @@ class DatasetFilterFetcher(QObject):
         self._combo_user_text = ""
         self._combo_explicit_selection_pending = False
         self._subgroup_map: Dict[str, Dict[str, str]] = {}
+        self._force_sync_populate = False
+        self._index_navigation_active = False
 
         # When running under pytest-qt (or any GUI app), Qt teardown order can be fragile.
         # Guard all deferred callbacks so they don't touch Qt objects during shutdown.
@@ -547,7 +549,13 @@ class DatasetFilterFetcher(QObject):
     def show_all(self) -> None:
         """Clear only the combo's partial-match filter and open the popup."""
 
-        self.clear_text_filter()
+        # Force synchronous combo population so that all items are available
+        # when showPopup() is called (async path would show only a placeholder).
+        self._force_sync_populate = True
+        try:
+            self.clear_text_filter()
+        finally:
+            self._force_sync_populate = False
         # Explicit "show all" (arrow click) should keep default focus behaviour.
         self._typing_popup_active = False
         self._restore_popup_focus_policy_if_needed()
@@ -814,6 +822,7 @@ class DatasetFilterFetcher(QObject):
         try:
             self.combo.editTextChanged.connect(self._on_combo_text_changed)
             self.combo.activated.connect(self._on_combo_activated)
+            self.combo.currentIndexChanged.connect(self._on_combo_index_changed)
         except Exception:
             pass
 
@@ -867,21 +876,57 @@ class DatasetFilterFetcher(QObject):
                 pass
 
     def _on_combo_text_edited(self, text: str) -> None:
+        # textEdited fires ONLY for actual keyboard input (not arrow/wheel navigation).
+        # Clear the navigation flag so the input is treated as intentional typing.
+        self._index_navigation_active = False
         self._on_combo_text_input(text)
 
+    def _on_combo_index_changed(self, index: int) -> None:
+        """Track index changes from navigation (arrow keys / mouse wheel).
+
+        Qt emits currentIndexChanged BEFORE setting the lineEdit text, so
+        the subsequent textChanged/editTextChanged can detect that the text
+        change originated from index navigation rather than user typing.
+        """
+        if self._suppress_filters:
+            return
+        if index >= 0:
+            self._index_navigation_active = True
+
     def _on_combo_activated(self, index: int) -> None:
+        """Handle explicit item selection (Enter key or click in popup)."""
         if not self.combo or not qt_is_valid(self.combo):
             return
         try:
             self._combo_explicit_selection_pending = False
+            self._index_navigation_active = False
             if index >= 0:
-                self._combo_user_text = self.combo.itemText(index) or ""
+                # Item explicitly selected — reset text filter so all items remain available.
+                self._combo_user_text = ""
+                self._typing_popup_active = False
+                self._restore_popup_focus_policy_if_needed()
+                if self._search_edit:
+                    self._suppress_filters = True
+                    try:
+                        self._search_edit.clear()
+                    finally:
+                        self._suppress_filters = False
+                    self._search_edit_authoritative = False
         except Exception:
             pass
 
     def _on_combo_text_changed(self, text: str) -> None:
         # textChanged can be emitted for programmatic updates as well; guard with suppress flag.
         if self._suppress_filters:
+            return
+
+        # When text changes due to index navigation (arrow keys / mouse wheel),
+        # do NOT treat the item text as a search filter.  Just accept the
+        # new display text and clear the navigation flag.
+        if self._index_navigation_active:
+            self._index_navigation_active = False
+            self._typing_popup_active = False
+            self._restore_popup_focus_policy_if_needed()
             return
 
         if self._restore_uncommitted_combo_text(text):
@@ -1072,7 +1117,9 @@ class DatasetFilterFetcher(QObject):
             self.combo.clear()
 
             # 大量件数は非同期更新（イベントループに制御を返す）
-            if len(self._filtered_datasets) > async_threshold:
+            # ただし _force_sync_populate フラグが立っている場合は同期更新
+            # （show_all 等、全件表示してからポップアップを開く必要がある場合）
+            if len(self._filtered_datasets) > async_threshold and not getattr(self, '_force_sync_populate', False):
                 async_started = True
 
                 # まずプレースホルダを表示
