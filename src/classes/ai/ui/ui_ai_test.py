@@ -22,6 +22,7 @@ from classes.utils.excel_records import (
     has_meaningful_value,
     load_excel_records,
 )
+from classes.utils.ui_responsiveness import schedule_deferred_ui_task, start_ui_responsiveness_run
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -88,6 +89,9 @@ class AITestWidget:
         
         # デバッグ出力制御
         self._debug_enabled = True  # デバッグ出力を有効化（AIプロバイダ問題調査のため）
+        self._scroll_area = None
+        self._initial_ai_settings_run = None
+        self._initial_task_data_run = None
         
     def enable_debug_output(self, enabled=True):
         """デバッグ出力の有効/無効を切り替え"""
@@ -245,9 +249,7 @@ class AITestWidget:
         self._scroll_area = scroll_area
 
         self._begin_initial_loading()
-        
-        # AI設定を初期化（ウィジェット設定後に遅延実行）
-        QTimer.singleShot(100, self._init_ai_settings)
+        self._schedule_initial_loading_tasks()
         
         # ウィジェット初期化確認
         self._debug_print(f"[DEBUG] AI test widget created successfully")
@@ -256,9 +258,6 @@ class AITestWidget:
             self._debug_print(f"[DEBUG] experiment_combo type: {type(self.experiment_combo)}")
             self._debug_print(f"[DEBUG] experiment_combo visible: {self.experiment_combo.isVisible()}")
             
-        # 初期データ読み込み（ウィジェット作成完了後、遅延を短縮してパフォーマンス向上）
-        QTimer.singleShot(100, self._initialize_task_data)  # 1秒から100msに短縮
-
         # テーマ変更に追従
         try:
             from classes.theme.theme_manager import ThemeManager
@@ -276,21 +275,80 @@ class AITestWidget:
     def _begin_initial_loading(self):
         self._startup_pending_steps = {'ai_settings', 'task_data'}
         try:
-            if hasattr(self, 'ai_progress_bar') and self.ai_progress_bar:
+            if hasattr(self, 'ai_progress_bar') and self.ai_progress_bar is not None:
                 self.ai_progress_bar.setRange(0, 0)
                 self.ai_progress_bar.setVisible(True)
         except Exception:
             pass
         try:
-            if hasattr(self, 'ai_progress_label') and self.ai_progress_label:
+            if hasattr(self, 'ai_progress_label') and self.ai_progress_label is not None:
                 self.ai_progress_label.setText('AIを初期化中...')
                 self.ai_progress_label.setVisible(True)
         except Exception:
             pass
 
+    def _schedule_deferred_startup_task(self, key, callback, *, delay_ms=0):
+        owner = getattr(self, '_scroll_area', None)
+        return schedule_deferred_ui_task(owner, f'ai-test-{key}', callback, delay_ms=delay_ms)
+
+    def _schedule_initial_loading_tasks(self):
+        self._initial_ai_settings_run = start_ui_responsiveness_run(
+            'ai_test',
+            'ai_settings',
+            'initial_load',
+            cache_state='mixed',
+        )
+        self._initial_ai_settings_run.mark('scheduled')
+        self._schedule_deferred_startup_task('init-ai-settings', self._run_initial_ai_settings)
+
+        self._initial_task_data_run = start_ui_responsiveness_run(
+            'ai_test',
+            'task_data',
+            'initial_load',
+            cache_state='mixed',
+        )
+        self._initial_task_data_run.mark('scheduled')
+        self._schedule_deferred_startup_task('init-task-data', self._run_initial_task_data, delay_ms=10)
+
+    def _run_initial_ai_settings(self):
+        run = self._initial_ai_settings_run
+        try:
+            if run is not None:
+                run.mark('worker_start')
+            self._init_ai_settings()
+            if run is not None:
+                provider_count = self.ai_provider_combo.count() if hasattr(self, 'ai_provider_combo') and self.ai_provider_combo is not None else 0
+                run.interactive(provider_count=int(provider_count))
+                run.complete(provider_count=int(provider_count))
+                run.finish(success=True)
+        except Exception as e:
+            if run is not None:
+                run.finish(success=False, error=str(e))
+            raise
+        finally:
+            self._initial_ai_settings_run = None
+
+    def _run_initial_task_data(self):
+        run = self._initial_task_data_run
+        try:
+            if run is not None:
+                run.mark('worker_start')
+            self._initialize_task_data()
+            if run is not None:
+                task_count = self.task_id_combo.count() if hasattr(self, 'task_id_combo') and self.task_id_combo is not None else 0
+                run.interactive(task_count=int(task_count))
+                run.complete(task_count=int(task_count))
+                run.finish(success=True)
+        except Exception as e:
+            if run is not None:
+                run.finish(success=False, error=str(e))
+            raise
+        finally:
+            self._initial_task_data_run = None
+
     def _update_initial_loading_message(self, message):
         try:
-            if hasattr(self, 'ai_progress_label') and self.ai_progress_label:
+            if hasattr(self, 'ai_progress_label') and self.ai_progress_label is not None:
                 self.ai_progress_label.setText(str(message))
                 self.ai_progress_label.setVisible(True)
         except Exception:
@@ -304,13 +362,13 @@ class AITestWidget:
         if pending:
             return
         try:
-            if hasattr(self, 'ai_progress_bar') and self.ai_progress_bar:
+            if hasattr(self, 'ai_progress_bar') and self.ai_progress_bar is not None:
                 self.ai_progress_bar.setVisible(False)
                 self.ai_progress_bar.setRange(0, 100)
         except Exception:
             pass
         try:
-            if hasattr(self, 'ai_progress_label') and self.ai_progress_label:
+            if hasattr(self, 'ai_progress_label') and self.ai_progress_label is not None:
                 self.ai_progress_label.setText('初期化完了')
                 label = self.ai_progress_label
 
@@ -1492,7 +1550,7 @@ class AITestWidget:
                 if self._debug_enabled:
                     logger.error("AIコンボボックスが初期化されていません")
                 # 遅延再実行
-                QTimer.singleShot(200, self._init_ai_settings)
+                self._schedule_deferred_startup_task('retry-init-ai-settings', self._init_ai_settings, delay_ms=200)
                 return
                 
             self._debug_print(f"[DEBUG] ai_provider_combo: {self.ai_provider_combo}")
@@ -1675,8 +1733,7 @@ class AITestWidget:
             # ラジオボタンの初期化を確認
             if not hasattr(self, 'arim_exp_radio') or not hasattr(self, 'normal_exp_radio'):
                 self._debug_print("[DEBUG] データソースラジオボタンが初期化されていません - 遅延再実行")
-                # QTimerを使用して遅延実行
-                QTimer.singleShot(200, self._init_datasource_selection)
+                self._schedule_deferred_startup_task('retry-init-datasource', self._init_datasource_selection, delay_ms=200)
                 return
             
             # datasource_info_labelの存在確認

@@ -28,6 +28,7 @@ from classes.theme import ThemeKey
 from classes.theme.theme_manager import get_color
 from classes.utils.label_style import apply_label_style
 from classes.utils.dataset_launch_manager import DatasetLaunchManager, DatasetPayload
+from classes.utils.ui_responsiveness import schedule_deferred_ui_task, start_ui_responsiveness_run
 
 # ロガー設定
 # シグナル用ヘルパークラス
@@ -415,7 +416,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     except Exception:
         container.dataset_dates_label = None
     
-    def load_and_filter_datasets():
+    def load_and_filter_datasets(run=None):
         """フィルタリング設定を適用してコンボボックスを更新"""
         try:
             t0 = time.perf_counter()
@@ -572,6 +573,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
             # 件数表示を更新
             filtered_count = len(filtered_datasets)
             count_label.setText(f"表示中: {filtered_count}/{total_count} 件")
+            combo.setEnabled(True)
             
             # 何も選択されていない状態にし、プレースホルダを表示
             combo.setCurrentIndex(-1)
@@ -595,14 +597,44 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
                 logger.info("[DataFetch2] dataset_dropdown timing: %s", timings)
             except Exception:
                 pass
+
+            if run is not None:
+                run.interactive(filtered_count=filtered_count, total_count=total_count, total_ms=round((time.perf_counter() - t0) * 1000.0, 3))
+                run.complete(filtered_count=filtered_count, total_count=total_count)
+                run.finish(success=True)
             
         except Exception as e:
             logger.error("データセット読み込みエラー: %s", e)
             combo.clear()
             # エラー時もダミー項目は追加しない
             count_label.setText("表示中: 0/0 件")
+            combo.setEnabled(True)
+            if run is not None:
+                run.finish(success=False, error=str(e))
             import traceback
             traceback.print_exc()
+
+    def schedule_dataset_load(reason: str = "manual", delay_ms: int = 0):
+        run = start_ui_responsiveness_run(
+            "data_fetch2",
+            "dataset_dropdown",
+            "initial_load" if reason == "initial" else "reload",
+            reason=reason,
+        )
+        if reason == "initial":
+            count_label.setText("表示中: 読み込み中...")
+            combo.setEnabled(False)
+        run.mark("scheduled")
+
+        def _run_dataset_load():
+            load_and_filter_datasets(run=run)
+
+        return schedule_deferred_ui_task(
+            container,
+            f"data-fetch2-dataset-load-{reason}",
+            _run_dataset_load,
+            delay_ms=delay_ms,
+        )
     
     def show_all_datasets():
         """全件表示ボタンが押された時の処理"""
@@ -632,8 +664,8 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
     search_edit.textChanged.connect(lambda text: combo.lineEdit().setText(text))
     combo.lineEdit().textChanged.connect(lambda text: search_edit.setText(text))
     
-    # 初回読み込み
-    load_and_filter_datasets()
+    # 初回読み込みは deferred 実行にして、タブ差し替え後の first paint を優先する
+    schedule_dataset_load("initial", delay_ms=0)
 
     # ---- 明示的状態管理 (empty / typing / selected) ----
     container.combo_state = "empty"
@@ -861,6 +893,7 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
 
     container.reset_filters = reset_filters_to_all
     container.reload_datasets = load_and_filter_datasets
+    container.schedule_dataset_load = schedule_dataset_load
     
     # ThemeManager 接続
     # NOTE:

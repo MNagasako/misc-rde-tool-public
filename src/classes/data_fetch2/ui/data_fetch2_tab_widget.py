@@ -27,19 +27,21 @@ except ImportError:
 
 from classes.theme import ThemeKey
 from classes.theme.theme_manager import get_color
+from classes.utils.ui_responsiveness import schedule_deferred_ui_task, start_ui_responsiveness_run
 
 logger = logging.getLogger(__name__)
 
 class DataFetch2TabWidget(QTabWidget):
     """データ取得2機能のタブウィジェット"""
     
-    def __init__(self, parent=None, *, prewarm_filter_widget: bool = True, prewarm_dataset_widget: bool = True, prewarm_filter_delay_ms: int | None = None):
+    def __init__(self, parent=None, *, prewarm_filter_widget: bool = True, prewarm_dataset_widget: bool = True, prewarm_filter_delay_ms: int | None = None, prewarm_dataset_delay_ms: int | None = None):
         super().__init__(parent)
         self.parent_controller = parent
         self.bearer_token = None
         self._prewarm_filter_widget = bool(prewarm_filter_widget)
         self._prewarm_dataset_widget = bool(prewarm_dataset_widget)
         self._prewarm_filter_delay_ms = self._resolve_filter_prewarm_delay(prewarm_filter_delay_ms)
+        self._prewarm_dataset_delay_ms = self._resolve_dataset_prewarm_delay(prewarm_dataset_delay_ms)
         self.data_fetch_widget = None
         
         # フィルタ設定の初期化
@@ -75,6 +77,13 @@ class DataFetch2TabWidget(QTabWidget):
         if os.environ.get("PYTEST_CURRENT_TEST"):
             return 0
         return 1500
+
+    def _resolve_dataset_prewarm_delay(self, explicit_delay_ms: int | None) -> int:
+        if explicit_delay_ms is not None:
+            return max(0, int(explicit_delay_ms))
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            return 0
+        return 180
         
     def setup_ui(self):
         """UI初期化"""
@@ -207,22 +216,34 @@ class DataFetch2TabWidget(QTabWidget):
     def _on_tab_changed(self, index: int):
         try:
             if index == getattr(self, '_dataset_tab_index', -1):
-                self._ensure_dataset_widget()
+                run = start_ui_responsiveness_run("data_fetch2", "dataset_tab", "lazy_tab_build", tab_index=index, cache_state="miss")
+                run.mark("placeholder_visible")
+                schedule_deferred_ui_task(self, "data-fetch2-dataset-tab", lambda session=run: self._ensure_dataset_widget(session))
             if index == getattr(self, '_bulk_rde_tab_index', -1):
-                self._ensure_bulk_rde_widget()
+                run = start_ui_responsiveness_run("data_fetch2", "bulk_rde_tab", "lazy_tab_build", tab_index=index, cache_state="miss")
+                run.mark("placeholder_visible")
+                schedule_deferred_ui_task(self, "data-fetch2-bulk-rde-tab", lambda session=run: self._ensure_bulk_rde_widget(session))
             elif index == getattr(self, '_bulk_dp_tab_index', -1):
-                self._ensure_bulk_dp_widget()
+                run = start_ui_responsiveness_run("data_fetch2", "bulk_dp_tab", "lazy_tab_build", tab_index=index, cache_state="miss")
+                run.mark("placeholder_visible")
+                schedule_deferred_ui_task(self, "data-fetch2-bulk-dp-tab", lambda session=run: self._ensure_bulk_dp_widget(session))
             if index == getattr(self, '_file_filter_tab_index', -1):
-                self._ensure_file_filter_widget()
+                run = start_ui_responsiveness_run("data_fetch2", "filter_tab", "lazy_tab_build", tab_index=index, cache_state="miss")
+                run.mark("placeholder_visible")
+                schedule_deferred_ui_task(self, "data-fetch2-filter-tab", lambda session=run: self._ensure_file_filter_widget(session))
         except Exception:
             pass
 
-    def _ensure_bulk_rde_widget(self):
+    def _ensure_bulk_rde_widget(self, run=None):
         if getattr(self, 'bulk_rde_widget', None) is not None:
+            if run is not None:
+                run.finish(success=True, cache_state="memory_hit")
             return
 
         from classes.data_fetch2.ui.bulk_rde_tab import create_bulk_rde_tab
 
+        if run is not None:
+            run.mark("build_start")
         tab_widget = create_bulk_rde_tab(self)
         self.bulk_rde_widget = tab_widget
         try:
@@ -232,15 +253,23 @@ class DataFetch2TabWidget(QTabWidget):
             pass
         wrapped = self._wrap_tab_widget(tab_widget, 'dataFetch2BulkRdeScrollArea')
         self._replace_tab_widget(self._bulk_rde_tab_index, wrapped, '📦 一括取得（RDE）')
+        if run is not None:
+            run.interactive(widget_class=type(tab_widget).__name__)
+            run.complete(widget_class=type(tab_widget).__name__)
+            run.finish(success=True)
 
-    def _ensure_dataset_widget(self):
+    def _ensure_dataset_widget(self, run=None):
         if getattr(self, 'data_fetch_widget', None) is not None:
+            if run is not None:
+                run.finish(success=True, cache_state="memory_hit")
             return
 
         t0 = time.perf_counter()
         # 構築中のレイアウト再計算・再描画を抑制（2921項目のsizeHint走査を回避）
         self.setUpdatesEnabled(False)
         try:
+            if run is not None:
+                run.mark("build_start")
             from classes.data_fetch2.core.ui.data_fetch2_widget import create_data_fetch2_widget
 
             tab_widget = create_data_fetch2_widget(self, self.bearer_token)
@@ -259,11 +288,19 @@ class DataFetch2TabWidget(QTabWidget):
                     "data_fetch2: _ensure_dataset_widget create=%.3fs replace=%.3fs total=%.3fs",
                     t1 - t0, t2 - t1, t2 - t0,
                 )
+                if run is not None:
+                    run.interactive(widget_class=type(tab_widget).__name__, create_ms=round((t1 - t0) * 1000.0, 3))
+                    run.complete(widget_class=type(tab_widget).__name__, total_ms=round((t2 - t0) * 1000.0, 3))
+                    run.finish(success=True)
                 return
         except ImportError as e:
             logger.error(f"データ取得ウィジェットのインポートエラー: {e}")
+            if run is not None:
+                run.finish(success=False, error=str(e))
         except Exception as e:
             logger.error(f"データ取得ウィジェット作成エラー: {e}")
+            if run is not None:
+                run.finish(success=False, error=str(e))
         finally:
             self.setUpdatesEnabled(True)
 
@@ -275,20 +312,30 @@ class DataFetch2TabWidget(QTabWidget):
         self.data_fetch_widget = None
         self._replace_tab_widget(self._dataset_tab_index, fallback_widget, '📊 データ取得')
 
-    def _ensure_bulk_dp_widget(self):
+    def _ensure_bulk_dp_widget(self, run=None):
         if getattr(self, 'bulk_dp_widget', None) is not None:
+            if run is not None:
+                run.finish(success=True, cache_state="memory_hit")
             return
 
         from classes.data_fetch2.ui.bulk_dp_tab import create_bulk_dp_tab
 
+        if run is not None:
+            run.mark("build_start")
         tab_widget = create_bulk_dp_tab(self)
         self.bulk_dp_widget = tab_widget
         wrapped = self._wrap_tab_widget(tab_widget, 'dataFetch2BulkDpScrollArea')
         self._replace_tab_widget(self._bulk_dp_tab_index, wrapped, '🌐 一括取得（DP）')
+        if run is not None:
+            run.interactive(widget_class=type(tab_widget).__name__)
+            run.complete(widget_class=type(tab_widget).__name__)
+            run.finish(success=True)
 
-    def _ensure_file_filter_widget(self):
+    def _ensure_file_filter_widget(self, run=None):
         """必要ならFileFilterWidgetを構築してタブへ挿入（1回だけ）。"""
         if getattr(self, 'file_filter_widget', None) is not None:
+            if run is not None:
+                run.finish(success=True, cache_state="memory_hit")
             return
 
         try:
@@ -298,6 +345,8 @@ class DataFetch2TabWidget(QTabWidget):
 
         t0 = time.perf_counter()
         try:
+            if run is not None:
+                run.mark("build_start")
             from classes.data_fetch2.ui.file_filter_widget import create_file_filter_widget
             widget = create_file_filter_widget(self._file_filter_container)
             widget.filterChanged.connect(self.on_file_filter_changed)
@@ -321,6 +370,10 @@ class DataFetch2TabWidget(QTabWidget):
             self.file_filter_widget = widget
             t1 = time.perf_counter()
             logger.info(f"[DataFetch2TabWidget] FileFilterWidget build: {t1 - t0:.3f} sec")
+            if run is not None:
+                run.interactive(widget_class=type(widget).__name__)
+                run.complete(widget_class=type(widget).__name__, total_ms=round((t1 - t0) * 1000.0, 3))
+                run.finish(success=True)
             try:
                 if PerfMonitor is not None:
                     PerfMonitor.mark(
@@ -332,6 +385,8 @@ class DataFetch2TabWidget(QTabWidget):
                 pass
         except ImportError as e:
             logger.error(f"フィルタウィジェットのインポートに失敗: {e}")
+            if run is not None:
+                run.finish(success=False, error=str(e))
             try:
                 if getattr(self, '_file_filter_placeholder', None) is not None:
                     self._file_filter_placeholder.setText("高度なフィルタ機能は利用できません")
@@ -349,7 +404,14 @@ class DataFetch2TabWidget(QTabWidget):
         self._dataset_tab_index = self.addTab(wrapped, '📊 データ取得')
         try:
             if self._prewarm_dataset_widget:
-                QTimer.singleShot(0, self._ensure_dataset_widget)
+                run = start_ui_responsiveness_run("data_fetch2", "dataset_tab", "lazy_tab_build", tab_index=self._dataset_tab_index, cache_state="miss", trigger="initial_prewarm")
+                run.mark("placeholder_visible")
+                schedule_deferred_ui_task(
+                    self,
+                    "data-fetch2-dataset-tab-prewarm",
+                    lambda session=run: self._ensure_dataset_widget(session),
+                    delay_ms=self._prewarm_dataset_delay_ms,
+                )
         except Exception:
             pass
 
@@ -452,7 +514,7 @@ class DataFetch2TabWidget(QTabWidget):
             logger.debug(f"初期フィルタ同期エラー: {e}")
 
 
-def create_data_fetch2_tab_widget(parent=None, *, prewarm_filter_widget: bool = True, prewarm_dataset_widget: bool = True, prewarm_filter_delay_ms: int | None = None):
+def create_data_fetch2_tab_widget(parent=None, *, prewarm_filter_widget: bool = True, prewarm_dataset_widget: bool = True, prewarm_filter_delay_ms: int | None = None, prewarm_dataset_delay_ms: int | None = None):
     """データ取得2タブウィジェットを作成"""
     try:
         # prewarm_filter_widget=True が従来挙動（初回描画をブロックしないため遅延構築）
@@ -461,6 +523,7 @@ def create_data_fetch2_tab_widget(parent=None, *, prewarm_filter_widget: bool = 
             prewarm_filter_widget=prewarm_filter_widget,
             prewarm_dataset_widget=prewarm_dataset_widget,
             prewarm_filter_delay_ms=prewarm_filter_delay_ms,
+            prewarm_dataset_delay_ms=prewarm_dataset_delay_ms,
         )
     except Exception as e:
         logger.error(f"データ取得2タブウィジェット作成エラー: {e}")

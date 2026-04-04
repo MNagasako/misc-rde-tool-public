@@ -31,6 +31,7 @@ from qt_compat.core import QDate, Qt, QTimer, Signal, QThread
 from classes.dataset.core.dataset_open_logic import create_group_select_widget
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
+from classes.utils.ui_responsiveness import start_ui_responsiveness_run
 from config.common import DATASET_JSON_PATH, SUBGROUP_DETAILS_DIR, SUBGROUP_REL_DETAILS_DIR, get_dynamic_file_path
 from classes.utils.window_sizing import is_window_maximized, resize_main_window
 from classes.utils.thread_registry import register_thread
@@ -692,6 +693,23 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     existing_row_layout.addWidget(reload_btn, 0)
     existing_panel_layout.addWidget(existing_row)
 
+    existing_status_row = QWidget(existing_panel)
+    existing_status_row_layout = QHBoxLayout(existing_status_row)
+    existing_status_row_layout.setContentsMargins(0, 0, 0, 0)
+    existing_status_row_layout.setSpacing(8)
+
+    existing_status_label = QLabel("既存データセット一覧は未読込です", existing_status_row)
+    existing_status_label.setObjectName("dataset_create2_existing_dataset_status")
+    existing_status_label.setWordWrap(True)
+    existing_status_row_layout.addWidget(existing_status_label, 1)
+
+    cancel_load_btn = QPushButton("中止", existing_status_row)
+    cancel_load_btn.setObjectName("dataset_create2_existing_dataset_cancel_button")
+    cancel_load_btn.setVisible(False)
+    existing_status_row_layout.addWidget(cancel_load_btn, 0)
+
+    existing_panel_layout.addWidget(existing_status_row)
+
     try:
         existing_panel.setStyleSheet(
             f"background-color: {get_color(ThemeKey.PANEL_NEUTRAL_BACKGROUND)};"
@@ -705,6 +723,7 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     # ファイル再読み込みを回避する。
     _manager_org_cache: dict[str, str] = {}
     _dataset_load_worker_ref: dict[str, _ExistingDatasetLoadWorker | None] = {"worker": None}
+    _dataset_load_run_ref = {"run": None}
 
     def _stop_dataset_load_worker() -> None:
         worker = _dataset_load_worker_ref.get("worker")
@@ -715,6 +734,16 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
             except Exception:
                 pass
             _dataset_load_worker_ref["worker"] = None
+        try:
+            cancel_load_btn.setVisible(False)
+            reload_btn.setEnabled(True)
+            existing_status_label.setText("既存データセット一覧の読み込みを中止しました")
+        except Exception:
+            pass
+        run = _dataset_load_run_ref.get("run")
+        if run is not None:
+            run.finish(success=False, cancelled=True)
+            _dataset_load_run_ref["run"] = None
 
     def _on_datasets_loaded(items: list, all_ids: set, preserve_id: str = "") -> None:
         try:
@@ -739,6 +768,14 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
             existing_combo.setCurrentIndex(0)
         existing_combo.blockSignals(False)
         reload_btn.setEnabled(True)
+        cancel_load_btn.setVisible(False)
+        existing_status_label.setText(f"既存データセット一覧を {len(items)} 件読み込みました")
+        run = _dataset_load_run_ref.get("run")
+        if run is not None:
+            run.interactive(item_count=len(items))
+            run.complete(item_count=len(items), total_known_ids=len(all_ids))
+            run.finish(success=True)
+            _dataset_load_run_ref["run"] = None
 
     def _populate_existing_dataset_combo() -> None:
         preserve_id = ""
@@ -768,6 +805,19 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
         existing_combo.addItem("読み込み中...", "")
         existing_combo.blockSignals(False)
         reload_btn.setEnabled(False)
+        cancel_load_btn.setVisible(True)
+        existing_status_label.setText("既存データセット一覧を読み込み中...")
+
+        run = start_ui_responsiveness_run(
+            "dataset_open",
+            "existing_dataset_combo",
+            "background_load",
+            filter_mode=filter_mode,
+            grant_filter=grant_filter_text,
+            cache_state="mixed",
+        )
+        run.mark("worker_start")
+        _dataset_load_run_ref["run"] = run
 
         worker = _ExistingDatasetLoadWorker(
             filter_mode=filter_mode,
@@ -780,6 +830,8 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
         register_thread(worker)
         _dataset_load_worker_ref["worker"] = worker
         worker.start()
+
+    cancel_load_btn.clicked.connect(_stop_dataset_load_worker)
 
     def _apply_autofill_from_existing_dataset(dataset_id: str) -> None:
         dataset_id = (dataset_id or "").strip()

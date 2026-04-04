@@ -30,6 +30,7 @@ from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
 from classes.dataset.util.show_event_refresh import RefreshOnShowWidget
 from classes.utils.dataset_launch_manager import DatasetLaunchManager, DatasetPayload
+from classes.utils.ui_responsiveness import schedule_deferred_ui_task, start_ui_responsiveness_run
 from classes.managers.log_manager import get_logger
 
 # ロガー設定
@@ -87,6 +88,9 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     widget.dataset_map = {}
     widget._dataentry_fetch_timer = None
     widget._initial_refresh_timer = None
+    widget._pending_dataset_sources_refresh_reason = None
+    widget._pending_dataset_sources_refresh_preserve_selection = True
+    widget._last_dataset_sources_refresh_signature = None
     layout = QVBoxLayout()
 
     # フィルタUI
@@ -726,14 +730,68 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         "last_modified": None,
         "user_grant_numbers": None,
         "filtered_datasets": {},
-        "display_data": {}
+        "display_data": {},
+        "json_cache": {},
     }
+
+    def _load_json_cached(cache_key: str, relative_path: str):
+        cache_store = dataset_cache.setdefault("json_cache", {})
+        path = get_dynamic_file_path(relative_path)
+        mtime = None
+        if os.path.exists(path):
+            try:
+                mtime = os.path.getmtime(path)
+            except OSError:
+                mtime = None
+
+        cache_entry = cache_store.get(cache_key)
+        if isinstance(cache_entry, dict) and cache_entry.get("mtime") == mtime:
+            return cache_entry.get("data")
+
+        data = None
+        if mtime is not None:
+            try:
+                with open(path, encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                data = None
+
+        cache_store[cache_key] = {
+            "mtime": mtime,
+            "data": data,
+        }
+        return data
+
+    def _get_file_mtime(relative_path: str) -> float | None:
+        path = get_dynamic_file_path(relative_path)
+        if not os.path.exists(path):
+            return None
+        try:
+            return os.path.getmtime(path)
+        except OSError:
+            return None
+
+    def _build_dataset_sources_refresh_signature() -> tuple:
+        filter_type = _get_current_filter_type()
+        subgroup_id = ""
+        if _is_subgroup_filter_mode_enabled(filter_type):
+            try:
+                subgroup_id = str(subgroup_filter_combo.currentData() or "")
+            except Exception:
+                subgroup_id = ""
+        grant_text = grant_filter_input.text().strip().lower()
+        return (
+            filter_type,
+            subgroup_id,
+            grant_text,
+            _get_file_mtime("output/rde/data/dataset.json"),
+            _get_file_mtime("output/rde/data/subGroup.json"),
+            _get_file_mtime("output/rde/data/self.json"),
+        )
     
     def _read_self_user_id_for_subgroup_filter() -> str:
         try:
-            self_path = get_dynamic_file_path("output/rde/data/self.json")
-            with open(self_path, encoding="utf-8") as f:
-                self_data = json.load(f)
+            self_data = _load_json_cached("self_for_subgroup_filter", "output/rde/data/self.json")
             return str(((self_data or {}).get("data", {}) or {}).get("id") or "").strip()
         except Exception:
             return ""
@@ -756,10 +814,8 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             # サブグループフィルタ除去
             
             # subGroup.jsonから読み込み
-            subgroup_path = get_dynamic_file_path("output/rde/data/subGroup.json")
-            if os.path.exists(subgroup_path):
-                with open(subgroup_path, 'r', encoding='utf-8') as f:
-                    subgroup_data = json.load(f)
+            subgroup_data = _load_json_cached("subgroups", "output/rde/data/subGroup.json")
+            if isinstance(subgroup_data, dict):
                 
                 # 正しいデータ構造から読み込み: {"data": {...}, "included": [...]}
                 subgroups = subgroup_data.get("included", [])
@@ -832,8 +888,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         
         try:
             # ログインユーザーID取得
-            with open(self_path, encoding="utf-8") as f:
-                self_data = json.load(f)
+            self_data = _load_json_cached("self_for_grants", "output/rde/data/self.json") or {}
             user_id = self_data.get("data", {}).get("id", None)
             logger.debug("ユーザーID: %s", user_id)
             
@@ -842,8 +897,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
                 return user_grant_numbers
             
             # ユーザーが属するサブグループを抽出
-            with open(sub_group_path, encoding="utf-8") as f:
-                sub_group_data = json.load(f)
+            sub_group_data = _load_json_cached("subgroups_for_grants", "output/rde/data/subGroup.json") or {}
             
             groups_count = 0
             for item in sub_group_data.get("included", []):
@@ -904,9 +958,10 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         current_filter_type = filter_type if filter_type is not None else _get_current_filter_type()
         return current_filter_type in ("managed_only", "org_subjects", "all")
 
-    def _update_subgroup_filter_enabled_state(filter_type: str | None = None) -> None:
+    def _update_subgroup_filter_enabled_state(filter_type: str | None = None, *, reload_subgroups: bool = True) -> None:
         current_filter_type = filter_type if filter_type is not None else _get_current_filter_type()
-        load_subgroups(current_filter_type)
+        if reload_subgroups:
+            load_subgroups(current_filter_type)
         enabled = _is_subgroup_filter_mode_enabled(current_filter_type)
         try:
             subgroup_filter_combo.setEnabled(enabled)
@@ -933,9 +988,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
 
     def _read_self_info() -> tuple[str, str]:
         try:
-            self_path = get_dynamic_file_path("output/rde/data/self.json")
-            with open(self_path, encoding="utf-8") as f:
-                self_data = json.load(f)
+            self_data = _load_json_cached("self_info", "output/rde/data/self.json") or {}
             attrs = ((self_data or {}).get("data", {}) or {}).get("attributes", {}) or {}
             uid = str(((self_data or {}).get("data", {}) or {}).get("id") or "").strip()
             org = str(attrs.get("organizationName") or attrs.get("organization") or "").strip()
@@ -956,8 +1009,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         try:
             detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dataset_id}.json")
             if os.path.exists(detail_path):
-                with open(detail_path, encoding="utf-8") as f:
-                    detail = json.load(f)
+                detail = _load_json_cached(f"dataset_detail_org::{dataset_id}", f"output/rde/data/datasets/{dataset_id}.json") or {}
                 rel = (((detail or {}).get("data", {}) or {}).get("relationships", {}) or {})
                 manager_rel = ((rel.get("manager", {}) or {}).get("data", {}) or {})
                 applicant_rel = ((rel.get("applicant", {}) or {}).get("data", {}) or {})
@@ -998,8 +1050,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         try:
             detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dataset_id}.json")
             if os.path.exists(detail_path):
-                with open(detail_path, encoding="utf-8") as f:
-                    detail = json.load(f)
+                detail = _load_json_cached(f"dataset_detail_group::{dataset_id}", f"output/rde/data/datasets/{dataset_id}.json") or {}
                 rel = (((detail or {}).get("data", {}) or {}).get("relationships", {}) or {})
                 group_rel = ((rel.get("group", {}) or {}).get("data", {}) or {})
                 resolved = str(group_rel.get("id") or "")
@@ -1009,7 +1060,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         dataset_group_cache[dataset_id] = resolved
         return resolved
 
-    def populate_dataset_combo_with_filter(preserve_selection_id: str | None = None):
+    def populate_dataset_combo_with_filter(preserve_selection_id: str | None = None, *, filter_type: str | None = None):
         """フィルタリングを適用してデータセットコンボボックスを更新"""
         dataset_path = get_dynamic_file_path("output/rde/data/dataset.json")
         
@@ -1022,8 +1073,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             return
         
         try:
-            with open(dataset_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            data = _load_json_cached("datasets", "output/rde/data/dataset.json") or {}
             
             datasets = data.get('data', []) if isinstance(data, dict) else data
             
@@ -1031,18 +1081,19 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             filtered_datasets = []
             
             # 管理・所属機関の課題・その他・全て のフィルタ
-            filter_type = "managed_only"
-            if filter_org_subjects_radio.isChecked():
-                filter_type = "org_subjects"
-            elif filter_others_only_radio.isChecked():
-                filter_type = "others_only"
-            elif filter_all_radio.isChecked():
-                filter_type = "all"
+            current_filter_type = filter_type if filter_type is not None else "managed_only"
+            if filter_type is None:
+                if filter_org_subjects_radio.isChecked():
+                    current_filter_type = "org_subjects"
+                elif filter_others_only_radio.isChecked():
+                    current_filter_type = "others_only"
+                elif filter_all_radio.isChecked():
+                    current_filter_type = "all"
             
-            _update_subgroup_filter_enabled_state(filter_type)
+            _update_subgroup_filter_enabled_state(current_filter_type, reload_subgroups=False)
 
             subgroup_filter_id = ""
-            if _is_subgroup_filter_mode_enabled(filter_type):
+            if _is_subgroup_filter_mode_enabled(current_filter_type):
                 try:
                     subgroup_filter_id = str(subgroup_filter_combo.currentData() or "")
                 except Exception:
@@ -1056,75 +1107,118 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
             
             self_user_id, self_org_name = _read_self_info()
 
-            # フィルタリング処理
-            filtered_datasets = []
-            managed_datasets = []
-            org_subject_datasets = []
-            other_datasets = []
-            
+            candidate_datasets = []
             for dataset in datasets:
                 attrs = dataset.get("attributes", {})
-                dataset_id = dataset.get("id", "")
-                name = attrs.get("name", "名前なし")
                 grant_number = attrs.get("grantNumber", "")
 
                 if subgroup_filter_id:
                     dataset_group_id = _resolve_dataset_group_id(dataset)
                     if dataset_group_id != subgroup_filter_id:
                         continue
-                
-                # グラント番号フィルタを先に適用
+
                 if grant_filter_text and grant_filter_text not in grant_number.lower():
                     continue
-                
-                rel = dataset.get("relationships", {}) or {}
-                manager_data = ((rel.get("manager", {}) or {}).get("data", {}) or {})
-                applicant_data = ((rel.get("applicant", {}) or {}).get("data", {}) or {})
-                manager_id = str(manager_data.get("id") or "").strip()
-                applicant_id = str(applicant_data.get("id") or "").strip()
+                candidate_datasets.append(dataset)
 
-                is_managed = bool(self_user_id and (manager_id == self_user_id or applicant_id == self_user_id))
+            # フィルタリング処理
+            filtered_datasets = []
+            managed_datasets = []
+            org_subject_datasets = []
+            other_datasets = []
 
-                is_org_subject = False
-                if self_org_name:
-                    manager_org = _resolve_dataset_manager_org(dataset_id, manager_id)
-                    if manager_org:
-                        is_org_subject = (manager_org == self_org_name)
+            if current_filter_type == "managed_only":
+                has_org_subject_candidate = False
+                for dataset in candidate_datasets:
+                    attrs = dataset.get("attributes", {})
+                    grant_number = attrs.get("grantNumber", "")
+                    rel = dataset.get("relationships", {}) or {}
+                    manager_data = ((rel.get("manager", {}) or {}).get("data", {}) or {})
+                    applicant_data = ((rel.get("applicant", {}) or {}).get("data", {}) or {})
+                    manager_id = str(manager_data.get("id") or "").strip()
+                    applicant_id = str(applicant_data.get("id") or "").strip()
 
-                if not is_org_subject and user_grant_numbers and grant_number and grant_number in user_grant_numbers:
-                    is_org_subject = True
+                    is_managed = bool(self_user_id and (manager_id == self_user_id or applicant_id == self_user_id))
+                    if is_managed:
+                        managed_datasets.append(dataset)
+                        continue
 
-                if is_managed:
-                    managed_datasets.append(dataset)
-                elif is_org_subject:
-                    org_subject_datasets.append(dataset)
-                else:
-                    other_datasets.append(dataset)
+                    if user_grant_numbers and grant_number and grant_number in user_grant_numbers:
+                        has_org_subject_candidate = True
 
-            should_fallback_to_all = (
-                filter_type in ("managed_only", "org_subjects")
-                and not managed_datasets
-                and not org_subject_datasets
-                and (other_datasets or datasets)
-            )
-            if should_fallback_to_all:
-                logger.info(
-                    "管理/所属機関の分類情報が不足しているため、表示は全件にフォールバックします (filter_type=%s)",
-                    filter_type,
-                )
-                filtered_datasets = managed_datasets + org_subject_datasets + other_datasets
-            else:
-                # フィルタタイプに基づいて表示対象を決定
-                if filter_type == "managed_only":
+                if managed_datasets:
                     filtered_datasets = managed_datasets
                     logger.debug("フィルタ適用: 管理（自身が開設・所有） (%s件)", len(filtered_datasets))
-                elif filter_type == "org_subjects":
+                else:
+                    has_org_subject_by_org = False
+                    if not has_org_subject_candidate and self_org_name:
+                        for dataset in candidate_datasets:
+                            dataset_id = dataset.get("id", "")
+                            rel = dataset.get("relationships", {}) or {}
+                            manager_data = ((rel.get("manager", {}) or {}).get("data", {}) or {})
+                            manager_id = str(manager_data.get("id") or "").strip()
+                            manager_org = _resolve_dataset_manager_org(dataset_id, manager_id)
+                            if manager_org and manager_org == self_org_name:
+                                has_org_subject_by_org = True
+                                break
+
+                    if has_org_subject_candidate or has_org_subject_by_org:
+                        filtered_datasets = []
+                        logger.debug("フィルタ適用: 管理（自身が開設・所有） (0件)")
+                    else:
+                        logger.info(
+                            "管理/所属機関の分類情報が不足しているため、表示は全件にフォールバックします (filter_type=%s)",
+                            current_filter_type,
+                        )
+                        filtered_datasets = candidate_datasets
+            else:
+                for dataset in candidate_datasets:
+                    attrs = dataset.get("attributes", {})
+                    dataset_id = dataset.get("id", "")
+                    grant_number = attrs.get("grantNumber", "")
+
+                    rel = dataset.get("relationships", {}) or {}
+                    manager_data = ((rel.get("manager", {}) or {}).get("data", {}) or {})
+                    applicant_data = ((rel.get("applicant", {}) or {}).get("data", {}) or {})
+                    manager_id = str(manager_data.get("id") or "").strip()
+                    applicant_id = str(applicant_data.get("id") or "").strip()
+
+                    is_managed = bool(self_user_id and (manager_id == self_user_id or applicant_id == self_user_id))
+
+                    is_org_subject = False
+                    if self_org_name:
+                        manager_org = _resolve_dataset_manager_org(dataset_id, manager_id)
+                        if manager_org:
+                            is_org_subject = (manager_org == self_org_name)
+
+                    if not is_org_subject and user_grant_numbers and grant_number and grant_number in user_grant_numbers:
+                        is_org_subject = True
+
+                    if is_managed:
+                        managed_datasets.append(dataset)
+                    elif is_org_subject:
+                        org_subject_datasets.append(dataset)
+                    else:
+                        other_datasets.append(dataset)
+
+                should_fallback_to_all = (
+                    current_filter_type == "org_subjects"
+                    and not org_subject_datasets
+                    and (other_datasets or managed_datasets or candidate_datasets)
+                )
+                if should_fallback_to_all:
+                    logger.info(
+                        "管理/所属機関の分類情報が不足しているため、表示は全件にフォールバックします (filter_type=%s)",
+                        current_filter_type,
+                    )
+                    filtered_datasets = managed_datasets + org_subject_datasets + other_datasets
+                elif current_filter_type == "org_subjects":
                     filtered_datasets = org_subject_datasets
                     logger.debug("フィルタ適用: 所属機関の課題 (%s件)", len(filtered_datasets))
-                elif filter_type == "others_only":
+                elif current_filter_type == "others_only":
                     filtered_datasets = other_datasets
                     logger.debug("フィルタ適用: その他 (%s件)", len(filtered_datasets))
-                elif filter_type == "all":
+                elif current_filter_type == "all":
                     filtered_datasets = managed_datasets + org_subject_datasets + other_datasets
                     logger.debug(
                         "フィルタ適用: 全て (管理: %s件, 所属機関の課題: %s件, その他: %s件, 合計: %s件)",
@@ -1215,12 +1309,59 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         parts = [part for part in (grant, name) if part]
         return " - ".join(parts) if parts else fallback
 
-    def refresh_dataset_sources(reason="manual", preserve_selection=True):
+    def refresh_dataset_sources(reason="manual", preserve_selection=True, run=None):
         """サブグループとデータセット一覧をまとめて再読み込みする"""
         logger.debug("データエントリータブ: refresh_dataset_sources reason=%s", reason)
+        refresh_signature = _build_dataset_sources_refresh_signature()
+        previous_signature = getattr(widget, "_last_dataset_sources_refresh_signature", None)
+        if reason in {"showEvent", "initial"} and previous_signature == refresh_signature:
+            logger.debug("dataset_dataentry: skip %s refresh because sources are unchanged", reason)
+            if run is not None:
+                run.finish(success=True, skipped=True, skip_reason="unchanged_sources")
+            return False
+
         selection_id = get_selected_dataset_id() if preserve_selection else None
-        load_subgroups(_get_current_filter_type())
-        populate_dataset_combo_with_filter(selection_id)
+        current_filter_type = _get_current_filter_type()
+        try:
+            load_subgroups(current_filter_type)
+            populate_dataset_combo_with_filter(selection_id, filter_type=current_filter_type)
+            widget._last_dataset_sources_refresh_signature = _build_dataset_sources_refresh_signature()
+            if run is not None:
+                dataset_count = max(dataset_combo.count() - 1, 0)
+                run.interactive(reason=reason, dataset_count=dataset_count)
+                run.complete(reason=reason, dataset_count=dataset_count)
+                run.finish(success=True, reason=reason, dataset_count=dataset_count)
+            return True
+        except Exception:
+            if run is not None:
+                run.finish(success=False, reason=reason)
+            raise
+
+    def schedule_dataset_sources_refresh(reason="manual", preserve_selection=True, *, delay_ms: int = 0):
+        if not qt_is_valid(widget):
+            return False
+        widget._pending_dataset_sources_refresh_reason = reason
+        widget._pending_dataset_sources_refresh_preserve_selection = preserve_selection
+
+        def _run_deferred_refresh():
+            if not qt_is_valid(widget):
+                return
+            pending_reason = getattr(widget, "_pending_dataset_sources_refresh_reason", None) or reason
+            pending_preserve = bool(getattr(widget, "_pending_dataset_sources_refresh_preserve_selection", preserve_selection))
+            run = start_ui_responsiveness_run(
+                "dataset_dataentry",
+                "dataset_sources",
+                "refresh",
+                reason=pending_reason,
+            )
+            refresh_dataset_sources(pending_reason, pending_preserve, run=run)
+
+        return schedule_deferred_ui_task(
+            widget,
+            "dataset-dataentry-refresh-sources",
+            _run_deferred_refresh,
+            delay_ms=delay_ms,
+        )
     
     def get_selected_dataset_id():
         """選択されたデータセットのIDを取得"""
@@ -1490,11 +1631,17 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     
     def on_refresh_dataset_clicked():
         """データセット一覧更新ボタンクリック時のハンドラー"""
-        refresh_dataset_sources("button")
+        schedule_dataset_sources_refresh("button")
     
+    def on_filter_mode_changed():
+        """表示モード変更時のハンドラー"""
+        current_filter_type = _get_current_filter_type()
+        load_subgroups(current_filter_type)
+        populate_dataset_combo_with_filter(get_selected_dataset_id(), filter_type=current_filter_type)
+
     def on_filter_changed():
         """フィルタ変更時のハンドラー"""
-        populate_dataset_combo_with_filter(get_selected_dataset_id())
+        populate_dataset_combo_with_filter(get_selected_dataset_id(), filter_type=_get_current_filter_type())
 
     def _get_entry_id_from_row(row: int):
         try:
@@ -1550,10 +1697,10 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
     entry_table.cellDoubleClicked.connect(on_entry_table_double_clicked)
     
     # フィルタ変更時のイベント接続
-    filter_user_only_radio.toggled.connect(on_filter_changed)
-    filter_org_subjects_radio.toggled.connect(on_filter_changed)
-    filter_others_only_radio.toggled.connect(on_filter_changed)
-    filter_all_radio.toggled.connect(on_filter_changed)
+    filter_user_only_radio.toggled.connect(lambda checked: checked and on_filter_mode_changed())
+    filter_org_subjects_radio.toggled.connect(lambda checked: checked and on_filter_mode_changed())
+    filter_others_only_radio.toggled.connect(lambda checked: checked and on_filter_mode_changed())
+    filter_all_radio.toggled.connect(lambda checked: checked and on_filter_mode_changed())
     subgroup_filter_combo.currentIndexChanged.connect(on_filter_changed)
     grant_filter_input.textChanged.connect(on_filter_changed)
     _update_subgroup_filter_enabled_state(_get_current_filter_type())
@@ -1576,7 +1723,7 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
         def _run_initial_refresh():
             if not qt_is_valid(widget):
                 return
-            refresh_dataset_sources("initial")
+            schedule_dataset_sources_refresh("initial")
 
         timer.timeout.connect(_run_initial_refresh)
         widget._initial_refresh_timer = timer
@@ -1640,7 +1787,8 @@ def create_dataset_dataentry_widget(parent, title, create_auto_resize_button):
 
     # 他タブから明示的に再利用できるように属性公開
     widget.refresh_dataset_combo = refresh_dataset_sources
-    widget.add_show_refresh_callback(lambda: refresh_dataset_sources("showEvent"))
+    widget.schedule_refresh_dataset_combo = schedule_dataset_sources_refresh
+    widget.add_show_refresh_callback(lambda: schedule_dataset_sources_refresh("showEvent"))
     
     widget.setLayout(layout)
     return widget

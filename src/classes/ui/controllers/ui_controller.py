@@ -23,6 +23,7 @@ from classes.utils.window_sizing import (
     resize_main_window,
     set_main_window_minimum_size,
 )
+from classes.utils.ui_responsiveness import start_ui_responsiveness_run
 
 # UIControllerCore をインポート
 from .ui_controller_core import UIControllerCore
@@ -1103,6 +1104,13 @@ class UIController(UIControllerCore):
         if PerfMonitor is not None:
             PerfMonitor.start(perf_key, logger=perf_logger)
         _t0 = time.perf_counter()
+        ui_run = start_ui_responsiveness_run(
+            "main_window",
+            mode,
+            "switch_mode",
+            previous_mode=str(getattr(self, "current_mode", "") or ""),
+        )
+        ui_run.mark("switch_start")
 
         is_pytest = bool(os.environ.get("PYTEST_CURRENT_TEST"))
         offline_state = self._get_offline_runtime_state()
@@ -1224,6 +1232,7 @@ class UIController(UIControllerCore):
             # 対応するウィジェットを表示
             widget = self.get_mode_widget(mode)
             if widget:
+                ui_run.mark("widget_resolved", widget_class=type(widget).__name__)
                 try:
                     from qt_compat.widgets import QSizePolicy
                     widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -1235,6 +1244,7 @@ class UIController(UIControllerCore):
                     self.parent.menu_area_layout.addWidget(widget, 1)
                 except Exception:
                     self.parent.menu_area_layout.addWidget(widget)
+                ui_run.interactive(widget_class=type(widget).__name__)
 
                 # 描画の「初回Paint」と「収束」を計測（ロジック完了後も描画が続くケースの切り分け）
                 if (
@@ -1491,6 +1501,9 @@ class UIController(UIControllerCore):
         elif mode == "data_portal":
             # データポータルは個別のウィジェットで処理
             pass
+
+        ui_run.complete(mode=mode)
+        ui_run.finish(success=True, elapsed_ms=round((time.perf_counter() - _t0) * 1000.0, 3))
 
         if PerfMonitor is not None:
             PerfMonitor.end(
@@ -1918,23 +1931,37 @@ class UIController(UIControllerCore):
             self.show_error(f"検索インデックスタブの作成でエラーが発生しました: {e}")
             index_tab_layout.addWidget(QLabel("検索インデックス機能が利用できません"))
 
-        # 初回のみ: ウィンドウ幅をディスプレイ幅90%上限で横スクロール不要な幅へ寄せる（可変のまま）
+        # 初回のみ: ステータス表が反映された後に必要な幅だけ再計算する
         try:
             top_level = self.parent
+            status_widget = getattr(self, 'basic_unified_status_widget', None)
+            if top_level is not None and status_widget is not None and not getattr(top_level, "_basic_info_initial_resize_done", False):
+                resize_run_ref = {"run": None}
 
-            if top_level is not None and not getattr(top_level, "_basic_info_initial_resize_done", False):
-                top_level._basic_info_initial_resize_done = True
+                def _ensure_resize_run():
+                    run = resize_run_ref.get("run")
+                    if run is None:
+                        run = start_ui_responsiveness_run(
+                            "basic_info",
+                            "initial_width_adjust",
+                            "deferred_resize",
+                            cache_state="miss",
+                        )
+                        run.mark("scheduled")
+                        resize_run_ref["run"] = run
+                    return run
 
                 def _adjust_width_once():
+                    run = _ensure_resize_run()
                     try:
-                        table = getattr(self, 'basic_unified_status_widget', None)
-                        table = getattr(table, 'table', None)
-                        if table is None:
+                        table = getattr(status_widget, 'table', None)
+                        if table is None or table.rowCount() <= 0:
+                            run.mark("waiting_for_rows")
                             return
 
+                        run.mark("build_start", row_count=int(table.rowCount()))
                         header = table.horizontalHeader()
 
-                        # stretchLastSection=True のままだと「現在の表示幅」に合わせて過小評価されるため、一時的に解除して計測する
                         old_stretch = None
                         try:
                             old_stretch = bool(header.stretchLastSection())
@@ -1964,22 +1991,14 @@ class UIController(UIControllerCore):
                         except Exception:
                             pass
 
-                        # 現在のviewport幅との差分だけウィンドウを広げる（左メニュー幅などは既にwindow幅に含まれるため差分で十分）
-                        viewport_w = 0
                         try:
                             viewport_w = int(table.viewport().width())
                         except Exception:
                             viewport_w = int(table.width()) if hasattr(table, 'width') else 0
 
                         shortage = max(0, int(required_table_width) - int(viewport_w))
-
-                        # 余白（フレーム/スクロールバー/タブ余白）
                         extra = 80
-                        desired = None
-                        if hasattr(top_level, 'width'):
-                            desired = int(top_level.width()) + int(shortage) + int(extra)
-                        else:
-                            desired = int(required_table_width) + int(extra)
+                        desired = int(top_level.width()) + int(shortage) + int(extra) if hasattr(top_level, 'width') else int(required_table_width) + int(extra)
 
                         screen = None
                         try:
@@ -1992,29 +2011,47 @@ class UIController(UIControllerCore):
                             except Exception:
                                 screen = None
 
+                        cap = None
                         if screen is not None:
                             avail = screen.availableGeometry().width()
                             cap = int(avail * 0.9)
                             desired = min(desired, cap)
 
-                        if hasattr(top_level, 'width') and hasattr(top_level, 'resize'):
-                            current_w = int(top_level.width())
-                            # shortageが0でも横スクロールが見えている場合があるので、その場合も少し広げる
+                        current_w = int(top_level.width()) if hasattr(top_level, 'width') else 0
+                        h_scroll_visible = False
+                        try:
+                            h_scroll_visible = bool(table.horizontalScrollBar().isVisible())
+                        except Exception:
                             h_scroll_visible = False
-                            try:
-                                h_scroll_visible = bool(table.horizontalScrollBar().isVisible())
-                            except Exception:
-                                h_scroll_visible = False
 
-                            if desired > current_w or h_scroll_visible:
-                                top_level.resize(max(current_w, desired), int(top_level.height()))
-                    except Exception:
-                        pass
+                        resized = False
+                        if hasattr(top_level, 'resize') and (desired > current_w or h_scroll_visible):
+                            top_level.resize(max(current_w, desired), int(top_level.height()))
+                            current_w = max(current_w, desired)
+                            resized = True
 
-                # レイアウト確定/列自動調整のタイミング差を吸収するため、数回リトライ
-                self._schedule_qt_single_shot(150, _adjust_width_once, key="basic_info_initial_resize_1")
-                self._schedule_qt_single_shot(400, _adjust_width_once, key="basic_info_initial_resize_2")
-                self._schedule_qt_single_shot(800, _adjust_width_once, key="basic_info_initial_resize_3")
+                        run.interactive(required_width=int(required_table_width), viewport_width=int(viewport_w), desired_width=int(desired), shortage=int(shortage))
+
+                        should_finish = (not h_scroll_visible) or (cap is not None and current_w >= cap)
+                        if should_finish:
+                            top_level._basic_info_initial_resize_done = True
+                            run.complete(horizontal_scroll_visible=bool(h_scroll_visible))
+                            run.finish(success=True)
+                        elif resized:
+                            self._schedule_qt_single_shot(120, _adjust_width_once, key="basic_info_initial_resize_followup")
+                    except Exception as e:
+                        run.finish(success=False, error=str(e))
+
+                def _schedule_adjustment(*_args):
+                    if getattr(top_level, "_basic_info_initial_resize_done", False):
+                        return
+                    self._schedule_qt_single_shot(0, _adjust_width_once, key="basic_info_initial_resize_deferred")
+
+                if not getattr(status_widget, "_initial_resize_signal_connected", False):
+                    status_widget.status_rows_applied.connect(_schedule_adjustment)
+                    status_widget._initial_resize_signal_connected = True
+
+                _schedule_adjustment()
         except Exception:
             pass
 

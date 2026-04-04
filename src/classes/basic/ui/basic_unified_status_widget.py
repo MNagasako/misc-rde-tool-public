@@ -238,6 +238,7 @@ class BasicUnifiedStatusWidget(QWidget):
 
     # ワーカースレッド→UIスレッドへ結果を渡す
     _status_rows_ready = Signal(int, object)
+    status_rows_applied = Signal(int, int)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -937,6 +938,10 @@ class BasicUnifiedStatusWidget(QWidget):
                     pass
                 try:
                     self.table.viewport().update()
+                except Exception:
+                    pass
+                try:
+                    self.status_rows_applied.emit(int(seq), len(rows))
                 except Exception:
                     pass
 

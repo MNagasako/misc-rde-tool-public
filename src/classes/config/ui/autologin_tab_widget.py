@@ -45,6 +45,7 @@ from classes.core.credential_store import (
 )
 from classes.managers.app_config_manager import get_config_manager
 from classes.theme import get_color, ThemeKey
+from classes.utils.ui_responsiveness import schedule_deferred_ui_task, start_ui_responsiveness_run
 
 # ログ設定
 logger = logging.getLogger(__name__)
@@ -63,10 +64,40 @@ class AutoLoginTabWidget(QWidget):
         self.parent_widget = parent
         self.config_manager = get_config_manager()
         self.health_check_result: Optional[CredentialStoreHealthCheck] = None
+        self._initial_health_check_run = None
         
         self.init_ui()
         self.load_current_settings()
-        self.perform_health_check()
+        self.health_status_text.setText("ヘルスチェックを準備中...")
+        self._schedule_initial_health_check()
+
+    def _schedule_initial_health_check(self) -> None:
+        self._initial_health_check_run = start_ui_responsiveness_run(
+            "settings",
+            "autologin_health_check",
+            "initial_load",
+            cache_state="miss",
+        )
+        self._initial_health_check_run.mark("scheduled")
+        schedule_deferred_ui_task(self, "autologin-initial-health-check", self._run_initial_health_check)
+
+    def _run_initial_health_check(self) -> None:
+        run = self._initial_health_check_run
+        if run is not None:
+            run.mark("worker_start")
+        self.health_status_text.setText("ヘルスチェックを実行中...")
+        try:
+            self.perform_health_check()
+            if run is not None:
+                run.interactive(status="visible")
+                run.complete(status="loaded")
+                run.finish(success=True)
+        except Exception:
+            if run is not None:
+                run.finish(success=False)
+            raise
+        finally:
+            self._initial_health_check_run = None
     
     def init_ui(self):
         """UI初期化"""

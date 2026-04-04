@@ -14,6 +14,7 @@ from qt_compat.core import Signal, QTimer
 
 from classes.managers.log_manager import get_logger
 from classes.theme import ThemeKey, get_color
+from classes.utils.ui_responsiveness import schedule_deferred_ui_task, start_ui_responsiveness_run
 from classes.utils.window_sizing import is_window_maximized, resize_main_window
 from .login_settings_tab import LoginSettingsTab
 if TYPE_CHECKING:
@@ -284,13 +285,21 @@ class DataPortalWidget(QWidget):
                 except Exception:
                     pass
             elif index == 1:
-                self._ensure_master_tab()
+                run = start_ui_responsiveness_run("data_portal", "master_tab", "lazy_tab_build", tab_index=index, cache_state="miss")
+                run.mark("placeholder_visible")
+                schedule_deferred_ui_task(self.tab_widget, "data-portal-master-tab", lambda session=run: self._ensure_master_tab(session))
             elif index == 2:
-                self._ensure_upload_tab()
+                run = start_ui_responsiveness_run("data_portal", "upload_tab", "lazy_tab_build", tab_index=index, cache_state="miss")
+                run.mark("placeholder_visible")
+                schedule_deferred_ui_task(self.tab_widget, "data-portal-upload-tab", lambda session=run: self._ensure_upload_tab(run=session))
             elif index == 3:
-                self._ensure_bulk_tab()
+                run = start_ui_responsiveness_run("data_portal", "bulk_tab", "lazy_tab_build", tab_index=index, cache_state="miss")
+                run.mark("placeholder_visible")
+                schedule_deferred_ui_task(self.tab_widget, "data-portal-bulk-tab", lambda session=run: self._ensure_bulk_tab(session))
             elif index == 4:
-                self._ensure_listing_tab()
+                run = start_ui_responsiveness_run("data_portal", "listing_tab", "lazy_tab_build", tab_index=index, cache_state="miss")
+                run.mark("placeholder_visible")
+                schedule_deferred_ui_task(self.tab_widget, "data-portal-listing-tab", lambda session=run: self._ensure_listing_tab(session))
 
             self._current_tab_index = index
             try:
@@ -355,8 +364,10 @@ class DataPortalWidget(QWidget):
         except Exception:
             logger.debug("DataPortalWidget: restore window state failed", exc_info=True)
 
-    def _ensure_master_tab(self) -> None:
+    def _ensure_master_tab(self, run=None) -> None:
         if self.master_data_tab is not None:
+            if run is not None:
+                run.finish(success=True, cache_state="memory_hit")
             return
         idx = self.tab_widget.indexOf(self._master_placeholder)
         if idx < 0:
@@ -365,6 +376,8 @@ class DataPortalWidget(QWidget):
 
         from .master_data_tab import MasterDataTab
 
+        if run is not None:
+            run.mark("build_start")
         self.master_data_tab = MasterDataTab(self)
         # シグナルを転送
         self.master_data_tab.master_fetched.connect(self.master_fetched.emit)
@@ -378,9 +391,15 @@ class DataPortalWidget(QWidget):
 
         # 置換
         self._replace_lazy_tab(idx, self.master_data_tab, "📋 マスタ")
+        if run is not None:
+            run.interactive(widget_class=type(self.master_data_tab).__name__)
+            run.complete(widget_class=type(self.master_data_tab).__name__)
+            run.finish(success=True)
 
-    def _ensure_upload_tab(self, *, set_current: bool = True) -> None:
+    def _ensure_upload_tab(self, *, set_current: bool = True, run=None) -> None:
         if self.dataset_upload_tab is not None:
+            if run is not None:
+                run.finish(success=True, cache_state="memory_hit")
             return
         idx = self.tab_widget.indexOf(self._upload_placeholder)
         if idx < 0:
@@ -388,15 +407,23 @@ class DataPortalWidget(QWidget):
 
         from .dataset_upload_tab import DatasetUploadTab
 
+        if run is not None:
+            run.mark("build_start")
         self.dataset_upload_tab = DatasetUploadTab(self)
         # シグナルを転送
         self.dataset_upload_tab.upload_completed.connect(self.upload_completed.emit)
 
         # 置換
         self._replace_lazy_tab(idx, self.dataset_upload_tab, "📤 データカタログ", set_current=set_current)
+        if run is not None:
+            run.interactive(widget_class=type(self.dataset_upload_tab).__name__)
+            run.complete(widget_class=type(self.dataset_upload_tab).__name__)
+            run.finish(success=True)
 
-    def _ensure_bulk_tab(self) -> None:
+    def _ensure_bulk_tab(self, run=None) -> None:
         if self.bulk_tab is not None:
+            if run is not None:
+                run.finish(success=True, cache_state="memory_hit")
             return
         idx = self.tab_widget.indexOf(self._bulk_placeholder)
         if idx < 0:
@@ -404,12 +431,20 @@ class DataPortalWidget(QWidget):
 
         from .portal_bulk_tab import DataPortalBulkTab
 
+        if run is not None:
+            run.mark("build_start")
         self.bulk_tab = DataPortalBulkTab(self)
 
         self._replace_lazy_tab(idx, self.bulk_tab, "📦 一括")
+        if run is not None:
+            run.interactive(widget_class=type(self.bulk_tab).__name__)
+            run.complete(widget_class=type(self.bulk_tab).__name__)
+            run.finish(success=True)
 
-    def _ensure_listing_tab(self) -> None:
+    def _ensure_listing_tab(self, run=None) -> None:
         if self.listing_tab is not None:
+            if run is not None:
+                run.finish(success=True, cache_state="memory_hit")
             return
         idx = self.tab_widget.indexOf(self._listing_placeholder)
         if idx < 0:
@@ -417,6 +452,8 @@ class DataPortalWidget(QWidget):
 
         from .portal_listing_tab import PortalListingTab
 
+        if run is not None:
+            run.mark("build_start")
         self.listing_tab = PortalListingTab(self)
 
         # 現在の環境を反映
@@ -456,6 +493,10 @@ class DataPortalWidget(QWidget):
 
         # 置換
         self._replace_lazy_tab(idx, self.listing_tab, "📋 一覧")
+        if run is not None:
+            run.interactive(widget_class=type(self.listing_tab).__name__)
+            run.complete(widget_class=type(self.listing_tab).__name__)
+            run.finish(success=True)
     
     def _on_credentials_saved(self, environment: str):
         """認証情報保存後の処理"""

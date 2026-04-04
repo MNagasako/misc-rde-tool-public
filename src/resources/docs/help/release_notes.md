@@ -6,11 +6,23 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.47）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| テーブル出力共通化 | `table_export.py` を基準に一覧・ポータル・試料一覧の CSV/XLSX 出力を pandas 非依存へ統一。 |
-| Excel読込統一 | `excel_records.py` を共通化し、AI・報告書・設備・設定系の XLSX 読み込みを openpyxl ベースへ整理。 |
-| 依存関係整理 | `requirements.txt` から pandas / xlsxwriter を削除し、実装前提を `csv` と `openpyxl` に統一。 |
-| テスト/品質 | export guardrail、Excel migration、supported formats、lazy import の unit/widget テストを追加更新。 |
+| リリース/品質 | リビジョンアップ（v2.5.48）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| UI応答性計測 | `ui_responsiveness.py` を追加し、モード切替・lazy build・初期ロードを JSONL で計測可能化。 |
+| deferred build 拡張 | データ登録、データ取得2、データポータル、設定の重いタブを placeholder 表示後に遅延構築。 |
+| 初期ロード最適化 | AI テスト初期化、自動ログインヘルスチェック、既存データセット一覧読込を表示後/バックグラウンドへ整理。 |
+| データセット選択安定化 | dataEntry 系の dataset source refresh をキャッシュ/差分判定ベースにし、managed 系分類を安定化。 |
+
+## v2.5.48 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.48）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| UI応答性計測 | `ui_responsiveness.py` を追加し、`UIController.switch_mode()`、設定/データ登録/データ取得2/データポータルの lazy build、AI テスト初期化などを `output/log/ui_responsiveness.jsonl` へ記録可能化。 |
+| deferred build | `data_register_tab_widget.py`、`data_fetch2_tab_widget.py`、`data_portal_widget.py`、`settings_tab_widget.py` で、重いタブの構築をプレースホルダ表示後の deferred 実行へ統一。 |
+| 初期ロード | `ui_ai_test.py` の AI設定/課題一覧、`autologin_tab_widget.py` のヘルスチェックを表示後に遅延実行し、`dataset_open_widget.py` の既存データセット一覧は状態表示付き worker + 中止導線を追加。 |
+| データセット選択 | `dataset_dataentry_widget_minimal.py` で dataset/self/subGroup JSON キャッシュ、refresh signature、フィルタモード別再読込整理を導入し、不要な全件再読込を抑制。 |
+| 基本情報 UI | `basic_unified_status_widget.py` の行反映シグナルを契機に `ui_controller.py` で初回幅調整する構成へ変更し、固定タイマ依存の resize を縮小。 |
+| テスト/品質 | `test_ui_responsiveness.py`、`test_data_portal_widget_lazy_deferred_build.py`、`test_settings_lazy_deferred_build.py`、`test_dataset_dataentry_widget.py`、`test_autologin_tab_widget_health_check_deferred.py` などを追加・更新。 |
 
 ## v2.5.47 の主な更新点
 

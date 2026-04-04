@@ -27,6 +27,7 @@ from classes.utils.window_sizing import (
     is_window_maximized,
     resize_main_window,
 )
+from classes.utils.ui_responsiveness import schedule_deferred_ui_task, start_ui_responsiveness_run
 
 
 def create_data_register_widget(*args, **kwargs):
@@ -193,66 +194,132 @@ class DataRegisterTabWidget(QWidget):
             except Exception:
                 pass
 
-    def _ensure_lazy_tab_built(self, index: int) -> None:
+    def _lazy_tab_name(self, index: int) -> str | None:
+        if self._batch_tab_index is not None and index == self._batch_tab_index:
+            return 'batch_tab'
+        if self._status_tab_index is not None and index == self._status_tab_index:
+            return 'status_tab'
+        if self._listing_tab_index is not None and index == self._listing_tab_index:
+            return 'listing_tab'
+        if self._mail_tab_index is not None and index == self._mail_tab_index:
+            return 'mail_tab'
+        return None
+
+    def _schedule_lazy_tab_build(self, index: int) -> None:
+        tab_name = self._lazy_tab_name(index)
+        if tab_name is None:
+            return
+
+        run = start_ui_responsiveness_run(
+            'data_register',
+            tab_name,
+            'lazy_tab_build',
+            tab_index=index,
+            cache_state='miss',
+        )
+        run.mark('placeholder_visible')
+        schedule_deferred_ui_task(
+            self.tab_widget,
+            f'data-register-lazy-tab-{index}',
+            lambda idx=index, session=run: self._ensure_lazy_tab_built_now(idx, session),
+        )
+
+    def _ensure_lazy_tab_built_now(self, index: int, run=None) -> None:
         if self._lazy_building:
+            if run is not None:
+                run.finish(success=True, skipped=True)
             return
 
         try:
             self._lazy_building = True
             if self._batch_tab_index is not None and index == self._batch_tab_index:
-                self._ensure_batch_register_tab_built()
+                self._ensure_batch_register_tab_built(run)
             elif self._status_tab_index is not None and index == self._status_tab_index:
-                self._ensure_status_tab_built()
+                self._ensure_status_tab_built(run)
             elif self._listing_tab_index is not None and index == self._listing_tab_index:
-                self._ensure_tile_listing_tab_built()
+                self._ensure_tile_listing_tab_built(run)
             elif self._mail_tab_index is not None and index == self._mail_tab_index:
-                self._ensure_mail_notification_tab_built()
+                self._ensure_mail_notification_tab_built(run)
+            elif run is not None:
+                run.finish(success=False, reason='unknown_tab')
         finally:
             self._lazy_building = False
 
-    def _ensure_batch_register_tab_built(self) -> None:
+    def _ensure_batch_register_tab_built(self, run=None) -> None:
         if getattr(self, 'batch_widget', None) is not None or self._batch_tab_index is None:
+            if run is not None:
+                run.finish(success=True, cache_state='memory_hit')
             return
 
         from .batch_register_widget import BatchRegisterWidget
 
+        if run is not None:
+            run.mark('build_start')
         batch_widget = BatchRegisterWidget(self.parent_controller)
         self.batch_widget = batch_widget
         scroll_area = self._wrap_tab_in_scroll(batch_widget, 'dataRegisterBatchScrollArea')
         self.batch_register_scroll_area = scroll_area
         self._replace_tab_widget(self._batch_tab_index, scroll_area, '一括登録')
+        if run is not None:
+            run.interactive(widget_class=type(batch_widget).__name__)
+            run.complete(widget_class=type(batch_widget).__name__)
+            run.finish(success=True)
 
-    def _ensure_status_tab_built(self) -> None:
+    def _ensure_status_tab_built(self, run=None) -> None:
         if getattr(self, 'status_widget', None) is not None or self._status_tab_index is None:
+            if run is not None:
+                run.finish(success=True, cache_state='memory_hit')
             return
 
         from .registration_status_widget import RegistrationStatusWidget
 
+        if run is not None:
+            run.mark('build_start')
         status_widget = RegistrationStatusWidget(self)
         self.status_widget = status_widget
         wrapped = self._wrap_tab_in_scroll(status_widget, 'dataRegisterStatusScrollArea')
         self._replace_tab_widget(self._status_tab_index, wrapped, '登録状況')
+        if run is not None:
+            run.interactive(widget_class=type(status_widget).__name__)
+            run.complete(widget_class=type(status_widget).__name__)
+            run.finish(success=True)
 
-    def _ensure_tile_listing_tab_built(self) -> None:
+    def _ensure_tile_listing_tab_built(self, run=None) -> None:
         if getattr(self, 'tile_listing_widget', None) is not None or self._listing_tab_index is None:
+            if run is not None:
+                run.finish(success=True, cache_state='memory_hit')
             return
 
         from .dataentry_tile_listing_widget import create_dataentry_tile_listing_widget
 
+        if run is not None:
+            run.mark('build_start')
         listing_widget = create_dataentry_tile_listing_widget(self)
         self.tile_listing_widget = listing_widget
         self._replace_tab_widget(self._listing_tab_index, listing_widget, '一覧')
+        if run is not None:
+            run.interactive(widget_class=type(listing_widget).__name__)
+            run.complete(widget_class=type(listing_widget).__name__)
+            run.finish(success=True)
 
-    def _ensure_mail_notification_tab_built(self) -> None:
+    def _ensure_mail_notification_tab_built(self, run=None) -> None:
         if getattr(self, 'mail_notification_tab', None) is not None or self._mail_tab_index is None:
+            if run is not None:
+                run.finish(success=True, cache_state='memory_hit')
             return
 
         from classes.data_entry.ui.mail_notification_tab import MailNotificationTab
 
+        if run is not None:
+            run.mark('build_start')
         tab = MailNotificationTab(self)
         self.mail_notification_tab = tab
         wrapped = self._wrap_tab_in_scroll(tab, 'dataRegisterMailNotificationScrollArea')
         self._replace_tab_widget(self._mail_tab_index, wrapped, '✉️ メール通知')
+        if run is not None:
+            run.interactive(widget_class=type(tab).__name__)
+            run.complete(widget_class=type(tab).__name__)
+            run.finish(success=True)
     
     def refresh_theme(self):
         """テーマ変更時のスタイル更新"""
@@ -354,7 +421,7 @@ class DataRegisterTabWidget(QWidget):
         logger.debug("タブ変更: index=%s", index)
 
         try:
-            self._ensure_lazy_tab_built(index)
+            self._schedule_lazy_tab_build(index)
         except Exception as e:
             logger.error("DataRegisterTabWidget: lazy tab build failed: %s", e)
 

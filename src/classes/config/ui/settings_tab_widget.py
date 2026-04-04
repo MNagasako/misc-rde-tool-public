@@ -27,6 +27,7 @@ try:
     from qt_compat.widgets import QSizePolicy
     from classes.theme import get_color, ThemeKey
     from classes.utils.window_sizing import clear_main_window_size_constraints
+    from classes.utils.ui_responsiveness import schedule_deferred_ui_task, start_ui_responsiveness_run
     PYQT5_AVAILABLE = True
 except ImportError as e:
     logger.error(f"Qt互換レイヤーインポート失敗: {e}")
@@ -201,8 +202,6 @@ class SettingsTabWidget(QWidget):
         return index
 
     def _maybe_build_current_lazy_tab(self, index: int) -> None:
-        if self._lazy_building:
-            return
         if index < 0:
             return
         try:
@@ -212,12 +211,56 @@ class SettingsTabWidget(QWidget):
         if current not in self._lazy_tab_builders:
             return
 
+        try:
+            tab_name = self._lazy_tab_names.get(current) or self.tab_widget.tabText(index)
+        except Exception:
+            tab_name = "lazy_tab"
+
+        run = start_ui_responsiveness_run(
+            "settings",
+            tab_name,
+            "lazy_tab_build",
+            tab_index=index,
+            cache_state="miss",
+        )
+        run.mark("placeholder_visible")
+        schedule_deferred_ui_task(
+            self.tab_widget,
+            f"settings-lazy-tab-{index}",
+            lambda idx=index, session=run: self._build_lazy_tab_now(idx, session),
+        )
+
+    def _build_lazy_tab_now(self, index: int, run=None) -> None:
+        if self._lazy_building:
+            if run is not None:
+                run.finish(success=True, skipped=True)
+            return
+        if index < 0:
+            if run is not None:
+                run.finish(success=False, reason="invalid_index")
+            return
+        try:
+            current = self.tab_widget.widget(index)
+        except Exception:
+            if run is not None:
+                run.finish(success=False, reason="missing_widget")
+            return
+        if current not in self._lazy_tab_builders:
+            if run is not None:
+                run.finish(success=True, cache_state="memory_hit")
+            return
+
         self._lazy_building = True
         try:
             tab_name = self._lazy_tab_names.get(current) or self.tab_widget.tabText(index)
             builder = self._lazy_tab_builders.get(current)
             if builder is None:
+                if run is not None:
+                    run.finish(success=False, reason="missing_builder")
                 return
+
+            if run is not None:
+                run.mark("build_start")
 
             try:
                 content = builder()
@@ -229,8 +272,12 @@ class SettingsTabWidget(QWidget):
                 l.addWidget(QLabel(f"{tab_name}の読み込みに失敗しました。"))
                 l.addWidget(QLabel(str(e)))
                 l.addStretch(1)
+                if run is not None:
+                    run.mark("build_error", error=str(e))
 
             new_scroll = self._wrap_in_scroll(content)
+            if run is not None:
+                run.interactive(widget_class=type(content).__name__)
 
             # 置換（以降は遅延対象ではない）
             self.tab_widget.removeTab(index)
@@ -245,6 +292,9 @@ class SettingsTabWidget(QWidget):
                 del self._lazy_tab_names[current]
             except Exception:
                 pass
+            if run is not None:
+                run.complete(widget_class=type(content).__name__)
+                run.finish(success=True)
         finally:
             self._lazy_building = False
     

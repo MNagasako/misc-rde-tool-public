@@ -23,6 +23,7 @@ from classes.theme.theme_manager import get_color
 from classes.managers.app_config_manager import get_config_manager
 from classes.utils.button_styles import get_button_style
 from classes.utils.dataset_filter_fetcher import DatasetFilterFetcher
+from classes.utils.ui_responsiveness import schedule_deferred_ui_task, start_ui_responsiveness_run
 from config.common import get_dynamic_file_path
 
 # ロガー設定
@@ -197,6 +198,67 @@ class AISuggestionDialog(QDialog):
 
     _INITIAL_VERTICAL_SCREEN_MARGIN = 50
     _INITIAL_HORIZONTAL_SCREEN_MARGIN = 50
+
+    def _delete_child_widget(self, widget, layout=None) -> None:
+        if widget is None:
+            return
+        try:
+            if layout is not None:
+                layout.removeWidget(widget)
+        except Exception:
+            pass
+        try:
+            widget.hide()
+        except Exception:
+            pass
+        try:
+            widget.deleteLater()
+        except Exception:
+            pass
+
+    def _replace_tab_widget(self, index: int, widget: QWidget, title: str) -> None:
+        try:
+            current_index = self.tab_widget.currentIndex()
+        except Exception:
+            current_index = index
+        try:
+            self.tab_widget.blockSignals(True)
+        except Exception:
+            pass
+        try:
+            self.tab_widget.removeTab(index)
+            self.tab_widget.insertTab(index, widget, title)
+            if current_index == index:
+                self.tab_widget.setCurrentIndex(index)
+        finally:
+            try:
+                self.tab_widget.blockSignals(False)
+            except Exception:
+                pass
+
+    def _show_lazy_tab_error(self, tab: QWidget, title: str, error: Exception) -> None:
+        layout = tab.layout()
+        if layout is None:
+            layout = QVBoxLayout(tab)
+        while layout.count():
+            item = layout.takeAt(0)
+            child = item.widget()
+            if child is not None:
+                self._delete_child_widget(child)
+        error_label = QLabel(f"{title}の読み込みに失敗しました。\n{error}")
+        error_label.setWordWrap(True)
+        try:
+            error_label.setAlignment(Qt.AlignCenter)
+        except Exception:
+            pass
+        try:
+            error_label.setStyleSheet(
+                f"color: {get_color(ThemeKey.TEXT_ERROR)}; padding: 16px; border: 1px solid {get_color(ThemeKey.NOTIFICATION_ERROR_BORDER)};"
+            )
+        except Exception:
+            pass
+        layout.addWidget(error_label)
+        layout.addStretch(1)
     
     def __init__(self, parent=None, context_data=None, extension_name="dataset_description", auto_generate=True, mode="dataset_suggestion", prompt_assembly_override=None):
         super().__init__(parent)
@@ -358,9 +420,13 @@ class AISuggestionDialog(QDialog):
 
             def _register_lazy_tab(title: str, build_fn):
                 tab = QWidget()
+                tab_layout = QVBoxLayout(tab)
+                tab_layout.setContentsMargins(16, 16, 16, 16)
+                tab_layout.addWidget(QLabel(f"{title}を準備中..."))
+                tab_layout.addStretch(1)
                 self.tab_widget.addTab(tab, title)
                 idx = self.tab_widget.indexOf(tab)
-                self._lazy_tab_builders[idx] = (tab, build_fn)
+                self._lazy_tab_builders[idx] = (tab, title, build_fn)
 
             _register_lazy_tab("データセット", self.setup_dataset_tab)
             _register_lazy_tab("報告書", self.setup_report_tab)
@@ -378,11 +444,44 @@ class AISuggestionDialog(QDialog):
                 try:
                     if not hasattr(self, "_lazy_tab_builders"):
                         return
-                    entry = self._lazy_tab_builders.pop(index, None)
+                    entry = self._lazy_tab_builders.get(index)
                     if not entry:
                         return
-                    tab, build_fn = entry
-                    build_fn(tab)
+                    placeholder_tab, title, build_fn = entry
+                    run = start_ui_responsiveness_run(
+                        "ai_suggestion_dialog",
+                        title or self.tab_widget.tabText(index) or f"tab_{index}",
+                        "lazy_tab_build",
+                        tab_index=index,
+                        cache_state="miss",
+                    )
+                    run.mark("placeholder_visible")
+
+                    def _build() -> None:
+                        active_entry = self._lazy_tab_builders.get(index)
+                        if not active_entry:
+                            run.finish(success=True, cache_state="memory_hit")
+                            return
+                        placeholder_tab, tab_title, build_fn = active_entry
+                        built_tab = QWidget(self.tab_widget)
+                        try:
+                            run.mark("build_start")
+                            build_fn(built_tab)
+                            self._replace_tab_widget(index, built_tab, tab_title)
+                            self._lazy_tab_builders.pop(index, None)
+                            run.interactive(widget_class=type(built_tab).__name__)
+                            run.complete(widget_class=type(built_tab).__name__)
+                            run.finish(success=True)
+                        except Exception as build_error:
+                            try:
+                                built_tab.deleteLater()
+                            except Exception:
+                                pass
+                            self._show_lazy_tab_error(placeholder_tab, tab_title, build_error)
+                            logger.warning("遅延タブ構築に失敗しました: index=%s title=%s error=%s", index, tab_title, build_error, exc_info=True)
+                            run.finish(success=False, error=str(build_error))
+
+                    schedule_deferred_ui_task(self.tab_widget, f"ai-suggestion-lazy-tab-{index}", _build)
                 except Exception as e:
                     logger.warning("遅延タブ初期化に失敗しました: index=%s error=%s", index, e)
 
@@ -3385,8 +3484,7 @@ class AISuggestionDialog(QDialog):
                 item = self.dataset_buttons_layout.takeAt(0)
                 widget = item.widget()
                 if widget is not None:
-                    widget.setParent(None)
-                    widget.deleteLater()
+                    self._delete_child_widget(widget)
 
             self.dataset_buttons.clear()
 
@@ -4420,8 +4518,7 @@ class AISuggestionDialog(QDialog):
                 item = self.report_buttons_layout.takeAt(0)
                 widget = item.widget()
                 if widget is not None:
-                    widget.setParent(None)
-                    widget.deleteLater()
+                    self._delete_child_widget(widget)
 
             self.report_buttons.clear()
 
@@ -6808,8 +6905,7 @@ ARIMNO: {{ARIMNO}}
                 item = self.buttons_layout.takeAt(0)
                 widget = item.widget()
                 if widget is not None:
-                    widget.setParent(None)
-                    widget.deleteLater()
+                    self._delete_child_widget(widget)
                 # QSpacerItem など widget を持たない要素は takeAt の時点で除去済み
 
             # 旧ボタン参照を破棄
@@ -8505,7 +8601,10 @@ ARIMNO: {{ARIMNO}}
             filter_widget = self._dataset_filter_fetcher.build_filter_panel(parent=self)
 
             if self._dataset_filter_widget:
-                self._dataset_filter_widget.setParent(None)
+                if hasattr(self, 'dataset_select_layout'):
+                    self._delete_child_widget(self._dataset_filter_widget, self.dataset_select_layout)
+                else:
+                    self._delete_child_widget(self._dataset_filter_widget)
             if hasattr(self, 'dataset_select_layout'):
                 self.dataset_select_layout.insertWidget(1, filter_widget)
             self._dataset_filter_widget = filter_widget
