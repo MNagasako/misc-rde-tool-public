@@ -1,4 +1,9 @@
-2.5.47
+2.5.48
+
+2026-04-05 v2.5.48 - 配布物整合（latest.json/checksum/README/release notes）
+	- 配布物（インストーラ）を v2.5.48 に更新。
+	- latest.json / checksums.sha256 を新配布物に整合。
+	- README / CHANGELOG / RELEASE_NOTES の表記を v2.5.48 に更新。
 
 2026-04-04 v2.5.47 - 配布物整合（latest.json/checksum/README/release notes）
 	- 配布物（インストーラ）を v2.5.47 に更新。
