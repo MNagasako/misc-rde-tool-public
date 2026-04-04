@@ -11,10 +11,10 @@ import zipfile
 import uuid
 from typing import List, Dict, Optional, Tuple
 from pathlib import Path
-import pandas as pd
 from dataclasses import dataclass
 
 import logging
+from openpyxl import Workbook
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -403,23 +403,29 @@ class TempFolderManager:
         Returns:
             str: 作成されたExcelファイルのパス
         """
-        # DataFrameを作成（絶対パス列・一時ファイルパス列を除外、英語カラム名に変更）
-        data = []
-        for mapping in mappings:
-            data.append({
-                'original_path': mapping.relative_path,  # 元相対パス
-                'flattened_name': mapping.register_name, # 登録ファイル名
-                'file_type': mapping.file_type,          # ファイル種別
-                'file_size': mapping.size,               # ファイルサイズ
-                'size_mb': round(mapping.size / 1024 / 1024, 3) # サイズ(MB)
-            })
-        df = pd.DataFrame(data)
         # Excelファイルを作成 (固定ファイル名を使用)
         xlsx_filename = "path_mapping.xlsx"
         xlsx_path = os.path.join(temp_dir, xlsx_filename)
-        with pd.ExcelWriter(xlsx_path, engine='openpyxl') as writer:
-            # filemapシートのみ出力
-            df.to_excel(writer, sheet_name='filemap', index=False)
+
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = 'filemap'
+        worksheet.append([
+            'original_path',
+            'flattened_name',
+            'file_type',
+            'file_size',
+            'size_mb',
+        ])
+        for mapping in mappings:
+            worksheet.append([
+                mapping.relative_path,
+                mapping.register_name,
+                mapping.file_type,
+                mapping.size,
+                round(mapping.size / 1024 / 1024, 3),
+            ])
+        workbook.save(xlsx_path)
         logger.info("マッピングExcelファイルを作成: %s", xlsx_path)
         # ファイル作成確認
         if os.path.exists(xlsx_path):

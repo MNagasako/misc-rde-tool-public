@@ -11,9 +11,10 @@ import os
 import re
 from typing import Optional, Dict, Any, List, Callable
 
-import numpy as np
-import pandas as pd
 from dataclasses import dataclass
+from openpyxl import Workbook, load_workbook
+
+from classes.utils.excel_records import load_excel_records
 
 
 @dataclass
@@ -101,6 +102,7 @@ class ReportConverter:
     
     CHUNK_SIZE = 100  # 100件ごとに保存
     EQUIPMENT_COLUMN_NAME = '利用した主な設備 / Equipment Used in This Project'
+    OUTPUT_COLUMNS = ARIM_COLUMNS + ['key']
     
     def __init__(self, progress_callback: Optional[Callable[[str], None]] = None):
         """
@@ -140,56 +142,63 @@ class ReportConverter:
                 return [part for part in parts if part]
             return [candidate]
     
-    def _transform_chunk(self, chunk_df: pd.DataFrame) -> pd.DataFrame:
-        """データチャンクの変換処理
-        
-        Args:
-            chunk_df: 変換対象のDataFrame
-            
-        Returns:
-            変換後のDataFrame
-        """
-        chunk_transformed = pd.DataFrame(columns=self.ARIM_COLUMNS)
-        
-        # カラムマッピングに基づいて変換
-        for arim_col, output_col in zip(
-            self.COLUMN_MAPPING['ARIM-extracted2 Columns'], 
-            self.COLUMN_MAPPING['Output Columns']
-        ):
-            if output_col != 'np.nan':
-                if arim_col in self.COLUMNS_TO_SPLIT:
-                    # 日本語/英語の分割（日本語部分のみ取得）
-                    chunk_transformed[arim_col] = chunk_df[output_col].apply(
-                        lambda x: x.split('/')[0].strip() if isinstance(x, str) else x
-                    )
-                else:
-                    chunk_transformed[arim_col] = chunk_df[output_col]
-                
-                # ダッシュ変換
-                if arim_col in self.COLUMNS_TO_DASH_CONVERT:
-                    chunk_transformed[arim_col] = chunk_transformed[arim_col].apply(
-                        lambda x: '----' if x == '-' else x
-                    )
-            else:
-                # 設備列の処理
-                if '利用した主な設備' in arim_col:
-                    equipment_num = int(arim_col[-1])
-                    chunk_transformed[arim_col] = chunk_df[self.EQUIPMENT_COLUMN_NAME].apply(
-                        lambda x: x[equipment_num - 1] if isinstance(x, list) and len(x) >= equipment_num else None
-                    )
-        
-        # ARIMNO変換
-        chunk_transformed['ARIMNO'] = 'JPMXP12' + chunk_transformed['ARIMNO'].astype(str)
-        
-        # 年度、機関コード、課題番号の抽出
-        chunk_transformed['年度'] = '20' + chunk_transformed['ARIMNO'].str[7:9]
-        chunk_transformed['機関コード'] = chunk_transformed['ARIMNO'].str[9:11]
-        chunk_transformed['課題番号（下4桁）'] = chunk_transformed['ARIMNO'].str[-4:].astype(int)
-        
-        # key列を追加（Output Columnsの最後の列から）
-        chunk_transformed['key'] = chunk_df[self.COLUMN_MAPPING['Output Columns'][-1]]
-        
-        return chunk_transformed
+    def _transform_chunk(self, chunk_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """データチャンクの変換処理"""
+        transformed_records: List[Dict[str, Any]] = []
+
+        for record in chunk_records:
+            transformed = {column: None for column in self.OUTPUT_COLUMNS}
+
+            for arim_col, output_col in zip(
+                self.COLUMN_MAPPING['ARIM-extracted2 Columns'],
+                self.COLUMN_MAPPING['Output Columns'],
+            ):
+                if output_col != 'np.nan':
+                    value = record.get(output_col)
+                    if arim_col in self.COLUMNS_TO_SPLIT and isinstance(value, str):
+                        value = value.split('/')[0].strip()
+                    if arim_col in self.COLUMNS_TO_DASH_CONVERT and value == '-':
+                        value = '----'
+                    transformed[arim_col] = value
+                    continue
+
+                if '利用した主な設備' not in arim_col:
+                    continue
+                equipment_num = int(arim_col[-1])
+                equipment_list = record.get(self.EQUIPMENT_COLUMN_NAME, [])
+                transformed[arim_col] = (
+                    equipment_list[equipment_num - 1]
+                    if isinstance(equipment_list, list) and len(equipment_list) >= equipment_num
+                    else None
+                )
+
+            arimno = f"JPMXP12{transformed.get('ARIMNO', '')}"
+            transformed['ARIMNO'] = arimno
+            transformed['年度'] = f"20{arimno[7:9]}" if len(arimno) >= 9 else None
+            transformed['機関コード'] = arimno[9:11] if len(arimno) >= 11 else None
+            suffix = arimno[-4:] if len(arimno) >= 4 else ''
+            try:
+                transformed['課題番号（下4桁）'] = int(suffix)
+            except ValueError:
+                transformed['課題番号（下4桁）'] = suffix
+            transformed['key'] = record.get(self.COLUMN_MAPPING['Output Columns'][-1])
+            transformed_records.append(transformed)
+
+        return transformed_records
+
+    def _write_chunk(self, output_path: str, records: List[Dict[str, Any]], *, append: bool) -> None:
+        if append and os.path.exists(output_path):
+            workbook = load_workbook(output_path)
+            worksheet = workbook.active
+        else:
+            workbook = Workbook()
+            worksheet = workbook.active
+            worksheet.append(self.OUTPUT_COLUMNS)
+
+        for record in records:
+            worksheet.append([record.get(column) for column in self.OUTPUT_COLUMNS])
+
+        workbook.save(output_path)
     
     def convert_report_data(
         self, 
@@ -217,13 +226,14 @@ class ReportConverter:
             
             self._log(f"入力ファイル読み込み: {input_path}")
             
-            # データ読み込み（engine明示指定）
-            output_df = pd.read_excel(input_path, engine='openpyxl')
-            
+            _headers, output_records = load_excel_records(input_path)
+
             # 設備列の変換（文字列→リスト）
-            output_df[self.EQUIPMENT_COLUMN_NAME] = output_df[self.EQUIPMENT_COLUMN_NAME].apply(
-                lambda x: self.safely_evaluate_literal(x) if isinstance(x, str) else []
-            )
+            for record in output_records:
+                value = record.get(self.EQUIPMENT_COLUMN_NAME)
+                record[self.EQUIPMENT_COLUMN_NAME] = (
+                    self.safely_evaluate_literal(value) if isinstance(value, str) else []
+                )
             
             # 進捗管理用ファイル
             output_dir = os.path.dirname(output_path)
@@ -239,32 +249,18 @@ class ReportConverter:
                 self._log(f"レジューム: {start_idx}行目から再開")
             
             # チャンク処理
-            num_rows = len(output_df)
+            num_rows = len(output_records)
             self._log(f"変換開始: {num_rows}行 ({start_idx}行目から)")
             
             for chunk_start in range(start_idx, num_rows, self.CHUNK_SIZE):
                 chunk_end = min(chunk_start + self.CHUNK_SIZE, num_rows)
-                chunk_df = output_df.iloc[chunk_start:chunk_end]
+                chunk_records = output_records[chunk_start:chunk_end]
                 
                 # チャンク変換
-                chunk_transformed = self._transform_chunk(chunk_df)
+                chunk_transformed = self._transform_chunk(chunk_records)
                 
                 # 保存
-                if chunk_start == 0:
-                    chunk_transformed.to_excel(tmp_output_file, index=False)
-                else:
-                    with pd.ExcelWriter(
-                        tmp_output_file, 
-                        mode='a', 
-                        if_sheet_exists='overlay', 
-                        engine='openpyxl'
-                    ) as writer:
-                        chunk_transformed.to_excel(
-                            writer, 
-                            index=False, 
-                            header=False, 
-                            startrow=chunk_start
-                        )
+                self._write_chunk(tmp_output_file, chunk_transformed, append=(chunk_start != 0))
                 
                 # 進捗保存
                 with open(progress_file, 'w', encoding='utf-8') as f:

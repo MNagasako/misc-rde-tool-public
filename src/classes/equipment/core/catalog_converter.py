@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
-import pandas as pd
+from openpyxl import load_workbook
 
 from config.common import CONFIG_DIR
 from classes.equipment.util.output_paths import (
@@ -24,6 +24,10 @@ from classes.equipment.util.output_paths import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_cell(value: Any) -> str:
+    return '' if value is None else str(value)
 
 
 class CatalogConverter:
@@ -123,8 +127,17 @@ class CatalogConverter:
         result_data = {}
         
         try:
-            # Excelシート読み込み
-            df = pd.read_excel(excel_path, sheet_name=sheet, skiprows=1).fillna('')
+            workbook = load_workbook(excel_path, read_only=True, data_only=True)
+            worksheet = workbook[sheet]
+            rows = worksheet.iter_rows(values_only=True)
+            next(rows, None)  # 先頭メタ情報行をスキップ
+            header_row = next(rows, None)
+            if header_row is None:
+                logger.warning(f"ヘッダー行が見つかりません: {sheet}")
+                workbook.close()
+                return {}
+
+            headers = [_normalize_cell(value) for value in header_row]
             sheet_name_translated = self.sheet_name_translation.get(sheet, sheet)
             
             # シート名から方法カテゴリ番号を抽出（例: "8.透過電子顕微鏡解析" → 8）
@@ -137,8 +150,14 @@ class CatalogConverter:
             logger.info(f"シート処理開始: {sheet} (カテゴリ番号: {method_category_number})")
             
             # 各行を処理
-            for index, row in df.iterrows():
-                reg_no = str(row.iloc[1])
+            for row in rows:
+                values = list(row[:len(headers)])
+                if len(values) < len(headers):
+                    values.extend([None] * (len(headers) - len(values)))
+                if not any(_normalize_cell(value).strip() for value in values):
+                    continue
+
+                reg_no = _normalize_cell(values[1])
                 
                 # 有効な登録番号のみ処理
                 if not self.VALID_REG_NO_PATTERN.match(reg_no):
@@ -149,19 +168,19 @@ class CatalogConverter:
                 # 登録番号ごとのデータ初期化
                 if reg_no not in result_data:
                     result_data[reg_no] = {
-                        'type': row.iloc[2],
+                        'type': values[2],
                         'methods': {},
-                        'remarks': str(row.iloc[-1])
+                        'remarks': _normalize_cell(values[-1])
                     }
                 else:
                     # 備考欄の追記
-                    if row.iloc[-1]:
-                        result_data[reg_no]['remarks'] += '; ' + str(row.iloc[-1])
+                    if _normalize_cell(values[-1]).strip():
+                        result_data[reg_no]['remarks'] += '; ' + _normalize_cell(values[-1])
                 
                 # メソッドデータ抽出
                 method_data = {}
                 
-                for col_index, method in enumerate(df.columns[3:-2]):
+                for col_index, method in enumerate(headers[3:-2]):
                     # 翻訳キーを取得
                     method_translated_key = next(
                         (k for k, v in self.measurement_methods_translation.items()
@@ -182,13 +201,17 @@ class CatalogConverter:
                         
                         if method == "その他 特記事項":
                             # 特記事項は備考欄に追記
-                            result_data[reg_no]['remarks'] += '; ' + str(row.iloc[col_index + 3])
+                            extra_remark = _normalize_cell(values[col_index + 3])
+                            if extra_remark.strip():
+                                result_data[reg_no]['remarks'] += '; ' + extra_remark
                         else:
                             # シンボルを整数に変換して保存
-                            method_data[method_translated_key] = self.symbol_to_int(row.iloc[col_index + 3])
+                            method_data[method_translated_key] = self.symbol_to_int(values[col_index + 3])
                 
                 # メソッドデータを保存
                 result_data[reg_no]['methods'][sheet_name_translated] = method_data
+
+            workbook.close()
             
             logger.info(f"シート処理完了: {sheet} ({len(result_data)} 件)")
             
@@ -237,8 +260,9 @@ class CatalogConverter:
             
             # 全シートを処理
             final_json = {}
-            xls = pd.ExcelFile(excel_path)
-            sheet_names = xls.sheet_names
+            workbook = load_workbook(excel_path, read_only=True, data_only=True)
+            sheet_names = workbook.sheetnames
+            workbook.close()
             total_sheets = len(sheet_names)
             
             logger.info(f"シート数: {total_sheets}")

@@ -9,8 +9,6 @@ import re
 import time
 from typing import Any, Dict, List, Optional
 
-import pandas as pd
-
 from qt_compat.core import Qt, QDate, QUrl, QThread, Signal
 from qt_compat.widgets import (
     QWidget,
@@ -53,6 +51,7 @@ from classes.dataset.util.dataset_listing_export_filename import (
     build_dataset_listing_export_default_filename,
 )
 from classes.managers.log_manager import get_logger
+from classes.ui.utilities.table_export import write_table_export
 from classes.utils.button_styles import get_button_style
 
 from classes.theme.theme_keys import ThemeKey
@@ -5625,11 +5624,8 @@ class DatasetListingWidget(QWidget):
             return
 
         try:
-            df = self._build_dataframe_from_view()
-            if fmt == "csv":
-                df.to_csv(path, index=False, encoding="utf-8-sig")
-            else:
-                df.to_excel(path, index=False)
+            headers, rows = self._build_export_table_from_view()
+            write_table_export(path, fmt, headers, rows, sheet_name="dataset_listing")
             QMessageBox.information(self, "出力", f"出力しました: {path}")
         except Exception as e:
             QMessageBox.critical(self, "出力エラー", str(e))
@@ -5705,11 +5701,11 @@ class DatasetListingWidget(QWidget):
         except Exception:
             pass
 
-    def _build_dataframe_from_view(self) -> pd.DataFrame:
+    def _build_export_table_from_view(self) -> tuple[List[str], List[List[Any]]]:
         model = self._table.model()
         header = self._table.horizontalHeader()
         if model is None:
-            return pd.DataFrame()
+            return ([], [])
 
         # Determine visible columns in visual order.
         visible_cols: List[int] = []
@@ -5742,7 +5738,7 @@ class DatasetListingWidget(QWidget):
                 row_values.append(str(model.data(idx, Qt.DisplayRole) or ""))
             data_rows.append(row_values)
 
-        return pd.DataFrame(data_rows, columns=col_labels)
+        return (col_labels, data_rows)
 
     @staticmethod
     def _qdate_to_date(qdate: QDate) -> datetime.date:

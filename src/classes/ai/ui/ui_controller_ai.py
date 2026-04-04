@@ -6,6 +6,7 @@ import logging
 import os
 import json
 import datetime
+from classes.utils.excel_records import get_record_headers, load_excel_records
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -709,8 +710,7 @@ class UIControllerAI:
             self.parent.update_progress(20, 100, "実験データ一覧を取得中...")
             all_experiments = self._get_all_experiments_for_task(task_id)
             
-            # DataFrameが空かどうかを適切にチェック
-            if all_experiments is None or (hasattr(all_experiments, 'empty') and all_experiments.empty) or len(all_experiments) == 0:
+            if not all_experiments:
                 try:
                     if hasattr(self, 'ai_response_display') and self.ai_response_display:
                         self.ai_response_display.append(f"[WARNING] 課題 {task_id} に関連する実験データが見つかりません")
@@ -723,13 +723,7 @@ class UIControllerAI:
                 self.parent.hide_progress()
                 return
             
-            # DataFrameを辞書のリストに変換
-            if hasattr(all_experiments, 'to_dict'):
-                # pandasのDataFrameの場合
-                experiments_list = all_experiments.to_dict('records')
-            else:
-                # 既にリストの場合
-                experiments_list = all_experiments
+            experiments_list = all_experiments
             
             try:
                 if hasattr(self, 'ai_response_display') and self.ai_response_display:
@@ -2340,9 +2334,7 @@ ARIMNO: {experiment_data.get('ARIMNO', 'N/A')}
     def _load_arim_extension_data(self):
         """ARIM拡張情報（converted.xlsx）を読み込む"""
         try:
-            import pandas as pd
             from config.common import INPUT_DIR
-            import os
             
             # ARIM拡張ファイルのパス
             arim_file_path = os.path.join(INPUT_DIR, 'ai', 'arim', 'converted.xlsx')
@@ -2355,33 +2347,24 @@ ARIMNO: {experiment_data.get('ARIMNO', 'N/A')}
                     self.parent.ai_response_display.append(f"[DEBUG] ARIM拡張ファイルが見つかりません: {arim_file_path}")
                 return None
             
-            # Excelファイルを読み込み
-            df = pd.read_excel(arim_file_path)
+            headers, arim_data = load_excel_records(arim_file_path)
             
             if hasattr(self.parent, 'ai_response_display'):
-                self.parent.ai_response_display.append(f"[DEBUG] ARIM拡張データ読み込み成功: {len(df)} 行, {len(df.columns)} 列")
-                self.parent.ai_response_display.append(f"[DEBUG] ARIM拡張データ列名: {list(df.columns)}")
+                self.parent.ai_response_display.append(f"[DEBUG] ARIM拡張データ読み込み成功: {len(arim_data)} 行, {len(headers)} 列")
+                self.parent.ai_response_display.append(f"[DEBUG] ARIM拡張データ列名: {headers}")
                 
                 # サンプルデータの表示
-                if len(df) > 0:
-                    sample_record = df.iloc[0].to_dict()
+                if arim_data:
+                    sample_record = arim_data[0]
                     if '課題番号' in sample_record:
                         self.parent.ai_response_display.append(f"[DEBUG] サンプル課題番号: {repr(sample_record.get('課題番号'))}")
                     if 'ARIMNO' in sample_record:
                         self.parent.ai_response_display.append(f"[DEBUG] サンプルARIMNO: {repr(sample_record.get('ARIMNO'))}")
             
-            # データフレームを辞書のリストに変換
-            arim_data = df.to_dict('records')
-            
             if hasattr(self.parent, 'ai_response_display'):
                 self.parent.ai_response_display.append(f"[INFO] ARIM拡張情報を読み込みました: {len(arim_data)} 件")
             
             return arim_data
-            
-        except ImportError:
-            if hasattr(self.parent, 'ai_response_display'):
-                self.parent.ai_response_display.append("[WARNING] pandas がインストールされていません。ARIM拡張情報をスキップします")
-            return None
         except Exception as e:
             if hasattr(self.parent, 'ai_response_display'):
                 self.parent.ai_response_display.append(f"[WARNING] ARIM拡張情報の読み込みに失敗: {e}")

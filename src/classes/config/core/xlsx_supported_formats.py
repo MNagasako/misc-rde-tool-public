@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import math
 import re
 from typing import List, Dict, Optional
 
-import pandas as pd
+from openpyxl import load_workbook
 
 from .models import SupportedFileFormatEntry
 
@@ -21,13 +22,10 @@ def _is_nonempty_cell_value(v: object) -> bool:
     try:
         if v is None:
             return False
-        # pandas NaN
-        if isinstance(v, float) and pd.isna(v):
-            return False
-        if hasattr(pd, "isna") and pd.isna(v):
+        if isinstance(v, float) and math.isnan(v):
             return False
     except Exception:
-        # pd.isna が扱えない型は後続で判定
+        # 数値変換できない型は後続で判定
         pass
 
     if isinstance(v, str):
@@ -35,7 +33,7 @@ def _is_nonempty_cell_value(v: object) -> bool:
     return True
 
 
-def _extract_versioned_template_columns(df: pd.DataFrame) -> tuple[Dict[int, str], Dict[int, str]]:
+def _extract_versioned_template_columns(columns: List[str]) -> tuple[Dict[int, str], Dict[int, str]]:
     """見出しに【Vn版】を含むテンプレート列を収集する。
 
     Returns:
@@ -44,7 +42,7 @@ def _extract_versioned_template_columns(df: pd.DataFrame) -> tuple[Dict[int, str
     name_cols: Dict[int, str] = {}
     id_cols: Dict[int, str] = {}
 
-    for col in df.columns:
+    for col in columns:
         col_s = str(col)
         ver = _extract_version(col_s)
         if ver is None:
@@ -231,6 +229,60 @@ def _extract_version(s: str) -> Optional[int]:
     return None
 
 
+def _worksheet_to_rows(xlsx_path: str) -> Dict[str, List[List[object]]]:
+    workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
+    sheets: Dict[str, List[List[object]]] = {}
+    for worksheet in workbook.worksheets:
+        rows: List[List[object]] = []
+        for row in worksheet.iter_rows(values_only=True):
+            rows.append(list(row))
+        sheets[worksheet.title] = rows
+    return sheets
+
+
+def _resolve_column(columns: List[str], candidates: List[str]) -> Optional[str]:
+    for candidate in candidates:
+        if candidate in columns:
+            return candidate
+    norm = lambda s: re.sub(r"[（）()【】]", "", s)
+    normalized_candidates = [norm(c) for c in candidates]
+    for col in columns:
+        cnorm = norm(str(col))
+        for cand in normalized_candidates:
+            if cand and cand in cnorm:
+                return col
+    return None
+
+
+def _extract_sheet_records(rows: List[List[object]], col_map_candidates: Dict[str, List[str]]) -> tuple[List[str], List[Dict[str, object]]]:
+    if not rows:
+        return ([], [])
+
+    candidate_headers = set(sum(col_map_candidates.values(), []))
+    best_idx = 0
+    best_score = -1
+    probe_count = min(10, len(rows))
+    for idx in range(probe_count):
+        row_vals = [str(v).strip() for v in rows[idx] if v is not None]
+        score = sum(1 for value in row_vals if value in candidate_headers)
+        if score > best_score:
+            best_score = score
+            best_idx = idx
+
+    header_row = rows[best_idx]
+    header_len = len(header_row)
+    headers = [str(v).strip() if v is not None else "" for v in header_row]
+    records: List[Dict[str, object]] = []
+    for raw_row in rows[best_idx + 1:]:
+        row = list(raw_row[:header_len])
+        if len(row) < header_len:
+            row.extend([None] * (header_len - len(row)))
+        if not any(_is_nonempty_cell_value(value) for value in row):
+            continue
+        records.append({headers[idx]: row[idx] for idx in range(header_len) if headers[idx]})
+    return (headers, records)
+
+
 def parse_supported_formats(xlsx_path: str) -> List[SupportedFileFormatEntry]:
     """複数シートXLSXを解析し、対応ファイル形式の一覧を抽出する。
 
@@ -242,8 +294,6 @@ def parse_supported_formats(xlsx_path: str) -> List[SupportedFileFormatEntry]:
       - dataset_id: ["データセットID", "dataset_id"] (任意)
     """
 
-    # 全シート読み込み
-    xl = pd.ExcelFile(xlsx_path)
     entries: List[SupportedFileFormatEntry] = []
 
     col_map_candidates: Dict[str, List[str]] = {
@@ -260,65 +310,31 @@ def parse_supported_formats(xlsx_path: str) -> List[SupportedFileFormatEntry]:
         "dataset_id": ["データセットID", "dataset_id"],
     }
 
-    def resolve(df: pd.DataFrame, key: str) -> Optional[str]:
-        # 1) 完全一致
-        for candidate in col_map_candidates[key]:
-            if candidate in df.columns:
-                return candidate
-        # 2) 部分一致（日本語ゆれ・括弧除去）
-        norm = lambda s: re.sub(r"[（）()【】]", "", s)
-        candidates = [norm(c) for c in col_map_candidates[key]]
-        for col in df.columns:
-            cnorm = norm(str(col))
-            for cand in candidates:
-                if cand and cand in cnorm:
-                    return col
-        return None
+    for sheet_name, sheet_rows in _worksheet_to_rows(xlsx_path).items():
+        columns, records = _extract_sheet_records(sheet_rows, col_map_candidates)
+        if not columns or not records:
+            continue
 
-    def reheader_if_needed(df: pd.DataFrame) -> pd.DataFrame:
-        """ヘッダが1行目でない場合に、候補見出しの存在する行をヘッダとして再設定"""
-        cols = set(sum(col_map_candidates.values(), []))
-        # 行毎に一致スコアを計算
-        best_idx = None
-        best_score = 0
-        for idx in range(min(10, len(df))):  # 先頭〜10行まで探査
-            row_vals = [str(v).strip() for v in df.iloc[idx].tolist()]
-            score = sum(1 for v in row_vals if v in cols)
-            if score > best_score:
-                best_score = score
-                best_idx = idx
-        if best_idx is not None and best_score >= 2:
-            # この行をヘッダにして以降をデータにする
-            header = [str(v).strip() for v in df.iloc[best_idx].tolist()]
-            new_df = df.iloc[best_idx + 1:].copy()
-            # 列数差は短い方に合わせる
-            n = min(len(header), new_df.shape[1])
-            new_df = new_df.iloc[:, :n]
-            new_df.columns = header[:n]
-            return new_df
-        return df
-
-    for sheet_name in xl.sheet_names:
-        df = xl.parse(sheet_name)
-        df = reheader_if_needed(df)
         # 列解決
-        equipment_col = resolve(df, "equipment_id")
-        file_col = resolve(df, "file_format")
-        tmpl_col = resolve(df, "template_name")
-        ver_col = resolve(df, "template_version_label")
-        dataset_col = resolve(df, "dataset_id")
+        equipment_col = _resolve_column(columns, col_map_candidates["equipment_id"])
+        file_col = _resolve_column(columns, col_map_candidates["file_format"])
+        tmpl_col = _resolve_column(columns, col_map_candidates["template_name"])
+        ver_col = _resolve_column(columns, col_map_candidates["template_version_label"])
+        dataset_col = _resolve_column(columns, col_map_candidates["dataset_id"])
 
         # 【Vn版】列が複数あるケースに対応（行ごとに最新版を選ぶ）
-        versioned_name_cols, versioned_id_cols = _extract_versioned_template_columns(df)
+        versioned_name_cols, versioned_id_cols = _extract_versioned_template_columns(columns)
         has_versioned_templates = bool(versioned_name_cols or versioned_id_cols)
 
         # 必須列がなければスキップ（テンプレ列は通常列 or 版付き列のいずれかで良い）
         if not (equipment_col and file_col and (tmpl_col or has_versioned_templates)):
             continue
 
-        for _, row in df.iterrows():
-            equipment_id = str(row[equipment_col]).strip() if pd.notna(row.get(equipment_col)) else ""
-            file_fmt_raw = str(row[file_col]).strip() if pd.notna(row.get(file_col)) else ""
+        for row in records:
+            equipment_value = row.get(equipment_col) if equipment_col else None
+            file_value = row.get(file_col) if file_col else None
+            equipment_id = str(equipment_value).strip() if _is_nonempty_cell_value(equipment_value) else ""
+            file_fmt_raw = str(file_value).strip() if _is_nonempty_cell_value(file_value) else ""
             template_name = ""
             template_version: Optional[int] = None
 
@@ -339,10 +355,13 @@ def parse_supported_formats(xlsx_path: str) -> List[SupportedFileFormatEntry]:
 
             # 版付き列で取れない場合は従来列を使用
             if not template_name and tmpl_col:
-                template_name = str(row[tmpl_col]).strip() if pd.notna(row.get(tmpl_col)) else ""
+                template_value = row.get(tmpl_col)
+                template_name = str(template_value).strip() if _is_nonempty_cell_value(template_value) else ""
 
-            version_label = str(row[ver_col]).strip() if (ver_col and pd.notna(row.get(ver_col))) else ""
-            dataset_id = str(row[dataset_col]).strip() if (dataset_col and pd.notna(row.get(dataset_col))) else None
+            version_value = row.get(ver_col) if ver_col else None
+            version_label = str(version_value).strip() if _is_nonempty_cell_value(version_value) else ""
+            dataset_value = row.get(dataset_col) if dataset_col else None
+            dataset_id = str(dataset_value).strip() if _is_nonempty_cell_value(dataset_value) else None
 
             if not equipment_id or not file_fmt_raw or not template_name:
                 continue

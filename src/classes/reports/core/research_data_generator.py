@@ -5,13 +5,14 @@
 変換済みExcelファイルと設備データJSONから研究データJSONを生成。
 """
 
-import pandas as pd
 import json
 import os
 import re
 import math
 from typing import Optional, Dict, Any, List, Callable
 from dataclasses import dataclass
+
+from classes.utils.excel_records import load_excel_records
 
 
 @dataclass
@@ -48,6 +49,16 @@ class ResearchDataGenerator:
         """ログ出力"""
         if self.progress_callback:
             self.progress_callback(message)
+
+    @staticmethod
+    def _is_null_like(value: Any) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, float):
+            return math.isnan(value) or math.isinf(value)
+        if isinstance(value, str):
+            return value.strip().lower() in {'', 'nan', 'none'}
+        return False
     
     @staticmethod
     def process_facility_code(code: Any) -> Any:
@@ -80,7 +91,7 @@ class ResearchDataGenerator:
         Returns:
             装置ID（見つからない場合はNone）
         """
-        if pd.isnull(device_str):
+        if ResearchDataGenerator._is_null_like(device_str):
             return None
         match = re.search(r'[A-Za-z]+-\d+', str(device_str))
         return match.group() if match else None
@@ -95,7 +106,7 @@ class ResearchDataGenerator:
         Returns:
             装置名（見つからない場合はNone）
         """
-        if pd.isnull(device_str):
+        if ResearchDataGenerator._is_null_like(device_str):
             return None
         match = re.search(r'：(.+)', str(device_str))
         return match.group(1).strip() if match else None
@@ -134,7 +145,7 @@ class ResearchDataGenerator:
             self._log(f"使用する設備データ: {merged_data_path}")
             
             # データ読み込み
-            df = pd.read_excel(excel_path)
+            _headers, records = load_excel_records(excel_path)
             with open(merged_data_path, 'r', encoding='utf-8') as file:
                 facility_codes = json.load(file)
             
@@ -149,8 +160,8 @@ class ResearchDataGenerator:
             processed_count = 0
             
             # データ処理
-            total_rows = len(df)
-            for index, row in df.iterrows():
+            total_rows = len(records)
+            for index, row in enumerate(records):
                 # 進捗表示
                 if index % 100 == 0:
                     progress_pct = (index / total_rows) * 100
@@ -161,16 +172,10 @@ class ResearchDataGenerator:
                 key_value = row['key']
                 
                 # NaN/infをNoneに変換
-                if pd.isnull(code_value) or (
-                    isinstance(code_value, float) and 
-                    (math.isnan(code_value) or math.isinf(code_value))
-                ):
+                if self._is_null_like(code_value):
                     code_value = None
                 
-                if pd.isnull(key_value) or (
-                    isinstance(key_value, float) and 
-                    (math.isnan(key_value) or math.isinf(key_value))
-                ):
+                if self._is_null_like(key_value):
                     key_value = None
                 
                 # 研究情報オブジェクト作成

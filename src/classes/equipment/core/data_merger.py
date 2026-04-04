@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 
-import pandas as pd
+from classes.utils.excel_records import load_excel_records
 
 from classes.equipment.util.output_paths import (
     get_equipment_root_dir,
@@ -90,23 +90,29 @@ class DataMerger:
                 progress_callback(1, 3, "データ読み込み中...")
             
             # データ読み込み
-            xlsx_df = pd.read_excel(str(xlsx_path))
+            _headers, xlsx_records = load_excel_records(str(xlsx_path))
             
             with json_path.open("r", encoding="utf-8") as json_file:
                 json_data = json.load(json_file)
             
-            logger.info(f"Excel行数: {len(xlsx_df)}, JSON件数: {len(json_data)}")
-            
-            # 空行除去とデータ型変換
-            xlsx_df = xlsx_df.dropna(how='all')
-            xlsx_df['設備ID'] = xlsx_df['設備ID'].astype(str)
-            
-            if 'code' in xlsx_df.columns:
-                xlsx_df['code'] = xlsx_df['code'].astype(str)
-            
-            # Additional_Info_JSON列の初期化
-            if 'Additional_Info_JSON' not in xlsx_df.columns:
-                xlsx_df['Additional_Info_JSON'] = [{} for _ in range(len(xlsx_df))]
+            logger.info(f"Excel行数: {len(xlsx_records)}, JSON件数: {len(json_data)}")
+
+            # データ型変換と初期化
+            for record in xlsx_records:
+                record['設備ID'] = str(record.get('設備ID', ''))
+                if 'code' in record and record.get('code') is not None:
+                    record['code'] = str(record.get('code', ''))
+
+                additional_info = record.get('Additional_Info_JSON')
+                if additional_info in (None, ''):
+                    record['Additional_Info_JSON'] = {}
+                elif isinstance(additional_info, str):
+                    try:
+                        record['Additional_Info_JSON'] = json.loads(additional_info)
+                    except Exception:
+                        record['Additional_Info_JSON'] = {}
+                elif not isinstance(additional_info, dict):
+                    record['Additional_Info_JSON'] = {}
             
             # プログレス通知
             if progress_callback:
@@ -114,29 +120,17 @@ class DataMerger:
             
             # メソッドデータのマージ
             methods_matched = 0
-            
-            def merge_methods(row):
-                nonlocal methods_matched
-                if row['設備ID'] in json_data:
-                    if isinstance(row['Additional_Info_JSON'], str):
-                        try:
-                            row['Additional_Info_JSON'] = json.loads(row['Additional_Info_JSON'])
-                        except:
-                            row['Additional_Info_JSON'] = {}
-                    
-                    if not isinstance(row['Additional_Info_JSON'], dict):
-                        row['Additional_Info_JSON'] = {}
-                    
-                    row['Additional_Info_JSON']['methods'] = json_data[row['設備ID']]['methods']
-                    methods_matched += 1
-                return row
-            
-            merged_df = xlsx_df.apply(merge_methods, axis=1)
+            for record in xlsx_records:
+                equipment_id = record.get('設備ID', '')
+                if equipment_id not in json_data:
+                    continue
+                record['Additional_Info_JSON']['methods'] = json_data[equipment_id]['methods']
+                methods_matched += 1
             
             logger.info(f"マージ完了: {methods_matched} 件のメソッドデータを統合")
             
             # JSON形式で保存
-            final_merged_json = merged_df.to_json(orient='records', force_ascii=False)
+            final_merged_json = json.dumps(xlsx_records, ensure_ascii=False)
             
             with output_path.open('w', encoding='utf-8') as f:
                 f.write(final_merged_json)
@@ -149,7 +143,7 @@ class DataMerger:
                 'excel_source': excel_filename,
                 'json_source': json_filename,
                 'processed_at': datetime.now().isoformat(),
-                'merged_count': len(merged_df),
+                'merged_count': len(xlsx_records),
                 'methods_matched': methods_matched
             }
             
@@ -182,7 +176,7 @@ class DataMerger:
                 'output_path': output_path,
                 'entry_path': entry_path,
                 'backup_path': backup_path,
-                'merged_count': len(merged_df),
+                'merged_count': len(xlsx_records),
                 'methods_matched': methods_matched,
                 'excel_source': excel_filename,
                 'json_source': json_filename

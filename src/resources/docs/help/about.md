@@ -47,7 +47,7 @@
 - **言語**: Python 3.13.5
 - **UI**: PySide6 / QtWebEngine
 - **HTTP**: `net.http_helpers` (requests + truststore)
-- **データ処理**: pandas / openpyxl / numpy
+- **データ処理**: openpyxl / numpy / csv
 - **ビルド**: PyInstaller (onedir / withtest プロファイル)
 
 ## プロジェクト体制

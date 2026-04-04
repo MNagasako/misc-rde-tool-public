@@ -4,7 +4,6 @@ UIControllerから分離したAIテスト機能専用モジュール（リファ
 """
 import os
 import json
-import pandas as pd
 import logging
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, 
@@ -17,6 +16,12 @@ from qt_compat.gui import QFont
 
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
+from classes.utils.excel_records import (
+    EmptyExcelError,
+    ensure_alias_column,
+    has_meaningful_value,
+    load_excel_records,
+)
 
 # ロガー設定
 logger = logging.getLogger(__name__)
@@ -1865,7 +1870,6 @@ class AITestWidget:
     def _load_experiment_data_for_task_list(self):
         """課題番号リスト用の実験データを読み込み（キャッシュ対応版）"""
         try:
-            import pandas as pd
             import os
             from config.common import get_dynamic_file_path
             
@@ -1913,10 +1917,10 @@ class AITestWidget:
             
             # Excelファイルの読み込み
             try:
-                self._debug_print(f"[DEBUG] pandas読み込み開始: {exp_file_path}")
-                df = pd.read_excel(exp_file_path)
-                self._debug_print(f"[DEBUG] pandas読み込み成功: {df.shape}")
-            except pd.errors.EmptyDataError:
+                self._debug_print(f"[DEBUG] Excel読み込み開始: {exp_file_path}")
+                headers, experiments = load_excel_records(exp_file_path)
+                self._debug_print(f"[DEBUG] Excel読み込み成功: {len(experiments)} records")
+            except EmptyExcelError:
                 error_msg = f"[ERROR] {data_source_name}ファイルにデータがありません: {exp_file_path}"
                 print(error_msg)
                 return None
@@ -1926,8 +1930,8 @@ class AITestWidget:
                 return None
             
             # データ内容チェック
-            if df.empty:
-                error_msg = f"[ERROR] {data_source_name}ファイルは空のデータフレームです"
+            if not experiments:
+                error_msg = f"[ERROR] {data_source_name}ファイルに有効なデータがありません"
                 if hasattr(self, 'ai_response_display') and self.ai_response_display:
                     self.ai_response_display.append(error_msg)
                 else:
@@ -1937,9 +1941,9 @@ class AITestWidget:
             # 課題番号列の存在確認（データソースによって異なる）
             if use_arim_data:
                 # ARIM実験データの場合は'ARIM ID'列を課題番号として使用
-                if "ARIM ID" not in df.columns:
+                if "ARIM ID" not in headers:
                     error_msg = "[ERROR] ARIM実験データに'ARIM ID'列が見つかりません"
-                    info_msg = f"利用可能な列: {list(df.columns)}"
+                    info_msg = f"利用可能な列: {headers}"
                     if hasattr(self, 'ai_response_display') and self.ai_response_display:
                         self.ai_response_display.append(error_msg)
                         self.ai_response_display.append(info_msg)
@@ -1948,12 +1952,12 @@ class AITestWidget:
                         print(info_msg)
                     return None
                 # ARIM IDを課題番号列としてマッピング
-                df['課題番号'] = df['ARIM ID']
+                ensure_alias_column(experiments, "ARIM ID", "課題番号")
             else:
                 # 標準実験データの場合は'課題番号'列を使用
-                if "課題番号" not in df.columns:
+                if "課題番号" not in headers:
                     error_msg = "[ERROR] 標準実験データに'課題番号'列が見つかりません"
-                    info_msg = f"利用可能な列: {list(df.columns)}"
+                    info_msg = f"利用可能な列: {headers}"
                     if hasattr(self, 'ai_response_display') and self.ai_response_display:
                         self.ai_response_display.append(error_msg)
                         self.ai_response_display.append(info_msg)
@@ -1972,84 +1976,6 @@ class AITestWidget:
             
             return experiments
             
-        except ImportError:
-            error_msg = "[ERROR] pandasライブラリがインストールされていません"
-            if hasattr(self, 'ai_response_display') and self.ai_response_display:
-                self.ai_response_display.append(error_msg)
-            else:
-                print(error_msg)
-            return None
-        except Exception as e:
-            error_msg = f"[ERROR] 実験データ読み込み処理中にエラーが発生: {e}"
-            if hasattr(self, 'ai_response_display') and self.ai_response_display:
-                self.ai_response_display.append(error_msg)
-            else:
-                print(error_msg)
-            return None
-            try:
-                logger.debug("pandas読み込み開始: %s", exp_file_path)
-                df = pd.read_excel(exp_file_path)
-                logger.debug("pandas読み込み成功: %s", df.shape)
-            except pd.errors.EmptyDataError:
-                error_msg = f"[ERROR] {data_source_name}ファイルにデータがありません: {exp_file_path}"
-                print(error_msg)
-                return None
-            except Exception as read_error:
-                error_msg = f"[ERROR] {data_source_name}ファイルの読み込みに失敗: {read_error}"
-                print(error_msg)
-                import traceback
-                traceback.print_exc()
-                return None
-            
-            # データ内容チェック
-            if df.empty:
-                error_msg = f"[ERROR] {data_source_name}ファイルは空のデータフレームです"
-                if hasattr(self, 'ai_response_display') and self.ai_response_display:
-                    self.ai_response_display.append(error_msg)
-                else:
-                    print(error_msg)
-                return None
-            
-            # 課題番号列の存在確認（データソースによって異なる）
-            if use_arim_data:
-                # ARIM実験データの場合は'ARIM ID'列を課題番号として使用
-                if "ARIM ID" not in df.columns:
-                    error_msg = "[ERROR] ARIM実験データに'ARIM ID'列が見つかりません"
-                    info_msg = f"利用可能な列: {list(df.columns)}"
-                    if hasattr(self, 'ai_response_display') and self.ai_response_display:
-                        self.ai_response_display.append(error_msg)
-                        self.ai_response_display.append(info_msg)
-                    else:
-                        print(error_msg)
-                        print(info_msg)
-                    return None
-                # ARIM IDを課題番号列としてマッピング
-                df['課題番号'] = df['ARIM ID']
-            else:
-                # 標準実験データの場合は'課題番号'列を使用
-                if "課題番号" not in df.columns:
-                    error_msg = "[ERROR] 標準実験データに'課題番号'列が見つかりません"
-                    info_msg = f"利用可能な列: {list(df.columns)}"
-                    if hasattr(self, 'ai_response_display') and self.ai_response_display:
-                        self.ai_response_display.append(error_msg)
-                        self.ai_response_display.append(info_msg)
-                    else:
-                        print(error_msg)
-                        print(info_msg)
-                    return None
-            
-            # DataFrameをJSON形式に変換
-            experiments = df.to_dict('records')
-            
-            return experiments
-            
-        except ImportError:
-            error_msg = "[ERROR] pandasライブラリがインストールされていません"
-            if hasattr(self, 'ai_response_display') and self.ai_response_display:
-                self.ai_response_display.append(error_msg)
-            else:
-                print(error_msg)
-            return None
         except Exception as e:
             error_msg = f"[ERROR] 実験データ読み込み処理中にエラーが発生: {e}"
             if hasattr(self, 'ai_response_display') and self.ai_response_display:
@@ -2436,18 +2362,16 @@ class AITestWidget:
             logger.error("_clear_task_info_display failed: %s", e)
 
     def _is_nan_value(self, value):
-        """pandas NaN値かどうかを判定"""
+        """欠損値かどうかを判定"""
         try:
-            import pandas as pd
-            return pd.isna(value)
-        except:
+            return not has_meaningful_value(value)
+        except Exception:
             return value is None or str(value).lower() in ['nan', 'none', '']
     
     def _update_experiment_list(self, task_id):
         """実験データリストを更新"""
         try:
             logger.debug("_update_experiment_list called for task: %s", task_id)
-            import pandas as pd
             
             if not hasattr(self, 'experiment_combo') or not self.experiment_combo:
                 logger.debug("experiment_combo is not available")
@@ -2459,21 +2383,21 @@ class AITestWidget:
             # 選択された課題に対応する実験データを取得
             exp_data = self._load_experiment_data_for_task(task_id)
             
-            if exp_data is not None and not exp_data.empty:
+            if exp_data:
                 # 実験データが存在する場合
                 valid_experiments_count = 0
-                for idx, row in exp_data.iterrows():
+                for row in exp_data:
                     arim_id = row.get("ARIM ID", "")
                     title = row.get("タイトル", "未設定")
                     experiment_date = row.get("実験日", "未設定")
                     equipment = row.get("実験装置", "未設定")
                     
                     # 空値や NaN の処理
-                    if pd.isna(title) or str(title).strip() == "":
+                    if not has_meaningful_value(title):
                         title = "未設定"
-                    if pd.isna(experiment_date) or str(experiment_date).strip() == "":
+                    if not has_meaningful_value(experiment_date):
                         experiment_date = "未設定"
-                    if pd.isna(equipment) or str(equipment).strip() == "":
+                    if not has_meaningful_value(equipment):
                         equipment = "未設定"
                     
                     # 実験データの有効性チェック
@@ -2481,7 +2405,7 @@ class AITestWidget:
                     content_fields = ["概要", "実験データ詳細", "利用装置", "装置仕様", "手法", "測定条件"]
                     for field in content_fields:
                         value = row.get(field)
-                        if value and not pd.isna(value) and str(value).strip() != "" and str(value).strip().lower() != "nan":
+                        if has_meaningful_value(value):
                             has_valid_content = True
                             break
                     
@@ -2499,9 +2423,9 @@ class AITestWidget:
                     }
                     
                     # その他の列も追加
-                    for col in exp_data.columns:
+                    for col, value in row.items():
                         if col not in experiment_data:
-                            experiment_data[col] = row.get(col, "")
+                            experiment_data[col] = value
                     
                     self.experiment_combo.addItem(display_text, experiment_data)
                     if has_valid_content:
@@ -2565,16 +2489,8 @@ class AITestWidget:
             all_exp_data = self._load_experiment_data_for_task_list()
             if all_exp_data is None:
                 return None
-            
-            import pandas as pd
-            
-            # DataFrameに変換
-            df = pd.DataFrame(all_exp_data)
-            
-            # 指定されたtask_idでフィルタリング
-            filtered_data = df[df['課題番号'] == task_id]
-            
-            return filtered_data
+
+            return [record for record in all_exp_data if record.get('課題番号') == task_id]
             
         except Exception as e:
             error_msg = f"[ERROR] 課題別実験データ読み込み中にエラーが発生: {e}"
@@ -3020,8 +2936,7 @@ class AITestWidget:
                                 static_data[file_name] = data
                                 self._cached_static_data[file_name] = data  # キャッシュに保存
                         elif file_name.endswith('.xlsx'):
-                            df = pd.read_excel(file_path)
-                            data = df.to_dict('records')
+                            _, data = load_excel_records(file_path)
                             static_data[file_name] = data
                             self._cached_static_data[file_name] = data  # キャッシュに保存
                         else:

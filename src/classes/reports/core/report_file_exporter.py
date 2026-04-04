@@ -11,7 +11,6 @@ import logging
 import shutil
 from typing import List, Dict, Optional
 from datetime import datetime
-import pandas as pd
 from openpyxl import Workbook, load_workbook
 
 from config.common import OUTPUT_DIR
@@ -20,6 +19,13 @@ from .report_cache_manager import ReportCacheManager
 
 
 logger = logging.getLogger(__name__)
+
+
+def _build_excel_rows(reports: List[Dict]) -> List[List[object]]:
+    rows = []
+    for report in reports:
+        rows.append([report.get(column, "") for column in EXCEL_COLUMNS])
+    return rows
 
 
 class ReportFileExporter:
@@ -69,27 +75,26 @@ class ReportFileExporter:
             >>> print(f"保存完了: {path}")
         """
         output_path = os.path.join(self.output_dir, filename)
-        
-        # DataFrameを作成
-        df = pd.DataFrame(reports, columns=EXCEL_COLUMNS)
+        rows = _build_excel_rows(reports)
         
         try:
             if append and os.path.exists(output_path):
                 # 既存ファイルに追記
                 logger.info(f"既存ファイルに追記: {output_path}")
-                with pd.ExcelWriter(output_path, mode='a', if_sheet_exists='overlay', engine='openpyxl') as writer:
-                    # 既存シートの最後の行を取得
-                    workbook = load_workbook(output_path)
-                    sheet = workbook.active
-                    startrow = sheet.max_row
-                    
-                    # ヘッダーなしで追記
-                    df.to_excel(writer, index=False, header=False, startrow=startrow)
+                workbook = load_workbook(output_path)
+                sheet = workbook.active
+                for row in rows:
+                    sheet.append(row)
+                workbook.save(output_path)
             else:
                 # 新規ファイル作成
                 logger.info(f"新規ファイル作成: {output_path}")
-                with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
-                    df.to_excel(writer, index=False, header=True)
+                workbook = Workbook()
+                sheet = workbook.active
+                sheet.append(EXCEL_COLUMNS)
+                for row in rows:
+                    sheet.append(row)
+                workbook.save(output_path)
             
             logger.info(f"Excel保存成功: {output_path} ({len(reports)}件)")
             
@@ -98,9 +103,13 @@ class ReportFileExporter:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             alt_filename = f"{os.path.splitext(filename)[0]}_{timestamp}.xlsx"
             alt_path = os.path.join(self.output_dir, alt_filename)
-            
-            with pd.ExcelWriter(alt_path, engine='xlsxwriter') as writer:
-                df.to_excel(writer, index=False, header=True)
+
+            workbook = Workbook()
+            sheet = workbook.active
+            sheet.append(EXCEL_COLUMNS)
+            for row in rows:
+                sheet.append(row)
+            workbook.save(alt_path)
             
             logger.warning(f"ファイルロック検出、別名で保存: {alt_path}")
             output_path = alt_path

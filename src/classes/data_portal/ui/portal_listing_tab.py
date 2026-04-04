@@ -50,6 +50,7 @@ from classes.data_portal.util.managed_csv_paths import build_managed_csv_path, f
 from classes.data_portal.util.managed_suffix_grouping import add_grouped_suffix_columns
 from classes.ui.utilities.listing_support import prepare_display_value
 from classes.ui.utilities.listing_table import ListingFilterProxyModel
+from classes.ui.utilities.table_export import write_record_export
 
 from classes.theme import ThemeKey, get_color
 from classes.theme import get_qcolor
@@ -1045,13 +1046,7 @@ class PortalListingTab(QWidget):
             return
 
         try:
-            import pandas as pd
-
-            df = pd.DataFrame(rows)
-            if kind == "csv":
-                df.to_csv(path, index=False, encoding="utf-8-sig")
-            else:
-                df.to_excel(path, index=False)
+            write_record_export(path, kind, rows, headers=headers, sheet_name="portal_listing")
             QMessageBox.information(self, "出力", f"出力しました: {path}")
         except Exception as exc:
             QMessageBox.warning(self, "出力失敗", f"出力に失敗しました: {exc}")

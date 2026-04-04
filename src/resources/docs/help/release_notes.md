@@ -6,12 +6,22 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.46）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| Basic Infoバックグラウンド取得 | `background_fetch_manager.py` を導入し、個別データ取得をバックグラウンド実行しながらタブ操作を継続可能に改善。 |
-| Basic Info進捗表示 | `basic_unified_status_widget.py` に個別データ取得のプログレスバー・段階ラベル・中止ボタンを追加。 |
-| dataset一覧再取得 | `dataset.json` 一覧は常に再取得し、差分判定の基準を最新化。個別 dataEntry / invoice は内部フィルタで必要分のみ取得。 |
-| 失敗記録 | invoice 取得の失敗理由を `_summary.json` に保持し、既知の失敗エントリ再試行を抑制。 |
-| テスト/品質 | 背景取得マネージャー、dataEntry / invoice の事前フィルタ、件数進捗表示のユニットテストを追加。 |
+| リリース/品質 | リビジョンアップ（v2.5.47）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| テーブル出力共通化 | `table_export.py` を基準に一覧・ポータル・試料一覧の CSV/XLSX 出力を pandas 非依存へ統一。 |
+| Excel読込統一 | `excel_records.py` を共通化し、AI・報告書・設備・設定系の XLSX 読み込みを openpyxl ベースへ整理。 |
+| 依存関係整理 | `requirements.txt` から pandas / xlsxwriter を削除し、実装前提を `csv` と `openpyxl` に統一。 |
+| テスト/品質 | export guardrail、Excel migration、supported formats、lazy import の unit/widget テストを追加更新。 |
+
+## v2.5.47 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.47）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| テーブル出力 | `table_export.py` を追加し、`listing_table.py`、`portal_listing_tab.py`、`portal_bulk_tab.py`、`sample_dedup_listing_widget.py` などの CSV/XLSX 出力を共通化。raw 値・hidden 列・cell widget テキストを保持したまま保存。 |
+| Excel読込基盤 | `excel_records.py` を共通基盤にし、`ui_ai_test.py`、`ai_extension_helper.py`、`xlsx_supported_formats.py`、`research_data_generator.py`、`catalog_converter.py`、`report_converter.py` などの XLSX 読み込みを openpyxl ベースの list-of-dicts へ移行。 |
+| 出力/変換 | `report_file_exporter.py` と `temp_folder_manager.py` の XLSX 出力を openpyxl に統一し、pandas 依存なしで append・マッピングExcel生成を維持。 |
+| 依存関係 | `requirements.txt` から pandas / xlsxwriter を削除。現行の表形式 CSV/XLSX 入出力は標準 `csv` と `openpyxl` を前提に運用。 |
+| テスト/品質 | `test_pandas_export_guardrails.py`、`test_report_excel_migration.py`、`test_equipment_excel_migration.py`、`test_ai_excel_record_migration.py`、`test_xlsx_supported_formats.py`、`test_table_export.py`、`test_ui_controller_lazy_imports.py` などを追加・更新。 |
 
 ## v2.5.46 の主な更新点
 

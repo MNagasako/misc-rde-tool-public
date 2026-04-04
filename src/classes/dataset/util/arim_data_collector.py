@@ -7,6 +7,7 @@ import os
 import json
 from typing import Dict, List, Optional, Any, Tuple
 from config.common import get_dynamic_file_path
+from classes.utils.excel_records import ensure_alias_column, get_record_headers, load_excel_records
 
 import logging
 
@@ -92,11 +93,8 @@ class ARIMDataCollector:
         """
         try:
             # AIテスト機能と同じファイルパスとロジック
-            import pandas as pd
-            from config.common import INPUT_DIR
-            
             # ARIM拡張ファイルのパス（AIテスト機能と同じ）
-            arim_file_path = os.path.join(INPUT_DIR, 'ai', 'arim', 'converted.xlsx')
+            arim_file_path = get_dynamic_file_path("input/ai/arim/converted.xlsx")
             
             if not os.path.exists(arim_file_path):
                 logger.debug("ARIM拡張ファイルが見つかりません: %s", arim_file_path)
@@ -104,8 +102,8 @@ class ARIMDataCollector:
             
             # Excelファイルを読み込み（AIテスト機能と同じ）
             if self.arim_extension_data is None:
-                df = pd.read_excel(arim_file_path)
-                self.arim_extension_data = df.to_dict('records')
+                _headers, records = load_excel_records(arim_file_path)
+                self.arim_extension_data = records
                 logger.info("ARIM拡張データ読み込み: %s 件", len(self.arim_extension_data))
             
             # 課題番号でマッチングを検索（AIテスト機能と同じロジック）
@@ -120,9 +118,6 @@ class ARIMDataCollector:
                 logger.debug("完全一致検索のみ実行 - 他の検索方式は無効化済み")
                 return None
                 
-        except ImportError:
-            logger.warning("pandas がインストールされていません。ARIM拡張情報をスキップします")
-            return None
         except Exception as e:
             logger.warning("ARIM拡張情報の読み込みに失敗: %s", e)
             return None
@@ -160,8 +155,6 @@ class ARIMDataCollector:
         ARIM実験データを取得（arim_exp.xlsx から複数実験データ対応）
         """
         try:
-            import pandas as pd
-            
             # ARIM実験データファイルを読み込み
             arim_exp_file_path = get_dynamic_file_path("input/ai/arim_exp.xlsx")
             if not os.path.exists(arim_exp_file_path):
@@ -169,24 +162,30 @@ class ARIMDataCollector:
                 return None
             
             # Excelファイルを読み込み
-            df = pd.read_excel(arim_exp_file_path)
-            logger.info("ARIM実験データ読み込み: %s 件", len(df))
+            headers, records = load_excel_records(arim_exp_file_path)
+            logger.info("ARIM実験データ読み込み: %s 件", len(records))
             
             # 'ARIM ID'列で課題番号を検索
-            if 'ARIM ID' not in df.columns:
+            if 'ARIM ID' not in headers:
                 logger.warning("ARIM実験データに'ARIM ID'列が見つかりません")
-                logger.debug("利用可能な列: %s", list(df.columns))
+                logger.debug("利用可能な列: %s", headers)
                 return None
+
+            ensure_alias_column(records, 'ARIM ID', '課題番号')
             
             # 課題番号に一致する実験データを抽出
-            matching_experiments = df[df['ARIM ID'] == grant_number]
+            matching_experiments = [
+                dict(record)
+                for record in records
+                if str(record.get('ARIM ID', '')).strip() == str(grant_number).strip()
+            ]
             
-            if matching_experiments.empty:
+            if not matching_experiments:
                 logger.info("課題番号 %s に対応するARIM実験データが見つかりません", grant_number)
                 return None
             
             # 複数実験データを辞書リストに変換
-            experiments_list = matching_experiments.to_dict('records')
+            experiments_list = matching_experiments
             logger.info("課題番号 %s の実験データ: %s 件", grant_number, len(experiments_list))
             
             # 各実験データに課題番号を追加（統一性のため）

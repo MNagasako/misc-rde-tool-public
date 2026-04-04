@@ -45,6 +45,8 @@ from PySide6.QtCore import (
     QPoint,
     QRect,
 )
+
+from classes.ui.utilities.table_export import write_record_export
 from PySide6.QtGui import QBrush, QCursor, QFont, QFontMetrics, QPen
 from PySide6.QtWidgets import QTableView, QStyledItemDelegate, QToolTip, QStyle, QStyleOptionButton, QStyleOptionViewItem
 
@@ -3729,13 +3731,8 @@ class SampleDedupListingWidget(QWidget):
             return
 
         try:
-            import pandas as pd
-
-            df = pd.DataFrame(data)
-            if kind == "csv":
-                df.to_csv(path, index=False, encoding="utf-8-sig")
-            else:
-                df.to_excel(path, index=False)
+            headers = [col.label for col in visible_cols]
+            write_record_export(path, kind, data, headers=headers, sheet_name="sample_listing")
             QMessageBox.information(self, "出力", f"出力しました: {path}")
         except Exception as e:
             QMessageBox.warning(self, "出力失敗", f"出力に失敗しました: {e}")

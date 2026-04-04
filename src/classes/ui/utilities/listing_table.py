@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 from classes.ui.utilities.listing_support import ListingColumn, prepare_display_value
+from classes.ui.utilities.table_export import write_record_export
 
 from qt_compat import QtCore, QtGui
 from qt_compat.core import Qt
@@ -285,13 +286,7 @@ class ListingTabBase(QWidget):
             return
 
         try:
-            import pandas as pd
-
-            df = pd.DataFrame(rows)
-            if kind == "csv":
-                df.to_csv(path, index=False, encoding="utf-8-sig")
-            else:
-                df.to_excel(path, index=False)
+            write_record_export(path, kind, rows, headers=headers, sheet_name="listing")
             QMessageBox.information(self, "出力", f"出力しました: {path}")
         except Exception as exc:
             QMessageBox.warning(self, "出力失敗", f"出力に失敗しました: {exc}")

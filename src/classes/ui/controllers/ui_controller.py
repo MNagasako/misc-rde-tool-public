@@ -16,6 +16,7 @@ from classes.basic.util.summary_file_utils import list_summary_workbooks
 from classes.theme import get_color, ThemeKey
 from classes.utils.button_styles import get_grouped_menu_button_style, get_menu_button_style
 from classes.utils.dataset_launch_manager import DatasetLaunchManager
+from classes.utils.excel_records import has_meaningful_value, is_missing_value
 from classes.utils.window_sizing import (
     clear_main_window_size_constraints,
     is_window_maximized,
@@ -113,99 +114,81 @@ class UIController(UIControllerCore):
 
                 callback()
             except (RuntimeError, AttributeError):
-                # QObject deleted / callback no longer valid
                 pass
             finally:
                 try:
                     self._rde_single_shot_timers.pop(store_key, None)
                 except Exception:
                     pass
+                try:
+                    timer.deleteLater()
+                except Exception:
+                    pass
 
-        try:
-            timer.timeout.connect(_on_timeout)
-            timer.start(int(delay_ms))
-        except Exception:
-            try:
-                self._rde_single_shot_timers.pop(store_key, None)
-            except Exception:
-                pass
-            return
-    
+        timer.timeout.connect(_on_timeout)
+        timer.start(delay_ms)
+
     def show_text_area_expanded(self, text_widget, title):
         """
         テキストエリアの内容を拡大表示（UIControllerFormsに委譲）
         Phase 2 Step 3.2: UI表示層への委譲
         """
-        # TODO: 特殊処理（AI問い合わせ結果）が含まれるため、段階的移行
-        # 問い合わせ結果の場合はAIコントローラーに委譲
         if title == "問い合わせ結果" and hasattr(self, 'last_response_info') and self.last_response_info:
             return self.ai_controller.show_text_area_with_ai_response_info(text_widget, title)
-        
-        # その他の場合はforms_controllerに委譲
+
         if hasattr(self, 'forms_controller') and self.forms_controller:
             return self.forms_controller.show_text_area_expanded(text_widget, title)
-        else:
-            # フォールバック（旧実装） - TODO: 最終的に削除予定
-            try:
-                # テキスト内容を取得
-                content = ""
-                if hasattr(text_widget, 'toPlainText'):
-                    content = text_widget.toPlainText()
-                    # QTextBrowserの場合、HTMLコンテンツも確認
-                    if hasattr(text_widget, 'toHtml') and not content.strip():
-                        html_content = text_widget.toHtml()
-                        if html_content.strip():
-                            content = html_content
-                elif hasattr(text_widget, 'toHtml'):
-                    content = text_widget.toHtml()
-                else:
-                    content = str(text_widget)
-                
-                # コンテンツが空の場合のメッセージ
-                if not content.strip():
-                    content = "（内容が空です）"
-                
-                # 編集可能かどうかを判定
-                editable = not text_widget.isReadOnly() if hasattr(text_widget, 'isReadOnly') else False
-                
-                # ダイアログを表示（元のウィジェットへの参照を渡す）
-                dialog = TextAreaExpandDialog(self.parent, title, content, editable, text_widget)
-                dialog.show()
-            
-            except Exception as e:
-                logger.error("拡大表示エラー: %s", e)
-            # エラー時もダイアログを表示
+
+        try:
+            content = ""
+            if hasattr(text_widget, 'toPlainText'):
+                content = text_widget.toPlainText()
+                if hasattr(text_widget, 'toHtml') and not content.strip():
+                    html_content = text_widget.toHtml()
+                    if html_content.strip():
+                        content = html_content
+            elif hasattr(text_widget, 'toHtml'):
+                content = text_widget.toHtml()
+            else:
+                content = str(text_widget)
+
+            if not content.strip():
+                content = "（内容が空です）"
+
+            editable = not text_widget.isReadOnly() if hasattr(text_widget, 'isReadOnly') else False
+            dialog = TextAreaExpandDialog(self.parent, title, content, editable, text_widget)
+            dialog.show()
+
+        except Exception as e:
+            logger.error("拡大表示エラー: %s", e)
             dialog = TextAreaExpandDialog(self.parent, title, f"エラーが発生しました: {e}", False)
             dialog.show()
-    
+
     def adjust_window_height_to_contents(self):
         """
         メインウィンドウの高さをコンテンツに合わせて自動調整
-        画面サイズの95%を上限とし、収まらない場合はスクロールバー対応
+        画面サイズの90%を上限とし、収まらない場合はスクロールバー対応
         """
         parent = self.parent
         mode = getattr(self, 'current_mode', None)
-        
+
         if not hasattr(parent, 'sizeHint'):
             return
-            
-        from qt_compat.widgets import QApplication
-        
-        # 画面サイズを取得
+
+        from qt_compat.widgets import QApplication, QScrollArea
+
         screen = QApplication.primaryScreen()
         if not screen:
             return
-            
+
         screen_geometry = screen.geometry()
-        max_screen_height = int(screen_geometry.height() * 0.90)  # 90%制限
+        max_screen_height = int(screen_geometry.height() * 0.90)
         max_screen_width = int(screen_geometry.width() * 0.90)
 
-        # コンテンツに必要なサイズを計算
         hint = parent.sizeHint()
-        
-        # モード別の最小サイズ設定
+
         if mode == "data_register":
-            min_height = 600  # データ登録は大きめに
+            min_height = 600
             min_width = 1000
         elif mode == "subgroup_create":
             min_height = 400
@@ -219,29 +202,29 @@ class UIController(UIControllerCore):
         else:
             min_height = 500
             min_width = 900
-        
-        # 新しいサイズを計算（95%制限内で）
+
         new_height = max(min_height, min(hint.height(), max_screen_height))
         new_width = max(min_width, min(hint.width(), max_screen_width))
-        
-        # サイズ制約をクリアして動的リサイズを可能にする
+
         clear_main_window_size_constraints(parent)
-        
-        # ウィンドウをリサイズ
         resize_main_window(parent, new_width, new_height)
-        
-        logger.debug("ウィンドウ高さ自動調整: %sx%s (画面比率: %.1f%%)", new_width, new_height, new_height/screen_geometry.height()*100)
-        
-        # スクロールエリア内のウィジェットが画面に収まるようにする
+
+        logger.debug(
+            "ウィンドウ高さ自動調整: %sx%s (画面比率: %.1f%%)",
+            new_width,
+            new_height,
+            new_height / screen_geometry.height() * 100,
+        )
+
         if hasattr(parent, 'centralWidget'):
             central_widget = parent.centralWidget()
             if central_widget and hasattr(central_widget, 'findChildren'):
-                from qt_compat.widgets import QScrollArea
                 scroll_areas = central_widget.findChildren(QScrollArea)
                 for scroll_area in scroll_areas:
                     if scroll_area.widget():
                         scroll_area.widget().adjustSize()
                         scroll_area.updateGeometry()
+
     def update_message_labels_position(self, mode):
         """
         autologin_msg_label/webview_msg_labelの位置をメニューごとに動的に再配置
@@ -413,6 +396,7 @@ class UIController(UIControllerCore):
     def _get_offline_runtime_state(self):
         try:
             from classes.core.offline_mode import get_offline_runtime_state
+
             return get_offline_runtime_state()
         except Exception:
             class _FallbackState:
@@ -437,6 +421,7 @@ class UIController(UIControllerCore):
         添付ファイル選択ボタン押下時の処理。添付ファイルパスを保存し、登録実行ボタンの有効/無効を制御。
         """
         from qt_compat.widgets import QFileDialog
+
         files, _ = QFileDialog.getOpenFileNames(None, "添付ファイルを選択", "", "すべてのファイル (*)")
         if files:
             self.selected_attachment_files = files
@@ -448,23 +433,19 @@ class UIController(UIControllerCore):
                 self.attachment_file_select_button.setText("添付ファイル選択(未選択)")
         self.update_register_exec_button_state()
 
-    def on_sample_selection_changed(self, idx):
-        """
-        試料選択コンボボックスの変更時処理
-        Args:
-            idx: 選択されたインデックス
-        """
+
+    def on_sample_selection_changed(self, index):
+        """既存試料の選択変更時に入力欄を同期する"""
         try:
-            if not hasattr(self, 'sample_select_combo'):
+            if not hasattr(self, 'sample_select_combo') or not self.sample_select_combo:
                 return
 
-            sample_data = self.sample_select_combo.itemData(idx)
-            
-            if sample_data is None:
-                # "新規入力"が選択された場合は入力欄をクリアし、sampleIdもクリア
+            sample_data = self.sample_select_combo.itemData(index) if index >= 0 else None
+
+            if not sample_data:
                 self.selected_sample_id = None
-                # 入力欄を編集可能にする
                 self.set_sample_inputs_enabled(True)
+
                 if hasattr(self, 'sample_names_input'):
                     self.sample_names_input.clear()
                 if hasattr(self, 'sample_description_input'):
@@ -474,31 +455,28 @@ class UIController(UIControllerCore):
                         self.sample_description_input.setPlainText("")
                 if hasattr(self, 'sample_composition_input'):
                     self.sample_composition_input.clear()
-            else:
-                # 既存試料が選択された場合はsampleIdを保存し、入力欄に値を設定
-                self.selected_sample_id = sample_data.get('id')
-                attributes = sample_data.get('attributes', {})
-                
-                # 入力欄を編集不可にする
-                self.set_sample_inputs_enabled(False)
-                
-                if hasattr(self, 'sample_names_input'):
-                    # names配列の最初の要素を使用
-                    names = attributes.get('names', [])
-                    name = names[0] if names else ''
-                    self.sample_names_input.setText(name)
-                    
-                if hasattr(self, 'sample_description_input'):
-                    description = attributes.get('description', '')
-                    if hasattr(self.sample_description_input, 'setText'):
-                        self.sample_description_input.setText(description)
-                    else:
-                        self.sample_description_input.setPlainText(description)
-                    
-                if hasattr(self, 'sample_composition_input'):
-                    composition = attributes.get('composition', '')
-                    self.sample_composition_input.setText(composition)
-                    
+                return
+
+            self.selected_sample_id = sample_data.get('id')
+            attributes = sample_data.get('attributes', {})
+            self.set_sample_inputs_enabled(False)
+
+            if hasattr(self, 'sample_names_input'):
+                names = attributes.get('names', [])
+                name = names[0] if names else ''
+                self.sample_names_input.setText(name)
+
+            if hasattr(self, 'sample_description_input'):
+                description = attributes.get('description', '')
+                if hasattr(self.sample_description_input, 'setText'):
+                    self.sample_description_input.setText(description)
+                else:
+                    self.sample_description_input.setPlainText(description)
+
+            if hasattr(self, 'sample_composition_input'):
+                composition = attributes.get('composition', '')
+                self.sample_composition_input.setText(composition)
+
         except Exception as e:
             if hasattr(self.parent, 'display_manager'):
                 self.parent.display_manager.set_message(f"試料選択変更処理エラー: {e}")
@@ -3203,58 +3181,20 @@ class UIController(UIControllerCore):
     def _load_experiment_data(self):
         """実験データを読み込み（選択されたデータソースに応じて）"""
         try:
-            import pandas as pd
-            import os
-            
-            # データソース選択を確認
             use_arim_data = (hasattr(self, 'arim_exp_radio') and 
                            self.arim_exp_radio.isChecked() and 
                            self.arim_exp_radio.isEnabled())
-            
-            if use_arim_data:
-                exp_file_path = os.path.join(INPUT_DIR, "ai", "arim_exp.xlsx")
-                data_source_name = "ARIM実験データ"
-            else:
-                exp_file_path = os.path.join(INPUT_DIR, "ai", "exp.xlsx")
-                data_source_name = "標準実験データ"
-            
-            logger.debug("%sを読み込み中: %s", data_source_name, exp_file_path)
-            
-            if not os.path.exists(exp_file_path):
-                self.ai_response_display.append(f"[ERROR] {data_source_name}ファイルが見つかりません: {exp_file_path}")
+
+            data_source_name = "ARIM実験データ" if use_arim_data else "標準実験データ"
+            experiments = self.ai_data_manager.load_experiment_data_file(use_arim_data)
+            if not experiments:
+                self.ai_response_display.append(f"[ERROR] {data_source_name}ファイルに有効なデータがありません")
                 return None
-            
-            # Excelファイルを読み込み
-            df = pd.read_excel(exp_file_path)
-            
-            if df.empty:
-                self.ai_response_display.append(f"[ERROR] {data_source_name}ファイルは空のデータフレームです")
-                return None
-            
-            # 課題番号列の存在確認とマッピング（データソースによって異なる）
-            if use_arim_data:
-                # ARIM実験データの場合は'ARIM ID'列を課題番号として使用
-                if "ARIM ID" not in df.columns:
-                    self.ai_response_display.append(f"[ERROR] ARIM実験データに'ARIM ID'列が見つかりません")
-                    self.ai_response_display.append(f"利用可能な列: {list(df.columns)}")
-                    return None
-                # ARIM IDを課題番号列としてマッピング
-                df['課題番号'] = df['ARIM ID']
-                logger.debug("ARIM ID列を課題番号列にマッピングしました")
-            else:
-                # 標準実験データの場合は'課題番号'列を確認
-                if "課題番号" not in df.columns:
-                    self.ai_response_display.append(f"[ERROR] 標準実験データに'課題番号'列が見つかりません")
-                    self.ai_response_display.append(f"利用可能な列: {list(df.columns)}")
-                    return None
-            
-            # DataFrameをJSON形式に変換
-            experiments = df.to_dict('records')
-            
+
             self.ai_response_display.append(f"[INFO] {data_source_name}を読み込み完了: {len(experiments)} 件")
             logger.debug("一括分析用データ読み込み完了: %s 件", len(experiments))
             return experiments
-            
+
         except Exception as e:
             self.ai_response_display.append(f"[ERROR] 実験データの読み込みに失敗: {e}")
             return None
@@ -3502,13 +3442,8 @@ class UIController(UIControllerCore):
             
             # AIDataManagerを使用して特定課題の実験データを取得
             experiments = self.ai_data_manager.get_experiments_for_task(task_id, use_arim_data)
-            
-            # DataFrameとして返す（既存コードとの互換性のため）
-            if experiments:
-                import pandas as pd
-                return pd.DataFrame(experiments)
-            else:
-                return None
+
+            return experiments or None
                 
         except Exception as e:
             error_msg = f"[ERROR] 課題別実験データ読み込み中にエラーが発生: {e}"
@@ -3549,10 +3484,8 @@ class UIController(UIControllerCore):
                 logger.debug("Value is None, returning 0")
                 return 0
             
-            # pandas NaN チェック
-            import pandas as pd
-            if pd.isna(value):
-                logger.debug("Value is pd.isna, returning 0")
+            if is_missing_value(value):
+                logger.debug("Value is missing, returning 0")
                 return 0
             
             # 文字列に変換
@@ -3574,17 +3507,7 @@ class UIController(UIControllerCore):
             return self.ai_data_manager.is_valid_data_value(value)
         
         # フォールバック処理（AIDataManagerが利用できない場合）
-        import pandas as pd
-        if value is None or pd.isna(value):
-            return False
-        if isinstance(value, str):
-            str_value = value.strip()
-            return str_value != "" and str_value.lower() != "nan"
-        try:
-            str_value = str(value).strip()
-            return str_value != "" and str_value.lower() != "nan"
-        except:
-            return False
+        return has_meaningful_value(value)
 
     def _get_all_experiments_for_task(self, task_id):
         """特定の課題IDに関連するすべての実験データを取得（AI分析一括処理用）"""
@@ -3752,8 +3675,6 @@ class UIController(UIControllerCore):
     def _update_task_info_display(self, task_id):
         """課題情報表示を更新"""
         try:
-            import pandas as pd
-
             exp_data = self._load_experiment_data_for_task_list()
             logger.debug("exp_data loaded: %s records", len(exp_data) if exp_data else 0)
             
@@ -3774,49 +3695,43 @@ class UIController(UIControllerCore):
                     if use_arim_data:
                         # ARIM実験データの場合
                         title_val = sample_exp.get("タイトル")
-                        if title_val:
+                        if self._is_valid_data_value(title_val):
                             info_lines.append(f"📝 タイトル: {title_val}")
                         
                         summary_val = sample_exp.get("概要")
-                        if summary_val:
-                            if summary_val and not pd.isna(summary_val):
-                                summary = str(summary_val).strip()
-                                if summary:
-                                    if len(summary) > 80:
-                                        summary = summary[:80] + "..."
-                                    info_lines.append(f"🎯 概要: {summary}")
+                        if self._is_valid_data_value(summary_val):
+                            summary = str(summary_val).strip()
+                            if len(summary) > 80:
+                                summary = summary[:80] + "..."
+                            info_lines.append(f"🎯 概要: {summary}")
                         
                         field_val = sample_exp.get("分野")
-                        if field_val:
+                        if self._is_valid_data_value(field_val):
                             info_lines.append(f"🔬 分野: {field_val}")
                         
                         device_val = sample_exp.get("利用装置")
-                        if device_val and not pd.isna(device_val):
+                        if self._is_valid_data_value(device_val):
                             device = str(device_val).strip()
-                            if device:
-                                if len(device) > 50:
-                                    device = device[:50] + "..."
-                                info_lines.append(f"🔧 利用装置: {device}")
+                            if len(device) > 50:
+                                device = device[:50] + "..."
+                            info_lines.append(f"🔧 利用装置: {device}")
                     else:
                         # 標準実験データの場合
                         task_name_val = sample_exp.get("課題名")
-                        if task_name_val:
+                        if self._is_valid_data_value(task_name_val):
                             info_lines.append(f"📝 課題名: {task_name_val}")
                         
                         purpose_val = sample_exp.get("目的")
-                        if purpose_val:
-                            if purpose_val and not pd.isna(purpose_val):
-                                purpose = str(purpose_val).strip()
-                                if purpose:
-                                    if len(purpose) > 80:
-                                        purpose = purpose[:80] + "..."
-                                    info_lines.append(f"🎯 目的: {purpose}")
+                        if self._is_valid_data_value(purpose_val):
+                            purpose = str(purpose_val).strip()
+                            if len(purpose) > 80:
+                                purpose = purpose[:80] + "..."
+                            info_lines.append(f"🎯 目的: {purpose}")
                         
                         facility_val = sample_exp.get("施設・設備")
-                        if facility_val and not pd.isna(facility_val):
+                        if self._is_valid_data_value(facility_val):
                             facility = str(facility_val).strip()
-                            if facility:
-                                info_lines.append(f"� 施設・設備: {facility}")
+                            info_lines.append(f"🏢 施設・設備: {facility}")
                     
                     # 課題情報の表示を更新
                     info_text = "\n".join(info_lines)
@@ -3843,8 +3758,6 @@ class UIController(UIControllerCore):
     def _update_experiment_list(self, task_id):
         """実験データリストを更新"""
         try:
-            import pandas as pd
-            
             if not hasattr(self, 'experiment_combo') or not self.experiment_combo:
                 logger.debug("experiment_combo is not available")
                 return
@@ -3855,21 +3768,21 @@ class UIController(UIControllerCore):
             # 選択された課題に対応する実験データを取得
             exp_data = self._load_experiment_data_for_task(task_id)
             
-            if exp_data is not None and not exp_data.empty:
+            if exp_data:
                 # 実験データが存在する場合
                 valid_experiments_count = 0
-                for idx, row in exp_data.iterrows():
+                for row in exp_data:
                     arim_id = row.get("ARIM ID", "")
                     title = row.get("タイトル", "未設定")
                     experiment_date = row.get("実験日", "未設定")
                     equipment = row.get("実験装置", "未設定")
                     
                     # 空値や NaN の処理
-                    if pd.isna(title) or str(title).strip() == "":
+                    if not self._is_valid_data_value(title):
                         title = "未設定"
-                    if pd.isna(experiment_date) or str(experiment_date).strip() == "":
+                    if not self._is_valid_data_value(experiment_date):
                         experiment_date = "未設定"
-                    if pd.isna(equipment) or str(equipment).strip() == "":
+                    if not self._is_valid_data_value(equipment):
                         equipment = "未設定"
                     
                     # 実験データの有効性チェック
@@ -3877,7 +3790,7 @@ class UIController(UIControllerCore):
                     content_fields = ["概要", "実験データ詳細", "利用装置", "装置仕様", "手法", "測定条件"]
                     for field in content_fields:
                         value = row.get(field)
-                        if value and not pd.isna(value) and str(value).strip() != "" and str(value).strip().lower() != "nan":
+                        if self._is_valid_data_value(value):
                             has_valid_content = True
                             break
                     
@@ -3895,9 +3808,9 @@ class UIController(UIControllerCore):
                     }
                     
                     # その他の列も追加
-                    for col in exp_data.columns:
+                    for col, value in row.items():
                         if col not in experiment_data:
-                            experiment_data[col] = row.get(col, "")
+                            experiment_data[col] = value
                     
                     self.experiment_combo.addItem(display_text, experiment_data)
                     if has_valid_content:
@@ -4535,7 +4448,7 @@ class UIController(UIControllerCore):
                     "",
                     "以下を確認してください:",
                     "• INPUT_DIR/ai/arim/converted.xlsx ファイルが存在するか",
-                    "• pandas がインストールされているか", 
+                    "• 必要な Excel 読み込み依存が利用可能か",
                     "• ファイルの読み込み権限があるか",
                     "• ARIMNO列または課題番号列が含まれているか",
                 ])

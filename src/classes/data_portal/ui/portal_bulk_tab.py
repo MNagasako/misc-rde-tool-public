@@ -44,6 +44,7 @@ from qt_compat.widgets import (
 
 from classes.managers.log_manager import get_logger
 from classes.theme import ThemeKey, get_color, get_qcolor
+from classes.ui.utilities.table_export import write_record_export
 from classes.utils.button_styles import get_button_style
 from config.common import get_dynamic_file_path
 
@@ -2400,13 +2401,7 @@ class DataPortalBulkTab(QWidget):
             return
 
         try:
-            import pandas as pd
-
-            df = pd.DataFrame(rows)
-            if kind == "csv":
-                df.to_csv(path, index=False, encoding="utf-8-sig")
-            else:
-                df.to_excel(path, index=False)
+            write_record_export(path, kind, rows, headers=headers, sheet_name="portal_bulk")
             QMessageBox.information(self, "出力", f"出力しました: {path}")
         except Exception as exc:
             QMessageBox.warning(self, "出力失敗", f"出力に失敗しました: {exc}")

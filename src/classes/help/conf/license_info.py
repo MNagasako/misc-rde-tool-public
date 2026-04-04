@@ -51,10 +51,6 @@ THIRD_PARTY_LICENSES = """
 - ライセンス: Apache License 2.0
 - 詳細: https://requests.readthedocs.io/
 
-### pandas
-- ライセンス: BSD 3-Clause License
-- 詳細: https://pandas.pydata.org/
-
 ### BeautifulSoup4
 - ライセンス: MIT License
 - 詳細: https://www.crummy.com/software/BeautifulSoup/

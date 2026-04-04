@@ -12,6 +12,7 @@ from functools import lru_cache
 from typing import Dict, Iterable, List, Optional, Tuple
 from config.common import get_dynamic_file_path
 from classes.ai.util.prompt_assembly import build_prompt
+from openpyxl import load_workbook
 
 import logging
 
@@ -95,19 +96,7 @@ def _read_excel_headers(file_path: str) -> List[str]:
     """Read header row (column names) from an Excel file."""
     if not file_path or not os.path.exists(file_path):
         return []
-    # Prefer pandas if available (fast for headers), else fallback to openpyxl.
     try:
-        import pandas as pd  # type: ignore
-
-        df = pd.read_excel(file_path, nrows=0)
-        cols = [c for c in df.columns if c is not None]
-        return [str(c) for c in cols]
-    except Exception:
-        pass
-
-    try:
-        from openpyxl import load_workbook  # type: ignore
-
         wb = load_workbook(file_path, read_only=True, data_only=True)
         ws = wb.active
         row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True), None)
@@ -123,10 +112,24 @@ def _read_excel_headers(file_path: str) -> List[str]:
 def _load_converted_xlsx_records_cached(file_path: str, mtime: float) -> List[Dict]:
     """Load converted.xlsx into list-of-dicts. Cached by path+mtime."""
     try:
-        import pandas as pd  # type: ignore
+        workbook = load_workbook(file_path, read_only=True, data_only=True)
+        worksheet = workbook.active
+        rows_iter = worksheet.iter_rows(values_only=True)
+        headers_row = next(rows_iter, None)
+        if not headers_row:
+            return []
 
-        df = pd.read_excel(file_path)
-        return df.to_dict('records')
+        headers = [str(value) for value in headers_row if value is not None]
+        records: List[Dict] = []
+        header_count = len(headers)
+        for row in rows_iter:
+            values = list(row[:header_count])
+            if len(values) < header_count:
+                values.extend([None] * (header_count - len(values)))
+            if not any(value is not None and str(value).strip() != "" for value in values):
+                continue
+            records.append({headers[idx]: values[idx] for idx in range(header_count)})
+        return records
     except Exception as e:
         logger.debug("converted.xlsx 読み込みに失敗: %s", e)
         return []

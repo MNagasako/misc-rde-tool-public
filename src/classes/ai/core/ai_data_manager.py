@@ -3,8 +3,8 @@ AI機能用データ管理クラス - ARIM RDE Tool
 UIControllerから分離したAI関連データ管理専用モジュール
 """
 import os
-import pandas as pd
 from config.common import INPUT_DIR
+from classes.utils.excel_records import ensure_alias_column, get_record_headers, has_meaningful_value, load_excel_records
 
 
 class AIDataManager:
@@ -48,10 +48,9 @@ class AIDataManager:
         if value is None:
             self._debug_log("Value is None, returning False")
             return False
-        
-        # pandas NaN チェック
-        if pd.isna(value):
-            self._debug_log("Value is pd.isna, returning False")
+
+        if not has_meaningful_value(value):
+            self._debug_log("Value is missing or empty, returning False")
             return False
         
         # 文字列の場合の詳細チェック
@@ -87,26 +86,43 @@ class AIDataManager:
         Args:
             use_arim_data: ARIMデータを使用するかどうか
         """
-        df = self.load_experiment_data_file(use_arim_data)
-        if df is None:
+        records = self.load_experiment_data_file(use_arim_data)
+        if not records:
             self._debug_log("データフレームの読み込みに失敗")
             return
+        headers = get_record_headers(records)
         
         data_type = "ARIMデータ" if use_arim_data else "通常データ"
         self._debug_log(f"=== {data_type} 列構造デバッグ ===")
-        self._debug_log(f"データシェイプ: {df.shape}")
-        self._debug_log(f"列数: {len(df.columns)}")
+        self._debug_log(f"データシェイプ: ({len(records)}, {len(headers)})")
+        self._debug_log(f"列数: {len(headers)}")
         
-        for i, col in enumerate(df.columns, 1):
-            sample_values = df[col].dropna().head(3).tolist()
+        for i, col in enumerate(headers, 1):
+            sample_values = []
+            for record in records:
+                value = record.get(col)
+                if has_meaningful_value(value):
+                    sample_values.append(value)
+                if len(sample_values) >= 3:
+                    break
             self._debug_log(f"{i:2d}. '{col}' - サンプル: {sample_values}")
         
         # 課題ID列の検出テスト
-        detected_col = self._find_task_id_column(df, use_arim_data)
+        detected_col = self._find_task_id_column(headers, use_arim_data)
         if detected_col:
-            unique_values = df[detected_col].dropna().unique()
+            unique_values = []
+            seen_values = set()
+            for record in records:
+                value = record.get(detected_col)
+                if not has_meaningful_value(value):
+                    continue
+                key = str(value).strip()
+                if key in seen_values:
+                    continue
+                seen_values.add(key)
+                unique_values.append(value)
             self._debug_log(f"検出された課題ID列: '{detected_col}' - ユニーク値数: {len(unique_values)}")
-            self._debug_log(f"サンプル課題ID: {unique_values[:5].tolist()}")
+            self._debug_log(f"サンプル課題ID: {unique_values[:5]}")
         else:
             self._debug_log("課題ID列が検出されませんでした")
         
@@ -118,7 +134,7 @@ class AIDataManager:
         Args:
             use_arim_data: ARIMデータを使用するかどうか
         Returns:
-            pandas.DataFrame: 読み込んだ実験データ
+            list[dict]: 読み込んだ実験データ
         """
         try:
             # ファイルパス決定
@@ -146,32 +162,29 @@ class AIDataManager:
             file_size = os.path.getsize(abs_path)
             self._debug_log(f"ファイルサイズ: {file_size} bytes")
             
-            # データ読み込み
-            self._debug_log(f"pandas読み込み開始: {abs_path}")
-            df = pd.read_excel(abs_path)
-            self._debug_log(f"pandas読み込み成功: {df.shape}")
+            headers, records = load_excel_records(abs_path)
+            self._debug_log(f"Excel読み込み成功: ({len(records)}, {len(headers)})")
             
             # 課題番号列の自動マッピング（互換性のため）
-            task_id_col = self._find_task_id_column(df, use_arim_data)
+            task_id_col = self._find_task_id_column(headers, use_arim_data)
             if task_id_col and task_id_col != '課題番号':
-                # 課題番号列として統一マッピング
-                df['課題番号'] = df[task_id_col]
+                ensure_alias_column(records, task_id_col, '課題番号')
                 self._debug_log(f"課題番号列をマッピング: {task_id_col} -> 課題番号")
             
             # データをインスタンス変数に保存
-            self.experiment_data = df
-            
-            return df
+            self.experiment_data = records
+
+            return records
             
         except Exception as e:
             self._debug_log(f"実験データ読み込みエラー: {e}")
             return None
     
-    def _find_task_id_column(self, df, use_arim_data=True):
+    def _find_task_id_column(self, columns_or_records, use_arim_data=True):
         """
-        データフレームから課題ID列を自動検出
+        読み込み済みレコードから課題ID列を自動検出
         Args:
-            df: pandas DataFrame
+            columns_or_records: 列名一覧またはレコード配列
             use_arim_data: ARIMデータを使用するかどうか
         Returns:
             str: 見つかった課題ID列名、見つからない場合はNone
@@ -192,18 +205,23 @@ class AIDataManager:
                 'project_id', 'Project_ID', 'id', 'ID', 'No', 'no'
             ]
         
+        if isinstance(columns_or_records, list) and columns_or_records and isinstance(columns_or_records[0], dict):
+            columns = get_record_headers(columns_or_records)
+        else:
+            columns = [str(column) for column in (columns_or_records or [])]
+
         # 実際の列名をログ出力（デバッグ用）
-        self._debug_log(f"実際のExcel列名: {list(df.columns)}")
+        self._debug_log(f"実際のExcel列名: {columns}")
         
         # 完全一致での検索
         for candidate in task_id_candidates:
-            if candidate in df.columns:
+            if candidate in columns:
                 self._debug_log(f"課題ID列を検出: {candidate}")
                 return candidate
         
         # 部分一致での検索（より柔軟な検索）
         for candidate in task_id_candidates:
-            for col in df.columns:
+            for col in columns:
                 if candidate.lower() in col.lower() or col.lower() in candidate.lower():
                     self._debug_log(f"課題ID列を部分一致で検出: {col} (候補: {candidate})")
                     return col
@@ -221,7 +239,7 @@ class AIDataManager:
         ]
         
         for pattern in task_patterns:
-            for col in df.columns:
+            for col in columns:
                 if re.match(pattern, col, re.IGNORECASE):
                     self._debug_log(f"課題ID列をパターンマッチで検出: {col} (パターン: {pattern})")
                     return col
@@ -237,20 +255,30 @@ class AIDataManager:
         Returns:
             list: 課題IDのリスト
         """
-        df = self.load_experiment_data_file(use_arim_data)
-        if df is None:
+        records = self.load_experiment_data_file(use_arim_data)
+        if not records:
             return []
         
         try:
             # 課題ID列を自動検出
-            task_id_col = self._find_task_id_column(df, use_arim_data)
+            task_id_col = self._find_task_id_column(records, use_arim_data)
             
             if task_id_col is None:
-                self._debug_log(f"課題ID列が見つかりません。利用可能カラム: {list(df.columns)}")
+                self._debug_log(f"課題ID列が見つかりません。利用可能カラム: {get_record_headers(records)}")
                 return []
             
             # ユニークな課題IDを取得
-            task_ids = df[task_id_col].dropna().unique().tolist()
+            task_ids = []
+            seen_ids = set()
+            for record in records:
+                value = record.get(task_id_col)
+                if not has_meaningful_value(value):
+                    continue
+                key = str(value).strip()
+                if key in seen_ids:
+                    continue
+                seen_ids.add(key)
+                task_ids.append(value)
             self._debug_log(f"課題ID数: {len(task_ids)} (from {task_id_col})")
             return sorted(task_ids)
             
@@ -265,28 +293,32 @@ class AIDataManager:
             task_id: 課題ID
             use_arim_data: ARIMデータを使用するかどうか
         Returns:
-            pandas.DataFrame: 該当する実験データ
+            list[dict]: 該当する実験データ
         """
-        df = self.load_experiment_data_file(use_arim_data)
-        if df is None:
-            return pd.DataFrame()
+        records = self.load_experiment_data_file(use_arim_data)
+        if not records:
+            return []
         
         try:
             # 課題ID列を自動検出
-            task_id_col = self._find_task_id_column(df, use_arim_data)
+            task_id_col = self._find_task_id_column(records, use_arim_data)
             
             if task_id_col is None:
                 self._debug_log("課題ID列が見つかりません")
-                return pd.DataFrame()
+                return []
             
             # 課題IDで絞り込み
-            task_experiments = df[df[task_id_col] == task_id]
+            task_experiments = [
+                dict(record)
+                for record in records
+                if str(record.get(task_id_col, "")).strip() == str(task_id).strip()
+            ]
             self._debug_log(f"課題 {task_id} の実験データ: {len(task_experiments)}件 (from {task_id_col})")
             
             # 結果をJSONライクな辞書のリストに変換
-            if not task_experiments.empty:
-                experiments_list = task_experiments.to_dict('records')
-                
+            if task_experiments:
+                experiments_list = task_experiments
+
                 # 課題番号列を統一（互換性のため）
                 for exp in experiments_list:
                     if '課題番号' not in exp and task_id_col in exp:
@@ -311,28 +343,29 @@ class AIDataManager:
             dict: 課題情報
         """
         experiments = self.get_experiments_for_task(task_id, use_arim_data)
-        if experiments.empty:
+        if not experiments:
             return {}
         
         try:
             # 最初の実験レコードから基本情報を取得
-            first_exp = experiments.iloc[0]
+            first_exp = experiments[0]
+            headers = get_record_headers(experiments)
             
             # カラム名の正規化（データソースに応じて）
             if use_arim_data:
                 # ARIMデータの場合
-                title_col = 'タイトル' if 'タイトル' in experiments.columns else 'title'
-                summary_col = '概要' if '概要' in experiments.columns else 'summary'
-                field_col = '分野' if '分野' in experiments.columns else 'field'
-                keywords_col = 'キーワード' if 'キーワード' in experiments.columns else 'keywords'
-                equipment_col = '実験装置' if '実験装置' in experiments.columns else 'equipment'
+                title_col = 'タイトル' if 'タイトル' in headers else 'title'
+                summary_col = '概要' if '概要' in headers else 'summary'
+                field_col = '分野' if '分野' in headers else 'field'
+                keywords_col = 'キーワード' if 'キーワード' in headers else 'keywords'
+                equipment_col = '実験装置' if '実験装置' in headers else 'equipment'
             else:
                 # 通常データの場合
-                title_col = 'title' if 'title' in experiments.columns else 'タイトル'
-                summary_col = 'summary' if 'summary' in experiments.columns else '概要'
-                field_col = 'field' if 'field' in experiments.columns else '分野'
-                keywords_col = 'keywords' if 'keywords' in experiments.columns else 'キーワード'
-                equipment_col = 'equipment' if 'equipment' in experiments.columns else '実験装置'
+                title_col = 'title' if 'title' in headers else 'タイトル'
+                summary_col = 'summary' if 'summary' in headers else '概要'
+                field_col = 'field' if 'field' in headers else '分野'
+                keywords_col = 'keywords' if 'keywords' in headers else 'キーワード'
+                equipment_col = 'equipment' if 'equipment' in headers else '実験装置'
             
             task_info = {
                 'task_id': task_id,
