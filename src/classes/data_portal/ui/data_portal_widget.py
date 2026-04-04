@@ -67,6 +67,7 @@ class DataPortalWidget(QWidget):
         self._current_tab_index: int | None = None
         self._applying_tab_window_state = False
         self._last_theme_refresh_mode: str | None = None
+        self._replacing_tab = False
 
         self._init_ui()
         self._connect_signals()
@@ -269,6 +270,10 @@ class DataPortalWidget(QWidget):
     def _on_tab_changed(self, index: int) -> None:
         """タブ切替時の遅延初期化"""
         try:
+            if self._replacing_tab:
+                self._current_tab_index = index
+                return
+
             self._save_current_window_state()
 
             # 0: login, 1: master, 2: upload, 3: bulk, 4: listing
@@ -294,6 +299,19 @@ class DataPortalWidget(QWidget):
                 self._finalize_tab_change(index)
         except Exception as e:
             logger.error("DataPortalWidget: tab change handling failed: %s", e)
+
+    def _replace_lazy_tab(self, idx: int, widget: QWidget, title: str, *, set_current: bool = True) -> None:
+        """placeholder を実タブへ差し替える間の currentChanged 再入を防ぐ。"""
+        self._replacing_tab = True
+        try:
+            self.tab_widget.blockSignals(True)
+            self.tab_widget.removeTab(idx)
+            self.tab_widget.insertTab(idx, widget, title)
+            if set_current:
+                self.tab_widget.setCurrentIndex(idx)
+        finally:
+            self.tab_widget.blockSignals(False)
+            self._replacing_tab = False
 
     def _finalize_tab_change(self, index: int) -> None:
         self._restore_window_state(index)
@@ -359,10 +377,7 @@ class DataPortalWidget(QWidget):
                 logger.error("マスタタブへのPortalClient設定に失敗: %s", e)
 
         # 置換
-        self.tab_widget.removeTab(idx)
-        self.tab_widget.insertTab(idx, self.master_data_tab, "📋 マスタ")
-        # current tab を維持
-        self.tab_widget.setCurrentIndex(idx)
+        self._replace_lazy_tab(idx, self.master_data_tab, "📋 マスタ")
 
     def _ensure_upload_tab(self, *, set_current: bool = True) -> None:
         if self.dataset_upload_tab is not None:
@@ -378,10 +393,7 @@ class DataPortalWidget(QWidget):
         self.dataset_upload_tab.upload_completed.connect(self.upload_completed.emit)
 
         # 置換
-        self.tab_widget.removeTab(idx)
-        self.tab_widget.insertTab(idx, self.dataset_upload_tab, "📤 データカタログ")
-        if set_current:
-            self.tab_widget.setCurrentIndex(idx)
+        self._replace_lazy_tab(idx, self.dataset_upload_tab, "📤 データカタログ", set_current=set_current)
 
     def _ensure_bulk_tab(self) -> None:
         if self.bulk_tab is not None:
@@ -394,9 +406,7 @@ class DataPortalWidget(QWidget):
 
         self.bulk_tab = DataPortalBulkTab(self)
 
-        self.tab_widget.removeTab(idx)
-        self.tab_widget.insertTab(idx, self.bulk_tab, "📦 一括")
-        self.tab_widget.setCurrentIndex(idx)
+        self._replace_lazy_tab(idx, self.bulk_tab, "📦 一括")
 
     def _ensure_listing_tab(self) -> None:
         if self.listing_tab is not None:
@@ -445,9 +455,7 @@ class DataPortalWidget(QWidget):
                 pass
 
         # 置換
-        self.tab_widget.removeTab(idx)
-        self.tab_widget.insertTab(idx, self.listing_tab, "📋 一覧")
-        self.tab_widget.setCurrentIndex(idx)
+        self._replace_lazy_tab(idx, self.listing_tab, "📋 一覧")
     
     def _on_credentials_saved(self, environment: str):
         """認証情報保存後の処理"""

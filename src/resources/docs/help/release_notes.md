@@ -6,15 +6,24 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.44）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| 外部アクセスモニター | 外部アクセスモニター機能を新規追加。HTTPリクエストの発信先・頻度・タイミングを一覧表示し、アプリの通信状況を透明化。 |
-| サブグループ完全性チェック | Basic Info で subGroupsAncestors の完全性を自動確認し、重複カウントメッセージを抑制。 |
-| マスタデータ改善 | マテリアルインデックス・タグマスタの取得に進捗コールバックを追加。Master Data Tab に CSV/XLSX エクスポート・自然ソートを実装。 |
-| data_fetch2最適化 | QComboBox パフォーマンス最適化、ウィジェット初期化改善、dataset.json キャッシュ追加。 |
-| AIプロバイダー到達性 | AIプロバイダーの到達性チェック機能を追加し、各ダイアログ・ウィジェットの接続状態を可視化。 |
-| TTLキャッシュ | 汎用 TTL キャッシュクラス（ttl_cache.py）を追加し、各所のキャッシュ管理を統一。 |
-| サブグループ編集 | ペイロード適用・ユーザーキャッシュクリア・メンバー管理の安定性を強化。 |
-| テスト/品質 | 外部アクセスモニター・TTLキャッシュ・到達性チェック・サブグループ・マスタデータ等の回帰テストを大幅追加。 |
+| リリース/品質 | リビジョンアップ（v2.5.46）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| Basic Infoバックグラウンド取得 | `background_fetch_manager.py` を導入し、個別データ取得をバックグラウンド実行しながらタブ操作を継続可能に改善。 |
+| Basic Info進捗表示 | `basic_unified_status_widget.py` に個別データ取得のプログレスバー・段階ラベル・中止ボタンを追加。 |
+| dataset一覧再取得 | `dataset.json` 一覧は常に再取得し、差分判定の基準を最新化。個別 dataEntry / invoice は内部フィルタで必要分のみ取得。 |
+| 失敗記録 | invoice 取得の失敗理由を `_summary.json` に保持し、既知の失敗エントリ再試行を抑制。 |
+| テスト/品質 | 背景取得マネージャー、dataEntry / invoice の事前フィルタ、件数進捗表示のユニットテストを追加。 |
+
+## v2.5.46 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.46）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| Basic Infoバックグラウンド取得 | `background_fetch_manager.py` を追加し、サンプル / データセット個別 / dataEntry / invoice / invoiceSchema の取得をバックグラウンドスレッドで段階実行可能に整理。 |
+| Basic Info進捗UI | `basic_unified_status_widget.py` で個別データ取得用の進捗バー、段階別メッセージ、中止ボタン、埋め込み worker 管理を追加。 |
+| Basic Info取得戦略 | `basic_info_logic.py` で `dataset.json` は常時再取得へ統一し、dataEntry / invoice は事前フィルタで新規・欠損・未成功分のみ取得するよう改善。 |
+| invoice失敗記録 | invoice 取得失敗を `_summary.json` の `failed` に保存し、既知のアクセス拒否や失敗済み entry の無駄な再試行を回避。 |
+| 起動導線 | `ui_basic_info.py` で Phase 1 の共通情報取得後に Phase 2 のバックグラウンド取得を開始する導線へ整理し、検索モードでも同じ説明文と進捗制御を反映。 |
+| テスト/品質 | `test_background_fetch_manager.py`、`test_data_entry_fetch_prefilter.py`、`test_invoice_progress_and_bg_guard.py`、`test_invoice_schema_prefilter.py`、`test_basic_info_force_download_false_fetches_lists.py` を追加・更新。 |
 
 ## v2.5.44 の主な更新点
 
@@ -34,7 +43,7 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.45）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| リリース/品質 | リビジョンアップ（v2.5.43）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
 | 終了時スレッド制御 | `thread_registry.py` を導入し、終了時に実行中 QThread の待機または強制停止を選べるよう改善。 |
 | AI提案ダイアログ | 保存済みの小さい高さがあっても、初回表示時は画面の利用可能領域基準の高さを優先するよう安定化。 |
 | 新規開設2 | 既存データセット読込 UI を遅延構築に変更し、構築中プログレス表示と worker 停止経路を追加。 |

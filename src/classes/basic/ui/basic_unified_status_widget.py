@@ -25,6 +25,7 @@ from qt_compat.widgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QProgressBar,
     QPushButton,
     QComboBox,
     QSizePolicy,
@@ -303,9 +304,38 @@ class BasicUnifiedStatusWidget(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.cellClicked.connect(self._on_table_cell_clicked)
 
+        # バックグラウンド取得プログレスバー領域
+        self._bg_fetch_frame = QWidget()
+        self._bg_fetch_frame.setVisible(False)
+        bg_layout = QHBoxLayout(self._bg_fetch_frame)
+        bg_layout.setContentsMargins(0, 4, 0, 4)
+        self._bg_fetch_label = QLabel("個別データ取得中...")
+        self._bg_fetch_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._bg_fetch_progress = QProgressBar()
+        self._bg_fetch_progress.setRange(0, 100)
+        self._bg_fetch_progress.setValue(0)
+        self._bg_fetch_progress.setFixedWidth(200)
+        self._bg_fetch_progress.setFixedHeight(18)
+        self._bg_fetch_cancel_btn = QPushButton("中止")
+        self._bg_fetch_cancel_btn.setMaximumWidth(60)
+        self._bg_fetch_cancel_btn.clicked.connect(self._on_bg_fetch_cancel)
+        bg_layout.addWidget(self._bg_fetch_label)
+        bg_layout.addWidget(self._bg_fetch_progress)
+        bg_layout.addWidget(self._bg_fetch_cancel_btn)
+
+        # 接続済みマネージャーの参照
+        self._bg_fetch_manager = None
+
+        # ProgressWorker 埋め込み実行用
+        self._embedded_worker = None
+        self._embedded_thread: Optional[threading.Thread] = None
+        self._embedded_task_name: str = ""
+        self._embedded_on_finished = None
+
         root = QVBoxLayout(self)
         root.addWidget(self._auth_label)
         root.addWidget(self._loading_label)
+        root.addWidget(self._bg_fetch_frame)
         root.addWidget(self.table, 1)
 
         self.refresh_theme()
@@ -932,6 +962,201 @@ class BasicUnifiedStatusWidget(QWidget):
                 except Exception:
                     pass
 
+    # ---- バックグラウンド取得 UI ----
+
+    def connect_background_fetch(self, manager) -> None:
+        """BackgroundFetchManager のシグナルを接続し、プログレス表示を開始する。"""
+        # 既存接続を切断
+        if self._bg_fetch_manager is not None:
+            try:
+                self._bg_fetch_manager.stage_started.disconnect(self._on_bg_stage_started)
+                self._bg_fetch_manager.stage_progress.disconnect(self._on_bg_stage_progress)
+                self._bg_fetch_manager.stage_completed.disconnect(self._on_bg_stage_completed)
+                self._bg_fetch_manager.all_completed.disconnect(self._on_bg_all_completed)
+                self._bg_fetch_manager.fetch_cancelled.disconnect(self._on_bg_cancelled)
+            except Exception:
+                pass
+
+        self._bg_fetch_manager = manager
+        manager.stage_started.connect(self._on_bg_stage_started)
+        manager.stage_progress.connect(self._on_bg_stage_progress)
+        manager.stage_completed.connect(self._on_bg_stage_completed)
+        manager.all_completed.connect(self._on_bg_all_completed)
+        manager.fetch_cancelled.connect(self._on_bg_cancelled)
+
+        self._bg_fetch_frame.setVisible(True)
+        self._bg_fetch_label.setText("個別データ取得を開始しています...")
+        self._bg_fetch_progress.setRange(0, 0)  # indeterminate
+        self._bg_fetch_progress.setValue(0)
+
+    def _on_bg_fetch_cancel(self) -> None:
+        if self._embedded_worker is not None:
+            self._on_embedded_cancel_clicked()
+            return
+        if self._bg_fetch_manager is not None:
+            self._bg_fetch_manager.cancel()
+            self._bg_fetch_label.setText("中止しています...")
+            self._bg_fetch_cancel_btn.setEnabled(False)
+
+    def _on_bg_stage_started(self, stage_name: str) -> None:
+        def _update():
+            self._bg_fetch_label.setText(f"取得中: {stage_name}")
+            self._bg_fetch_progress.setRange(0, 100)
+            self._bg_fetch_progress.setValue(0)
+        QTimer.singleShot(0, _update)
+
+    def _on_bg_stage_progress(self, stage_name: str, current: int, total: int, message: str) -> None:
+        def _update():
+            text = f"{stage_name}: {message}" if message else stage_name
+            self._bg_fetch_label.setText(text)
+            if total > 0 and not (total == 100 and current <= 100):
+                self._bg_fetch_progress.setRange(0, total)
+                self._bg_fetch_progress.setValue(min(current, total))
+            elif total == 100:
+                self._bg_fetch_progress.setRange(0, 100)
+                self._bg_fetch_progress.setValue(min(current, 100))
+        QTimer.singleShot(0, _update)
+
+    def _on_bg_stage_completed(self, stage_name: str, success: bool, message: str) -> None:
+        def _update():
+            prefix = "✔" if success else "✖"
+            self._bg_fetch_label.setText(f"{prefix} {stage_name}: {message}")
+            # 段階完了ごとにステータステーブルも更新
+            QTimer.singleShot(500, self.update_status)
+        QTimer.singleShot(0, _update)
+
+    def _on_bg_all_completed(self, success: bool, message: str) -> None:
+        def _update():
+            self._bg_fetch_frame.setVisible(False)
+            self._bg_fetch_cancel_btn.setEnabled(True)
+            self._bg_fetch_manager = None
+            # 最終ステータス更新
+            self.update_status()
+        QTimer.singleShot(0, _update)
+
+    def _on_bg_cancelled(self) -> None:
+        def _update():
+            self._bg_fetch_label.setText("個別データ取得: 中止しました")
+            self._bg_fetch_cancel_btn.setEnabled(True)
+            self._bg_fetch_manager = None
+            # 2秒後にバーを隠す
+            QTimer.singleShot(2000, lambda: self._bg_fetch_frame.setVisible(False))
+            self.update_status()
+        QTimer.singleShot(0, _update)
+
+    # ---- 汎用 ProgressWorker 埋め込み実行 ----
+
+    @property
+    def is_task_running(self) -> bool:
+        """何らかのタスク（BackgroundFetchManager or 埋め込みWorker）が実行中か"""
+        if self._bg_fetch_manager is not None:
+            return True
+        if self._embedded_worker is not None:
+            return True
+        return False
+
+    def run_worker_embedded(self, worker, task_name: str = "処理中",
+                            *, on_finished=None) -> bool:
+        """ProgressWorker / SimpleProgressWorker をタブ内プログレスバーで実行する。
+
+        実行中の場合は False を返す（呼び出し側でアラートを出す想定）。
+
+        Args:
+            worker: ProgressWorker or SimpleProgressWorker
+            task_name: 表示用タスク名
+            on_finished: 完了時コールバック (success: bool, message: str) -> None
+        Returns:
+            True: 正常に開始した / False: 既に実行中のため開始できない
+        """
+        if self.is_task_running:
+            return False
+
+        self._embedded_worker = worker
+        self._embedded_task_name = task_name
+        self._embedded_on_finished = on_finished
+
+        # UI表示
+        self._bg_fetch_frame.setVisible(True)
+        self._bg_fetch_label.setText(f"{task_name}を開始しています...")
+        self._bg_fetch_progress.setRange(0, 0)  # indeterminate
+        self._bg_fetch_progress.setValue(0)
+        self._bg_fetch_cancel_btn.setEnabled(True)
+
+        # シグナル接続
+        if hasattr(worker, 'progress_detail'):
+            try:
+                worker.progress_detail.connect(self._on_embedded_progress_detail)
+            except Exception:
+                worker.progress.connect(self._on_embedded_progress)
+        else:
+            worker.progress.connect(self._on_embedded_progress)
+        worker.finished.connect(self._on_embedded_finished)
+
+        # スレッドで実行
+        self._embedded_thread = threading.Thread(target=worker.run, daemon=True)
+        self._embedded_thread.start()
+        return True
+
+    def _on_embedded_cancel_clicked(self) -> None:
+        """埋め込みワーカーのキャンセル処理"""
+        if self._embedded_worker is not None:
+            self._embedded_worker.cancel()
+            self._bg_fetch_label.setText(f"{self._embedded_task_name}: 中止しています...")
+            self._bg_fetch_cancel_btn.setEnabled(False)
+
+    def _on_embedded_progress(self, percent: int, message: str) -> None:
+        def _update():
+            text = f"{self._embedded_task_name}: {message}" if message else self._embedded_task_name
+            self._bg_fetch_label.setText(text)
+            self._bg_fetch_progress.setRange(0, 100)
+            self._bg_fetch_progress.setValue(min(max(int(percent), 0), 100))
+        QTimer.singleShot(0, _update)
+
+    def _on_embedded_progress_detail(self, current: int, total: int, message: str) -> None:
+        def _update():
+            text = f"{self._embedded_task_name}: {message}" if message else self._embedded_task_name
+            self._bg_fetch_label.setText(text)
+            if total > 0 and not (total == 100 and current <= 100):
+                self._bg_fetch_progress.setRange(0, total)
+                self._bg_fetch_progress.setValue(min(max(current, 0), total))
+            elif total == 100:
+                self._bg_fetch_progress.setRange(0, 100)
+                self._bg_fetch_progress.setValue(min(max(current, 0), 100))
+            else:
+                self._bg_fetch_progress.setRange(0, 0)  # indeterminate
+        QTimer.singleShot(0, _update)
+
+    def _on_embedded_finished(self, success: bool, message: str) -> None:
+        def _update():
+            prefix = "✅" if success else "❌"
+            self._bg_fetch_label.setText(f"{prefix} {self._embedded_task_name}: {message}")
+            self._bg_fetch_progress.setRange(0, 100)
+            self._bg_fetch_progress.setValue(100)
+            self._bg_fetch_cancel_btn.setEnabled(True)
+
+            # コールバック呼び出し
+            cb = self._embedded_on_finished
+            self._embedded_worker = None
+            self._embedded_thread = None
+            self._embedded_on_finished = None
+
+            # 3秒後にバーを隠す
+            QTimer.singleShot(3000, lambda: self._hide_frame_if_idle())
+            # ステータステーブル更新
+            self.update_status()
+
+            if cb is not None:
+                try:
+                    cb(success, message)
+                except Exception:
+                    logger.debug("embedded on_finished callback failed", exc_info=True)
+        QTimer.singleShot(0, _update)
+
+    def _hide_frame_if_idle(self) -> None:
+        """タスクが実行中でなければプログレスフレームを隠す"""
+        if not self.is_task_running:
+            self._bg_fetch_frame.setVisible(False)
+
     def _on_refetch_clicked(self, row_index: int, row_meta: dict[str, Any]) -> None:
         if self._controller is None:
             QMessageBox.warning(self, "エラー", "コントローラーが設定されていません")
@@ -940,6 +1165,15 @@ class BasicUnifiedStatusWidget(QWidget):
         stage_name = str(row_meta.get("_stage_name") or "").strip()
         item_name = row_meta.get("_item_name")
         refetch_kind = str(row_meta.get("_refetch_kind") or "").strip()
+
+        # 個別データ段階はバックグラウンドで実行
+        _INDIVIDUAL_STAGES = {
+            "サンプル情報", "データセット情報", "データエントリ情報",
+            "インボイス情報", "invoiceSchema情報",
+        }
+        if stage_name in _INDIVIDUAL_STAGES:
+            self._on_refetch_individual_background(stage_name, refetch_kind)
+            return
 
         # JSON群(dir/stage)は「上書き/欠損のみ」を選べる
         overwrite = True
@@ -984,7 +1218,6 @@ class BasicUnifiedStatusWidget(QWidget):
 
         try:
             from classes.utils.progress_worker import ProgressWorker
-            from classes.basic.ui.ui_basic_info import show_progress_dialog
             from core.bearer_token_manager import BearerTokenManager
 
             bearer_token = BearerTokenManager.get_token_with_relogin_prompt(self._controller.parent)
@@ -1016,20 +1249,78 @@ class BasicUnifiedStatusWidget(QWidget):
                 task_name="再取得",
             )
 
-            dialog = show_progress_dialog(self._controller.parent, "再取得", worker)
-
-            # 完了後に表示更新
-            def _refresh_after(_success: bool, _message: str):
-                QTimer.singleShot(100, self.update_status)
-
-            try:
-                worker.finished.connect(_refresh_after)
-            except Exception:
-                pass
-
-            _ = dialog
+            if not self.run_worker_embedded(worker, f"再取得: {stage_name}"):
+                QMessageBox.information(
+                    self, "処理中",
+                    "現在別の取得処理が実行中です。\n完了または中止してから再度お試しください。",
+                )
+                return
         except Exception as e:
             QMessageBox.warning(self, "エラー", f"再取得開始に失敗しました:\n{e}")
+
+    def _on_refetch_individual_background(self, stage_name: str, refetch_kind: str) -> None:
+        """個別データ段階の再取得をバックグラウンドで実行する。"""
+        from qt_compat.widgets import QInputDialog
+        from core.bearer_token_manager import BearerTokenManager
+        from classes.basic.core.background_fetch_manager import BackgroundFetchManager
+
+        # 上書き/欠損のみ選択
+        overwrite = True
+        if refetch_kind in {"dir", "stage"}:
+            choice, ok = QInputDialog.getItem(
+                self,
+                "再取得方法",
+                "再取得方法を選択してください",
+                ["上書き再取得", "欠損のみ取得"],
+                0,
+                False,
+            )
+            if not ok:
+                return
+            overwrite = choice == "上書き再取得"
+
+        bearer_token = BearerTokenManager.get_token_with_relogin_prompt(
+            self._controller.parent if self._controller else None
+        )
+        if not bearer_token:
+            QMessageBox.warning(self, "認証エラー", "認証トークンが取得できません。ログインしてください。")
+            return
+
+        # 並列数
+        parallel_workers = 10
+        try:
+            spin = getattr(self._controller, 'basic_parallel_download_spinbox', None)
+            if spin is not None and hasattr(spin, 'value'):
+                parallel_workers = int(spin.value())
+        except Exception:
+            pass
+
+        mgr = BackgroundFetchManager.instance()
+        if self.is_task_running or mgr.is_running:
+            QMessageBox.information(self, "処理中", "現在別の取得処理が実行中です。\n完了または中止してから再度お試しください。")
+            return
+
+        # 単一段階のみ実行するために BackgroundFetchManager を使う
+        # 検索条件は controller から取得（あれば）
+        search_state = getattr(self._controller, '_basic_info_search_state', None) if self._controller else None
+        on_self = False
+        search_words = None
+        search_words_batch = None
+        if search_state is not None:
+            on_self = True
+            search_words = getattr(search_state, 'manual_keyword', None) or None
+            search_words_batch = getattr(search_state, 'keyword_batch', None) or None
+
+        self.connect_background_fetch(mgr)
+        mgr.start(
+            bearer_token,
+            force_download=overwrite,
+            parallel_workers=parallel_workers,
+            on_self=on_self,
+            search_words=search_words,
+            search_words_batch=search_words_batch,
+            stages_filter=[stage_name],
+        )
 
     def _refetch_task(
         self,

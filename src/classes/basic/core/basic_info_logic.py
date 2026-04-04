@@ -1067,11 +1067,53 @@ def fetch_invoice_schemas(bearer_token, output_dir, progress_callback=None, max_
         summary_lock = threading.Lock()
 
         total_templates = len(template_ids)
-        
-        # タスクリストを作成（並列実行用）
+
+        # --- v2.5.46: 事前フィルタリング（成功済み・失敗記録・既存ファイルを除外） ---
+        success_set = set(summary.get("success", []))
+        failed_set = set(summary.get("failed", {}).keys())
+        schema_dir = os.path.join(output_dir, "invoiceSchemas")
+        existing_files = {f[:-5] for f in os.listdir(schema_dir) if f.endswith(".json") and f != "summary.json"}
+
+        need_fetch_ids = []
+        skipped_success = 0
+        skipped_failed = 0
+        skipped_file = 0
+        for tid in template_ids:
+            if tid in success_set:
+                skipped_success += 1
+            elif tid in failed_set:
+                skipped_failed += 1
+            elif tid in existing_files:
+                skipped_file += 1
+            else:
+                need_fetch_ids.append(tid)
+
+        logger.info(
+            "invoiceSchemas事前フィルタ: 総数=%d, 成功記録=%d, 失敗記録=%d, 既存ファイル=%d, 要取得=%d",
+            total_templates, skipped_success, skipped_failed, skipped_file, len(need_fetch_ids),
+        )
+
+        if progress_callback:
+            msg = (f"invoiceSchemas: 総数={total_templates}, "
+                   f"成功記録={skipped_success}, 失敗記録={skipped_failed}, "
+                   f"要取得={len(need_fetch_ids)} (並列: {max_workers})")
+            if not progress_callback(10, 100, msg):
+                return "キャンセルされました"
+
+        # 全件スキップなら即完了
+        if not need_fetch_ids:
+            result_msg = (f"invoiceSchema取得完了: 成功=0, 失敗=0, "
+                         f"スキップ（成功記録={skipped_success}, 失敗記録={skipped_failed}, "
+                         f"既存={skipped_file}）, 総数={total_templates}")
+            logger.info(result_msg)
+            if progress_callback:
+                progress_callback(100, 100, result_msg)
+            return result_msg
+
+        # タスクリストを要取得分のみで作成
         tasks = [
             (bearer_token, template_id, output_dir, summary, log_path, summary_path, team_id_candidates, summary_lock)
-            for template_id in template_ids
+            for template_id in need_fetch_ids
         ]
         
         # 並列ダウンロード実行（50件以上で自動並列化）
@@ -1280,6 +1322,9 @@ def fetch_all_data_entrys_info(bearer_token, output_dir=None, progress_callback=
     
     改善版: データセット総数を事前計算し、プログレス更新頻度を向上
     v2.1.0: 並列ダウンロード対応（50件以上で自動並列化）
+    v2.5: 事前フィルタリング + TTLCache共有化で不要なリクエスト・I/Oを削減
+    v2.5.46: TTLCache依存を除去し、ファイル存在チェックのみで事前フィルタリング
+             （TTLCache の30分TTL切れにより全件再取得されるバグを修正）
     
     Args:
         bearer_token: 認証トークン
@@ -1289,6 +1334,7 @@ def fetch_all_data_entrys_info(bearer_token, output_dir=None, progress_callback=
         max_workers: 最大並列ワーカー数（デフォルト: 10）
     """
     try:
+        import time as _time
         from net.http_helpers import parallel_download
         
         output_dir = output_dir or OUTPUT_RDE_DATA_DIR
@@ -1308,20 +1354,54 @@ def fetch_all_data_entrys_info(bearer_token, output_dir=None, progress_callback=
             
         datasets = data.get("data", [])
         total_datasets = len(datasets)
-        logger.info(f"データエントリ情報取得開始: {total_datasets}件のデータセット処理")
-        
+        all_ids = [ds.get("id") for ds in datasets if ds.get("id")]
+
+        # --- 事前フィルタリング: ファイル存在チェック ---
+        # v2.5.46: TTLCache依存を除去。ディレクトリ一覧で一括チェック（per-file os.path.exists より高速）
+        t_filter_start = _time.perf_counter()
+        target_dir = os.path.join(output_dir, "dataEntry")
+        os.makedirs(target_dir, exist_ok=True)
+
+        # ディレクトリ内の既存ファイル名を一括取得
+        existing_ids = {f[:-5] for f in os.listdir(target_dir) if f.endswith(".json")}
+
+        need_fetch_ids = []
+        skipped_by_cache = 0
+        for ds_id in all_ids:
+            if ds_id in existing_ids:
+                skipped_by_cache += 1
+            else:
+                need_fetch_ids.append(ds_id)
+
+        t_filter_elapsed = _time.perf_counter() - t_filter_start
+        logger.info(
+            "データエントリ事前フィルタ: 総数=%d, キャッシュ済=%d, 要取得=%d (%.2f秒)",
+            total_datasets, skipped_by_cache, len(need_fetch_ids), t_filter_elapsed,
+        )
+
         if progress_callback:
-            if not progress_callback(0, total_datasets, f"データエントリ取得開始: 総数={total_datasets}件 (並列: {max_workers})"):
+            msg = (f"データエントリ取得開始: 総数={total_datasets}件, "
+                   f"キャッシュ済={skipped_by_cache}件, 要取得={len(need_fetch_ids)}件 "
+                   f"(並列: {max_workers})")
+            if not progress_callback(0, len(need_fetch_ids) or 1, msg):
                 return "キャンセルされました"
-        
-        # タスクリストを作成（並列実行用）
-        tasks = [(bearer_token, ds.get("id")) for ds in datasets if ds.get("id")]
-        
-        # 並列ダウンロード実行（50件以上で自動並列化）
+
+        # 全件キャッシュ済みなら即完了
+        if not need_fetch_ids:
+            result_msg = (f"データエントリ情報取得完了: "
+                         f"成功=0, 失敗=0, スキップ={skipped_by_cache}, 総数={total_datasets}")
+            logger.info(result_msg)
+            if progress_callback:
+                progress_callback(100, 100, result_msg)
+            return result_msg
+
+        # --- タスクリストを要取得分のみで作成 ---
+        tasks = [(bearer_token, ds_id) for ds_id in need_fetch_ids]
+
         def worker(token, ds_id):
-            """ワーカー関数"""
+            """ワーカー関数（呼び出し元で事前フィルタ済み）"""
             try:
-                fetch_data_entry_info_from_api(token, ds_id)
+                fetch_data_entry_info_from_api(token, ds_id, output_dir=target_dir, _shared_cache=True)
                 return "success"
             except Exception as e:
                 logger.error(f"データエントリ処理失敗: ds_id={ds_id}, error={e}")
@@ -1333,6 +1413,7 @@ def fetch_all_data_entrys_info(bearer_token, output_dir=None, progress_callback=
                 return progress_callback(int(current), int(total), f"データエントリ取得中: {message}")
             return True
         
+        t_fetch_start = _time.perf_counter()
         result = parallel_download(
             tasks=tasks,
             worker_function=worker,
@@ -1341,12 +1422,14 @@ def fetch_all_data_entrys_info(bearer_token, output_dir=None, progress_callback=
             threshold=parallel_threshold,
             progress_mode="count",
         )
-        
+        t_fetch_elapsed = _time.perf_counter() - t_fetch_start
+
         result_msg = (f"データエントリ情報取得完了: "
                      f"成功={result['success_count']}, "
                      f"失敗={result['failed_count']}, "
-                     f"スキップ={result['skipped_count']}, "
-                     f"総数={result['total']}")
+                     f"スキップ={skipped_by_cache}, "
+                     f"総数={total_datasets} "
+                     f"(取得: {t_fetch_elapsed:.1f}秒)")
         logger.info(result_msg)
         
         if progress_callback:
@@ -1367,25 +1450,28 @@ def fetch_all_data_entrys_info(bearer_token, output_dir=None, progress_callback=
 
 
 
-def fetch_data_entry_info_from_api(bearer_token, dataset_id, output_dir=None, force_refresh: bool = False):
+def fetch_data_entry_info_from_api(bearer_token, dataset_id, output_dir=None, force_refresh: bool = False, _shared_cache=None):
     """
     指定データセットIDのデータエントリ情報をAPIから取得し、dataEntry.jsonとして保存
     v1.18.4: Bearer Token自動選択対応
     v2.3: TTLCache連携 - キャッシュ有効なら再取得をスキップ
+    v2.5: _shared_cache パラメータでTTLCacheインスタンスの共有に対応（I/O削減）
+    v2.5.46: _shared_cache は真偽値のセンチネルとして使用（呼び出し元で事前フィルタ済みを示す）
     """
-    from datetime import timedelta
-    from classes.core.ttl_cache import TTLCache
-
     url = f"https://rde-api.nims.go.jp/data?filter%5Bdataset.id%5D={dataset_id}&sort=-created&page%5Boffset%5D=0&page%5Blimit%5D=24&include=owner%2Csample%2CthumbnailFile%2Cfiles"
     target_dir = output_dir or DATA_ENTRY_DIR
     save_path = os.path.join(target_dir, f"{dataset_id}.json")
 
-    # TTLCache による期限付きチェック（既定30分）
-    cache = TTLCache("data_entry", default_ttl=timedelta(minutes=30))
-    if not force_refresh and cache.has(f"entry:{dataset_id}"):
-        if os.path.exists(save_path):
-            logger.info("データエントリ: TTLキャッシュ有効のためスキップ: %s", dataset_id)
-            return
+    # _shared_cache が真の場合は呼び出し元で事前フィルタ済みのためスキップチェック不要
+    # _shared_cache が偽の場合は従来どおり個別にチェック
+    if not _shared_cache:
+        from datetime import timedelta
+        from classes.core.ttl_cache import TTLCache
+        cache = TTLCache("data_entry", default_ttl=timedelta(minutes=30))
+        if not force_refresh and cache.has(f"entry:{dataset_id}"):
+            if os.path.exists(save_path):
+                logger.info("データエントリ: TTLキャッシュ有効のためスキップ: %s", dataset_id)
+                return
 
     headers = {
         "Accept": "application/vnd.api+json",
@@ -1408,8 +1494,9 @@ def fetch_data_entry_info_from_api(bearer_token, dataset_id, output_dir=None, fo
         with open(save_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-        # TTLCache に記録
-        cache.put(f"entry:{dataset_id}", True)
+        # TTLCache に記録（個別呼び出し時のみ。バッチ呼び出しでは不要）
+        if not _shared_cache:
+            cache.put(f"entry:{dataset_id}", True)
             
         logger.info(f"データエントリ取得・保存完了: {dataset_id}.json -> {save_path}")
         
@@ -1427,7 +1514,16 @@ def invalidate_entry_cache(dataset_id: str) -> None:
 
 
 def fetch_invoice_info_from_api(bearer_token, entry_id, output_dir=None):
-    """指定エントリIDのインボイス情報をAPIから取得し、invoice.jsonとして保存"""
+    """
+    指定エントリIDのインボイス情報をAPIから取得し、invoice.jsonとして保存
+    
+    v2.5.46: HTTP 403/404 等のアクセス拒否系エラーはキャッチして失敗理由文字列を返す。
+             呼び出し元（fetch_all_invoices_info）で失敗記録に使用する。
+    
+    Returns:
+        None: 成功またはスキップ
+        str: 失敗理由（例: "HTTP 403", "HTTP 404"）
+    """
     url = f"https://rde-api.nims.go.jp/invoices/{entry_id}?include=submittedBy%2CdataOwner%2Cinstrument"
     target_dir = output_dir or INVOICE_DIR
     save_path = os.path.join(target_dir, f"{entry_id}.json")
@@ -1443,7 +1539,14 @@ def fetch_invoice_info_from_api(bearer_token, entry_id, output_dir=None):
         resp = api_request("GET", url, bearer_token=bearer_token, headers=headers, timeout=10)
         if resp is None:
             logger.error(f"インボイス取得失敗: entry_id={entry_id}")
-            return
+            return "Request failed"
+
+        status_code = getattr(resp, "status_code", None)
+        if status_code in (401, 403, 404):
+            reason = f"HTTP {status_code}"
+            logger.warning(f"インボイス取得失敗（アクセス拒否）: entry_id={entry_id}, {reason}")
+            return reason
+
         resp.raise_for_status()
         data = resp.json()
         
@@ -1452,10 +1555,11 @@ def fetch_invoice_info_from_api(bearer_token, entry_id, output_dir=None):
             json.dump(data, f, ensure_ascii=False, indent=2)
             
         logger.info(f"インボイス取得・保存完了: {entry_id}.json -> {save_path}")
+        return None
         
     except Exception as e:
         logger.error(f"インボイス取得・保存失敗: entry_id={entry_id}, error={e}")
-        raise
+        return str(e)
 
 
 def fetch_all_invoices_info(bearer_token, output_dir=None, progress_callback=None, max_workers: int = 10):
@@ -1465,6 +1569,8 @@ def fetch_all_invoices_info(bearer_token, output_dir=None, progress_callback=Non
     改善版: データセット数とタイル数から総予定取得数を事前計算し、
     プログレス更新頻度を大幅に向上させて処理の進行状況を明確化
     v2.1.0: 並列ダウンロード対応（50件以上で自動並列化）
+    v2.5: 事前フィルタリングで既存インボイスをスキップし不要なリクエスト・スレッドプール投入を削減
+    v2.5.46: 失敗エントリ記憶（_summary.json）で権限なしエントリの再試行を防止
     
     Args:
         bearer_token: 認証トークン
@@ -1472,6 +1578,7 @@ def fetch_all_invoices_info(bearer_token, output_dir=None, progress_callback=Non
         progress_callback: プログレスコールバック関数 (current, total, message) -> bool
     """
     try:
+        import time as _time
         from net.http_helpers import parallel_download
         
         resolved_root = output_dir or OUTPUT_RDE_DATA_DIR
@@ -1491,11 +1598,19 @@ def fetch_all_invoices_info(bearer_token, output_dir=None, progress_callback=Non
         
         # 全データエントリファイルを読み込み、総エントリ数を計算
         entry_list = []  # [entry_id, ...]
+        total_de_files = len(dataentry_files)
         
-        logger.info(f"インボイス情報取得開始: {len(dataentry_files)}件のデータエントリファイルを解析中")
+        logger.info(f"インボイス情報取得開始: {total_de_files}件のデータエントリファイルを解析中")
         
-        for file_path in dataentry_files:
+        for idx, file_path in enumerate(dataentry_files):
             try:
+                if progress_callback and idx % 5 == 0:
+                    if not progress_callback(
+                        idx, total_de_files,
+                        f"データエントリ解析中... ({idx}/{total_de_files}件, ID数: {len(entry_list)})",
+                    ):
+                        return "キャンセルされました"
+
                 with open(file_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 
@@ -1509,23 +1624,101 @@ def fetch_all_invoices_info(bearer_token, output_dir=None, progress_callback=Non
                 logger.error(f"データエントリファイル読み込み失敗: file={file_path}, error={e}")
         
         total_entries = len(entry_list)
-        logger.info(f"インボイス取得計画: 総数={total_entries}件")
+
+        if progress_callback:
+            if not progress_callback(
+                total_de_files, total_de_files,
+                f"データエントリ解析完了: {total_entries}件のID検出。既存ファイルを確認中...",
+            ):
+                return "キャンセルされました"
+
+        # --- 事前フィルタリング: 既存ファイル + 失敗記録をスキップ ---
+        t_filter_start = _time.perf_counter()
+        os.makedirs(invoice_dir, exist_ok=True)
+
+        # 既存ファイルを一括チェック
+        existing_ids = {f[:-5] for f in os.listdir(invoice_dir) if f.endswith(".json") and f != "_summary.json"}
+
+        if progress_callback:
+            if not progress_callback(
+                total_de_files, total_de_files,
+                f"既存インボイス: {len(existing_ids)}件検出。失敗記録を確認中...",
+            ):
+                return "キャンセルされました"
+
+        # 失敗記録（_summary.json）を読み込み
+        summary_path = os.path.join(invoice_dir, "_summary.json")
+        if os.path.exists(summary_path):
+            try:
+                with open(summary_path, "r", encoding="utf-8") as f:
+                    invoice_summary = json.load(f)
+            except Exception:
+                invoice_summary = {}
+        else:
+            invoice_summary = {}
+        if not isinstance(invoice_summary, dict):
+            invoice_summary = {}
+        failed_record: dict = invoice_summary.get("failed", {})
+        if not isinstance(failed_record, dict):
+            failed_record = {}
+
+        need_fetch_ids = []
+        skipped_existing = 0
+        skipped_failed = 0
+        for entry_id in entry_list:
+            if entry_id in existing_ids:
+                skipped_existing += 1
+            elif entry_id in failed_record:
+                skipped_failed += 1
+            else:
+                need_fetch_ids.append(entry_id)
+        t_filter_elapsed = _time.perf_counter() - t_filter_start
+
+        logger.info(
+            "インボイス事前フィルタ: 総数=%d, 既存=%d, 失敗記録=%d, 要取得=%d (%.2f秒)",
+            total_entries, skipped_existing, skipped_failed, len(need_fetch_ids), t_filter_elapsed,
+        )
         
         if progress_callback:
-            msg = f"インボイス取得開始 (データセット: {len(dataentry_files)}件, タイル総数: {total_entries}件, 並列: {max_workers})"
-            if not progress_callback(5, 100, msg):
+            msg = (f"インボイス取得開始 (データセット: {len(dataentry_files)}件, "
+                   f"タイル総数: {total_entries}件, 既存: {skipped_existing}件, "
+                   f"失敗記録: {skipped_failed}件, "
+                   f"要取得: {len(need_fetch_ids)}件, 並列: {max_workers})")
+            if not progress_callback(0, len(need_fetch_ids) or 1, msg):
                 return "キャンセルされました"
+
+        # 全件スキップなら即完了
+        if not need_fetch_ids:
+            result_msg = (f"インボイス情報取得完了: "
+                         f"成功=0, 失敗=0, "
+                         f"スキップ={skipped_existing}, 失敗記録={skipped_failed}, "
+                         f"総数={total_entries}")
+            logger.info(result_msg)
+            if progress_callback:
+                progress_callback(100, 100, result_msg)
+            return result_msg
         
-        # タスクリストを作成（並列実行用）
-        tasks = [(bearer_token, entry_id) for entry_id in entry_list]
-        
+        # タスクリストを要取得分のみで作成
+        tasks = [(bearer_token, entry_id) for entry_id in need_fetch_ids]
+
+        # 失敗記録の追記用（スレッドセーフ）
+        import threading
+        failure_lock = threading.Lock()
+        new_failures: dict[str, str] = {}
+
         # 並列ダウンロード実行（50件以上で自動並列化）
         def worker(token, entry_id):
-            """ワーカー関数"""
+            """ワーカー関数（失敗時は _summary.json に記録）"""
             try:
-                fetch_invoice_info_from_api(token, entry_id, invoice_dir)
+                fail_reason = fetch_invoice_info_from_api(token, entry_id, invoice_dir)
+                if fail_reason is not None:
+                    with failure_lock:
+                        new_failures[entry_id] = fail_reason
+                    return f"failed: {fail_reason}"
                 return "success"
             except Exception as e:
+                with failure_lock:
+                    new_failures[entry_id] = str(e)
                 logger.error(f"インボイス処理失敗: entry_id={entry_id}, error={e}")
                 return f"failed: {e}"
         
@@ -1535,6 +1728,7 @@ def fetch_all_invoices_info(bearer_token, output_dir=None, progress_callback=Non
                 return progress_callback(int(current), int(total), f"インボイス取得中: {message}")
             return True
         
+        t_fetch_start = _time.perf_counter()
         result = parallel_download(
             tasks=tasks,
             worker_function=worker,
@@ -1543,13 +1737,26 @@ def fetch_all_invoices_info(bearer_token, output_dir=None, progress_callback=Non
             threshold=50,
             progress_mode="count",
         )
+        t_fetch_elapsed = _time.perf_counter() - t_fetch_start
+
+        # --- 失敗記録を _summary.json に保存 ---
+        if new_failures:
+            failed_record.update(new_failures)
+            invoice_summary["failed"] = failed_record
+            try:
+                with open(summary_path, "w", encoding="utf-8") as f:
+                    json.dump(invoice_summary, f, ensure_ascii=False, indent=2)
+                logger.info("インボイス失敗記録保存: %d件（累計%d件）", len(new_failures), len(failed_record))
+            except Exception:
+                logger.warning("インボイス _summary.json 保存失敗", exc_info=True)
         
         # === 完了処理 ===
         result_msg = (f"インボイス情報取得完了: "
                      f"成功={result['success_count']}, "
                      f"失敗={result['failed_count']}, "
-                     f"スキップ={result['skipped_count']}, "
-                     f"総数={result['total']}")
+                     f"スキップ={skipped_existing}, 失敗記録={skipped_failed}, "
+                     f"総数={total_entries} "
+                     f"(取得: {t_fetch_elapsed:.1f}秒)")
         logger.info(result_msg)
         
         if progress_callback:
@@ -4291,23 +4498,19 @@ def fetch_basic_info_logic(
 
         dataset_progress_adapter = _make_stage_progress_adapter(6)
 
-        if force_download or not _exists(DATASET_JSON_PATH):
-            dataset_result = fetch_all_dataset_info(
-                bearer_token,
-                output_dir=os.path.join(OUTPUT_DIR, "rde", "data"),
-                onlySelf=onlySelf,
-                searchWords=searchWords,
-                searchWordsBatch=searchWordsBatch,
-                progress_callback=dataset_progress_adapter,
-                max_workers=parallel_workers,
-            )
-            if dataset_result == "キャンセルされました":
-                return "キャンセルされました"
-        else:
-            cache_message = "データセット一覧: 既存の dataset.json を利用するため取得をスキップします"
-            logger.info(cache_message)
-            if not update_stage_progress(6, 100, f"キャッシュ完了 (計画: 不明件, 並列: なし)"):
-                return "キャンセルされました"
+        # v2.5: 一覧(dataset.json)は常に再取得する
+        # force_download=False でも一覧を更新しないと個別(datasets/*.json)の差分判定ができない
+        dataset_result = fetch_all_dataset_info(
+            bearer_token,
+            output_dir=os.path.join(OUTPUT_DIR, "rde", "data"),
+            onlySelf=onlySelf,
+            searchWords=searchWords,
+            searchWordsBatch=searchWordsBatch,
+            progress_callback=dataset_progress_adapter,
+            max_workers=parallel_workers,
+        )
+        if dataset_result == "キャンセルされました":
+            return "キャンセルされました"
 
         if not update_stage_progress(6, 100, "完了"):
             return "キャンセルされました"
@@ -4318,27 +4521,18 @@ def fetch_basic_info_logic(
             
         logger.debug("fetch_all_data_entrys_info")
         
-        # dataEntry フォルダ内のファイル数をチェック（v2.1.21: 欠損判定）
-        dataentry_dir = os.path.join(OUTPUT_DIR, "rde", "data", "dataEntry")
-        dataentry_has_files, dataentry_count = _folder_has_files(dataentry_dir)
+        # v2.5: 個別データは常に fetch_all_data_entrys_info を呼ぶ
+        # 内部の事前フィルタリング(TTLCache+ファイル存在チェック)が新規・欠損分のみ取得する
+        # プログレスコールバックを作成（ステージ7の0-100%をマッピング）
+        dataentry_progress_callback = _make_stage_progress_adapter(7)
         
-        skip_dataentry_fetch = not force_download and dataentry_has_files
-        
-        if skip_dataentry_fetch:
-            logger.info(f"データエントリ情報: 既存フォルダ({dataentry_count}件)を利用するため取得をスキップします")
-            if not update_stage_progress(7, 100, "キャッシュ完了"):
-                return "キャンセルされました"
-        else:
-            # プログレスコールバックを作成（ステージ7の0-100%をマッピング）
-            dataentry_progress_callback = _make_stage_progress_adapter(7)
-            
-            result = fetch_all_data_entrys_info(
-                bearer_token,
-                progress_callback=dataentry_progress_callback,
-                max_workers=parallel_workers,
-            )
-            if result == "キャンセルされました":
-                return "キャンセルされました"
+        result = fetch_all_data_entrys_info(
+            bearer_token,
+            progress_callback=dataentry_progress_callback,
+            max_workers=parallel_workers,
+        )
+        if result == "キャンセルされました":
+            return "キャンセルされました"
         
         if not update_stage_progress(7, 100, "データエントリ情報取得完了"):
             return "キャンセルされました"
@@ -4349,27 +4543,18 @@ def fetch_basic_info_logic(
             
         logger.debug("fetch_all_invoices_info")
         
-        # invoice フォルダ内のファイル数をチェック（v2.1.21: 欠損判定）
-        invoice_dir = os.path.join(OUTPUT_DIR, "rde", "data", "invoice")
-        invoice_has_files, invoice_count = _folder_has_files(invoice_dir)
+        # v2.5: 個別データは常に fetch_all_invoices_info を呼ぶ
+        # 内部の事前フィルタリング(既存ファイルチェック)が新規・欠損分のみ取得する
+        # プログレスコールバックを作成（ステージ8の0-100%をマッピング）
+        invoice_progress_callback = _make_stage_progress_adapter(8)
         
-        skip_invoice_fetch = not force_download and invoice_has_files
-        
-        if skip_invoice_fetch:
-            logger.info(f"インボイス情報: 既存フォルダ({invoice_count}件)を利用するため取得をスキップします")
-            if not update_stage_progress(8, 100, "キャッシュ完了"):
-                return "キャンセルされました"
-        else:
-            # プログレスコールバックを作成（ステージ8の0-100%をマッピング）
-            invoice_progress_callback = _make_stage_progress_adapter(8)
-            
-            result = fetch_all_invoices_info(
-                bearer_token,
-                progress_callback=invoice_progress_callback,
-                max_workers=parallel_workers,
-            )
-            if result == "キャンセルされました":
-                return "キャンセルされました"
+        result = fetch_all_invoices_info(
+            bearer_token,
+            progress_callback=invoice_progress_callback,
+            max_workers=parallel_workers,
+        )
+        if result == "キャンセルされました":
+            return "キャンセルされました"
         
         if not update_stage_progress(8, 100, "インボイス情報取得完了"):
             return "キャンセルされました"

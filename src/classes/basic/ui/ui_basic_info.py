@@ -42,6 +42,42 @@ from .basic_info_search_dialog import (
 logger = logging.getLogger(__name__)
 
 
+def _start_background_fetch_phase2(
+    controller,
+    *,
+    bearer_token: str,
+    force_download: bool = False,
+    on_self: bool = False,
+    search_words=None,
+    search_words_batch=None,
+    parallel_workers: int = 10,
+) -> None:
+    """Phase 2: 個別データをBackgroundFetchManagerでバックグラウンド取得開始。
+
+    Phase 1（共通情報取得）完了後に呼ばれる。
+    UIスレッドから呼ぶこと（シグナル接続前提）。
+    """
+    from ..core.background_fetch_manager import BackgroundFetchManager
+
+    mgr = BackgroundFetchManager.instance()
+
+    # ステータスウィジェットへの接続（あれば）
+    status_widget = getattr(controller, 'basic_unified_status_widget', None)
+    if status_widget is not None and hasattr(status_widget, 'connect_background_fetch'):
+        status_widget.connect_background_fetch(mgr)
+
+    started = mgr.start(
+        bearer_token,
+        force_download=force_download,
+        parallel_workers=parallel_workers,
+        on_self=on_self,
+        search_words=search_words,
+        search_words_batch=search_words_batch,
+    )
+    if not started:
+        logger.warning("Phase 2: バックグラウンド取得は既に実行中のため開始をスキップしました")
+
+
 def _estimate_remaining_seconds(elapsed_seconds: float, current: int, total: int) -> float | None:
     """現在の進捗から残り秒(推定)を返す。推定不能な場合はNone。"""
     try:
@@ -102,6 +138,44 @@ def _build_progress_label(*, message: str, current: int, total: int, elapsed_sec
         return "\n".join(parts)
     except Exception:
         return str(message)
+
+
+def _run_embedded(controller, worker, task_name: str, *, on_finished=None) -> bool:
+    """ProgressWorker をタブ内埋め込みプログレスで実行する。
+
+    controller.basic_unified_status_widget が存在する場合は埋め込みプログレスを使い、
+    存在しない場合（テスト等）は show_progress_dialog にフォールバックする。
+
+    Args:
+        controller: UIコントローラー
+        worker: ProgressWorker or SimpleProgressWorker
+        task_name: 表示用タスク名
+        on_finished: 完了時コールバック (success, message) -> None
+    Returns:
+        True: 開始成功 / False: 既にタスク実行中
+    """
+    status_widget = getattr(controller, 'basic_unified_status_widget', None)
+    if status_widget is not None and hasattr(status_widget, 'run_worker_embedded'):
+        if status_widget.is_task_running:
+            QMessageBox.information(
+                controller.parent,
+                "処理中",
+                "現在別の取得処理が実行中です。\n完了または中止してから再度お試しください。",
+            )
+            return False
+        started = status_widget.run_worker_embedded(worker, task_name, on_finished=on_finished)
+        if not started:
+            QMessageBox.information(
+                controller.parent,
+                "処理中",
+                "現在別の取得処理が実行中です。\n完了または中止してから再度お試しください。",
+            )
+        return started
+
+    # フォールバック: 埋め込み先がない場合はモーダルダイアログ
+    show_progress_dialog(controller.parent, task_name, worker)
+    return True
+
 
 def show_progress_dialog(parent, title, worker, show_completion_dialog=True):
     """プログレス表示付きで処理を実行する共通関数
@@ -370,18 +444,17 @@ def fetch_basic_info(controller):
     """
     基本情報取得（全データセット）
     
-    v2.0.1改善:
-    - トークン検証の追加
-    - エラーメッセージの明確化
-    - 再ログイン促進機能の統合
-    
-    v2.1.16追加:
-    - グループ選択ダイアログの統合
+    v2.5.46改善:
+    - Phase 1: 共通情報をモーダルダイアログで取得
+    - Phase 2: 個別データ(サンプル/データセット/dataEntry/invoice/invoiceSchema)を
+      BackgroundFetchManagerでバックグラウンド非同期取得
+    - Phase 2実行中もタブ切替・他操作が可能
+    - Phase 2は任意のタイミングで中止可能
     """
     try:
         import json
         from pathlib import Path
-        from ..core.basic_info_logic import fetch_basic_info_logic, show_fetch_confirmation_dialog
+        from ..core.basic_info_logic import fetch_common_info_only_logic, show_fetch_confirmation_dialog
         from core.bearer_token_manager import BearerTokenManager
         from config.common import get_dynamic_file_path
         from .group_selection_dialog import show_group_selection_dialog
@@ -472,22 +545,33 @@ def fetch_basic_info(controller):
         # プログレス表示付きワーカーを作成
         parallel_max_workers = _get_basic_info_parallel_workers(controller, default=10)
         worker = ProgressWorker(
-            task_func=fetch_basic_info_logic,
+            task_func=fetch_common_info_only_logic,
             task_kwargs={
                 'bearer_token': bearer_token,
                 'parent': controller.parent,
                 'webview': webview,
-                'onlySelf': False,
-                'searchWords': None,
-                'skip_confirmation': True,
+                'program_id': selected_program_id,
                 'force_download': force_download,
-                'parallel_max_workers': parallel_max_workers,
             },
-            task_name="基本情報取得"
+            task_name="基本情報取得（共通情報）"
         )
-        
-        # プログレス表示
-        show_progress_dialog(controller.parent, "基本情報取得", worker)
+
+        # Phase 1 完了後に Phase 2（個別データ）をバックグラウンドで開始
+        def _on_phase1_finished(success, message):
+            if not success or message == "キャンセルされました":
+                return
+            _start_background_fetch_phase2(
+                controller,
+                bearer_token=bearer_token,
+                force_download=force_download,
+                on_self=False,
+                search_words=None,
+                search_words_batch=None,
+                parallel_workers=parallel_max_workers,
+            )
+
+        # タブ内プログレスで実行
+        _run_embedded(controller, worker, "基本情報取得（共通情報）", on_finished=_on_phase1_finished)
     except ImportError as e:
         logger.error(f"基本情報取得モジュールのインポートエラー: {e}")
         QMessageBox.critical(controller.parent, "エラー", f"基本情報取得機能の初期化に失敗しました: {e}")
@@ -499,18 +583,14 @@ def fetch_basic_info_self(controller):
     """
     基本情報取得（検索条件付き）
     
-    v2.0.1改善:
-    - トークン検証の追加
-    - エラーメッセージの明確化
-    - 再ログイン促進機能の統合
-    
-    v2.1.16追加:
-    - グループ選択ダイアログの統合
+    v2.5.46改善:
+    - Phase 1: 共通情報をモーダルダイアログで取得
+    - Phase 2: 個別データをBackgroundFetchManagerでバックグラウンド非同期取得
     """
     try:
         import json
         from pathlib import Path
-        from ..core.basic_info_logic import fetch_basic_info_logic, show_fetch_confirmation_dialog
+        from ..core.basic_info_logic import fetch_common_info_only_logic, show_fetch_confirmation_dialog
         from core.bearer_token_manager import BearerTokenManager
         from config.common import get_dynamic_file_path
         from .group_selection_dialog import show_group_selection_dialog
@@ -591,8 +671,8 @@ def fetch_basic_info_self(controller):
             )
             msg_box.setInformativeText(
                 "• はい（上書き取得）: すべて再取得して最新データで上書き\n"
-                "• いいえ（新規のみ取得）: 新規ファイルのみ取得します。\n"
-                "  既存ファイルは内容が古くても更新されません。"
+                "• いいえ（新規のみ取得）: 一覧は再取得し、個別データは\n"
+                "  新規・欠損分のみ取得します。"
             )
             yes_btn = msg_box.addButton("はい（上書き取得）", QMessageBox.YesRole)
             no_btn = msg_box.addButton("いいえ（新規のみ取得）", QMessageBox.NoRole)
@@ -629,24 +709,36 @@ def fetch_basic_info_self(controller):
         # プログレス表示付きワーカーを作成
         parallel_max_workers = _get_basic_info_parallel_workers(controller, default=10)
         worker = ProgressWorker(
-            task_func=fetch_basic_info_logic,
+            task_func=fetch_common_info_only_logic,
             task_kwargs={
                 'bearer_token': bearer_token,
                 'parent': controller.parent,
                 'webview': webview,
-                'onlySelf': True,
-                'searchWords': searchWords,
-                'searchWordsBatch': searchWordsBatch,
-                'skip_confirmation': True,
                 'program_id': selected_program_id,
                 'force_download': force_download,
-                'parallel_max_workers': parallel_max_workers,
             },
-            task_name="検索付き基本情報取得"
+            task_name="検索付き基本情報取得（共通情報）"
         )
-        
-        # プログレス表示
-        show_progress_dialog(controller.parent, "自分の基本情報取得", worker)
+
+        # Phase 1 完了後に Phase 2（個別データ）をバックグラウンドで開始
+        _search_words = searchWords
+        _search_words_batch = searchWordsBatch
+
+        def _on_phase1_finished(success, message):
+            if not success or message == "キャンセルされました":
+                return
+            _start_background_fetch_phase2(
+                controller,
+                bearer_token=bearer_token,
+                force_download=force_download,
+                on_self=True,
+                search_words=_search_words,
+                search_words_batch=_search_words_batch,
+                parallel_workers=parallel_max_workers,
+            )
+
+        # タブ内プログレスで実行
+        _run_embedded(controller, worker, "検索付き基本情報取得（共通情報）", on_finished=_on_phase1_finished)
     except ImportError as e:
         logger.error(f"基本情報取得モジュールのインポートエラー: {e}")
         QMessageBox.critical(controller.parent, "エラー", f"基本情報取得機能の初期化に失敗しました: {e}")
@@ -700,8 +792,8 @@ def summary_basic_info_to_Xlsx(controller):
             task_name="まとめXLSX作成"
         )
         
-        # プログレス表示
-        show_progress_dialog(controller.parent, "まとめXLSX作成", worker)
+        # タブ内プログレスで実行（XLSXタブの場合はフォールバックでモーダル）
+        _run_embedded(controller, worker, "まとめXLSX作成")
     except ImportError as e:
         logger.error(f"XLSX出力モジュールのインポートエラー: {e}")
         QMessageBox.critical(controller.parent, "エラー", f"XLSX出力機能の初期化に失敗しました: {e}")
@@ -748,8 +840,8 @@ def apply_basic_info_to_Xlsx(controller):
             task_name="XLSX反映"
         )
         
-        # プログレス表示
-        show_progress_dialog(controller.parent, "XLSX反映", worker)
+        # タブ内プログレスで実行（XLSXタブの場合はフォールバックでモーダル）
+        _run_embedded(controller, worker, "XLSX反映")
     except ImportError as e:
         logger.error(f"XLSX反映モジュールのインポートエラー: {e}")
         QMessageBox.critical(controller.parent, "エラー", f"XLSX反映機能の初期化に失敗しました: {e}")
@@ -797,8 +889,8 @@ def fetch_invoice_schema(controller):
         task_name="invoiceSchemas取得"
     )
     
-    # プログレス表示
-    show_progress_dialog(controller.parent, "invoiceSchemas取得", worker)
+    # タブ内プログレスで実行
+    _run_embedded(controller, worker, "invoiceSchemas取得")
 
 def fetch_sample_info_only(controller):
     """
@@ -850,8 +942,8 @@ def fetch_sample_info_only(controller):
         task_name="サンプル情報強制取得"
     )
     
-    # プログレス表示
-    show_progress_dialog(controller.parent, "サンプル情報強制取得", worker)
+    # タブ内プログレスで実行
+    _run_embedded(controller, worker, "サンプル情報強制取得")
 
 def fetch_common_info_only(controller):
     """
@@ -926,8 +1018,8 @@ def fetch_common_info_only(controller):
         )
         msg_box.setInformativeText(
             "• はい（上書き取得）: すべて再取得して最新データで上書き\n"
-            "• いいえ（新規のみ取得）: 新規ファイルのみ取得します。\n"
-            "  既存ファイルは内容が古くても更新されません。"
+            "• いいえ（新規のみ取得）: 一覧は再取得し、個別データは\n"
+            "  新規・欠損分のみ取得します。"
         )
         yes_btn = msg_box.addButton("はい（上書き取得）", QMessageBox.YesRole)
         no_btn = msg_box.addButton("いいえ（新規のみ取得）", QMessageBox.NoRole)
@@ -972,23 +1064,8 @@ def fetch_common_info_only(controller):
         task_name="共通情報取得"
     )
     
-    # プログレス表示
-    def on_finished_with_refresh(success, message):
-        def handle_finished():
-            if success:
-                QMessageBox.information(controller.parent, "共通情報取得", message)
-                # JSON状況表示を更新
-                QTimer.singleShot(100, lambda: refresh_json_status_display(controller))
-            else:
-                QMessageBox.critical(controller.parent, "共通情報取得 - エラー", message)
-        # 先にプログレスダイアログを閉じる処理（show_progress_dialog側）を通してから表示する
-        QTimer.singleShot(50, handle_finished)
-    
-    # 通常のプログレス表示
-    progress_dialog = show_progress_dialog(controller.parent, "共通情報取得", worker, show_completion_dialog=False)
-
-    # 完了時の追加処理（プログレス側の close/timer停止を妨げない）
-    worker.finished.connect(on_finished_with_refresh)
+    # タブ内プログレスで実行（完了後にステータス更新）
+    _run_embedded(controller, worker, "共通情報取得")
 
 
 def fetch_common_info_only2(controller):
@@ -1034,20 +1111,8 @@ def fetch_common_info_only2(controller):
         task_name="共通情報取得2",
     )
 
-    def on_finished_with_refresh(success, message):
-        def handle_finished():
-            if success:
-                QMessageBox.information(controller.parent, "共通情報取得2", message)
-                QTimer.singleShot(100, lambda: refresh_json_status_display(controller))
-            else:
-                QMessageBox.critical(controller.parent, "共通情報取得2 - エラー", message)
-        # 先にプログレスダイアログを閉じる処理（show_progress_dialog側）を通してから表示する
-        QTimer.singleShot(50, handle_finished)
-
-    progress_dialog = show_progress_dialog(controller.parent, "共通情報取得2", worker, show_completion_dialog=False)
-    worker.finished.connect(on_finished_with_refresh)
-
-    return progress_dialog
+    # タブ内プログレスで実行
+    _run_embedded(controller, worker, "共通情報取得2")
 
 def refresh_json_status_display(controller):
     """
@@ -1359,47 +1424,8 @@ def execute_individual_stage_ui(controller, stage_name):
         task_name=f"{stage_name}実行"
     )
     
-    # プログレス表示
-    import time
-    _started = time.perf_counter()
-
-    def _format_elapsed(seconds: float) -> str:
-        try:
-            total = int(round(seconds))
-            h = total // 3600
-            m = (total % 3600) // 60
-            s = total % 60
-            if h > 0:
-                return f"{h}:{m:02d}:{s:02d}"
-            return f"{m}:{s:02d}"
-        except Exception:
-            return ""
-
-    def on_finished_with_refresh(success, message):
-        def handle_finished():
-            elapsed = time.perf_counter() - _started
-            elapsed_text = _format_elapsed(elapsed)
-            if elapsed_text:
-                message_with_time = f"{message}\n\n所要時間: {elapsed_text}"
-            else:
-                message_with_time = message
-            if success:
-                QMessageBox.information(controller.parent, f"{stage_name}実行", message_with_time)
-                # JSON状況表示を更新
-                if hasattr(controller, 'basic_unified_status_widget'):
-                    QTimer.singleShot(100, lambda: controller.basic_unified_status_widget.update_status())
-                elif hasattr(controller, 'json_status_widget'):
-                    QTimer.singleShot(100, lambda: controller.json_status_widget.update_status())
-            else:
-                QMessageBox.critical(controller.parent, f"{stage_name}実行 - エラー", message_with_time)
-        QTimer.singleShot(0, handle_finished)
-    
-    # 通常のプログレス表示
-    progress_dialog = show_progress_dialog(controller.parent, f"{stage_name}実行", worker)
-    
-    # 完了時処理を上書き
-    worker.finished.disconnect()  # 既存の接続を削除
-    worker.finished.connect(on_finished_with_refresh)
+    # タブ内プログレスで実行
+    _run_embedded(controller, worker, f"{stage_name}実行")
 
 def create_individual_execution_widget(parent=None):
     """
