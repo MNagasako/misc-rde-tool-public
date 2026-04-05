@@ -57,6 +57,32 @@ class MaterialIndexLoader:
             logger.error("MI情報フォーマットエラー: %s", e)
             return f"[MI情報フォーマットエラー: {e}]"
 
+    @classmethod
+    def clear_cache(cls) -> None:
+        cls._cache = None
+
+    @classmethod
+    def get_cache_metadata(cls) -> Dict[str, Any]:
+        path = get_dynamic_file_path("input/ai/MI.json")
+        size_bytes = 0
+        updated_at = None
+        try:
+            if os.path.exists(path):
+                stat = os.stat(path)
+                size_bytes = int(stat.st_size)
+                from datetime import datetime, timezone
+
+                updated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+        except Exception:
+            pass
+        return {
+            "path": path,
+            "item_count": len(cls._cache) if isinstance(cls._cache, dict) else 0,
+            "size_bytes": size_bytes,
+            "updated_at": updated_at,
+            "active": cls._cache is not None,
+        }
+
 
 class EquipmentLoader:
     """装置情報(EQUIPMENTS.json)の読み込み管理"""
@@ -138,10 +164,38 @@ class EquipmentLoader:
                     formatted_lines.append(f"分類: {classification}")
                     
                 formatted_lines.append("")
-                
+
             formatted_lines.append("=== 関連装置情報終了 ===")
             return "\n".join(formatted_lines)
-            
+
         except Exception as e:
             logger.error("装置情報フォーマットエラー: %s", e)
             return f"[装置情報フォーマットエラー: {e}]"
+
+    @classmethod
+    def clear_cache(cls) -> None:
+        cls._cache = None
+
+    @classmethod
+    def get_cache_metadata(cls) -> Dict[str, Any]:
+        path = get_dynamic_file_path("input/ai/EQUIPMENTS_pretty.json")
+        if not os.path.exists(path):
+            path = get_dynamic_file_path("input/ai/EQUIPMENTS.json")
+        size_bytes = 0
+        updated_at = None
+        try:
+            if os.path.exists(path):
+                stat = os.stat(path)
+                size_bytes = int(stat.st_size)
+                from datetime import datetime, timezone
+
+                updated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+        except Exception:
+            pass
+        return {
+            "path": path,
+            "item_count": len(cls._cache) if isinstance(cls._cache, list) else 0,
+            "size_bytes": size_bytes,
+            "updated_at": updated_at,
+            "active": cls._cache is not None,
+        }

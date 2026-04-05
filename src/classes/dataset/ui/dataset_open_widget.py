@@ -31,9 +31,9 @@ from qt_compat.core import QDate, Qt, QTimer, Signal, QThread
 from classes.dataset.core.dataset_open_logic import create_group_select_widget
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
-from classes.utils.ui_responsiveness import start_ui_responsiveness_run
+from classes.utils.ui_responsiveness import schedule_deferred_ui_task, start_ui_responsiveness_run
 from config.common import DATASET_JSON_PATH, SUBGROUP_DETAILS_DIR, SUBGROUP_REL_DETAILS_DIR, get_dynamic_file_path
-from classes.utils.window_sizing import is_window_maximized, resize_main_window
+from classes.utils.window_sizing import is_window_maximized
 from classes.utils.thread_registry import register_thread
 
 import logging
@@ -2495,56 +2495,13 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
             return f"tab_{index}"
 
     def _save_window_size_for_tab(index: int) -> None:
-        if index < 0:
-            return
-        try:
-            window = main_widget.window()
-            if window is None or is_window_maximized(window):
-                return
-            tab_key = _tab_key(index)
-            saved_sizes = tab_window_state.get("saved_sizes")
-            if isinstance(saved_sizes, dict):
-                saved_sizes[tab_key] = (int(window.width()), int(window.height()))
-        except Exception:
-            logger.debug("dataset_open: save window size failed", exc_info=True)
+        return
 
     def _apply_window_size_for_tab(index: int) -> None:
-        if index < 0:
-            return
-        try:
-            window = main_widget.window()
-            if window is None or is_window_maximized(window):
-                return
-            tab_key = _tab_key(index)
-            saved_sizes = tab_window_state.get("saved_sizes")
-            saved = saved_sizes.get(tab_key) if isinstance(saved_sizes, dict) else None
-            if isinstance(saved, tuple) and len(saved) == 2:
-                resize_main_window(window, int(saved[0]), int(saved[1]))
-                return
+        return
 
-            tab_text = tab_widget.tabText(index)
-            if tab_text in ("新規開設", "新規開設2"):
-                target_w = _login_mode_like_width(window)
-                resize_main_window(window, target_w, window.height())
-                return
-            if tab_text == "一覧":
-                screen = window.screen() if hasattr(window, 'screen') else None
-                if screen is None:
-                    screen = QApplication.primaryScreen()
-                if screen is not None:
-                    available = screen.availableGeometry()
-                    resize_main_window(window, int(available.width() * 0.90), int(available.height() * 0.90))
-                return
-            if tab_text == "閲覧・修正":
-                screen = window.screen() if hasattr(window, 'screen') else None
-                if screen is None:
-                    screen = QApplication.primaryScreen()
-                if screen is not None:
-                    available = screen.availableGeometry()
-                    resize_main_window(window, window.width(), available.height())
-                return
-        except Exception:
-            logger.debug("dataset_open: apply window size failed", exc_info=True)
+    def _defer_tab_action(key: str, callback) -> None:
+        schedule_deferred_ui_task(tab_widget, f"dataset-open-{key}", callback)
     
     # 新規開設タブ
     try:
@@ -2930,19 +2887,18 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
 
             current_tab = tab_widget.widget(index)
             if create2_idx >= 0 and index == create2_idx:
-                _ensure_create2_built()
-                _apply_window_size_for_tab(index)
+                _defer_tab_action("create2", _ensure_create2_built)
                 tab_window_state["last_index"] = index
                 return
 
             if current_tab is main_widget._dataset_edit_tab:
-                edit_was_built = edit_built
-                _ensure_edit_built()
-                if not edit_was_built:
-                    logger.info("修正タブが選択されました - 初回生成直後のため追加リフレッシュをスキップします")
-                else:
-                    logger.info("修正タブが選択されました - データセットリストをリフレッシュします")
-                    if edit_tab is not None and hasattr(edit_tab, '_refresh_dataset_list'):
+                def _build_edit_tab() -> None:
+                    edit_was_built = edit_built
+                    _ensure_edit_built()
+                    if not edit_was_built:
+                        logger.info("修正タブが選択されました - 初回生成直後のため追加リフレッシュをスキップします")
+                    elif edit_tab is not None and hasattr(edit_tab, '_refresh_dataset_list'):
+                        logger.info("修正タブが選択されました - データセットリストをリフレッシュします")
                         try:
                             edit_tab._refresh_dataset_list(show_progress=False)
                         except TypeError:
@@ -2950,11 +2906,13 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
                         logger.info("データセットリストのリフレッシュが完了しました")
                     else:
                         logger.debug("データセットリフレッシュ機能がスキップされました (edit_tab=%s)", edit_tab is not None)
+
+                _defer_tab_action("edit", _build_edit_tab)
             elif current_tab is main_widget._dataset_dataentry_tab:
-                _ensure_dataentry_built()
+                _defer_tab_action("dataentry", _ensure_dataentry_built)
                 logger.info("データエントリータブが選択されました")
             elif current_tab is main_widget._dataset_listing_tab:
-                _ensure_listing_built()
+                _defer_tab_action("listing", _ensure_listing_built)
                 logger.info("一覧タブが選択されました")
 
             _apply_window_size_for_tab(index)
@@ -2969,7 +2927,6 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
         try:
             initial_idx = tab_widget.currentIndex()
             tab_window_state["last_index"] = initial_idx
-            _apply_window_size_for_tab(initial_idx)
         except Exception:
             logger.debug("dataset_open: initial tab size apply failed", exc_info=True)
 

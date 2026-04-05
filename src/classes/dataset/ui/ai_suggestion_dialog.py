@@ -674,10 +674,11 @@ class AISuggestionDialog(QDialog):
             except Exception:
                 pass
 
+        _apply()
         try:
             QTimer.singleShot(0, _apply)
         except Exception:
-            _apply()
+            pass
 
     def _apply_minimum_height_policy(self):
         """(互換) ダイアログ最小高さを内容に必要な範囲で設定する。"""
@@ -2846,12 +2847,15 @@ class AISuggestionDialog(QDialog):
         self.report_important_sub_filter_combo.currentIndexChanged.connect(self.refresh_report_entries)
         self.report_entries_table.itemSelectionChanged.connect(self.on_report_entry_selected)
 
-        # 初期ロード
-        self.refresh_report_entries()
-        try:
-            self.load_report_buttons()
-        except Exception as e:
-            logger.warning("報告書タブのボタン読み込みに失敗しました: %s", e)
+        # 初期ロードは遅延実行し、タブ構築を先にイベントループへ返す
+        def _initialize_report_tab() -> None:
+            self.refresh_report_entries()
+            try:
+                self.load_report_buttons()
+            except Exception as e:
+                logger.warning("報告書タブのボタン読み込みに失敗しました: %s", e)
+
+        schedule_deferred_ui_task(tab_widget, "ai-suggestion-report-tab-initial-load", _initialize_report_tab)
 
     # ------------------------------------------------------------------
     # Dataset tab (table-based selection)

@@ -1511,6 +1511,56 @@ def save_prompt_dictionary_config(config: Dict[str, Any]) -> bool:
         return False
 
 
+def clear_prompt_dictionary_caches(*, remove_summary_file: bool = False) -> None:
+    """Clear in-memory prompt dictionary caches and optional summary cache file."""
+
+    _ALIAS_CONFIG_CACHE["mtime"] = None
+    _ALIAS_CONFIG_CACHE["value"] = None
+    _PROMPT_DICTIONARY_SUMMARY_CACHE["mtime"] = None
+    _PROMPT_DICTIONARY_SUMMARY_CACHE["source_mtime"] = None
+    _PROMPT_DICTIONARY_SUMMARY_CACHE["value"] = None
+    if remove_summary_file:
+        try:
+            summary_path = get_prompt_dictionary_summary_path()
+            if os.path.exists(summary_path):
+                os.remove(summary_path)
+        except Exception:
+            logger.debug("prompt dictionary summary cache removal failed", exc_info=True)
+
+
+def get_prompt_dictionary_cache_metadata() -> Dict[str, Any]:
+    """Return metadata for prompt dictionary cache summary and in-memory snapshots."""
+
+    summary_path = get_prompt_dictionary_summary_path()
+    summary = _load_prompt_dictionary_summary() or {}
+    size_bytes = 0
+    updated_at = None
+    try:
+        if os.path.exists(summary_path):
+            stat = os.stat(summary_path)
+            size_bytes = int(stat.st_size)
+            updated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+    except Exception:
+        pass
+
+    in_memory_active = bool(
+        _ALIAS_CONFIG_CACHE.get("value") is not None
+        or _PROMPT_DICTIONARY_SUMMARY_CACHE.get("value") is not None
+    )
+    item_count = 0
+    try:
+        item_count = int(summary.get("candidate_count") or 0) + int(summary.get("general_alias_count") or 0)
+    except Exception:
+        item_count = 0
+    return {
+        "path": summary_path,
+        "item_count": item_count,
+        "size_bytes": size_bytes,
+        "updated_at": updated_at,
+        "active": bool(in_memory_active or os.path.exists(summary_path)),
+    }
+
+
 def get_prompt_dictionary_summary(config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     if config is None:
         summary = _load_prompt_dictionary_summary()

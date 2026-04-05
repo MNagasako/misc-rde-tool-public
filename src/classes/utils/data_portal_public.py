@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import logging
 import re
 import time
@@ -33,6 +34,105 @@ _PUBLIC_OUTPUT_DATASET_ID_CACHE: dict[str, object] = {
 }
 
 _PUBLIC_LISTING_DATASET_ID_CACHE: dict[tuple[str, int, int], dict[str, object]] = {}
+
+
+def clear_public_output_dataset_id_cache() -> None:
+    _PUBLIC_OUTPUT_DATASET_ID_CACHE["path"] = None
+    _PUBLIC_OUTPUT_DATASET_ID_CACHE["mtime"] = None
+    _PUBLIC_OUTPUT_DATASET_ID_CACHE["dataset_ids"] = set()
+
+
+def get_public_output_dataset_id_cache_metadata() -> dict[str, object]:
+    cached = _PUBLIC_OUTPUT_DATASET_ID_CACHE.get("dataset_ids")
+    path = _PUBLIC_OUTPUT_DATASET_ID_CACHE.get("path") or str(get_public_data_portal_root_dir("production") / "output.json")
+    updated_at = None
+    size_bytes = 0
+    try:
+        if isinstance(path, str) and path and Path(path).exists():
+            stat = Path(path).stat()
+            updated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+            size_bytes = int(stat.st_size)
+    except Exception:
+        pass
+    return {
+        "path": str(path or ""),
+        "item_count": len(cached) if isinstance(cached, set) else 0,
+        "size_bytes": size_bytes,
+        "updated_at": updated_at,
+        "active": bool(cached) if isinstance(cached, set) else False,
+    }
+
+
+def clear_public_listing_dataset_id_cache() -> None:
+    _PUBLIC_LISTING_DATASET_ID_CACHE.clear()
+
+
+def get_public_listing_dataset_id_cache_metadata() -> dict[str, object]:
+    item_count = 0
+    latest = None
+    for payload in _PUBLIC_LISTING_DATASET_ID_CACHE.values():
+        dataset_ids = payload.get("dataset_ids") if isinstance(payload, dict) else None
+        if isinstance(dataset_ids, set):
+            item_count += len(dataset_ids)
+        fetched_at = payload.get("fetched_at") if isinstance(payload, dict) else None
+        try:
+            candidate = datetime.fromtimestamp(float(fetched_at), tz=timezone.utc)
+        except Exception:
+            continue
+        if latest is None or candidate > latest:
+            latest = candidate
+    return {
+        "path": "memory://classes.utils.data_portal_public._PUBLIC_LISTING_DATASET_ID_CACHE",
+        "item_count": item_count,
+        "size_bytes": 0,
+        "updated_at": latest,
+        "active": bool(item_count),
+    }
+
+
+def clear_public_detail_cache(*, environment: Optional[str] = None) -> None:
+    envs = [environment] if environment else ["production", "test"]
+    for env in envs:
+        try:
+            cache_dir = get_public_data_portal_cache_dir(env or "production")
+        except Exception:
+            continue
+        try:
+            for path in cache_dir.glob("*.json"):
+                path.unlink(missing_ok=True)
+        except Exception:
+            continue
+
+
+def get_public_detail_cache_metadata(*, environment: Optional[str] = None) -> dict[str, object]:
+    envs = [environment] if environment else ["production", "test"]
+    paths: list[str] = []
+    count = 0
+    size_bytes = 0
+    latest = None
+    for env in envs:
+        try:
+            cache_dir = get_public_data_portal_cache_dir(env or "production")
+        except Exception:
+            continue
+        paths.append(str(cache_dir))
+        try:
+            for path in cache_dir.glob("*.json"):
+                stat = path.stat()
+                count += 1
+                size_bytes += int(stat.st_size)
+                candidate = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+                if latest is None or candidate > latest:
+                    latest = candidate
+        except Exception:
+            continue
+    return {
+        "paths": paths,
+        "item_count": count,
+        "size_bytes": size_bytes,
+        "updated_at": latest,
+        "active": bool(count),
+    }
 
 
 def get_public_published_dataset_ids(*, environment: str = "production", use_cache: bool = True) -> set[str]:

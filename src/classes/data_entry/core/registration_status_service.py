@@ -297,6 +297,15 @@ def clear_cache() -> None:
 			if os.path.exists(p):
 				os.remove(p)
 				removed.append(p)
+		if os.path.isdir(_ENTRY_DETAIL_DIR):
+			for name in os.listdir(_ENTRY_DETAIL_DIR):
+				path = os.path.join(_ENTRY_DETAIL_DIR, name)
+				if not os.path.isfile(path):
+					continue
+				if not name.lower().endswith('.json'):
+					continue
+				os.remove(path)
+				removed.append(path)
 		if removed:
 			logger.info(f"[登録状況] キャッシュ削除: {removed}")
 		else:
@@ -339,6 +348,32 @@ def get_cache_metadata() -> List[Dict[str, Any]]:
 		info = _collect_cache_metadata(cache_type, path)
 		if info:
 			metadata.append(info)
+	import os
+	if os.path.isdir(_ENTRY_DETAIL_DIR):
+		try:
+			count = 0
+			size = 0
+			updated_at = None
+			for name in os.listdir(_ENTRY_DETAIL_DIR):
+				path = os.path.join(_ENTRY_DETAIL_DIR, name)
+				if not os.path.isfile(path) or not name.lower().endswith('.json'):
+					continue
+				count += 1
+				stat = os.stat(path)
+				size += int(stat.st_size)
+				candidate = datetime.fromtimestamp(stat.st_mtime, tz=_UTC)
+				if updated_at is None or candidate > updated_at:
+					updated_at = candidate
+			if count:
+				metadata.append({
+					"type": "detail",
+					"path": _ENTRY_DETAIL_DIR,
+					"updated_at": updated_at,
+					"size": size,
+					"count": count,
+				})
+		except Exception as exc:
+			logger.debug("個別エントリーキャッシュメタ情報の収集に失敗: %s", exc)
 	return metadata
 
 

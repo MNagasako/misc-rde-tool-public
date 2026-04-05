@@ -7,7 +7,7 @@ Browserクラスから UI制御ロジックを分離
 import logging
 
 from qt_compat.widgets import (
-    QVBoxLayout, QWidget
+    QTabWidget, QVBoxLayout, QWidget
 )
 from qt_compat.core import QTimer
 
@@ -22,6 +22,11 @@ from classes.utils.window_sizing import (
     is_window_maximized,
     resize_main_window,
     set_main_window_minimum_size,
+)
+from classes.utils.main_window_geometry import (
+    MainWindowGeometryContext,
+    MainWindowGeometryManager,
+    MainWindowGeometryPolicy,
 )
 from classes.utils.ui_responsiveness import start_ui_responsiveness_run
 
@@ -128,6 +133,144 @@ class UIController(UIControllerCore):
 
         timer.timeout.connect(_on_timeout)
         timer.start(delay_ms)
+
+    def _ensure_main_window_geometry_manager(self):
+        manager = getattr(self, "_main_window_geometry_manager", None)
+        if manager is None and getattr(self, "parent", None) is not None:
+            manager = MainWindowGeometryManager(self.parent)
+            self._main_window_geometry_manager = manager
+        return manager
+
+    def _save_main_window_geometry(self, *, force: bool = False) -> None:
+        manager = self._ensure_main_window_geometry_manager()
+        if manager is None:
+            return
+        try:
+            manager.save_current_geometry(force=force)
+        except Exception:
+            logger.debug("main window geometry save failed", exc_info=True)
+
+    def _login_mode_fixed_width(self) -> int:
+        top_level = getattr(self, "parent", None)
+        try:
+            webview_width = int(getattr(top_level, "_webview_fixed_width", 900) or 900)
+        except Exception:
+            webview_width = 900
+        return max(200, webview_width + 120 + 40)
+
+    def _resolve_mode_tab_widget(self, mode, widget):
+        if mode == "basic_info":
+            return getattr(self, "basic_info_tabs", None)
+        if isinstance(widget, QTabWidget):
+            return widget
+        for attr_name in ("tab_widget", "_dataset_tab_widget", "_tab_widget"):
+            tab_widget = getattr(widget, attr_name, None)
+            if isinstance(tab_widget, QTabWidget):
+                return tab_widget
+        try:
+            if widget is not None and hasattr(widget, "findChild"):
+                tab_widget = widget.findChild(QTabWidget)
+                if isinstance(tab_widget, QTabWidget):
+                    return tab_widget
+        except Exception:
+            pass
+        return None
+
+    def _mode_tab_geometry_key(self, tab_widget, index: int) -> str:
+        try:
+            title = str(tab_widget.tabText(index) or "")
+        except Exception:
+            title = ""
+        object_name = ""
+        try:
+            page = tab_widget.widget(index)
+            object_name = str(page.objectName() or "") if page is not None and hasattr(page, "objectName") else ""
+        except Exception:
+            object_name = ""
+        if object_name:
+            return f"tab-{index}-{object_name}"
+        return f"tab-{index}-{title}"
+
+    def _main_window_geometry_policy(self, context: MainWindowGeometryContext) -> MainWindowGeometryPolicy:
+        mode = str(context.mode_key or "").replace("-", "_")
+        tab_title = str(context.tab_title or "")
+        fixed_login_width = self._login_mode_fixed_width()
+
+        if mode in {"login", "data_fetch"}:
+            return MainWindowGeometryPolicy(
+                preferred_width=fixed_login_width,
+                width_ratio=None,
+                height_ratio=1.0,
+                min_width=fixed_login_width,
+            )
+        if mode == "subgroup_create":
+            if tab_title == "一覧":
+                return MainWindowGeometryPolicy(width_ratio=0.95, height_ratio=1.0)
+            if tab_title == "閲覧・修正":
+                return MainWindowGeometryPolicy(width_ratio=0.92, height_ratio=1.0)
+            return MainWindowGeometryPolicy(width_ratio=0.82, height_ratio=1.0)
+        if mode == "dataset_open":
+            if tab_title in {"新規開設", "新規開設2"}:
+                return MainWindowGeometryPolicy(
+                    preferred_width=fixed_login_width,
+                    height_ratio=1.0,
+                    fit_available_height_on_first_show=True,
+                    geometry_revision=1,
+                    min_width=fixed_login_width,
+                )
+            if tab_title == "一覧":
+                return MainWindowGeometryPolicy(width_ratio=0.95, height_ratio=1.0)
+            if tab_title == "タイル（データエントリー）":
+                return MainWindowGeometryPolicy(width_ratio=0.95, height_ratio=1.0)
+            if tab_title == "閲覧・修正":
+                return MainWindowGeometryPolicy(width_ratio=0.9, height_ratio=1.0)
+            return MainWindowGeometryPolicy(width_ratio=0.88, height_ratio=1.0)
+        if mode == "data_register":
+            if tab_title == "通常登録":
+                return MainWindowGeometryPolicy(
+                    preferred_width=1200,
+                    height_ratio=1.0,
+                    fit_available_height_on_first_show=True,
+                    geometry_revision=1,
+                )
+            if tab_title in {"一括登録", "一覧", "登録状況", "✉️ メール通知"}:
+                return MainWindowGeometryPolicy(width_ratio=0.95, height_ratio=1.0)
+            return MainWindowGeometryPolicy(width_ratio=0.9, height_ratio=1.0)
+        if mode == "sample_dedup":
+            return MainWindowGeometryPolicy(width_ratio=0.95, height_ratio=1.0)
+        if mode == "data_fetch2":
+            if tab_title in {"📦 一括取得（RDE）", "🌐 一括取得（DP）", "🔍 ファイルフィルタ"}:
+                return MainWindowGeometryPolicy(width_ratio=0.95, height_ratio=1.0)
+            return MainWindowGeometryPolicy(width_ratio=0.9, height_ratio=1.0)
+        if mode == "basic_info":
+            if tab_title == "XLSX":
+                return MainWindowGeometryPolicy(width_ratio=0.92, height_ratio=1.0)
+            return MainWindowGeometryPolicy(width_ratio=0.88, height_ratio=1.0)
+        if mode == "data_portal":
+            return MainWindowGeometryPolicy(width_ratio=0.95, height_ratio=1.0)
+        if mode == "settings":
+            return MainWindowGeometryPolicy(width_ratio=0.92, height_ratio=1.0)
+        if mode == "help":
+            return MainWindowGeometryPolicy(width_ratio=0.85, height_ratio=1.0)
+        if mode == "ai_test":
+            return MainWindowGeometryPolicy(width_ratio=0.92, height_ratio=1.0)
+        return MainWindowGeometryPolicy(width_ratio=0.88, height_ratio=1.0)
+
+    def _activate_main_window_geometry(self, mode, widget=None) -> None:
+        manager = self._ensure_main_window_geometry_manager()
+        if manager is None:
+            return
+        tab_widget = self._resolve_mode_tab_widget(mode, widget)
+        try:
+            manager.configure(
+                mode_key=str(mode or "mode"),
+                tab_widget=tab_widget,
+                tab_key_resolver=(lambda index, tw=tab_widget: self._mode_tab_geometry_key(tw, index)) if tab_widget is not None else None,
+                policy_resolver=self._main_window_geometry_policy,
+            )
+            self._schedule_qt_single_shot(0, manager.apply_current_geometry, key=f"apply_main_window_geometry_{mode}")
+        except Exception:
+            logger.debug("main window geometry activation failed", exc_info=True)
 
     def show_text_area_expanded(self, text_widget, title):
         """
@@ -1119,6 +1262,7 @@ class UIController(UIControllerCore):
         # WebView(ログイン/データ取得)用途のみ横幅固定・アスペクト比固定。
         # それ以外の通常機能は常にリサイズ可能にする。
         top_level = self.parent if hasattr(self, 'parent') else None
+        self._save_main_window_geometry(force=True)
         if top_level:
             try:
                 if mode in {"login", "data_fetch"}:
@@ -1219,6 +1363,7 @@ class UIController(UIControllerCore):
                 logger.error("タブ統合機能の更新エラー: %s", e)
 
         # メニューエリアの更新
+        active_widget = None
         if hasattr(self.parent, 'menu_area_layout'):
             # 既存のウィジェットをすべて削除
             for i in reversed(range(self.parent.menu_area_layout.count())):
@@ -1231,6 +1376,7 @@ class UIController(UIControllerCore):
 
             # 対応するウィジェットを表示
             widget = self.get_mode_widget(mode)
+            active_widget = widget
             if widget:
                 ui_run.mark("widget_resolved", widget_class=type(widget).__name__)
                 try:
@@ -1291,9 +1437,6 @@ class UIController(UIControllerCore):
                 margin = 40
                 fixed_width = webview_width + menu_width + margin
                 clear_main_window_size_constraints(top_level, min_width=fixed_width)
-                if not is_window_maximized(top_level):
-                    if top_level.width() < fixed_width:
-                        resize_main_window(top_level, width=fixed_width)
             
             if hasattr(self.parent, 'webview'):
                 self.parent.webview.setVisible(True)
@@ -1375,44 +1518,6 @@ class UIController(UIControllerCore):
             if top_level:
                 clear_main_window_size_constraints(top_level)
 
-            # サブグループ・データセット・基本情報・設定モードは初期高さをディスプレイの90%に設定（後から変更可）
-            if mode in ["subgroup_create", "basic_info", "dataset_open", "data_register", "settings", "ai_test", "data_portal", "help"]:
-                import os
-
-                if not os.environ.get("PYTEST_CURRENT_TEST") and not is_window_maximized(top_level):
-                    try:
-                        from qt_compat.widgets import QApplication
-                        screen = QApplication.primaryScreen()
-                        if screen:
-                            screen_geometry = screen.geometry()
-                            max_height = int(screen_geometry.height() * 0.90)
-                            if top_level:
-                                resize_main_window(top_level, height=max_height)
-                    except Exception as e:
-                        logger.debug("初期高さ90%リサイズ失敗: %s", e)
-
-            # データ取得2専用の初期高さ600pxでリサイズ（最大・最小制約はかけない）
-            if mode == "data_fetch2":
-                if not os.environ.get("PYTEST_CURRENT_TEST") and not is_window_maximized(top_level):
-                    if top_level:
-                        resize_main_window(top_level, height=600)
-
-            # データセットは初期幅をディスプレイの75%に設定（後から変更可）
-            if mode in [ "dataset_open" ]:
-                import os
-
-                if not os.environ.get("PYTEST_CURRENT_TEST") and not is_window_maximized(top_level):
-                    try:
-                        from qt_compat.widgets import QApplication
-                        screen = QApplication.primaryScreen()
-                        if screen:
-                            screen_geometry = screen.geometry()
-                            max_width = int(screen_geometry.width() * 0.75)
-                            if top_level:
-                                resize_main_window(top_level, width=max_width)
-                    except Exception as e:
-                        logger.debug("初期幅75%リサイズ失敗: %s", e)
-
         elif mode == "data_fetch":
             # データ取得モード：WebViewを表示してオーバーレイも表示
             # ウィンドウサイズを確実に標準サイズに復元し、初期高さ800pxに設定（後から変更可）
@@ -1422,9 +1527,6 @@ class UIController(UIControllerCore):
                 margin = 40
                 fixed_width = webview_width + menu_width + margin
                 clear_main_window_size_constraints(top_level, min_width=fixed_width)
-                if not is_window_maximized(top_level):
-                    target_width = max(fixed_width, int(top_level.width()))
-                    resize_main_window(top_level, target_width, 800)
             
             if hasattr(self.parent, 'webview'):
                 self.parent.webview.setVisible(True)
@@ -1501,6 +1603,8 @@ class UIController(UIControllerCore):
         elif mode == "data_portal":
             # データポータルは個別のウィジェットで処理
             pass
+
+        self._activate_main_window_geometry(mode, active_widget)
 
         ui_run.complete(mode=mode)
         ui_run.finish(success=True, elapsed_ms=round((time.perf_counter() - _t0) * 1000.0, 3))
@@ -2451,10 +2555,7 @@ class UIController(UIControllerCore):
                         self.data_register_widget = self._create_widget("データ登録")
                     else:
                         logger.debug("データ登録タブウィジェット作成成功")
-                        
-                        # 初回のデータ登録ウィジェット作成時に95%の高さを適用
-                        self._apply_initial_data_register_sizing()
-                        
+
                 except Exception as e:
                     logger.error("データ登録ウィジェット作成エラー: %s", e)
                     import traceback
@@ -4996,29 +5097,6 @@ class UIController(UIControllerCore):
         layout.addWidget(open_settings_button)
         
         return widget
-    
-    def _apply_initial_data_register_sizing(self):
-        """初回のデータ登録ウィジェット作成時にウィンドウサイズを95%に設定"""
-        try:
-            from qt_compat.widgets import QApplication
-            from qt_compat.core import QTimer
-            
-            # 通常登録タブの初期サイズ (90%高さ、標準幅1200px)
-            def apply_sizing():
-                if hasattr(self, 'parent') and self.parent:
-                    screen = QApplication.primaryScreen().geometry()
-                    target_height = int(screen.height() * 0.90)
-                    target_width = 1200  # 通常登録タブの標準幅
-                    
-                    logger.debug("初回データ登録ウィジェット作成: 画面サイズ適用 %sx%s", target_width, target_height)
-                    self.parent.resize(target_width, target_height)
-                    # 位置調整は行わない（ユーザー要望により削除）
-            
-            # UIが完全に作成された後にサイズを適用
-            self._schedule_qt_single_shot(50, apply_sizing, key="apply_initial_data_register_sizing")
-            
-        except Exception as e:
-            logger.error("初回データ登録サイズ適用エラー: %s", e)
     
     def open_ai_extension_dialog_from_menu(self):
         """メニューからAI拡張ダイアログを直接開く（簡素化版）"""

@@ -15,7 +15,7 @@ from qt_compat.core import Signal, QTimer
 from classes.managers.log_manager import get_logger
 from classes.theme import ThemeKey, get_color
 from classes.utils.ui_responsiveness import schedule_deferred_ui_task, start_ui_responsiveness_run
-from classes.utils.window_sizing import is_window_maximized, resize_main_window
+from classes.utils.window_sizing import is_window_maximized
 from .login_settings_tab import LoginSettingsTab
 if TYPE_CHECKING:
     from .master_data_tab import MasterDataTab
@@ -275,8 +275,6 @@ class DataPortalWidget(QWidget):
                 self._current_tab_index = index
                 return
 
-            self._save_current_window_state()
-
             # 0: login, 1: master, 2: upload, 3: bulk, 4: listing
             if index == 0:
                 try:
@@ -323,46 +321,13 @@ class DataPortalWidget(QWidget):
             self._replacing_tab = False
 
     def _finalize_tab_change(self, index: int) -> None:
-        self._restore_window_state(index)
         self._refresh_tab_theme(index)
 
     def _save_current_window_state(self) -> None:
-        try:
-            if self._applying_tab_window_state:
-                return
-            index = self._current_tab_index
-            top_level = self.window()
-            if index is None or top_level is None or is_window_maximized(top_level):
-                return
-            size = top_level.size() if hasattr(top_level, "size") else None
-            pos = top_level.pos() if hasattr(top_level, "pos") else None
-            if size is not None and getattr(size, "isValid", lambda: False)():
-                self._tab_window_sizes[int(index)] = size
-            if pos is not None:
-                self._tab_window_positions[int(index)] = (int(pos.x()), int(pos.y()))
-        except Exception:
-            logger.debug("DataPortalWidget: save window state failed", exc_info=True)
+        return
 
     def _restore_window_state(self, index: int) -> None:
-        try:
-            top_level = self.window()
-            if top_level is None or is_window_maximized(top_level):
-                return
-            saved_size = self._tab_window_sizes.get(int(index))
-            saved_pos = self._tab_window_positions.get(int(index))
-            if saved_size is None and saved_pos is None:
-                return
-
-            self._applying_tab_window_state = True
-            try:
-                if saved_size is not None:
-                    resize_main_window(top_level, int(saved_size.width()), int(saved_size.height()))
-                if saved_pos is not None and hasattr(top_level, "move"):
-                    top_level.move(int(saved_pos[0]), int(saved_pos[1]))
-            finally:
-                self._applying_tab_window_state = False
-        except Exception:
-            logger.debug("DataPortalWidget: restore window state failed", exc_info=True)
+        return
 
     def _ensure_master_tab(self, run=None) -> None:
         if self.master_data_tab is not None:

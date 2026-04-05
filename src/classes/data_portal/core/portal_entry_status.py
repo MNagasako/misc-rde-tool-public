@@ -544,3 +544,44 @@ def get_portal_entry_status_cache() -> PortalEntryStatusCache:
     if _CACHE_SINGLETON is None:
         _CACHE_SINGLETON = PortalEntryStatusCache()
     return _CACHE_SINGLETON
+
+
+def get_portal_entry_status_cache_metadata() -> dict[str, Any]:
+    """Return portal entry status cache metadata for diagnostics/UI."""
+
+    cache = get_portal_entry_status_cache()
+    cache._ensure_loaded()
+
+    latest_saved_at = 0.0
+    latest_count = 0
+    size_bytes = 0
+    updated_at = None
+    paths = _all_persisted_cache_paths()
+    for path in paths:
+        try:
+            if not path or not os.path.exists(path):
+                continue
+            stat = os.stat(path)
+            size_bytes += int(stat.st_size)
+            candidate_updated = datetime.fromtimestamp(stat.st_mtime)
+            if updated_at is None or candidate_updated > updated_at:
+                updated_at = candidate_updated
+            with open(path, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+            if not isinstance(payload, dict):
+                continue
+            saved_at = float(payload.get("saved_at") or 0.0)
+            items = payload.get("items") if isinstance(payload.get("items"), dict) else {}
+            if saved_at >= latest_saved_at:
+                latest_saved_at = saved_at
+                latest_count = len(items)
+        except Exception:
+            continue
+
+    return {
+        "paths": paths,
+        "size_bytes": size_bytes,
+        "item_count": latest_count or len(getattr(cache, "_items", {}) or {}),
+        "updated_at": updated_at,
+        "active": bool(latest_count or getattr(cache, "_items", {})),
+    }

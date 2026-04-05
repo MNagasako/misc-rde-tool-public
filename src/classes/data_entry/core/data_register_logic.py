@@ -5,6 +5,8 @@ import tempfile
 import urllib.parse
 import re
 
+from classes.utils.window_sizing import center_window_on_parent
+
 
 def _build_data_register_completion_text(
     *,
@@ -69,17 +71,7 @@ def _center_on_parent(widget, parent) -> None:
     try:
         if widget is None or parent is None:
             return
-        try:
-            parent_geo = parent.frameGeometry()
-        except Exception:
-            parent_geo = None
-        if parent_geo is None:
-            return
-        try:
-            fg = widget.frameGeometry()
-            fg.moveCenter(parent_geo.center())
-            widget.move(fg.topLeft())
-        except Exception:
+        if not center_window_on_parent(widget, parent):
             return
     except Exception:
         return

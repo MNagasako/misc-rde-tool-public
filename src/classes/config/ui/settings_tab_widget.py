@@ -124,6 +124,9 @@ class SettingsTabWidget(QWidget):
         # 設備タブ
         self._add_lazy_tab("設備", self._create_equipment_tab_widget)
 
+        # キャッシュタブ
+        self._add_lazy_tab("キャッシュ", self._create_cache_tab_widget)
+
         # MISCタブ（タブ一覧の最後尾に配置）
         self.setup_misc_tab()
             
@@ -163,6 +166,12 @@ class SettingsTabWidget(QWidget):
         scroll.setWidget(container)
         return scroll
 
+    def _wrap_tab_content(self, content_widget: QWidget) -> QWidget:
+        """必要に応じてスクロールラッパーを付与する。"""
+        if bool(getattr(content_widget, "_settings_direct_tab", False)):
+            return content_widget
+        return self._wrap_in_scroll(content_widget)
+
     def _enable_window_resizing(self) -> None:
         """設定ウィジェットの親ウィンドウを常時リサイズ可能にする。"""
         top_level = self.window()
@@ -175,8 +184,8 @@ class SettingsTabWidget(QWidget):
 
     def _add_scroll_tab(self, content_widget: QWidget, tab_name: str) -> int:
         """各設定タブをスクロール可能に統一し、内容が少ない場合は上に詰めて表示する。"""
-        scroll = self._wrap_in_scroll(content_widget)
-        return self.tab_widget.addTab(scroll, tab_name)
+        wrapped = self._wrap_tab_content(content_widget)
+        return self.tab_widget.addTab(wrapped, tab_name)
 
     def _add_lazy_tab(self, tab_name: str, builder: Callable[[], QWidget]) -> int:
         """タブ自体は即時に追加し、内容はタブ選択時に構築する。"""
@@ -275,7 +284,7 @@ class SettingsTabWidget(QWidget):
                 if run is not None:
                     run.mark("build_error", error=str(e))
 
-            new_scroll = self._wrap_in_scroll(content)
+            new_scroll = self._wrap_tab_content(content)
             if run is not None:
                 run.interactive(widget_class=type(content).__name__)
 
@@ -1157,6 +1166,39 @@ class SettingsTabWidget(QWidget):
             info_label.setWordWrap(True)
             layout.addWidget(info_label)
 
+            layout.addStretch(1)
+            return widget
+
+    def _create_cache_tab_widget(self) -> QWidget:
+        """キャッシュタブ（内容ウィジェット）を作成して返す。"""
+        logger.info("[settings_tab_widget] キャッシュタブ作成開始")
+        try:
+            from classes.config.ui.cache_tab import CacheManagementTab
+
+            cache_widget = CacheManagementTab(self)
+            self.cache_widget = cache_widget
+            logger.info("[settings_tab_widget] キャッシュタブ作成成功")
+            return cache_widget
+        except Exception as e:
+            logger.warning("[settings_tab_widget] キャッシュタブ作成失敗: %s", e)
+            widget = QWidget()
+            layout = QVBoxLayout(widget)
+            layout.setContentsMargins(20, 20, 20, 20)
+
+            title_label = QLabel("キャッシュ")
+            try:
+                title_font = QFont()
+                title_font.setPointSize(14)
+                title_font.setBold(True)
+                title_label.setFont(title_font)
+            except Exception:
+                pass
+            layout.addWidget(title_label)
+
+            info_label = QLabel("キャッシュ管理機能の読み込みに失敗しました。")
+            info_label.setWordWrap(True)
+            layout.addWidget(info_label)
+            layout.addWidget(QLabel(str(e)))
             layout.addStretch(1)
             return widget
 

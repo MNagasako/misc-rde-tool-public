@@ -6,11 +6,22 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.48）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| UI応答性計測 | `ui_responsiveness.py` を追加し、モード切替・lazy build・初期ロードを JSONL で計測可能化。 |
-| deferred build 拡張 | データ登録、データ取得2、データポータル、設定の重いタブを placeholder 表示後に遅延構築。 |
-| 初期ロード最適化 | AI テスト初期化、自動ログインヘルスチェック、既存データセット一覧読込を表示後/バックグラウンドへ整理。 |
-| データセット選択安定化 | dataEntry 系の dataset source refresh をキャッシュ/差分判定ベースにし、managed 系分類を安定化。 |
+| リリース/品質 | リビジョンアップ（v2.5.49）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| メインウィンドウ geometry | `main_window_geometry.py` / `window_sizing.py` を更新し、対象タブの初回表示 size/center を一括計算化。 |
+| geometry migration | `dataset_open` の「新規開設 / 新規開設2」と `data_register` の「通常登録」は、旧保存 geometry を `geometry_revision` で 1 回だけ無効化。 |
+| キャッシュ管理 | 設定の「キャッシュ」タブを direct-fill + 非同期更新 UI にし、更新可否と再生成経路を registry で一元化。 |
+| キャッシュ更新対象 | 登録状況、公開 `output.json` ID、公開一覧 ID、プロンプト辞書サマリ、MI / EQUIPMENTS ローダーを安全に再生成可能化。 |
+
+## v2.5.49 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.49）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| メインウィンドウ geometry | `main_window_geometry.py` と `window_sizing.py` で、初回未保存時の width / height / position を 1 回の centered geometry 計算で決定するよう変更。 |
+| geometry migration | `dataset_open` の「新規開設 / 新規開設2」と `data_register` の「通常登録」は `geometry_revision` を持ち、旧保存値を 1 回だけ無視して現行 policy で再保存。 |
+| 対象タブの初回表示 | `ui_controller.py` の geometry policy を整理し、上記 3 タブは未保存時に利用可能画面高さへフィットしつつ中央表示。保存済み geometry は migration 後も tab ごとに個別復元。 |
+| キャッシュ管理 | `settings_tab_widget.py` / `cache_tab.py` / `cache_registry.py` を更新し、キャッシュ一覧を tab 高へ追従させつつ、更新可能対象を非同期更新できるよう改善。 |
+| 更新可能キャッシュ | 登録状況、公開 `output.json` ID、公開一覧 ID、プロンプト辞書サマリ、MI / EQUIPMENTS ローダーの refresh callback と理由表示を追加。 |
 
 ## v2.5.48 の主な更新点
 

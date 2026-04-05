@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
@@ -242,6 +243,70 @@ def clear_subgroup_list_cache() -> None:
     _SUBGROUP_LIST_CACHE["columns"] = None
     _SUBGROUP_LIST_CACHE["rows"] = None
     _SUBGROUP_LIST_CACHE["created_at"] = 0.0
+    _DETAIL_USER_ATTR_CACHE.clear()
+
+
+def clear_subgroup_list_cache_storage(*, include_persisted: bool = True) -> None:
+    """Clear subgroup listing cache including persisted files when requested."""
+
+    clear_subgroup_list_cache()
+    if not include_persisted:
+        return
+
+    path = _persisted_cache_path()
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        pass
+
+
+def get_subgroup_list_cache_metadata() -> Dict[str, Any]:
+    """Return subgroup listing cache metadata for diagnostics/UI."""
+
+    path = _persisted_cache_path()
+    size_bytes = 0
+    updated_at = None
+    created_at = None
+    persisted_count = 0
+
+    try:
+        if path and os.path.exists(path):
+            stat = os.stat(path)
+            size_bytes = int(stat.st_size)
+            updated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+            payload = _load_json_file(path)
+            if isinstance(payload, dict):
+                created_raw = payload.get("created_at")
+                try:
+                    if created_raw is not None:
+                        created_at = datetime.fromtimestamp(float(created_raw), tz=timezone.utc)
+                except Exception:
+                    created_at = None
+                rows = payload.get("rows")
+                if isinstance(rows, list):
+                    persisted_count = len(rows)
+    except Exception:
+        pass
+
+    memory_rows = _SUBGROUP_LIST_CACHE.get("rows")
+    memory_count = len(memory_rows) if isinstance(memory_rows, list) else 0
+    created_epoch = float(_SUBGROUP_LIST_CACHE.get("created_at") or 0.0)
+    if created_epoch > 0:
+        memory_created = datetime.fromtimestamp(created_epoch, tz=timezone.utc)
+        if created_at is None or memory_created > created_at:
+            created_at = memory_created
+
+    return {
+        "paths": [path] if path else [],
+        "size_bytes": size_bytes,
+        "item_count": memory_count or persisted_count,
+        "memory_count": memory_count,
+        "detail_user_count": len(_DETAIL_USER_ATTR_CACHE),
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "active": bool(memory_count or persisted_count or len(_DETAIL_USER_ATTR_CACHE) or (path and os.path.exists(path))),
+    }
 
 
 def _coerce_items(payload: Any) -> List[dict]:

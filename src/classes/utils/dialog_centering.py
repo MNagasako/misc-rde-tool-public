@@ -5,6 +5,8 @@ from typing import Optional
 
 from shiboken6 import isValid as _shiboken_is_valid
 
+from classes.utils.window_sizing import center_window_on_parent
+
 
 def install_dialog_centering(*, enabled: bool = True, force: bool = False) -> bool:
     """アプリ全体のポップアップダイアログを親ウィンドウ中央へ寄せる。
@@ -160,16 +162,8 @@ def _center_on_parent(widget, parent) -> None:
     try:
         if widget is None or parent is None:
             return
-        parent_geo = None
-        try:
-            parent_geo = parent.frameGeometry()
-        except Exception:
-            parent_geo = None
-        if parent_geo is None:
-            return
-        fg = widget.frameGeometry()
-        fg.moveCenter(parent_geo.center())
-        widget.move(fg.topLeft())
+        if not center_window_on_parent(widget, parent):
+            _center_on_screen(widget)
     except Exception:
         return
 

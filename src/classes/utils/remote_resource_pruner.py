@@ -14,8 +14,10 @@ Notes:
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Iterable, Literal, Optional
@@ -94,6 +96,62 @@ def mark_missing(resource_type: ResourceType, resource_id: str) -> None:
     except Exception:
         # Fail-safe: do not block UI/data loading.
         return
+
+
+def clear_marked_missing(
+    resource_type: Optional[ResourceType] = None,
+    *,
+    include_existence_cache: bool = True,
+) -> None:
+    """Clear persisted missing-id cache and optional existence TTL cache."""
+
+    if resource_type is None:
+        try:
+            path = _cache_path()
+            if path and os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
+    else:
+        data = _load_cache()
+        key = "datasets" if resource_type == "dataset" else "groups"
+        data.pop(key, None)
+        data["updated_at"] = int(time.time())
+        try:
+            _save_cache(data)
+        except Exception:
+            pass
+
+    if include_existence_cache:
+        _existence_cache.clear()
+
+
+def get_missing_cache_metadata() -> dict[str, object]:
+    """Return metadata for persisted missing-id cache and TTL existence cache."""
+
+    data = _load_cache()
+    datasets = _get_set(data, "datasets")
+    groups = _get_set(data, "groups")
+    path = _cache_path()
+    size_bytes = 0
+    updated_at = None
+    try:
+        if path and os.path.exists(path):
+            stat = os.stat(path)
+            size_bytes = int(stat.st_size)
+            updated_at = datetime.datetime.fromtimestamp(stat.st_mtime, tz=datetime.timezone.utc)
+    except Exception:
+        pass
+    return {
+        "path": path,
+        "item_count": len(datasets) + len(groups),
+        "dataset_count": len(datasets),
+        "group_count": len(groups),
+        "ttl_memory_count": len(_existence_cache),
+        "size_bytes": size_bytes,
+        "updated_at": updated_at,
+        "active": bool(datasets or groups or _existence_cache),
+    }
 
 
 @dataclass(frozen=True)

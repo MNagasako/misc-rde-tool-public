@@ -7,16 +7,12 @@ from qt_compat.widgets import QApplication, QLabel, QSizePolicy, QTabWidget, QVB
 
 from classes.subgroup.ui.sample_dedup_listing_widget import SampleDedupListingWidget
 from classes.subgroup.util.sample_dedup_table_records import build_sample_listing2_rows_from_files, get_default_columns_list2
-from classes.utils.window_sizing import is_window_maximized, resize_main_window
+from classes.utils.ui_responsiveness import schedule_deferred_ui_task
 
 
 class SampleDedupTabWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        # key: tab index, value: QSize
-        self._tab_window_sizes: dict[int, object] = {}
-        self._current_tab_index: int | None = None
-        self._last_tab_index_applied: int | None = None
         self._listing2_widget = None
 
         layout = QVBoxLayout(self)
@@ -55,71 +51,9 @@ class SampleDedupTabWidget(QWidget):
             pass
         return super().event(event)
 
-    def _target_size_90pct(self):
-        screen = QApplication.primaryScreen()
-        if not screen:
-            return None
-        try:
-            geo = screen.availableGeometry()
-        except Exception:
-            geo = screen.geometry()
-        w = max(640, int(geo.width() * 0.9))
-        h = max(480, int(geo.height() * 0.9))
-        return w, h
-
     def _on_tab_changed(self, index: int) -> None:
         if index == 1:
-            self._ensure_listing2_built()
-
-        top_level = self.window()
-
-        # Save previous tab size.
-        try:
-            if (
-                self._current_tab_index is not None
-                and top_level
-                and not is_window_maximized(top_level)
-                and top_level.size().isValid()
-            ):
-                self._tab_window_sizes[self._current_tab_index] = top_level.size()
-        except Exception:
-            pass
-
-        self._current_tab_index = index
-
-        if top_level and is_window_maximized(top_level):
-            self._last_tab_index_applied = index
-            return
-
-        # Avoid re-applying resize for the same tab unless we actually switch tabs.
-        if self._last_tab_index_applied == index:
-            return
-
-        if not top_level:
-            return
-
-        # Restore saved size for this tab.
-        try:
-            saved = self._tab_window_sizes.get(index)
-            if saved is not None and getattr(saved, "isValid", lambda: False)():
-                resize_main_window(top_level, saved.width(), saved.height())
-                self._last_tab_index_applied = index
-                return
-        except Exception:
-            pass
-
-        # First time for this tab: apply 90% screen size.
-        target = self._target_size_90pct()
-        if target:
-            try:
-                resize_main_window(top_level, target[0], target[1])
-            except Exception:
-                pass
-            try:
-                self._tab_window_sizes[index] = top_level.size()
-            except Exception:
-                pass
-        self._last_tab_index_applied = index
+            schedule_deferred_ui_task(self.tab_widget, "sample-dedup-listing2-tab", self._ensure_listing2_built)
 
     def _ensure_listing2_built(self) -> None:
         if self._listing2_widget is not None:

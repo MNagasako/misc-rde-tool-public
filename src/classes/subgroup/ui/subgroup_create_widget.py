@@ -14,13 +14,12 @@ from ..util.subgroup_ui_helpers import (
 from .subgroup_listing_widget import create_subgroup_listing_widget
 from classes.theme import get_color, ThemeKey
 from classes.utils.label_style import apply_label_style
+from classes.utils.ui_responsiveness import schedule_deferred_ui_task
 from .subgroup_inherit_dialog import (
     GRANT_NUMBER_NOT_INHERITED_MESSAGE,
     SubgroupInheritDialog,
     build_subjects_with_grant_number_placeholder,
 )
-from classes.utils.window_sizing import is_window_maximized, resize_main_window
-
 # ロガー設定
 logger = logging.getLogger(__name__)
 
@@ -67,26 +66,6 @@ def create_subgroup_create_widget(parent, title, color, create_auto_resize_butto
     edit_tab = None
     edit_scroll = None
     edit_built = False
-
-    # タブ切り替え時にサブグループリストをリフレッシュする機能を追加
-    def _reset_window_height_to_screen(target_widget: QWidget) -> None:
-        try:
-            window = target_widget.window() if target_widget is not None else None
-            if window is None or is_window_maximized(window):
-                return
-            screen = getattr(window, 'screen', None)
-            if callable(screen):
-                screen = screen()
-            if screen is None:
-                # fallback
-                screen = QApplication.primaryScreen()
-            if screen is None:
-                return
-            available = screen.availableGeometry()
-            # 縦サイズのみディスプレイに合わせる（その後はユーザーが変更可能）
-            resize_main_window(window, window.width(), available.height())
-        except Exception:
-            logger.debug("subgroup_create: window height reset failed", exc_info=True)
 
     try:
         edit_scroll = QScrollArea()
@@ -168,18 +147,18 @@ def create_subgroup_create_widget(parent, title, color, create_auto_resize_butto
 
             # 閲覧・修正タブが選択された場合
             if current_text == "閲覧・修正":
-                _ensure_edit_tab_built()
-                logger.info("修正タブが選択されました - サブグループリストをリフレッシュします")
-                if edit_tab is not None and hasattr(edit_tab, '_refresh_subgroup_list'):
-                    edit_tab._refresh_subgroup_list()
-                    logger.info("サブグループリストのリフレッシュが完了しました")
-                else:
-                    logger.debug("サブグループリフレッシュ機能がスキップされました (edit_tab=%s)", edit_tab is not None)
+                def _activate_edit_tab() -> None:
+                    _ensure_edit_tab_built()
+                    logger.info("修正タブが選択されました - サブグループリストをリフレッシュします")
+                    if edit_tab is not None and hasattr(edit_tab, '_refresh_subgroup_list'):
+                        edit_tab._refresh_subgroup_list()
+                        logger.info("サブグループリストのリフレッシュが完了しました")
+                    else:
+                        logger.debug("サブグループリフレッシュ機能がスキップされました (edit_tab=%s)", edit_tab is not None)
 
-                if edit_scroll is not None:
-                    _reset_window_height_to_screen(edit_scroll)
+                schedule_deferred_ui_task(tab_widget, "subgroup-create-edit-tab", _activate_edit_tab)
             elif current_text == '一覧':
-                _ensure_listing_tab_built()
+                schedule_deferred_ui_task(tab_widget, "subgroup-create-listing-tab", _ensure_listing_tab_built)
         except Exception as e:
             logger.error("タブ切り替え時のリフレッシュ処理でエラー: %s", e)
 

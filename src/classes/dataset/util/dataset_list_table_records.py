@@ -379,6 +379,75 @@ def clear_dataset_list_cache() -> None:
     _DATASET_LIST_CACHE["created_at"] = 0.0
 
 
+def clear_dataset_list_cache_storage(*, include_persisted: bool = True) -> None:
+    """Clear dataset listing cache including persisted files when requested."""
+
+    clear_dataset_list_cache()
+    if not include_persisted:
+        return
+
+    for path in (_cache_file_path(), _persisted_cache_path()):
+        try:
+            if path and os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            continue
+
+
+def get_dataset_list_cache_metadata() -> Dict[str, Any]:
+    """Return dataset listing cache metadata for diagnostics/UI."""
+
+    paths = [path for path in (_cache_file_path(), _persisted_cache_path()) if path]
+    size_bytes = 0
+    updated_at: Optional[datetime.datetime] = None
+    created_at: Optional[datetime.datetime] = None
+    persisted_count = 0
+
+    for path in paths:
+        try:
+            if not os.path.exists(path):
+                continue
+            stat = os.stat(path)
+            size_bytes += int(stat.st_size)
+            candidate_updated = datetime.datetime.fromtimestamp(stat.st_mtime, tz=datetime.timezone.utc)
+            if updated_at is None or candidate_updated > updated_at:
+                updated_at = candidate_updated
+            payload = _load_json_file(path)
+            if isinstance(payload, dict):
+                created_raw = payload.get("created_at")
+                try:
+                    if created_raw is not None:
+                        candidate_created = datetime.datetime.fromtimestamp(float(created_raw), tz=datetime.timezone.utc)
+                        if created_at is None or candidate_created > created_at:
+                            created_at = candidate_created
+                except Exception:
+                    pass
+                rows = payload.get("rows")
+                if isinstance(rows, list):
+                    persisted_count = max(persisted_count, len(rows))
+        except Exception:
+            continue
+
+    memory_rows = _DATASET_LIST_CACHE.get("rows")
+    memory_count = len(memory_rows) if isinstance(memory_rows, list) else 0
+    created_epoch = float(_DATASET_LIST_CACHE.get("created_at") or 0.0)
+    if created_epoch > 0:
+        memory_created = datetime.datetime.fromtimestamp(created_epoch, tz=datetime.timezone.utc)
+        if created_at is None or memory_created > created_at:
+            created_at = memory_created
+
+    return {
+        "paths": paths,
+        "size_bytes": size_bytes,
+        "item_count": memory_count or persisted_count,
+        "memory_count": memory_count,
+        "persisted_count": persisted_count,
+        "created_at": created_at,
+        "updated_at": updated_at,
+        "active": bool(memory_count or persisted_count or any(os.path.exists(path) for path in paths)),
+    }
+
+
 def _safe_mtime(path: str) -> float:
     if not path:
         return 0.0

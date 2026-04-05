@@ -141,6 +141,48 @@ def _clear_query_cache_for_index(index_payload: dict[str, Any]) -> None:
     _save_query_cache_payload({"signature": signature, "entries": {}})
 
 
+def clear_query_cache() -> None:
+    """Clear persisted and in-memory query cache used by search index lookups."""
+
+    global _QUERY_CACHE_LOADED, _QUERY_CACHE_PAYLOAD
+
+    _QUERY_CACHE_PAYLOAD = {"signature": "", "entries": {}}
+    _QUERY_CACHE_LOADED = True
+
+    path = get_query_cache_path()
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except Exception:
+        pass
+
+
+def get_query_cache_metadata() -> dict[str, Any]:
+    """Return query cache metadata for diagnostics/UI."""
+
+    path = get_query_cache_path()
+    payload = _load_query_cache_payload()
+    entries = payload.get("entries") if isinstance(payload.get("entries"), dict) else {}
+    updated_at = None
+    size_bytes = 0
+    try:
+        if path and os.path.exists(path):
+            stat = os.stat(path)
+            updated_at = datetime.fromtimestamp(stat.st_mtime)
+            size_bytes = int(stat.st_size)
+    except Exception:
+        pass
+
+    return {
+        "path": path,
+        "size_bytes": size_bytes,
+        "item_count": len(entries),
+        "signature": _safe_str(payload.get("signature")),
+        "updated_at": updated_at,
+        "active": bool(entries),
+    }
+
+
 def _query_cache_lookup(index_payload: dict[str, Any], criteria: dict[str, str]) -> set[str] | None:
     cache_key = _criteria_cache_key(criteria)
     if not cache_key:

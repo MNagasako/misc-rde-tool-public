@@ -51,6 +51,110 @@ def _get_window_frame_extra_size(window) -> tuple[int, int]:
         return 0, 0
 
 
+def clamp_window_geometry(window, width: int, height: int, x: int, y: int) -> tuple[int, int, int, int]:
+    """Clamp client geometry so the full frame stays within the available screen."""
+
+    available = get_available_screen_geometry(window)
+    if available is None:
+        return int(width), int(height), int(x), int(y)
+
+    frame_extra_width, frame_extra_height = _get_window_frame_extra_size(window)
+
+    min_width = MAIN_WINDOW_MIN_WIDTH
+    min_height = MAIN_WINDOW_MIN_HEIGHT
+    try:
+        if window is not None and hasattr(window, "minimumWidth"):
+            min_width = max(min_width, int(window.minimumWidth()))
+    except Exception:
+        pass
+    try:
+        if window is not None and hasattr(window, "minimumHeight"):
+            min_height = max(min_height, int(window.minimumHeight()))
+    except Exception:
+        pass
+
+    max_client_width = max(min_width, int(available.width()) - int(frame_extra_width))
+    max_client_height = max(min_height, int(available.height()) - int(frame_extra_height))
+
+    clamped_width = max(min_width, min(int(width), max_client_width))
+    clamped_height = max(min_height, min(int(height), max_client_height))
+
+    frame_width = int(clamped_width) + int(frame_extra_width)
+    frame_height = int(clamped_height) + int(frame_extra_height)
+    min_x = int(available.x())
+    min_y = int(available.y())
+    max_x = int(available.x() + available.width() - frame_width)
+    max_y = int(available.y() + available.height() - frame_height)
+
+    clamped_x = min(max(int(x), min_x), max_x if max_x >= min_x else min_x)
+    clamped_y = min(max(int(y), min_y), max_y if max_y >= min_y else min_y)
+    return clamped_width, clamped_height, clamped_x, clamped_y
+
+
+def resolve_centered_window_geometry(window, width: int, height: int) -> tuple[int, int, int, int]:
+    """Return centered client geometry for an intended size within the available screen."""
+
+    available = get_available_screen_geometry(window)
+    if available is None:
+        return clamp_window_geometry(
+            window,
+            int(width),
+            int(height),
+            int(window.x()) if window is not None and hasattr(window, "x") else 0,
+            int(window.y()) if window is not None and hasattr(window, "y") else 0,
+        )
+
+    frame_extra_width, frame_extra_height = _get_window_frame_extra_size(window)
+    clamped_width, clamped_height, _, _ = clamp_window_geometry(
+        window,
+        int(width),
+        int(height),
+        int(window.x()) if window is not None and hasattr(window, "x") else 0,
+        int(window.y()) if window is not None and hasattr(window, "y") else 0,
+    )
+    frame_width = int(clamped_width) + int(frame_extra_width)
+    frame_height = int(clamped_height) + int(frame_extra_height)
+    target_x = int(available.x() + max(0, (int(available.width()) - frame_width) / 2))
+    target_y = int(available.y() + max(0, (int(available.height()) - frame_height) / 2))
+    return clamp_window_geometry(window, clamped_width, clamped_height, target_x, target_y)
+
+
+def center_window_on_parent(window, parent) -> bool:
+    """Center a top-level window on its parent while keeping it inside the available area."""
+
+    if window is None or parent is None or not hasattr(window, "move"):
+        return False
+    if is_window_maximized(window):
+        return False
+
+    try:
+        parent_frame = parent.frameGeometry() if hasattr(parent, "frameGeometry") else None
+        if parent_frame is None:
+            return center_window_on_screen(window)
+
+        frame = window.frameGeometry() if hasattr(window, "frameGeometry") else None
+        frame_width = int(frame.width()) if frame is not None else int(window.width())
+        frame_height = int(frame.height()) if frame is not None else int(window.height())
+        client_width = int(window.width()) if hasattr(window, "width") else frame_width
+        client_height = int(window.height()) if hasattr(window, "height") else frame_height
+        client_offset_x = int(window.x()) - int(frame.x()) if frame is not None and hasattr(window, "x") else 0
+        client_offset_y = int(window.y()) - int(frame.y()) if frame is not None and hasattr(window, "y") else 0
+
+        target_frame_x = int(parent_frame.center().x() - (frame_width / 2))
+        target_frame_y = int(parent_frame.center().y() - (frame_height / 2))
+        _, _, clamped_x, clamped_y = clamp_window_geometry(
+            window,
+            client_width,
+            client_height,
+            target_frame_x + client_offset_x,
+            target_frame_y + client_offset_y,
+        )
+        window.move(clamped_x, clamped_y)
+        return True
+    except Exception:
+        return False
+
+
 def get_main_window_min_height() -> int:
     """Return the unified main-window minimum height."""
 
