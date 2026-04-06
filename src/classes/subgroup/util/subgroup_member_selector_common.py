@@ -1470,6 +1470,28 @@ class CommonSubgroupMemberSelector(QWidget):
             email_map[user_id] = email_text
 
         return email_map
+
+    def get_effective_user_name_map(self):
+        """現在有効な対象行の user_id -> 表示名マップを返す。"""
+        name_map = {}
+        for row in range(self.table.rowCount()):
+            if self.show_filter and self.table.isRowHidden(row):
+                continue
+
+            owner_radio = self.table.cellWidget(row, 2)
+            if not owner_radio:
+                continue
+
+            user_id = getattr(owner_radio, 'user_id', None)
+            if not user_id:
+                continue
+
+            name_item = self.table.item(row, 0)
+            user_name = str(name_item.text() if name_item else '').strip()
+            if user_name:
+                name_map[user_id] = user_name
+
+        return name_map
     
     def _apply_table_style(self):
         """テーブルスタイル適用（テーマ切替対応）- 初回とリフレッシュで同じスタイル"""

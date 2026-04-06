@@ -40,6 +40,8 @@ import logging
 
 # ロガー設定
 logger = logging.getLogger(__name__)
+_EXISTING_DATASET_COMBO_ASYNC_THRESHOLD = 80
+_EXISTING_DATASET_COMBO_CHUNK_SIZE = 100
 
 
 class _ExistingDatasetLoadWorker(QThread):
@@ -724,8 +726,10 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
     _manager_org_cache: dict[str, str] = {}
     _dataset_load_worker_ref: dict[str, _ExistingDatasetLoadWorker | None] = {"worker": None}
     _dataset_load_run_ref = {"run": None}
+    _existing_combo_population_generation_ref = {"generation": 0}
 
     def _stop_dataset_load_worker() -> None:
+        _existing_combo_population_generation_ref["generation"] += 1
         worker = _dataset_load_worker_ref.get("worker")
         if worker is not None:
             try:
@@ -746,36 +750,109 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
             _dataset_load_run_ref["run"] = None
 
     def _on_datasets_loaded(items: list, all_ids: set, preserve_id: str = "") -> None:
+        _existing_combo_population_generation_ref["generation"] += 1
+        generation = _existing_combo_population_generation_ref["generation"]
         try:
             _all_dataset_ids_ref["ids"] = all_ids
         except Exception:
             pass
-        existing_combo.blockSignals(True)
-        existing_combo.clear()
-        existing_combo.addItem("(選択してください)", "")
-        for label, dsid in items:
-            existing_combo.addItem(label, dsid)
+
         try:
-            if preserve_id:
-                idx = existing_combo.findData(preserve_id)
+            current_selected_id = str(existing_combo.currentData() or "")
+        except Exception:
+            current_selected_id = ""
+        selection_to_restore = current_selected_id or str(preserve_id or "")
+        selection_restored = {"done": False}
+
+        try:
+            existing_combo.blockSignals(True)
+            existing_combo.clear()
+            existing_combo.addItem("(選択してください)", "")
+            existing_combo.setCurrentIndex(-1)
+        finally:
+            existing_combo.blockSignals(False)
+
+        total_items = len(items)
+
+        def _finish_loaded_state() -> None:
+            reload_btn.setEnabled(True)
+            cancel_load_btn.setVisible(False)
+            existing_status_label.setText(f"既存データセット一覧を {total_items} 件読み込みました")
+            run = _dataset_load_run_ref.get("run")
+            if run is not None:
+                run.interactive(item_count=total_items)
+                run.complete(item_count=total_items, total_known_ids=len(all_ids))
+                run.finish(success=True)
+                _dataset_load_run_ref["run"] = None
+
+        def _restore_selection_if_possible() -> None:
+            if selection_restored["done"]:
+                return
+            try:
+                selected_now = str(existing_combo.currentData() or "")
+            except Exception:
+                selected_now = ""
+            if selected_now:
+                selection_restored["done"] = True
+                return
+            if not selection_to_restore:
+                return
+            try:
+                idx = existing_combo.findData(selection_to_restore)
                 if idx >= 0:
                     existing_combo.setCurrentIndex(idx)
-                else:
-                    existing_combo.setCurrentIndex(0)
-            else:
-                existing_combo.setCurrentIndex(0)
-        except Exception:
-            existing_combo.setCurrentIndex(0)
-        existing_combo.blockSignals(False)
-        reload_btn.setEnabled(True)
-        cancel_load_btn.setVisible(False)
-        existing_status_label.setText(f"既存データセット一覧を {len(items)} 件読み込みました")
-        run = _dataset_load_run_ref.get("run")
-        if run is not None:
-            run.interactive(item_count=len(items))
-            run.complete(item_count=len(items), total_known_ids=len(all_ids))
-            run.finish(success=True)
-            _dataset_load_run_ref["run"] = None
+                    selection_restored["done"] = True
+            except Exception:
+                pass
+
+        def _append_chunk(start: int) -> None:
+            if generation != _existing_combo_population_generation_ref["generation"]:
+                return
+            try:
+                app = QApplication.instance()
+            except Exception:
+                app = None
+            if app is None:
+                return
+
+            end = min(start + _EXISTING_DATASET_COMBO_CHUNK_SIZE, total_items)
+
+            try:
+                existing_combo.blockSignals(True)
+                for label, dsid in items[start:end]:
+                    existing_combo.addItem(label, dsid)
+                _restore_selection_if_possible()
+            finally:
+                existing_combo.blockSignals(False)
+
+            if end < total_items:
+                existing_status_label.setText(
+                    f"既存データセット一覧を読み込み中... ({end}/{total_items}件を表示済み)"
+                )
+                QTimer.singleShot(0, lambda: _append_chunk(end))
+                return
+
+            _finish_loaded_state()
+
+        if total_items == 0:
+            _finish_loaded_state()
+            return
+
+        if total_items <= _EXISTING_DATASET_COMBO_ASYNC_THRESHOLD:
+            try:
+                existing_combo.blockSignals(True)
+                for label, dsid in items:
+                    existing_combo.addItem(label, dsid)
+                _restore_selection_if_possible()
+            finally:
+                existing_combo.blockSignals(False)
+            _finish_loaded_state()
+            return
+
+        existing_status_label.setText(
+            f"既存データセット一覧を読み込み中... (0/{total_items}件を表示済み)"
+        )
+        QTimer.singleShot(0, lambda: _append_chunk(0))
 
     def _populate_existing_dataset_combo() -> None:
         preserve_id = ""

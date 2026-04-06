@@ -953,20 +953,29 @@ class SubgroupPayloadBuilder:
         # ユーザー名キャッシュから取得
         from classes.subgroup.core.user_cache_manager import UserCacheManager
         cache_manager = UserCacheManager.instance()
+
+        def _resolve_display_name(role_entry):
+            payload_name = str(
+                role_entry.get('userName')
+                or role_entry.get('displayName')
+                or role_entry.get('memberName')
+                or ''
+            ).strip()
+            if payload_name:
+                return payload_name
+
+            user_id = role_entry.get('userId', '')
+            user_info = cache_manager.get_user(user_id)
+            if user_info and user_info.get('userName'):
+                return user_info['userName']
+
+            return user_id[:10] + "..." if len(user_id) > 10 else user_id
         
         # ロール情報の簡易表示（氏名 + 日本語ロール）
         role_summary = []
         for role in attr.get('roles', []):
-            user_id = role.get('userId', '')
             role_name = role.get('role', '')
-            
-            # ユーザー名をキャッシュから取得
-            user_info = cache_manager.get_user(user_id)
-            if user_info and user_info.get('userName'):
-                display_name = user_info['userName']
-            else:
-                # キャッシュにない場合はIDを表示
-                display_name = user_id[:10] + "..." if len(user_id) > 10 else user_id
+            display_name = _resolve_display_name(role)
             
             # ロールを日本語化
             role_jp = role_translation.get(role_name, role_name)

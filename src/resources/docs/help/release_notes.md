@@ -6,11 +6,21 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.50）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| shared geometry | `ui_controller.py` を更新し、login / subgroup_create / sample_dedup / data_fetch2 / basic_info / data_portal の初回表示も shared geometry manager で制御。 |
-| 右ペインメッセージ | autologin / webview メッセージを WebView 専用フレームへ固定し、非ログイン画面に不要な枠付き領域が出ないよう修正。 |
-| AI提案ダイアログ | `ai_suggestion_dialog.py` で親ウィンドウ中心を基準に初回横位置を決定し、画面内 clamp と併用して配置を安定化。 |
-| データ取得2 一括取得 | `data_fetch2_tab_widget.py` / `bulk_rde_tab.py` で bulk タブの viewport 追従、フィルタコンボ伸縮、選択列チェックボックス化を実施。 |
+| リリース/品質 | リビジョンアップ（v2.5.51）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| 更新履歴タブ | `release_notes_source.py` / `release_notes_tab.py` により、更新履歴タブを `VERSION.txt` 正本から自動生成する構成へ整理。 |
+| サブグループ | payload 側 `userName` と表示中メンバー行を優先し、確認ダイアログとロール抽出で hidden 行や未解決 userId の混在を抑制。 |
+| データセット読込 | `dataset_edit_widget.py` / `dataset_open_widget.py` で既存データセットコンボの非同期分割読込中も表示済み候補の検索・選択を維持。 |
+| 終了制御/ポータル | `thread_registry.py`、`portal_client.py`、`dataset_listing_widget.py` を更新し、アプリ終了時停止ガードと一覧系 worker の cancel 経路を整理。 |
+
+## v2.5.51 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.51）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| 更新履歴タブ | `release_notes_source.py` を追加し、`release_notes_tab.py` が `VERSION.txt` の履歴行から Markdown を生成して表示するよう変更。概要のみを採用し、内部ファイル名や詳細箇条書きはユーザー向けタブへ出さない。 |
+| サブグループ表示 | `subgroup_ui_helpers.py` / `subgroup_api_client.py` を更新し、payload に含まれる `userName` を確認表示へ優先反映。メンバーセレクタでは表示中行だけをロール抽出対象にし、重複メールや hidden 行混在時の不整合を抑制。 |
+| データセット選択 | `dataset_edit_widget.py` / `dataset_open_widget.py` の既存データセットコンボを改善し、分割読込中でも表示済み候補の検索・選択を許可。create2 の既存データセット絞り込みも同方針へ整理。 |
+| 終了制御/ポータル | `thread_registry.py` に aboutToQuit ガードを追加し、`arim_rde_tool.py` から終了時の最終停止処理を接続。`portal_client.py` / `dataset_listing_widget.py` では cancel により session close と worker 停止を行う。 |
 
 ## v2.5.50 の主な更新点
 

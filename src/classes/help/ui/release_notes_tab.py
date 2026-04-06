@@ -18,7 +18,8 @@ except ImportError:
         pass
 
 
-from classes.help.util.markdown_renderer import load_help_markdown, set_markdown_document
+from classes.help.util.markdown_renderer import set_markdown_document
+from classes.help.util.release_notes_source import build_release_notes_markdown
 
 
 class ReleaseNotesTab(QWidget):
@@ -128,9 +129,6 @@ class ReleaseNotesTab(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(10)
 
-        group = QGroupBox("更新履歴")
-        group_layout = QVBoxLayout(group)
-
         self._group = QGroupBox("更新履歴")
         group_layout = QVBoxLayout(self._group)
 
@@ -142,12 +140,12 @@ class ReleaseNotesTab(QWidget):
             pass
 
         try:
-            text, base_dir = load_help_markdown("release_notes.md")
-            set_markdown_document(self._browser, text, base_dir)
+            text = build_release_notes_markdown()
+            set_markdown_document(self._browser, text, None)
         except FileNotFoundError as e:
-            logger.warning("更新履歴ファイルが見つかりません: %s", e)
+            logger.warning("更新履歴ソースファイルが見つかりません: %s", e)
             self._browser.setPlainText(
-                "更新履歴ファイルが見つかりませんでした。src/resources/docs/help/release_notes.md を確認してください。"
+                "更新履歴ソースファイルが見つかりませんでした。VERSION.txt を確認してください。"
             )
         except Exception as e:
             logger.error("更新履歴読み込みエラー: %s", e)

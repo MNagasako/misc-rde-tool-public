@@ -53,6 +53,7 @@ from classes.dataset.util.dataset_listing_export_filename import (
 from classes.managers.log_manager import get_logger
 from classes.ui.utilities.table_export import write_table_export
 from classes.utils.button_styles import get_button_style
+from classes.utils.thread_registry import register_thread
 
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import ThemeManager, get_color
@@ -68,6 +69,63 @@ _ACTIVE_DATASET_LISTING_PORTAL_CSV_THREADS: set[QThread] = set()
 
 
 logger = get_logger("Dataset.ListingWidget")
+
+
+def _attach_cancellable_thread(thread: QThread, worker: QObject, worker_attr_name: str) -> None:
+    def _stop_thread() -> None:
+        try:
+            cancel = getattr(worker, "cancel", None)
+            if callable(cancel):
+                cancel()
+        except Exception:
+            pass
+        try:
+            thread.requestInterruption()
+        except Exception:
+            pass
+        try:
+            thread.quit()
+        except Exception:
+            pass
+
+    try:
+        setattr(thread, "stop", _stop_thread)
+    except Exception:
+        pass
+    try:
+        setattr(thread, worker_attr_name, worker)
+    except Exception:
+        pass
+    register_thread(thread)
+
+
+def _stop_thread_and_wait(thread: Optional[QThread], worker: Optional[QObject] = None, *, wait_ms: int = 300) -> None:
+    if worker is not None:
+        try:
+            cancel = getattr(worker, "cancel", None)
+            if callable(cancel):
+                cancel()
+        except Exception:
+            pass
+    if thread is None:
+        return
+    try:
+        stop = getattr(thread, "stop", None)
+        if callable(stop):
+            stop()
+    except Exception:
+        pass
+    try:
+        if thread.isRunning():
+            thread.wait(wait_ms)
+    except Exception:
+        pass
+    try:
+        if thread.isRunning():
+            thread.terminate()
+            thread.wait(min(wait_ms, 200))
+    except Exception:
+        pass
 
 
 def _build_user_profile_url(user_id: str) -> str:
@@ -2335,17 +2393,7 @@ class DatasetListingWidget(QWidget):
         worker = self._portal_worker
         thread = self._portal_thread
 
-        if worker is not None:
-            try:
-                getattr(worker, "cancel")()
-            except Exception:
-                pass
-
-        if thread is not None and thread.isRunning():
-            try:
-                thread.quit()
-            except Exception:
-                pass
+        _stop_thread_and_wait(thread, worker)
 
         self._portal_thread = None
         self._portal_worker = None
@@ -2353,11 +2401,8 @@ class DatasetListingWidget(QWidget):
 
     def _cancel_portal_csv_fill(self) -> None:
         thread = self._portal_csv_thread
-        if thread is not None and thread.isRunning():
-            try:
-                thread.quit()
-            except Exception:
-                pass
+        worker = self._portal_csv_worker
+        _stop_thread_and_wait(thread, worker)
         self._portal_csv_thread = None
         self._portal_csv_worker = None
         self._refresh_portal_async_progress_button()
@@ -2366,17 +2411,7 @@ class DatasetListingWidget(QWidget):
         worker = self._portal_prefetch_worker
         thread = self._portal_prefetch_thread
 
-        if worker is not None:
-            try:
-                getattr(worker, "cancel")()
-            except Exception:
-                pass
-
-        if thread is not None and thread.isRunning():
-            try:
-                thread.quit()
-            except Exception:
-                pass
+        _stop_thread_and_wait(thread, worker)
 
         self._portal_prefetch_thread = None
         self._portal_prefetch_worker = None
@@ -2698,9 +2733,16 @@ class DatasetListingWidget(QWidget):
             self._tasks = tasks
             self._environment = environment
             self._cancelled = False
+            self._client = None
 
         def cancel(self) -> None:
             self._cancelled = True
+            client = self._client
+            if client is not None:
+                try:
+                    client.cancel()
+                except Exception:
+                    pass
 
         def run(self) -> None:
             from classes.data_portal.core.auth_manager import get_auth_manager
@@ -2725,9 +2767,17 @@ class DatasetListingWidget(QWidget):
                     pass
                 return
 
+            if self._cancelled:
+                try:
+                    self.finished.emit()
+                except Exception:
+                    pass
+                return
+
             try:
                 client = PortalClient(env)
                 client.set_credentials(credentials)
+                self._client = client
             except Exception:
                 try:
                     self.finished.emit()
@@ -2740,6 +2790,7 @@ class DatasetListingWidget(QWidget):
             except Exception:
                 login_ok = False
             if not login_ok:
+                self._client = None
                 try:
                     self.finished.emit()
                 except Exception:
@@ -2781,6 +2832,8 @@ class DatasetListingWidget(QWidget):
                     ok, resp = client.post("main.php", data=data)
                 except Exception:
                     continue
+                if self._cancelled:
+                    break
                 if not ok or not hasattr(resp, "text"):
                     continue
 
@@ -2796,6 +2849,8 @@ class DatasetListingWidget(QWidget):
                         ok, resp = client.post("main.php", data=data)
                     except Exception:
                         continue
+                    if self._cancelled:
+                        break
                     if not ok or not hasattr(resp, "text"):
                         continue
                     html = resp.text or ""
@@ -2819,6 +2874,8 @@ class DatasetListingWidget(QWidget):
                     self.row_ready.emit(int(row_index), label)
                 except Exception:
                     continue
+
+            self._client = None
 
             try:
                 self.finished.emit()
@@ -2878,6 +2935,17 @@ class DatasetListingWidget(QWidget):
             self._dataset_id = str(dataset_id or "").strip()
             self._env_candidates = [str(e or "").strip() for e in (env_candidates or []) if str(e or "").strip()]
             self._worker_env = str(worker_env or "production").strip() or "production"
+            self._cancelled = False
+            self._client = None
+
+        def cancel(self) -> None:
+            self._cancelled = True
+            client = self._client
+            if client is not None:
+                try:
+                    client.cancel()
+                except Exception:
+                    pass
 
         def run(self) -> None:
             dsid = self._dataset_id
@@ -2891,6 +2959,13 @@ class DatasetListingWidget(QWidget):
             logged_in_label = None
             logged_in_checked = False
             error_text: str = ""
+
+            if self._cancelled:
+                try:
+                    self.finished.emit()
+                except Exception:
+                    pass
+                return
 
             # Logged-in check (if credentials available)
             try:
@@ -2914,11 +2989,20 @@ class DatasetListingWidget(QWidget):
                     logged_in_checked = True
                     client = PortalClient(self._worker_env)
                     client.set_credentials(credentials)
+                    self._client = client
                     try:
                         login_ok, _msg = client.login()
                     except Exception as exc:
                         login_ok = False
                         error_text = f"データポータルログインに失敗しました ({self._worker_env}): {exc}"
+
+                    if self._cancelled:
+                        self._client = None
+                        try:
+                            self.finished.emit()
+                        except Exception:
+                            pass
+                        return
 
                     if login_ok:
                         data = {
@@ -2938,6 +3022,14 @@ class DatasetListingWidget(QWidget):
                             if not error_text:
                                 error_text = f"データポータル検索に失敗しました ({self._worker_env}): {exc}"
 
+                        if self._cancelled:
+                            self._client = None
+                            try:
+                                self.finished.emit()
+                            except Exception:
+                                pass
+                            return
+
                         if ok and hasattr(resp, "text"):
                             html = resp.text or ""
                             if "ログイン" in html or "Login" in html or "loginArea" in html:
@@ -2956,6 +3048,14 @@ class DatasetListingWidget(QWidget):
                                         resp = None
                                         if not error_text:
                                             error_text = f"データポータル再検索に失敗しました ({self._worker_env}): {exc}"
+
+                                    if self._cancelled:
+                                        self._client = None
+                                        try:
+                                            self.finished.emit()
+                                        except Exception:
+                                            pass
+                                        return
 
                                     if ok and hasattr(resp, "text"):
                                         html = resp.text or ""
@@ -2981,6 +3081,8 @@ class DatasetListingWidget(QWidget):
                 logged_in_label = None
                 if not error_text:
                     error_text = "データポータル確認処理でエラーが発生しました"
+            finally:
+                self._client = None
 
             # Public (no-login) check
             public_published = False
@@ -3303,10 +3405,7 @@ class DatasetListingWidget(QWidget):
 
         self._portal_status_refresh_threads.add(thread)
         _ACTIVE_DATASET_LISTING_PORTAL_THREADS.add(thread)
-        try:
-            setattr(thread, "_portal_status_refresh_worker", worker)
-        except Exception:
-            pass
+        _attach_cancellable_thread(thread, worker, "_portal_status_refresh_worker")
         try:
             thread.finished.connect(lambda: self._portal_status_refresh_threads.discard(thread))
             thread.finished.connect(lambda: _ACTIVE_DATASET_LISTING_PORTAL_THREADS.discard(thread))
@@ -3610,10 +3709,7 @@ class DatasetListingWidget(QWidget):
         self._portal_thread = thread
 
         _ACTIVE_DATASET_LISTING_PORTAL_THREADS.add(thread)
-        try:
-            setattr(thread, "_portal_worker", worker)
-        except Exception:
-            pass
+        _attach_cancellable_thread(thread, worker, "_portal_worker")
         try:
             thread.finished.connect(lambda: _ACTIVE_DATASET_LISTING_PORTAL_THREADS.discard(thread))
         except Exception:
@@ -3747,10 +3843,7 @@ class DatasetListingWidget(QWidget):
         self._portal_prefetch_thread = thread
 
         _ACTIVE_DATASET_LISTING_PORTAL_THREADS.add(thread)
-        try:
-            setattr(thread, "_portal_prefetch_worker", worker)
-        except Exception:
-            pass
+        _attach_cancellable_thread(thread, worker, "_portal_prefetch_worker")
         try:
             thread.finished.connect(lambda: _ACTIVE_DATASET_LISTING_PORTAL_THREADS.discard(thread))
         except Exception:
@@ -4054,10 +4147,7 @@ class DatasetListingWidget(QWidget):
         self._portal_thread = thread
 
         _ACTIVE_DATASET_LISTING_PORTAL_THREADS.add(thread)
-        try:
-            setattr(thread, "_portal_worker", worker)
-        except Exception:
-            pass
+        _attach_cancellable_thread(thread, worker, "_portal_worker")
         try:
             thread.finished.connect(lambda: _ACTIVE_DATASET_LISTING_PORTAL_THREADS.discard(thread))
         except Exception:
@@ -4073,6 +4163,17 @@ class DatasetListingWidget(QWidget):
         def __init__(self, *, environment: str):
             super().__init__()
             self._environment = str(environment or "production").strip() or "production"
+            self._cancelled = False
+            self._client = None
+
+        def cancel(self) -> None:
+            self._cancelled = True
+            client = self._client
+            if client is not None:
+                try:
+                    client.cancel()
+                except Exception:
+                    pass
 
         def run(self) -> None:
             from classes.data_portal.core.auth_manager import get_auth_manager
@@ -4092,10 +4193,29 @@ class DatasetListingWidget(QWidget):
                     pass
                 return
 
+            if self._cancelled:
+                try:
+                    self.finished.emit()
+                except Exception:
+                    pass
+                return
+
             try:
                 client = PortalClient(env)
                 client.set_credentials(credentials)
+                self._client = client
             except Exception:
+                try:
+                    self.finished.emit()
+                except Exception:
+                    pass
+                return
+
+            if self._cancelled:
+                try:
+                    client.cancel()
+                except Exception:
+                    pass
                 try:
                     self.finished.emit()
                 except Exception:
@@ -4107,6 +4227,17 @@ class DatasetListingWidget(QWidget):
             except Exception:
                 ok = False
             if not ok:
+                try:
+                    self.finished.emit()
+                except Exception:
+                    pass
+                return
+
+            if self._cancelled:
+                try:
+                    client.cancel()
+                except Exception:
+                    pass
                 try:
                     self.finished.emit()
                 except Exception:
@@ -4125,6 +4256,17 @@ class DatasetListingWidget(QWidget):
                     pass
                 return
 
+            if self._cancelled:
+                try:
+                    client.cancel()
+                except Exception:
+                    pass
+                try:
+                    self.finished.emit()
+                except Exception:
+                    pass
+                return
+
             payload = getattr(resp, "content", b"")
             try:
                 from classes.data_portal.core.portal_csv_status import parse_portal_theme_csv_to_label_map
@@ -4137,6 +4279,8 @@ class DatasetListingWidget(QWidget):
                 self.mapping_ready.emit(env, mapping)
             except Exception:
                 pass
+            finally:
+                self._client = None
 
             try:
                 self.finished.emit()
@@ -4184,10 +4328,7 @@ class DatasetListingWidget(QWidget):
         self._portal_csv_thread = thread
 
         _ACTIVE_DATASET_LISTING_PORTAL_CSV_THREADS.add(thread)
-        try:
-            setattr(thread, "_portal_csv_worker", worker)
-        except Exception:
-            pass
+        _attach_cancellable_thread(thread, worker, "_portal_csv_worker")
         try:
             thread.finished.connect(lambda: _ACTIVE_DATASET_LISTING_PORTAL_CSV_THREADS.discard(thread))
         except Exception:

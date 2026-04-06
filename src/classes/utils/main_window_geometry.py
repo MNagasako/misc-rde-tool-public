@@ -67,7 +67,8 @@ def sanitize_geometry_key_part(value: str | None, fallback: str = "default") -> 
 
 class MainWindowGeometryManager(QObject):
     def __init__(self, window, config_manager=None):
-        super().__init__(window)
+        qt_parent = window if isinstance(window, QObject) else None
+        super().__init__(qt_parent)
         self._window = window
         self._config_manager = config_manager or get_config_manager()
         self._mode_key: Optional[str] = None

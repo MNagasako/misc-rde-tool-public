@@ -12,6 +12,9 @@ logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 _threads: WeakSet = WeakSet()
+_shutdown_guard_lock = threading.Lock()
+_guarded_apps: set[int] = set()
+_shutdown_in_progress = False
 
 
 def register_thread(thread) -> None:
@@ -65,6 +68,16 @@ def stop_all(timeout_ms: int = 3000) -> int:
 
     for t in threads:
         try:
+            if hasattr(t, "requestInterruption") and callable(getattr(t, "requestInterruption")):
+                t.requestInterruption()
+        except Exception:
+            logger.debug("ThreadRegistry: requestInterruption() 呼び出し失敗", exc_info=True)
+        try:
+            if hasattr(t, "quit") and callable(getattr(t, "quit")):
+                t.quit()
+        except Exception:
+            logger.debug("ThreadRegistry: quit() 呼び出し失敗", exc_info=True)
+        try:
             if hasattr(t, "stop") and callable(getattr(t, "stop")):
                 t.stop()
         except Exception:
@@ -81,8 +94,17 @@ def stop_all(timeout_ms: int = 3000) -> int:
             if hasattr(t, "isRunning") and t.isRunning():
                 if hasattr(t, "terminate"):
                     t.terminate()
+                    try:
+                        t.wait(min(timeout_ms, 500))
+                    except Exception:
+                        pass
                     forced += 1
                     logger.warning("ThreadRegistry: スレッドを強制終了しました: %s", t)
+        except Exception:
+            pass
+        try:
+            if not (hasattr(t, "isRunning") and t.isRunning()):
+                unregister_thread(t)
         except Exception:
             pass
 
@@ -127,3 +149,39 @@ def has_active_threads() -> bool:
 def active_thread_count() -> int:
     """実行中のスレッド数を返す。"""
     return len(active_threads())
+
+
+def stop_all_for_app_exit(stop_timeout_ms: int = 1500, wait_timeout_ms: int = 2000) -> None:
+    """アプリ終了時の最終停止処理を一度だけ実行する。"""
+    global _shutdown_in_progress
+    with _shutdown_guard_lock:
+        if _shutdown_in_progress:
+            return
+        _shutdown_in_progress = True
+    try:
+        stop_all(timeout_ms=stop_timeout_ms)
+        wait_all(timeout_ms=wait_timeout_ms)
+    finally:
+        with _shutdown_guard_lock:
+            _shutdown_in_progress = False
+
+
+def install_app_shutdown_guard(app) -> bool:
+    """QApplication の aboutToQuit に最終停止処理を接続する。"""
+    if app is None:
+        return False
+
+    app_id = id(app)
+    with _shutdown_guard_lock:
+        if app_id in _guarded_apps:
+            return False
+        _guarded_apps.add(app_id)
+
+    try:
+        app.aboutToQuit.connect(lambda: stop_all_for_app_exit())
+        return True
+    except Exception:
+        with _shutdown_guard_lock:
+            _guarded_apps.discard(app_id)
+        logger.debug("ThreadRegistry: aboutToQuit ガード接続失敗", exc_info=True)
+        return False

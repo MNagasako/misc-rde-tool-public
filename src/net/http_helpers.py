@@ -151,8 +151,9 @@ def proxy_get(url: str, **kwargs) -> requests.Response:
     # 内部制御用オプション（requestsへは渡さない）
     use_new_session = bool(kwargs.pop("use_new_session", False))
     skip_bearer_token = bool(kwargs.pop("skip_bearer_token", False))
+    session_override = kwargs.pop("session", None)
 
-    session = create_new_proxy_session() if use_new_session else get_proxy_session()
+    session = session_override if session_override is not None else (create_new_proxy_session() if use_new_session else get_proxy_session())
     
     # Bearer Token自動付与（ヘッダーに含まれていない場合）
     if 'headers' not in kwargs or kwargs['headers'] is None:
@@ -186,8 +187,9 @@ def proxy_post(url: str, data: Optional[Union[Dict, str, bytes]] = None,
     """
     # 内部制御用オプション（requestsへは渡さない）
     skip_bearer_token = bool(kwargs.pop("skip_bearer_token", False))
+    session_override = kwargs.pop("session", None)
 
-    session = get_proxy_session()
+    session = session_override if session_override is not None else get_proxy_session()
     
     # Bearer Token自動付与
     if 'headers' not in kwargs or kwargs['headers'] is None:

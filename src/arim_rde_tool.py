@@ -144,6 +144,7 @@ class Browser(QWidget):
         self._init_basic_attributes(auto_close, test_mode)
         # UI要素の初期化
         self._init_ui_elements()
+        self._install_shutdown_guards()
 
         # 各種マネージャーの初期化
         self.app_initializer = AppInitializer(self)
@@ -219,6 +220,18 @@ class Browser(QWidget):
 
         if self.test_mode:
             QTimer.singleShot(100, self.quick_test_exit)
+
+    def _install_shutdown_guards(self):
+        """UI破棄時やアプリ終了時にバックグラウンド処理を確実に止める。"""
+        try:
+            from classes.utils.thread_registry import install_app_shutdown_guard, stop_all_for_app_exit
+
+            app = QApplication.instance()
+            if app is not None:
+                install_app_shutdown_guard(app)
+            self.destroyed.connect(lambda *_: stop_all_for_app_exit())
+        except Exception:
+            logger.debug("終了時スレッド停止ガードの設定に失敗", exc_info=True)
 
     def _init_basic_attributes(self, auto_close, test_mode):
         """基本属性の初期化"""

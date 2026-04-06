@@ -205,6 +205,22 @@ class SubgroupCreateHandler:
                 rows = self.member_selector.user_rows or []
         return rows
 
+    def _get_effective_user_name_map(self):
+        name_map = {}
+        if hasattr(self.member_selector, "get_effective_user_name_map"):
+            try:
+                name_map = self.member_selector.get_effective_user_name_map()
+            except Exception:
+                name_map = {}
+        return name_map
+
+    @staticmethod
+    def _attach_display_name(role_payload, user_id, name_map):
+        user_name = str(name_map.get(user_id, "") or "").strip()
+        if user_name:
+            role_payload["userName"] = user_name
+        return role_payload
+
     @staticmethod
     def _resolve_role_name(owner_checked, assistant_checked, member_checked, agent_checked, viewer_checked):
         if owner_checked:
@@ -243,6 +259,8 @@ class SubgroupCreateHandler:
                 email_map = self.member_selector.get_effective_user_email_map()
             except Exception:
                 email_map = {}
+
+        name_map = self._get_effective_user_name_map()
 
         selected_email_to_user = {}
         duplicate_emails = set()
@@ -313,6 +331,7 @@ class SubgroupCreateHandler:
                     "canEditMembers": False,
                 }
 
+            role_payload = self._attach_display_name(role_payload, user_id, name_map)
             roles.append(role_payload)
 
             normalized_email = str(email_map.get(user_id, "") or "").strip().lower()
@@ -363,6 +382,8 @@ class SubgroupCreateHandler:
             except Exception:
                 email_map = {}
 
+        name_map = self._get_effective_user_name_map()
+
         for user_entry in user_rows:
             # 破損したタプルがあっても続行できるように安全に展開
             try:
@@ -374,44 +395,44 @@ class SubgroupCreateHandler:
                 if _is_widget_checked_safe(owner_radio):
                     owner_count += 1
                     owner_id = user_id
-                    roles.append({
+                    roles.append(self._attach_display_name({
                         "userId": user_id,
                         "role": "OWNER",
                         "canCreateDatasets": True,
                         "canEditMembers": True
-                    })
+                    }, user_id, name_map))
                 elif _is_widget_checked_safe(assistant_cb):
                     selected_user_ids.append(user_id)
-                    roles.append({
+                    roles.append(self._attach_display_name({
                         "userId": user_id,
                         "role": "ASSISTANT",
                         "canCreateDatasets": True,
                         "canEditMembers": True
-                    })
+                    }, user_id, name_map))
                 elif _is_widget_checked_safe(member_cb):
                     selected_user_ids.append(user_id)
-                    roles.append({
+                    roles.append(self._attach_display_name({
                         "userId": user_id,
                         "role": "MEMBER",
                         "canCreateDatasets": False,
                         "canEditMembers": False
-                    })
+                    }, user_id, name_map))
                 elif _is_widget_checked_safe(agent_cb):
                     selected_user_ids.append(user_id)
-                    roles.append({
+                    roles.append(self._attach_display_name({
                         "userId": user_id,
                         "role": "AGENT",
                         "canCreateDatasets": False,
                         "canEditMembers": False
-                    })
+                    }, user_id, name_map))
                 elif _is_widget_checked_safe(viewer_cb):
                     selected_user_ids.append(user_id)
-                    roles.append({
+                    roles.append(self._attach_display_name({
                         "userId": user_id,
                         "role": "VIEWER",
                         "canCreateDatasets": False,
                         "canEditMembers": False
-                    })
+                    }, user_id, name_map))
 
                 if roles and roles[-1].get("userId") == user_id:
                     normalized_email = str(email_map.get(user_id, "") or "").strip().lower()
@@ -706,6 +727,20 @@ def prepare_subgroup_create_request(widget, parent, user_rows=None):
     roles = []
     owner_id = None
     owner_count = 0
+    name_map = {}
+
+    member_selector = getattr(widget, 'member_selector', None)
+    if member_selector is not None and hasattr(member_selector, 'get_effective_user_name_map'):
+        try:
+            name_map = member_selector.get_effective_user_name_map()
+        except Exception:
+            name_map = {}
+
+    def _attach_user_name(role_payload, user_id):
+        user_name = str(name_map.get(user_id, '') or '').strip()
+        if user_name:
+            role_payload['userName'] = user_name
+        return role_payload
 
     for entry in user_rows or []:
         try:
@@ -716,44 +751,44 @@ def prepare_subgroup_create_request(widget, parent, user_rows=None):
             if _is_widget_checked_safe(owner_radio):
                 owner_count += 1
                 owner_id = user_id
-                roles.append({
+                roles.append(_attach_user_name({
                     "userId": user_id,
                     "role": "OWNER",
                     "canCreateDatasets": True,
                     "canEditMembers": True
-                })
+                }, user_id))
             elif _is_widget_checked_safe(assistant_cb):
                 selected_user_ids.append(user_id)
-                roles.append({
+                roles.append(_attach_user_name({
                     "userId": user_id,
                     "role": "ASSISTANT",
                     "canCreateDatasets": True,
                     "canEditMembers": True
-                })
+                }, user_id))
             elif _is_widget_checked_safe(member_cb):
                 selected_user_ids.append(user_id)
-                roles.append({
+                roles.append(_attach_user_name({
                     "userId": user_id,
                     "role": "MEMBER",
                     "canCreateDatasets": False,
                     "canEditMembers": False
-                })
+                }, user_id))
             elif _is_widget_checked_safe(agent_cb):
                 selected_user_ids.append(user_id)
-                roles.append({
+                roles.append(_attach_user_name({
                     "userId": user_id,
                     "role": "AGENT",
                     "canCreateDatasets": False,
                     "canEditMembers": False
-                })
+                }, user_id))
             elif _is_widget_checked_safe(viewer_cb):
                 selected_user_ids.append(user_id)
-                roles.append({
+                roles.append(_attach_user_name({
                     "userId": user_id,
                     "role": "VIEWER",
                     "canCreateDatasets": False,
                     "canEditMembers": False
-                })
+                }, user_id))
         except Exception:
             continue
 

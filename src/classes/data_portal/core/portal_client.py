@@ -12,6 +12,8 @@ from typing import Optional, Dict, Any, Tuple
 from urllib.parse import urljoin, urlparse
 
 from net.http_helpers import proxy_get, proxy_post
+from net.config import load_network_config
+from net.session_manager import create_new_proxy_session
 from classes.managers.log_manager import get_logger
 from .auth_manager import PortalCredentials
 from ..conf.config import get_data_portal_config
@@ -56,8 +58,36 @@ class PortalClient:
         self.credentials: Optional[PortalCredentials] = None
         self.authenticated = False
         self.session_cookies = {}
+        self._cancel_requested = False
+        self._session = create_new_proxy_session()
+        self._request_timeout = self._resolve_request_timeout()
         
         logger.info(f"PortalClient 初期化: {environment} 環境 ({self.base_url})")
+
+    def _resolve_request_timeout(self) -> Tuple[float, float]:
+        try:
+            cfg = load_network_config() or {}
+            timeouts = ((cfg.get("network", {}) or {}).get("timeouts", {}) or {})
+            connect_timeout = float(timeouts.get("connect", 10) or 10)
+            read_timeout = float(timeouts.get("read", 30) or 30)
+            return (max(1.0, connect_timeout), max(1.0, read_timeout))
+        except Exception:
+            return (10.0, 30.0)
+
+    def _close_session(self) -> None:
+        try:
+            if self._session is not None:
+                self._session.close()
+        except Exception:
+            pass
+
+    def cancel(self) -> None:
+        self._cancel_requested = True
+        self._close_session()
+
+    def _ensure_not_cancelled(self) -> None:
+        if self._cancel_requested:
+            raise RuntimeError("PortalClient operation cancelled")
     
     def set_credentials(self, credentials: PortalCredentials):
         """
@@ -118,6 +148,7 @@ class PortalClient:
             Tuple[bool, Any]: (成功フラグ, レスポンスまたはエラーメッセージ)
         """
         try:
+            self._ensure_not_cancelled()
             url = self._build_url(path)
             auth = self._get_auth_tuple()
             
@@ -133,7 +164,9 @@ class PortalClient:
                 url,
                 params=params,
                 auth=auth,
-                cookies=self.session_cookies
+                cookies=self.session_cookies,
+                timeout=self._request_timeout,
+                session=self._session,
             )
             
             # 実際に送信されたリクエストヘッダーをログ出力
@@ -164,6 +197,8 @@ class PortalClient:
                 return False, f"ステータスコード: {response.status_code}"
                 
         except Exception as e:
+            if self._cancel_requested:
+                return False, "キャンセルされました"
             logger.error(f"[ERROR] GET リクエストエラー: {e}")
             import traceback
             logger.error(f"[ERROR] Traceback: {traceback.format_exc()}")
@@ -184,6 +219,7 @@ class PortalClient:
             Tuple[bool, Any]: (成功フラグ, レスポンスまたはエラーメッセージ)
         """
         try:
+            self._ensure_not_cancelled()
             url = self._build_url(path)
             auth = self._get_auth_tuple()
             
@@ -205,7 +241,9 @@ class PortalClient:
                 files=files,
                 auth=auth,
                 cookies=self.session_cookies,
-                headers=headers
+                headers=headers,
+                timeout=self._request_timeout,
+                session=self._session,
             )
             
             # 実際に送信されたリクエストヘッダーをログ出力
@@ -236,6 +274,8 @@ class PortalClient:
                 return False, f"ステータスコード: {response.status_code}"
                 
         except Exception as e:
+            if self._cancel_requested:
+                return False, "キャンセルされました"
             logger.error(f"[ERROR] POST リクエストエラー: {e}")
             import traceback
             logger.error(f"[ERROR] Traceback: {traceback.format_exc()}")
@@ -489,6 +529,9 @@ class PortalClient:
         if not self.credentials:
             return False, "認証情報が設定されていません"
 
+        if self._cancel_requested:
+            return False, "キャンセルされました"
+
         if not self.is_authenticated():
             ok, msg = self.login()
             if not ok:
@@ -498,6 +541,9 @@ class PortalClient:
         ok, resp = self.get("main.php", params={"mode": "theme"})
         if not ok or not hasattr(resp, "text"):
             return False, "CSV用トークン取得失敗"
+
+        if self._cancel_requested:
+            return False, "キャンセルされました"
 
         html = resp.text or ""
         code, key = self._extract_csv_tokens_from_html(html)
@@ -530,6 +576,9 @@ class PortalClient:
         ok, resp = self.post("main.php", data=data, headers=headers)
         if not ok:
             return False, resp
+
+        if self._cancel_requested:
+            return False, "キャンセルされました"
 
         # Save CSV for real-world inspection (opt-in via env).
         if os.environ.get("ARIM_PORTAL_SAVE_CSV", "").strip():

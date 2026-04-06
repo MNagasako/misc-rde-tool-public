@@ -35,6 +35,8 @@ from classes.managers.log_manager import get_logger
 logger = get_logger(__name__)
 
 _GLOBAL_REDUNDANT_FILTER_SKIP_LOG_STATE: dict[tuple[str, str, str], float] = {}
+_DATASET_EDIT_COMBO_ASYNC_THRESHOLD = 80
+_DATASET_EDIT_COMBO_CHUNK_SIZE = 100
 
 
 def _should_log_redundant_filter_skip(
@@ -1054,7 +1056,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         
         def combo_key_press_event(event):
             """カーソルキー・ホイール対応のキープレスハンドラ"""
-            if getattr(existing_dataset_combo, "_is_preparing", False):
+            if getattr(existing_dataset_combo, "_is_preparing", False) and not _dataset_combo_has_selectable_items():
                 event.ignore()
                 return
             key = event.key()
@@ -1096,6 +1098,12 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     dataset_selection_widget.setLayout(dataset_selection_layout)
     layout.addWidget(dataset_selection_widget)
 
+    dataset_combo_status_label = QLabel("")
+    dataset_combo_status_label.setObjectName("dataset_edit_combo_status")
+    dataset_combo_status_label.setWordWrap(True)
+    dataset_combo_status_label.setVisible(False)
+    layout.addWidget(dataset_combo_status_label)
+
     # 選択中データセットの日時（JST）+ サブグループ名を表示
     try:
         from classes.utils.dataset_datetime_display import create_dataset_dates_label, attach_dataset_dates_label_with_subgroup
@@ -1134,6 +1142,16 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         dataset_data = existing_dataset_combo.itemData(idx)
         return isinstance(dataset_data, dict) and bool(dataset_data.get("id"))
 
+    def _dataset_combo_has_selectable_items() -> bool:
+        try:
+            for idx in range(existing_dataset_combo.count()):
+                item_data = existing_dataset_combo.itemData(idx)
+                if isinstance(item_data, dict) and item_data.get("id"):
+                    return True
+        except Exception:
+            return False
+        return False
+
     def _update_launch_button_state() -> None:
         enabled = _has_dataset_selection()
         for button in launch_buttons:
@@ -1142,6 +1160,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     # 準備中メッセージ用のタイマーと開始時刻
     _preparing_start_time: float | None = None
     _preparing_total_count: int | None = None
+    _preparing_status_message: str | None = None
     _preparing_timer = QTimer(existing_dataset_combo)
     _preparing_timer.setInterval(1000)
 
@@ -1152,22 +1171,21 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         import time as _time
         elapsed = _time.time() - _preparing_start_time
         elapsed_str = f"{int(elapsed)}秒経過"
-        try:
-            line_edit = existing_dataset_combo.lineEdit()
-        except RuntimeError:
-            _preparing_timer.stop()
-            return
-        if line_edit:
-            base = dataset_combo_preparing_message
-            if _preparing_total_count:
-                base = f"データセット一覧を準備中です... ({_preparing_total_count}件)"
-            line_edit.setText(f"{base} [{elapsed_str}]")
-            line_edit.setCursorPosition(0)
+        base = _preparing_status_message or dataset_combo_preparing_message
+        if _preparing_total_count and _preparing_status_message is None:
+            base = f"データセット一覧を準備中です... ({_preparing_total_count}件)"
+        dataset_combo_status_label.setText(f"{base} [{elapsed_str}]")
+        dataset_combo_status_label.setVisible(True)
 
     _preparing_timer.timeout.connect(_update_preparing_eta)
 
-    def _set_dataset_combo_preparing_state(preparing: bool, message: str | None = None) -> None:
-        nonlocal _preparing_start_time, _preparing_total_count
+    def _set_dataset_combo_preparing_state(
+        preparing: bool,
+        message: str | None = None,
+        *,
+        allow_interaction: bool = False,
+    ) -> None:
+        nonlocal _preparing_start_time, _preparing_total_count, _preparing_status_message
         import time as _time
         status_message = (message or dataset_combo_preparing_message).strip() or dataset_combo_preparing_message
         was_blocked = existing_dataset_combo.signalsBlocked()
@@ -1179,28 +1197,44 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             if preparing:
                 if _preparing_start_time is None:
                     _preparing_start_time = _time.time()
-                existing_dataset_combo.setEnabled(False)
-                existing_dataset_combo.setToolTip(status_message)
-                existing_dataset_combo.clear()
-                existing_dataset_combo.setCurrentIndex(-1)
+                _preparing_status_message = status_message
+                has_items = bool(allow_interaction) or _dataset_combo_has_selectable_items()
+                existing_dataset_combo.setEnabled(has_items)
+                existing_dataset_combo.setToolTip(
+                    status_message + ("\n表示済みの候補は検索・選択できます" if has_items else "")
+                )
+                dataset_combo_status_label.setText(status_message)
+                dataset_combo_status_label.setVisible(True)
+                if not has_items:
+                    existing_dataset_combo.clear()
+                    existing_dataset_combo.setCurrentIndex(-1)
                 if line_edit:
-                    line_edit.setReadOnly(True)
-                    line_edit.setPlaceholderText(status_message)
-                    line_edit.setText(status_message)
-                    line_edit.setCursorPosition(0)
-                    line_edit.setStyleSheet(
-                        f"color: {get_color(ThemeKey.STATUS_ERROR)}; font-weight: bold;"
-                    )
+                    if has_items:
+                        line_edit.setReadOnly(False)
+                        if "準備中" in (line_edit.text() or ""):
+                            line_edit.clear()
+                        if not line_edit.text().strip():
+                            line_edit.setPlaceholderText("表示済み候補から検索・選択")
+                        line_edit.setStyleSheet("")
+                    else:
+                        line_edit.setReadOnly(True)
+                        line_edit.clear()
+                        line_edit.setPlaceholderText(status_message)
+                        line_edit.setStyleSheet(
+                            f"color: {get_color(ThemeKey.STATUS_ERROR)}; font-weight: bold;"
+                        )
                 _preparing_timer.start()
             else:
                 _preparing_start_time = None
                 _preparing_total_count = None
+                _preparing_status_message = None
                 _preparing_timer.stop()
                 existing_dataset_combo.setEnabled(True)
                 existing_dataset_combo.setToolTip(dataset_combo_ready_tooltip)
+                dataset_combo_status_label.clear()
+                dataset_combo_status_label.setVisible(False)
                 if line_edit:
                     line_edit.setReadOnly(False)
-                    line_edit.clear()
                     line_edit.setStyleSheet("")
         finally:
             existing_dataset_combo.blockSignals(was_blocked)
@@ -2179,6 +2213,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             update_override_state["enabled"] = False
         refresh_update_controls(filter_type, grant_number_filter)
 
+    _dataset_combo_population_generation = {"generation": 0}
+
     def update_combo_box_ui(datasets, display_names, filter_type, grant_number_filter, dataset_count):
         """コンボボックスのUIを更新する"""
         nonlocal _preparing_total_count
@@ -2190,29 +2226,108 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         )
         _preparing_total_count = dataset_count or None
         _set_dataset_combo_preparing_state(True, preparing_message)
-        _process_events()
+        _dataset_combo_population_generation["generation"] += 1
+        generation = _dataset_combo_population_generation["generation"]
+
+        def _build_filter_desc() -> str:
+            filter_desc = f"フィルタ: {filter_type}"
+            subgroup_text = ""
+            try:
+                subgroup_text = subgroup_filter_combo.currentText().strip()
+            except Exception:
+                subgroup_text = ""
+            try:
+                subgroup_id = str(subgroup_filter_combo.currentData() or "")
+            except Exception:
+                subgroup_id = ""
+            if subgroup_id and subgroup_text and subgroup_text != "全て":
+                filter_desc += f", サブグループ: '{subgroup_text}'"
+            if grant_number_filter:
+                filter_desc += f", 課題番号: '{grant_number_filter}'"
+            return filter_desc
+
+        def _update_line_edit_placeholder(loaded_count: int) -> None:
+            line_edit = existing_dataset_combo.lineEdit()
+            if not line_edit or line_edit.text().strip():
+                return
+            filter_desc = _build_filter_desc()
+            if dataset_count and loaded_count < dataset_count:
+                line_edit.setPlaceholderText(
+                    f"データセット ({loaded_count}/{dataset_count}件を準備中) から検索... [{filter_desc}]"
+                )
+            else:
+                line_edit.setPlaceholderText(
+                    f"データセット ({dataset_count}件) から検索... [{filter_desc}]"
+                )
+
+        def _refresh_completion_state(loaded_datasets, loaded_display_names) -> None:
+            current_completer = existing_dataset_combo.completer()
+            if current_completer:
+                try:
+                    current_completer.activated.disconnect(on_completer_activated)
+                except Exception:
+                    pass
+                current_completer.deleteLater()
+
+            if loaded_display_names:
+                completer = QCompleter(list(loaded_display_names), existing_dataset_combo)
+                completer.setCaseSensitivity(Qt.CaseInsensitive)
+                completer.setFilterMode(Qt.MatchContains)
+                popup_view = completer.popup()
+                popup_view.setMinimumHeight(240)
+                popup_view.setMaximumHeight(240)
+                existing_dataset_combo.setCompleter(completer)
+                completer.activated.connect(on_completer_activated)
+            else:
+                existing_dataset_combo.setCompleter(None)
+
+            existing_dataset_combo._datasets_cache = list(loaded_datasets)
+            existing_dataset_combo._display_names_cache = list(loaded_display_names)
+            try:
+                existing_dataset_combo._display_to_dataset_map = {
+                    _normalize_display_text(loaded_display_names[i]): loaded_datasets[i]
+                    for i in range(min(len(loaded_display_names), len(loaded_datasets)))
+                    if isinstance(loaded_datasets[i], dict)
+                }
+                logger.debug("display_to_dataset_map 構築完了: %s エントリ", len(existing_dataset_combo._display_to_dataset_map))
+            except Exception as map_err:
+                logger.debug("display_to_dataset_map 構築失敗: %s", map_err)
+            _update_line_edit_placeholder(len(loaded_datasets))
 
         was_blocked = existing_dataset_combo.signalsBlocked()
         existing_dataset_combo.blockSignals(True)
         try:
-            # コンボボックスを完全にクリア（キャッシュも含む）
             existing_dataset_combo.clear()
             if hasattr(existing_dataset_combo, '_datasets_cache'):
                 delattr(existing_dataset_combo, '_datasets_cache')
             if hasattr(existing_dataset_combo, '_display_names_cache'):
                 delattr(existing_dataset_combo, '_display_names_cache')
+            if hasattr(existing_dataset_combo, '_display_to_dataset_map'):
+                delattr(existing_dataset_combo, '_display_to_dataset_map')
 
-            # 既存のCompleterがあればクリア
-            if existing_dataset_combo.completer():
-                existing_dataset_combo.completer().deleteLater()
+            current_completer = existing_dataset_combo.completer()
+            if current_completer:
+                try:
+                    current_completer.activated.disconnect(on_completer_activated)
+                except Exception:
+                    pass
+                current_completer.deleteLater()
 
-            # コンボボックスにアイテムを追加（重要：カーソルキー操作に必要）
-            if not datasets or not display_names:
-                existing_dataset_combo.addItem("-- データセットを選択してください --", None)
-                logger.debug("データセットなし: プレースホルダのみ追加")
-            else:
-                # 全データセットをコンボボックスに追加
-                total_items = min(len(display_names), len(datasets))
+            existing_dataset_combo.addItem("-- データセットを選択してください --", None)
+            existing_dataset_combo.setCurrentIndex(-1)
+        finally:
+            existing_dataset_combo.blockSignals(was_blocked)
+
+        if not datasets or not display_names:
+            logger.debug("データセットなし: プレースホルダのみ追加")
+            _refresh_completion_state([], [])
+            _set_dataset_combo_preparing_state(False)
+            return
+
+        total_items = min(len(display_names), len(datasets))
+        if total_items <= _DATASET_EDIT_COMBO_ASYNC_THRESHOLD:
+            try:
+                existing_dataset_combo.blockSignals(True)
                 for i in range(total_items):
                     display_text = display_names[i]
                     dataset = datasets[i]
@@ -2220,63 +2335,51 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                         existing_dataset_combo.addItem(display_text, dataset)
                     else:
                         logger.warning("データセットが辞書ではありません: index=%s, type=%s", i, type(dataset))
-                    if total_items > 200 and (i % 100 == 0 or i == total_items - 1):
-                        _process_events()
-                logger.debug("コンボボックスに %s 件のアイテムを追加", len(datasets))
-
-            # QCompleterを設定
-            completer = QCompleter(display_names, existing_dataset_combo)
-            completer.setCaseSensitivity(Qt.CaseInsensitive)
-            completer.setFilterMode(Qt.MatchContains)
-            # 検索時の補完リスト（popup）の高さを12行分に制限
-            popup_view = completer.popup()
-            popup_view.setMinimumHeight(240)
-            popup_view.setMaximumHeight(240)
-            existing_dataset_combo.setCompleter(completer)
-            # Completerからの選択シグナルを接続
-            completer.activated.connect(on_completer_activated)
-
-            # プレースホルダーテキストを設定
-            if existing_dataset_combo.lineEdit():
-                filter_desc = f"フィルタ: {filter_type}"
-                subgroup_text = ""
-                try:
-                    subgroup_text = subgroup_filter_combo.currentText().strip()
-                except Exception:
-                    subgroup_text = ""
-                try:
-                    subgroup_id = str(subgroup_filter_combo.currentData() or "")
-                except Exception:
-                    subgroup_id = ""
-                if subgroup_id and subgroup_text and subgroup_text != "全て":
-                    filter_desc += f", サブグループ: '{subgroup_text}'"
-                if grant_number_filter:
-                    filter_desc += f", 課題番号: '{grant_number_filter}'"
-                existing_dataset_combo.lineEdit().setPlaceholderText(f"データセット ({dataset_count}件) から検索... [{filter_desc}]")
-
-            # データセット一覧をComboBoxに保存（mousePressEvent用）
-            existing_dataset_combo._datasets_cache = datasets
-            existing_dataset_combo._display_names_cache = display_names
-            # 表示テキスト→データセット(dict)の高速マップを構築（Completer選択用）
-            # キーを正規化してCompleter選択時のマッチング精度を向上
-            try:
-                existing_dataset_combo._display_to_dataset_map = {
-                    _normalize_display_text(display_names[i]): datasets[i]
-                    for i in range(min(len(display_names), len(datasets)))
-                    if isinstance(datasets[i], dict)
-                }
-                logger.debug("display_to_dataset_map 構築完了: %s エントリ", len(existing_dataset_combo._display_to_dataset_map))
-            except Exception as map_err:
-                logger.debug("display_to_dataset_map 構築失敗: %s", map_err)
-
-            # コンボを未選択状態にする（ヘッダー/プレースホルダのみ）
-            try:
-                existing_dataset_combo.setCurrentIndex(-1)
-            except Exception:
-                pass
-        finally:
-            existing_dataset_combo.blockSignals(was_blocked)
+            finally:
+                existing_dataset_combo.blockSignals(False)
+            _refresh_completion_state(datasets[:total_items], display_names[:total_items])
+            logger.debug("コンボボックスに %s 件のアイテムを追加", total_items)
             _set_dataset_combo_preparing_state(False)
+            return
+
+        loaded_datasets = []
+        loaded_display_names = []
+
+        def _append_chunk(start_index: int) -> None:
+            if generation != _dataset_combo_population_generation["generation"]:
+                return
+
+            end_index = min(start_index + _DATASET_EDIT_COMBO_CHUNK_SIZE, total_items)
+            combo_was_blocked = existing_dataset_combo.signalsBlocked()
+            existing_dataset_combo.blockSignals(True)
+            try:
+                for index in range(start_index, end_index):
+                    display_text = display_names[index]
+                    dataset = datasets[index]
+                    if isinstance(dataset, dict):
+                        existing_dataset_combo.addItem(display_text, dataset)
+                        loaded_datasets.append(dataset)
+                        loaded_display_names.append(display_text)
+                    else:
+                        logger.warning("データセットが辞書ではありません: index=%s, type=%s", index, type(dataset))
+            finally:
+                existing_dataset_combo.blockSignals(combo_was_blocked)
+
+            _refresh_completion_state(loaded_datasets, loaded_display_names)
+            logger.debug("コンボボックスに %s/%s 件のアイテムを追加", len(loaded_datasets), total_items)
+
+            if end_index < total_items:
+                _set_dataset_combo_preparing_state(
+                    True,
+                    f"データセット一覧を準備中です... ({len(loaded_datasets)}/{total_items}件を表示済み、表示済み候補は検索・選択できます)",
+                    allow_interaction=bool(loaded_datasets),
+                )
+                QTimer.singleShot(0, lambda: _append_chunk(end_index))
+                return
+
+            _set_dataset_combo_preparing_state(False)
+
+        QTimer.singleShot(0, lambda: _append_chunk(0))
 
     # データセット情報を読み込んでドロップダウンに追加
     def load_existing_datasets(
@@ -2534,7 +2637,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             if not hasattr(existing_dataset_combo, '_mouse_press_event_set'):
                 orig_mouse_press = existing_dataset_combo.mousePressEvent
                 def combo_mouse_press_event(event):
-                    if getattr(existing_dataset_combo, "_is_preparing", False):
+                    if getattr(existing_dataset_combo, "_is_preparing", False) and not _dataset_combo_has_selectable_items():
                         event.ignore()
                         return
                     # ドロップダウンボタンクリック時は常に全リスト表示
