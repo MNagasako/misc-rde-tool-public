@@ -527,6 +527,7 @@ class DataFetch2BulkDpTab(QWidget):
 
     def __init__(self, parent: QWidget | None = None, *, async_bootstrap: bool | None = None):
         super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self._all_records: list[dict] = []
         self._records: list[dict] = []
         self._current_page = 1
@@ -765,8 +766,9 @@ class DataFetch2BulkDpTab(QWidget):
         self.table = QTableWidget(0, len(self.COLUMNS), self)
         self.table.setHorizontalHeaderLabels(self.COLUMNS)
         self.table.setSortingEnabled(True)
-        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.MinimumExpanding)
+        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.table.setMinimumHeight(240)
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         hh = self.table.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.Interactive)
         self.table.verticalHeader().setSectionResizeMode(QHeaderView.Interactive)

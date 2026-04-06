@@ -888,6 +888,22 @@ class AISuggestionDialog(QDialog):
             screen = QApplication.primaryScreen()
         return screen.availableGeometry() if screen is not None else None
 
+    def _anchor_horizontal_center_x(self) -> Optional[int]:
+        anchor = self._dialog_anchor_window()
+        if anchor is None:
+            return None
+
+        try:
+            frame = anchor.frameGeometry()
+            return int(frame.x() + (frame.width() / 2))
+        except Exception:
+            pass
+
+        try:
+            return int(anchor.x() + (anchor.width() / 2))
+        except Exception:
+            return None
+
     def _clamp_geometry(self, width: int, height: int, x: int, y: int):
         geo = self._available_screen_geometry()
         if geo is None:
@@ -932,7 +948,11 @@ class AISuggestionDialog(QDialog):
             frame_width = client_width + frame_extra_width
             frame_height = client_height + frame_extra_height
 
-            target_frame_x = int(geo.x() + max(0, (int(geo.width()) - frame_width) / 2))
+            anchor_center_x = self._anchor_horizontal_center_x()
+            if anchor_center_x is not None:
+                target_frame_x = int(anchor_center_x - (frame_width / 2))
+            else:
+                target_frame_x = int(geo.x() + max(0, (int(geo.width()) - frame_width) / 2))
             target_frame_y = int(geo.y() + max(0, (int(geo.height()) - frame_height) / 2))
             max_x = int(geo.right() - frame_width + 1)
             max_y = int(geo.bottom() - frame_height + 1)
@@ -1011,15 +1031,17 @@ class AISuggestionDialog(QDialog):
         horizontal_margin = int(self._INITIAL_HORIZONTAL_SCREEN_MARGIN) * 2
         target_width = max(480, int(geo.width()) - horizontal_margin - frame_extra_width)
 
+        parent_width = self._dialog_anchor_initial_width()
+        if parent_width is not None:
+            target_width = max(480, min(target_width, int(parent_width)))
+
         if self._tab_title(index) == "ファイル抽出設定":
-            parent_width = self._dialog_anchor_initial_width()
             if parent_width is not None:
                 target_width = max(480, min(target_width, int(parent_width)))
 
-        vertical_margin = int(self._INITIAL_VERTICAL_SCREEN_MARGIN) * 2
         target_height = max(
             max(320, self.minimumHeight()),
-            int(geo.height()) - vertical_margin - frame_extra_height,
+            int(geo.height()) - frame_extra_height,
         )
         return target_width, target_height
 

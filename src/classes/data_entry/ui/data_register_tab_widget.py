@@ -9,7 +9,7 @@
 import logging
 import os
 from qt_compat.widgets import (
-    QWidget, QVBoxLayout, QTabWidget, QLabel, QScrollArea, QSizePolicy, QApplication, QGroupBox
+    QWidget, QVBoxLayout, QTabWidget, QLabel, QScrollArea, QSizePolicy
 )
 from qt_compat.core import QTimer, Qt
 from qt_compat.gui import QFont
@@ -20,12 +20,6 @@ from classes.data_entry.conf.ui_constants import (
     get_data_register_tab_style,
     get_data_register_form_style,
     get_scroll_area_style,
-    TAB_HEIGHT_RATIO,
-)
-from classes.utils.window_sizing import (
-    clear_main_window_size_constraints,
-    is_window_maximized,
-    resize_main_window,
 )
 from classes.utils.ui_responsiveness import schedule_deferred_ui_task, start_ui_responsiveness_run
 
@@ -57,19 +51,7 @@ class DataRegisterTabWidget(QWidget):
         self._status_tab_index = None
         self._listing_tab_index = None
         self._mail_tab_index = None
-        # タブごとにウィンドウサイズを独立管理する（他タブと共通化しない）
-        # key: tab index, value: QSize
-        self._tab_window_sizes: dict[int, object] = {}
         self._current_tab_index: int | None = None
-        # 「その他タブ」（例: メール通知タブ等）で復元するウィンドウサイズ
-        self._last_other_window_size = None
-        # showEvent/WindowActivate 経由で同一タブに対して _on_tab_changed が再実行されることがある。
-        # その際に resize() を再適用すると、ユーザーが調整した幅が戻る原因になるため、最後に適用したタブを記録する。
-        self._last_tab_index_applied = None
-        # タブ初回表示時のみ「位置調整」を行うためのフラグ
-        self._tab_window_positions_applied: set[int] = set()
-        # タブ初回表示時のみ「初期サイズ調整」を行うためのフラグ
-        self._tab_window_initial_sizes_applied: set[int] = set()
         self._lazy_building = False
         self.setup_ui()
         

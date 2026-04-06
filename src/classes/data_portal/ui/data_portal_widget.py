@@ -15,7 +15,6 @@ from qt_compat.core import Signal, QTimer
 from classes.managers.log_manager import get_logger
 from classes.theme import ThemeKey, get_color
 from classes.utils.ui_responsiveness import schedule_deferred_ui_task, start_ui_responsiveness_run
-from classes.utils.window_sizing import is_window_maximized
 from .login_settings_tab import LoginSettingsTab
 if TYPE_CHECKING:
     from .master_data_tab import MasterDataTab
@@ -63,10 +62,7 @@ class DataPortalWidget(QWidget):
         self.listing_tab = None
         self._listing_placeholder = None
 
-        self._tab_window_sizes: dict[int, object] = {}
-        self._tab_window_positions: dict[int, tuple[int, int]] = {}
         self._current_tab_index: int | None = None
-        self._applying_tab_window_state = False
         self._last_theme_refresh_mode: str | None = None
         self._replacing_tab = False
 
@@ -322,12 +318,6 @@ class DataPortalWidget(QWidget):
 
     def _finalize_tab_change(self, index: int) -> None:
         self._refresh_tab_theme(index)
-
-    def _save_current_window_state(self) -> None:
-        return
-
-    def _restore_window_state(self, index: int) -> None:
-        return
 
     def _ensure_master_tab(self, run=None) -> None:
         if self.master_data_tab is not None:

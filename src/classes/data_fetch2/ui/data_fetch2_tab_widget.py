@@ -14,7 +14,7 @@ try:
         QLabel, QPushButton, QLineEdit, QApplication,
         QScrollArea, QGroupBox, QGridLayout, QComboBox,
         QTextEdit, QListWidget, QTreeWidget, QTreeWidgetItem,
-        QCheckBox, QSpinBox
+        QCheckBox, QSpinBox, QSizePolicy
     )
     from qt_compat.core import Qt
     from qt_compat.core import QTimer
@@ -24,6 +24,7 @@ except ImportError:
     PYQT5_AVAILABLE = False
     class QWidget: pass
     class QTabWidget: pass
+    class QSizePolicy: pass
 
 from classes.theme import ThemeKey
 from classes.theme.theme_manager import get_color
@@ -111,11 +112,12 @@ class DataFetch2TabWidget(QTabWidget):
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
         container = QWidget(scroll)
+        container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        content_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
-        container_layout.addWidget(content_widget)
-        container_layout.addStretch(1)
+        container_layout.addWidget(content_widget, 1)
         scroll.setWidget(container)
         return scroll
 
@@ -209,7 +211,12 @@ class DataFetch2TabWidget(QTabWidget):
         # プレウォーム（初回描画のあとに構築）
         try:
             if self._prewarm_filter_widget:
-                QTimer.singleShot(self._prewarm_filter_delay_ms, self._ensure_file_filter_widget)
+                schedule_deferred_ui_task(
+                    self,
+                    "data-fetch2-filter-tab-prewarm",
+                    self._ensure_file_filter_widget,
+                    delay_ms=self._prewarm_filter_delay_ms,
+                )
         except Exception:
             pass
 

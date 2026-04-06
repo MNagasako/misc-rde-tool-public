@@ -6,11 +6,22 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.49）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
-| メインウィンドウ geometry | `main_window_geometry.py` / `window_sizing.py` を更新し、対象タブの初回表示 size/center を一括計算化。 |
-| geometry migration | `dataset_open` の「新規開設 / 新規開設2」と `data_register` の「通常登録」は、旧保存 geometry を `geometry_revision` で 1 回だけ無効化。 |
-| キャッシュ管理 | 設定の「キャッシュ」タブを direct-fill + 非同期更新 UI にし、更新可否と再生成経路を registry で一元化。 |
-| キャッシュ更新対象 | 登録状況、公開 `output.json` ID、公開一覧 ID、プロンプト辞書サマリ、MI / EQUIPMENTS ローダーを安全に再生成可能化。 |
+| リリース/品質 | リビジョンアップ（v2.5.50）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| shared geometry | `ui_controller.py` を更新し、login / subgroup_create / sample_dedup / data_fetch2 / basic_info / data_portal の初回表示も shared geometry manager で制御。 |
+| 右ペインメッセージ | autologin / webview メッセージを WebView 専用フレームへ固定し、非ログイン画面に不要な枠付き領域が出ないよう修正。 |
+| AI提案ダイアログ | `ai_suggestion_dialog.py` で親ウィンドウ中心を基準に初回横位置を決定し、画面内 clamp と併用して配置を安定化。 |
+| データ取得2 一括取得 | `data_fetch2_tab_widget.py` / `bulk_rde_tab.py` で bulk タブの viewport 追従、フィルタコンボ伸縮、選択列チェックボックス化を実施。 |
+
+## v2.5.50 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.50）。VERSION/README/配布物/ヘルプ/ドキュメントのバージョン表記を更新。 |
+| shared geometry | `ui_controller.py` と関連 widget を更新し、`dataset_open` / `data_register` の revision 更新に加え、login / subgroup_create / sample_dedup / data_fetch2 / basic_info / data_portal の初回表示も shared geometry manager に統一。 |
+| geometry の重複制御整理 | `data_portal_widget.py`、`portal_listing_tab.py`、`dataset_open_widget.py`、`data_register_tab_widget.py` の局所的な初回サイズ・位置処理を整理し、親ウィンドウの不要な resize を抑制。 |
+| 右ペインメッセージ | `ui_controller.py` で autologin / webview メッセージラベルを WebView 専用フレームへ固定し、右ペイン上部の不要な枠表示を解消。 |
+| AI提案ダイアログ | `ai_suggestion_dialog.py` で親ウィンドウ中心基準の初回横位置計算を追加し、画面外へはみ出さない clamp と組み合わせて配置を安定化。 |
+| データ取得2 一括取得 | `data_fetch2_tab_widget.py` / `bulk_rde_tab.py` で bulk タブ wrapper を expanding 化し、フィルタコンボの伸縮、選択列のチェックボックスウィジェット化、行の視覚状態更新を改善。 |
 
 ## v2.5.49 の主な更新点
 

@@ -420,6 +420,10 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
         """フィルタリング設定を適用してコンボボックスを更新"""
         try:
             t0 = time.perf_counter()
+            try:
+                previous_dataset_id = combo.currentData()
+            except Exception:
+                previous_dataset_id = None
             # フィルタ設定を取得
             share_filter_types = {0: "both", 1: "enabled", 2: "disabled"}
             member_filter_types = {0: "both", 1: "member", 2: "non_member"}
@@ -574,9 +578,16 @@ def create_dataset_dropdown_all(dataset_json_path, parent, global_share_filter="
             filtered_count = len(filtered_datasets)
             count_label.setText(f"表示中: {filtered_count}/{total_count} 件")
             combo.setEnabled(True)
-            
-            # 何も選択されていない状態にし、プレースホルダを表示
-            combo.setCurrentIndex(-1)
+
+            restored_index = -1
+            if previous_dataset_id:
+                for i in range(combo.count()):
+                    if combo.itemData(i) == previous_dataset_id:
+                        restored_index = i
+                        break
+
+            # 直前の選択候補が残っていれば維持し、無ければ空状態へ戻す
+            combo.setCurrentIndex(restored_index)
             # 初期状態は検索可能にする
             if combo.lineEdit():
                 combo.lineEdit().setReadOnly(False)

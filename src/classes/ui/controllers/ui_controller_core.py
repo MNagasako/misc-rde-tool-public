@@ -844,6 +844,7 @@ class UIControllerCore:
             
             # 待機メッセージ用の専用フレーム
             message_frame = QWidget()
+            message_frame.setObjectName('webview_message_frame')
             message_frame.setStyleSheet(f'''
                 QWidget {{
                     background-color: {get_color(ThemeKey.PANEL_BACKGROUND)};
@@ -855,6 +856,8 @@ class UIControllerCore:
             message_layout = QVBoxLayout()
             message_layout.setContentsMargins(10, 5, 10, 5)
             message_layout.setSpacing(3)
+            self.parent.webview_message_frame = message_frame
+            self.parent.webview_message_layout = message_layout
             
             # 待機メッセージラベル（目立つ位置）
             message_layout.addWidget(self.parent.autologin_msg_label)
@@ -1010,8 +1013,20 @@ class UIControllerCore:
             from config.common import DEBUG_INFO_FILE, LOGIN_FILE
             
             self.parent.show()
-            fit_main_window_height_to_screen(self.parent)
-            self.center_window()
+            geometry_applied = False
+            try:
+                ensure_manager = getattr(self, '_ensure_main_window_geometry_manager', None)
+                if callable(ensure_manager):
+                    manager = ensure_manager()
+                    if manager is not None:
+                        manager.apply_current_geometry()
+                        geometry_applied = True
+            except Exception:
+                logger.debug("shared main window geometry apply failed during finalize", exc_info=True)
+
+            if not geometry_applied:
+                fit_main_window_height_to_screen(self.parent)
+                self.center_window()
 
             try:
                 self.parent._initial_window_client_width = int(self.parent.width())

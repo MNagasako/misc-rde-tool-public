@@ -55,8 +55,6 @@ from classes.ui.utilities.table_export import write_record_export
 from classes.theme import ThemeKey, get_color
 from classes.theme import get_qcolor
 from classes.utils.button_styles import get_button_style
-from classes.utils.window_sizing import resize_main_window
-
 from classes.data_portal.core.portal_csv_full import (
     extract_code as extract_managed_code,
     extract_dataset_id as extract_managed_dataset_id,
@@ -649,7 +647,6 @@ class PortalListingTab(QWidget):
         self._filter_mode: str = "all"  # all | group
         self._filter_group_kind: str = "fixed"  # fixed | managed_group | managed_raw
         self._display_mode: str = "default"  # default | compact | equal
-        self._did_apply_initial_width: bool = False
         self._did_apply_initial_layout: bool = False
         self._populate_token: int = 0
         self._pending_rows: list[dict[str, Any]] = []
@@ -1056,22 +1053,6 @@ class PortalListingTab(QWidget):
         try:
             QtCore.QTimer.singleShot(0, self._relayout_filter_fields)
             QtCore.QTimer.singleShot(120, self._relayout_filter_fields)
-        except Exception:
-            pass
-        if self._did_apply_initial_width or self._is_running_under_pytest():
-            return
-        self._did_apply_initial_width = True
-        try:
-            win = self.window()
-            screen = win.screen() if win is not None else None
-            if screen is None:
-                screen = QtGui.QGuiApplication.primaryScreen()
-            if screen is None:
-                return
-            avail = screen.availableGeometry()
-            target_w = int(avail.width() * 0.9)
-            if target_w > 0 and win is not None:
-                resize_main_window(win, target_w, win.height())
         except Exception:
             pass
         self._apply_initial_layout_once()

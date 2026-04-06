@@ -2473,32 +2473,9 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     tab_widget = QTabWidget()
     main_widget._dataset_tab_widget = tab_widget  # type: ignore[attr-defined]
 
-    # タブごとのウィンドウサイズを独立管理
     tab_window_state: dict[str, object] = {
         "last_index": -1,
-        "saved_sizes": {},
     }
-
-    def _login_mode_like_width(window) -> int:
-        try:
-            webview_width = int(getattr(window, '_webview_fixed_width', 900) or 900)
-        except Exception:
-            webview_width = 900
-        menu_width = 120
-        margin = 40
-        return max(200, webview_width + menu_width + margin)
-
-    def _tab_key(index: int) -> str:
-        try:
-            return str(tab_widget.tabText(index) or f"tab_{index}")
-        except Exception:
-            return f"tab_{index}"
-
-    def _save_window_size_for_tab(index: int) -> None:
-        return
-
-    def _apply_window_size_for_tab(index: int) -> None:
-        return
 
     def _defer_tab_action(key: str, callback) -> None:
         schedule_deferred_ui_task(tab_widget, f"dataset-open-{key}", callback)
@@ -2881,10 +2858,6 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     def on_tab_changed(index):
         """タブ切り替え時の処理"""
         try:
-            previous_index = int(tab_window_state.get("last_index", -1) or -1)
-            if previous_index >= 0 and previous_index != index:
-                _save_window_size_for_tab(previous_index)
-
             current_tab = tab_widget.widget(index)
             if create2_idx >= 0 and index == create2_idx:
                 _defer_tab_action("create2", _ensure_create2_built)
@@ -2915,7 +2888,6 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
                 _defer_tab_action("listing", _ensure_listing_built)
                 logger.info("一覧タブが選択されました")
 
-            _apply_window_size_for_tab(index)
             tab_window_state["last_index"] = index
         except Exception as e:
             logger.error("タブ切り替え時のリフレッシュ処理でエラー: %s", e)

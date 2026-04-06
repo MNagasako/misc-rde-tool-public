@@ -196,7 +196,16 @@ class UIController(UIControllerCore):
         tab_title = str(context.tab_title or "")
         fixed_login_width = self._login_mode_fixed_width()
 
-        if mode in {"login", "data_fetch"}:
+        if mode == "login":
+            return MainWindowGeometryPolicy(
+                preferred_width=fixed_login_width,
+                width_ratio=None,
+                height_ratio=1.0,
+                fit_available_height_on_first_show=True,
+                geometry_revision=1,
+                min_width=fixed_login_width,
+            )
+        if mode == "data_fetch":
             return MainWindowGeometryPolicy(
                 preferred_width=fixed_login_width,
                 width_ratio=None,
@@ -208,14 +217,19 @@ class UIController(UIControllerCore):
                 return MainWindowGeometryPolicy(width_ratio=0.95, height_ratio=1.0)
             if tab_title == "閲覧・修正":
                 return MainWindowGeometryPolicy(width_ratio=0.92, height_ratio=1.0)
-            return MainWindowGeometryPolicy(width_ratio=0.82, height_ratio=1.0)
+            return MainWindowGeometryPolicy(
+                width_ratio=0.82,
+                height_ratio=1.0,
+                fit_available_height_on_first_show=True,
+                geometry_revision=1,
+            )
         if mode == "dataset_open":
             if tab_title in {"新規開設", "新規開設2"}:
                 return MainWindowGeometryPolicy(
                     preferred_width=fixed_login_width,
                     height_ratio=1.0,
                     fit_available_height_on_first_show=True,
-                    geometry_revision=1,
+                    geometry_revision=2,
                     min_width=fixed_login_width,
                 )
             if tab_title == "一覧":
@@ -231,22 +245,46 @@ class UIController(UIControllerCore):
                     preferred_width=1200,
                     height_ratio=1.0,
                     fit_available_height_on_first_show=True,
-                    geometry_revision=1,
+                    geometry_revision=2,
                 )
             if tab_title in {"一括登録", "一覧", "登録状況", "✉️ メール通知"}:
                 return MainWindowGeometryPolicy(width_ratio=0.95, height_ratio=1.0)
             return MainWindowGeometryPolicy(width_ratio=0.9, height_ratio=1.0)
         if mode == "sample_dedup":
-            return MainWindowGeometryPolicy(width_ratio=0.95, height_ratio=1.0)
+            return MainWindowGeometryPolicy(
+                width_ratio=0.95,
+                height_ratio=1.0,
+                fit_available_height_on_first_show=True,
+                geometry_revision=1,
+            )
         if mode == "data_fetch2":
             if tab_title in {"📦 一括取得（RDE）", "🌐 一括取得（DP）", "🔍 ファイルフィルタ"}:
                 return MainWindowGeometryPolicy(width_ratio=0.95, height_ratio=1.0)
-            return MainWindowGeometryPolicy(width_ratio=0.9, height_ratio=1.0)
+            return MainWindowGeometryPolicy(
+                width_ratio=0.9,
+                height_ratio=1.0,
+                fit_available_height_on_first_show=True,
+                geometry_revision=1,
+            )
         if mode == "basic_info":
+            if tab_title == "基本情報":
+                return MainWindowGeometryPolicy(
+                    width_ratio=0.88,
+                    height_ratio=1.0,
+                    fit_available_height_on_first_show=True,
+                    geometry_revision=1,
+                )
             if tab_title == "XLSX":
                 return MainWindowGeometryPolicy(width_ratio=0.92, height_ratio=1.0)
             return MainWindowGeometryPolicy(width_ratio=0.88, height_ratio=1.0)
         if mode == "data_portal":
+            if tab_title == "🔐 ログイン設定":
+                return MainWindowGeometryPolicy(
+                    width_ratio=0.95,
+                    height_ratio=1.0,
+                    fit_available_height_on_first_show=True,
+                    geometry_revision=1,
+                )
             return MainWindowGeometryPolicy(width_ratio=0.95, height_ratio=1.0)
         if mode == "settings":
             return MainWindowGeometryPolicy(width_ratio=0.92, height_ratio=1.0)
@@ -371,49 +409,42 @@ class UIController(UIControllerCore):
 
     def update_message_labels_position(self, mode):
         """
-        autologin_msg_label/webview_msg_labelの位置をメニューごとに動的に再配置
+        autologin/webview メッセージを WebView 専用フレームへ固定する。
+
+        以前は WebView 非表示時に menu_area の先頭へ差し替えていたが、
+        起動直後の非ログインモードでも起動タイマー由来のバナーが露出し、
+        右ペイン上部に不要な枠付き領域が現れていた。
         """
-        # 親ウィジェットのレイアウト構造を前提とする
         parent = self.parent
         if not hasattr(parent, 'autologin_msg_label') or not hasattr(parent, 'webview_msg_label'):
             return
-        # WebViewが表示されている場合はwebview_widget直下に詰めて表示
-        if hasattr(parent, 'webview') and parent.webview.isVisible():
-            # webview_widgetのvboxレイアウトを取得
-            webview_widget = parent.findChild(QWidget, 'webview_widget')
-            vbox = None
-            if webview_widget:
-                vbox = webview_widget.layout()
-            # fallback: 直接親レイアウトを取得
-            if vbox is None and hasattr(parent, 'webview'):
-                vbox = parent.webview.parentWidget().layout()
-            # 既存のラベルを一度取り除く
-            for label in [parent.autologin_msg_label, parent.webview_msg_label]:
-                if label.parent() and label.parent().layout():
-                    label.parent().layout().removeWidget(label)
-            # WebView直下に追加
-            if vbox:
-                vbox.addWidget(parent.autologin_msg_label)
-                vbox.addWidget(parent.webview_msg_label)
-        else:
-            # WebView非表示時はmenu_area_layoutの一番上に追加
-            if hasattr(parent, 'menu_area_layout'):
-                target_parent = None
-                try:
-                    target_parent = parent.menu_area_layout.parentWidget()
-                except Exception:
-                    target_parent = getattr(parent, 'menu_area_widget', None)
-                if (
-                    target_parent is not None
-                    and parent.autologin_msg_label.parent() is target_parent
-                    and parent.webview_msg_label.parent() is target_parent
-                ):
-                    return
-                for label in [parent.autologin_msg_label, parent.webview_msg_label]:
-                    if label.parent() and label.parent().layout():
-                        label.parent().layout().removeWidget(label)
-                parent.menu_area_layout.insertWidget(0, parent.webview_msg_label)
-                parent.menu_area_layout.insertWidget(0, parent.autologin_msg_label)
+        message_layout = getattr(parent, 'webview_message_layout', None)
+        message_frame = getattr(parent, 'webview_message_frame', None)
+
+        if message_layout is None:
+            message_frame = parent.findChild(QWidget, 'webview_message_frame')
+            if message_frame is not None:
+                message_layout = message_frame.layout()
+
+        if message_layout is None or message_frame is None:
+            return
+
+        labels = [parent.autologin_msg_label, parent.webview_msg_label]
+        if all(
+            label.parent() is message_frame and message_layout.indexOf(label) >= 0
+            for label in labels
+        ):
+            return
+
+        for label in labels:
+            current_parent = label.parent()
+            current_layout = current_parent.layout() if current_parent and hasattr(current_parent, 'layout') else None
+            if current_layout is not None:
+                current_layout.removeWidget(label)
+
+        for index, label in enumerate(labels):
+            message_layout.insertWidget(index, label)
+
     def on_webview_login_success(self):
         """
         ログイン完了時にWebView/オーバーレイを小さくする

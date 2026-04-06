@@ -1793,13 +1793,13 @@ class DataFetch2BulkRdeTab(QWidget):
             r = self.table.rowCount()
             self.table.insertRow(r)
 
-            checked_item = QTableWidgetItem()
-            checked_item.setFlags(checked_item.flags() | Qt.ItemIsUserCheckable | Qt.ItemIsEnabled)
             checked = bool(self._selection_state.get(self._record_key(rec), True))
-            checked_item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+            checked_item = QTableWidgetItem("")
+            checked_item.setFlags((checked_item.flags() | Qt.ItemIsEnabled) & ~Qt.ItemIsEditable)
             checked_item.setTextAlignment(Qt.AlignCenter)
             checked_item.setData(Qt.UserRole, rec)
             self.table.setItem(r, 0, checked_item)
+            self.table.setCellWidget(r, 0, self._create_selection_cell_widget(rec, checked))
 
             values = [
                 self._resolve_subgroup_display(rec.get("subgroup", "")),
@@ -1825,6 +1825,60 @@ class DataFetch2BulkRdeTab(QWidget):
         self.table.blockSignals(False)
         self._update_pagination_controls()
 
+    def _create_selection_cell_widget(self, rec: dict, checked: bool) -> QWidget:
+        container = QWidget(self.table)
+        container.setObjectName("bulkRdeSelectionCell")
+        layout = QHBoxLayout(container)
+        layout.setContentsMargins(0, 2, 0, 2)
+        layout.setSpacing(0)
+        layout.setAlignment(Qt.AlignCenter)
+
+        checkbox = QCheckBox("", container)
+        checkbox.setChecked(bool(checked))
+        checkbox.toggled.connect(
+            lambda state, record=rec, current_checkbox=checkbox: self._on_selection_checkbox_toggled(
+                record,
+                current_checkbox,
+                state,
+            )
+        )
+        layout.addWidget(checkbox, 0, Qt.AlignCenter)
+        self._apply_selection_cell_visual_state(container, checkbox, bool(checked))
+        return container
+
+    def _row_for_selection_widget(self, cell_widget: QWidget) -> int:
+        for row in range(self.table.rowCount()):
+            if self.table.cellWidget(row, 0) is cell_widget:
+                return row
+        return -1
+
+    def _on_selection_checkbox_toggled(self, rec: dict, checkbox: QCheckBox, checked: bool):
+        self._selection_state[self._record_key(rec)] = bool(checked)
+        row = self._row_for_selection_widget(checkbox.parentWidget())
+        if row >= 0:
+            self._apply_row_visual_state(row)
+
+    def _apply_selection_cell_visual_state(self, cell_widget: QWidget, checkbox: QCheckBox, checked: bool):
+        indicator_background = get_color(ThemeKey.BUTTON_SUCCESS_BACKGROUND if checked else ThemeKey.TABLE_ROW_BACKGROUND_SELECTED)
+        indicator_border = get_color(ThemeKey.BUTTON_SUCCESS_BORDER if checked else ThemeKey.BORDER_DARK)
+
+        cell_widget.setStyleSheet(
+            "\n".join(
+                [
+                    "QWidget#bulkRdeSelectionCell { background: transparent; border: none; }",
+                ]
+            )
+        )
+        checkbox.setStyleSheet(
+            "\n".join(
+                [
+                    "QCheckBox { spacing: 0px; background: transparent; padding: 0px; margin: 0px; }",
+                    f"QCheckBox::indicator {{ width: 18px; height: 18px; border-radius: 4px; border: 2px solid {indicator_border}; background-color: transparent; }}",
+                    f"QCheckBox::indicator:checked {{ background-color: {indicator_background}; border: 2px solid {indicator_border}; }}",
+                ]
+            )
+        )
+
     def _resolve_subgroup_display(self, subgroup_id: str) -> str:
         subgroup_id = str(subgroup_id or "").strip()
         if not subgroup_id:
@@ -1846,15 +1900,21 @@ class DataFetch2BulkRdeTab(QWidget):
         check_item = self.table.item(row, 0)
         if check_item is None:
             return
-        checked = check_item.checkState() == Qt.Checked
-        bg = get_qcolor(ThemeKey.BUTTON_SUCCESS_BACKGROUND if checked else ThemeKey.TABLE_ROW_BACKGROUND)
-        fg = get_qcolor(ThemeKey.BUTTON_SUCCESS_TEXT if checked else ThemeKey.TABLE_ROW_TEXT)
+        rec = check_item.data(Qt.UserRole)
+        checked = isinstance(rec, dict) and bool(self._selection_state.get(self._record_key(rec), True))
+        bg = get_qcolor(ThemeKey.TABLE_ROW_MEMBER_BACKGROUND if checked else ThemeKey.TABLE_ROW_BACKGROUND)
+        fg = get_qcolor(ThemeKey.TABLE_ROW_TEXT)
         for col in range(self.table.columnCount()):
             cell = self.table.item(row, col)
             if cell is None:
                 continue
             cell.setData(Qt.BackgroundRole, bg)
             cell.setData(Qt.ForegroundRole, fg)
+        cell_widget = self.table.cellWidget(row, 0)
+        if cell_widget is not None:
+            checkbox = cell_widget.findChild(QCheckBox)
+            if checkbox is not None:
+                self._apply_selection_cell_visual_state(cell_widget, checkbox, checked)
 
     def _set_checked_all(self, checked: bool, ensure_current: bool = False):
         if ensure_current:
