@@ -6,10 +6,21 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.52）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
-| 検証 | 現行コードスナップショットに v2.5.51 からの機能差分がないことを確認し、compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを再確認。 |
-| 更新履歴タブ | `release_notes_source.py` / `release_notes_tab.py` により、更新履歴タブを `VERSION.txt` 正本から自動生成する構成を維持。 |
-| サブグループ/データセット/終了制御 | v2.5.51 で入った payload `userName` 優先、既存データセット分割読込中選択維持、app shutdown guard / portal cancel 整理を現行コードの正として継続確認。 |
+| リリース/品質 | リビジョンアップ（v2.5.53）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| 設定/UI | Misc タブに UI表示リセットを追加し、メインウィンドウと AI提案ダイアログの保存済み位置・サイズを既定レイアウトへ戻せるよう改善。 |
+| データセット/進捗 | `dataset_edit_widget.py` / `dataset_open_widget.py` の親子関係と progress dialog 条件を整理し、初期表示とタブ遷移の安定性を改善。 |
+| 検証 | compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.53 導線で確認。 |
+
+## v2.5.53 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.53）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| 設定/UI | `misc_tab.py` に UI表示リセットを追加し、`main_window_geometry.py` の保存済み geometry を削除して既定レイアウトを再適用できるよう改善。 |
+| 更新確認/進捗 | `misc_tab.py` の更新確認 progress stub にタイトル/ラベル状態を保持させ、実 UI では cancel 導線と完了制御を整理。 |
+| データセット | `dataset_open_widget.py` / `dataset_edit_widget.py` で親子関係を見直し、非表示親に対する progress dialog 生成を避けて小さな孤立ウィンドウを防止。 |
+| 起動/UI品質 | `splash_screen.py` は Tk root を `withdraw()` したまま `Toplevel` のみ表示する構成へ変更し、起動時の root 点滅を抑止。 |
+| 検証 | `tests/run_pre_build_tests.ps1` に Pyright 系静的解析ゲートを追加し、設定ファイル不在時も `src tests scripts` を対象に確認するよう更新。 |
 
 ## v2.5.52 の主な更新点
 

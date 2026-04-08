@@ -1372,10 +1372,14 @@ def create_data_fetch2_widget(parent=None, bearer_token=None):
                     import threading
                     
                     # プログレスダイアログ作成
-                    progress_dialog = QProgressDialog(widget)
+                    progress_dialog = QProgressDialog(
+                        "処理を開始しています...",
+                        "キャンセル",
+                        0,
+                        100,
+                        widget,
+                    )
                     progress_dialog.setWindowTitle("ファイル一括取得")
-                    progress_dialog.setLabelText("処理を開始しています...")
-                    progress_dialog.setRange(0, 100)
                     progress_dialog.setValue(0)
                     progress_dialog.setWindowModality(Qt.WindowModal)
                     progress_dialog.setCancelButtonText("キャンセル")

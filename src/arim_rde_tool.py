@@ -1418,10 +1418,14 @@ def main():
                             from qt_compat.widgets import QMessageBox, QProgressDialog
                             from qt_compat.core import Qt
 
-                            progress = QProgressDialog(browser)
+                            progress = QProgressDialog(
+                                "更新情報（latest.json）を確認中...",
+                                "",
+                                0,
+                                0,
+                                browser,
+                            )
                             progress.setWindowTitle("更新確認")
-                            progress.setLabelText("更新情報（latest.json）を確認中...")
-                            progress.setRange(0, 0)  # indeterminate
                             progress.setMinimumDuration(200)
                             progress.setWindowModality(Qt.WindowModal)
                             try:

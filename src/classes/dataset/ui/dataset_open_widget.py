@@ -22,6 +22,7 @@
 import os
 import json
 import math
+from typing import Any, cast
 from qt_compat.widgets import QWidget, QVBoxLayout, QLabel, QTabWidget, QScrollArea, QApplication
 from qt_compat.widgets import QHBoxLayout, QFormLayout, QLineEdit, QTextEdit, QPushButton
 from qt_compat.widgets import QButtonGroup, QComboBox, QRadioButton, QSizePolicy
@@ -276,7 +277,22 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
             _filter_combo,
         ) = create_tab_result[:11]
     else:
-        container, team_groups, group_combo, grant_combo, open_btn, name_edit, embargo_edit, template_combo, template_list, _filter_combo = create_tab_result
+        legacy_create_tab_result = cast(
+            tuple[Any, Any, Any, Any, Any, Any, Any, Any, Any, Any],
+            create_tab_result,
+        )
+        (
+            container,
+            team_groups,
+            group_combo,
+            grant_combo,
+            open_btn,
+            name_edit,
+            embargo_edit,
+            template_combo,
+            template_list,
+            _filter_combo,
+        ) = legacy_create_tab_result
         manager_combo = getattr(container, "manager_combo", None)
 
     filter_combo = _filter_combo
@@ -2531,7 +2547,7 @@ def _create_dataset_create2_tab(parent: QWidget) -> QWidget:
 def create_dataset_open_widget(parent, title, create_auto_resize_button):
     """データセット開設・編集のタブ付きウィジェット"""
     # メインコンテナ
-    main_widget = QWidget()
+    main_widget = QWidget(parent)
     main_layout = QVBoxLayout()
     # タブ管理用のリファレンスを保持（クリーンアップや再生成時に使用）
     main_widget._dataset_tab_widget = None  # type: ignore[attr-defined]
@@ -2547,12 +2563,23 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     #main_layout.addWidget(label)
     
     # タブウィジェット
-    tab_widget = QTabWidget()
+    tab_widget = QTabWidget(main_widget)
     main_widget._dataset_tab_widget = tab_widget  # type: ignore[attr-defined]
 
     tab_window_state: dict[str, object] = {
         "last_index": -1,
     }
+
+    def _tab_build_parent(container):
+        try:
+            viewport_getter = getattr(container, "viewport", None)
+            if callable(viewport_getter):
+                viewport = viewport_getter()
+                if viewport is not None:
+                    return viewport
+        except Exception:
+            pass
+        return container if container is not None else main_widget
 
     def _defer_tab_action(key: str, callback) -> None:
         schedule_deferred_ui_task(tab_widget, f"dataset-open-{key}", callback)
@@ -2588,16 +2615,16 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     create2_scroll = None
     create2_idx = -1
     try:
-        create2_scroll = QScrollArea()
+        create2_scroll = QScrollArea(tab_widget)
         create2_scroll.setWidgetResizable(True)
         create2_scroll.setFrameStyle(0)
         create2_scroll.setContentsMargins(0, 0, 0, 0)
         create2_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         create2_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
-        create2_placeholder = QWidget()
+        create2_placeholder = QWidget(create2_scroll)
         create2_layout = QVBoxLayout(create2_placeholder)
-        create2_layout.addWidget(QLabel("新規開設2を読み込み中..."))
+        create2_layout.addWidget(QLabel("新規開設2を読み込み中...", create2_placeholder))
         create2_layout.addStretch(1)
         create2_scroll.setWidget(create2_placeholder)
 
@@ -2642,11 +2669,11 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     edit_scroll = None  # タブとして追加されるラッパ
     edit_built = False
     try:
-        edit_scroll = QScrollArea()
+        edit_scroll = QScrollArea(tab_widget)
         edit_scroll.setWidgetResizable(True)
         edit_scroll.setFrameStyle(0)
         edit_scroll.setContentsMargins(0, 0, 0, 0)
-        edit_scroll.setWidget(QLabel("閲覧・修正タブを読み込み中..."))
+        edit_scroll.setWidget(QLabel("閲覧・修正タブを読み込み中...", edit_scroll))
         tab_widget.addTab(edit_scroll, "閲覧・修正")
         main_widget._dataset_edit_tab = edit_scroll  # type: ignore[attr-defined]
         main_widget._dataset_edit_inner_tab = None  # type: ignore[attr-defined]
@@ -2659,14 +2686,14 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     dataentry_scroll = None
     dataentry_built = False
     try:
-        dataentry_scroll = QScrollArea()
+        dataentry_scroll = QScrollArea(tab_widget)
         dataentry_scroll.setWidgetResizable(True)
         dataentry_scroll.setFrameStyle(0)
         dataentry_scroll.setContentsMargins(0, 0, 0, 0)
 
-        dataentry_placeholder = QWidget()
+        dataentry_placeholder = QWidget(dataentry_scroll)
         dataentry_layout = QVBoxLayout(dataentry_placeholder)
-        dataentry_layout.addWidget(QLabel("タイル（データエントリー）を読み込み中..."))
+        dataentry_layout.addWidget(QLabel("タイル（データエントリー）を読み込み中...", dataentry_placeholder))
         dataentry_layout.addStretch(1)
         dataentry_scroll.setWidget(dataentry_placeholder)
         tab_widget.addTab(dataentry_scroll, "タイル（データエントリー）")
@@ -2678,9 +2705,9 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     listing_tab = None
     listing_built = False
     try:
-        listing_placeholder = QWidget()
+        listing_placeholder = QWidget(tab_widget)
         listing_layout = QVBoxLayout(listing_placeholder)
-        listing_layout.addWidget(QLabel("一覧を読み込み中..."))
+        listing_layout.addWidget(QLabel("一覧を読み込み中...", listing_placeholder))
         listing_layout.addStretch(1)
         tab_widget.addTab(listing_placeholder, "一覧")
         main_widget._dataset_listing_tab = listing_placeholder  # type: ignore[attr-defined]
@@ -2702,10 +2729,10 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
         # プログレス表示を即座に見せる
         try:
             if create2_scroll is not None:
-                progress_widget = QWidget()
+                progress_widget = QWidget(create2_scroll)
                 progress_layout = QVBoxLayout(progress_widget)
                 progress_layout.addStretch(1)
-                progress_label = QLabel("新規開設2タブを構築中...")
+                progress_label = QLabel("新規開設2タブを構築中...", progress_widget)
                 progress_label.setAlignment(Qt.AlignCenter)
                 try:
                     progress_label.setStyleSheet(
@@ -2729,7 +2756,7 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
     def _do_build_create2() -> None:
         nonlocal create2_tab, _create2_building
         try:
-            built = _create_dataset_create2_tab(parent)
+            built = _create_dataset_create2_tab(_tab_build_parent(create2_scroll))
 
             # 初回表示時に横スクロールが出にくいよう、過大な最小幅を抑制
             try:
@@ -2786,13 +2813,13 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
         try:
             from classes.dataset.ui.dataset_edit_widget import create_dataset_edit_widget
 
-            edit_tab = create_dataset_edit_widget(parent, "データセット編集", create_auto_resize_button)
+            edit_tab = create_dataset_edit_widget(_tab_build_parent(edit_scroll), "データセット編集", create_auto_resize_button)
             edit_scroll.setWidget(edit_tab)
             main_widget._dataset_edit_inner_tab = edit_tab  # type: ignore[attr-defined]
         except Exception as e:
             logger.warning("データセット編集タブの作成に失敗: %s", e)
             try:
-                edit_scroll.setWidget(QLabel(f"データセット編集タブの読み込みに失敗しました: {e}"))
+                edit_scroll.setWidget(QLabel(f"データセット編集タブの読み込みに失敗しました: {e}", edit_scroll))
             except Exception:
                 pass
         finally:
@@ -2808,7 +2835,7 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
         try:
             from classes.dataset.ui.dataset_dataentry_widget_minimal import create_dataset_dataentry_widget
 
-            built = create_dataset_dataentry_widget(parent, "データエントリー", create_auto_resize_button)
+            built = create_dataset_dataentry_widget(_tab_build_parent(dataentry_scroll), "データエントリー", create_auto_resize_button)
             dataentry_tab = built
 
             dataentry_scroll.setWidget(built)
@@ -2833,7 +2860,7 @@ def create_dataset_open_widget(parent, title, create_auto_resize_button):
         try:
             from classes.dataset.ui.dataset_listing_widget import create_dataset_listing_widget
 
-            built = create_dataset_listing_widget(parent, "一覧")
+            built = create_dataset_listing_widget(tab_widget, "一覧")
 
             # 「ツール内」リンク: 閲覧・修正タブで該当データセットを開く
             try:

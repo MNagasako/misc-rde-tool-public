@@ -189,10 +189,8 @@ def show_progress_dialog(parent, title, worker, show_completion_dialog=True):
     Returns:
         QProgressDialog: プログレスダイアログインスタンス
     """
-    progress_dialog = QProgressDialog(parent)
+    progress_dialog = QProgressDialog("処理を開始しています...", "キャンセル", 0, 100, parent)
     progress_dialog.setWindowTitle(title)
-    progress_dialog.setLabelText("処理を開始しています...")
-    progress_dialog.setRange(0, 100)
     progress_dialog.setValue(0)
     # QProgressDialog の autoClose/autoReset は 100% 到達時に勝手に閉じるため、
     # 長い処理や「丸めで一瞬100%」になるケースでチラつき/再表示の原因になり得る。

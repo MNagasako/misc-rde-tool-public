@@ -14,6 +14,7 @@ from pathlib import Path
 from config.common import REVISION
 from classes.managers.app_config_manager import get_config_manager
 from classes.core.platform import is_windows, open_path, reveal_in_file_manager
+from classes.utils.main_window_geometry import clear_persisted_ui_geometry
 
 try:
     from qt_compat.widgets import (
@@ -48,12 +49,20 @@ class _UpdateCheckProgressStub(QObject):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._window_title = ""
+        self._label_text = ""
 
-    def setWindowTitle(self, _title: str) -> None:
-        return
+    def setWindowTitle(self, title: str) -> None:
+        self._window_title = str(title)
 
-    def setLabelText(self, _text: str) -> None:
-        return
+    def windowTitle(self) -> str:
+        return self._window_title
+
+    def setLabelText(self, text: str) -> None:
+        self._label_text = str(text)
+
+    def labelText(self) -> str:
+        return self._label_text
 
     def setRange(self, _minimum: int, _maximum: int) -> None:
         return
@@ -167,6 +176,10 @@ class MiscTab(QWidget):
         # アプリ更新
         update_group = self.create_update_group()
         layout.addWidget(update_group)
+
+        # UI表示リセット
+        ui_reset_group = self.create_ui_reset_group()
+        layout.addWidget(ui_reset_group)
 
         # メインメニュー表示
         menu_group = self.create_menu_group()
@@ -326,6 +339,66 @@ class MiscTab(QWidget):
         self.load_menu_settings()
         return group
 
+    def create_ui_reset_group(self):
+        """保存済みUI位置・サイズのリセット"""
+        group = QGroupBox("UI表示")
+        group.setStyleSheet(
+            f"""
+            QGroupBox {{
+                font-weight: bold;
+                border: 1px solid {get_color(ThemeKey.BORDER_DEFAULT)};
+                border-radius: 5px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }}
+            QGroupBox::title {{
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }}
+            """
+        )
+
+        layout = QVBoxLayout(group)
+        layout.setSpacing(10)
+
+        info_label = QLabel(
+            "メインウィンドウとAI提案ダイアログの保存済み位置・サイズを削除し、\n"
+            "既定レイアウトへ戻します。"
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet(
+            f"color: {get_color(ThemeKey.TEXT_MUTED)}; font-size: 9pt; font-weight: normal;"
+        )
+        layout.addWidget(info_label)
+
+        btn_layout = QHBoxLayout()
+        self._reset_ui_geometry_btn = QPushButton("UIリセット")
+        self._reset_ui_geometry_btn.clicked.connect(self.reset_persisted_ui_geometry)
+        self._reset_ui_geometry_btn.setStyleSheet(
+            f"""
+            QPushButton {{
+                padding: 6px 14px;
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND)};
+                color: {get_color(ThemeKey.BUTTON_DANGER_TEXT)};
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_HOVER)};
+            }}
+            QPushButton:pressed {{
+                background-color: {get_color(ThemeKey.BUTTON_DANGER_BACKGROUND_PRESSED)};
+            }}
+            """
+        )
+        btn_layout.addWidget(self._reset_ui_geometry_btn)
+        btn_layout.addStretch(1)
+        layout.addLayout(btn_layout)
+
+        return group
+
     def load_menu_settings(self):
         """メインメニュー表示設定の読み込み"""
         try:
@@ -363,6 +436,70 @@ class MiscTab(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "保存失敗", f"メインメニュー設定の保存に失敗しました: {e}")
 
+    def reset_persisted_ui_geometry(self):
+        """保存済みのUI位置・サイズを削除する"""
+        reply = QMessageBox.question(
+            self,
+            "UIリセット",
+            "保存済みのUI位置・サイズをリセットしますか？\n\n"
+            "対象:\n"
+            "- メインウィンドウ\n"
+            "- AI提案ダイアログ\n\n"
+            "現在表示中のメインウィンドウは、可能であれば既定レイアウトに戻します。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        try:
+            cfg = get_config_manager()
+            removed_any = clear_persisted_ui_geometry(config_manager=cfg)
+            reapplied = self._reapply_current_main_window_geometry() if removed_any else False
+
+            if removed_any:
+                detail = (
+                    "現在表示中のメインウィンドウにも既定レイアウトを再適用しました。"
+                    if reapplied
+                    else "次回表示時に既定レイアウトが適用されます。"
+                )
+                QMessageBox.information(
+                    self,
+                    "UIリセット完了",
+                    "保存済みのUI位置・サイズをリセットしました。\n" + detail,
+                )
+                return
+
+            QMessageBox.information(
+                self,
+                "UIリセット",
+                "保存済みのUI位置・サイズはありませんでした。",
+            )
+        except Exception as e:
+            logger.error("UIリセットに失敗: %s", e, exc_info=True)
+            QMessageBox.warning(self, "UIリセット失敗", f"UIリセットに失敗しました: {e}")
+
+    def _reapply_current_main_window_geometry(self) -> bool:
+        try:
+            top_level = self.window() if hasattr(self, "window") else None
+            ui_controller = getattr(top_level, "ui_controller", None)
+            if ui_controller is None:
+                return False
+
+            ensure_manager = getattr(ui_controller, "_ensure_main_window_geometry_manager", None)
+            if not callable(ensure_manager):
+                return False
+
+            manager = ensure_manager()
+            if manager is None or manager.current_context() is None:
+                return False
+
+            manager.apply_current_geometry()
+            return True
+        except Exception:
+            logger.debug("main window geometry reapply failed after reset", exc_info=True)
+            return False
+
     def check_for_update(self):
         """手動の更新確認→希望があればDL+検証+インストーラ実行（進捗表示/非同期）"""
         try:
@@ -378,7 +515,11 @@ class MiscTab(QWidget):
                 self._update_check_btn.setEnabled(False)
 
             cancelled = {"v": False}
-            progress = _UpdateCheckProgressStub(self) if is_pytest else QProgressDialog(self)
+            progress = (
+                _UpdateCheckProgressStub(self)
+                if is_pytest
+                else QProgressDialog("更新情報（latest.json）を取得中...", "キャンセル", 0, 0, self)
+            )
             # テストでは QApplication.topLevelWidgets() の走査が不安定化要因になり得るため、
             # 進捗ダイアログをインスタンス変数として保持して参照可能にする。
             self._update_check_progress = progress

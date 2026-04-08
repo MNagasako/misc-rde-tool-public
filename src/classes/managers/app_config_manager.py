@@ -264,6 +264,31 @@ class AppConfigManager:
         except Exception as e:
             self.logger.error(f"設定値設定失敗: {key_path} = {value}, error: {e}")
             return False
+
+    def delete(self, key_path: str) -> bool:
+        """設定値の削除（ドット記法サポート）"""
+        try:
+            keys = key_path.split('.')
+            target = self._config
+
+            for key in keys[:-1]:
+                if not isinstance(target, dict) or key not in target:
+                    self.logger.debug(f"削除対象の設定キー未発見: {key_path}")
+                    return False
+                target = target[key]
+
+            last_key = keys[-1]
+            if not isinstance(target, dict) or last_key not in target:
+                self.logger.debug(f"削除対象の設定キー未発見: {key_path}")
+                return False
+
+            del target[last_key]
+            self.logger.debug(f"設定値削除: {key_path}")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"設定値削除失敗: {key_path}, error: {e}")
+            return False
     
     def save_to_file(self, file_path: Optional[str] = None) -> bool:
         """

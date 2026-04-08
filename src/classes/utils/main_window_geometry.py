@@ -65,6 +65,28 @@ def sanitize_geometry_key_part(value: str | None, fallback: str = "default") -> 
     return normalized or fallback
 
 
+PERSISTED_UI_GEOMETRY_PREFIXES = (
+    "ui.main_window",
+    "ui.ai_suggestion_dialog",
+)
+
+
+def clear_persisted_ui_geometry(config_manager=None) -> bool:
+    config_manager = config_manager or get_config_manager()
+    delete = getattr(config_manager, "delete", None)
+    if not callable(delete):
+        raise AttributeError("Config manager does not support delete()")
+
+    removed_any = False
+    for prefix in PERSISTED_UI_GEOMETRY_PREFIXES:
+        removed_any = bool(delete(prefix)) or removed_any
+
+    if removed_any and not config_manager.save():
+        raise RuntimeError("設定ファイルの保存に失敗しました")
+
+    return removed_any
+
+
 class MainWindowGeometryManager(QObject):
     def __init__(self, window, config_manager=None):
         qt_parent = window if isinstance(window, QObject) else None

@@ -853,7 +853,7 @@ def get_user_grant_numbers():
 
 def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     """データセット編集専用ウィジェット"""
-    widget = _create_refresh_on_show_widget()
+    widget = _create_refresh_on_show_widget(parent)
     layout = QVBoxLayout()
     
     # タイトル
@@ -862,26 +862,26 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     #layout.addWidget(title_label)
     
     # フィルタ設定エリア
-    filter_widget = QWidget()
+    filter_widget = QWidget(widget)
     filter_layout = QVBoxLayout()
     filter_layout.setContentsMargins(0, 0, 0, 0)
     
     # フィルタタイプ選択（ラジオボタン）
-    filter_type_widget = QWidget()
+    filter_type_widget = QWidget(filter_widget)
     filter_type_layout = QHBoxLayout()
     filter_type_layout.setContentsMargins(0, 0, 0, 0)
     
-    filter_type_label = QLabel("表示データセット:")
+    filter_type_label = QLabel("表示データセット:", filter_type_widget)
     filter_type_label.setMinimumWidth(120)
     filter_type_label.setStyleSheet("font-weight: bold;")
     
-    filter_user_only_radio = QRadioButton("管理（自身が開設・所有）")
+    filter_user_only_radio = QRadioButton("管理（自身が開設・所有）", filter_type_widget)
     filter_user_only_radio.setObjectName("dataset_filter_user_only_radio")
-    filter_org_subjects_radio = QRadioButton("所属機関の課題")
+    filter_org_subjects_radio = QRadioButton("所属機関の課題", filter_type_widget)
     filter_org_subjects_radio.setObjectName("dataset_filter_org_subjects_radio")
-    filter_others_only_radio = QRadioButton("その他")
+    filter_others_only_radio = QRadioButton("その他", filter_type_widget)
     filter_others_only_radio.setObjectName("dataset_filter_others_radio")
-    filter_all_radio = QRadioButton("全て")
+    filter_all_radio = QRadioButton("全て", filter_type_widget)
     filter_all_radio.setObjectName("dataset_filter_all_radio")
     filter_user_only_radio.setChecked(True)  # デフォルトは「管理（自身が開設・所有）」
     
@@ -890,7 +890,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     filter_type_layout.addWidget(filter_org_subjects_radio)
     filter_type_layout.addWidget(filter_others_only_radio)
     filter_type_layout.addWidget(filter_all_radio)
-    enable_update_override_button = QPushButton("更新有効化")
+    enable_update_override_button = QPushButton("更新有効化", filter_type_widget)
     enable_update_override_button.setObjectName("dataset_update_override_button")
     enable_update_override_button.setEnabled(False)
     enable_update_override_button.setMaximumWidth(130)
@@ -916,15 +916,15 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     filter_type_widget.setLayout(filter_type_layout)
     filter_layout.addWidget(filter_type_widget)
 
-    subgroup_filter_widget = QWidget()
+    subgroup_filter_widget = QWidget(filter_widget)
     subgroup_filter_layout = QHBoxLayout()
     subgroup_filter_layout.setContentsMargins(0, 0, 0, 0)
 
-    subgroup_filter_label = QLabel("サブグループフィルタ:")
+    subgroup_filter_label = QLabel("サブグループフィルタ:", subgroup_filter_widget)
     subgroup_filter_label.setMinimumWidth(120)
     subgroup_filter_label.setStyleSheet("font-weight: bold;")
 
-    subgroup_filter_combo = QComboBox()
+    subgroup_filter_combo = QComboBox(subgroup_filter_widget)
     subgroup_filter_combo.setObjectName("dataset_subgroup_filter_combo")
     subgroup_filter_combo.setEditable(True)
     subgroup_filter_combo.setInsertPolicy(QComboBox.NoInsert)
@@ -943,21 +943,21 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     filter_layout.addWidget(subgroup_filter_widget)
     
     # 課題番号部分一致検索
-    grant_number_filter_widget = QWidget()
+    grant_number_filter_widget = QWidget(filter_widget)
     grant_number_filter_layout = QHBoxLayout()
     grant_number_filter_layout.setContentsMargins(0, 0, 0, 0)
     
-    grant_number_filter_label = QLabel("課題番号フィルタ:")
+    grant_number_filter_label = QLabel("課題番号フィルタ:", grant_number_filter_widget)
     grant_number_filter_label.setMinimumWidth(120)
     grant_number_filter_label.setStyleSheet("font-weight: bold;")
     
-    grant_number_filter_edit = QLineEdit()
+    grant_number_filter_edit = QLineEdit(grant_number_filter_widget)
     grant_number_filter_edit.setObjectName("dataset_grant_number_filter_edit")
     grant_number_filter_edit.setPlaceholderText("課題番号の一部を入力（部分一致検索・リアルタイム絞り込み）")
     grant_number_filter_edit.setMinimumWidth(400)
     
     # エントリーリスト更新ボタンを追加
-    cache_refresh_button = QPushButton("エントリーリスト更新")
+    cache_refresh_button = QPushButton("エントリーリスト更新", grant_number_filter_widget)
     cache_refresh_button.setObjectName("dataset_entry_list_refresh_button")
     cache_refresh_button.setMaximumWidth(150)
     # 警告系ボタンスタイルへ統一（ThemeKey）
@@ -982,7 +982,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     cache_refresh_button.setToolTip("選択中データセットのエントリー一覧をAPIから再取得して更新します")
 
     # データセット再取得ボタン（APIから詳細再取得し、フォーム表示を更新）
-    dataset_refetch_button = QPushButton("再取得")
+    dataset_refetch_button = QPushButton("再取得", grant_number_filter_widget)
     dataset_refetch_button.setObjectName("dataset_refetch_button")
     dataset_refetch_button.setMaximumWidth(80)
     dataset_refetch_button.setStyleSheet(f"""
@@ -1018,13 +1018,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     layout.addWidget(filter_widget)
     
     # 既存データセットドロップダウン（ラベルとコンボボックスを一行で表示）
-    dataset_selection_widget = QWidget()
+    dataset_selection_widget = QWidget(widget)
     dataset_selection_layout = QHBoxLayout()
     dataset_selection_layout.setContentsMargins(0, 0, 0, 0)
     
-    existing_dataset_label = QLabel("表示するデータセット:")
+    existing_dataset_label = QLabel("表示するデータセット:", dataset_selection_widget)
     existing_dataset_label.setMinimumWidth(150)
-    existing_dataset_combo = QComboBox()
+    existing_dataset_combo = QComboBox(dataset_selection_widget)
     existing_dataset_combo.setObjectName("datasetEditCombo")
     # タブ幅に追従して横幅を伸縮（固定幅は避ける）
     existing_dataset_combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
@@ -1098,7 +1098,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     dataset_selection_widget.setLayout(dataset_selection_layout)
     layout.addWidget(dataset_selection_widget)
 
-    dataset_combo_status_label = QLabel("")
+    dataset_combo_status_label = QLabel("", widget)
     dataset_combo_status_label.setObjectName("dataset_edit_combo_status")
     dataset_combo_status_label.setWordWrap(True)
     dataset_combo_status_label.setVisible(False)
@@ -1114,10 +1114,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     except Exception:
         pass
 
-    launch_controls_widget = QWidget()
+    launch_controls_widget = QWidget(widget)
     launch_controls_layout = QHBoxLayout()
     launch_controls_layout.setContentsMargins(0, 0, 0, 0)
-    launch_label = QLabel("他機能連携:")
+    launch_label = QLabel("他機能連携:", launch_controls_widget)
     launch_label.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_PRIMARY)}; font-weight: bold;")
     launch_controls_layout.addWidget(launch_label)
 
@@ -1288,7 +1288,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         )
 
     for target_key, caption in launch_targets:
-        btn = QPushButton(caption)
+        btn = QPushButton(caption, launch_controls_widget)
         btn.setStyleSheet(launch_button_style)
         btn.clicked.connect(lambda _=None, key=target_key: _handle_dataset_launch(key))
         launch_controls_layout.addWidget(btn)
@@ -1310,7 +1310,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         except Exception:
             logger.debug("dataset_edit: launch_to_subgroup_edit failed", exc_info=True)
 
-    subgroup_btn = QPushButton("サブグループ閲覧・修正")
+    subgroup_btn = QPushButton("サブグループ閲覧・修正", launch_controls_widget)
     subgroup_btn.setStyleSheet(launch_button_style)
     subgroup_btn.clicked.connect(_launch_to_subgroup_edit)
     launch_controls_layout.addWidget(subgroup_btn)
@@ -1746,15 +1746,35 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         if not is_pytest:
             QApplication.processEvents()
 
+    def _can_show_progress_dialog() -> bool:
+        """Return True only when the parent widget is already visible.
+
+        Creating QProgressDialog while the parent is not shown can briefly create
+        a detached tiny top-level window on some Windows environments.
+        """
+        if is_pytest:
+            return False
+        try:
+            if widget is None:
+                return False
+            if not widget.isVisible():
+                return False
+            parent_window = widget.window()
+            if parent_window is None or not parent_window.isVisible():
+                return False
+        except Exception:
+            return False
+        return True
+
     # プログレスダイアログを作成
     def create_progress_dialog(title, text, maximum=0):
         """プログレスダイアログを作成"""
         # Windows + pytest-qt 環境でネイティブUI/イベント処理が不安定になり得るため、テスト時はno-op化
-        if is_pytest:
+        if not _can_show_progress_dialog():
             return _NullProgress()
 
         progress = QProgressDialog(text, "キャンセル", 0, maximum, widget)
-        progress.setWindowTitle(title)
+        progress.setWindowTitle(title or "処理中")
         progress.setWindowModality(Qt.WindowModal)
         progress.setMinimumDuration(1200)  # 短時間処理でのチラつき抑制
         progress.setCancelButton(None)  # キャンセルボタンを無効化
@@ -2942,7 +2962,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     # 編集フォーム作成
     def create_edit_form():
         """編集フォームを作成"""
-        form_widget = QWidget()
+        form_widget = QWidget(widget)
         form_layout = QGridLayout()
         form_layout.setHorizontalSpacing(12)
         form_layout.setVerticalSpacing(6)
@@ -2950,14 +2970,14 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         form_layout.setColumnStretch(1, 1)
         
         # データセット名
-        form_layout.addWidget(QLabel("データセット名:"), 0, 0)
-        edit_dataset_name_edit = QLineEdit()
+        form_layout.addWidget(QLabel("データセット名:", form_widget), 0, 0)
+        edit_dataset_name_edit = QLineEdit(form_widget)
         edit_dataset_name_edit.setPlaceholderText("データセット名を入力")
         form_layout.addWidget(edit_dataset_name_edit, 0, 1)
         
         # 課題番号（コンボボックスに変更）
-        form_layout.addWidget(QLabel("課題番号:"), 1, 0)
-        edit_grant_number_combo = QComboBox()
+        form_layout.addWidget(QLabel("課題番号:", form_widget), 1, 0)
+        edit_grant_number_combo = QComboBox(form_widget)
         edit_grant_number_combo.setEditable(True)
         edit_grant_number_combo.setInsertPolicy(QComboBox.NoInsert)
         edit_grant_number_combo.lineEdit().setPlaceholderText("課題番号を選択または入力")
@@ -3000,7 +3020,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         form_layout.addWidget(edit_grant_number_combo, 1, 1)
         
         # 説明
-        form_layout.addWidget(QLabel("説明:"), 2, 0)
+        form_layout.addWidget(QLabel("説明:", form_widget), 2, 0)
         
         # 説明フィールド用の水平レイアウト
         description_layout = QHBoxLayout()
@@ -3769,18 +3789,18 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         ai_check_button.clicked.connect(check_description_quality)
         
         # ボタンレイアウトをウィジェット化
-        ai_buttons_widget = QWidget()
+        ai_buttons_widget = QWidget(widget)
         ai_buttons_widget.setLayout(ai_buttons_layout)
         description_layout.addWidget(ai_buttons_widget)
         
         # 水平レイアウトを含むウィジェットを作成
-        description_widget = QWidget()
+        description_widget = QWidget(widget)
         description_widget.setLayout(description_layout)
         form_layout.addWidget(description_widget, 2, 1)
         
         # エンバーゴ期間終了日
         form_layout.addWidget(QLabel("エンバーゴ期間終了日:"), 3, 0)
-        edit_embargo_edit = QDateEdit()
+        edit_embargo_edit = QDateEdit(form_widget)
         edit_embargo_edit.setDisplayFormat("yyyy-MM-dd")
         edit_embargo_edit.setCalendarPopup(True)
         edit_embargo_edit.setFixedWidth(140)
@@ -3793,7 +3813,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         
         # データセットテンプレート（表示のみ）
         form_layout.addWidget(QLabel("データセットテンプレート:"), 4, 0)
-        edit_template_display = QLineEdit()
+        edit_template_display = QLineEdit(form_widget)
         edit_template_display.setPlaceholderText("データセットテンプレート名（表示のみ）")
         edit_template_display.setReadOnly(True)
         # 読み取り専用視覚表示: 未定義キー INPUT_BACKGROUND_READONLY -> 既存 INPUT_BACKGROUND_DISABLED へ置換
@@ -3801,8 +3821,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         form_layout.addWidget(edit_template_display, 4, 1)
         
         # 申請者（表示のみ）
-        applicant_label = QLabel("申請者:")
-        edit_applicant_display = QLineEdit()
+        applicant_label = QLabel("申請者:", form_widget)
+        edit_applicant_display = QLineEdit(form_widget)
         edit_applicant_display.setPlaceholderText("申請者（表示のみ）")
         edit_applicant_display.setReadOnly(True)
         edit_applicant_display.setStyleSheet(
@@ -3813,8 +3833,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         form_layout.addWidget(edit_applicant_display, 5, 1)
 
         # データセット管理者（変更可）
-        manager_label = QLabel("管理者:")
-        edit_manager_combo = QComboBox()
+        manager_label = QLabel("管理者:", form_widget)
+        edit_manager_combo = QComboBox(form_widget)
         edit_manager_combo.setEditable(True)
         edit_manager_combo.setInsertPolicy(QComboBox.NoInsert)
         if edit_manager_combo.lineEdit():
@@ -3834,30 +3854,30 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         taxonomy_layout = QHBoxLayout()
         taxonomy_layout.setContentsMargins(0, 0, 0, 0)
         taxonomy_layout.setSpacing(6)
-        edit_taxonomy_edit = QLineEdit()
+        edit_taxonomy_edit = QLineEdit(form_widget)
         edit_taxonomy_edit.setPlaceholderText("タクソノミーキー（設定ボタンで編集）")
         edit_taxonomy_edit.setReadOnly(True)  # 読み取り専用
 
-        taxonomy_builder_button = QPushButton("設定...")
+        taxonomy_builder_button = QPushButton("設定...", form_widget)
         taxonomy_builder_button.setMaximumWidth(90)
 
         taxonomy_layout.addWidget(edit_taxonomy_edit)
         taxonomy_layout.addWidget(taxonomy_builder_button)
 
-        taxonomy_widget = QWidget()
+        taxonomy_widget = QWidget(widget)
         taxonomy_widget.setLayout(taxonomy_layout)
 
         # 問い合わせ先
-        edit_contact_edit = QLineEdit()
+        edit_contact_edit = QLineEdit(form_widget)
         edit_contact_edit.setPlaceholderText("問い合わせ先を入力")
         edit_contact_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         edit_contact_edit.setFixedHeight(26)
-        form_layout.addWidget(QLabel("問い合わせ先:"), 7, 0)
+        form_layout.addWidget(QLabel("問い合わせ先:", form_widget), 7, 0)
         form_layout.addWidget(edit_contact_edit, 7, 1)
 
         # タクソノミーキー（ビルダーダイアログ使用）
         taxonomy_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        form_layout.addWidget(QLabel("タクソノミーキー:"), 8, 0)
+        form_layout.addWidget(QLabel("タクソノミーキー:", form_widget), 8, 0)
         form_layout.addWidget(taxonomy_widget, 8, 1)
         
         # タクソノミービルダーボタンのイベントハンドラー
@@ -3888,40 +3908,40 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         taxonomy_builder_button.clicked.connect(open_taxonomy_builder)
         
         # 関連情報（旧：関連リンク）- ビルダーダイアログ使用
-        form_layout.addWidget(QLabel("関連情報:"), 9, 0)
+        form_layout.addWidget(QLabel("関連情報:", form_widget), 9, 0)
         related_links_layout = QHBoxLayout()
         related_links_layout.setContentsMargins(0, 2, 0, 2)
         related_links_layout.setSpacing(8)
-        edit_related_links_edit = QLineEdit()
+        edit_related_links_edit = QLineEdit(form_widget)
         edit_related_links_edit.setPlaceholderText("関連情報を入力（タイトル1:URL1,タイトル2:URL2 の形式、設定ボタンでも編集可能）")
         
-        related_links_builder_button = QPushButton("設定...")
+        related_links_builder_button = QPushButton("設定...", form_widget)
         related_links_builder_button.setMaximumWidth(80)
         
         related_links_layout.addWidget(edit_related_links_edit)
         related_links_layout.addWidget(related_links_builder_button)
         
         # レイアウトをWidgetでラップしてGridLayoutに追加
-        related_links_widget = QWidget()
+        related_links_widget = QWidget(widget)
         related_links_widget.setLayout(related_links_layout)
         form_layout.addWidget(related_links_widget, 9, 1)
         
         # TAGフィールド（ビルダーダイアログ使用）
-        form_layout.addWidget(QLabel("TAG:"), 10, 0)
+        form_layout.addWidget(QLabel("TAG:", form_widget), 10, 0)
         tag_layout = QHBoxLayout()
         tag_layout.setContentsMargins(0, 2, 0, 2)
         tag_layout.setSpacing(8)
-        edit_tags_edit = QLineEdit()
+        edit_tags_edit = QLineEdit(form_widget)
         edit_tags_edit.setPlaceholderText("TAGを入力（カンマ区切り、設定ボタンでも編集可能）")
         
-        tag_builder_button = QPushButton("設定...")
+        tag_builder_button = QPushButton("設定...", form_widget)
         tag_builder_button.setMaximumWidth(80)
         
         tag_layout.addWidget(edit_tags_edit)
         tag_layout.addWidget(tag_builder_button)
         
         # レイアウトをWidgetでラップしてGridLayoutに追加
-        tag_widget = QWidget()
+        tag_widget = QWidget(widget)
         tag_widget.setLayout(tag_layout)
         form_layout.addWidget(tag_widget, 10, 1)
         
@@ -4038,13 +4058,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         related_links_builder_button.clicked.connect(open_related_links_builder)
         
         # データセット引用の書式
-        edit_citation_format_edit = QLineEdit()
+        edit_citation_format_edit = QLineEdit(form_widget)
         edit_citation_format_edit.setPlaceholderText("データセット引用の書式を入力")
         edit_citation_format_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         edit_citation_format_edit.textChanged.connect(lambda text: edit_citation_format_edit.setToolTip(text))
 
         # 利用ライセンス選択
-        edit_license_combo = QComboBox()
+        edit_license_combo = QComboBox(form_widget)
         edit_license_combo.setEditable(True)
         edit_license_combo.setInsertPolicy(QComboBox.NoInsert)
         edit_license_combo.lineEdit().setPlaceholderText("ライセンスを選択または検索")
@@ -4115,20 +4135,20 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         license_completer.setFilterMode(Qt.MatchContains)
         edit_license_combo.setCompleter(license_completer)
 
-        form_layout.addWidget(QLabel("データセット引用の書式:"), 11, 0)
+        form_layout.addWidget(QLabel("データセット引用の書式:", form_widget), 11, 0)
         form_layout.addWidget(edit_citation_format_edit, 11, 1)
-        form_layout.addWidget(QLabel("利用ライセンス:"), 12, 0)
+        form_layout.addWidget(QLabel("利用ライセンス:", form_widget), 12, 0)
         form_layout.addWidget(edit_license_combo, 12, 1)
         
         # 関連データセット - ビルダーダイアログ使用
-        form_layout.addWidget(QLabel("関連データセット:"), 13, 0)
+        form_layout.addWidget(QLabel("関連データセット:", form_widget), 13, 0)
         related_datasets_layout = QHBoxLayout()
-        edit_related_datasets_display = QLineEdit()
+        edit_related_datasets_display = QLineEdit(form_widget)
         edit_related_datasets_display.setReadOnly(True)
         edit_related_datasets_display.setPlaceholderText("関連データセット（設定ボタンで編集）")
         edit_related_datasets_display.setStyleSheet(f"background-color: {get_color(ThemeKey.INPUT_BACKGROUND_DISABLED)}; color: {get_color(ThemeKey.TEXT_MUTED)};")
         
-        related_datasets_builder_button = QPushButton("設定...")
+        related_datasets_builder_button = QPushButton("設定...", form_widget)
         related_datasets_builder_button.setMaximumWidth(80)
         related_datasets_builder_button.clicked.connect(open_related_datasets_builder)
         
@@ -4136,7 +4156,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         related_datasets_layout.addWidget(related_datasets_builder_button)
         
         # レイアウトをWidgetでラップしてGridLayoutに追加
-        related_datasets_widget = QWidget()
+        related_datasets_widget = QWidget(widget)
         related_datasets_widget.setLayout(related_datasets_layout)
         form_layout.addWidget(related_datasets_widget, 13, 1)
         
@@ -4144,13 +4164,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         widget._selected_related_dataset_ids = []
         
         # データ一覧表示タイプ選択（ラジオボタン）- 関連データセットの下に移動
-        form_layout.addWidget(QLabel("データ一覧表示タイプ:"), 14, 0)
-        data_listing_type_widget = QWidget()
+        form_layout.addWidget(QLabel("データ一覧表示タイプ:", form_widget), 14, 0)
+        data_listing_type_widget = QWidget(widget)
         data_listing_type_layout = QHBoxLayout()
         data_listing_type_layout.setContentsMargins(0, 0, 0, 0)
         
-        edit_data_listing_gallery_radio = QRadioButton("ギャラリー表示")
-        edit_data_listing_tree_radio = QRadioButton("ツリー表示")
+        edit_data_listing_gallery_radio = QRadioButton("ギャラリー表示", data_listing_type_widget)
+        edit_data_listing_tree_radio = QRadioButton("ツリー表示", data_listing_type_widget)
         edit_data_listing_gallery_radio.setChecked(True)  # デフォルトはギャラリー表示
         
         data_listing_type_layout.addWidget(edit_data_listing_gallery_radio)
@@ -4161,16 +4181,18 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         form_layout.addWidget(data_listing_type_widget, 14, 1)
         
         # チェックボックス（横並び1行）
-        checkbox_widget = QWidget()
+        checkbox_widget = QWidget(widget)
         checkbox_layout = QHBoxLayout()
         checkbox_layout.setContentsMargins(0, 0, 0, 0)
         checkbox_layout.setSpacing(12)
 
-        edit_anonymize_checkbox = QCheckBox("データセットを匿名にする")
+        edit_anonymize_checkbox = QCheckBox("データセットを匿名にする", checkbox_widget)
         # 既存互換: 個別の『データ登録を禁止する』チェックボックスも生成（非表示行）
-        edit_data_entry_prohibited_checkbox = QCheckBox("データ登録を禁止する")
-        edit_data_entry_delete_prohibited_checkbox = QCheckBox("データの登録及び削除を禁止する")
-        edit_share_core_scope_checkbox = QCheckBox("データ中核拠点広域シェア（RDE全体での共有）を有効にする")
+        edit_data_entry_prohibited_checkbox = QCheckBox("データ登録を禁止する", checkbox_widget)
+        edit_data_entry_delete_prohibited_checkbox = QCheckBox("データの登録及び削除を禁止する", checkbox_widget)
+        edit_data_entry_delete_prohibited_checkbox.setObjectName("dataset_edit_data_entry_delete_prohibited_checkbox")
+        edit_data_entry_delete_prohibited_checkbox.hide()
+        edit_share_core_scope_checkbox = QCheckBox("データ中核拠点広域シェア（RDE全体での共有）を有効にする", checkbox_widget)
 
         checkbox_layout.addWidget(edit_anonymize_checkbox)
         # 横並び3つの指定に合わせ、『データ登録を禁止する』を採用
@@ -4179,7 +4201,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
 
         checkbox_widget.setLayout(checkbox_layout)
 
-        form_layout.addWidget(QLabel("共有範囲/利用制限:"), 15, 0)
+        form_layout.addWidget(QLabel("共有範囲/利用制限:", form_widget), 15, 0)
         form_layout.addWidget(checkbox_widget, 15, 1)
         
         form_widget.setLayout(form_layout)
@@ -4508,12 +4530,12 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 return str(first.get("id") or "")
         return ""
 
-    content_splitter = QSplitter(Qt.Vertical)
+    content_splitter = QSplitter(Qt.Vertical, widget)
     content_splitter.setChildrenCollapsible(False)
     content_splitter.addWidget(edit_form_widget)
 
     # データエントリー一覧パネル
-    entries_panel = QWidget()
+    entries_panel = QWidget(widget)
     entries_panel_layout = QVBoxLayout()
     entries_panel_layout.setContentsMargins(0, 0, 0, 0)
     entries_title = QLabel("データエントリー一覧（選択データセット）")
@@ -4546,7 +4568,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
     entries_button_layout.addStretch()
     entries_panel_layout.addLayout(entries_button_layout)
 
-    entries_table = QTableWidget()
+    entries_table = QTableWidget(entries_panel)
     # 列拡張: 登録状況開始日時とリンク列を追加 (複数候補は行分割表示)
     entries_table.setColumnCount(6)
     entries_table.setHorizontalHeaderLabels(["データエントリーID", "名称", "登録状況ID", "登録状況ステータス", "登録開始日時", "リンク"])

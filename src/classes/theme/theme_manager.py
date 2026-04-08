@@ -191,6 +191,12 @@ class ThemeManager(QObject):
                             event.Type.WinIdChange,
                             event.Type.ParentChange,
                         ):
+                            if et != event.Type.Show:
+                                try:
+                                    if not obj.isVisible():
+                                        return False
+                                except Exception:
+                                    return False
                             from classes.theme.window_frame import apply_window_frame_theme
                             try:
                                 obj.setProperty("_rde_window_frame_theming", True)

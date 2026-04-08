@@ -62,19 +62,23 @@ def show_splash_screen():
         muted_color = get_color(ThemeKey.TEXT_MUTED)
 
         root = tk.Tk()
-        root.title("スプラッシュ画面")
+        # Tk の root は生成直後に既定タイトル（python）で一瞬表示され得るため、
+        # 非表示のまま保持し、実際に見せるのは Toplevel のみとする。
+        root.withdraw()
+        splash = tk.Toplevel(root)
+        splash.title("スプラッシュ画面")
         screen_width = root.winfo_screenwidth()
         screen_height = root.winfo_screenheight()
         window_width = 400
         window_height = 400
         x = (screen_width // 2) - (window_width // 2)
         y = (screen_height // 2) - (window_height // 2)
-        root.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        root.overrideredirect(True)
-        root.lift()
-        root.focus_force()
+        splash.geometry(f"{window_width}x{window_height}+{x}+{y}")
+        splash.overrideredirect(True)
+        splash.lift()
+        splash.focus_force()
         # キャンバス
-        canvas = tk.Canvas(root, width=250, height=250)
+        canvas = tk.Canvas(splash, width=250, height=250)
         canvas.pack(fill="both", expand=True)
         # 画像表示（失敗時はテキストのみ）
         try:
@@ -109,7 +113,13 @@ def show_splash_screen():
         canvas.create_text(200, 300, text="作成支援ツール（仮）", fill=text_color, font=("Arial", 12, "bold"))
         canvas.create_text(200, 320, text=f"Version {REVISION}", fill=accent_color, font=("Arial", 10, "bold"))
         canvas.create_text(200, 340, text="GitHub: MNagasako/misc-rde-tool-public", fill=muted_color, font=("Arial", 10))
-        root.after(2000, root.destroy)
+        def _close_splash():
+            try:
+                splash.destroy()
+            finally:
+                root.destroy()
+
+        splash.after(2000, _close_splash)
         root.mainloop()
     except Exception as e:
         logger.warning("スプラッシュ画面の表示に失敗: %s", e)
