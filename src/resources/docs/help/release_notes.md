@@ -6,10 +6,20 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.53）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
-| 設定/UI | Misc タブに UI表示リセットを追加し、メインウィンドウと AI提案ダイアログの保存済み位置・サイズを既定レイアウトへ戻せるよう改善。 |
-| データセット/進捗 | `dataset_edit_widget.py` / `dataset_open_widget.py` の親子関係と progress dialog 条件を整理し、初期表示とタブ遷移の安定性を改善。 |
-| 検証 | compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.53 導線で確認。 |
+| リリース/品質 | リビジョンアップ（v2.5.54）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| データセット | `dataset_edit_widget.py` の既存データセット候補で、signature 付き永続キャッシュを使った初期再利用を追加。 |
+| 設定/キャッシュ | `cache_registry.py` にデータセット編集ランタイムキャッシュと永続候補キャッシュを追加し、キャッシュ管理タブから可視化/クリア可能化。 |
+| 検証 | compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.54 導線で確認。 |
+
+## v2.5.54 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.54）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| データセット候補キャッシュ | `dataset_edit_combo_cache.py` を追加し、`output/rde/cache/dataset_edit_combo_cache.json` に既定候補を signature 付きで保存。`dataset.json` / `self.json` / `subGroup.json` が未変化なら初期表示前に再利用。 |
+| データセット編集UI | `dataset_edit_widget.py` は persisted cache 優先利用、clear 後の preparing 状態復帰、runtime cache metadata 公開を実装。incremental population 中の検索・選択継続も維持。 |
+| キャッシュ管理 | `cache_registry.py` に `dataset_edit_combo` と `dataset_edit_runtime` を追加し、設定のキャッシュ管理タブから状態確認とクリアを行えるよう整理。 |
+| 検証 | `test_dataset_edit_combo_cache.py`、`test_dataset_edit_runtime_cache_registry.py`、`test_dataset_edit_widget_initial_refresh.py` を追加・更新。 |
 
 ## v2.5.53 の主な更新点
 

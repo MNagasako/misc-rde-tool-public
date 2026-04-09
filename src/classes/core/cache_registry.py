@@ -164,6 +164,36 @@ def _resolve_data_fetch2_widget(context: CacheRuntimeContext):
     return getattr(context.browser, "data_fetch2_widget", None)
 
 
+def _resolve_dataset_edit_widget(context: CacheRuntimeContext):
+    controller = _resolve_ui_controller(context)
+    if controller is None:
+        return None
+
+    dataset_tab_widget = getattr(controller, "_dataset_tab_widget", None)
+    if dataset_tab_widget is not None:
+        widget = getattr(dataset_tab_widget, "edit_widget", None)
+        if widget is not None:
+            return widget
+
+    dataset_widget = getattr(controller, "dataset_open_widget", None)
+    if dataset_widget is None:
+        dataset_widget = getattr(context.browser, "dataset_open_widget", None)
+    if dataset_widget is None:
+        return None
+
+    widget = getattr(dataset_widget, "_dataset_edit_inner_tab", None)
+    if widget is not None:
+        return widget
+
+    scroll = getattr(dataset_widget, "_dataset_edit_tab", None)
+    if scroll is not None and hasattr(scroll, "widget"):
+        try:
+            return scroll.widget()
+        except Exception:
+            return None
+    return None
+
+
 def _browser_blob_hash_snapshot(context: CacheRuntimeContext) -> CacheSnapshot:
     browser = context.browser
     blob_hashes = getattr(browser, "_recent_blob_hashes", None) if browser is not None else None
@@ -324,6 +354,60 @@ def _clear_data_fetch2_runtime(context: CacheRuntimeContext) -> CacheClearResult
     return CacheClearResult(True if cleared or widget is None else False, "データ取得2のメモリキャッシュをクリアしました")
 
 
+def _dataset_edit_runtime_snapshot(context: CacheRuntimeContext) -> CacheSnapshot:
+    widget = _resolve_dataset_edit_widget(context)
+    metadata = {}
+    if widget is not None and hasattr(widget, "get_cache_metadata"):
+        try:
+            metadata = widget.get_cache_metadata() or {}
+        except Exception:
+            metadata = {}
+
+    raw_count = int(metadata.get("raw_data_count") or 0)
+    filtered_count = int(metadata.get("filtered_cache_count") or 0)
+    display_count = int(metadata.get("display_cache_count") or 0)
+    combo_count = int(metadata.get("combo_cache_count") or 0)
+    preparing = bool(metadata.get("preparing"))
+
+    notes_parts = []
+    if widget is None:
+        notes_parts.append("widget missing")
+    else:
+        notes_parts.extend(
+            [
+                f"raw={raw_count}",
+                f"filters={filtered_count}",
+                f"display={display_count}",
+                f"combo={combo_count}",
+            ]
+        )
+        if preparing:
+            notes_parts.append("preparing=1")
+
+    return CacheSnapshot(
+        cache_id="dataset_edit_runtime",
+        name="データセット編集ランタイムキャッシュ",
+        feature="データセット",
+        cache_type="メモリ",
+        storage_path="memory://DatasetEditWidget",
+        created_at=None,
+        updated_at=None,
+        size_bytes=0,
+        item_count=combo_count or raw_count or filtered_count or display_count,
+        active=bool(metadata.get("active")) if metadata else False,
+        clearable=widget is not None and hasattr(widget, "clear_cache"),
+        notes=", ".join(notes_parts),
+    )
+
+
+def _clear_dataset_edit_runtime(context: CacheRuntimeContext) -> CacheClearResult:
+    widget = _resolve_dataset_edit_widget(context)
+    if widget is None or not hasattr(widget, "clear_cache"):
+        return CacheClearResult(False, "実行中のデータセット編集ウィジェットが見つかりません")
+    widget.clear_cache()
+    return CacheClearResult(True, "データセット編集ランタイムキャッシュをクリアしました")
+
+
 def _ai_runtime_snapshot(context: CacheRuntimeContext) -> CacheSnapshot:
     widget = _resolve_ai_test_widget(context)
     template_count = 0
@@ -462,6 +546,31 @@ def _build_registry() -> CacheRegistry:
 
         clear_dataset_list_cache_storage(include_persisted=True)
         return CacheClearResult(True, "データセット一覧キャッシュをクリアしました")
+
+    def dataset_edit_combo_snapshot(_context: CacheRuntimeContext) -> CacheSnapshot:
+        from classes.dataset.util.dataset_edit_combo_cache import get_dataset_edit_combo_cache_metadata
+
+        meta = get_dataset_edit_combo_cache_metadata()
+        return CacheSnapshot(
+            cache_id="dataset_edit_combo",
+            name="データセット編集候補キャッシュ",
+            feature="データセット",
+            cache_type="JSON",
+            storage_path=_join_paths(meta.get("paths", [])),
+            created_at=meta.get("created_at"),
+            updated_at=meta.get("updated_at"),
+            size_bytes=int(meta.get("size_bytes") or 0),
+            item_count=int(meta.get("item_count") or 0),
+            active=bool(meta.get("active")),
+            clearable=True,
+            notes="閲覧・修正タブの表示候補（managed_only / フィルタなし）",
+        )
+
+    def clear_dataset_edit_combo(_context: CacheRuntimeContext) -> CacheClearResult:
+        from classes.dataset.util.dataset_edit_combo_cache import clear_dataset_edit_combo_cache_storage
+
+        clear_dataset_edit_combo_cache_storage()
+        return CacheClearResult(True, "データセット編集候補キャッシュをクリアしました")
 
     def subgroup_listing_snapshot(_context: CacheRuntimeContext) -> CacheSnapshot:
         from classes.subgroup.util.subgroup_list_table_records import get_subgroup_list_cache_metadata
@@ -919,6 +1028,18 @@ def _build_registry() -> CacheRegistry:
             _browser_image_count_snapshot,
             _clear_browser_image_counts,
             refresh_reason="実行時メモリのみのため更新不可",
+        ),
+        CacheEntry(
+            "dataset_edit_combo",
+            dataset_edit_combo_snapshot,
+            clear_dataset_edit_combo,
+            refresh_reason="閲覧・修正タブ表示時に再生成されるため更新不可",
+        ),
+        CacheEntry(
+            "dataset_edit_runtime",
+            _dataset_edit_runtime_snapshot,
+            _clear_dataset_edit_runtime,
+            refresh_reason="画面内状態に依存するため設定タブからは更新不可",
         ),
         CacheEntry(
             "data_fetch2_runtime",

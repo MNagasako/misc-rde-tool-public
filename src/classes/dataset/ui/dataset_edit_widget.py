@@ -11,7 +11,7 @@ import shutil
 import codecs
 import logging
 import re
-from typing import Iterable, Callable, Optional
+from typing import Iterable, Callable, Optional, cast
 
 from qt_compat.widgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QGridLayout, 
@@ -20,10 +20,15 @@ from qt_compat.widgets import (
     QListWidget, QListWidgetItem, QProgressDialog, QApplication, QSplitter,
     QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy
 )
-from qt_compat.core import Qt, QDate, QTimer
+from qt_compat.core import Qt, QDate, QTimer, QStringListModel
 from config.common import get_dynamic_file_path
 from classes.theme.theme_keys import ThemeKey
 from classes.theme.theme_manager import get_color
+from classes.dataset.util.dataset_edit_combo_cache import (
+    build_default_dataset_edit_combo_signature,
+    load_default_dataset_edit_combo_cache,
+    save_default_dataset_edit_combo_cache,
+)
 from classes.dataset.util.dataset_refresh_notifier import get_dataset_refresh_notifier
 from classes.dataset.util.show_event_refresh import RefreshOnShowWidget
 from classes.dataset.ui.taxonomy_builder_dialog import TaxonomyBuilderDialog
@@ -1685,6 +1690,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         dataset_cache["dataset_org_cache"].clear()
         dataset_cache["dataset_group_cache"].clear()
         dataset_cache["last_applied_filter"] = None
+        dataset_cache["last_skip_logged_filter"] = None
+        dataset_cache["last_skip_logged_at"] = None
         logger.info("データセットキャッシュをクリアしました")
 
     def _build_dataset_load_request(
@@ -1941,6 +1948,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                     applicant_id = str(applicant_data.get("id") or "").strip()
 
                     is_managed = bool(self_user_id and (manager_id == self_user_id or applicant_id == self_user_id))
+
+                    if filter_type == "managed_only":
+                        if is_managed:
+                            managed_datasets.append(dataset)
+                        else:
+                            other_datasets.append(dataset)
+                        continue
 
                     is_org_subject = False
                     if self_org_name:
@@ -2235,6 +2249,112 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
 
     _dataset_combo_population_generation = {"generation": 0}
 
+    def _disconnect_dataset_combo_completer(current_completer) -> None:
+        if current_completer is None:
+            return
+        import warnings
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            try:
+                current_completer.activated.disconnect(on_completer_activated)
+            except Exception:
+                pass
+
+    def _clear_dataset_combo_completion_state(
+        *,
+        reset_items: bool = False,
+        cancel_population: bool = True,
+    ) -> None:
+        if cancel_population:
+            _dataset_combo_population_generation["generation"] += 1
+
+        current_completer = existing_dataset_combo.completer()
+        if current_completer:
+            _disconnect_dataset_combo_completer(current_completer)
+            current_completer.deleteLater()
+            try:
+                existing_dataset_combo.setCompleter(cast(QCompleter, None))
+            except Exception:
+                pass
+
+        for attr_name in (
+            "_datasets_cache",
+            "_display_names_cache",
+            "_display_to_dataset_map",
+            "_display_names_model",
+        ):
+            if hasattr(existing_dataset_combo, attr_name):
+                try:
+                    delattr(existing_dataset_combo, attr_name)
+                except Exception:
+                    pass
+
+        if not reset_items:
+            return
+
+        was_blocked = existing_dataset_combo.signalsBlocked()
+        existing_dataset_combo.blockSignals(True)
+        try:
+            existing_dataset_combo.clear()
+            existing_dataset_combo.addItem("-- データセットを選択してください --", None)
+            existing_dataset_combo.setCurrentIndex(-1)
+            line_edit = existing_dataset_combo.lineEdit()
+            if line_edit is not None:
+                line_edit.clear()
+        finally:
+            existing_dataset_combo.blockSignals(was_blocked)
+
+    def _ensure_dataset_combo_completer() -> QStringListModel:
+        current_model = getattr(existing_dataset_combo, "_display_names_model", None)
+        current_completer = existing_dataset_combo.completer()
+        if isinstance(current_model, QStringListModel) and current_completer is not None:
+            return current_model
+
+        if current_completer is not None:
+            _disconnect_dataset_combo_completer(current_completer)
+            current_completer.deleteLater()
+
+        completer_model = QStringListModel([], existing_dataset_combo)
+        completer = QCompleter(completer_model, existing_dataset_combo)
+        completer.setCaseSensitivity(getattr(Qt, "CaseInsensitive"))
+        completer.setFilterMode(getattr(Qt, "MatchContains"))
+        popup_view = completer.popup()
+        if popup_view is not None:
+            popup_view.setMinimumHeight(240)
+            popup_view.setMaximumHeight(240)
+        existing_dataset_combo.setCompleter(completer)
+        completer.activated.connect(on_completer_activated)
+        setattr(existing_dataset_combo, "_display_names_model", completer_model)
+        return completer_model
+
+    def clear_runtime_cache(*, reset_ui: bool = True) -> None:
+        clear_cache()
+        dataset_load_state["in_progress"] = False
+        dataset_load_state["current_request"] = None
+        dataset_load_state["pending_request"] = None
+        _clear_dataset_combo_completion_state(reset_items=reset_ui)
+        if reset_ui:
+            _set_dataset_combo_preparing_state(True, dataset_combo_preparing_message, allow_interaction=False)
+            clear_edit_form()
+
+    def get_runtime_cache_metadata() -> dict:
+        raw_data = dataset_cache.get("raw_data")
+        combo_cache = getattr(existing_dataset_combo, "_datasets_cache", None)
+        return {
+            "raw_data_count": len(raw_data) if isinstance(raw_data, list) else 0,
+            "filtered_cache_count": len(dataset_cache.get("filtered_datasets") or {}),
+            "display_cache_count": len(dataset_cache.get("display_data") or {}),
+            "combo_cache_count": len(combo_cache) if isinstance(combo_cache, list) else 0,
+            "preparing": bool(getattr(existing_dataset_combo, "_is_preparing", False)),
+            "active": bool(
+                dataset_cache.get("raw_data")
+                or dataset_cache.get("filtered_datasets")
+                or dataset_cache.get("display_data")
+                or combo_cache
+            ),
+        }
+
     def update_combo_box_ui(datasets, display_names, filter_type, grant_number_filter, dataset_count):
         """コンボボックスのUIを更新する"""
         nonlocal _preparing_total_count
@@ -2280,58 +2400,43 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                     f"データセット ({dataset_count}件) から検索... [{filter_desc}]"
                 )
 
-        def _refresh_completion_state(loaded_datasets, loaded_display_names) -> None:
-            current_completer = existing_dataset_combo.completer()
-            if current_completer:
-                try:
-                    current_completer.activated.disconnect(on_completer_activated)
-                except Exception:
-                    pass
-                current_completer.deleteLater()
-
+        def _refresh_completion_state(
+            loaded_datasets,
+            loaded_display_names,
+            *,
+            display_map=None,
+            reuse_collections: bool = False,
+        ) -> None:
             if loaded_display_names:
-                completer = QCompleter(list(loaded_display_names), existing_dataset_combo)
-                completer.setCaseSensitivity(Qt.CaseInsensitive)
-                completer.setFilterMode(Qt.MatchContains)
-                popup_view = completer.popup()
-                popup_view.setMinimumHeight(240)
-                popup_view.setMaximumHeight(240)
-                existing_dataset_combo.setCompleter(completer)
-                completer.activated.connect(on_completer_activated)
+                completer_model = _ensure_dataset_combo_completer()
+                completer_model.setStringList(list(loaded_display_names))
             else:
-                existing_dataset_combo.setCompleter(None)
+                _clear_dataset_combo_completion_state(reset_items=False)
 
-            existing_dataset_combo._datasets_cache = list(loaded_datasets)
-            existing_dataset_combo._display_names_cache = list(loaded_display_names)
+            cached_datasets = loaded_datasets if reuse_collections else list(loaded_datasets)
+            cached_display_names = loaded_display_names if reuse_collections else list(loaded_display_names)
+            setattr(existing_dataset_combo, "_datasets_cache", cached_datasets)
+            setattr(existing_dataset_combo, "_display_names_cache", cached_display_names)
             try:
-                existing_dataset_combo._display_to_dataset_map = {
-                    _normalize_display_text(loaded_display_names[i]): loaded_datasets[i]
-                    for i in range(min(len(loaded_display_names), len(loaded_datasets)))
-                    if isinstance(loaded_datasets[i], dict)
-                }
-                logger.debug("display_to_dataset_map 構築完了: %s エントリ", len(existing_dataset_combo._display_to_dataset_map))
+                if display_map is None:
+                    current_display_map = {
+                        _normalize_display_text(loaded_display_names[i]): loaded_datasets[i]
+                        for i in range(min(len(loaded_display_names), len(loaded_datasets)))
+                        if isinstance(loaded_datasets[i], dict)
+                    }
+                else:
+                    current_display_map = display_map if reuse_collections else dict(display_map)
+                setattr(existing_dataset_combo, "_display_to_dataset_map", current_display_map)
+                logger.debug("display_to_dataset_map 構築完了: %s エントリ", len(current_display_map))
             except Exception as map_err:
                 logger.debug("display_to_dataset_map 構築失敗: %s", map_err)
-            _update_line_edit_placeholder(len(loaded_datasets))
+            _update_line_edit_placeholder(len(cached_datasets))
 
         was_blocked = existing_dataset_combo.signalsBlocked()
         existing_dataset_combo.blockSignals(True)
         try:
             existing_dataset_combo.clear()
-            if hasattr(existing_dataset_combo, '_datasets_cache'):
-                delattr(existing_dataset_combo, '_datasets_cache')
-            if hasattr(existing_dataset_combo, '_display_names_cache'):
-                delattr(existing_dataset_combo, '_display_names_cache')
-            if hasattr(existing_dataset_combo, '_display_to_dataset_map'):
-                delattr(existing_dataset_combo, '_display_to_dataset_map')
-
-            current_completer = existing_dataset_combo.completer()
-            if current_completer:
-                try:
-                    current_completer.activated.disconnect(on_completer_activated)
-                except Exception:
-                    pass
-                current_completer.deleteLater()
+            _clear_dataset_combo_completion_state(reset_items=False, cancel_population=False)
 
             existing_dataset_combo.addItem("-- データセットを選択してください --", None)
             existing_dataset_combo.setCurrentIndex(-1)
@@ -2364,6 +2469,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
 
         loaded_datasets = []
         loaded_display_names = []
+        loaded_display_map = {}
 
         def _append_chunk(start_index: int) -> None:
             if generation != _dataset_combo_population_generation["generation"]:
@@ -2380,12 +2486,18 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                         existing_dataset_combo.addItem(display_text, dataset)
                         loaded_datasets.append(dataset)
                         loaded_display_names.append(display_text)
+                        loaded_display_map[_normalize_display_text(display_text)] = dataset
                     else:
                         logger.warning("データセットが辞書ではありません: index=%s, type=%s", index, type(dataset))
             finally:
                 existing_dataset_combo.blockSignals(combo_was_blocked)
 
-            _refresh_completion_state(loaded_datasets, loaded_display_names)
+            _refresh_completion_state(
+                loaded_datasets,
+                loaded_display_names,
+                display_map=loaded_display_map,
+                reuse_collections=True,
+            )
             logger.debug("コンボボックスに %s/%s 件のアイテムを追加", len(loaded_datasets), total_items)
 
             if end_index < total_items:
@@ -2450,6 +2562,11 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         
         # キャッシュキーを生成
         cache_key = get_cache_key(filter_type, grant_number_filter, subgroup_filter_id)
+        is_default_combo_cache_target = (
+            filter_type == "managed_only"
+            and not grant_number_filter.strip()
+            and not str(subgroup_filter_id or "").strip()
+        )
         
         # キャッシュが有効で、強制再読み込みでない場合はキャッシュを使用
         if not force_reload and is_cache_valid() and cache_key in dataset_cache["filtered_datasets"]:
@@ -2464,6 +2581,21 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 _restore_dataset_selection(preserve_selection_id)
             logger.info("キャッシュからの読み込み完了: %s件", len(datasets))
             return
+
+        if not force_reload and is_default_combo_cache_target:
+            persisted_signature = build_default_dataset_edit_combo_signature()
+            persisted_combo_cache = load_default_dataset_edit_combo_cache(persisted_signature)
+            if isinstance(persisted_combo_cache, dict):
+                datasets = persisted_combo_cache.get("datasets") or []
+                display_names = persisted_combo_cache.get("display_names") or []
+                if isinstance(datasets, list) and isinstance(display_names, list) and len(datasets) == len(display_names):
+                    dataset_cache["filtered_datasets"][cache_key] = datasets
+                    dataset_cache["display_data"][cache_key] = display_names
+                    update_combo_box_ui(datasets, display_names, filter_type, grant_number_filter, len(datasets))
+                    if preserve_selection_id:
+                        _restore_dataset_selection(preserve_selection_id)
+                    logger.info("永続キャッシュからデータセット一覧を読み込み: %s件", len(datasets))
+                    return
         
         _set_dataset_combo_preparing_state(True)
         _process_events()
@@ -2645,6 +2777,13 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             dataset_cache["filtered_datasets"][cache_key] = datasets
             dataset_cache["display_data"][cache_key] = display_names
             logger.info("フィルタ結果をキャッシュに保存: %s -> %s件", cache_key, len(datasets))
+
+            if is_default_combo_cache_target:
+                save_default_dataset_edit_combo_cache(
+                    datasets,
+                    display_names,
+                    signature=build_default_dataset_edit_combo_signature(),
+                )
             
             # UIを更新
             update_combo_box_ui(datasets, display_names, filter_type, grant_number_filter, len(datasets))
@@ -5585,7 +5724,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 grant_number_filter = grant_number_filter_edit.text().strip()
                 subgroup_filter_id = _get_subgroup_filter_id()
                 # キャッシュをクリアして強制再読み込み
-                clear_cache()
+                clear_runtime_cache()
                 load_existing_datasets(filter_type, grant_number_filter, subgroup_filter_id, force_reload=True)
                 
                 # 更新したデータセットを再選択
@@ -5749,7 +5888,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         
         if force_reload:
             logger.info("外部からキャッシュクリア付きリフレッシュ")
-            clear_cache()
+            clear_runtime_cache()
         
         load_existing_datasets(
             filter_type,
@@ -5764,8 +5903,10 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         """外部からキャッシュを強制更新"""
         refresh_with_current_filter(force_reload=True, show_progress=True)
     
-    widget._refresh_dataset_list = refresh_with_current_filter
-    widget._refresh_cache = refresh_cache_from_external
+    setattr(widget, "_refresh_dataset_list", refresh_with_current_filter)
+    setattr(widget, "_refresh_cache", refresh_cache_from_external)
+    setattr(widget, "clear_cache", clear_runtime_cache)
+    setattr(widget, "get_cache_metadata", get_runtime_cache_metadata)
     def _refresh_dataset_list_on_show():
         if not initial_load_state["completed"]:
             logger.debug("初期ロード完了前の showEvent リフレッシュをスキップ")
@@ -5773,7 +5914,7 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
         refresh_with_current_filter(show_progress=False)
 
     widget.add_show_refresh_callback(_refresh_dataset_list_on_show)
-    widget._restore_dataset_selection = _restore_dataset_selection
+    setattr(widget, "_restore_dataset_selection", _restore_dataset_selection)
     
     # グローバル通知システムに登録
     notifier = get_dataset_refresh_notifier()
