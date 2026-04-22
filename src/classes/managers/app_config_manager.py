@@ -106,6 +106,25 @@ class AppConfigManager:
                 "backup_enabled": True
             },
 
+            # AI用ファイル抽出設定
+            "file_text_extraction": {
+                "target_extensions": [".txt", ".csv", ".xlsx", ".json", ".md", ".log", ".xml"],
+                "exclude_patterns": [
+                    ".*_anonymized\\.json",
+                    "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\.json",
+                ],
+                "max_files": 10,
+                "max_file_size_bytes": 10 * 1024 * 1024,
+                "max_chars_per_file": 10000,
+                "excel_all_sheets": True,
+                "excel_max_rows": 1000,
+                # AIが追加で取得するSTRUCTUREDファイルの保存先。
+                # temp: 一時ファイルとして抽出後に削除（既定）
+                # dataFiles: データ取得2と同じ output/rde/data/dataFiles 配下へ恒久保存
+                # dataFilesAI: AI専用 output/rde/data/dataFilesAI 配下へ恒久保存
+                "ai_download_storage_mode": "temp",
+            },
+
             # データポータル設定
             "data_portal": {
                 # テスト環境URLは固定値をコードに持たず設定から供給する

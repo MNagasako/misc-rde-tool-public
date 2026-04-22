@@ -12,7 +12,8 @@ class RefreshOnShowWidget(QWidget):
     """QWidget that automatically reruns callbacks every time it becomes visible."""
 
     def __init__(self, parent=None) -> None:
-        super().__init__(parent)
+        qt_parent = parent if isinstance(parent, QWidget) else None
+        super().__init__(qt_parent)
         if os.environ.get("PYTEST_CURRENT_TEST"):
             self.setAttribute(Qt.WA_DontShowOnScreen, True)
         self._show_refresh_callbacks: List[Callable[[], None]] = []

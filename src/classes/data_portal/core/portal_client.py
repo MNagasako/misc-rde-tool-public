@@ -8,6 +8,7 @@ net.http_helpersを使用してプロキシ・SSL設定に対応
 import logging
 import re
 import os
+from datetime import datetime
 from typing import Optional, Dict, Any, Tuple
 from urllib.parse import urljoin, urlparse
 
@@ -20,6 +21,14 @@ from ..conf.config import get_data_portal_config
 from bs4 import BeautifulSoup
 
 logger = get_logger("DataPortal.PortalClient")
+
+
+def _bs4_attr_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return " ".join(str(part) for part in value if str(part).strip())
+    return str(value)
 
 
 class PortalClient:
@@ -351,7 +360,12 @@ class PortalClient:
                 password_keys = ['password', 'pass', 'pwd', 'login_password']
 
                 for f in candidate_forms:
-                    names = set(inp.get('name') for inp in f.find_all('input') if inp.get('name'))
+                    names = {
+                        name
+                        for inp in f.find_all('input')
+                        for name in [_bs4_attr_text(inp.get('name')).strip()]
+                        if name
+                    }
                     if any(k in names for k in username_keys) and any(k in names for k in password_keys):
                         target_form = f
                         break
@@ -362,25 +376,25 @@ class PortalClient:
 
                 if target_form:
                     # form actionを取得
-                    action_attr = target_form.get('action')
+                    action_attr = _bs4_attr_text(target_form.get('action')).strip()
                     if action_attr:
                         post_target = action_attr
 
                     # input要素を収集
                     inputs = target_form.find_all('input')
                     for inp in inputs:
-                        name = inp.get('name')
+                        name = _bs4_attr_text(inp.get('name')).strip()
                         if not name:
                             continue
-                        value = inp.get('value', '')
+                        value = _bs4_attr_text(inp.get('value', ''))
                         parsed_fields[name] = value
 
                     # button要素(type=submit)も収集（name/valueが要求されるサイト対策）
                     for btn in target_form.find_all('button'):
-                        btn_type = (btn.get('type') or '').lower()
-                        name = btn.get('name')
+                        btn_type = _bs4_attr_text(btn.get('type')).strip().lower()
+                        name = _bs4_attr_text(btn.get('name')).strip()
                         if btn_type == 'submit' and name:
-                            value = btn.get('value') or btn.text.strip() or 'submit'
+                            value = _bs4_attr_text(btn.get('value')).strip() or btn.text.strip() or 'submit'
                             parsed_fields[name] = value
                 else:
                     logger.warning("ログインフォームが見つかりません。既定フィールドで送信します。")
@@ -508,6 +522,182 @@ class PortalClient:
 
         return code, key
 
+    @staticmethod
+    def _response_looks_like_html(response: Any) -> bool:
+        try:
+            headers = getattr(response, "headers", {}) or {}
+            content_type = str(headers.get("content-type", "") or "").lower()
+            if "html" in content_type:
+                return True
+        except Exception:
+            pass
+
+        try:
+            text = str(getattr(response, "text", "") or "")
+        except Exception:
+            text = ""
+
+        probe = text.lstrip()[:512].lower()
+        return probe.startswith("<!doctype html") or probe.startswith("<html") or "<html" in probe
+
+    @staticmethod
+    def _extract_latest_csv_download_filename_from_html(html: str) -> Optional[str]:
+        """Extract the newest downloadable filename from the csv_download listing page."""
+
+        text = html or ""
+        if not text.strip():
+            return None
+
+        candidates: list[tuple[Optional[datetime], int, str]] = []
+
+        try:
+            soup = BeautifulSoup(text, 'html.parser')
+            order = 0
+            for form in soup.find_all('form'):
+                fields: Dict[str, str] = {}
+                for inp in form.find_all('input'):
+                    name = str(inp.get('name') or '').strip()
+                    if not name:
+                        continue
+                    fields[name] = str(inp.get('value') or '')
+
+                if fields.get('mode') != 'theme':
+                    continue
+                if fields.get('mode2') != 'csv_download':
+                    continue
+                if fields.get('mode3') != 'download':
+                    continue
+
+                filename = str(fields.get('filename') or '').strip()
+                if not filename:
+                    continue
+
+                parsed_dt: Optional[datetime] = None
+                row = form.find_parent('tr')
+                if row is not None:
+                    cells = row.find_all('td', recursive=False) or row.find_all('td')
+                    if len(cells) >= 2:
+                        dt_text = cells[1].get_text(' ', strip=True)
+                        try:
+                            parsed_dt = datetime.strptime(dt_text, "%Y-%m-%d %H:%M:%S")
+                        except Exception:
+                            parsed_dt = None
+
+                if parsed_dt is None:
+                    match = re.search(r'(\d{8})[-_](\d{6})', filename)
+                    if match:
+                        try:
+                            parsed_dt = datetime.strptime("".join(match.groups()), "%Y%m%d%H%M%S")
+                        except Exception:
+                            parsed_dt = None
+
+                candidates.append((parsed_dt, order, filename))
+                order += 1
+        except Exception:
+            candidates = []
+
+        if candidates:
+            best_filename: Optional[str] = None
+            best_dt: Optional[datetime] = None
+            best_order: Optional[int] = None
+            for parsed_dt, order, filename in candidates:
+                if parsed_dt is None:
+                    if best_filename is None:
+                        best_filename = filename
+                        best_order = order
+                    continue
+                if best_dt is None or parsed_dt > best_dt or (parsed_dt == best_dt and (best_order is None or order < best_order)):
+                    best_dt = parsed_dt
+                    best_order = order
+                    best_filename = filename
+            if best_filename:
+                return best_filename
+            candidates.sort(key=lambda item: item[1])
+            return candidates[0][2]
+
+        match = re.search(r'name=["\']filename["\']\s+value=["\']([^"\']+\.csv)["\']', text, flags=re.IGNORECASE)
+        if match:
+            return str(match.group(1) or '').strip() or None
+        return None
+
+    def _build_theme_csv_listing_request_data(
+        self,
+        *,
+        keyword: str,
+        search_inst: str,
+        search_license_level: str,
+        search_status: str,
+        page: int,
+    ) -> Dict[str, str]:
+        return {
+            "mode": "theme",
+            "mode2": "csv_download",
+            "keyword": keyword or "",
+            "search_inst": search_inst or "",
+            "search_license_level": search_license_level or "",
+            "search_doi": "0",
+            "search_contents": "-1",
+            "search_isanonymized": "-1",
+            "search_status": search_status or "",
+            "page": str(int(page) if int(page) > 0 else 1),
+        }
+
+    def _download_theme_csv_via_listing(
+        self,
+        *,
+        headers: Dict[str, str],
+        keyword: str,
+        search_inst: str,
+        search_license_level: str,
+        search_status: str,
+        page: int,
+    ) -> Tuple[bool, Any]:
+        list_data = self._build_theme_csv_listing_request_data(
+            keyword=keyword,
+            search_inst=search_inst,
+            search_license_level=search_license_level,
+            search_status=search_status,
+            page=page,
+        )
+
+        ok, list_resp = self.post("main.php", data=list_data, headers=headers)
+        if not ok:
+            return False, list_resp
+
+        if self._cancel_requested:
+            return False, "キャンセルされました"
+
+        if not self._response_looks_like_html(list_resp):
+            return True, list_resp
+
+        list_html = str(getattr(list_resp, "text", "") or "")
+        filename = self._extract_latest_csv_download_filename_from_html(list_html)
+        if not filename:
+            try:
+                self._save_login_debug_response("theme_csv_download_listing", list_html)
+            except Exception:
+                pass
+            return False, "CSVダウンロード一覧から最新ファイル名を抽出できません"
+
+        download_data = {
+            "mode": "theme",
+            "mode2": "csv_download",
+            "mode3": "download",
+            "filename": filename,
+        }
+        ok, download_resp = self.post("main.php", data=download_data, headers=headers)
+        if not ok:
+            return False, download_resp
+
+        if self._response_looks_like_html(download_resp):
+            try:
+                self._save_login_debug_response("theme_csv_download_html", getattr(download_resp, "text", "") or "")
+            except Exception:
+                pass
+            return False, f"CSVダウンロード応答がHTMLでした: {filename}"
+
+        return True, download_resp
+
     def download_theme_csv(
         self,
         *,
@@ -520,10 +710,8 @@ class PortalClient:
         """Download logged-in theme list as CSV.
 
         The portal provides a CSV export via main.php:
-        - mode=theme
-        - mode2=csv_download
-        - auth=1
-        - code/key tokens (extracted from HTML)
+        - legacy flow: direct csv_download with auth=1 + code/key tokens
+        - current flow: csv_download listing HTML -> latest filename -> mode3=download
         """
 
         if not self.credentials:
@@ -547,38 +735,63 @@ class PortalClient:
 
         html = resp.text or ""
         code, key = self._extract_csv_tokens_from_html(html)
-        if not code or not key:
-            # Persist for inspection
-            try:
-                self._save_login_debug_response("theme_main_for_csv", html)
-            except Exception:
-                pass
-            return False, "CSV用トークン(code/key)を抽出できません"
 
         headers = {
             "Origin": self._origin_for_headers(),
-            "Referer": "https://nanonet.go.jp/",
+            "Referer": self._build_url("main.php?mode=theme"),
         }
 
-        data = {
-            "mode": "theme",
-            "mode2": "csv_download",
-            "keyword": keyword or "",
-            "search_inst": search_inst or "",
-            "search_license_level": search_license_level or "",
-            "search_status": search_status or "",
-            "page": str(int(page) if int(page) > 0 else 1),
-            "auth": "1",
-            "code": str(code),
-            "key": str(key),
-        }
+        resp = None
+        if code and key:
+            data = {
+                "mode": "theme",
+                "mode2": "csv_download",
+                "keyword": keyword or "",
+                "search_inst": search_inst or "",
+                "search_license_level": search_license_level or "",
+                "search_status": search_status or "",
+                "page": str(int(page) if int(page) > 0 else 1),
+                "auth": "1",
+                "code": str(code),
+                "key": str(key),
+            }
 
-        ok, resp = self.post("main.php", data=data, headers=headers)
-        if not ok:
-            return False, resp
+            ok, resp = self.post("main.php", data=data, headers=headers)
+            if not ok:
+                return False, resp
 
-        if self._cancel_requested:
-            return False, "キャンセルされました"
+            if self._cancel_requested:
+                return False, "キャンセルされました"
+
+            if self._response_looks_like_html(resp):
+                logger.info("code/key直ダウンロードがHTML応答のため、CSV一覧フォールバックへ切替")
+                ok, resp = self._download_theme_csv_via_listing(
+                    headers=headers,
+                    keyword=keyword,
+                    search_inst=search_inst,
+                    search_license_level=search_license_level,
+                    search_status=search_status,
+                    page=page,
+                )
+                if not ok:
+                    return False, resp
+            else:
+                ok = True
+        else:
+            ok, resp = self._download_theme_csv_via_listing(
+                headers=headers,
+                keyword=keyword,
+                search_inst=search_inst,
+                search_license_level=search_license_level,
+                search_status=search_status,
+                page=page,
+            )
+            if not ok:
+                try:
+                    self._save_login_debug_response("theme_main_for_csv", html)
+                except Exception:
+                    pass
+                return False, resp
 
         # Save CSV for real-world inspection (opt-in via env).
         if os.environ.get("ARIM_PORTAL_SAVE_CSV", "").strip():

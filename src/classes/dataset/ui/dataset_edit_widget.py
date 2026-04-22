@@ -2583,8 +2583,11 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             return
 
         if not force_reload and is_default_combo_cache_target:
-            persisted_signature = build_default_dataset_edit_combo_signature()
-            persisted_combo_cache = load_default_dataset_edit_combo_cache(persisted_signature)
+            persisted_signature = build_default_dataset_edit_combo_signature(path_resolver=get_dynamic_file_path)
+            persisted_combo_cache = load_default_dataset_edit_combo_cache(
+                persisted_signature,
+                path_resolver=get_dynamic_file_path,
+            )
             if isinstance(persisted_combo_cache, dict):
                 datasets = persisted_combo_cache.get("datasets") or []
                 display_names = persisted_combo_cache.get("display_names") or []
@@ -2782,7 +2785,8 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
                 save_default_dataset_edit_combo_cache(
                     datasets,
                     display_names,
-                    signature=build_default_dataset_edit_combo_signature(),
+                    signature=build_default_dataset_edit_combo_signature(path_resolver=get_dynamic_file_path),
+                    path_resolver=get_dynamic_file_path,
                 )
             
             # UIを更新

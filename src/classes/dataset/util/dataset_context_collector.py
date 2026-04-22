@@ -18,12 +18,336 @@ import logging
 # ロガー設定
 logger = logging.getLogger(__name__)
 
+AI_DOWNLOAD_STORAGE_MODE_TEMP = "temp"
+AI_DOWNLOAD_STORAGE_MODE_DATAFILES = "dataFiles"
+AI_DOWNLOAD_STORAGE_MODE_DATAFILES_AI = "dataFilesAI"
+AI_DOWNLOAD_STORAGE_MODE_DEFAULT = AI_DOWNLOAD_STORAGE_MODE_TEMP
+_VALID_AI_DOWNLOAD_STORAGE_MODES = {
+    AI_DOWNLOAD_STORAGE_MODE_TEMP,
+    AI_DOWNLOAD_STORAGE_MODE_DATAFILES,
+    AI_DOWNLOAD_STORAGE_MODE_DATAFILES_AI,
+}
+
 
 class DatasetContextCollector:
     """データセット関連のコンテキストデータ収集クラス"""
     
     def __init__(self):
         self.cache = {}
+
+    def _get_ai_download_storage_mode(self) -> str:
+        """AI自動取得ファイルの保存モードを取得する。"""
+        try:
+            from classes.managers.app_config_manager import AppConfigManager
+
+            manager = AppConfigManager()
+            mode = str(
+                manager.get(
+                    "file_text_extraction.ai_download_storage_mode",
+                    AI_DOWNLOAD_STORAGE_MODE_DEFAULT,
+                )
+                or AI_DOWNLOAD_STORAGE_MODE_DEFAULT
+            )
+        except Exception as exc:
+            logger.debug("AIダウンロード保存モード取得失敗: %s", exc)
+            mode = AI_DOWNLOAD_STORAGE_MODE_DEFAULT
+
+        if mode not in _VALID_AI_DOWNLOAD_STORAGE_MODES:
+            return AI_DOWNLOAD_STORAGE_MODE_DEFAULT
+        return mode
+
+    def _get_persistent_download_base_dir(self, storage_mode: str) -> Optional[str]:
+        """恒久保存モード時のベースディレクトリを返す。"""
+        from config.common import get_dynamic_file_path
+
+        if storage_mode == AI_DOWNLOAD_STORAGE_MODE_DATAFILES:
+            return get_dynamic_file_path("output/rde/data/dataFiles")
+        if storage_mode == AI_DOWNLOAD_STORAGE_MODE_DATAFILES_AI:
+            return get_dynamic_file_path("output/rde/data/dataFilesAI")
+        return None
+
+    def _load_dataset_identity(
+        self,
+        dataset_id: str,
+        data_items: Optional[List[Dict[str, Any]]] = None,
+        bearer_token: Optional[str] = None,
+        proxy_get=None,
+    ) -> Dict[str, str]:
+        """保存先決定に必要なデータセット名/課題番号を可能な範囲で解決する。"""
+        from config.common import get_dynamic_file_path
+
+        dataset_name = ""
+        grant_number = ""
+
+        def _extract_attrs(payload: Any) -> Dict[str, Any]:
+            if isinstance(payload, dict):
+                if isinstance(payload.get("data"), dict):
+                    return payload.get("data", {}).get("attributes", {}) or {}
+                return payload.get("attributes", {}) or {}
+            return {}
+
+        try:
+            dataset_detail_path = get_dynamic_file_path(f"output/rde/data/datasets/{dataset_id}.json")
+            if os.path.exists(dataset_detail_path):
+                with open(dataset_detail_path, "r", encoding="utf-8") as fp:
+                    attrs = _extract_attrs(json.load(fp))
+                dataset_name = str(attrs.get("name") or "").strip()
+                grant_number = str(attrs.get("grantNumber") or "").strip()
+        except Exception as exc:
+            logger.debug("dataset detail identity load failed (%s): %s", dataset_id, exc)
+
+        if not dataset_name or not grant_number:
+            try:
+                dataset_listing_path = get_dynamic_file_path("output/rde/data/dataset.json")
+                if os.path.exists(dataset_listing_path):
+                    with open(dataset_listing_path, "r", encoding="utf-8") as fp:
+                        listing = json.load(fp)
+                    for item in list(listing.get("data") or []):
+                        if str(item.get("id") or "").strip() != str(dataset_id or "").strip():
+                            continue
+                        attrs = item.get("attributes", {}) or {}
+                        dataset_name = dataset_name or str(attrs.get("name") or "").strip()
+                        grant_number = grant_number or str(attrs.get("grantNumber") or "").strip()
+                        break
+            except Exception as exc:
+                logger.debug("dataset listing identity load failed (%s): %s", dataset_id, exc)
+
+        if data_items:
+            for item in data_items:
+                attrs = item.get("attributes", {}) or {}
+                dataset_name = dataset_name or str(attrs.get("datasetName") or "").strip()
+                grant_number = grant_number or str(attrs.get("grantNumber") or "").strip()
+                if dataset_name and grant_number:
+                    break
+
+        if (not dataset_name or not grant_number) and dataset_id and bearer_token and proxy_get:
+            try:
+                dataset_detail_url = f"https://rde-api.nims.go.jp/datasets/{dataset_id}"
+                detail_headers = {
+                    "Accept": "application/vnd.api+json",
+                    "Authorization": f"Bearer {bearer_token}",
+                    "Host": "rde-api.nims.go.jp",
+                    "Origin": "https://rde.nims.go.jp",
+                    "Referer": "https://rde.nims.go.jp/",
+                }
+                response = proxy_get(dataset_detail_url, headers=detail_headers)
+                if getattr(response, "status_code", None) == 200:
+                    attrs = _extract_attrs(response.json())
+                    dataset_name = dataset_name or str(attrs.get("name") or "").strip()
+                    grant_number = grant_number or str(attrs.get("grantNumber") or "").strip()
+            except Exception as exc:
+                logger.debug("dataset detail api identity load failed (%s): %s", dataset_id, exc)
+
+        return {
+            "dataset_name": dataset_name,
+            "grant_number": grant_number,
+        }
+
+    def _get_existing_dataset_dirs(
+        self,
+        dataset_id: str,
+        storage_mode: str,
+        data_items: Optional[List[Dict[str, Any]]] = None,
+        bearer_token: Optional[str] = None,
+        proxy_get=None,
+    ) -> List[str]:
+        """既存ファイル再利用候補のディレクトリを優先順で返す。"""
+        from config.common import get_dynamic_file_path
+        from classes.data_fetch2.core.logic.fetch2_filelist_logic import replace_invalid_path_chars
+
+        candidates: List[str] = []
+        identity = self._load_dataset_identity(
+            dataset_id,
+            data_items,
+            bearer_token=bearer_token,
+            proxy_get=proxy_get,
+        )
+        dataset_name = str(identity.get("dataset_name") or "").strip()
+        grant_number = str(identity.get("grant_number") or "").strip()
+
+        if dataset_name and grant_number:
+            preferred_base = self._get_persistent_download_base_dir(storage_mode)
+            base_dirs = []
+            if preferred_base:
+                base_dirs.append(preferred_base)
+            elif storage_mode == AI_DOWNLOAD_STORAGE_MODE_TEMP:
+                base_dirs.append(get_dynamic_file_path("output/rde/data/dataFiles"))
+                base_dirs.append(get_dynamic_file_path("output/rde/data/dataFilesAI"))
+
+            safe_dataset_name = replace_invalid_path_chars(dataset_name)
+            for base_dir in base_dirs:
+                if not base_dir:
+                    continue
+                candidates.append(os.path.join(base_dir, grant_number, safe_dataset_name))
+
+        # 旧来の dataFiles/{dataset_id} 構造も後方互換で探索する
+        if storage_mode == AI_DOWNLOAD_STORAGE_MODE_DATAFILES:
+            candidates.append(get_dynamic_file_path(f"output/rde/data/dataFiles/{dataset_id}"))
+        elif storage_mode == AI_DOWNLOAD_STORAGE_MODE_DATAFILES_AI:
+            candidates.append(get_dynamic_file_path(f"output/rde/data/dataFilesAI/{dataset_id}"))
+        else:
+            candidates.append(get_dynamic_file_path(f"output/rde/data/dataFiles/{dataset_id}"))
+            candidates.append(get_dynamic_file_path(f"output/rde/data/dataFilesAI/{dataset_id}"))
+
+        deduped: List[str] = []
+        seen: set[str] = set()
+        for path in candidates:
+            norm = os.path.normcase(os.path.normpath(path))
+            if norm in seen:
+                continue
+            seen.add(norm)
+            deduped.append(path)
+        return deduped
+
+    def _load_cached_entry_files_payload(self, entry_id: str) -> Optional[Dict[str, Any]]:
+        """dataFiles/<entry_id>.json キャッシュを読み込む。"""
+        from config.common import get_dynamic_file_path
+
+        if not entry_id:
+            return None
+
+        candidates = (
+            get_dynamic_file_path(f"output/rde/data/dataFiles/{entry_id}.json"),
+            get_dynamic_file_path(f"output/rde/data/dataFiles/sub/{entry_id}.json"),
+        )
+        for path in candidates:
+            try:
+                if not os.path.exists(path):
+                    continue
+                with open(path, "r", encoding="utf-8") as fh:
+                    payload = json.load(fh)
+                if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+                    return payload
+            except Exception as exc:
+                logger.debug("cached entry files load failed (%s): %s", path, exc)
+        return None
+
+    def _collect_structured_files_from_local_cache(
+        self,
+        dataset_id: str,
+        bearer_token: Optional[str] = None,
+        proxy_get=None,
+    ) -> List[Dict[str, Any]]:
+        """dataEntry / dataFiles キャッシュから STRUCTURED ファイル情報を組み立てる。"""
+        from config.common import get_dynamic_file_path
+
+        entry_path = get_dynamic_file_path(f"output/rde/data/dataEntry/{dataset_id}.json")
+        if not os.path.exists(entry_path):
+            return []
+
+        try:
+            with open(entry_path, "r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except Exception as exc:
+            logger.debug("dataEntry cache load failed (%s): %s", dataset_id, exc)
+            return []
+
+        entries = payload.get("data") or []
+        dataset_identity = self._load_dataset_identity(
+            dataset_id,
+            entries if isinstance(entries, list) else None,
+            bearer_token=bearer_token,
+            proxy_get=proxy_get,
+        )
+        structured_files: List[Dict[str, Any]] = []
+
+        if not isinstance(entries, list):
+            return structured_files
+
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            entry_id = str(entry.get("id") or "").strip()
+            entry_attrs = entry.get("attributes", {}) or {}
+            cached_files = self._load_cached_entry_files_payload(entry_id)
+            if not cached_files:
+                continue
+            for item in list(cached_files.get("data") or []):
+                if not isinstance(item, dict):
+                    continue
+                file_attrs = item.get("attributes", {}) or {}
+                if str(file_attrs.get("fileType") or "") != "STRUCTURED":
+                    continue
+                structured_files.append(
+                    {
+                        "id": str(item.get("id") or "").strip(),
+                        "name": file_attrs.get("fileName", ""),
+                        "size": file_attrs.get("fileSize", 0),
+                        "media_type": file_attrs.get("mediaType", ""),
+                        "tile_name": entry_attrs.get("name", ""),
+                        "tile_number": entry_attrs.get("dataNumber", ""),
+                        "dataset_name": dataset_identity.get("dataset_name") or entry_attrs.get("datasetName", ""),
+                        "grant_number": dataset_identity.get("grant_number") or entry_attrs.get("grantNumber", ""),
+                    }
+                )
+
+        return structured_files
+
+    def _download_structured_file(
+        self,
+        *,
+        file_id: str,
+        file_name: str,
+        bearer_token: Optional[str],
+        storage_mode: str,
+        file_info: Dict[str, Any],
+        proxy_get,
+    ) -> Optional[str]:
+        """設定に応じて一時/恒久保存でSTRUCTUREDファイルを取得する。"""
+        if storage_mode == AI_DOWNLOAD_STORAGE_MODE_TEMP:
+            import tempfile
+
+            file_download_url = f"https://rde-api.nims.go.jp/files/{file_id}?isDownload=true"
+            download_headers = {
+                "Authorization": f"Bearer {bearer_token}",
+                "Host": "rde-api.nims.go.jp",
+                "Origin": "https://rde.nims.go.jp",
+                "Referer": "https://rde.nims.go.jp/",
+                "Accept": "*/*",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            }
+
+            file_response = proxy_get(file_download_url, headers=download_headers, stream=True)
+            if file_response.status_code != 200:
+                logger.warning("ファイルダウンロード失敗: %s (HTTP %s)", file_name, file_response.status_code)
+                return None
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file_name)[1]) as tmp_file:
+                for chunk in file_response.iter_content(chunk_size=8192):
+                    if chunk:
+                        tmp_file.write(chunk)
+                file_path = tmp_file.name
+            logger.info("AI動的ダウンロード完了(一時): %s -> %s", file_name, file_path)
+            return file_path
+
+        base_dir = self._get_persistent_download_base_dir(storage_mode)
+        if not base_dir:
+            logger.warning("未対応のAI保存モード: %s", storage_mode)
+            return None
+
+        if not file_id:
+            logger.warning("file_id が無いため恒久保存ダウンロードできません: %s", file_name)
+            return None
+
+        from classes.data_fetch2.core.logic.fetch2_filelist_logic import download_file_for_data_id
+
+        saved_path = download_file_for_data_id(
+            data_id=file_id,
+            bearer_token=bearer_token,
+            save_dir_base=base_dir,
+            file_name=file_name,
+            grantNumber=file_info.get("grant_number"),
+            dataset_name=file_info.get("dataset_name"),
+            tile_name=file_info.get("tile_name"),
+            tile_number=file_info.get("tile_number"),
+            parent=None,
+        )
+        if not saved_path:
+            logger.warning("AI恒久保存ダウンロード失敗: %s", file_name)
+            return None
+
+        logger.info("AI動的ダウンロード完了(恒久保存:%s): %s -> %s", storage_mode, file_name, saved_path)
+        return str(saved_path)
         
     def collect_full_context(self, dataset_id: Optional[str] = None, **form_data) -> Dict[str, Any]:
         """
@@ -105,7 +429,7 @@ class DatasetContextCollector:
             
         return context
         
-    def _collect_arim_data(self, grant_number: str, form_data: Dict[str, Any] = None) -> Dict[str, str]:
+    def _collect_arim_data(self, grant_number: str, form_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         課題番号からARIM課題データを収集
         AIテスト機能と同じデータソースを使用
@@ -117,7 +441,7 @@ class DatasetContextCollector:
         Returns:
             ARIM課題データ（プロンプトテンプレート用）
         """
-        arim_formatted = {}
+        arim_formatted: Dict[str, Any] = {}
         
         try:
             logger.info("ARIM課題データ収集開始: %s", grant_number)
@@ -504,21 +828,26 @@ class DatasetContextCollector:
         Returns:
             抽出されたテキスト内容、または (テキスト, JSON文字列) のタプル
         """
+        def _finalize_response(
+            text_value: str,
+            contents: Optional[Dict[str, str]] = None,
+            json_ready: Optional[Dict[str, Any]] = None,
+        ):
+            """テキストとJSONの返却形式を整形"""
+            if include_json:
+                payload_source = json_ready or contents
+                json_payload = self._build_structured_json_payload(payload_source, text_value)
+                return text_value, json_payload
+            return text_value
+
         try:
             logger.debug("ファイル内容抽出開始: dataset_id=%s", dataset_id)
             from core.bearer_token_manager import BearerTokenManager
             from net.http_helpers import proxy_get
             from classes.dataset.util.file_text_extractor import get_file_text_extractor, format_extracted_files_for_prompt
             import tempfile
-            
-            def _finalize_response(text_value: str, contents: Optional[Dict[str, str]] = None, json_ready: Optional[Dict[str, Any]] = None):
-                """テキストとJSONの返却形式を整形"""
-                if include_json:
-                    payload_source = json_ready or contents
-                    json_payload = self._build_structured_json_payload(payload_source, text_value)
-                    return text_value, json_payload
-                return text_value
-            
+            storage_mode = self._get_ai_download_storage_mode()
+
             # Bearer Token取得（既存ファイル使用時は不要だが、API呼び出し用に試行）
             bearer_token = BearerTokenManager.get_token_with_relogin_prompt()
             if not bearer_token:
@@ -527,6 +856,7 @@ class DatasetContextCollector:
             
             # RDE APIでデータ情報を取得（トークンがある場合のみ）
             structured_files = []
+            data_list: List[Dict[str, Any]] = []
             
             if bearer_token:
                 api_url = f"https://rde-api.nims.go.jp/data?filter%5Bdataset.id%5D={dataset_id}&sort=-created&page%5Boffset%5D=0&page%5Blimit%5D=100&include=owner%2Csample%2CthumbnailFile%2Cfiles"
@@ -563,6 +893,7 @@ class DatasetContextCollector:
                         
                         # STRUCTUREDファイルのみをフィルタリング
                         for data_item in data_list:
+                            data_attrs = data_item.get('attributes', {}) or {}
                             relationships = data_item.get('relationships', {})
                             file_ids = [f['id'] for f in relationships.get('files', {}).get('data', [])]
                             
@@ -576,7 +907,11 @@ class DatasetContextCollector:
                                             'id': file_id,
                                             'name': file_attr.get('fileName', ''),
                                             'size': file_attr.get('fileSize', 0),
-                                            'media_type': file_attr.get('mediaType', '')
+                                            'media_type': file_attr.get('mediaType', ''),
+                                            'tile_name': data_attrs.get('name', ''),
+                                            'tile_number': data_attrs.get('dataNumber', ''),
+                                            'dataset_name': data_attrs.get('datasetName', ''),
+                                            'grant_number': data_attrs.get('grantNumber', ''),
                                         })
                         
                         logger.info(f"API経由でSTRUCTUREDファイル検出: {len(structured_files)}件")
@@ -584,40 +919,55 @@ class DatasetContextCollector:
                     logger.warning(f"ファイル情報取得API失敗: HTTP {response.status_code}")
             
             # API情報がない場合は、既存ダウンロード済みファイルから直接検索
-            from config.common import get_dynamic_file_path, DATAFILES_DIR
             import glob
             
-            dataset_files_dir = get_dynamic_file_path(f'output/rde/data/dataFiles/{dataset_id}')
-            
-            if not structured_files and os.path.exists(dataset_files_dir):
-                logger.info(f"API情報なし - 既存ファイルから直接検索: {dataset_files_dir}")
-                # 既存ファイルを全て検索（再帰的）
-                all_files = glob.glob(os.path.join(dataset_files_dir, '**', '*'), recursive=True)
+            existing_dataset_dirs = self._get_existing_dataset_dirs(
+                dataset_id,
+                storage_mode,
+                data_list,
+                bearer_token=bearer_token,
+                proxy_get=proxy_get,
+            )
+
+            if not structured_files:
+                structured_files = self._collect_structured_files_from_local_cache(
+                    dataset_id,
+                    bearer_token=bearer_token,
+                    proxy_get=proxy_get,
+                )
+                if structured_files:
+                    logger.info("ローカルキャッシュ経由でSTRUCTUREDファイル検出: %s件", len(structured_files))
+
+            if not structured_files:
                 extractor_temp = get_file_text_extractor()
-                
-                for file_path in all_files:
-                    if os.path.isfile(file_path):
-                        file_name = os.path.basename(file_path)
-                        
-                        # 書誌情報JSONファイルを除外（UUIDパターン + .json）
-                        # 例: 4a932435-495b-4394-999a-d42136066b04.json, *_anonymized.json
-                        if file_name.endswith('_anonymized.json'):
-                            continue
-                        # UUID形式のJSONファイルを除外（8-4-4-4-12の形式）
-                        import re
-                        if re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$', file_name, re.IGNORECASE):
-                            continue
-                        
-                        # 抽出可能なファイルのみをstructured_filesに追加
-                        if extractor_temp.is_extractable(file_name):
-                            structured_files.append({
-                                'id': '',  # file_idは不明
-                                'name': file_name,
-                                'size': os.path.getsize(file_path),
-                                'media_type': '',
-                                'local_path': file_path  # 既存ファイルのパスを保持
-                            })
-                logger.info(f"既存ファイルから抽出可能ファイル検出: {len(structured_files)}件")
+                for dataset_files_dir in existing_dataset_dirs:
+                    if not os.path.exists(dataset_files_dir):
+                        continue
+                    logger.info("API情報なし - 既存ファイルから直接検索: %s", dataset_files_dir)
+                    all_files = glob.glob(os.path.join(dataset_files_dir, '**', '*'), recursive=True)
+                    for file_path in all_files:
+                        if os.path.isfile(file_path):
+                            file_name = os.path.basename(file_path)
+
+                            # 書誌情報JSONファイルを除外（UUIDパターン + .json）
+                            # 例: 4a932435-495b-4394-999a-d42136066b04.json, *_anonymized.json
+                            if file_name.endswith('_anonymized.json'):
+                                continue
+                            # UUID形式のJSONファイルを除外（8-4-4-4-12の形式）
+                            import re
+                            if re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$', file_name, re.IGNORECASE):
+                                continue
+
+                            # 抽出可能なファイルのみをstructured_filesに追加
+                            if extractor_temp.is_extractable(file_name):
+                                structured_files.append({
+                                    'id': '',  # file_idは不明
+                                    'name': file_name,
+                                    'size': os.path.getsize(file_path),
+                                    'media_type': '',
+                                    'local_path': file_path,  # 既存ファイルのパスを保持
+                                })
+                logger.info("既存ファイルから抽出可能ファイル検出: %s件", len(structured_files))
             
             if not structured_files:
                 no_structured_msg = '（このデータセットにはSTRUCTUREDタイプのファイルが含まれていません。また、既存のダウンロード済みファイルも見つかりませんでした）'
@@ -627,16 +977,15 @@ class DatasetContextCollector:
             extractor = get_file_text_extractor()
             
             # 各ファイルをダウンロードしてテキスト抽出（最大10ファイルまで）
-            # 既存のダウンロードディレクトリを確認（データ取得2と同じ構造）
-            from config.common import get_dynamic_file_path, DATAFILES_DIR
-            import glob
-            
             extracted_contents = {}
             json_ready_contents = {}
             max_files = 10
-            
-            # 既存ダウンロード済みファイルの検索パターン: output/rde/data/dataFiles/{dataset_id}/**/*
-            dataset_files_dir = get_dynamic_file_path(f'output/rde/data/dataFiles/{dataset_id}')
+            dataset_identity = self._load_dataset_identity(
+                dataset_id,
+                data_list,
+                bearer_token=bearer_token,
+                proxy_get=proxy_get,
+            )
             
             for idx, file_info in enumerate(structured_files[:max_files], 1):
                 file_name = file_info['name']
@@ -656,45 +1005,37 @@ class DatasetContextCollector:
                         logger.info(f"既存ファイル（ダイレクト）を使用: {file_name} ({file_path})")
                     
                     # 1. 既存のダウンロード済みファイルを検索
-                    if not file_path and os.path.exists(dataset_files_dir):
-                        # ファイル名で再帰検索（サブディレクトリ含む）
-                        search_pattern = os.path.join(dataset_files_dir, '**', file_name)
-                        matching_files = glob.glob(search_pattern, recursive=True)
-                        
-                        if matching_files:
-                            file_path = matching_files[0]
-                            logger.info(f"既存ファイルを使用: {file_name} ({file_path})")
+                    if not file_path:
+                        for dataset_files_dir in existing_dataset_dirs:
+                            if not os.path.exists(dataset_files_dir):
+                                continue
+                            search_pattern = os.path.join(dataset_files_dir, '**', file_name)
+                            matching_files = glob.glob(search_pattern, recursive=True)
+                            if matching_files:
+                                file_path = matching_files[0]
+                                logger.info(f"既存ファイルを使用: {file_name} ({file_path})")
+                                break
                     
                     # 2. 既存ファイルが見つからない場合は動的ダウンロード
                     if not file_path:
-                        logger.debug(f"既存ファイルなし、動的ダウンロード開始: {file_name}")
-                        
-                        # ダウンロードURL生成（RDE APIのファイルダウンロードエンドポイント）
-                        # データ取得2と同じ形式: /files/{file_id}?isDownload=true
-                        file_download_url = f"https://rde-api.nims.go.jp/files/{file_id}?isDownload=true"
-                        
-                        download_headers = {
-                            "Authorization": f"Bearer {bearer_token}",
-                            "Host": "rde-api.nims.go.jp",
-                            "Origin": "https://rde.nims.go.jp",
-                            "Referer": "https://rde.nims.go.jp/",
-                            "Accept": "*/*",
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-                        }
-                        
-                        file_response = proxy_get(file_download_url, headers=download_headers, stream=True)
-                        
-                        if file_response.status_code != 200:
-                            logger.warning(f"ファイルダウンロード失敗: {file_name} (HTTP {file_response.status_code})")
+                        logger.debug("既存ファイルなし、動的ダウンロード開始: %s (mode=%s)", file_name, storage_mode)
+                        enriched_file_info = dict(file_info)
+                        enriched_file_info["dataset_name"] = str(
+                            file_info.get("dataset_name") or dataset_identity.get("dataset_name") or ""
+                        )
+                        enriched_file_info["grant_number"] = str(
+                            file_info.get("grant_number") or dataset_identity.get("grant_number") or ""
+                        )
+                        file_path = self._download_structured_file(
+                            file_id=file_id,
+                            file_name=file_name,
+                            bearer_token=bearer_token,
+                            storage_mode=storage_mode,
+                            file_info=enriched_file_info,
+                            proxy_get=proxy_get,
+                        )
+                        if not file_path:
                             continue
-                        
-                        # 一時ファイルに保存してテキスト抽出
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file_name)[1]) as tmp_file:
-                            for chunk in file_response.iter_content(chunk_size=8192):
-                                if chunk:
-                                    tmp_file.write(chunk)
-                            file_path = tmp_file.name
-                        logger.info(f"動的ダウンロード完了: {file_name}")
                     
                     # 3. テキスト抽出（既存ファイルまたはダウンロードしたファイル）
                     is_temp_file = file_path and file_path.startswith(tempfile.gettempdir())

@@ -26,6 +26,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+from typing import Any, Optional, Dict
+
+
 def _get_this_module_file_path() -> str | None:
     spec = globals().get("__spec__")
     origin = getattr(spec, "origin", None) if spec else None
@@ -285,7 +288,8 @@ def get_static_resource_path(relative_path):
     
     if is_binary_execution():
         # バイナリ実行時: _MEIPASS配下から取得
-        return os.path.join(sys._MEIPASS, *path_parts)
+        meipass_dir = getattr(sys, '_MEIPASS', '') or ''
+        return os.path.join(meipass_dir, *path_parts)
     else:
         # ソース実行時
         # testsディレクトリは特別扱い（project_root直下）
@@ -327,6 +331,15 @@ def read_version_from_version_txt() -> str:
     try:
         if is_binary_execution():
             candidates.append(get_static_resource_path("VERSION.txt"))
+            executable_path = getattr(sys, "executable", "") or ""
+            if executable_path:
+                executable_dir = os.path.dirname(os.path.abspath(executable_path))
+                candidates.append(os.path.join(executable_dir, "VERSION.txt"))
+                candidates.append(os.path.join(executable_dir, "_internal", "VERSION.txt"))
+            meipass_dir = getattr(sys, "_MEIPASS", "") or ""
+            if meipass_dir:
+                candidates.append(os.path.join(meipass_dir, "VERSION.txt"))
+                candidates.append(os.path.join(meipass_dir, "_internal", "VERSION.txt"))
         else:
             candidates.append(get_dynamic_file_path("VERSION.txt"))
     except Exception:
@@ -336,7 +349,12 @@ def read_version_from_version_txt() -> str:
         except Exception:
             pass
 
+    deduped_candidates: list[str] = []
     for path in candidates:
+        if path and path not in deduped_candidates:
+            deduped_candidates.append(path)
+
+    for path in deduped_candidates:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 for line in f:
@@ -367,6 +385,8 @@ CONFIG_DIR = get_dynamic_file_path('config')
 OUTPUT_RDE_DIR = get_dynamic_file_path('output/rde')
 # dataFilesディレクトリの定数
 DATAFILES_DIR = get_dynamic_file_path('output/rde/data/dataFiles')
+# AI専用 dataFiles ディレクトリの定数
+DATAFILES_AI_DIR = get_dynamic_file_path('output/rde/data/dataFilesAI')
 # samplesディレクトリの定数
 SAMPLES_DIR = get_dynamic_file_path('output/rde/data/samples')
 DATASET_JSON_CHUNKS_DIR = get_dynamic_file_path('output/rde/data/datasetJsonChunks')
@@ -393,6 +413,8 @@ def initialize_directories():
         HIDDEN_DIR,
         LOCKS_DIR,
         CONFIG_DIR,
+        DATAFILES_DIR,
+        DATAFILES_AI_DIR,
         DATASET_JSON_CHUNKS_DIR,
         TEMPLATE_JSON_CHUNKS_DIR,
         INSTRUMENT_JSON_CHUNKS_DIR,
@@ -590,9 +612,6 @@ def save_bearer_token(token, host: str = 'rde.nims.go.jp') -> bool:
         v2.1.0: TokenManager形式（辞書）と従来形式（文字列）の両方に対応
     """
     try:
-        import logging
-        logger = logging.getLogger(__name__)
-
         normalized_host = _normalize_token_host(host)
         if not normalized_host:
             logger.error("Bearer Token保存エラー: hostが空です")
@@ -667,9 +686,6 @@ def load_bearer_token(host: str = 'rde.nims.go.jp') -> Optional[str]:
         v2.1.0: TokenManager形式（辞書）と従来形式（文字列）の両方に対応
     """
     try:
-        import logging
-        logger = logging.getLogger(__name__)
-
         normalized_host = _normalize_token_host(host)
         if not normalized_host:
             return None
@@ -735,7 +751,7 @@ def load_bearer_token(host: str = 'rde.nims.go.jp') -> Optional[str]:
         logger.error(f"Bearer Token読み込みエラー ({host}): {e}")
         return None
 
-def load_all_bearer_tokens() -> Dict[str, str]:
+def load_all_bearer_tokens() -> Dict[str, Any]:
     """
     全ホストのBearer Tokenを取得
     
@@ -765,9 +781,6 @@ def delete_bearer_token(host: str = 'rde.nims.go.jp') -> bool:
         v2.0.6: ログインボタン押下時のトークン無効化に使用
     """
     try:
-        import logging
-        logger = logging.getLogger(__name__)
-        
         logger.debug(f"[TOKEN-DELETE] トークン削除開始: host={host}")
         
         # 既存のトークンを読み込み

@@ -150,9 +150,15 @@ def _resolve_dataset_manager_label(dataset_id: str) -> str:
     if not isinstance(payload, dict):
         return ""
 
-    relationships = ((payload.get("data") or {}).get("relationships") or {})
-    manager_data = ((relationships.get("manager") or {}).get("data") or {})
-    manager_id = _to_str(manager_data.get("id") or "").strip()
+    data = payload.get("data")
+    data_dict = data if isinstance(data, dict) else {}
+    relationships = data_dict.get("relationships")
+    relationships_dict = relationships if isinstance(relationships, dict) else {}
+    manager = relationships_dict.get("manager")
+    manager_dict = manager if isinstance(manager, dict) else {}
+    manager_data = manager_dict.get("data")
+    manager_data_dict = manager_data if isinstance(manager_data, dict) else {}
+    manager_id = _to_str(manager_data_dict.get("id") or "").strip()
     if not manager_id:
         return ""
 
@@ -165,9 +171,13 @@ def extract_public_code(record: dict) -> str:
 
 
 def extract_public_dataset_id(record: dict) -> str:
-    fields_raw = record.get("fields_raw") if isinstance(record.get("fields_raw"), dict) else {}
-    fields = record.get("fields") if isinstance(record.get("fields"), dict) else {}
-    dsid = _to_str(fields_raw.get("dataset_id") or fields.get("dataset_id") or record.get("dataset_id") or "").strip()
+    fields_raw_value = record.get("fields_raw")
+    fields_raw = fields_raw_value if isinstance(fields_raw_value, dict) else {}
+    fields_value = record.get("fields")
+    fields = fields_value if isinstance(fields_value, dict) else {}
+    dsid = _to_str(
+        fields_raw.get("dataset_id") or fields.get("dataset_id") or record.get("dataset_id") or ""
+    ).strip()
     return dsid
 
 
@@ -276,8 +286,10 @@ def normalize_managed_record(record: dict[str, str], *, code: str, dataset_id: s
         "タグ": "keyword_tags",
         "タグ (2)": "keyword_tags",
         "タグ(2)": "keyword_tags",
+        "アトリビュートタグ": "keyword_tags",
         "データ数": "data_tile_count",
         "データタイル数": "data_tile_count",
+        "データセットURL": "url",
         "管理者": "dataset_manager",
         "管理者名": "dataset_manager",
         "管理者(所属)": "dataset_manager",

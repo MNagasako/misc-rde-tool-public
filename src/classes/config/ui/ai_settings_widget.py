@@ -16,6 +16,7 @@ import logging
 from typing import Dict, Any, List, Optional
 
 from classes.theme import get_color, ThemeKey
+from classes.managers.app_config_manager import AppConfigManager
 
 from classes.ai.util.generation_params import (
     GENERATION_PARAM_SPECS,
@@ -41,26 +42,24 @@ from classes.ai.util.local_llm import (
     parse_local_llm_base_url,
     uses_ollama_native_generate,
 )
-try:
-    from qt_compat.widgets import (
-        QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
-        QLabel, QPushButton, QLineEdit, QComboBox, QCheckBox,
-        QGroupBox, QGridLayout, QScrollArea, QTextEdit,
-        QSpinBox, QDoubleSpinBox, QMessageBox, QFormLayout,
-        QProgressBar, QSplitter, QTableWidget, QTableWidgetItem,
-        QHeaderView, QRadioButton, QButtonGroup
-    )
-    from qt_compat.core import Qt, Signal, QThread
-    from qt_compat.gui import QFont
-    PYQT5_AVAILABLE = True
-except ImportError:
-    PYQT5_AVAILABLE = False
-    # ダミークラス定義
-    class QWidget: pass
-    class Signal: pass
+from qt_compat.widgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
+    QLabel, QPushButton, QLineEdit, QComboBox, QCheckBox,
+    QGroupBox, QGridLayout, QScrollArea, QTextEdit,
+    QSpinBox, QDoubleSpinBox, QMessageBox, QFormLayout,
+    QProgressBar, QSplitter, QTableWidget, QTableWidgetItem,
+    QHeaderView, QRadioButton, QButtonGroup
+)
+from qt_compat.core import Qt, Signal, QThread
+from qt_compat.gui import QFont
 
 # ログ設定
 logger = logging.getLogger(__name__)
+
+AI_DOWNLOAD_STORAGE_MODE_TEMP = "temp"
+AI_DOWNLOAD_STORAGE_MODE_DATAFILES = "dataFiles"
+AI_DOWNLOAD_STORAGE_MODE_DATAFILES_AI = "dataFilesAI"
+AI_DOWNLOAD_STORAGE_MODE_DEFAULT = AI_DOWNLOAD_STORAGE_MODE_TEMP
 
 # パス管理
 try:
@@ -93,6 +92,7 @@ class AISettingsWidget(QWidget):
         self.default_provider_combo = None
         self.timeout_spinbox = None
         self.temperature_spinbox = None  # 互換性のため残す（UIでは使用しない）
+        self.ai_download_storage_mode_combo = None
 
         # 生成パラメータ（新UI）
         self.generation_params_table = None
@@ -171,6 +171,16 @@ class AISettingsWidget(QWidget):
         self.timeout_spinbox.setValue(30)
         self.timeout_spinbox.setSuffix(" 秒")
         group_layout.addRow("タイムアウト:", self.timeout_spinbox)
+
+        self.ai_download_storage_mode_combo = QComboBox()
+        self.ai_download_storage_mode_combo.addItem("一時ファイル（抽出後に削除・既定）", AI_DOWNLOAD_STORAGE_MODE_TEMP)
+        self.ai_download_storage_mode_combo.addItem("output/rde/data/dataFiles に恒久保存", AI_DOWNLOAD_STORAGE_MODE_DATAFILES)
+        self.ai_download_storage_mode_combo.addItem("output/rde/data/dataFilesAI に恒久保存", AI_DOWNLOAD_STORAGE_MODE_DATAFILES_AI)
+        self.ai_download_storage_mode_combo.setToolTip(
+            "AIがSTRUCTUREDファイルを追加取得したときの保存先を選択します。\n"
+            "恒久保存を選ぶと、データ取得2と同じフォルダ構造で保存します。"
+        )
+        group_layout.addRow("AI取得ファイル保存先:", self.ai_download_storage_mode_combo)
 
         # リトライ回数（最大試行回数）
         self.request_max_attempts_spinbox = QSpinBox()
@@ -1102,6 +1112,7 @@ class AISettingsWidget(QWidget):
             
             # UI要素に設定を反映
             self.apply_config_to_ui()
+            self.load_app_settings()
             self._refresh_test_provider_combo()
             
         except Exception as e:
@@ -1122,12 +1133,14 @@ class AISettingsWidget(QWidget):
                 self.current_config = self.get_hardcoded_defaults()
             
             self.apply_config_to_ui()
+            self.load_app_settings()
             self._refresh_test_provider_combo()
             
         except Exception as e:
             logger.error(f"デフォルト設定読み込みエラー: {e}")
             self.current_config = self.get_hardcoded_defaults()
             self.apply_config_to_ui()
+            self.load_app_settings()
             self._refresh_test_provider_combo()
     
     def get_hardcoded_defaults(self):
@@ -1529,7 +1542,50 @@ class AISettingsWidget(QWidget):
         except Exception as e:
             logger.error(f"UI設定収集エラー: {e}")
             return None
-    
+
+    def load_app_settings(self):
+        """app_config.json 側のAI関連設定を読み込み"""
+        try:
+            manager = AppConfigManager()
+            mode = str(
+                manager.get(
+                    "file_text_extraction.ai_download_storage_mode",
+                    AI_DOWNLOAD_STORAGE_MODE_DEFAULT,
+                )
+                or AI_DOWNLOAD_STORAGE_MODE_DEFAULT
+            )
+            if mode not in {
+                AI_DOWNLOAD_STORAGE_MODE_TEMP,
+                AI_DOWNLOAD_STORAGE_MODE_DATAFILES,
+                AI_DOWNLOAD_STORAGE_MODE_DATAFILES_AI,
+            }:
+                mode = AI_DOWNLOAD_STORAGE_MODE_DEFAULT
+
+            if self.ai_download_storage_mode_combo is not None:
+                index = self.ai_download_storage_mode_combo.findData(mode)
+                if index < 0:
+                    index = self.ai_download_storage_mode_combo.findData(AI_DOWNLOAD_STORAGE_MODE_DEFAULT)
+                if index >= 0:
+                    self.ai_download_storage_mode_combo.setCurrentIndex(index)
+        except Exception as e:
+            logger.warning("app_config 側AI設定読み込みエラー: %s", e)
+
+    def save_app_settings(self):
+        """app_config.json 側のAI関連設定を保存"""
+        manager = AppConfigManager()
+        mode = AI_DOWNLOAD_STORAGE_MODE_DEFAULT
+        if self.ai_download_storage_mode_combo is not None:
+            mode = str(self.ai_download_storage_mode_combo.currentData() or AI_DOWNLOAD_STORAGE_MODE_DEFAULT)
+        if mode not in {
+            AI_DOWNLOAD_STORAGE_MODE_TEMP,
+            AI_DOWNLOAD_STORAGE_MODE_DATAFILES,
+            AI_DOWNLOAD_STORAGE_MODE_DATAFILES_AI,
+        }:
+            mode = AI_DOWNLOAD_STORAGE_MODE_DEFAULT
+        manager.set("file_text_extraction.ai_download_storage_mode", mode)
+        if not manager.save():
+            raise RuntimeError("app_config.json の保存に失敗しました")
+
     def save_settings(self):
         """設定を保存"""
         try:
@@ -1545,7 +1601,9 @@ class AISettingsWidget(QWidget):
             # JSON形式で保存
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(config, f, ensure_ascii=False, indent=2)
-            
+
+            self.save_app_settings()
+
             self.current_config = config
             self.settings_changed.emit()
             
@@ -1566,6 +1624,10 @@ class AISettingsWidget(QWidget):
         
         if reply == QMessageBox.Yes:
             self.load_default_settings()
+            if self.ai_download_storage_mode_combo is not None:
+                index = self.ai_download_storage_mode_combo.findData(AI_DOWNLOAD_STORAGE_MODE_DEFAULT)
+                if index >= 0:
+                    self.ai_download_storage_mode_combo.setCurrentIndex(index)
     
     def fetch_available_models(self, provider):
         """APIから利用可能なモデルリストを取得（非同期・多重実行防止）"""

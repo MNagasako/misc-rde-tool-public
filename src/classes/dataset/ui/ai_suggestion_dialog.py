@@ -8262,7 +8262,7 @@ ARIMNO: {{ARIMNO}}
                     config = json.load(f)
             
             # 抽出設定を更新
-            extraction_config = {}
+            extraction_config = dict(config.get('file_text_extraction', {}) or {})
             
             # ファイル拡張子
             if hasattr(self, 'file_extensions_input'):

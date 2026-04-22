@@ -4,7 +4,7 @@ import json
 import os
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from config.common import ensure_directory_exists, get_dynamic_file_path
 
@@ -13,12 +13,20 @@ _CACHE_REL_PATH = "output/rde/cache/dataset_edit_combo_cache.json"
 _CACHE_VERSION = 1
 
 
-def _cache_path() -> str:
-    return get_dynamic_file_path(_CACHE_REL_PATH)
+def _resolve_path(path_resolver: Callable[[str], str] | None, relative_path: str) -> str:
+    resolver = path_resolver or get_dynamic_file_path
+    return resolver(relative_path)
 
 
-def _file_signature(relative_path: str) -> Dict[str, Any]:
-    path = get_dynamic_file_path(relative_path)
+def _cache_path(path_resolver: Callable[[str], str] | None = None) -> str:
+    return _resolve_path(path_resolver, _CACHE_REL_PATH)
+
+
+def _file_signature(
+    relative_path: str,
+    path_resolver: Callable[[str], str] | None = None,
+) -> Dict[str, Any]:
+    path = _resolve_path(path_resolver, relative_path)
     mtime = None
     size = 0
     try:
@@ -36,17 +44,24 @@ def _file_signature(relative_path: str) -> Dict[str, Any]:
     }
 
 
-def build_default_dataset_edit_combo_signature() -> Dict[str, Any]:
+def build_default_dataset_edit_combo_signature(
+    *,
+    path_resolver: Callable[[str], str] | None = None,
+) -> Dict[str, Any]:
     return {
         "version": _CACHE_VERSION,
-        "dataset": _file_signature("output/rde/data/dataset.json"),
-        "self": _file_signature("output/rde/data/self.json"),
-        "subgroup": _file_signature("output/rde/data/subGroup.json"),
+        "dataset": _file_signature("output/rde/data/dataset.json", path_resolver),
+        "self": _file_signature("output/rde/data/self.json", path_resolver),
+        "subgroup": _file_signature("output/rde/data/subGroup.json", path_resolver),
     }
 
 
-def load_default_dataset_edit_combo_cache(signature: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-    path = _cache_path()
+def load_default_dataset_edit_combo_cache(
+    signature: Optional[Dict[str, Any]] = None,
+    *,
+    path_resolver: Callable[[str], str] | None = None,
+) -> Optional[Dict[str, Any]]:
+    path = _cache_path(path_resolver)
     if not path or not os.path.exists(path):
         return None
     try:
@@ -58,7 +73,9 @@ def load_default_dataset_edit_combo_cache(signature: Optional[Dict[str, Any]] = 
     if not isinstance(payload, dict):
         return None
 
-    expected_signature = signature if signature is not None else build_default_dataset_edit_combo_signature()
+    expected_signature = signature if signature is not None else build_default_dataset_edit_combo_signature(
+        path_resolver=path_resolver
+    )
     if payload.get("signature") != expected_signature:
         return None
 
@@ -81,8 +98,9 @@ def save_default_dataset_edit_combo_cache(
     display_names: list[str],
     *,
     signature: Optional[Dict[str, Any]] = None,
+    path_resolver: Callable[[str], str] | None = None,
 ) -> None:
-    path = _cache_path()
+    path = _cache_path(path_resolver)
     if not path:
         return
 
@@ -92,7 +110,9 @@ def save_default_dataset_edit_combo_cache(
         payload = {
             "version": _CACHE_VERSION,
             "created_at": time.time(),
-            "signature": signature if signature is not None else build_default_dataset_edit_combo_signature(),
+            "signature": signature if signature is not None else build_default_dataset_edit_combo_signature(
+                path_resolver=path_resolver
+            ),
             "default_combo": {
                 "datasets": datasets or [],
                 "display_names": display_names or [],

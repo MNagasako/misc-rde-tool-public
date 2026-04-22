@@ -6,10 +6,30 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.54）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
-| データセット | `dataset_edit_widget.py` の既存データセット候補で、signature 付き永続キャッシュを使った初期再利用を追加。 |
-| 設定/キャッシュ | `cache_registry.py` にデータセット編集ランタイムキャッシュと永続候補キャッシュを追加し、キャッシュ管理タブから可視化/クリア可能化。 |
-| 検証 | compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.54 導線で確認。 |
+| リリース/品質 | リビジョンアップ（v2.5.56）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| AI取得ファイル保存先 | `ai_settings_widget.py` が AI追加取得 STRUCTURED ファイルの保存先として `temp` / `dataFiles` / `dataFilesAI` を選択可能にし、`app_config.json` へ保存。 |
+| STRUCTUREDファイル取得 | `dataset_context_collector.py` が一時保存/恒久保存を切り替え、既存キャッシュ再利用と fetch2 互換レイアウトでの保存を処理。 |
+| 検証 | compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.56 導線で確認。 |
+
+## v2.5.56 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.56）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| AI設定 | `ai_settings_widget.py` に AI取得ファイル保存先コンボを追加し、`config/app_config.json` の `file_text_extraction.ai_download_storage_mode` へ保存するよう整理。 |
+| STRUCTUREDファイル保存 | `dataset_context_collector.py` は AI追加取得ファイルを一時保存だけでなく `output/rde/data/dataFiles/` または `output/rde/data/dataFilesAI/` に恒久保存でき、既存キャッシュや dataEntry キャッシュも再利用する。 |
+| 設定保持 | `ai_suggestion_dialog.py` は `file_text_extraction` 設定を部分更新し、ファイル抽出設定保存時に `ai_download_storage_mode` を失わない。 |
+| 検証 | `test_dataset_context_file_storage.py` と `test_ai_settings_download_storage_mode.py` を追加し、保存モード永続化と download/reuse 経路を確認。 |
+
+## v2.5.55 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.55）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| CSVダウンロード動線 | `portal_client.py` は旧 `code` / `key` 方式を維持しつつ、CSV 一覧 HTML を解析して最新 filename を選び、`mode3=download` へ進む新フローへ対応。 |
+| CSV構造差分吸収 | managed CSV の `アトリビュートタグ` を `keyword_tags` に、`データセットURL` を `url` に吸収し、旧ヘッダとの互換を維持。 |
+| 一覧表示 | `portal_listing_tab.py` で `managed:アトリビュートタグ` と `managed:データセットURL` の冗長列を抑止し、固定列へマージ済みの値を優先表示。 |
+| 検証 | `test_portal_client_theme_csv_download.py`、`test_portal_csv_full_parsing.py`、`test_portal_entry_merge_titles_tags.py`、関連 widget テストを追加・更新。 |
 
 ## v2.5.54 の主な更新点
 

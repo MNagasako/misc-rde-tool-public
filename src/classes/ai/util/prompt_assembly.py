@@ -212,7 +212,7 @@ _PROMPT_DICTIONARY_RECURSIVE_SCAN_TARGETS = {
 
 _PROMPT_DICTIONARY_AUTO_APPROVE_THRESHOLDS = {
     "alias": 0.9,
-    "allowlist": 0.75,
+    "allowlist": 0.7,
     "stopword": 0.96,
     "weak_stopword": 0.98,
 }
