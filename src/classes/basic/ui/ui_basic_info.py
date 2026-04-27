@@ -898,7 +898,10 @@ def fetch_sample_info_only(controller):
     - BearerTokenManager統一
     - トークン検証の追加
     """
-    from ..core.basic_info_logic import fetch_sample_info_only as fetch_sample_info_only_logic
+    from ..core.basic_info_logic import (
+        fetch_sample_info_only as fetch_sample_info_only_logic,
+        fetch_sample_info_only_direct as fetch_sample_info_only_direct_logic,
+    )
     from core.bearer_token_manager import BearerTokenManager
     
     # トークン取得
@@ -919,7 +922,7 @@ def fetch_sample_info_only(controller):
     reply = QMessageBox.question(
         controller.parent, 
         "サンプル情報強制取得の確認",
-        "全サンプル情報を強制取得しますか？\n\n実行内容:\n• 既存ファイルを上書き更新\n• subGroup.jsonの全グループIDでサンプル情報を取得\n• 最新のサンプル情報に更新\n\n※事前にサブグループ情報が必要です",
+        "全サンプル情報を強制取得しますか？\n\n実行内容:\n• 旧ルート: subGroup.json の groupId 経由で取得\n• 新ルート: /samples のページネーション取得 + 個別詳細取得\n• 既存ファイルを上書き更新\n\n※トークン不足時は失敗理由を結果に表示します",
         QMessageBox.Yes | QMessageBox.No,
         QMessageBox.No
     )
@@ -928,10 +931,44 @@ def fetch_sample_info_only(controller):
         logger.info("サンプル情報強制取得処理はユーザーによりキャンセルされました。")
         return
     
+    # 旧ルート + 新ルートを連続実行するラッパー
+    def _combined_sample_fetch(*, bearer_token, output_dir, progress_callback=None, max_workers=10):
+        def _legacy_cb(current, total, message):
+            if progress_callback:
+                mapped = int((max(0, min(100, int(current))) * 50) / 100)
+                return progress_callback(mapped, 100, f"[旧ルート] {message}")
+            return True
+
+        def _direct_cb(current, total, message):
+            if progress_callback:
+                mapped = 50 + int((max(0, min(100, int(current))) * 50) / 100)
+                return progress_callback(mapped, 100, f"[新ルート] {message}")
+            return True
+
+        legacy_msg = fetch_sample_info_only_logic(
+            bearer_token=bearer_token,
+            output_dir=output_dir,
+            progress_callback=_legacy_cb,
+            max_workers=max_workers,
+        )
+        if legacy_msg == "キャンセルされました":
+            return legacy_msg
+
+        direct_msg = fetch_sample_info_only_direct_logic(
+            bearer_token=bearer_token,
+            output_dir=output_dir,
+            progress_callback=_direct_cb,
+            max_workers=max_workers,
+        )
+        if direct_msg == "キャンセルされました":
+            return direct_msg
+
+        return f"旧ルート: {legacy_msg} | 新ルート: {direct_msg}"
+
     # プログレス表示付きワーカーを作成
     parallel_max_workers = _get_basic_info_parallel_workers(controller, default=10)
     worker = ProgressWorker(
-        task_func=fetch_sample_info_only_logic,
+        task_func=_combined_sample_fetch,
         task_kwargs={
             'bearer_token': bearer_token,
             'output_dir': get_dynamic_file_path("output/rde/data"),

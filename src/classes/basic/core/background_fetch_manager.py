@@ -145,7 +145,9 @@ class BackgroundFetchManager(QObject):
             fetch_all_invoices_info,
             fetch_invoice_schemas,
             fetch_sample_info_only,
+            fetch_sample_info_only_direct,
             fetch_sample_info_stage,
+            fetch_sample_info_stage_direct,
         )
         from config.common import get_dynamic_file_path
 
@@ -164,18 +166,53 @@ class BackgroundFetchManager(QObject):
 
         # 1) サンプル情報（他段階と独立）
         def _fetch_samples() -> str | None:
+            # 旧ルート（groupId経由）→ 新ルート（ページネーション直取得）の順に実行
+            # これにより、既存互換を維持しつつ全件補完を行う。
+            legacy_msg = ""
+            direct_msg = ""
+
+            def _legacy_cb(current: int, total: int, message: str = "") -> bool:
+                return self._progress_callback_for("サンプル情報")(current, total, f"[旧ルート] {message}")
+
+            def _direct_cb(current: int, total: int, message: str = "") -> bool:
+                return self._progress_callback_for("サンプル情報")(current, total, f"[新ルート] {message}")
+
             if force_download:
-                return fetch_sample_info_only(
+                legacy_msg = fetch_sample_info_only(
                     bearer_token,
                     output_dir=output_rde_data,
-                    progress_callback=self._progress_callback_for("サンプル情報"),
+                    progress_callback=_legacy_cb,
                     max_workers=parallel_workers,
                 )
-            return fetch_sample_info_stage(
-                bearer_token,
-                progress_callback=self._progress_callback_for("サンプル情報"),
-                max_workers=parallel_workers,
-            )
+            else:
+                legacy_msg = fetch_sample_info_stage(
+                    bearer_token,
+                    progress_callback=_legacy_cb,
+                    max_workers=parallel_workers,
+                )
+
+            if legacy_msg == "キャンセルされました":
+                return legacy_msg
+
+            # 旧ルート失敗時も新ルートで補完を試行（トークン不備などの切り分けのため）
+            if force_download:
+                direct_msg = fetch_sample_info_only_direct(
+                    bearer_token,
+                    output_dir=output_rde_data,
+                    progress_callback=_direct_cb,
+                    max_workers=parallel_workers,
+                )
+            else:
+                direct_msg = fetch_sample_info_stage_direct(
+                    bearer_token,
+                    progress_callback=_direct_cb,
+                    max_workers=parallel_workers,
+                )
+
+            if direct_msg == "キャンセルされました":
+                return direct_msg
+
+            return f"旧ルート: {legacy_msg} | 新ルート: {direct_msg}"
 
         stages.append(("サンプル情報", _fetch_samples))
 

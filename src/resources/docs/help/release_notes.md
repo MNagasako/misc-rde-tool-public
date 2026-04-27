@@ -6,10 +6,20 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.56）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
-| AI取得ファイル保存先 | `ai_settings_widget.py` が AI追加取得 STRUCTURED ファイルの保存先として `temp` / `dataFiles` / `dataFilesAI` を選択可能にし、`app_config.json` へ保存。 |
-| STRUCTUREDファイル取得 | `dataset_context_collector.py` が一時保存/恒久保存を切り替え、既存キャッシュ再利用と fetch2 互換レイアウトでの保存を処理。 |
-| 検証 | compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.56 導線で確認。 |
+| リリース/品質 | リビジョンアップ（v2.5.57）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| samples取得経路 | `basic_info_logic.py` に、既存 subgroup ルートを維持しつつ、samples 全件ページネーション + 個別詳細取得の直接ルートを追加。 |
+| ALL/単体導線統合 | `background_fetch_manager.py` と `ui_basic_info.py` で、旧ルートと新ルートを順次実行するよう統合。進捗表示は route prefix 付き。 |
+| 検証 | `test_fetch_sample_direct_route.py` / `test_background_fetch_manager.py` を更新し、compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.57 導線で確認。 |
+
+## v2.5.57 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.57）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| Basic Info samples | `basic_info_logic.py` で samples 直接取得ルート（ページネーション + 個別詳細）を追加し、既存 subgroup ルートと併用で同一保存先へ集約。 |
+| 実行導線 | `background_fetch_manager.py` の ALL 実行と `ui_basic_info.py` のサンプル単体実行で、旧ルート + 新ルートの順次実行を有効化。 |
+| 観測性/診断 | route prefix 付き進捗表示を追加し、Material bearer token 未取得時の診断メッセージを明確化。 |
+| 検証 | `test_fetch_sample_direct_route.py`、`test_background_fetch_manager.py` を更新し、関連回帰を確認。 |
 
 ## v2.5.56 の主な更新点
 

@@ -3417,6 +3417,10 @@ def fetch_sample_info_stage(bearer_token, progress_callback=None, max_workers: i
         # Material API用のトークンを明示的に取得
         from config.common import load_bearer_token
         material_token = load_bearer_token('rde-material.nims.go.jp')
+        if not material_token:
+            msg = "Material APIトークンが取得できません。rde-material.nims.go.jp へのログイン状態を確認してください。"
+            logger.error(msg)
+            return msg
         
         # 並列化用タスクリスト作成
         tasks = [
@@ -3931,6 +3935,7 @@ STAGE_FUNCTIONS = {
     "invoiceSchema情報": fetch_invoice_schema_stage,
     "テンプレート・設備・ライセンス情報": fetch_template_instrument_stage,
     "統合情報生成": finalize_basic_info_stage,
+    "サンプル情報（直接取得）": lambda bearer_token, **kwargs: fetch_sample_info_stage_direct(bearer_token, **kwargs),
     "--- 軽量取得 ---": None,  # セパレータ
     "サンプル情報（軽量）": lambda bearer_token, **kwargs: fetch_sample_info_from_subgroup_ids_only(bearer_token),
     "--- 自動更新 ---": None,  # セパレータ
@@ -4001,7 +4006,7 @@ def execute_individual_stage(
             # 自動更新関数は bearer_token と progress_callback のみ
             result = func(bearer_token, progress_callback=progress_callback)
         else:
-            if stage_name in {"サンプル情報", "データエントリ情報", "インボイス情報", "invoiceSchema情報", "テンプレート・設備・ライセンス情報"}:
+            if stage_name in {"サンプル情報", "サンプル情報（直接取得）", "データエントリ情報", "インボイス情報", "invoiceSchema情報", "テンプレート・設備・ライセンス情報"}:
                 result = func(
                     bearer_token,
                     progress_callback=progress_callback,
@@ -4384,70 +4389,84 @@ def fetch_basic_info_logic(
                 from net.http_helpers import parallel_download
 
                 material_token = load_bearer_token('rde-material.nims.go.jp')
-                tasks = [
-                    (material_token, included.get("id", ""), sample_dir, force_download)
-                    for included in sub_group_included
-                    if included.get("id")
-                ]
+                if not material_token:
+                    logger.warning(
+                        "Material APIトークンが取得できないためサンプル取得をスキップします。"
+                        " rde-material.nims.go.jp へのログイン状態を確認してください。"
+                    )
+                    failed_samples = total_samples
+                else:
+                    tasks = [
+                        (material_token, included.get("id", ""), sample_dir, force_download)
+                        for included in sub_group_included
+                        if included.get("id")
+                    ]
 
-                def sample_parallel_progress(current, total, message):
-                    mapped = 5 + int((current / 100.0) * 90)
-                    mapped = min(95, max(5, mapped))
-                    text = f"並列サンプル取得中 (計画: {total_samples}件, {message})"
-                    return update_stage_progress(4, mapped, text)
+                    def sample_parallel_progress(current, total, message):
+                        mapped = 5 + int((current / 100.0) * 90)
+                        mapped = min(95, max(5, mapped))
+                        text = f"並列サンプル取得中 (計画: {total_samples}件, {message})"
+                        return update_stage_progress(4, mapped, text)
 
-                result = parallel_download(
-                    tasks=tasks,
-                    worker_function=_fetch_single_sample_worker_force,
-                    max_workers=parallel_workers,
-                    progress_callback=sample_parallel_progress,
-                    threshold=1,
-                )
+                    result = parallel_download(
+                        tasks=tasks,
+                        worker_function=_fetch_single_sample_worker_force,
+                        max_workers=parallel_workers,
+                        progress_callback=sample_parallel_progress,
+                        threshold=1,
+                    )
 
-                if result.get("cancelled"):
-                    logger.warning("サンプル情報取得がユーザーによりキャンセルされました")
-                    return "キャンセルされました"
+                    if result.get("cancelled"):
+                        logger.warning("サンプル情報取得がユーザーによりキャンセルされました")
+                        return "キャンセルされました"
 
-                processed_samples = result.get("success_count", 0)
-                skipped_samples = result.get("skipped_count", 0)
-                failed_samples = result.get("failed_count", 0)
+                    processed_samples = result.get("success_count", 0)
+                    skipped_samples = result.get("skipped_count", 0)
+                    failed_samples = result.get("failed_count", 0)
             else:
                 from config.common import load_bearer_token
 
                 material_token = load_bearer_token('rde-material.nims.go.jp')
-                for idx, included in enumerate(sub_group_included):
-                    current_index = idx + 1
-                    sample_progress = int((current_index / total_samples) * 100) if total_samples > 0 else 100
-                    group_id_sample = included.get("id", "")
-                    sample_json_path = os.path.join(sample_dir, f"{group_id_sample}.json")
-                    
-                    if not force_download and os.path.exists(sample_json_path):
-                        skipped_samples += 1
-                        if not update_stage_progress(4, sample_progress, f"サンプル確認 {current_index}/{total_samples} - スキップ済み: {skipped_samples}"):
-                            return "キャンセルされました"
-                        logger.debug(f"サンプル情報({group_id_sample})は既に存在するためスキップしました: {sample_json_path}")
-                        continue
+                if not material_token:
+                    logger.warning(
+                        "Material APIトークンが取得できないためサンプル取得をスキップします。"
+                        " rde-material.nims.go.jp へのログイン状態を確認してください。"
+                    )
+                    failed_samples = total_samples
+                else:
+                    for idx, included in enumerate(sub_group_included):
+                        current_index = idx + 1
+                        sample_progress = int((current_index / total_samples) * 100) if total_samples > 0 else 100
+                        group_id_sample = included.get("id", "")
+                        sample_json_path = os.path.join(sample_dir, f"{group_id_sample}.json")
                         
-                    if not update_stage_progress(4, sample_progress, f"サンプル取得中 {current_index}/{total_samples} - 完了: {processed_samples}"):
-                        return "キャンセルされました"
-                    
-                    url = f"https://rde-material-api.nims.go.jp/samples?groupId={group_id_sample}&page%5Blimit%5D=1000&page%5Boffset%5D=0&fields%5Bsample%5D=names%2Cdescription%2Ccomposition"
-                    try:
-                        headers_sample = _make_headers(material_token, host="rde-material-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
-                        resp = api_request("GET", url, bearer_token=material_token, headers=headers_sample, timeout=10)
-                        if resp is None:
-                            logger.error(f"サンプル情報({group_id_sample})の取得に失敗しました: リクエストエラー")
-                            failed_samples += 1
+                        if not force_download and os.path.exists(sample_json_path):
+                            skipped_samples += 1
+                            if not update_stage_progress(4, sample_progress, f"サンプル確認 {current_index}/{total_samples} - スキップ済み: {skipped_samples}"):
+                                return "キャンセルされました"
+                            logger.debug(f"サンプル情報({group_id_sample})は既に存在するためスキップしました: {sample_json_path}")
                             continue
-                        resp.raise_for_status()
-                        data = resp.json()
-                        with open(sample_json_path, "w", encoding="utf-8") as f:
-                            json.dump(data, f, ensure_ascii=False, indent=2)
-                        processed_samples += 1
-                        logger.info(f"サンプル情報({group_id_sample})の取得・保存に成功しました: {sample_json_path}")
-                    except Exception as e:
-                        failed_samples += 1
-                        logger.error(f"サンプル情報({group_id_sample})の取得・保存に失敗しました: {e}")
+                            
+                        if not update_stage_progress(4, sample_progress, f"サンプル取得中 {current_index}/{total_samples} - 完了: {processed_samples}"):
+                            return "キャンセルされました"
+                        
+                        url = f"https://rde-material-api.nims.go.jp/samples?groupId={group_id_sample}&page%5Blimit%5D=1000&page%5Boffset%5D=0&fields%5Bsample%5D=names%2Cdescription%2Ccomposition"
+                        try:
+                            headers_sample = _make_headers(material_token, host="rde-material-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
+                            resp = api_request("GET", url, bearer_token=material_token, headers=headers_sample, timeout=10)
+                            if resp is None:
+                                logger.error(f"サンプル情報({group_id_sample})の取得に失敗しました: リクエストエラー")
+                                failed_samples += 1
+                                continue
+                            resp.raise_for_status()
+                            data = resp.json()
+                            with open(sample_json_path, "w", encoding="utf-8") as f:
+                                json.dump(data, f, ensure_ascii=False, indent=2)
+                            processed_samples += 1
+                            logger.info(f"サンプル情報({group_id_sample})の取得・保存に成功しました: {sample_json_path}")
+                        except Exception as e:
+                            failed_samples += 1
+                            logger.error(f"サンプル情報({group_id_sample})の取得・保存に失敗しました: {e}")
 
             logger.info(
                 "サンプル情報取得完了: 処理済み %s件, スキップ済み %s件, 失敗 %s件 (計画 %s件)",
@@ -4743,6 +4762,9 @@ def fetch_sample_info_only(bearer_token, output_dir=None, progress_callback=None
                 # Material API用のトークンを明示的に取得
                 from config.common import load_bearer_token
                 material_token = load_bearer_token('rde-material.nims.go.jp')
+                if not material_token:
+                    logger.error("Material APIトークンが取得できません: group_id=%s", group_id)
+                    return "failed: material token not found"
                 headers_sample = _make_headers(material_token, host="rde-material-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
                 resp = api_request("GET", url, bearer_token=material_token, headers=headers_sample, timeout=10)
                 if resp is None:
@@ -4854,6 +4876,10 @@ def fetch_sample_info_from_subgroup_ids_only(bearer_token, output_dir=None):
                 # Material API用のトークンを明示的に取得
                 from config.common import load_bearer_token
                 material_token = load_bearer_token('rde-material.nims.go.jp')
+                if not material_token:
+                    failed_samples += 1
+                    logger.error("Material APIトークンが取得できません: %s", group_id_sample)
+                    continue
                 headers_sample = _make_headers(material_token, host="rde-material-api.nims.go.jp", origin="https://rde-entry-arim.nims.go.jp", referer="https://rde-entry-arim.nims.go.jp/")
                 resp = api_request("GET", url, bearer_token=material_token, headers=headers_sample, timeout=10)
                 if resp is None:
@@ -4968,6 +4994,626 @@ def fetch_sample_info_for_dataset_only(bearer_token, dataset_id, output_dir=None
         error_msg = f"データセット{dataset_id}のサンプル情報取得でエラー: {e}"
         logger.error(error_msg)
         return error_msg
+
+def _save_sample_item_from_list(item: dict, sample_dir: str) -> str:
+    """
+    ページネーションリストの1アイテムを {id}.json として保存する。
+    形式: {"data": [item], "meta": {"totalCounts": 1}}
+    この形式は既存コード (build_sample_dedup_rows_from_files 等) と互換。
+
+    Returns:
+        str: "success" / "skipped" / "failed"
+    """
+    sample_id = item.get("id")
+    if not sample_id:
+        return "skipped"
+
+    sample_json_path = os.path.join(sample_dir, f"{sample_id}.json")
+    if os.path.exists(sample_json_path):
+        logger.debug(f"既存ファイルをスキップ: {sample_json_path}")
+        return "skipped"
+
+    try:
+        file_data = {"data": [item], "meta": {"totalCounts": 1}}
+        with open(sample_json_path, "w", encoding="utf-8") as f:
+            json.dump(file_data, f, ensure_ascii=False, indent=2)
+        logger.debug(f"サンプル保存完了: {sample_json_path}")
+        return "success"
+    except Exception as e:
+        logger.error(f"サンプル保存エラー ({sample_id}): {e}")
+        return "failed"
+
+
+def _fetch_all_sample_ids_paginated(material_token, progress_callback=None):
+    """
+    別ルート: /samples エンドポイントからページネーションで全サンプルIDを取得する。
+
+    Args:
+        material_token: Material API認証トークン
+        progress_callback: (current, total, message) -> bool | None
+
+    Returns:
+        list[str]: 取得した全サンプルIDのリスト。失敗時は空リスト。
+    """
+    BASE_URL = "https://rde-material-api.nims.go.jp/samples"
+    FIELDS = "names%2Cdescription%2Ccomposition"
+    LIMIT = 100
+
+    sample_ids: list = []
+    offset = 0
+    total_count: int | None = None
+
+    while True:
+        url = (
+            f"{BASE_URL}?page%5Blimit%5D={LIMIT}&page%5Boffset%5D={offset}"
+            f"&fields%5Bsample%5D={FIELDS}"
+        )
+        headers = _make_headers(
+            material_token,
+            host="rde-material-api.nims.go.jp",
+            origin="https://rde-material.nims.go.jp",
+            referer="https://rde-material.nims.go.jp/",
+        )
+        try:
+            resp = api_request("GET", url, bearer_token=material_token, headers=headers, timeout=30)
+        except Exception as e:
+            logger.error(f"サンプルID一覧取得でエラー (offset={offset}): {e}")
+            break
+
+        if resp is None or resp.status_code != 200:
+            status = resp.status_code if resp is not None else "None"
+            logger.error(f"サンプルID一覧取得失敗 (HTTP {status}, offset={offset})")
+            break
+
+        try:
+            data = resp.json()
+        except Exception as e:
+            logger.error(f"サンプルID一覧レスポンスのJSON解析失敗 (offset={offset}): {e}")
+            break
+
+        if total_count is None:
+            total_count = data.get("meta", {}).get("totalCounts", 0)
+            logger.info(f"サンプル総件数: {total_count}")
+
+        items = data.get("data", [])
+        if not items:
+            break
+
+        for item in items:
+            sample_id = item.get("id")
+            if sample_id:
+                sample_ids.append(sample_id)
+
+        offset += LIMIT
+        fetched = len(sample_ids)
+
+        if progress_callback:
+            if total_count and total_count > 0:
+                pct = min(99, int(fetched / total_count * 100))
+            else:
+                pct = 0
+            if not progress_callback(pct, 100, f"サンプルID取得中: {fetched}/{total_count}件"):
+                logger.info("サンプルID取得がキャンセルされました")
+                return sample_ids
+
+        if total_count is not None and fetched >= total_count:
+            break
+
+    logger.info(f"サンプルID取得完了: {len(sample_ids)}件 (総数: {total_count})")
+    return sample_ids
+
+
+def _fetch_single_sample_detail_worker(material_token, sample_id, sample_dir):
+    """
+    別ルート用ワーカー: 個別サンプル詳細を取得して保存する。
+    既存ファイルがある場合はスキップ。
+
+    Returns:
+        str: "success" / "skipped" / "failed"
+    """
+    try:
+        if not sample_id:
+            return "skipped"
+
+        sample_json_path = os.path.join(sample_dir, f"{sample_id}.json")
+
+        if os.path.exists(sample_json_path):
+            logger.debug(f"既存ファイルをスキップ: {sample_json_path}")
+            return "skipped"
+
+        url = (
+            f"https://rde-material-api.nims.go.jp/samples/{sample_id}"
+            "?include=sharingGroups%2Cowner&fields%5Buser%5D=userName%2CorganizationName%2CisDeleted"
+        )
+        headers = _make_headers(
+            material_token,
+            host="rde-material-api.nims.go.jp",
+            origin="https://rde-material.nims.go.jp",
+            referer="https://rde-material.nims.go.jp/",
+        )
+        resp = api_request("GET", url, bearer_token=material_token, headers=headers, timeout=15)
+
+        if resp is None:
+            logger.warning(f"サンプル詳細取得失敗 (リクエスト失敗): {sample_id}")
+            return "failed"
+
+        if resp.status_code == 404:
+            logger.debug(f"サンプル詳細が見つかりません: {sample_id}")
+            return "skipped"
+
+        if resp.status_code != 200:
+            logger.warning(f"サンプル詳細取得失敗 (HTTP {resp.status_code}): {sample_id}")
+            return "failed"
+
+        data = resp.json()
+        # 既存の samples/*.json 読み込み処理は data が list 形式を想定しているため、
+        # 個別詳細レスポンス(data=dict)は互換形式へ正規化して保存する。
+        if isinstance(data, dict) and isinstance(data.get("data"), dict):
+            normalized = {
+                "data": [data.get("data")],
+            }
+            if data.get("included") is not None:
+                normalized["included"] = data.get("included")
+            normalized["meta"] = {"totalCounts": 1}
+            data = normalized
+        with open(sample_json_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"サンプル詳細保存完了: {sample_json_path}")
+        return "success"
+
+    except Exception as e:
+        logger.error(f"サンプル詳細({sample_id})の取得に失敗: {e}")
+        return "failed"
+
+
+def _fetch_single_sample_detail_worker_force(material_token, sample_id, sample_dir, force_download=False):
+    """
+    別ルート用ワーカー (force_download対応版): 個別サンプル詳細を取得して保存する。
+
+    Returns:
+        str: "success" / "skipped" / "failed"
+    """
+    try:
+        if not sample_id:
+            return "skipped"
+
+        sample_json_path = os.path.join(sample_dir, f"{sample_id}.json")
+
+        if force_download and os.path.exists(sample_json_path):
+            try:
+                os.remove(sample_json_path)
+            except Exception as remove_error:
+                logger.debug(f"既存サンプルファイル削除失敗を無視: {remove_error}")
+        elif not force_download and os.path.exists(sample_json_path):
+            logger.debug(f"既存ファイルをスキップ: {sample_json_path}")
+            return "skipped"
+
+        url = (
+            f"https://rde-material-api.nims.go.jp/samples/{sample_id}"
+            "?include=sharingGroups%2Cowner&fields%5Buser%5D=userName%2CorganizationName%2CisDeleted"
+        )
+        headers = _make_headers(
+            material_token,
+            host="rde-material-api.nims.go.jp",
+            origin="https://rde-material.nims.go.jp",
+            referer="https://rde-material.nims.go.jp/",
+        )
+        resp = api_request("GET", url, bearer_token=material_token, headers=headers, timeout=15)
+
+        if resp is None:
+            logger.warning(f"サンプル詳細取得失敗 (リクエスト失敗): {sample_id}")
+            return "failed"
+
+        if resp.status_code == 404:
+            logger.debug(f"サンプル詳細が見つかりません: {sample_id}")
+            return "skipped"
+
+        if resp.status_code != 200:
+            logger.warning(f"サンプル詳細取得失敗 (HTTP {resp.status_code}): {sample_id}")
+            return "failed"
+
+        data = resp.json()
+        # 既存の samples/*.json 読み込み処理との互換形式に正規化
+        if isinstance(data, dict) and isinstance(data.get("data"), dict):
+            normalized = {
+                "data": [data.get("data")],
+            }
+            if data.get("included") is not None:
+                normalized["included"] = data.get("included")
+            normalized["meta"] = {"totalCounts": 1}
+            data = normalized
+        with open(sample_json_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"サンプル詳細保存完了: {sample_json_path}")
+        return "success"
+
+    except Exception as e:
+        logger.error(f"サンプル詳細({sample_id})の取得・保存に失敗: {e}")
+        return "failed"
+
+
+def fetch_sample_info_stage_direct(bearer_token, progress_callback=None, max_workers: int = 10):
+    """
+    別ルート段階: /samples エンドポイントをページネーションし、各アイテムを
+    直接 {id}.json として保存する。1ページ100件 × N ページ分のリクエストのみで
+    全サンプル情報を取得できる。
+
+    保存形式: {"data": [item], "meta": {"totalCounts": 1}}
+    → 既存の build_sample_dedup_rows_from_files 等と互換。
+    → サブグループ情報 (subGroup.json) 不要で実行可能。
+    """
+    from config.common import load_bearer_token
+    from net.http_helpers import parallel_download
+
+    if not bearer_token:
+        return "Bearerトークンが取得できません。ログイン状態を確認してください。"
+
+    if progress_callback:
+        if not progress_callback(2, 100, "サンプル一覧取得開始..."):
+            return "キャンセルされました"
+
+    material_token = load_bearer_token('rde-material.nims.go.jp')
+    if not material_token:
+        msg = "Material APIトークンが取得できません。rde-material.nims.go.jp へのログイン状態を確認してください。"
+        logger.error(msg)
+        return msg
+
+    BASE_URL = "https://rde-material-api.nims.go.jp/samples"
+    LIMIT = 100
+    FIELDS = "names%2Cdescription%2Ccomposition"
+
+    sample_dir = os.path.join(OUTPUT_DIR, "rde", "data", "samples")
+    os.makedirs(sample_dir, exist_ok=True)
+
+    # 1ページ目を取得して totalCounts を確認
+    url0 = f"{BASE_URL}?page%5Blimit%5D={LIMIT}&page%5Boffset%5D=0&fields%5Bsample%5D={FIELDS}"
+    headers = _make_headers(
+        material_token,
+        host="rde-material-api.nims.go.jp",
+        origin="https://rde-material.nims.go.jp",
+        referer="https://rde-material.nims.go.jp/",
+    )
+    try:
+        resp0 = api_request("GET", url0, bearer_token=material_token, headers=headers, timeout=30)
+    except Exception as e:
+        return f"サンプル一覧取得に失敗しました: {e}"
+
+    if resp0 is None or resp0.status_code != 200:
+        status = resp0.status_code if resp0 is not None else "None"
+        return f"サンプル一覧取得に失敗しました (HTTP {status})。"
+
+    try:
+        page0 = resp0.json()
+    except Exception as e:
+        return f"サンプル一覧レスポンスのJSON解析に失敗しました: {e}"
+
+    total_count: int = page0.get("meta", {}).get("totalCounts", 0)
+    logger.info(f"サンプル総件数: {total_count}")
+
+    saved = skipped = failed = 0
+    listed_ids: list[str] = []
+    newly_saved_ids: list[str] = []
+
+    # 1ページ目のアイテムを保存
+    for item in page0.get("data", []):
+        sid = item.get("id") if isinstance(item, dict) else None
+        if sid:
+            listed_ids.append(sid)
+        result = _save_sample_item_from_list(item, sample_dir)
+        if result == "success":
+            saved += 1
+            if sid:
+                newly_saved_ids.append(sid)
+        elif result == "skipped":
+            skipped += 1
+        else:
+            failed += 1
+
+    # 残りページを順次取得・保存
+    offset = LIMIT
+    while offset < total_count:
+        pct = 5 + int((offset / total_count) * 90) if total_count > 0 else 95
+        if progress_callback:
+            msg = f"サンプル取得中 {min(offset + LIMIT, total_count)}/{total_count} 件"
+            if not progress_callback(pct, 100, msg):
+                logger.info("サンプル直接取得がキャンセルされました")
+                return "キャンセルされました"
+
+        url = f"{BASE_URL}?page%5Blimit%5D={LIMIT}&page%5Boffset%5D={offset}&fields%5Bsample%5D={FIELDS}"
+        try:
+            resp = api_request("GET", url, bearer_token=material_token, headers=headers, timeout=30)
+        except Exception as e:
+            logger.error(f"サンプルページ取得エラー (offset={offset}): {e}")
+            failed += LIMIT
+            offset += LIMIT
+            continue
+
+        if resp is None or resp.status_code != 200:
+            status = resp.status_code if resp is not None else "None"
+            logger.error(f"サンプルページ取得失敗 (HTTP {status}, offset={offset})")
+            failed += LIMIT
+            offset += LIMIT
+            continue
+
+        try:
+            page_data = resp.json()
+        except Exception as e:
+            logger.error(f"サンプルページJSON解析エラー (offset={offset}): {e}")
+            failed += LIMIT
+            offset += LIMIT
+            continue
+
+        for item in page_data.get("data", []):
+            sid = item.get("id") if isinstance(item, dict) else None
+            if sid:
+                listed_ids.append(sid)
+            result = _save_sample_item_from_list(item, sample_dir)
+            if result == "success":
+                saved += 1
+                if sid:
+                    newly_saved_ids.append(sid)
+            elif result == "skipped":
+                skipped += 1
+            else:
+                failed += 1
+
+        offset += LIMIT
+
+    # Step2: ページネーションで列挙した sample_id について個別詳細取得を試行
+    detail_success = detail_skipped = detail_failed = 0
+    if listed_ids:
+        if progress_callback:
+            if not progress_callback(96, 100, f"サンプル個別詳細取得開始: 対象 {len(listed_ids)}件"):
+                return "キャンセルされました"
+
+        # 新規保存IDは詳細で上書き、それ以外はスキップ判定付きで取得
+        force_ids = set(newly_saved_ids)
+        detail_tasks_force = [(material_token, sid, sample_dir, True) for sid in listed_ids if sid in force_ids]
+        detail_tasks_skip = [(material_token, sid, sample_dir) for sid in listed_ids if sid not in force_ids]
+
+        def _detail_progress(current, total, message):
+            if progress_callback:
+                mapped = 96 + int((current / 100.0) * 4)
+                return progress_callback(mapped, 100, f"サンプル個別詳細取得中: {message}")
+            return True
+
+        if detail_tasks_force:
+            result_force = parallel_download(
+                tasks=detail_tasks_force,
+                worker_function=_fetch_single_sample_detail_worker_force,
+                max_workers=max_workers,
+                progress_callback=_detail_progress,
+                threshold=50,
+            )
+            if result_force.get("cancelled"):
+                return "キャンセルされました"
+            detail_success += result_force.get("success_count", 0)
+            detail_skipped += result_force.get("skipped_count", 0)
+            detail_failed += result_force.get("failed_count", 0)
+
+        if detail_tasks_skip:
+            result_skip = parallel_download(
+                tasks=detail_tasks_skip,
+                worker_function=_fetch_single_sample_detail_worker,
+                max_workers=max_workers,
+                progress_callback=_detail_progress,
+                threshold=50,
+            )
+            if result_skip.get("cancelled"):
+                return "キャンセルされました"
+            detail_success += result_skip.get("success_count", 0)
+            detail_skipped += result_skip.get("skipped_count", 0)
+            detail_failed += result_skip.get("failed_count", 0)
+
+    if progress_callback:
+        progress_callback(100, 100, "サンプル情報（直接取得）完了")
+
+    logger.info(
+        "サンプル情報（直接取得）完了: 一覧保存(成功=%s, スキップ=%s, 失敗=%s), 個別詳細(成功=%s, スキップ=%s, 失敗=%s), 総数=%s",
+        saved,
+        skipped,
+        failed,
+        detail_success,
+        detail_skipped,
+        detail_failed,
+        total_count,
+    )
+    return (
+        f"サンプル情報（直接取得）完了。"
+        f"一覧保存 成功: {saved}件, スキップ: {skipped}件, 失敗: {failed}件 / "
+        f"個別詳細 成功: {detail_success}件, スキップ: {detail_skipped}件, 失敗: {detail_failed}件 "
+        f"(総数: {total_count}件)"
+    )
+
+
+def fetch_sample_info_only_direct(bearer_token, output_dir=None, progress_callback=None, max_workers: int = 10):
+    """
+    別ルート: サンプル情報を直接取得・強制上書き保存する。
+    fetch_sample_info_only の直接取得版。ページネーションリストから直接保存。
+
+    subGroup.json 不要で実行可能。
+    """
+    from config.common import load_bearer_token
+    from net.http_helpers import parallel_download
+
+    if not bearer_token:
+        return "Bearerトークンが取得できません。ログイン状態を確認してください。"
+
+    if progress_callback:
+        if not progress_callback(2, 100, "サンプル一覧取得開始 (直接取得・強制)..."):
+            return "キャンセルされました"
+
+    material_token = load_bearer_token('rde-material.nims.go.jp')
+    if not material_token:
+        msg = "Material APIトークンが取得できません。rde-material.nims.go.jp へのログイン状態を確認してください。"
+        logger.error(msg)
+        return msg
+
+    BASE_URL = "https://rde-material-api.nims.go.jp/samples"
+    LIMIT = 100
+    FIELDS = "names%2Cdescription%2Ccomposition"
+
+    root_dir = output_dir or OUTPUT_RDE_DATA_DIR
+    sample_dir = os.path.join(root_dir, "samples")
+    os.makedirs(sample_dir, exist_ok=True)
+
+    headers = _make_headers(
+        material_token,
+        host="rde-material-api.nims.go.jp",
+        origin="https://rde-material.nims.go.jp",
+        referer="https://rde-material.nims.go.jp/",
+    )
+
+    # 1ページ目で totalCounts を取得
+    url0 = f"{BASE_URL}?page%5Blimit%5D={LIMIT}&page%5Boffset%5D=0&fields%5Bsample%5D={FIELDS}"
+    try:
+        resp0 = api_request("GET", url0, bearer_token=material_token, headers=headers, timeout=30)
+    except Exception as e:
+        return f"サンプル一覧取得に失敗しました: {e}"
+
+    if resp0 is None or resp0.status_code != 200:
+        status = resp0.status_code if resp0 is not None else "None"
+        return f"サンプル一覧取得に失敗しました (HTTP {status})。"
+
+    try:
+        page0 = resp0.json()
+    except Exception as e:
+        return f"サンプル一覧レスポンスのJSON解析に失敗しました: {e}"
+
+    total_count: int = page0.get("meta", {}).get("totalCounts", 0)
+    logger.info(f"サンプル総件数 (強制): {total_count}")
+
+    saved = skipped = failed = 0
+    listed_ids: list[str] = []
+
+    def _save_force(item: dict) -> str:
+        """強制上書きで1アイテムを保存"""
+        sample_id = item.get("id")
+        if not sample_id:
+            return "skipped"
+        sample_json_path = os.path.join(sample_dir, f"{sample_id}.json")
+        # 既存ファイルを削除（強制上書き）
+        if os.path.exists(sample_json_path):
+            try:
+                os.remove(sample_json_path)
+            except Exception as remove_error:
+                logger.debug(f"既存ファイル削除失敗を無視: {remove_error}")
+        try:
+            file_data = {"data": [item], "meta": {"totalCounts": 1}}
+            with open(sample_json_path, "w", encoding="utf-8") as f:
+                json.dump(file_data, f, ensure_ascii=False, indent=2)
+            return "success"
+        except Exception as e:
+            logger.error(f"サンプル強制保存エラー ({sample_id}): {e}")
+            return "failed"
+
+    for item in page0.get("data", []):
+        sid = item.get("id") if isinstance(item, dict) else None
+        if sid:
+            listed_ids.append(sid)
+        result = _save_force(item)
+        if result == "success":
+            saved += 1
+        elif result == "skipped":
+            skipped += 1
+        else:
+            failed += 1
+
+    offset = LIMIT
+    while offset < total_count:
+        pct = 5 + int((offset / total_count) * 90) if total_count > 0 else 95
+        if progress_callback:
+            msg = f"サンプル取得中（強制）{min(offset + LIMIT, total_count)}/{total_count} 件"
+            if not progress_callback(pct, 100, msg):
+                return "キャンセルされました"
+
+        url = f"{BASE_URL}?page%5Blimit%5D={LIMIT}&page%5Boffset%5D={offset}&fields%5Bsample%5D={FIELDS}"
+        try:
+            resp = api_request("GET", url, bearer_token=material_token, headers=headers, timeout=30)
+        except Exception as e:
+            logger.error(f"サンプルページ取得エラー (offset={offset}): {e}")
+            failed += LIMIT
+            offset += LIMIT
+            continue
+
+        if resp is None or resp.status_code != 200:
+            status = resp.status_code if resp is not None else "None"
+            logger.error(f"サンプルページ取得失敗 (HTTP {status}, offset={offset})")
+            failed += LIMIT
+            offset += LIMIT
+            continue
+
+        try:
+            page_data = resp.json()
+        except Exception as e:
+            logger.error(f"サンプルページJSON解析エラー (offset={offset}): {e}")
+            failed += LIMIT
+            offset += LIMIT
+            continue
+
+        for item in page_data.get("data", []):
+            sid = item.get("id") if isinstance(item, dict) else None
+            if sid:
+                listed_ids.append(sid)
+            result = _save_force(item)
+            if result == "success":
+                saved += 1
+            elif result == "skipped":
+                skipped += 1
+            else:
+                failed += 1
+
+        offset += LIMIT
+
+    # Step2: 個別詳細を全IDに対して強制取得（上書き）
+    detail_success = detail_skipped = detail_failed = 0
+    if listed_ids:
+        if progress_callback:
+            if not progress_callback(96, 100, f"サンプル個別詳細取得開始（強制）: 対象 {len(listed_ids)}件"):
+                return "キャンセルされました"
+
+        detail_tasks = [(material_token, sid, sample_dir, True) for sid in listed_ids]
+
+        def _detail_progress(current, total, message):
+            if progress_callback:
+                mapped = 96 + int((current / 100.0) * 4)
+                return progress_callback(mapped, 100, f"サンプル個別詳細取得中（強制）: {message}")
+            return True
+
+        result = parallel_download(
+            tasks=detail_tasks,
+            worker_function=_fetch_single_sample_detail_worker_force,
+            max_workers=max_workers,
+            progress_callback=_detail_progress,
+            threshold=50,
+        )
+        if result.get("cancelled"):
+            return "キャンセルされました"
+        detail_success = result.get("success_count", 0)
+        detail_skipped = result.get("skipped_count", 0)
+        detail_failed = result.get("failed_count", 0)
+
+    if progress_callback:
+        progress_callback(100, 100, "完了")
+
+    logger.info(
+        "サンプル情報（直接取得・強制）完了: 一覧保存(成功=%s, 失敗=%s), 個別詳細(成功=%s, スキップ=%s, 失敗=%s), 総数=%s",
+        saved,
+        failed,
+        detail_success,
+        detail_skipped,
+        detail_failed,
+        total_count,
+    )
+    return (
+        f"サンプル情報（直接取得・強制）完了。"
+        f"一覧保存 成功: {saved}件, 失敗: {failed}件 / "
+        f"個別詳細 成功: {detail_success}件, スキップ: {detail_skipped}件, 失敗: {detail_failed}件, "
+        f"総数: {total_count}件"
+    )
+
 
 def fetch_common_info_only_logic(
     bearer_token,
