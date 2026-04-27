@@ -164,59 +164,45 @@ class BackgroundFetchManager(QObject):
         # invoiceSchema は template.json に依存（Phase1 で取得済み前提）
         stages: list[tuple[str, Callable[[], str | None]]] = []
 
-        # 1) サンプル情報（他段階と独立）
-        def _fetch_samples() -> str | None:
-            # 旧ルート（groupId経由）→ 新ルート（ページネーション直取得）の順に実行
-            # これにより、既存互換を維持しつつ全件補完を行う。
-            legacy_msg = ""
-            direct_msg = ""
-
-            def _legacy_cb(current: int, total: int, message: str = "") -> bool:
-                return self._progress_callback_for("サンプル情報")(current, total, f"[旧ルート] {message}")
-
-            def _direct_cb(current: int, total: int, message: str = "") -> bool:
-                return self._progress_callback_for("サンプル情報")(current, total, f"[新ルート] {message}")
-
+        # 1) サンプル情報（旧ルート）
+        def _fetch_samples_legacy() -> str | None:
+            cb = self._progress_callback_for("サンプル情報（旧ルート）")
             if force_download:
-                legacy_msg = fetch_sample_info_only(
+                return fetch_sample_info_only(
                     bearer_token,
                     output_dir=output_rde_data,
-                    progress_callback=_legacy_cb,
+                    progress_callback=cb,
                     max_workers=parallel_workers,
                 )
-            else:
-                legacy_msg = fetch_sample_info_stage(
+            return fetch_sample_info_stage(
+                bearer_token,
+                progress_callback=cb,
+                max_workers=parallel_workers,
+            )
+
+        stages.append(("サンプル情報（旧ルート）", _fetch_samples_legacy))
+
+        # 2) サンプル情報（新ルート）— 明示的に stages_filter に含まれた場合のみ実行
+        # 基本情報取得(ALL/検索)では実行しない。ボタン「サンプル情報取得(選択)」から直接呼ぶ際のみ使用。
+        if stages_filter is not None and "サンプル情報（新ルート）" in stages_filter:
+            def _fetch_samples_direct() -> str | None:
+                cb = self._progress_callback_for("サンプル情報（新ルート）")
+                if force_download:
+                    return fetch_sample_info_only_direct(
+                        bearer_token,
+                        output_dir=output_rde_data,
+                        progress_callback=cb,
+                        max_workers=parallel_workers,
+                    )
+                return fetch_sample_info_stage_direct(
                     bearer_token,
-                    progress_callback=_legacy_cb,
+                    progress_callback=cb,
                     max_workers=parallel_workers,
                 )
 
-            if legacy_msg == "キャンセルされました":
-                return legacy_msg
+            stages.append(("サンプル情報（新ルート）", _fetch_samples_direct))
 
-            # 旧ルート失敗時も新ルートで補完を試行（トークン不備などの切り分けのため）
-            if force_download:
-                direct_msg = fetch_sample_info_only_direct(
-                    bearer_token,
-                    output_dir=output_rde_data,
-                    progress_callback=_direct_cb,
-                    max_workers=parallel_workers,
-                )
-            else:
-                direct_msg = fetch_sample_info_stage_direct(
-                    bearer_token,
-                    progress_callback=_direct_cb,
-                    max_workers=parallel_workers,
-                )
-
-            if direct_msg == "キャンセルされました":
-                return direct_msg
-
-            return f"旧ルート: {legacy_msg} | 新ルート: {direct_msg}"
-
-        stages.append(("サンプル情報", _fetch_samples))
-
-        # 2) データセット情報（一覧 + 個別 — dataEntry/invoiceが依存）
+        # 3) データセット情報（一覧 + 個別 — dataEntry/invoiceが依存）
         def _fetch_datasets() -> str | None:
             return fetch_all_dataset_info(
                 bearer_token,
@@ -230,7 +216,7 @@ class BackgroundFetchManager(QObject):
 
         stages.append(("データセット情報", _fetch_datasets))
 
-        # 3) データエントリ情報（dataset.jsonに依存）
+        # 4) データエントリ情報（dataset.jsonに依存）
         def _fetch_data_entries() -> str | None:
             return fetch_all_data_entrys_info(
                 bearer_token,
@@ -240,7 +226,7 @@ class BackgroundFetchManager(QObject):
 
         stages.append(("データエントリ情報", _fetch_data_entries))
 
-        # 4) インボイス情報（dataset.jsonに依存）
+        # 5) インボイス情報（dataset.jsonに依存）
         def _fetch_invoices() -> str | None:
             return fetch_all_invoices_info(
                 bearer_token,
@@ -250,7 +236,7 @@ class BackgroundFetchManager(QObject):
 
         stages.append(("インボイス情報", _fetch_invoices))
 
-        # 5) invoiceSchema情報（template.jsonに依存 — Phase1で取得済み）
+        # 6) invoiceSchema情報（template.jsonに依存 — Phase1で取得済み）
         def _fetch_invoice_schemas() -> str | None:
             return fetch_invoice_schemas(
                 bearer_token,

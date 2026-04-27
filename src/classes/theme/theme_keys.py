@@ -236,6 +236,20 @@ class ThemeKey(str, Enum):
     BUTTON_BASICINFO_REFETCH_BACKGROUND_PRESSED = "button.basicinfo.refetch.background.pressed"
     BUTTON_BASICINFO_REFETCH_TEXT = "button.basicinfo.refetch.text"
     BUTTON_BASICINFO_REFETCH_BORDER = "button.basicinfo.refetch.border"
+
+    # テーブル内 エクスポートボタン
+    BUTTON_BASICINFO_EXPORT_BACKGROUND = "button.basicinfo.export.background"
+    BUTTON_BASICINFO_EXPORT_BACKGROUND_HOVER = "button.basicinfo.export.background.hover"
+    BUTTON_BASICINFO_EXPORT_BACKGROUND_PRESSED = "button.basicinfo.export.background.pressed"
+    BUTTON_BASICINFO_EXPORT_TEXT = "button.basicinfo.export.text"
+    BUTTON_BASICINFO_EXPORT_BORDER = "button.basicinfo.export.border"
+
+    # テーブル内 フォルダボタン
+    BUTTON_BASICINFO_FOLDER_BACKGROUND = "button.basicinfo.folder.background"
+    BUTTON_BASICINFO_FOLDER_BACKGROUND_HOVER = "button.basicinfo.folder.background.hover"
+    BUTTON_BASICINFO_FOLDER_BACKGROUND_PRESSED = "button.basicinfo.folder.background.pressed"
+    BUTTON_BASICINFO_FOLDER_TEXT = "button.basicinfo.folder.text"
+    BUTTON_BASICINFO_FOLDER_BORDER = "button.basicinfo.folder.border"
     
     # ========================================
     # Text - テキスト・ラベル

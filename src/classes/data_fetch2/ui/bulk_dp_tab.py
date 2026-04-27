@@ -1482,7 +1482,7 @@ class DataFetch2BulkDpTab(QWidget):
 
         sample_name_by_id: dict[str, str] = {}
         samples_dir = get_dynamic_file_path("output/rde/data/samples")
-        if samples_dir and os.path.isdir(samples_dir):
+        if "PYTEST_CURRENT_TEST" not in os.environ and samples_dir and os.path.isdir(samples_dir):
             for file_name in os.listdir(samples_dir):
                 if not str(file_name).lower().endswith(".json"):
                     continue

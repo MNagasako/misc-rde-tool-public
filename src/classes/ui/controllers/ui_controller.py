@@ -1846,14 +1846,23 @@ class UIController(UIControllerCore):
             invoice_schema_btn.clicked.connect(self.fetch_invoice_schema)
             btn_layout1.addWidget(invoice_schema_btn)
 
-            # サンプル情報取得ボタン（旧: サンプル情報強制取得）
-            self.sample_info_btn = self.create_auto_resize_button("サンプル情報取得", 150, 36, g3_style)
+            # サンプル情報取得ボタン（経路選択）
+            self.sample_info_btn = self.create_auto_resize_button("サンプル情報取得(選択)", 180, 36, g3_style)
             sample_info_btn = self.sample_info_btn
+            sample_info_btn.setToolTip("クリック後に 旧ルート / 新ルート / 両方 を選択して取得できます")
             sample_info_btn.clicked.connect(self.fetch_sample_info_only)
             btn_layout1.addWidget(sample_info_btn)
 
             btn_layout1.addStretch(1)
             basic_tab_layout.addLayout(btn_layout1)
+
+            sample_route_note = QLabel(
+                "旧ルート: サブグループにアクセス権があるサンプルのみ（本ツールの動作に関連） / "
+                "新ルート: 全サンプル対象（現時点で本ツール動作には非依存）"
+            )
+            sample_route_note.setWordWrap(True)
+            sample_route_note.setStyleSheet(f"color: {get_color(ThemeKey.TEXT_MUTED)}; margin-top: 2px;")
+            basic_tab_layout.addWidget(sample_route_note)
         except Exception as e:
             self.show_error(f"基本情報画面の1行目ボタン作成でエラーが発生しました: {e}")
             basic_tab_layout.addWidget(QLabel("基本情報機能の一部が利用できません"))
@@ -1904,6 +1913,12 @@ class UIController(UIControllerCore):
                 32,
                 get_button_style("secondary"),
             )
+            self.export_all_basic_info_btn = self.create_auto_resize_button(
+                "📦 全エクスポート",
+                160,
+                32,
+                get_button_style("secondary"),
+            )
 
             def open_basic_info_data_dir():
                 import os
@@ -1922,10 +1937,20 @@ class UIController(UIControllerCore):
 
             self.open_basic_info_data_dir_btn.clicked.connect(open_basic_info_data_dir)
 
+            def export_all_basic_info():
+                status_widget = getattr(self, 'basic_unified_status_widget', None)
+                if status_widget is None or not hasattr(status_widget, 'export_all_rows'):
+                    QMessageBox.warning(self.parent, "エクスポートエラー", "ステータス表が初期化されていないため、全エクスポートを実行できません。")
+                    return
+                status_widget.export_all_rows()
+
+            self.export_all_basic_info_btn.clicked.connect(export_all_basic_info)
+
             parallel_row.addWidget(parallel_label)
             parallel_row.addWidget(parallel_spin)
             parallel_row.addStretch(1)
             parallel_row.addWidget(self.open_basic_info_data_dir_btn)
+            parallel_row.addWidget(self.export_all_basic_info_btn)
 
             # 後段で「状況更新」「API Debug」ボタンを同一行へ移設するため保持
             self._basic_info_parallel_row = parallel_row
@@ -5068,7 +5093,7 @@ class UIController(UIControllerCore):
             self.show_error(f"invoice_schema取得でエラーが発生しました: {e}")
     
     def fetch_sample_info_only(self):
-        """サンプル情報強制取得 - basicパッケージに委譲"""
+        """サンプル情報取得（経路選択） - basicパッケージに委譲"""
         try:
             from classes.basic.ui.ui_basic_info import fetch_sample_info_only
             fetch_sample_info_only(self)
@@ -5076,7 +5101,7 @@ class UIController(UIControllerCore):
             self.show_error(f"基本情報モジュールのインポートに失敗しました: {e}")
         except Exception as e:
             self.show_error(f"サンプル情報取得でエラーが発生しました: {e}")
-    
+
     def _create_fallback_settings_widget(self):
         """フォールバック：従来の設定ダイアログを開くボタンを含むウィジェット"""
         from qt_compat.widgets import QWidget, QVBoxLayout, QPushButton, QLabel

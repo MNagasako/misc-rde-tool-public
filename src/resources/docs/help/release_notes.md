@@ -6,10 +6,20 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.57）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
-| samples取得経路 | `basic_info_logic.py` に、既存 subgroup ルートを維持しつつ、samples 全件ページネーション + 個別詳細取得の直接ルートを追加。 |
-| ALL/単体導線統合 | `background_fetch_manager.py` と `ui_basic_info.py` で、旧ルートと新ルートを順次実行するよう統合。進捗表示は route prefix 付き。 |
-| 検証 | `test_fetch_sample_direct_route.py` / `test_background_fetch_manager.py` を更新し、compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.57 導線で確認。 |
+| リリース/品質 | リビジョンアップ（v2.5.58）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| エクスポート導線 | `basic_unified_status_widget.py` のエクスポート導線を「標準保存ダイアログ（zip/gzip）→進捗ダイアログ（中止可）」へ統一。 |
+| 進捗表示/保存先 | worker + queue + QTimer で進捗バー更新と経過/残り時間表示を安定化。保存先既定は Desktop、以降は前回保存先を記憶。 |
+| 検証 | `test_basic_unified_status_widget_actions.py` を更新し、保存ダイアログ導線・保存先記憶を追加検証。compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.58 導線で確認。 |
+
+## v2.5.58 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.58）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| エクスポートUI | `basic_unified_status_widget.py` で保存ダイアログ確定後に進捗ダイアログを表示し、中止ボタン付きで実行する導線へ変更。 |
+| 保存先運用 | 初回既定保存先を Desktop に設定し、`QSettings` で前回保存先ディレクトリを再利用。 |
+| 進捗安定化 | スレッド側進捗を queue 経由で UI タイマーへ反映し、進捗バーと経過/残り時間表示を安定化。 |
+| 検証 | `test_basic_unified_status_widget_actions.py` を更新し、保存ダイアログキャンセル・選択結果反映・保存先記憶の回帰を確認。 |
 
 ## v2.5.57 の主な更新点
 

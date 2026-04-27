@@ -892,7 +892,7 @@ def fetch_invoice_schema(controller):
 
 def fetch_sample_info_only(controller):
     """
-    サンプル情報のみを強制取得する
+    サンプル情報取得（経路選択）
     
     v2.0.4改善:
     - BearerTokenManager統一
@@ -903,6 +903,7 @@ def fetch_sample_info_only(controller):
         fetch_sample_info_only_direct as fetch_sample_info_only_direct_logic,
     )
     from core.bearer_token_manager import BearerTokenManager
+    from qt_compat.widgets import QInputDialog
     
     # トークン取得
     bearer_token = BearerTokenManager.get_token_with_relogin_prompt(controller.parent)
@@ -918,11 +919,41 @@ def fetch_sample_info_only(controller):
         )
         return
     
+    # 取得経路を選択
+    route_items = [
+        "旧ルートのみ（サブグループ権限分）",
+        "新ルートのみ（全サンプル）",
+        "両方（旧→新）",
+    ]
+    route_text, route_ok = QInputDialog.getItem(
+        controller.parent,
+        "サンプル取得経路の選択",
+        "実行する取得経路を選択してください",
+        route_items,
+        2,
+        False,
+    )
+    if not route_ok:
+        logger.info("サンプル情報取得処理はユーザーによりキャンセルされました。(経路選択)")
+        return
+
+    route_mode = "both"
+    if route_text.startswith("旧ルート"):
+        route_mode = "legacy"
+    elif route_text.startswith("新ルート"):
+        route_mode = "direct"
+
     # 確認ダイアログ
     reply = QMessageBox.question(
         controller.parent, 
-        "サンプル情報強制取得の確認",
-        "全サンプル情報を強制取得しますか？\n\n実行内容:\n• 旧ルート: subGroup.json の groupId 経由で取得\n• 新ルート: /samples のページネーション取得 + 個別詳細取得\n• 既存ファイルを上書き更新\n\n※トークン不足時は失敗理由を結果に表示します",
+        "サンプル情報取得の確認",
+        "選択した経路でサンプル情報を取得します。\n\n"
+        "実行内容:\n"
+        "• 旧ルート: subGroup.json の groupId 経由（サブグループ権限分）\n"
+        "• 新ルート: /samples のページネーション + 個別詳細（全サンプル対象）\n"
+        "• 既存ファイルを上書き更新\n\n"
+        f"選択経路: {route_text}\n"
+        "※トークン不足時は失敗理由を結果に表示します",
         QMessageBox.Yes | QMessageBox.No,
         QMessageBox.No
     )
@@ -931,19 +962,33 @@ def fetch_sample_info_only(controller):
         logger.info("サンプル情報強制取得処理はユーザーによりキャンセルされました。")
         return
     
-    # 旧ルート + 新ルートを連続実行するラッパー
-    def _combined_sample_fetch(*, bearer_token, output_dir, progress_callback=None, max_workers=10):
+    def _route_sample_fetch(*, bearer_token, output_dir, progress_callback=None, max_workers=10):
         def _legacy_cb(current, total, message):
             if progress_callback:
-                mapped = int((max(0, min(100, int(current))) * 50) / 100)
+                mapped = int((max(0, min(100, int(current))) * 50) / 100) if route_mode == "both" else int(current)
                 return progress_callback(mapped, 100, f"[旧ルート] {message}")
             return True
 
         def _direct_cb(current, total, message):
             if progress_callback:
-                mapped = 50 + int((max(0, min(100, int(current))) * 50) / 100)
+                mapped = 50 + int((max(0, min(100, int(current))) * 50) / 100) if route_mode == "both" else int(current)
                 return progress_callback(mapped, 100, f"[新ルート] {message}")
             return True
+
+        if route_mode == "legacy":
+            return fetch_sample_info_only_logic(
+                bearer_token=bearer_token,
+                output_dir=output_dir,
+                progress_callback=_legacy_cb,
+                max_workers=max_workers,
+            )
+        if route_mode == "direct":
+            return fetch_sample_info_only_direct_logic(
+                bearer_token=bearer_token,
+                output_dir=output_dir,
+                progress_callback=_direct_cb,
+                max_workers=max_workers,
+            )
 
         legacy_msg = fetch_sample_info_only_logic(
             bearer_token=bearer_token,
@@ -968,7 +1013,7 @@ def fetch_sample_info_only(controller):
     # プログレス表示付きワーカーを作成
     parallel_max_workers = _get_basic_info_parallel_workers(controller, default=10)
     worker = ProgressWorker(
-        task_func=_combined_sample_fetch,
+        task_func=_route_sample_fetch,
         task_kwargs={
             'bearer_token': bearer_token,
             'output_dir': get_dynamic_file_path("output/rde/data"),
@@ -979,6 +1024,7 @@ def fetch_sample_info_only(controller):
     
     # タブ内プログレスで実行
     _run_embedded(controller, worker, "サンプル情報強制取得")
+
 
 def fetch_common_info_only(controller):
     """

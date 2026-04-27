@@ -245,6 +245,20 @@ class DarkTheme:
         ThemeKey.BUTTON_BASICINFO_REFETCH_BACKGROUND_PRESSED: "#ffe0b2",  # Orange 100
         ThemeKey.BUTTON_BASICINFO_REFETCH_TEXT: "#000000",
         ThemeKey.BUTTON_BASICINFO_REFETCH_BORDER: "#ffb74d",
+
+        # テーブル内 エクスポートボタン - Teal (Dark)
+        ThemeKey.BUTTON_BASICINFO_EXPORT_BACKGROUND: "#4db6ac",  # Teal 300
+        ThemeKey.BUTTON_BASICINFO_EXPORT_BACKGROUND_HOVER: "#80cbc4",  # Teal 200
+        ThemeKey.BUTTON_BASICINFO_EXPORT_BACKGROUND_PRESSED: "#b2dfdb",  # Teal 100
+        ThemeKey.BUTTON_BASICINFO_EXPORT_TEXT: "#000000",
+        ThemeKey.BUTTON_BASICINFO_EXPORT_BORDER: "#26a69a",
+
+        # テーブル内 フォルダボタン - Blue (Dark)
+        ThemeKey.BUTTON_BASICINFO_FOLDER_BACKGROUND: "#64b5f6",  # Blue 300
+        ThemeKey.BUTTON_BASICINFO_FOLDER_BACKGROUND_HOVER: "#90caf9",  # Blue 200
+        ThemeKey.BUTTON_BASICINFO_FOLDER_BACKGROUND_PRESSED: "#bbdefb",  # Blue 100
+        ThemeKey.BUTTON_BASICINFO_FOLDER_TEXT: "#000000",
+        ThemeKey.BUTTON_BASICINFO_FOLDER_BORDER: "#42a5f5",
         
         # ========================================
         # Text - テキスト・ラベル（Material Dark準拠）

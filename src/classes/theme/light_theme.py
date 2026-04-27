@@ -245,6 +245,20 @@ class LightTheme:
         ThemeKey.BUTTON_BASICINFO_REFETCH_BACKGROUND_PRESSED: "#bf360c",
         ThemeKey.BUTTON_BASICINFO_REFETCH_TEXT: "#ffffff",
         ThemeKey.BUTTON_BASICINFO_REFETCH_BORDER: "#e65100",
+
+        # テーブル内 エクスポートボタン - Teal
+        ThemeKey.BUTTON_BASICINFO_EXPORT_BACKGROUND: "#00897b",
+        ThemeKey.BUTTON_BASICINFO_EXPORT_BACKGROUND_HOVER: "#00695c",
+        ThemeKey.BUTTON_BASICINFO_EXPORT_BACKGROUND_PRESSED: "#004d40",
+        ThemeKey.BUTTON_BASICINFO_EXPORT_TEXT: "#ffffff",
+        ThemeKey.BUTTON_BASICINFO_EXPORT_BORDER: "#00796b",
+
+        # テーブル内 フォルダボタン - Blue
+        ThemeKey.BUTTON_BASICINFO_FOLDER_BACKGROUND: "#1976d2",
+        ThemeKey.BUTTON_BASICINFO_FOLDER_BACKGROUND_HOVER: "#1565c0",
+        ThemeKey.BUTTON_BASICINFO_FOLDER_BACKGROUND_PRESSED: "#0d47a1",
+        ThemeKey.BUTTON_BASICINFO_FOLDER_TEXT: "#ffffff",
+        ThemeKey.BUTTON_BASICINFO_FOLDER_BORDER: "#1976d2",
         
         # ========================================
         # Text - テキスト・ラベル

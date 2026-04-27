@@ -10,7 +10,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import queue
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -20,12 +22,16 @@ from dateutil.parser import parse as parse_datetime
 
 from classes.theme import ThemeKey, get_color
 from config.common import get_dynamic_file_path
+from qt_compat import QtCore
 from qt_compat.core import Qt, QTimer, Signal
 from qt_compat.widgets import (
+    QAbstractItemView,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QMessageBox,
     QProgressBar,
+    QProgressDialog,
     QPushButton,
     QComboBox,
     QSizePolicy,
@@ -239,13 +245,19 @@ class BasicUnifiedStatusWidget(QWidget):
     # ワーカースレッド→UIスレッドへ結果を渡す
     _status_rows_ready = Signal(int, object)
     status_rows_applied = Signal(int, int)
+    _EXPORT_SETTINGS_ORG = "ARIM"
+    _EXPORT_SETTINGS_APP = "RDETool"
+    _EXPORT_SETTINGS_KEY = "basic_info/last_export_dir"
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._auth_border_color_key: Optional[ThemeKey] = None
 
         self._refetch_button_style: str = ""
+        self._export_button_style: str = ""
+        self._folder_button_style: str = ""
         self._columns_sized_once: bool = False
+        self._last_rows: list[dict[str, Any]] = []
 
         self._controller = None
 
@@ -261,7 +273,7 @@ class BasicUnifiedStatusWidget(QWidget):
         self._status_loading_seq: int = 0
 
         self._auth_label = QLabel("")
-        self._auth_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self._auth_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._loading_label = QLabel("")
         self._loading_label.setObjectName('basicInfoStatusLoadingLabel')
         self._loading_label.setVisible(False)
@@ -282,13 +294,15 @@ class BasicUnifiedStatusWidget(QWidget):
         self._stage_execute_button.clicked.connect(self._on_stage_execute_clicked)
 
         self.table = QTableWidget()
-        self.table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.table.setColumnCount(11)
+        self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.table.setColumnCount(13)
         self.table.setHorizontalHeaderLabels(
             [
                 "項目",
                 "対象",
                 "再取得",
+            "エクスポート",
+            "フォルダ",
                 "種別",
                 "取得割合",
                 "JSON日時",
@@ -299,9 +313,9 @@ class BasicUnifiedStatusWidget(QWidget):
                 "件数",
             ]
         )
-        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.table.verticalHeader().setVisible(False)
         self.table.cellClicked.connect(self._on_table_cell_clicked)
 
@@ -311,7 +325,7 @@ class BasicUnifiedStatusWidget(QWidget):
         bg_layout = QHBoxLayout(self._bg_fetch_frame)
         bg_layout.setContentsMargins(0, 4, 0, 4)
         self._bg_fetch_label = QLabel("個別データ取得中...")
-        self._bg_fetch_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._bg_fetch_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._bg_fetch_progress = QProgressBar()
         self._bg_fetch_progress.setRange(0, 100)
         self._bg_fetch_progress.setValue(0)
@@ -452,6 +466,8 @@ class BasicUnifiedStatusWidget(QWidget):
 
             # テーブル内「再取得」ボタン（update_statusで生成される）
             self._refetch_button_style = get_button_style("basicinfo_refetch")
+            self._export_button_style = get_button_style("basicinfo_export")
+            self._folder_button_style = get_button_style("basicinfo_folder")
 
             self.refresh_button.setStyleSheet(
                 f"""
@@ -536,7 +552,8 @@ class BasicUnifiedStatusWidget(QWidget):
                 ("organization.json", "instrumentType.json"),
                 fetch_meta_target_ids=("organization", "instrument_type"),
             ),
-            _StageDef("サンプル情報", ("samples",), fetch_meta_target_ids=("samples",)),
+            _StageDef("サンプル情報（旧ルート）", ("samples",), fetch_meta_target_ids=("samples",)),
+            _StageDef("サンプル情報（新ルート）", ("samples",), fetch_meta_target_ids=("samples",)),
             _StageDef(
                 "データセット情報",
                 ("dataset.json", "datasets"),
@@ -716,6 +733,9 @@ class BasicUnifiedStatusWidget(QWidget):
 
         for stage in self._build_stage_defs():
             stage_info = completion.get(stage.name, {}) if isinstance(completion, dict) else {}
+            if not stage_info and stage.name in {"サンプル情報（旧ルート）", "サンプル情報（新ルート）"}:
+                # 既存 completion は "サンプル情報" キーのみを持つため互換吸収
+                stage_info = completion.get("サンプル情報", {}) if isinstance(completion, dict) else {}
 
             completed = int(stage_info.get("completed", 0) or 0)
             total = int(stage_info.get("total", len(stage.required_items)) or 0)
@@ -872,6 +892,7 @@ class BasicUnifiedStatusWidget(QWidget):
                 pass
 
             try:
+                self._last_rows = list(rows)
                 self.table.setRowCount(len(rows))
                 for r, row in enumerate(rows):
                     self.table.setRowHeight(r, 24)
@@ -879,6 +900,8 @@ class BasicUnifiedStatusWidget(QWidget):
                         row.get("item", ""),
                         row.get("target", ""),
                         "",  # 再取得ボタン
+                        "",  # エクスポートボタン
+                        "",  # フォルダボタン
                         row.get("kind", ""),
                         row.get("ratio", ""),
                         row.get("json_dt", ""),
@@ -893,15 +916,15 @@ class BasicUnifiedStatusWidget(QWidget):
                         if c == 1:
                             target_path = row.get("_target_path")
                             if isinstance(target_path, str) and target_path:
-                                item.setData(Qt.UserRole, target_path)
+                                item.setData(Qt.ItemDataRole.UserRole, target_path)
                                 font = item.font()
                                 font.setUnderline(True)
                                 item.setFont(font)
                                 item.setToolTip("クリックでファイル/フォルダを開きます")
-                        if c in (4, 8, 9, 10):
-                            item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                        if c in (6, 10, 11, 12):
+                            item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                         else:
-                            item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                            item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
                         self.table.setItem(r, c, item)
 
                     # 再取得ボタン（列=2）
@@ -913,6 +936,32 @@ class BasicUnifiedStatusWidget(QWidget):
                             btn.setStyleSheet(self._refetch_button_style)
                         btn.clicked.connect(lambda _checked=False, rr=r, meta=row: self._on_refetch_clicked(rr, meta))
                         self.table.setCellWidget(r, 2, btn)
+                    except Exception:
+                        pass
+
+                    # エクスポートボタン（列=3）
+                    try:
+                        export_btn = QPushButton("📤")
+                        export_btn.setObjectName("basic_info_export_button")
+                        export_btn.setMaximumWidth(40)
+                        export_btn.setToolTip("出力先フォルダを選択してエクスポート")
+                        if self._export_button_style:
+                            export_btn.setStyleSheet(self._export_button_style)
+                        export_btn.clicked.connect(lambda _checked=False, meta=row: self._on_export_clicked(meta))
+                        self.table.setCellWidget(r, 3, export_btn)
+                    except Exception:
+                        pass
+
+                    # フォルダボタン（列=4）
+                    try:
+                        folder_btn = QPushButton("📁")
+                        folder_btn.setObjectName("basic_info_folder_button")
+                        folder_btn.setMaximumWidth(40)
+                        folder_btn.setToolTip("親フォルダをエクスプローラーで開く")
+                        if self._folder_button_style:
+                            folder_btn.setStyleSheet(self._folder_button_style)
+                        folder_btn.clicked.connect(lambda _checked=False, meta=row: self._on_open_folder_clicked(meta))
+                        self.table.setCellWidget(r, 4, folder_btn)
                     except Exception:
                         pass
 
@@ -1173,7 +1222,7 @@ class BasicUnifiedStatusWidget(QWidget):
 
         # 個別データ段階はバックグラウンドで実行
         _INDIVIDUAL_STAGES = {
-            "サンプル情報", "データセット情報", "データエントリ情報",
+            "サンプル情報（旧ルート）", "サンプル情報（新ルート）", "データセット情報", "データエントリ情報",
             "インボイス情報", "invoiceSchema情報",
         }
         if stage_name in _INDIVIDUAL_STAGES:
@@ -1381,7 +1430,8 @@ class BasicUnifiedStatusWidget(QWidget):
                 "ユーザー情報": "self",
                 "グループ関連情報": "group_pipeline",
                 "組織・装置情報": "organization",
-                "サンプル情報": "samples",
+                "サンプル情報（旧ルート）": "samples",
+                "サンプル情報（新ルート）": "samples",
                 "データセット情報": "dataset_details",
                 "データエントリ情報": "data_entry",
                 "インボイス情報": "invoice",
@@ -1405,7 +1455,8 @@ class BasicUnifiedStatusWidget(QWidget):
                 "ユーザー情報": ["self.json"],
                 "グループ関連情報": ["group.json", "groupDetail.json", "subGroup.json"],
                 "組織・装置情報": ["organization.json", "instrumentType.json"],
-                "サンプル情報": ["samples"],
+                "サンプル情報（旧ルート）": ["samples"],
+                "サンプル情報（新ルート）": ["samples"],
                 "データセット情報": ["dataset.json", "datasets"],
                 "データエントリ情報": ["dataEntry"],
                 "インボイス情報": ["invoice"],
@@ -1460,7 +1511,7 @@ class BasicUnifiedStatusWidget(QWidget):
             )
         elif stage_name == "組織・装置情報":
             result = basic_info_logic.fetch_organization_stage(bearer_token, progress_callback=progress_callback)
-        elif stage_name == "サンプル情報":
+        elif stage_name == "サンプル情報（旧ルート）":
             if overwrite:
                 result = basic_info_logic.fetch_sample_info_only(
                     bearer_token,
@@ -1470,6 +1521,20 @@ class BasicUnifiedStatusWidget(QWidget):
                 )
             else:
                 result = basic_info_logic.fetch_sample_info_stage(
+                    bearer_token,
+                    progress_callback=progress_callback,
+                    max_workers=int(parallel_max_workers) if parallel_max_workers else 10,
+                )
+        elif stage_name == "サンプル情報（新ルート）":
+            if overwrite:
+                result = basic_info_logic.fetch_sample_info_only_direct(
+                    bearer_token,
+                    output_dir=base_dir,
+                    progress_callback=progress_callback,
+                    max_workers=int(parallel_max_workers) if parallel_max_workers else 10,
+                )
+            else:
+                result = basic_info_logic.fetch_sample_info_stage_direct(
                     bearer_token,
                     progress_callback=progress_callback,
                     max_workers=int(parallel_max_workers) if parallel_max_workers else 10,
@@ -1526,7 +1591,7 @@ class BasicUnifiedStatusWidget(QWidget):
             cell = self.table.item(row, column)
             if cell is None:
                 return
-            target_path = cell.data(Qt.UserRole)
+            target_path = cell.data(Qt.ItemDataRole.UserRole)
             if not isinstance(target_path, str) or not target_path:
                 return
 
@@ -1540,6 +1605,348 @@ class BasicUnifiedStatusWidget(QWidget):
                 raise RuntimeError("open_path failed")
         except Exception as e:
             QMessageBox.warning(self, "開けません", f"対象を開けませんでした:\n{e}")
+
+    def _ask_export_format(self) -> Optional[str]:
+        from qt_compat.widgets import QInputDialog
+
+        choice, ok = QInputDialog.getItem(
+            self,
+            "エクスポート形式",
+            "形式を選択してください",
+            ["zip", "gzip"],
+            0,
+            False,
+        )
+        if not ok:
+            return None
+        return str(choice)
+
+    def _default_export_dir(self) -> str:
+        desktop = Path.home() / "Desktop"
+        if desktop.exists() and desktop.is_dir():
+            return str(desktop)
+        return str(Path.home())
+
+    def _get_last_export_dir(self) -> str:
+        try:
+            settings = QtCore.QSettings(self._EXPORT_SETTINGS_ORG, self._EXPORT_SETTINGS_APP)
+            raw = settings.value(self._EXPORT_SETTINGS_KEY, "", type=str)
+            if isinstance(raw, str) and raw.strip() and Path(raw).exists():
+                return raw
+        except Exception:
+            pass
+        return self._default_export_dir()
+
+    def _set_last_export_dir(self, directory: str) -> None:
+        if not directory:
+            return
+        try:
+            settings = QtCore.QSettings(self._EXPORT_SETTINGS_ORG, self._EXPORT_SETTINGS_APP)
+            settings.setValue(self._EXPORT_SETTINGS_KEY, directory)
+        except Exception:
+            return
+
+    def _pick_export_destination(self, default_stem: str, title: str) -> Optional[tuple[str, str]]:
+        initial_dir = self._get_last_export_dir()
+        suggested = str(Path(initial_dir) / f"{default_stem}.zip")
+        selected_filter = "ZIP (*.zip)"
+        selected_path, selected_filter = QFileDialog.getSaveFileName(
+            self,
+            title,
+            suggested,
+            "ZIP (*.zip);;GZip (*.tar.gz)",
+            selected_filter,
+        )
+        if not selected_path:
+            return None
+
+        export_format = "zip" if "zip" in selected_filter.lower() and "gzip" not in selected_filter.lower() else "gzip"
+        path_obj = Path(selected_path)
+        if export_format == "zip" and path_obj.suffix.lower() != ".zip":
+            path_obj = path_obj.with_suffix(".zip")
+        elif export_format == "gzip":
+            low = str(path_obj).lower()
+            if not (low.endswith(".tar.gz") or low.endswith(".tgz")):
+                path_obj = Path(f"{path_obj}.tar.gz")
+
+        self._set_last_export_dir(str(path_obj.parent))
+        return str(path_obj), export_format
+
+    def _export_targets_to_file(
+        self,
+        targets: list[str],
+        export_path: str,
+        export_format: str,
+        progress_callback,
+        is_cancelled,
+    ) -> tuple[int, Optional[str]]:
+        import tarfile
+        import zipfile
+
+        normalized_targets = [Path(t) for t in targets if Path(t).exists()]
+        if not normalized_targets:
+            return 0, None
+
+        out_path = Path(export_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def _safe_unique_name(used: set[str], base_name: str) -> str:
+            candidate = base_name
+            idx = 2
+            while candidate in used:
+                stem = Path(base_name).stem
+                suffix = "".join(Path(base_name).suffixes)
+                candidate = f"{stem}_{idx}{suffix}"
+                idx += 1
+            used.add(candidate)
+            return candidate
+
+        completed = 0
+        if export_format == "zip":
+            used_names: set[str] = set()
+            with zipfile.ZipFile(out_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for target in normalized_targets:
+                    if is_cancelled():
+                        break
+                    if target.is_file():
+                        arcname = _safe_unique_name(used_names, target.name)
+                        zf.write(target, arcname=arcname)
+                    elif target.is_dir():
+                        for child in target.rglob("*"):
+                            if is_cancelled():
+                                break
+                            if child.is_file():
+                                rel = child.relative_to(target)
+                                arcname = _safe_unique_name(used_names, str(Path(target.name) / rel))
+                                zf.write(child, arcname=arcname)
+                    completed += 1
+                    progress_callback(completed)
+        else:
+            used_names: set[str] = set()
+            with tarfile.open(out_path, mode="w:gz") as tf:
+                for target in normalized_targets:
+                    if is_cancelled():
+                        break
+                    arcname = _safe_unique_name(used_names, target.name)
+                    tf.add(target, arcname=arcname, recursive=True)
+                    completed += 1
+                    progress_callback(completed)
+
+        return completed, str(out_path)
+
+    def _run_export_with_progress_dialog(
+        self,
+        targets: list[str],
+        export_path: str,
+        export_format: str,
+        title: str,
+    ) -> None:
+        targets_existing = [t for t in targets if Path(t).exists()]
+        if not targets_existing:
+            QMessageBox.information(self, "エクスポート", "存在する対象がありません。")
+            return
+
+        progress = QProgressDialog(f"{title}を実行中...", "中止", 0, len(targets_existing), self)
+        progress.setWindowTitle(f"{title}進行状況")
+        progress.setWindowModality(Qt.WindowModality.ApplicationModal)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        progress.setValue(0)
+        progress.show()
+
+        state: dict[str, Any] = {
+            "done": False,
+            "cancelled": False,
+            "error": None,
+            "completed": 0,
+            "output_path": None,
+        }
+        updates: queue.Queue[int] = queue.Queue()
+        started_at = time.monotonic()
+
+        def _is_cancelled() -> bool:
+            return bool(state["cancelled"]) or progress.wasCanceled()
+
+        def _progress_callback(done_count: int) -> None:
+            updates.put(done_count)
+
+        def _worker() -> None:
+            try:
+                completed, output = self._export_targets_to_file(
+                    targets_existing,
+                    export_path,
+                    export_format,
+                    progress_callback=_progress_callback,
+                    is_cancelled=_is_cancelled,
+                )
+                state["completed"] = completed
+                state["output_path"] = output
+            except Exception as e:
+                state["error"] = str(e)
+            finally:
+                state["done"] = True
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+
+        timer = QTimer(self)
+
+        def _tick() -> None:
+            if progress.wasCanceled():
+                state["cancelled"] = True
+
+            latest = None
+            while True:
+                try:
+                    latest = updates.get_nowait()
+                except queue.Empty:
+                    break
+            if latest is not None:
+                progress.setValue(latest)
+
+            elapsed = int(max(0.0, time.monotonic() - started_at))
+            done_count = int(progress.value())
+            total = max(1, len(targets_existing))
+            if done_count > 0:
+                avg = elapsed / done_count
+                remain = int(avg * max(0, total - done_count))
+                progress.setLabelText(f"{title}を実行中...\n経過: {elapsed}秒 / 残り: {remain}秒")
+            else:
+                progress.setLabelText(f"{title}を実行中...\n経過: {elapsed}秒 / 残り: -")
+
+            if state["done"]:
+                timer.stop()
+                progress.setValue(state["completed"])
+                progress.close()
+                if state["error"]:
+                    QMessageBox.warning(self, title, f"エクスポート中にエラーが発生しました:\n{state['error']}")
+                    return
+                if state["cancelled"]:
+                    QMessageBox.information(self, title, "エクスポートを中止しました。")
+                    return
+                if state["completed"] <= 0:
+                    QMessageBox.information(self, title, "エクスポート対象がありませんでした。")
+                    return
+                QMessageBox.information(
+                    self,
+                    f"{title}完了",
+                    f"{state['completed']} 件をエクスポートしました。\n{state['output_path']}",
+                )
+
+        timer.timeout.connect(_tick)
+        timer.start(120)
+
+    def _resolve_row_paths(self, row_meta: dict[str, Any]) -> list[str]:
+        base_dir = Path(get_dynamic_file_path("output/rde/data"))
+        target_path = row_meta.get("_target_path")
+        if isinstance(target_path, str) and target_path:
+            return [target_path]
+
+        target_text = str(row_meta.get("target") or "").strip()
+        if not target_text:
+            return []
+        paths: list[str] = []
+        for line in target_text.splitlines():
+            rel = line.strip()
+            if not rel:
+                continue
+            p = base_dir / rel
+            paths.append(str(p))
+        return paths
+
+    def _export_path(self, src_path: str, export_format: str, output_dir: Optional[str] = None) -> Optional[str]:
+        import gzip
+        import shutil
+
+        path = Path(src_path)
+        if not path.exists():
+            return None
+
+        if output_dir:
+            export_dir = Path(output_dir)
+        else:
+            export_dir = Path(get_dynamic_file_path("output/rde/exports/basic_info"))
+        export_dir.mkdir(parents=True, exist_ok=True)
+
+        stem = path.name if path.is_dir() else path.stem
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        if export_format == "zip":
+            archive_base = export_dir / f"{stem}_{timestamp}"
+            if path.is_dir():
+                result = shutil.make_archive(str(archive_base), "zip", root_dir=str(path))
+            else:
+                result = shutil.make_archive(
+                    str(archive_base),
+                    "zip",
+                    root_dir=str(path.parent),
+                    base_dir=path.name,
+                )
+            return str(Path(result))
+
+        if export_format == "gzip":
+            if path.is_dir():
+                archive_base = export_dir / f"{stem}_{timestamp}"
+                tar_path = shutil.make_archive(str(archive_base), "gztar", root_dir=str(path))
+                return str(Path(tar_path))
+
+            out_path = export_dir / f"{path.name}_{timestamp}.gz"
+            with path.open("rb") as f_in, gzip.open(out_path, "wb") as f_out:
+                shutil.copyfileobj(f_in, f_out)
+            return str(out_path)
+
+        return None
+
+    def _on_export_clicked(self, row_meta: dict[str, Any]) -> None:
+        targets = self._resolve_row_paths(row_meta)
+        if not targets:
+            QMessageBox.information(self, "エクスポート", "エクスポート対象が見つかりませんでした。")
+            return
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        selected = self._pick_export_destination(f"basic_info_export_{timestamp}", "エクスポート保存先")
+        if not selected:
+            return
+        output_path, export_format = selected
+        self._run_export_with_progress_dialog(targets, output_path, export_format, "エクスポート")
+
+    def _open_path_or_parent(self, path_str: str) -> bool:
+        from classes.core.platform import open_path
+
+        p = Path(path_str)
+        if p.exists():
+            # ファイルの場合は親フォルダ、ディレクトリの場合はそのフォルダ自体を開く
+            folder = p if p.is_dir() else p.parent
+            return bool(open_path(str(folder)))
+        parent = p.parent
+        if parent.exists():
+            return bool(open_path(str(parent)))
+        return False
+
+    def _on_open_folder_clicked(self, row_meta: dict[str, Any]) -> None:
+        targets = self._resolve_row_paths(row_meta)
+        if not targets:
+            QMessageBox.information(self, "フォルダを開く", "開ける対象が見つかりませんでした。")
+            return
+        for target in targets:
+            if self._open_path_or_parent(target):
+                return
+        QMessageBox.warning(self, "フォルダを開く", "対象を開けませんでした。")
+
+    def export_all_rows(self) -> None:
+        targets_all: list[str] = []
+        for row in (self._last_rows or []):
+            targets_all.extend(self._resolve_row_paths(row))
+
+        if not targets_all:
+            QMessageBox.information(self, "全エクスポート", "エクスポート対象が見つかりませんでした。")
+            return
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        selected = self._pick_export_destination(f"basic_info_export_all_{timestamp}", "全エクスポート保存先")
+        if not selected:
+            return
+        output_path, export_format = selected
+        self._run_export_with_progress_dialog(targets_all, output_path, export_format, "全エクスポート")
 
     def _show_api_debug(self) -> None:
         try:
