@@ -6,10 +6,19 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.58）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
-| エクスポート導線 | `basic_unified_status_widget.py` のエクスポート導線を「標準保存ダイアログ（zip/gzip）→進捗ダイアログ（中止可）」へ統一。 |
-| 進捗表示/保存先 | worker + queue + QTimer で進捗バー更新と経過/残り時間表示を安定化。保存先既定は Desktop、以降は前回保存先を記憶。 |
-| 検証 | `test_basic_unified_status_widget_actions.py` を更新し、保存ダイアログ導線・保存先記憶を追加検証。compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.58 導線で確認。 |
+| リリース/品質 | リビジョンアップ（v2.5.59）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| API改善 | `basic_info_logic.py`, `dataset_dataentry_logic.py`, `dataset_context_collector.py`, `site_rde.py` のデータ取得APIページ制限を 24 から 100 へ引き上げ。 |
+| パス管理 | `dataset_dataentry_logic.py` の `get_dataentry_info_from_cache` で `get_dynamic_file_path` 経由のパス構築へ修正。 |
+| 検証 | compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.59 導線で確認。 |
+
+## v2.5.59 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.59）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| API ページ制限 | `basic_info_logic.py`, `dataset_dataentry_logic.py`, `dataset_context_collector.py`, `site_rde.py` の data 取得 API page limit を 24 → 100 に変更。 |
+| パス管理修正 | `dataset_dataentry_logic.py` の `get_dataentry_info_from_cache` で `OUTPUT_DIR` 直接参照から `get_dynamic_file_path("output")` 経由へ修正し、実行環境依存を解消。 |
+| 検証 | compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.59 導線で確認。 |
 
 ## v2.5.58 の主な更新点
 

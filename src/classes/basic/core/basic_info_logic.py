@@ -1458,7 +1458,7 @@ def fetch_data_entry_info_from_api(bearer_token, dataset_id, output_dir=None, fo
     v2.5: _shared_cache パラメータでTTLCacheインスタンスの共有に対応（I/O削減）
     v2.5.46: _shared_cache は真偽値のセンチネルとして使用（呼び出し元で事前フィルタ済みを示す）
     """
-    url = f"https://rde-api.nims.go.jp/data?filter%5Bdataset.id%5D={dataset_id}&sort=-created&page%5Boffset%5D=0&page%5Blimit%5D=24&include=owner%2Csample%2CthumbnailFile%2Cfiles"
+    url = f"https://rde-api.nims.go.jp/data?filter%5Bdataset.id%5D={dataset_id}&sort=-created&page%5Boffset%5D=0&page%5Blimit%5D=100&include=owner%2Csample%2CthumbnailFile%2Cfiles"
     target_dir = output_dir or DATA_ENTRY_DIR
     save_path = os.path.join(target_dir, f"{dataset_id}.json")
 

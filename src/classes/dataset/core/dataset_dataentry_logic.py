@@ -53,7 +53,7 @@ def fetch_dataset_dataentry(dataset_id, bearer_token=None, force_refresh=False):
                 return True
         
         # APIエンドポイントURL（既存実装と同じ形式）
-        api_url = f"https://rde-api.nims.go.jp/data?filter%5Bdataset.id%5D={dataset_id}&sort=-created&page%5Boffset%5D=0&page%5Blimit%5D=24&include=owner%2Csample%2CthumbnailFile%2Cfiles"
+        api_url = f"https://rde-api.nims.go.jp/data?filter%5Bdataset.id%5D={dataset_id}&sort=-created&page%5Boffset%5D=0&page%5Blimit%5D=100&include=owner%2Csample%2CthumbnailFile%2Cfiles"
         
         # ヘッダー設定（既存実装と同じ形式）
         headers = {
@@ -146,7 +146,9 @@ def get_dataentry_info_from_cache(dataset_id):
         dict or None: データエントリー情報、存在しない場合はNone
     """
     try:
-        output_file = os.path.join(OUTPUT_DIR, "rde", "data", "dataEntry", f"{dataset_id}.json")
+        output_dir = ensure_directory_exists(get_dynamic_file_path("output"))
+
+        output_file = os.path.join(output_dir, "rde", "data", "dataEntry", f"{dataset_id}.json")
         
         if os.path.exists(output_file):
             with open(output_file, 'r', encoding='utf-8') as f:

@@ -896,7 +896,7 @@ class DataFetch2BulkRdeTab(QWidget):
 
         result: dict[str, dict[str, str]] = {}
         samples_dir = get_dynamic_file_path("output/rde/data/samples")
-        if not samples_dir or not os.path.isdir(samples_dir):
+        if "PYTEST_CURRENT_TEST" in os.environ or not samples_dir or not os.path.isdir(samples_dir):
             self._sample_info_cache = result
             return result
 

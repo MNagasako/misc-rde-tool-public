@@ -590,7 +590,7 @@ class DatasetContextCollector:
             logger.debug("Bearer Token取得成功: %s...", bearer_token[:20])
             
             # RDE APIでデータ情報を取得
-            api_url = f"https://rde-api.nims.go.jp/data?filter%5Bdataset.id%5D={dataset_id}&sort=-created&page%5Boffset%5D=0&page%5Blimit%5D=24&include=owner%2Csample%2CthumbnailFile%2Cfiles"
+            api_url = f"https://rde-api.nims.go.jp/data?filter%5Bdataset.id%5D={dataset_id}&sort=-created&page%5Boffset%5D=0&page%5Blimit%5D=100&include=owner%2Csample%2CthumbnailFile%2Cfiles"
             
             logger.debug("API URL: %s", api_url)
             
