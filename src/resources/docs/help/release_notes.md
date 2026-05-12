@@ -6,10 +6,20 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.59）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
-| API改善 | `basic_info_logic.py`, `dataset_dataentry_logic.py`, `dataset_context_collector.py`, `site_rde.py` のデータ取得APIページ制限を 24 から 100 へ引き上げ。 |
-| パス管理 | `dataset_dataentry_logic.py` の `get_dataentry_info_from_cache` で `get_dynamic_file_path` 経由のパス構築へ修正。 |
-| 検証 | compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.59 導線で確認。 |
+| リリース/品質 | リビジョンアップ（v2.5.60）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| データポータル編集 | `portal_edit_dialog.py` の保存確認ダイアログにペイロードプレビューを追加し、チェックボックス系配列フィールドの全解除時クリア挙動を正規化。 |
+| データポータル表示 | `dataset_upload_tab.py` で JSON キャッシュの作成日時/更新日時表示を追加し、リフレッシュ時の表示反映を改善。 |
+| 検証 | compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.60 導線で確認。 |
+
+## v2.5.60 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.60）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| 保存確認ダイアログ | `portal_edit_dialog.py` で保存確認ダイアログにペイロードプレビューを追加し、確認性を向上。 |
+| 配列フィールド正規化 | `portal_edit_dialog.py` でチェックボックス系配列フィールドの全解除時にクリア用送信値（`['']`）へ正規化する挙動を補強。 |
+| JSONタイムスタンプ表示 | `dataset_upload_tab.py` で portal_entry_status_cache の作成日時/更新日時表示とリフレッシュ反映を改善。 |
+| 検証 | `test_000_portal_edit_dialog_facility_link.py`、`test_dataset_upload_tab.py` を中心に関連回帰を確認。 |
 
 ## v2.5.59 の主な更新点
 

@@ -10,6 +10,7 @@ import re
 import html as html_lib
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import urlencode
 from typing import Any, Callable, Dict, Optional
 from qt_compat.widgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
@@ -69,6 +70,17 @@ class PortalEditDialog(QDialog):
         't_file_count',
         't_meta_totalfilesize',
         't_meta_totalfilesizeinthisversion',
+    }
+    _CLEARED_ARRAY_MARKER = ['']
+    _SEARCH_CONTEXT_DEFAULTS = {
+        'keyword': '',
+        'search_inst': '',
+        'search_license_level': '',
+        'search_doi': '0',
+        'search_contents': '-1',
+        'search_isanonymized': '-1',
+        'search_status': '',
+        'page': '1',
     }
     
     def __init__(
@@ -1166,17 +1178,10 @@ class PortalEditDialog(QDialog):
     def _on_save(self):
         """保存処理（2段階: conf→rec）"""
         try:
+            conf_data = self._collect_form_data('conf')
+
             # 確認ダイアログ
-            reply = QMessageBox.question(
-                self,
-                "修正確認",
-                f"{self._build_environment_message()}\n\n"
-                "データポータルのエントリを修正しますか?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            
-            if reply != QMessageBox.Yes:
+            if not self._show_save_confirmation_dialog(conf_data):
                 return
             
             # プログレスダイアログ
@@ -1192,8 +1197,7 @@ class PortalEditDialog(QDialog):
             logger.info("[SAVE-STEP1] 確認画面へのPOST開始")
             progress.setLabelText("確認画面へ送信中...")
             QApplication.processEvents()
-            
-            conf_data = self._collect_form_data('conf')
+
             logger.info(f"[SAVE-STEP1] 送信データ: {len(conf_data)} fields")
             
             success, response = self.portal_client.post("main.php", data=conf_data)
@@ -1222,17 +1226,7 @@ class PortalEditDialog(QDialog):
             QApplication.processEvents()
             
             # confレスポンスのhiddenフィールドを使用してrecデータを作成
-            rec_data = {
-                'mode': 'theme',
-                'mode2': 'change',
-                'mode3': 'rec',
-                't_code': self.t_code,
-                'keyword': self.dataset_id,
-                'search_inst': '',
-                'search_license_level': '',
-                'search_status': '',
-                'page': '1'
-            }
+            rec_data = self._build_base_post_data('rec', self.t_code)
             rec_data.update(conf_hidden_fields)
             logger.info(f"[SAVE-STEP2] 送信データ: {len(rec_data)} fields")
             
@@ -1256,26 +1250,139 @@ class PortalEditDialog(QDialog):
         except Exception as e:
             logger.error(f"保存エラー: {e}", exc_info=True)
             QMessageBox.critical(self, "エラー", f"保存エラー\n{e}")
-    
-    def _collect_form_data(self, mode3: str) -> dict:
-        """フォームデータ収集"""
+
+    def _show_save_confirmation_dialog(self, conf_data: dict) -> bool:
+        """保存前確認ダイアログを表示し、必要なら payload プレビューを開く。"""
+        while True:
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Question)
+            msg_box.setWindowTitle("修正確認")
+            msg_box.setText(
+                f"{self._build_environment_message()}\n\n"
+                "データポータルのエントリを修正しますか?"
+            )
+
+            preview_btn = msg_box.addButton("ペイロード確認", QMessageBox.ActionRole)
+            save_btn = msg_box.addButton("保存", QMessageBox.YesRole)
+            cancel_btn = msg_box.addButton("キャンセル", QMessageBox.NoRole)
+            msg_box.setDefaultButton(cancel_btn)
+            msg_box.exec()
+
+            clicked_button = msg_box.clickedButton()
+            if clicked_button is preview_btn:
+                self._show_payload_preview_dialog(conf_data)
+                continue
+
+            return clicked_button is save_btn
+
+    def _build_payload_preview_text(self, payload: dict) -> str:
+        """投稿予定 payload のプレビューテキストを構築する。"""
+        json_payload = json.dumps(payload, ensure_ascii=False, indent=2)
+        form_payload = urlencode(payload, doseq=True)
+        return (
+            "確認画面POST payload (mode3=conf)\n"
+            "================================\n\n"
+            "JSON表現\n"
+            "----------\n"
+            f"{json_payload}\n\n"
+            "application/x-www-form-urlencoded\n"
+            "--------------------------------\n"
+            f"{form_payload}\n\n"
+            "補足\n"
+            "----\n"
+            "確定登録 (mode3=rec) は、確認画面レスポンスの hidden fields を使って送信します。\n"
+            "配列フィールドの全解除は、空値マーカーを含むキー送信で表現されます。"
+        )
+
+    def _show_payload_preview_dialog(self, payload: dict) -> None:
+        """投稿予定 payload を表示するダイアログを開く。"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle("投稿予定ペイロード")
+        dialog.resize(760, 560)
+
+        layout = QVBoxLayout(dialog)
+
+        message = QLabel(
+            f"{self._build_environment_message()}\n\n"
+            "保存時に確認画面へ送信する予定の payload です。"
+        )
+        message.setWordWrap(True)
+        layout.addWidget(message)
+
+        preview_edit = QTextEdit(dialog)
+        preview_edit.setReadOnly(True)
+        preview_edit.setPlainText(self._build_payload_preview_text(payload))
+        layout.addWidget(preview_edit)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Close, parent=dialog)
+        buttons.rejected.connect(dialog.reject)
+        buttons.accepted.connect(dialog.accept)
+        buttons.button(QDialogButtonBox.Close).clicked.connect(dialog.accept)
+        layout.addWidget(buttons)
+
+        dialog.exec()
+
+    @classmethod
+    def _build_base_post_data(cls, mode3: str, t_code: str) -> dict:
         post_data = {
             'mode': 'theme',
             'mode2': 'change',
             'mode3': mode3,
-            't_code': self.t_code,
-            'keyword': self.dataset_id,
-            'search_inst': '',
-            'search_license_level': '',
-            'search_status': '',
-            'page': '1'
+            't_code': t_code,
+        }
+        post_data.update(cls._SEARCH_CONTEXT_DEFAULTS)
+        return post_data
+
+    @classmethod
+    def _sanitize_hidden_field_value(cls, name: str, value: Any, dataset_id: Optional[str] = None) -> Any:
+        if not isinstance(value, str):
+            return value
+
+        normalized = value.strip()
+        lowered = normalized.lower()
+
+        if name in cls._SEARCH_CONTEXT_DEFAULTS:
+            if name == 'keyword' and dataset_id and normalized == str(dataset_id):
+                return cls._SEARCH_CONTEXT_DEFAULTS[name]
+            if '<br' in lowered or 'warning' in lowered or 'undefined array key' in lowered:
+                return cls._SEARCH_CONTEXT_DEFAULTS[name]
+
+        return value
+
+    def _normalize_field_value_for_post(self, key: str, value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+
+        field_data = self.form_data.get(key, {}) if isinstance(self.form_data, dict) else {}
+        if field_data.get('type') == 'datetime-local':
+            normalized = value.strip()
+            if 'T' not in normalized and re.match(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$', normalized):
+                return normalized.replace(' ', 'T', 1)
+
+        return value
+    
+    def _collect_form_data(self, mode3: str) -> dict:
+        """フォームデータ収集"""
+        cleared_array_marker = list(getattr(self, '_CLEARED_ARRAY_MARKER', PortalEditDialog._CLEARED_ARRAY_MARKER))
+
+        post_data = PortalEditDialog._build_base_post_data(mode3, self.t_code)
+
+        editable_array_keys = {
+            key for key in self.field_widgets.keys()
+            if isinstance(key, str) and key.endswith('[]')
         }
         
         # 非表示フィールドとチェックボックス配列
         for key, field_data in self.form_data.items():
             if field_data['type'] == 'hidden':
-                post_data[key] = field_data['value']
+                post_data[key] = PortalEditDialog._sanitize_hidden_field_value(
+                    key,
+                    field_data['value'],
+                    dataset_id=self.dataset_id,
+                )
             elif field_data['type'] == 'checkbox_array':
+                if key in editable_array_keys:
+                    continue
                 # チェックされている値のみを配列として送信
                 checked_values = [item['value'] for item in field_data['values'] if item['checked']]
                 if checked_values:
@@ -1289,8 +1396,8 @@ class PortalEditDialog(QDialog):
                 if checked:
                     post_data[key] = checked
                 # 空の場合も空配列として送信（フォームクリア用）
-                elif key in ['mmi_code_array[]', 'mt_code_array[]', 'mec_code_array[]']:
-                    post_data[key] = []
+                elif key.endswith('[]'):
+                    post_data[key] = list(cleared_array_marker)
             elif key in ['t_equip_process', 't_paper_proceed']:
                 # QTableWidget（装置・プロセス、論文・プロシーディング）
                 # サーバー側は20件固定を期待しているため、常に20件分送信
@@ -1311,17 +1418,18 @@ class PortalEditDialog(QDialog):
                         post_data[f"{key}{i}"] = values[i - 1]
             elif isinstance(widget, QComboBox):
                 value = widget.currentData()
-                if value is not None and value != "":  # 空文字列は送信しない
-                    # 配列フィールド（[]付き）の場合はリストとして送信
-                    if key.endswith('[]'):
+                if key.endswith('[]'):
+                    if value is not None and value != "":
                         post_data[key] = [value]
                     else:
-                        post_data[key] = value
+                        post_data[key] = list(cleared_array_marker)
+                elif value is not None and value != "":  # 空文字列は送信しない
+                    post_data[key] = value
             elif isinstance(widget, QLineEdit):
                 text = widget.text()
-                if key in self._ZERO_DEFAULT_FIELDS and (text is None or str(text).strip() == ''):
+                if key in PortalEditDialog._ZERO_DEFAULT_FIELDS and (text is None or str(text).strip() == ''):
                     text = '0'
-                post_data[key] = text
+                post_data[key] = PortalEditDialog._normalize_field_value_for_post(self, key, text)
             elif isinstance(widget, QTextEdit):
                 post_data[key] = widget.toPlainText()
             elif isinstance(widget, QButtonGroup):
@@ -1337,6 +1445,8 @@ class PortalEditDialog(QDialog):
                         checked.append(cb.property('value'))
                 if checked:
                     post_data[key] = checked
+                elif key.endswith('[]'):
+                    post_data[key] = list(cleared_array_marker)
         
         return post_data
     
@@ -1360,8 +1470,9 @@ class PortalEditDialog(QDialog):
             for hidden_input in soup.find_all('input', {'type': 'hidden'}):
                 name = hidden_input.get('name')
                 value = hidden_input.get('value', '')
-                
-                if name and name not in ['mode', 'mode2', 'mode3', 't_code', 'keyword', 'search_inst', 'search_license_level', 'search_status', 'page']:
+
+                excluded_names = {'mode', 'mode2', 'mode3', 't_code'} | set(PortalEditDialog._SEARCH_CONTEXT_DEFAULTS.keys())
+                if name and name not in excluded_names:
                     # 配列フィールド（名前に[]が含まれる）の処理
                     if '[]' in name:
                         if name not in hidden_fields:
