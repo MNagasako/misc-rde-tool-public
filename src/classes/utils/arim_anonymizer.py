@@ -148,11 +148,20 @@ class ARIMAnonymizer:
         # ルートdata/attributes
         if isinstance(data, dict) and "data" in data:
             changed |= self.anonymize_attributes(data["data"], grant_number)
-        # included配列（typeに関係なくattributesを持つものすべて）
+        # included配列では user 要素を丸ごと除去し、それ以外は属性匿名化を継続する
         if isinstance(data, dict) and "included" in data and isinstance(data["included"], list):
+            filtered_included = []
+            removed_user = False
             for inc in data["included"]:
+                if isinstance(inc, dict) and inc.get("type") == "user":
+                    removed_user = True
+                    continue
                 if isinstance(inc, dict) and "attributes" in inc:
                     changed |= self.anonymize_attributes(inc, grant_number)
+                filtered_included.append(inc)
+            if removed_user:
+                data["included"] = filtered_included
+                changed = True
         return changed
 
     def anonymize_attributes(self, obj, grant_number):

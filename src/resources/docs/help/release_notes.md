@@ -6,10 +6,19 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.60）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
-| データポータル編集 | `portal_edit_dialog.py` の保存確認ダイアログにペイロードプレビューを追加し、チェックボックス系配列フィールドの全解除時クリア挙動を正規化。 |
-| データポータル表示 | `dataset_upload_tab.py` で JSON キャッシュの作成日時/更新日時表示を追加し、リフレッシュ時の表示反映を改善。 |
-| 検証 | compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.60 導線で確認。 |
+| リリース/品質 | リビジョンアップ（v2.5.61）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| 書誌情報JSON匿名化 | `arim_anonymizer.py` で `included` 内の `type == user` 要素を属性マスクではなく要素ごと除去するよう改善。 |
+| 匿名化出力継続性 | user除去のみの差分でも `changed=True` を返すようにし、`非開示_*.json` 出力を維持。 |
+| 検証 | compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.61 導線で確認。 |
+
+## v2.5.61 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.61）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| 匿名化仕様修正 | `arim_anonymizer.py` の `anonymize_json()` で `included` 内の `type == user` 要素を除去し、残る要素のみ匿名化を継続するよう変更。 |
+| 出力条件修正 | user要素除去のみが差分のケースでも `changed=True` を返し、`非開示_*.json` を保存できるよう修正。 |
+| テスト | `test_arim_anonymizer.py` を新規追加し、`test_dataset_upload_tab.py` に `_anonymize_json` 経路の回帰テストを追加。 |
 
 ## v2.5.60 の主な更新点
 
