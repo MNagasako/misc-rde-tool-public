@@ -12,6 +12,7 @@ import shutil
 from typing import List, Dict, Optional
 from datetime import datetime
 from openpyxl import Workbook, load_workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 
 from config.common import OUTPUT_DIR
 from ..conf.field_definitions import EXCEL_COLUMNS
@@ -21,10 +22,19 @@ from .report_cache_manager import ReportCacheManager
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_excel_cell_value(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    return ILLEGAL_CHARACTERS_RE.sub("", value)
+
+
 def _build_excel_rows(reports: List[Dict]) -> List[List[object]]:
     rows = []
     for report in reports:
-        rows.append([report.get(column, "") for column in EXCEL_COLUMNS])
+        rows.append([
+            _sanitize_excel_cell_value(report.get(column, ""))
+            for column in EXCEL_COLUMNS
+        ])
     return rows
 
 

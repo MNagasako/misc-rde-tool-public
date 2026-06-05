@@ -6,10 +6,19 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.61）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
-| 書誌情報JSON匿名化 | `arim_anonymizer.py` で `included` 内の `type == user` 要素を属性マスクではなく要素ごと除去するよう改善。 |
-| 匿名化出力継続性 | user除去のみの差分でも `changed=True` を返すようにし、`非開示_*.json` 出力を維持。 |
-| 検証 | compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.61 導線で確認。 |
+| リリース/品質 | リビジョンアップ（v2.5.62）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| 報告書Excel安定化 | `report_file_exporter.py` で openpyxl の禁止制御文字をセル書き込み前に除去し、`IllegalCharacterError` による一括処理中断を回避。 |
+| 一括処理エラー抑止 | 報告書本文に制御文字が混在するケースでも Excel 出力が継続し、途中失敗によるエントリー本文ポップアップ肥大化を抑制。 |
+| 検証 | compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.62 導線で確認。 |
+
+## v2.5.62 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.62）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| 報告書Excel安定化 | `report_file_exporter.py` の `export_excel()` でセル値サニタイズを追加し、openpyxl の禁止制御文字を除去するよう修正。 |
+| 例外再発防止 | `test_report_excel_migration.py` に禁止文字混在データの回帰テストを追加し、同種障害を固定。 |
+| 影響範囲確認 | 報告書関連 unit/widget テストを再実行し、設定ウィジェット配下の報告書導線で回帰がないことを確認。 |
 
 ## v2.5.61 の主な更新点
 
