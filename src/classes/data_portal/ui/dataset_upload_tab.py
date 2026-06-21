@@ -86,6 +86,9 @@ class DatasetUploadTab(QWidget):
     def __init__(self, parent=None):
         """初期化"""
         super().__init__(parent)
+        self._cleanup_done = False
+        self._environments_loaded = False
+        self.destroyed.connect(lambda *_args: self._cleanup_resources())
         self._theme_refresh_managed_by_parent = self._is_theme_managed_by_parent()
         
         self.auth_manager = get_auth_manager()
@@ -480,10 +483,7 @@ class DatasetUploadTab(QWidget):
         self.env_combo.setMinimumHeight(28)
         self.env_combo.currentTextChanged.connect(self._on_environment_changed)
         layout.addRow("環境:", self.env_combo)
-        
-        # 環境情報を読み込み
-        self._load_environments()
-        
+
         group.setLayout(layout)
         return group
     
@@ -680,7 +680,63 @@ class DatasetUploadTab(QWidget):
                 self._dataset_dropdown_init_timer.timeout.connect(self._ensure_dataset_dropdown_initialized)
             self._dataset_dropdown_init_timer.start(0)
         except Exception:
-            QTimer.singleShot(0, self._ensure_dataset_dropdown_initialized)
+            self._dataset_dropdown_init_scheduled = False
+            self._ensure_dataset_dropdown_initialized()
+
+    def showEvent(self, event):  # noqa: N802
+        super().showEvent(event)
+        try:
+            self._ensure_environment_initialized()
+        except Exception:
+            pass
+        try:
+            if self.dataset_search_radio.isChecked():
+                self._schedule_dataset_dropdown_init()
+        except Exception:
+            pass
+
+    def _cleanup_resources(self) -> None:
+        if self._cleanup_done:
+            return
+        self._cleanup_done = True
+
+        try:
+            if self._dataset_dropdown_init_timer is not None:
+                self._dataset_dropdown_init_timer.stop()
+                self._dataset_dropdown_init_timer.deleteLater()
+        except Exception:
+            pass
+        self._dataset_dropdown_init_timer = None
+        self._dataset_dropdown_init_scheduled = False
+
+        if not self._theme_refresh_managed_by_parent:
+            try:
+                from classes.theme.theme_manager import ThemeManager
+
+                ThemeManager.instance().theme_changed.disconnect(self.refresh_theme)
+            except Exception:
+                pass
+
+        for worker_attr in ("upload_worker", "contents_zip_upload_worker"):
+            worker = getattr(self, worker_attr, None)
+            if worker is None:
+                continue
+            try:
+                if worker.isRunning():
+                    worker.requestInterruption()
+                    worker.quit()
+                    worker.wait(200)
+            except Exception:
+                pass
+            try:
+                worker.deleteLater()
+            except Exception:
+                pass
+            setattr(self, worker_attr, None)
+
+    def closeEvent(self, event):  # noqa: N802
+        self._cleanup_resources()
+        super().closeEvent(event)
 
     def _ensure_dataset_dropdown_initialized(self) -> None:
         if self._dataset_dropdown_initialized:
@@ -988,6 +1044,12 @@ class DatasetUploadTab(QWidget):
                 # test, production以外は表示しない（既にフィルタ済みだが念のため）
                 continue
             self.env_combo.addItem(display_name, env)
+
+    def _ensure_environment_initialized(self) -> None:
+        if self._environments_loaded:
+            return
+        self._environments_loaded = True
+        self._load_environments()
     
     def _on_environment_changed(self, display_name: str):
         """環境変更時の処理"""
@@ -1026,7 +1088,7 @@ class DatasetUploadTab(QWidget):
         self.direct_file_widget.setVisible(is_direct)
         self.dataset_search_widget.setVisible(not is_direct)
 
-        if not is_direct:
+        if not is_direct and self.isVisible():
             self._schedule_dataset_dropdown_init()
         
         # 選択解除

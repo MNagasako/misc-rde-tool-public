@@ -6,10 +6,22 @@
 
 | 分類 | 内容 |
 | --- | --- |
-| リリース/品質 | リビジョンアップ（v2.5.62）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
-| 報告書Excel安定化 | `report_file_exporter.py` で openpyxl の禁止制御文字をセル書き込み前に除去し、`IllegalCharacterError` による一括処理中断を回避。 |
-| 一括処理エラー抑止 | 報告書本文に制御文字が混在するケースでも Excel 出力が継続し、途中失敗によるエントリー本文ポップアップ肥大化を抑制。 |
-| 検証 | compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.62 導線で確認。 |
+| リリース/品質 | リビジョンアップ（v2.5.63）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| 報告書変換レジューム回復 | `report_converter.py` でチャンク保存を一時ファイル経由の原子的保存へ変更し、破損した `*.tmp.xlsx` や不整合な `convert_progress.json` を検知した際に安全に再開するよう改善。 |
+| テスト強化 | `test_report_excel_migration.py` に破損した一時Excelからの回復と、進捗メタデータ不整合時の再開位置補正テストを追加。 |
+| pre-build 安定化 | `run_pre_build_tests.ps1` の Widget スイートで、非ゼロ終了時も file-by-file fallback を行い、まとめ実行時だけの失敗やタイムアウトの切り分けを改善。 |
+| build 運用導線 | `AGENT_BUILD_RUNBOOK.md` と `START_BUILD_AGENT_PROMPT.md` を追加し、agent build/release 依頼の入口を整理。 |
+| 検証 | compileall / import smoke / Pyright 系 / pytest / pre-build / onedir ビルドを v2.5.63 導線で確認。 |
+
+## v2.5.63 の主な更新点
+
+| 分類 | 内容 |
+| --- | --- |
+| リリース/品質 | リビジョンアップ（v2.5.63）。VERSION/README/配布物/ヘルプ/ドキュメント/setup の版数表記を更新。 |
+| 報告書変換レジューム回復 | `report_converter.py` のチャンク保存を一時ファイル経由の原子的保存へ変更し、破損した `*.tmp.xlsx` や不整合な `convert_progress.json` を検知した際に先頭から安全に再開するよう改善。 |
+| テスト強化 | `test_report_excel_migration.py` に破損した一時Excelからの回復と、進捗メタデータ不整合時の再開位置補正テストを追加。 |
+| pre-build 安定化 | `run_pre_build_tests.ps1` の Widget スイートで、非ゼロ終了時も file-by-file fallback を行い、まとめ実行時だけの失敗やタイムアウトの切り分けを改善。 |
+| build 運用導線 | `AGENT_BUILD_RUNBOOK.md` と `START_BUILD_AGENT_PROMPT.md` を追加し、README / build関連 docs に agent build/release 依頼の入口を反映。 |
 
 ## v2.5.62 の主な更新点
 

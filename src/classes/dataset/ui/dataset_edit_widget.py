@@ -2479,6 +2479,9 @@ def create_dataset_edit_widget(parent, title, create_auto_resize_button):
             combo_was_blocked = existing_dataset_combo.signalsBlocked()
             existing_dataset_combo.blockSignals(True)
             try:
+                # 遅延投入に入ったら placeholder を外し、表示済み候補だけを即選択可能にする。
+                if start_index == 0 and existing_dataset_combo.count() == 1 and existing_dataset_combo.itemData(0) is None:
+                    existing_dataset_combo.clear()
                 for index in range(start_index, end_index):
                     display_text = display_names[index]
                     dataset = datasets[index]

@@ -9,10 +9,12 @@ import ast
 import json
 import os
 import re
-from typing import Optional, Dict, Any, List, Callable
+from typing import Optional, Dict, Any, List, Callable, cast
 
 from dataclasses import dataclass
 from openpyxl import Workbook, load_workbook
+from openpyxl.worksheet._read_only import ReadOnlyWorksheet
+from openpyxl.worksheet.worksheet import Worksheet
 
 from classes.utils.excel_records import load_excel_records
 
@@ -147,7 +149,7 @@ class ReportConverter:
         transformed_records: List[Dict[str, Any]] = []
 
         for record in chunk_records:
-            transformed = {column: None for column in self.OUTPUT_COLUMNS}
+            transformed: Dict[str, Any] = {column: None for column in self.OUTPUT_COLUMNS}
 
             for arim_col, output_col in zip(
                 self.COLUMN_MAPPING['ARIM-extracted2 Columns'],
@@ -186,19 +188,105 @@ class ReportConverter:
 
         return transformed_records
 
+    def _save_workbook_atomically(self, workbook: Workbook, output_path: str) -> None:
+        """ワークブックを一時ファイル経由で原子的に保存する。"""
+        staging_path = output_path + ".writing"
+        try:
+            workbook.save(staging_path)
+            os.replace(staging_path, output_path)
+        finally:
+            if os.path.exists(staging_path):
+                try:
+                    os.remove(staging_path)
+                except OSError:
+                    pass
+
     def _write_chunk(self, output_path: str, records: List[Dict[str, Any]], *, append: bool) -> None:
         if append and os.path.exists(output_path):
             workbook = load_workbook(output_path)
-            worksheet = workbook.active
+            worksheet = cast(Worksheet, workbook.active)
         else:
             workbook = Workbook()
-            worksheet = workbook.active
+            worksheet = cast(Worksheet, workbook.active)
             worksheet.append(self.OUTPUT_COLUMNS)
 
-        for record in records:
-            worksheet.append([record.get(column) for column in self.OUTPUT_COLUMNS])
+        try:
+            for record in records:
+                worksheet.append([record.get(column) for column in self.OUTPUT_COLUMNS])
 
-        workbook.save(output_path)
+            self._save_workbook_atomically(workbook, output_path)
+        finally:
+            close = getattr(workbook, "close", None)
+            if callable(close):
+                close()
+
+    def _inspect_resume_workbook(self, tmp_output_file: str) -> Optional[int]:
+        """レジューム用ワークブックを検証し、保持済みデータ行数を返す。"""
+        try:
+            workbook = load_workbook(tmp_output_file, read_only=True, data_only=True)
+        except Exception:
+            return None
+
+        try:
+            worksheet = cast(ReadOnlyWorksheet, workbook.active)
+            header_row = next(worksheet.iter_rows(min_row=1, max_row=1, values_only=True), None)
+            if header_row is None:
+                return None
+            normalized_headers = ["" if value is None else str(value) for value in header_row]
+            if normalized_headers[:len(self.OUTPUT_COLUMNS)] != self.OUTPUT_COLUMNS:
+                return None
+            max_row = worksheet.max_row or 1
+            return max(max_row - 1, 0)
+        except Exception:
+            return None
+        finally:
+            close = getattr(workbook, "close", None)
+            if callable(close):
+                close()
+
+    def _clear_resume_state(self, progress_file: str, tmp_output_file: str, reason: str) -> None:
+        """破損・不整合なレジューム状態を削除する。"""
+        for stale_path in (progress_file, tmp_output_file):
+            if not os.path.exists(stale_path):
+                continue
+            try:
+                os.remove(stale_path)
+            except OSError:
+                pass
+        self._log(f"レジューム情報を破棄して先頭から再開: {reason}")
+
+    def _resolve_resume_start_index(
+        self,
+        *,
+        resume: bool,
+        progress_file: str,
+        tmp_output_file: str,
+    ) -> int:
+        """レジューム可能なら開始インデックスを返し、不整合なら安全にリセットする。"""
+        if not resume or not os.path.exists(progress_file):
+            return 0
+
+        try:
+            with open(progress_file, 'r', encoding='utf-8') as f:
+                progress = json.load(f)
+            progress_index = int(progress.get('last_index', 0) or 0)
+        except Exception as exc:
+            self._clear_resume_state(progress_file, tmp_output_file, f"進捗ファイルを読めません ({exc})")
+            return 0
+
+        resume_rows = self._inspect_resume_workbook(tmp_output_file)
+        if resume_rows is None:
+            self._clear_resume_state(progress_file, tmp_output_file, "一時Excelが破損または不正です")
+            return 0
+
+        if resume_rows != progress_index:
+            self._log(
+                f"レジューム情報を補正: progress={progress_index}行, tmp={resume_rows}行"
+            )
+
+        start_idx = resume_rows
+        self._log(f"レジューム: {start_idx}行目から再開")
+        return start_idx
     
     def convert_report_data(
         self, 
@@ -241,15 +329,19 @@ class ReportConverter:
             tmp_output_file = output_path + '.tmp.xlsx'
             
             # レジューム対応
-            start_idx = 0
-            if resume and os.path.exists(progress_file):
-                with open(progress_file, 'r', encoding='utf-8') as f:
-                    progress = json.load(f)
-                    start_idx = progress.get('last_index', 0)
-                self._log(f"レジューム: {start_idx}行目から再開")
+            start_idx = self._resolve_resume_start_index(
+                resume=resume,
+                progress_file=progress_file,
+                tmp_output_file=tmp_output_file,
+            )
             
             # チャンク処理
             num_rows = len(output_records)
+            if start_idx > num_rows:
+                self._log(
+                    f"レジューム位置を補正: {start_idx}行 -> {num_rows}行 (入力総行数を超過)"
+                )
+                start_idx = num_rows
             self._log(f"変換開始: {num_rows}行 ({start_idx}行目から)")
             
             for chunk_start in range(start_idx, num_rows, self.CHUNK_SIZE):
